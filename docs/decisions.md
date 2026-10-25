@@ -4,6 +4,65 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-246 — A non-credentials sign-in must carry `email_verified === true`; the gate refuses before any user lookup. Amends DECISION-015 point 2; fulfils the `evaluateSignIn()` clause of DECISION-187.**
+
+**Status:** Resolved (operator-visible finding F231, architect ruling in the 2b addendum 2, R38) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-google-email-verified` (v0.42.4; no migration)
+
+- **Rule.** `evaluateSignIn(provider, user, claims, findUserByEmail)` returns `false` for every non-credentials provider unless `claims.emailVerified === true` (strict boolean: `false`, absent, `null`, `"true"`, `1` all refuse), and decides that before the no-email check and before it reads `users`. The `signIn` callback in `src/auth.ts` feeds `{ emailVerified: profile?.email_verified }`. `claims` is a required parameter with no default, so a call site that forgets it is a compile error.
+- **Amendment to DECISION-015 point 2.** That point said keying the OAuth lookup on `user.email` is safe because Google "verifies [the email] at token issuance". The protocol does not guarantee that: the profile carries an `email_verified` claim that may be `false` or absent, and Auth.js does not enforce it. With `allowDangerousEmailAccountLinking: true`, an unverified claim of an existing user's address signed in as that user (an enrolled user still met `/totp`: a mitigation, not the fix), and a claim of an unused address created a pre-claimed account that, for an address in `INITIAL_ADMIN_EMAILS`, received `ADMIN_ROLE`. The verified claim, not the issuer, is the proof. The email-keyed lookup, the soft-deactivation rule and the credentials short-circuit in DECISION-015 stand.
+- **Fulfils DECISION-187.** The refusal is a pure decision inside `evaluateSignIn()`. Nothing is applied from `signIn` or `jwt`, no verified flag is persisted to the token or to `users.emailVerified`, and `jwt` is untouched.
+- **Refusal behaviour.** A refusal returns `false`, so Auth.js shows its generic "Access Denied" page, byte-identical to a deactivated or no-email refusal (no string changes; no enumeration). One PII-free `console.warn` (`provider` and `typeof` the claim only; never email, subject id or name) records a claim refusal. No audit row: a refusal is not a mutation and an unauthenticated party would be writing it. No flag: a security refusal must not be switchable.
+- **What it does and does not cover.** The gate is a property of the claim, not of the provider's name. A second provider that asserts `email_verified: true` passes it with no further design work, and the claim is only as trustworthy as its issuer (a tenant-controlled OIDC IdP can assert it for any address). Any second provider therefore needs its own design review before it is registered, and `allowDangerousEmailAccountLinking` should be set to `false` for it. The email and WebAuthn Auth.js paths pass no profile and would be refused; neither is configured.
+- **Rejected.** Persisting the claim (a state change from `signIn`/`jwt`; a design question for Increment 2b). Removing `allowDangerousEmailAccountLinking` (breaks existing-account Google sign-in; unnecessary once gated). An optional claim argument defaulting to allow (reopens the hole at any missed call site). An audit row per refusal. A flag.
+- **Accepted residual (`paper`).** No automated test drives a real Google exchange: that the claim arrives rests on the wiring test (`src/auth.sign-in.test.ts`), a dependency tripwire that reads the installed `@auth/core`, and a reading of its OIDC path. Google is configured in no environment, and production `accounts` has 0 rows, so the defect was latent. Verify the claim shape on `development` when Google is first configured. A user whose profile reports the address unverified sees the generic Access Denied page and is told nothing specific (TODO: `/signin` message for OAuth failures).
+- **Revisit if** `@auth/core` stops passing `profile` to the `signIn` callback (the tripwire fails first), a second provider is added, or Increment 2b decides to persist a verified flag.
+
+---
+
+**DECISION-231 — Workflow guardrails: the push gate parses commands instead of scanning them and refuses a command that moves HEAD and pushes; Playwright refuses port 3000 from a worktree; `withDbRetry` is one shared helper whose scope is idempotence; the flag reset is a guarded SQL file checked against the seed.**
+
+**Status:** Resolved (tech-lead, implementation; operator rulings Q1-Q9 on the analyst's defaults, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-retro-workflow-efficiency` (Phase 3; no `src/` or `drizzle/` change, no version bump)
+
+- **Gate.** `scripts/pre-push-gate.mjs` tokenizes the command (quotes, `$()` and backticks, heredocs, comments, `bash -c`/`eval` recursion to depth 6, `command`/`env`/path prefixes) and refuses one command in which a HEAD mover (`commit`, `merge`, `rebase`, `cherry-pick`, `am`, `pull`, `revert`, `reset`) precedes a push that targets this repository, even with a fresh marker. The target-repository check comes first so `scratch/` checkouts stay exempt. **Accepted residuals** (listed in the script header and pinned by tests that say when to remove them): aliases, variable indirection, non-shell wrappers, `checkout`/`switch`, depth over 6; `git push $(git commit ...)` with a fresh marker (an unquoted `$()` is ordered after the command that encloses it); and prefixes that carry flags of their own (`nice -n`, `time -p`, `command -p`, and `env -u NAME` / `exec -a NAME`), where the flag is read as the command and the push behind it is not seen. Prefixes are followed when they carry no flags of their own; `env` also skips bare flags such as `-i`. The gate catches an agent's mistakes, not an adversary.
+- **Playwright.** A dev-lane config load in a linked worktree with the resolved loopback port 3000 throws, unless `PW_ALLOW_3000=1`; never in CI or the main checkout. The dev lane does not need `-p` or `AUTH_URL` where `.env.local` sets no `AUTH_URL`: Phase 5 signed in on :3480 without either. Passing `-p <port>` from the command is an optional follow-up (`docs/TODO.md`).
+- **Retry.** `withDbRetry` lives in `e2e/support/db.ts`. A step may be wrapped only if repeating it after a lost reply leaves the same end state; plain INSERTs, state-machine edges and read-then-overwrite "prior state" captures are never wrapped. Only connection drops retry: SQLSTATE class 08 and 57P01-57P03/53300, or a `fetch failed`/reset/connect-timeout text; constraint errors and statement/lock timeouts throw at once. Nested wrappers run once (outermost retries). That a wrapped teardown survives a real Neon drop is unverified.
+- **Reset.** `scripts/ci/e2e-reset-flags.sql` is one transaction that refuses unless `-v pipeline_branch=1`, sets every seeded global flag to its `scripts/seed.ts` value, applies the baseline file, and is checked against `seed.ts` by a unit test. **Accepted residual:** per-organization toggles and `rollout_percent` are not reset.
+- **Briefings.** `briefings-check` counts recorded decisions above the marker that `docs/briefings.md` does not name (ranges expanded); the marker stays the contiguous floor. A number mentioned in passing silences it (accepted).
+- **AGENTS.md.** Committed in the form `next dev` writes, guarded by a test against the installed generator, rather than disabling `agentRules` (which would delete the block).
+- **Also shipped.** `npm run worktrees:report` is read-only: free disk and per-worktree state, suggesting removal only for a worktree that has commits of its own, all on `origin/main` (as of the last fetch), a named branch and a clean tree (a bare `git worktree remove` of a fresh worktree silently deletes its untracked `.env.local`; Phase 5 FAIL-1). It cannot see squash-merged or fast-forwarded branches. `stats:escape` accepts `--since` (an allowlisted date or "N days ago" form, passed to git through `execFileSync`, never a shell; default output unchanged).
+- **Revisit if** Next changes the agent-file generator's path, a Phase 5 run shows a non-3000 dev server needs more than `-p` and `AUTH_URL`, or the gate's residuals produce a real unchecked push.
+
+---
+
+**DECISION-230 — The session's 2FA claim is set only inside a server-side verification grant; the jwt callback's update branch reads nothing from the update payload; client session updates are refused at the route.**
+
+**Status:** Resolved (architect, Phase 2; operator ruling on existing sessions, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-24-session-update-hardening` (v0.42.3; no migration)
+
+- **Mechanism.** The TOTP and recovery verification actions wrap `unstable_update({})` in `withTwoFactorGrant(userId, method, ...)`, an `AsyncLocalStorage` scope in a `server-only` module (`src/lib/auth/two-factor-grant.ts`). The jwt callback sets `twoFactorVerified = true` only when `trigger === "update"` and `takeTwoFactorGrant(token.sub)` finds a single-use grant for that user in the current request. Nothing is serialized, so there is nothing to replay. The update branch accepts no boolean, roles or features from the payload; every legitimate caller only wants the refresh, which `trigger === "update"` already causes. The sign-in reset of the claim is unchanged.
+- **Route.** `POST /api/auth/session` answers 405 with `Allow: GET` and no body or cookie, at `src/app/api/auth/[...nextauth]/route.ts`. This is defence in depth: `unstable_update` calls `Auth()` in-process and never reaches the route, so it is unaffected, and the proxy stays a pure function of host, path and claims.
+- **The grant helper is never exported from, or wrapped by, a `'use server'` module,** because every exported async function in such a file is a callable endpoint. It is not imported by `src/lib/auth/config.ts` or the proxy (`check:proxy-imports` backs this).
+- **Fallback, not used.** If request context ever stopped reaching the jwt callback, the approved alternative is an HMAC proof derived from `AUTH_SECRET`, bound to the subject and a per-session id, short-lived, compared in constant time. It was not needed: the grant propagated in the dev and `next start` runs. The failure mode is fail-closed (a loop on `/totp`).
+- **Rejected for this fix.** A per-user `users.two_factor_verified_at` cannot tell one session from another. A per-session server record is the right design for revocation and is tracked in `docs/TODO.md`.
+- **Operator ruling, 2026-10-25: existing sessions are not rotated.** There are two active production accounts, both the operator's, so no member is forced to verify again. The fix covers new activity; it cannot show whether an existing session already carries a claim it did not earn, because that leaves no audit mark. Such a session stays verified until its token expires (about 30 days).
+- **Accepted residual (`paper`).** A verified claim outlives an administrator's TOTP reset or a sign-out elsewhere until the token expires. Tracked as the revocation follow-up.
+- **Disclosure hygiene.** Release notes, commit titles and the PR stay neutral until deploy.
+- **Revisit if** Auth.js or Next changes how async context reaches the jwt callback, `next.config.ts` sets `trailingSlash` or `skipTrailingSlashRedirect` (the route check matches `/api/auth/session` exactly; the callback layer does not depend on it).
+
+---
+
+**DECISION-229 — Accelerated Feature tier: low-risk Feature-class work skips the architect and a separate design spawn, and keeps QA whole.**
+
+**Status:** Resolved (operator, "Adopt it", 2026-10-24) · **Date:** 2026-10-24 · **Feature:** the 2026-10-24 retrospective, `docs/reviews/2026-10-24-retrospective.md` ("The risk-tiered pipeline"; implementation, tech-lead)
+
+- **Rule.** CLAUDE.md's Classification table gains an **Accelerated Feature** row. A Feature or bug fix that adds no migration or schema change, touches none of `src/auth.ts`, `src/proxy.ts`, `src/lib/authz.ts`, the permission catalog or a flag seed, and adds no route, server action, `SECURITY DEFINER` function or dependency runs: analyst brief, a short tech-lead design with Copy and Edge Cases (architect skipped with explicit notation), Phase 4, a scoped Phase 5, Phase 6. Anything ambiguous is a full Feature.
+- **What it keeps, with no exemption.** QA, including the copy-truthfulness check and the 360px check; the failing-first regression test; `npm run check`; a Copy section read by someone other than its author.
+- **Promotion.** A QA FAIL that traces to a design claim, or any discovery that the change crosses an excluded line, promotes the pipeline to a full Feature at that point.
+- **Why.** Sixteen pipelines in the window were low-risk by the retrospective's reading; five of them had a first-run QA FAIL, each closed the same day, and none was a permission, schema or auth miss, the classes the tier excludes. The informal "Accelerated" mode already existed in the work-log template and four pipelines ran it with explicit notation; this makes it a named class with a stated floor. It closes the 2026-10-22 efficiency question parked in `docs/TODO.md`.
+- **Numbering.** The retrospective suggested DECISION-225; 225 to 228 are reserved for Community Increment 2b, so this is 229.
+- **Revisit if** a second period shows an Accelerated pipeline's QA FAIL traced to a skipped architect or design step, or a production escape from an Accelerated pipeline.
+
+---
+
 **DECISION-224 — zod 4 conversion rules: parity at the first message, ids through `z.guid`, tests that pin only what a user can see.**
 
 **Status:** Resolved · **Date:** 2026-10-24 · **Feature:** `2026-10-23-zod-4` (Phase 3 with the Phase 3a amendment; implementation, tech-lead)
@@ -357,7 +416,7 @@ Google's published fill, stroke, text and "G" colours for the light and dark but
 
 **Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 2, R3; amends Phase 1 C4, Flow 8, G11, Q8)
 
-`src/auth.ts` and `src/lib/auth/` are unchanged in Increment 1. Google sign-in for an invitee (Increment 3) means configuring Google, adding `email_verified === true` to `evaluateSignIn()`, and a Flow 4 e2e through Google; it never adds an automatic claim to the auth callbacks.
+`src/auth.ts` and `src/lib/auth/` are unchanged in Increment 1. Google sign-in for an invitee (Increment 3) means configuring Google and a Flow 4 e2e through Google (the `email_verified === true` gate in `evaluateSignIn()` shipped in 0.42.4, DECISION-246); it never adds an automatic claim to the auth callbacks.
 
 (2026-10-21, Phase 2.)
 

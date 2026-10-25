@@ -1908,6 +1908,18 @@ Pipeline `2026-10-23-zod-4` (v0.42.2; no migration; DECISION-223–224). Not a s
 
 **F229 — zod 4's `.int()` rejects integers beyond ±2^53 as an `invalid_type`.** A bounded number field given `1e20` (for example the fee-rate field) would report "must be a whole number." where v3 reported "must be between 0 and N." A plain port of `connection-input.ts` changes user-visible copy. Found in Phase 3 by running the schema on both versions. **Closed:** `.refine(Number.isInteger)` in `.int()`'s place; resolved by DECISION-224 (2).
 
+## 2y. Session handling hardening — finding (F237)
+
+Pipeline `2026-10-24-session-update-hardening` (v0.42.3; no migration; DECISION-230). Not a schema round: recorded here because this file is where the F-series lives. F234-F236 and F238 are unassigned and returned unused.
+
+**F237 (low) — recovery-code consumption is a read followed by an unconditional write, and a TOTP code can be reused within its time window.** `src/app/(auth)/totp/actions.ts` (about `:109-122`) looks a recovery code up and then writes `used_at` without testing it again, so two concurrent submissions of the same code can both succeed; the write should be one conditional `UPDATE ... WHERE used_at IS NULL RETURNING`. Separately, no last-used time step is recorded for TOTP, so a code that has been accepted can be accepted again until its window passes. Both are reachable only from a session that has already passed the password step and that holds a valid code, which is why this is low. **Open, not fixed here:** a bug-fix pipeline of its own (`docs/TODO.md`). Found by the architect's Phase 2 reading of the verification action.
+
+## 2z. Workflow guardrails — finding (F239)
+
+Pipeline `2026-10-25-retro-workflow-efficiency` (no migration, no `src/` change; DECISION-231). Not a schema round: recorded here because this file is where the F-series lives.
+
+**F239 (low, process control, `paper`) — the pre-push matcher read quoted and heredoc text as commands and missed wrapped pushes.** Found at Phase 1 (G1, G2) and reproduced again while drafting the design. The quote-naive splitter matched `git push` inside commit-message text (a false refusal whenever the marker was stale, the normal state at commit time) and missed `bash -c "..."`, `command git push`, `/usr/bin/git push` and `(git push)`, which could have pushed without the marker check. It also let a single command that committed and pushed pass on a marker stamped at the pre-commit HEAD. An agent's mistake, not an exploit. **Closed by** item 1 (`scripts/pre-push-gate.mjs` now tokenizes the command and refuses a HEAD mover followed by a push), except the residuals listed in DECISION-231 and in the script header: aliases and variable indirection, non-shell wrappers, `checkout`/`switch`, nesting deeper than 6, `git push $(git commit ...)` with a fresh marker, and prefixes that carry flags of their own. Those are `docs/TODO.md` lines.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

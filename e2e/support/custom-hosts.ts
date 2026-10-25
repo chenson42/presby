@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import http from "node:http";
 import { gunzipSync } from "node:zlib";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 import { backdateDomainClockHttp } from "./domains-fixture";
 import { E2E_USERS } from "./users";
 
@@ -315,7 +315,7 @@ const PATH: Record<WalkState, Array<[string, string?, string?]>> = {
 };
 
 async function actingUserId(sql: Sql): Promise<string> {
-  const rows = (await sql`select id from users where email = ${E2E_USERS["mfa-enrolled"].email}`) as { id: string }[];
+  const rows = (await withDbRetry("acting user id", () => sql`select id from users where email = ${E2E_USERS["mfa-enrolled"].email}`)) as { id: string }[];
   if (!rows[0]) throw new Error("[custom-hosts] no mfa-enrolled user row; globalSetup must run first");
   return rows[0].id;
 }
@@ -396,29 +396,29 @@ export async function createSiteOrg(
 /** The `org_portal.domains` toggle row (the owner-only SQL predicate reads it). `null` removes the row. */
 export async function setDomainsToggle(sql: Sql, orgId: string, enabled: boolean | null): Promise<void> {
   if (enabled === null) {
-    await sql`delete from organization_feature_toggles where organization_id = ${orgId}::uuid and feature_key = 'org_portal.domains'`;
+    await withDbRetry("clear domains toggle", () => sql`delete from organization_feature_toggles where organization_id = ${orgId}::uuid and feature_key = 'org_portal.domains'`);
     return;
   }
-  await sql`
+  await withDbRetry("set domains toggle", () => sql`
     insert into organization_feature_toggles (organization_id, feature_key, enabled)
     values (${orgId}::uuid, 'org_portal.domains', ${enabled})
-    on conflict (organization_id, feature_key) do update set enabled = ${enabled}`;
+    on conflict (organization_id, feature_key) do update set enabled = ${enabled}`);
 }
 
 export async function setSiteStatus(sql: Sql, orgId: string, status: "provisioning" | "live" | "suspended"): Promise<void> {
-  await sql`update organization_sites set status = ${status} where organization_id = ${orgId}::uuid`;
+  await withDbRetry("set site status", () => sql`update organization_sites set status = ${status} where organization_id = ${orgId}::uuid`);
 }
 
 export async function setOrgStatus(sql: Sql, orgId: string, status: "active" | "inactive"): Promise<void> {
-  await sql`update organizations set status = ${status} where id = ${orgId}::uuid`;
+  await withDbRetry("set org status", () => sql`update organizations set status = ${status} where id = ${orgId}::uuid`);
 }
 
 export async function setPublicRenderFlag(sql: Sql, enabled: boolean): Promise<void> {
-  await sql`update feature_flags set enabled = ${enabled} where key = 'sites.public_render'`;
+  await withDbRetry("set public render flag", () => sql`update feature_flags set enabled = ${enabled} where key = 'sites.public_render'`);
 }
 
 export async function getPublicRenderFlag(sql: Sql): Promise<boolean> {
-  const rows = (await sql`select enabled from feature_flags where key = 'sites.public_render'`) as { enabled: boolean }[];
+  const rows = (await withDbRetry("get public render flag", () => sql`select enabled from feature_flags where key = 'sites.public_render'`)) as { enabled: boolean }[];
   if (!rows[0]) throw new Error("[custom-hosts] no feature_flags row for sites.public_render");
   return rows[0].enabled;
 }
@@ -426,10 +426,10 @@ export async function getPublicRenderFlag(sql: Sql): Promise<boolean> {
 /** Gives the org a brand (an invented maroon seed) so a custom host's brand cascade can be asserted. */
 export async function setBrand(sql: Sql, orgId: string, seedHex: string): Promise<void> {
   const user = await actingUserId(sql);
-  await sql`
+  await withDbRetry("set brand", () => sql`
     insert into organization_brands (organization_id, seed_hex, type_pairing, brand_token_version, updated_by)
     values (${orgId}::uuid, ${seedHex}, 'classic', 1, ${user}::uuid)
-    on conflict (organization_id) do update set seed_hex = ${seedHex}`;
+    on conflict (organization_id) do update set seed_hex = ${seedHex}`);
 }
 
 export interface DomainRow {
@@ -475,9 +475,9 @@ export async function stepDomain(sql: Sql, id: string, to: string, cause?: strin
 /** `paused` / `disputed` / none: the owner-only platform hold (a column, not a state). */
 export async function setHold(sql: Sql, id: string, hold: "paused" | "disputed" | null): Promise<void> {
   if (hold === null) {
-    await sql`update organization_domains set platform_hold = null, hold_reason = null where id = ${id}::uuid`;
+    await withDbRetry("clear hold", () => sql`update organization_domains set platform_hold = null, hold_reason = null where id = ${id}::uuid`);
   } else {
-    await sql`update organization_domains set platform_hold = ${hold}, hold_reason = 'Arranged by the e2e fixture.' where id = ${id}::uuid`;
+    await withDbRetry("set hold", () => sql`update organization_domains set platform_hold = ${hold}, hold_reason = 'Arranged by the e2e fixture.' where id = ${id}::uuid`);
   }
 }
 
@@ -492,20 +492,23 @@ export async function addExpiredClaim(sql: Sql, orgId: string, hostname: string)
 /** Removes a fixture organization and everything under it. Refuses anything that is not an `e2e-domains-` org. */
 export async function removeSiteOrg(sql: Sql, org: SiteOrg): Promise<void> {
   if (!/^e2e-domains-/.test(org.slug)) throw new Error(`[custom-hosts] refusing to remove non-fixture org ${org.slug}`);
-  await sql`delete from site_contact_messages where organization_id = ${org.orgId}::uuid`;
-  await sql`delete from organization_brands where organization_id = ${org.orgId}::uuid`;
-  await sql`delete from organization_sites where organization_id = ${org.orgId}::uuid`;
-  await sql`delete from blob_assets where organization_id = ${org.orgId}::uuid`;
-  await sql`delete from organizations where id = ${org.orgId}::uuid`;
-  const left = (await sql`select 1 from organizations where id = ${org.orgId}::uuid`) as unknown[];
-  if (left.length > 0) throw new Error(`[custom-hosts] fixture organization ${org.slug} was not removed`);
-  const rows = (await sql`select 1 from organization_domains where organization_id = ${org.orgId}::uuid`) as unknown[];
-  if (rows.length > 0) throw new Error(`[custom-hosts] domain rows of ${org.slug} survived its removal`);
+  // Deletes then confirming reads: repeating the whole unit after a lost reply ends the same.
+  await withDbRetry(`remove site org ${org.slug}`, async () => {
+    await sql`delete from site_contact_messages where organization_id = ${org.orgId}::uuid`;
+    await sql`delete from organization_brands where organization_id = ${org.orgId}::uuid`;
+    await sql`delete from organization_sites where organization_id = ${org.orgId}::uuid`;
+    await sql`delete from blob_assets where organization_id = ${org.orgId}::uuid`;
+    await sql`delete from organizations where id = ${org.orgId}::uuid`;
+    const left = (await sql`select 1 from organizations where id = ${org.orgId}::uuid`) as unknown[];
+    if (left.length > 0) throw new Error(`[custom-hosts] fixture organization ${org.slug} was not removed`);
+    const rows = (await sql`select 1 from organization_domains where organization_id = ${org.orgId}::uuid`) as unknown[];
+    if (rows.length > 0) throw new Error(`[custom-hosts] domain rows of ${org.slug} survived its removal`);
+  });
 }
 
 /** Removes any fixture orgs a crashed earlier run left behind (slug prefix `e2e-domains-` only). */
 export async function removeStaleSiteOrgs(sql: Sql): Promise<void> {
-  const stale = (await sql`select id, slug from organizations where slug like 'e2e-domains-%'`) as { id: string; slug: string }[];
+  const stale = (await withDbRetry("list stale site orgs", () => sql`select id, slug from organizations where slug like 'e2e-domains-%'`)) as { id: string; slug: string }[];
   for (const s of stale) {
     await removeSiteOrg(sql, { orgId: s.id, slug: s.slug, name: s.slug, blobId: "" });
   }
@@ -581,5 +584,7 @@ export async function buildWorld(sql: Sql): Promise<World> {
 /** Removes the world and confirms by SELECT (never assumed from the delete succeeding). */
 export async function teardownWorld(sql: Sql, world: World | undefined): Promise<void> {
   if (!world) return;
-  for (const org of [world.one, world.two, world.walk]) await removeSiteOrg(sql, org);
+  await withDbRetry("teardown world", async () => {
+    for (const org of [world.one, world.two, world.walk]) await removeSiteOrg(sql, org);
+  });
 }

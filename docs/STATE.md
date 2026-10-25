@@ -3,11 +3,59 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-24 (zod 4 integrated at v0.42.2; v0.41.0, v0.42.0 and v0.42.1 are live).
+Updated 2026-10-25 (v0.42.3, session handling hardening, is live as of its 2026-10-25 deploy; v0.42.4, the provider-email check, is integrated on its branch; retro workflow-efficiency is merged to `main` with no version bump).
 
 ---
 
-## RESUME HERE — 2026-10-24: v0.41.0, v0.42.0 and v0.42.1 are live; zod 4 is integrated at v0.42.2, PR pending
+## RESUME HERE — 2026-10-25: v0.42.4 (sign-in provider email check, F231) is integrated; v0.42.3 is live; five other pipelines are open
+
+`pipeline/google-email-verified` (worktree `presby-gauth`, no migration) is merged up to `main` (`77be511`: 0.42.3 plus PR #52 workflow-efficiency)
+and integrated as **v0.42.4**, F231 **closed in code and tests**. `evaluateSignIn()` now refuses every non-credentials sign-in unless the provider
+asserted `email_verified === true`, before any user lookup, so an unverified claim can neither link to an existing account nor create one (and the
+`INITIAL_ADMIN_EMAILS` bootstrap is unreachable through it). DECISION-246 amends DECISION-015 point 2 and fulfils the `evaluateSignIn()` clause of
+DECISION-187. QA PASS, Phase 6 SHIP WITH NOTES. **The limit:** no real Google exchange has happened anywhere (Google is configured in no environment,
+production `accounts` has 0 rows); the claim's arrival rests on `src/auth.sign-in.test.ts` and a tripwire on the installed `@auth/core`. The
+`Invitations Increment 3: Google` TODO line now carries the first-exchange check. **Community Increment 2b's Phase 4 is unblocked on this fix**
+(it was blocked on 0.42.3 and F231). Next: `/pre-push`, then `/merge-pr`, then deploy.
+
+`pipeline/session-update-hardening` (worktree `presby-sess`, Neon `pipeline-session-update`, no migration) is merged up to `main` (`ce661d7`,
+the 2026-10-24 retrospective's agent edits) and integrated as **v0.42.3**, a security patch with neutral wording. The server now accepts that
+the second sign-in factor is complete only from its own verification screens (TOTP and recovery code); other requests to change a session's
+state are refused, and the session-update path reads nothing from the request. DECISION-230, F237 (`docs/schema-design-2.md` §2y), one
+CLAUDE.md sentence under *The Proxy Does Not Reach the Database* (operator-approved). QA PASS, Phase 6 SHIP WITH NOTES; the notes are
+`docs/TODO.md` lines. **Operator ruling 2026-10-25: existing sessions are not rotated** (two active production accounts, both the operator's).
+The release note, commit titles and PR stay neutral until deploy.
+
+**Deployed 2026-10-25.** Still owed: the production sign-in smoke (an MFA-enrolled account signs in, enters a code and reaches its destination;
+the grant relies on async context reaching the jwt callback, proven on `next start`, not yet on Vercel) and the sibling hand-off
+(`/downstream-sync` and a neutral heads-up to repos seeded from the same starter). Both are TODO lines. The held test-coverage review
+(`docs/reviews/2026-10-24-test-coverage.md`, finding C-1) is now committed and logged.
+
+**Retro workflow-efficiency** (`pipeline/retro-workflow-efficiency`, worktree `presby-wf`) is merged up to `main` at 0.42.3 and integrated:
+DECISION-231, F239 (`docs/schema-design-2.md` §2z), TODO lines for its residuals and follow-ups, and the briefings backlog (13 entries, marker
+`decision=224`). QA run 2 PASS, Phase 6 SHIP WITH NOTES. Tooling and docs only, so no version bump and no release note. Next: `/pre-push`, then
+`/merge-pr`. Heads-up: the new push gate refuses one command that commits and pushes, so commit and push stay two separate calls.
+
+**Open pipelines (each has its own worktree and Neon branch; numbers are pre-assigned in the work-log headers):**
+
+| Pipeline | Worktree | Phase | Numbers | Next |
+|---|---|---|---|---|
+| Community Increment 2b, sign-in invitations (`pipeline/signin-invites`, `docs/work-log/2026-10-22-founding-admin-directory.md` in `../presby-2b`) | `presby-2b` | Phase 3 amendment 2 done | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Phase 4 is unblocked once 0.42.4 merges (0.42.3 is live; F231 is fixed on `pipeline/google-email-verified`) |
+| F231, refuse an unverified Google email claim (`2026-10-25-google-email-verified`) | `presby-gauth` | Integrated on its branch as **0.42.4** (Phase 6 SHIP WITH NOTES) | DECISION-246; F231; no migration; port 3520 | `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
+| Retro workflow-efficiency (`2026-10-25-retro-workflow-efficiency`, promoted to a full Feature by QA run 1) | `presby-wf` | Integrated on its branch (Phase 6 SHIP WITH NOTES) | DECISION-231; F239; no migration; port 3480 | `/pre-push`, `/merge-pr`, then remove the worktree |
+| Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Phase 3 (3a) running | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | Phase 3, then Phase 4 |
+| Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Phase 3 done | migration 0067; DECISION-238-241; F250-F257; port 3500 | Phase 4 queued |
+| Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Phase 3 done | migration 0068; DECISION-242-245; F258-F265; port 3510 | Phase 4 queued |
+
+**Next free numbers:** DECISION-**251**, F**274**, migration **0070**. F234-F236 and F238 were returned unused. Integration of these branches is
+serialized one PR at a time through `/merge-pr` (Workflow Rule 16); `docs/schema-design-2.md` §2y (0.42.3) and §2z (retro workflow-efficiency) are
+taken, so the next findings subsection is `2aa`.
+
+**Not forgotten:** the F166 bug-fix pipeline, the operator questions in `docs/TODO.md`, and the overdue periodic reviews.
+
+---
+
+## Previous handoff — 2026-10-24 (later): v0.41.0, v0.42.0 and v0.42.1 are live; zod 4 is integrated at v0.42.2
 
 **Live in production:** v0.41.0 (Community Increment 2), v0.42.0 (several email addresses per person) and v0.42.1 (the invitation screens say
 who has to accept; PR #48).

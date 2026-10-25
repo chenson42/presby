@@ -117,6 +117,11 @@ comes back to you.
 For a bug fix: write the failing test first, watch it fail, then fix it and watch
 it pass. Suffix the name `— regression for [bug short title]`.
 
+## Self-Verification Before Naming Phase 4 Complete
+
+- Before naming Phase 4 complete on a new CHECK, EXCLUDE or trigger, restate its logic in English and confirm the restatement, not the SQL, matches the design (`publications_withdrawal_shape`'s inverted boolean).
+- Every helper a `SECURITY DEFINER` function or trigger calls, and every `deny` helper a tenant path reaches, is tested as `presby_app`: the test asserts the designed refusal literal, not `permission denied for function ...` (0046 B-M1; again in 0053's deny helpers, QA first pass 2026-09-26).
+
 ## When You're Done
 
 Fill in the Phase 4 section of the feature's work-log (`docs/work-log/YYYY-MM-DD-<slug>.md`) per `docs/work-log/_template.md` and update your row in the Per-Phase Status table. State explicitly which migration mode you used and why: `db:push` (name the Neon branch, note "will db:generate before merge"), `db:generate` (the migration file path), or hand-written (the `drizzle/00XX_presby_*.sql` path, the idempotent whole-file re-apply proof, and the `_journal.json` entry). In the handoff note: new tables/columns and relationships available to the next implementer, the local apply command (`npm run db:push`, `npm run db:migrate`, or `psql "$MIGRATE_DATABASE_URL" -f drizzle/00XX_*.sql`, plus `db:seed`/`seed-dev.sql` if the seed changed), the `test-rls.sql` sections added or touched, and the next agent (usually api-developer).

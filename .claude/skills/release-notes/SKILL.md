@@ -105,6 +105,12 @@ When ready to merge, update `package.json` `version` to match the release-notes 
 
 ---
 
+## Step 6: Operator briefing
+
+Append one entry to `docs/briefings.md` for this release (severity-tagged, 80-150 words, the DECISION range it records, anything the operator must know that the release notes do not say), then move the `covers:` marker to the release's highest DECISION and the release commit. This step is part of the same housekeeping cluster as Rules 10, 14 and 15.
+
+---
+
 ## Templates
 
 ### Feature

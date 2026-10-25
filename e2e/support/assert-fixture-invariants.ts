@@ -31,7 +31,7 @@
 
 import { neon } from "@neondatabase/serverless";
 import { E2E_USERS } from "./users";
-import { platformSql } from "./db";
+import { platformSql, withDbRetry } from "./db";
 import { RESERVED_YEAR_MIN, RESERVED_YEAR_MAX } from "./sasr-fixture";
 
 /**
@@ -54,7 +54,7 @@ export async function assertAdminFixtureHasNoOrgs(): Promise<void> {
   const sql = neon(platformDbUrl);
   const email = E2E_USERS.admin.email;
 
-  const rows = await sql`
+  const rows = await withDbRetry("read admin fixture memberships", () => sql`
     SELECT o.slug
     FROM memberships m
     JOIN people p ON p.id = m.person_id
@@ -62,7 +62,7 @@ export async function assertAdminFixtureHasNoOrgs(): Promise<void> {
     JOIN organizations o ON o.id = m.organization_id
     WHERE u.email = ${email}
       AND p.merged_into_id IS NULL
-  `;
+  `);
 
   if (rows.length > 0) {
     const slugs = rows.map((r) => r.slug as string).join(", ");
@@ -99,12 +99,12 @@ export async function assertAdminFixtureHasNoOrgs(): Promise<void> {
 export async function assertNoStrayFixtureReturns(): Promise<void> {
   const sql = platformSql("assert-fixture-invariants");
 
-  const rows = (await sql`
+  const rows = (await withDbRetry("read stray fixture returns", () => sql`
     SELECT o.slug, sr.report_year, sr.id
       FROM statistical_returns sr
       JOIN organizations o ON o.id = sr.organization_id
      WHERE sr.report_year BETWEEN ${RESERVED_YEAR_MIN} AND ${RESERVED_YEAR_MAX}
-  `) as { slug: string; report_year: number; id: string }[];
+  `)) as { slug: string; report_year: number; id: string }[];
 
   if (rows.length > 0) {
     const described = rows
@@ -133,7 +133,7 @@ export async function assertNoStrayFixtureReturns(): Promise<void> {
 export async function assertSeedPublicationsIntact(): Promise<void> {
   const sql = platformSql("assert-fixture-invariants");
 
-  const rows = (await sql`
+  const rows = (await withDbRetry("read seeded publication", () => sql`
     SELECT p.id, p.withdrawn_at
       FROM publications p
       JOIN statistical_returns sr
@@ -142,7 +142,7 @@ export async function assertSeedPublicationsIntact(): Promise<void> {
      WHERE o.slug = 'alder-creek'
        AND p.record_class = 'statistical_return'
        AND sr.report_year = 2025
-  `) as { id: string; withdrawn_at: string | null }[];
+  `)) as { id: string; withdrawn_at: string | null }[];
 
   if (rows.length === 0) {
     throw new Error(

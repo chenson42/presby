@@ -28,6 +28,7 @@ import { neon } from "@neondatabase/serverless";
 import { E2E_EMAILS, E2E_USER_LIST } from "./users";
 import { seedE2EUsers } from "./seed-users";
 import { seedE2EOrgs } from "./seed-orgs";
+import { withDbRetry } from "./db";
 import { sweepStaleDomainsUiFixtures } from "./domains-ui-fixture";
 import { sweepStaleInvitationFixtures } from "./invitation-fixture";
 
@@ -84,13 +85,16 @@ async function cleanupTestFeedback(dbUrl: string): Promise<void> {
 
   try {
     const sql = neon(dbUrl);
-    const deleted = await sql`
-      DELETE FROM feedback
-      WHERE user_id IN (
-        SELECT id FROM users WHERE email = ANY(${E2E_EMAILS})
-      )
-      RETURNING id
-    `;
+    const deleted = await withDbRetry(
+      "delete test feedback",
+      () => sql`
+        DELETE FROM feedback
+        WHERE user_id IN (
+          SELECT id FROM users WHERE email = ANY(${E2E_EMAILS})
+        )
+        RETURNING id
+      `,
+    );
     console.log(
       `[globalSetup] cleanup: deleted ${deleted.length} test feedback rows`
     );
@@ -318,8 +322,10 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     "";
 
   // The suite owns its users. Any failure here throws — see the file header.
-  await seedE2EUsers(dbUrl);
-  await seedE2EOrgs(platformDbUrl);
+  // Both re-run on every start against a populated database (idempotent by header), so a
+  // dropped connection mid-seed is retried as a whole.
+  await withDbRetry("seed e2e users", () => seedE2EUsers(dbUrl));
+  await withDbRetry("seed e2e orgs", () => seedE2EOrgs(platformDbUrl));
   await sweepStaleDomainsUiFixtureOrgs(platformDbUrl);
   await sweepStaleInvitationFixtureOrgs(platformDbUrl);
   await cleanupTestFeedback(dbUrl);

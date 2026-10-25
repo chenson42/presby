@@ -16,7 +16,7 @@ import {
   features,
 } from "@/lib/db/schema";
 import { authConfig } from "@/lib/auth/config";
-import { evaluateSignIn } from "@/lib/auth/sign-in-gate";
+import { evaluateSignIn, isEmailClaimVerified } from "@/lib/auth/sign-in-gate";
 import { ADMIN_ROLE, FEATURES, MEMBER_ROLE } from "@/lib/permissions";
 import { getRequestIp } from "@/lib/request-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -31,6 +31,7 @@ import {
   computeEffectiveTwoFactor,
 } from "@/lib/auth/local-login";
 import { verifyTurnstile } from "@/lib/turnstile";
+import { takeTwoFactorGrant } from "@/lib/auth/two-factor-grant";
 
 const INITIAL_ADMIN_EMAILS = (process.env.INITIAL_ADMIN_EMAILS ?? "")
   .split(",")
@@ -86,11 +87,14 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
-      // Google verifies email ownership at sign-in, so linking an existing
-      // user record by email is safe with Google alone. If a fork adds a
-      // second OAuth provider (GitHub, Microsoft, etc.) that does NOT verify
-      // email, set this to `false` or the second provider can impersonate a
-      // Google user by claiming their email.
+      // Linking an existing user record by email is only safe because the signIn
+      // callback refuses any sign-in whose provider did not assert
+      // `email_verified === true` (evaluateSignIn, DECISION-246). Google verifies
+      // an address only when that claim says so; Auth.js does not check it. Do
+      // not remove the gate without removing this flag. The gate refuses any
+      // provider that does not assert `email_verified === true`, and that claim
+      // is only as trustworthy as its issuer: design any second provider in, and
+      // consider setting this to `false`, before registering it.
       allowDangerousEmailAccountLinking: true,
     }),
     Credentials({
@@ -214,24 +218,40 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ],
   callbacks: {
     ...authConfig.callbacks,
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       // Delegate to the extracted gate so all branches are unit-testable.
       // See src/lib/auth/sign-in-gate.ts and DECISION-015 for rationale:
       //   - credentials → true unconditionally (authorize() already checked isActive)
+      //   - OAuth, email_verified not strictly true → false (DECISION-246),
+      //     logged without PII
       //   - OAuth, no row → true (adapter will create the user row after this)
       //   - OAuth, isActive=false → false (soft-deactivation block)
       //   - OAuth, no email → false (fail-safe)
-      return evaluateSignIn(
-        account?.provider ?? "credentials",
-        user,
-        (email) =>
-          db.query.users
-            .findFirst({
-              where: eq(users.email, email),
-              columns: { isActive: true },
-            })
-            .then((row) => row ?? null),
+      const provider = account?.provider ?? "credentials";
+      const claims = { emailVerified: profile?.email_verified };
+      const allowed = await evaluateSignIn(provider, user, claims, (email) =>
+        db.query.users
+          .findFirst({
+            where: eq(users.email, email),
+            columns: { isActive: true },
+          })
+          .then((row) => row ?? null),
       );
+      if (
+        !allowed &&
+        provider !== "credentials" &&
+        !isEmailClaimVerified(claims.emailVerified)
+      ) {
+        // Refusal is otherwise invisible (the user sees only Auth.js's generic
+        // Access Denied page). Provider and claim type only: never the email,
+        // subject id or name. No audit row: a refusal is not a mutation, and
+        // an unauthenticated party would be writing it.
+        console.warn("signIn refused: provider email not verified", {
+          provider,
+          claimType: typeof claims.emailVerified,
+        });
+      }
+      return allowed;
     },
     // The `session` callback lives in the shared authConfig so the edge
     // runtime (proxy.ts) sees the same projection.
@@ -255,20 +275,13 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
           .where(eq(users.id, user.id));
       }
 
-      // Server-action-triggered updates (e.g. 2FA verified, role assigned)
-      // call `unstable_update`; we merge the partial session payload back into
-      // the token here so subsequent requests see the new state.
-      if (trigger === "update" && session?.user) {
-        if (typeof session.user.twoFactorVerified === "boolean") {
-          token.twoFactorVerified = session.user.twoFactorVerified;
-        }
-        if (Array.isArray(session.user.roles)) {
-          token.roles = session.user.roles;
-        }
-        if (Array.isArray(session.user.features)) {
-          token.features = session.user.features;
-        }
-      }
+      // An update (`trigger === "update"`) reads NOTHING from its payload: the
+      // same trigger arrives from a server action's `unstable_update()` and
+      // from a request a browser can make itself, and the callback cannot tell
+      // them apart. Everything an update changes is re-derived below from the
+      // database (activity, 2FA requirement, roles, features); the one claim
+      // that is not derivable, `twoFactorVerified`, is set only inside a
+      // server-side verification grant (DECISION-230).
 
       // Stale-JWT defense + role refresh.
       //
@@ -277,7 +290,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
       // only thing standing between a deleted/deactivated user and a still-
       // valid signed cookie. For role + feature changes to apply mid-session,
       // call `unstable_update({})` from the mutating action; this re-runs
-      // the role lookup below.
+      // the role lookup below (an update never carries data into the token).
       if (!token.sub) return token;
 
       const userId = token.sub;
@@ -291,6 +304,13 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         return {};
       }
       token.isActive = dbUser.isActive;
+      // The only writer of `twoFactorVerified` besides the sign-in reset above:
+      // the TOTP / recovery-code action wraps its `unstable_update({})` in a
+      // single-use grant for this user. A request with no grant, or one for
+      // another user, leaves the claim exactly as it was.
+      if (trigger === "update" && takeTwoFactorGrant(userId)) {
+        token.twoFactorVerified = true;
+      }
       // Effective twoFactorRequired: (this user's column OR any congregation
       // they belong to requiring it) AND the auth.require_2fa master switch.
       // The per-church arm goes through a SECURITY DEFINER function — no org

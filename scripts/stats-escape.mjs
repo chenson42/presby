@@ -1,17 +1,33 @@
 #!/usr/bin/env node
 /**
- * Escape-rate reporter. Reads the 30-day git log and prints a breakdown of
- * `fix:` commits by channel (Caught-By) and discovery phase (Discovered-In).
+ * Escape-rate reporter. Reads the git log (30 days by default, or everything
+ * since `--since`) and prints a breakdown of `fix:` commits by channel
+ * (Caught-By) and discovery phase (Discovered-In).
  *
  * The "grandfather cutoff" (2026-05-18) is the date the commit-message
  * standard was introduced. Commits before that date are expected to have no
  * trailers; this script calls them out explicitly so the missing-trailer
  * count isn't mistaken for hook bypasses.
  *
- * Usage: node scripts/stats-escape.mjs
- *        npm run stats:escape
+ * `--since=<value>` (or `--since <value>`) replaces the 30-day window, which
+ * double-counts against the 14-day retrospective cadence. Accepted values
+ * (anything else is refused before git runs, and git is called with an
+ * argument array, never a shell string):
+ *   YYYY-MM-DD            a bare date means local midnight
+ *   YYYY-MM-DD HH:MM[:SS] (a `T` may replace the space)
+ *   "N days ago" / "N weeks ago" (N is 1-3 digits; day, days, week, weeks)
+ * git's --since compares the COMMITTER date, so a rebased or amended commit
+ * counts by when it was rewritten, not when it was first authored; the report
+ * header therefore says "since <value>", never "authored since". The default
+ * output (no flag) is unchanged. CLAUDE.md's "30-day" wording stays true for
+ * the default.
+ *
+ * Usage: node scripts/stats-escape.mjs [--since=2026-10-10]
+ *        npm run stats:escape [-- --since=2026-10-10]
  */
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { parseTrailers } from "./commit-msg.mjs";
 
@@ -39,21 +55,79 @@ const DISCOVERED_IN_VALUES = [
 
 const FIX_PREFIX_RE = /^fix(\([^)]+\))?:/;
 
+// ── --since ──────────────────────────────────────────────────────────────────
+
+const DEFAULT_SINCE = "30 days ago";
+const ABSOLUTE_RE = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$/;
+const RELATIVE_RE = /^\d{1,3} (day|days|week|weeks) ago$/;
+
+function sinceIsAllowed(value) {
+  if (RELATIVE_RE.test(value)) return true;
+  return ABSOLUTE_RE.test(value) && !Number.isNaN(new Date(value).getTime());
+}
+
+/**
+ * Reads `--since` from argv (the part after the node/script entries).
+ *
+ * @param {string[]} argv
+ * @returns {{ since: string | null } | { error: string }}
+ */
+export function parseSinceArg(argv) {
+  let value = null;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--since") {
+      value = argv[i + 1] ?? "";
+      break;
+    }
+    if (a.startsWith("--since=")) {
+      value = a.slice("--since=".length);
+      break;
+    }
+  }
+  if (value === null) return { since: null };
+  if (!sinceIsAllowed(value)) {
+    return {
+      error: `stats-escape: --since expects YYYY-MM-DD, YYYY-MM-DD HH:MM, or "N days|weeks ago" (got "${value}").`,
+    };
+  }
+  return { since: value };
+}
+
+/**
+ * The git log argument vector: a single --since option, no shell involved.
+ *
+ * @param {string | null} since
+ * @returns {string[]}
+ */
+export function gitLogArgs(since) {
+  return ["log", `--since=${since ?? DEFAULT_SINCE}`, "--format=%H%n%s%n%b%n---END---"];
+}
+
+/**
+ * Report title and the parenthesised tag after "(30d)"-style labels.
+ *
+ * @param {string | null} since
+ * @returns {{ title: string; tag: string }}
+ */
+export function windowLabel(since) {
+  if (since === null) return { title: "Escape-Rate Report — 30-day window", tag: "30d" };
+  return { title: `Escape-Rate Report — since ${since}`, tag: `since ${since}` };
+}
+
 // ── Git log parsing ──────────────────────────────────────────────────────────
 
 /**
- * Fetch commit entries for the last 30 days from git log.
+ * Fetch commit entries from git log (default window, or since `since`).
  * Returns an array of { hash, subject, body } objects.
  *
+ * @param {string | null} since
  * @returns {{ hash: string; subject: string; body: string }[]}
  */
-function fetchCommits() {
+function fetchCommits(since) {
   let raw;
   try {
-    raw = execSync(
-      'git log --since="30 days ago" --format="%H%n%s%n%b%n---END---"',
-      { encoding: "utf8" }
-    );
+    raw = execFileSync("git", gitLogArgs(since), { encoding: "utf8" });
   } catch {
     console.error("stats-escape: git log failed. Are you in a git repository?");
     process.exit(1);
@@ -79,7 +153,7 @@ function fetchCommits() {
 
 // ── Stats accumulation ───────────────────────────────────────────────────────
 
-function computeStats(commits) {
+export function computeStats(commits) {
   let totalCommits = 0;
   let totalFix = 0;
   let fixWithTrailers = 0;
@@ -143,7 +217,20 @@ function padLeft(str, width) {
 
 // ── Output ───────────────────────────────────────────────────────────────────
 
-function printReport(stats) {
+/** `label` then spaces to column `width`, always at least one space. */
+function labelTo(label, width) {
+  return label + " ".repeat(Math.max(1, width - label.length));
+}
+
+/**
+ * The report as text. With no flag the output is byte-identical to the
+ * pre-`--since` report (the retrospective copies it verbatim).
+ *
+ * @param {ReturnType<typeof computeStats>} stats
+ * @param {{ title: string; tag: string }} label
+ * @returns {string}
+ */
+export function formatReport(stats, label = windowLabel(null)) {
   const {
     totalCommits,
     totalFix,
@@ -152,58 +239,76 @@ function printReport(stats) {
     caughtByCounts,
     discoveredInCounts,
   } = stats;
+  const out = [];
+  const log = (line = "") => out.push(line);
+  const defaultWindow = label.tag === "30d";
 
-  console.log("Escape-Rate Report — 30-day window");
-  console.log(
+  log(label.title);
+  log(
     `Grandfather cutoff: ${GRANDFATHER_CUTOFF} (commits before this date lacked trailers by design)`
   );
-  console.log("");
-  console.log(`Total commits (30d):        ${padLeft(totalCommits, 2)}`);
-  console.log(`fix: commits (30d):          ${padLeft(totalFix, 1)}`);
-  console.log(`  With trailers:             ${padLeft(fixWithTrailers, 1)}`);
-  console.log(
+  log("");
+  log(`${labelTo(`Total commits (${label.tag}):`, 28)}${padLeft(totalCommits, 2)}`);
+  log(`${labelTo(`fix: commits (${label.tag}):`, 29)}${padLeft(totalFix, 1)}`);
+  log(`  With trailers:             ${padLeft(fixWithTrailers, 1)}`);
+  log(
     `  Missing trailers (bypass): ${padLeft(fixMissingTrailers, 1)}   ← hook bypassed or pre-cutoff`
   );
-  console.log("");
+  log("");
 
   if (fixWithTrailers === 0) {
-    console.log(
-      `Caught-By breakdown (no tagged fix: commits in the last 30 days)`
+    log(
+      defaultWindow
+        ? `Caught-By breakdown (no tagged fix: commits in the last 30 days)`
+        : `Caught-By breakdown (no tagged fix: commits in this window)`
     );
     CAUGHT_BY_VALUES.forEach((k) => {
-      console.log(`  ${padRight(k, 16)} ${padLeft(0, 1)}   (0%)`);
+      log(`  ${padRight(k, 16)} ${padLeft(0, 1)}   (0%)`);
     });
-    console.log("");
-    console.log("Discovered-In breakdown:");
+    log("");
+    log("Discovered-In breakdown:");
     DISCOVERED_IN_VALUES.forEach((k) => {
-      console.log(`  ${padRight(k, 16)} ${padLeft(0, 1)}   (0%)`);
+      log(`  ${padRight(k, 16)} ${padLeft(0, 1)}   (0%)`);
     });
-    return;
+    return out.join("\n");
   }
 
-  console.log(
+  log(
     `Caught-By breakdown (${fixWithTrailers} tagged fix: commit${fixWithTrailers === 1 ? "" : "s"}):`
   );
   CAUGHT_BY_VALUES.forEach((k) => {
     const count = caughtByCounts[k];
-    console.log(
-      `  ${padRight(k, 16)} ${padLeft(count, 1)}${pct(count, fixWithTrailers)}`
-    );
+    log(`  ${padRight(k, 16)} ${padLeft(count, 1)}${pct(count, fixWithTrailers)}`);
   });
-  console.log("");
-  console.log("Discovered-In breakdown:");
+  log("");
+  log("Discovered-In breakdown:");
   DISCOVERED_IN_VALUES.forEach((k) => {
     const count = discoveredInCounts[k];
     if (count > 0) {
-      console.log(
-        `  ${padRight(k, 16)} ${padLeft(count, 1)}${pct(count, fixWithTrailers)}`
-      );
+      log(`  ${padRight(k, 16)} ${padLeft(count, 1)}${pct(count, fixWithTrailers)}`);
     }
   });
+  return out.join("\n");
+}
+
+export function printReport(stats, label = windowLabel(null)) {
+  console.log(formatReport(stats, label));
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
-const commits = fetchCommits();
-const stats = computeStats(commits);
-printReport(stats);
+// Run only when invoked directly (not imported by tests).
+const invoked =
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+
+if (invoked) {
+  const parsed = parseSinceArg(process.argv.slice(2));
+  if ("error" in parsed) {
+    console.error(parsed.error);
+    process.exit(2);
+  }
+  const commits = fetchCommits(parsed.since);
+  const stats = computeStats(commits);
+  printReport(stats, windowLabel(parsed.since));
+}

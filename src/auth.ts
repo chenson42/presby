@@ -91,10 +91,10 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
       // callback refuses any sign-in whose provider did not assert
       // `email_verified === true` (evaluateSignIn, DECISION-246). Google verifies
       // an address only when that claim says so; Auth.js does not check it. Do
-      // not remove the gate without removing this flag. A second OAuth provider
-      // is refused by that same gate until it is designed in (the claim is
-      // required for every non-credentials provider); setting this to `false` is
-      // the further step if it can never prove ownership of an email.
+      // not remove the gate without removing this flag. The gate refuses any
+      // provider that does not assert `email_verified === true`, and that claim
+      // is only as trustworthy as its issuer: design any second provider in, and
+      // consider setting this to `false`, before registering it.
       allowDangerousEmailAccountLinking: true,
     }),
     Credentials({

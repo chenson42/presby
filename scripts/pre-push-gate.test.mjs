@@ -347,6 +347,40 @@ describe("decideHook › fail-open", () => {
   });
 });
 
+// ACCEPTED RESIDUALS, pinned. These assert what the gate does TODAY and document
+// that it is a known gap (see ACCEPTED RESIDUALS in scripts/pre-push-gate.mjs),
+// not that the behaviour is right. Remove a test here only when the gate is
+// changed to catch the case.
+describe("commandContainsGitPush › accepted residuals", () => {
+  const base = { cwd: REPO_ROOT, repoRoot: REPO_ROOT, head: "aaaaaaaaaa", toplevelOf: () => REPO_ROOT };
+  const fresh = { head: "aaaaaaaaaa" };
+
+  it("an unquoted $() is ordered after its enclosing command: the commit is not seen before the push", () => {
+    // accepted residual: remove this test only when the gate is changed to catch it
+    const command = "git push $(git commit -m x)";
+    expect(commandContainsGitPush(command)).toBe(true);
+    expect(decideHook({ ...base, marker: fresh, command })).toEqual({ exit: 0 });
+    // the marker check still applies to the push itself
+    expect(decideHook({ ...base, marker: null, command }).exit).toBe(2);
+  });
+
+  it.each(["nice -n 5 git push", "time -p git push", "command -p git push"])(
+    "a prefix with a flag of its own hides the push: %j is not seen",
+    (command) => {
+      // accepted residual: remove this test only when the gate is changed to catch it
+      expect(commandContainsGitPush(command)).toBe(false);
+      expect(decideHook({ ...base, marker: null, command })).toEqual({ exit: 0 });
+    },
+  );
+
+  it("the same prefixes with no flags are followed (the control)", () => {
+    for (const command of ["nice git push", "time git push", "command git push"]) {
+      expect(commandContainsGitPush(command)).toBe(true);
+      expect(decideHook({ ...base, marker: null, command }).exit).toBe(2);
+    }
+  });
+});
+
 describe("hook mode (spawn, read-only)", () => {
   it("refuses a chained commit and push and leaves the real marker byte-for-byte alone", () => {
     const markerPath = path.join(REPO_ROOT, ".claude", "pre-push-ok.json");

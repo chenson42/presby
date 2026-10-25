@@ -36,7 +36,8 @@
  * quote-naive splitter refused its own pipeline's commit messages). Wrapped
  * invocations are followed: `bash|sh|zsh|dash -c "..."`, `eval ...`, a shell
  * reading a heredoc, and the prefixes `command`, `env`, `exec`, `builtin`,
- * `time`, `nohup`, `nice`, `!`, `NAME=value`; `git` is matched by basename
+ * `time`, `nohup`, `nice`, `!`, `NAME=value` when they carry no flags of their
+ * own (`env` also skips bare flags such as `-i`); `git` is matched by basename
  * (`/usr/bin/git`). Nesting is followed to depth 6.
  *
  * Scoped to THIS repo only: a `git push` run against some other git
@@ -59,6 +60,13 @@
  *   - a plain terminal is never gated, by design
  *   - `cd` inside a subshell or `bash -c` is treated as persisting (this is
  *     conservative toward gating)
+ *   - an unquoted `$()` is ordered after the command that encloses it, so in
+ *     `git push $(git commit -m x)` the commit is not seen as preceding the push
+ *     (with a fresh marker it is allowed; with none it is refused as usual)
+ *   - a prefix that carries flags of its own (`nice -n 5`, `time -p`,
+ *     `command -p`, `env -u NAME`, `exec -a NAME`): the flag is read as the
+ *     command, so the push behind it is not seen at all (allowed even with no
+ *     marker)
  *
  * Exported for unit-testing:
  *   commandContainsGitPush(command: string): boolean

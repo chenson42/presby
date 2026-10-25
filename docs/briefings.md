@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=c1c586b -->
+<!-- covers: decision=224 commit=11095cd -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,8 @@ is checked.*
 ---
 
 ## 2026-10-25
+
+- [ ] **`decision` · The platform admin area now opens on a dashboard of what needs attention, behind a grouped menu with a phone version; the organization workspace you asked for is still to come (0.43.0; DECISION-251, DECISION-252, DECISION-253, DECISION-255).** Increment 1 of 4 is read-only. **What to know:** the dashboard's rule that it shows no congregation-member data is held by a test that catches a careless reader, not a deliberately evasive one, and the two-factor card is the one place that reads through people and memberships, by your ruling (DECISION-252). The admin area deliberately has no loading screens, because one would make a missing page report success (DECISION-251). Status uses icons and words for now; proper status colours come in Increment 4 (DECISION-255). The Design system page is visible to anyone who can open the admin area. **Still open:** the organization workspace and the "waiting for a first administrator" and invitation cards (Increment 2); three admin detail pages show the "couldn't load this page" screen instead of a 404 for a malformed address (tracked).
 
 - [ ] **`defect` · The new-organization form could silently drop a type or parent picked before the page finished loading; it now waits (0.42.5; F275).** On `/admin/organizations/new`, a choice made in the first moment after the page appeared could be reset by the page's own startup, creating a root or wrong-type organization that the product cannot repair (the type is permanent and there is no reparent control). The whole form now stays greyed out until it is ready. Nothing already created is affected, but if you created an organization very quickly after opening the page, open it from the organizations list and check its type and parent. **Still open:** the type and slug are permanent only by convention (nothing in the database stops a direct rewrite); that is the platform admin redesign's Increment 3.
 

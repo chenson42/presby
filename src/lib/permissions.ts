@@ -50,9 +50,15 @@ export const FEATURE_CATALOG: Array<{
   },
   {
     key: FEATURES.ADMIN_ORGANIZATIONS,
-    name: "Manage organization branding",
+    // COPY-ONLY CHANGE (platform admin redesign Increment 1, DECISION-253):
+    // `name` and `description` now say what this key gates today. Keys, the
+    // FEATURES map, array order and categories are untouched (pinned by
+    // permissions.test.ts). Deployed `features` rows keep the old text
+    // because scripts/seed.ts uses onConflictDoNothing; nothing displays
+    // those columns to an operator.
+    name: "Manage organizations",
     description:
-      "Create organizations; set a congregation's brand colour, logo and type pairing at onboarding; neutralise an abusive tenant's brand.",
+      "Create organizations and manage how each is set up on PresbyPortal: administrator and treasurer invitations, brand and public profile, public site, domains, and giving-notice health.",
     category: "admin",
   },
   {

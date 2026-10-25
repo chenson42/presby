@@ -4,6 +4,54 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-241 — Public events calendar: the implementation shape.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (events Increment 4, v0.44.0, migration 0067)
+
+- **Names.** The column is `events.website_listed` (matching `public_listed` elsewhere, DECISION-131), the CHECK `events_website_requires_public`, the definer `presby_public_events_calendar(p_slug)`, the toggle `org_portal.public_calendar` (worship category, `orgTypes: null`, self-service), the slot `eventsCalendar`, the audit keys `event.listed_on_website` and `event.unlisted_from_website`.
+- **The window and cap live in the function and are mirrored by named constants.** Previous month through 12 months ahead (14 months), 400 rows; on truncation the window shrinks to the last complete month, and a truncation that leaves none returns `unavailable`. A test pins the SQL literals to the TypeScript constants and to the catalog, so the SQL composition of the toggle, category axis and default zone cannot drift from `orgFeatureEnabledInTx` and `DEFAULT_ORG_TIME_ZONE`. A differential DB test compares the two over the whole axis × category × toggle matrix.
+- **One DOM per month.** The panels are server-rendered once and laid out by CSS (a seven-column grid from `md`, a day list below, or the list everywhere by the visitor's choice); event details are native `<details>`. The client island holds only the active month index, the layout and the "earlier days" state, and receives panels, not event data. A `location.hash` mirror (Phase 2's optional suggestion) is declined: a deep link to a month is not needed to replace the old embed and adds a client-only effect to test; revisit if a church asks to link to a month.
+- **Pure rules shared by the count and the write.** `deriveListed`, `planSeriesListing` and `inheritedListing` live in `src/lib/events/website-listing.ts`. A series is published or unpublished "this and all later" through `setSeriesWebsiteListing`, which locks the series rows; changing one event goes through the edit form. This replaces Phase 1 Flow 3's scope choice inside one form with two surfaces of equal capability, avoiding a dual-mode form value (DECISION-133). New occurrences inherit from the latest non-cancelled occurrence AND the parent's `is_public`.
+- **Audit in the same transaction.** `insertAuditRow` (not `recordAudit`) on all four writers, one row per column-changing write, none for a no-op or a cancel. The lib functions take an `EventActor { userId, email }` so the row carries who did it.
+- **Declined Phase 2 suggestions, with reasons.** `website_listed_by/_at`: the audit row is authoritative and nothing reads the columns; adding them later is additive. A partial index: the window is a bounded range scan on `events_org_starts_idx` and the table is small per organization; revisit if an `EXPLAIN` on a several-thousand-row organization says otherwise.
+- **No off-warning and no on-confirmation for the toggle.** Rollback should be one click; the on-direction exposure is bounded by the per-event mark (F255 tracks the residual).
+- **G9 (where-the-calendar-appears status line) is deferred**, with the reasons in the work-log's Carry-forward (`docs/TODO.md`).
+- **Revisit if** a church needs a month deep link, the payload for a busy organization is measured large (about 0.75 MB of uncompressed HTML for 2 events and 4.1 MB at the 400-event maximum, accepted; `docs/TODO.md`), or a fifth writer of `website_listed` appears (it must audit).
+
+---
+
+**DECISION-240 — Event writes stay unaudited except when the website column changes; narrowly amends DECISION-113 ruling 5.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar`
+
+- Event create, edit, extend and cancel remain unaudited **except** when `events.website_listed` changes. Any write path that flips it in either direction writes **one** in-transaction audit row via `insertAuditRow` (`src/lib/audit-tx.ts`, so the change and the audit commit together).
+- That covers `createEvent` (including a series), `updateEvent` (including the derived clear when `is_public` goes false), `extendSeriesPattern` (new occurrences inherited as listed), and the series-scope mutation `setSeriesWebsiteListing`. The row carries the new `AUDIT_ACTIONS` keys (listed/unlisted), the scope, the root event id, and the changed and skipped counts.
+- The org toggle flip is already audited by `toggleOrgFeature()`. Cancelling an event is not audited; it narrows exposure and the read filters it out (F254).
+- **Accepted residual (`paper`).** A future writer that sets the column directly would escape the audit; the only code writers are the four above, and the TypeScript field is written nowhere else.
+
+---
+
+**DECISION-239 — A navigable public live slot affirms DECISION-132's redline: month navigation is a pre-rendered bounded window switched by a client island.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar`
+
+- DECISION-132's live-slot redline is affirmed **without amendment** for a navigable slot. The island receives only server-rendered panels and an index. Request-derived parameters (`?month=`) and a JSON endpoint are rejected. A client-only `location.hash` mirror is permitted because it never reaches the server (DECISION-241 declines to build it).
+- Public calendar components are built in `(public)/site/[slug]` (flat or `_`-private folder). They reuse only the pure `src/lib/calendar` / `src/lib/events` layer and never import `(org)` route files.
+
+---
+
+**DECISION-238 — Public events calendar publication: a per-event column off by default, tied to `is_public` by a CHECK and re-filtered at read time; one `SECURITY DEFINER` read that always returns one row.**
+
+**Status:** Resolved (architect, Phase 2; operator rulings Q1 and Q3, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (migration 0067)
+
+- Publication is a new per-event column, `events.website_listed`, **off by default**, tied to `is_public` by the table CHECK `events_website_requires_public` and re-filtered on `is_public` at read time (it holds even with the CHECK dropped).
+- The anonymous read is one `SECURITY DEFINER` function, `presby_public_events_calendar(p_slug)`, that **always returns one row**. Inside it, it checks: org active, site live, and the toggle composed exactly as `orgFeatureEnabledInTx` composes it, **including the category axis read from `feature_flags` inside the function**. It returns a `jsonb_build_object` allow-list with no ids.
+- The window and row cap are fixed inside the function, and every non-serving reason and every read failure collapses to `unavailable` (DECISION-154). The reader lives in `src/lib/public-calendar.ts`, not the pure `src/lib/calendar/`.
+- The toggle is self-service (`operatorEnabled: false`, operator ruling Q3). The new function does not repeat `presby_public_giving_config`'s omission of the category axis (F250, tracked in `docs/TODO.md`).
+- **Accepted residuals.** A cancelled event keeps the flag true and the read filters it (F254, `paper`); the table has no length CHECK, so the definer clips (F256, `paper`); a published event's free text is public and may be archived, which the form and release note say.
+
+---
+
 **DECISION-246 — A non-credentials sign-in must carry `email_verified === true`; the gate refuses before any user lookup. Amends DECISION-015 point 2; fulfils the `evaluateSignIn()` clause of DECISION-187.**
 
 **Status:** Resolved (operator-visible finding F231, architect ruling in the 2b addendum 2, R38) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-google-email-verified` (v0.42.4; no migration)

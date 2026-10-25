@@ -224,7 +224,7 @@ so no row that predates the CI run can appear in a log or an uploaded trace.
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | **deferred** — see below |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | **set 2026-10-19** (Production). The key belongs to PresbyPortal's **own Resend team** (its own Pro subscription), where `presbyportal.org` is the verified sending domain — never a team shared with other products, because the key is full-access (the Track F mail increment provisions church domains with it) and full access reaches every domain in its team. From: `PresbyPortal <noreply@presbyportal.org>`. |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | **deliberately unset.** `.env.example` says this credentials-login bypass is not suitable for production |
-| `SITES_INGEST_OIDC_AUDIENCE` / `GITHUB_SITES_ORG` | needed before a real `site-fpcw` content ingest can authenticate |
+| `SITES_INGEST_OIDC_AUDIENCE` / `GITHUB_SITES_ORG` | **set** (Production; corrected 2026-10-25). A site repo's `PRESBY_OIDC_AUDIENCE` repository variable must equal `SITES_INGEST_OIDC_AUDIENCE` exactly. `site-pasturechurch` carries both repository variables; `site-fpcw` carries neither, so its ingest still fails auth |
 | *test/dev only, never in Vercel (build-asserted in Production):* `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake` (`doh` is the default and the only production value), `DOMAINS_FAKE_STATE_FILE`, `DOMAINS_ALLOW_RESERVED_TLDS=1` | e2e and local development |
 
 Optional: `NEXT_PUBLIC_TURNSTILE_SITE_KEY`/`TURNSTILE_SECRET_KEY`,
@@ -814,6 +814,68 @@ is 0.
 
 ---
 
+## Public events calendar (0067)
+
+Added at integration (v0.44.0). Migration `0067`. Design:
+`docs/work-log/2026-10-25-public-events-calendar.md`; DECISION-238-241; findings
+F250-F256 (`docs/schema-design-2.md` §2ab). Confirm first, on production:
+`select count(*) from information_schema.columns where table_name = 'events'
+and column_name = 'website_listed'` is 0. The migration is independent of
+`0065` and `0066` (Community 2b and 3a): apply it in whatever order the
+branches merge. The journal skips idx 65 and 66 on purpose; do not renumber.
+
+### Pre-deploy runbook: 0067, then the code
+
+1. **Order: `0067` first, then merge and deploy the code.** Every merge to
+   `main` auto-deploys production. The new code's `EVENT_COLUMNS` selects
+   `events.website_listed`, so with the code live and the column missing every
+   events admin page errors. The OLD code against the NEW schema is unaffected
+   (it never names the column, the column defaults to false, and the CHECK only
+   binds a row that is listed). The migration is additive: one default-false
+   column, one CHECK and one `SECURITY DEFINER` function. No table, policy or
+   table grant is added. A code rollback is safe.
+2. **Snapshot `production` first** (Neon).
+3. **Apply `0067` WITH `-1`, as the owner, on the direct endpoint:**
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0067_presby_public_events_calendar.sql`.
+   The file is idempotent and has no top-level `begin;`/`commit;` (its `begin`
+   is inside the function body).
+4. **Verify against the catalog, not the DDL, and diff against `development`.**
+   - `events.website_listed` is `boolean`, `NOT NULL`, default `false`; the row
+     count and `select count(*) from events where website_listed` (expect 0)
+     are unchanged by the migration.
+   - `events_website_requires_public` exists, `convalidated` is true, and
+     `pg_get_constraintdef` reads `CHECK (((NOT website_listed) OR is_public))`.
+   - `presby_public_events_calendar(text)` has `prosecdef` true, `provolatile`
+     `s`, `proconfig` `search_path=public, pg_temp`, and owner `neondb_owner`.
+   - `proacl` of the function names only the owner and `presby_app`
+     (`{neondb_owner=X/neondb_owner,presby_app=X/neondb_owner}`):
+     `has_function_privilege` is false for `public` and `presby_platform` and
+     true for `presby_app`.
+   - `events` still has `relrowsecurity` and `relforcerowsecurity` true and its
+     one `tenant_isolation` policy. Table grants are unchanged.
+5. **Merge and deploy.** Smoke the events admin page (`/o/<slug>/admin/events`
+   for an organization with `org_portal.events` on, or the new-event form) and
+   one anonymous public-site page. No `org_portal.public_calendar` row exists in
+   any organization, no event has the box ticked and no site carries the slot,
+   so merging exposes nothing.
+6. **On `development`:** apply `0067`, then
+   `scripts/public-calendar/seed-dev-public-calendar.sql` (also reached through
+   `scripts/seed-dev.sql`), then run the full `scripts/test-rls.sql` as
+   `presby_app`. Section 67 is `scripts/public-calendar/test-rls-67.sql` and
+   adds 58 passes; the three known drift failures at lines 217, 516 and 7927 are
+   pre-existing. **Do not run the seed or the suite on production** (test
+   helpers and a fixture site).
+7. **Turning it on for a congregation is a separate, later step** (the toggle
+   at `/o/<slug>/admin/features`, the slot placed on a page by the site's
+   maintainer, an event marked). The public-site integration for the first
+   customer is a `docs/TODO.md` line with its own preconditions and a
+   real-iPhone check.
+8. **Down-path.** There is no rollback file. The fastest way back is the toggle
+   off for the organization, then unmark the events, then `sites.public_render`.
+   Do not drop the column or the CHECK; the code needs them.
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.
@@ -824,8 +886,13 @@ These are **not** oversights.
   operator.** Accepted for now; production serves public pages only. Redirect URI
   when it happens: `https://<canonical host>/api/auth/callback/google`.
 - **First real `site-fpcw` ingest** — `organization_sites.last_ingested_commit_sha`
-  for `fpcw` is still a scratch placeholder, and the two OIDC variables above are
-  unset, so an ingest would fail auth.
+  for `fpcw` is still a scratch placeholder. The two Production OIDC variables
+  above now exist (corrected 2026-10-25); what is missing is `site-fpcw`'s own
+  repository variables, `PRESBY_INGEST_URL` and `PRESBY_OIDC_AUDIENCE`, and the
+  run history shows every ingest attempt failed (the five newest, 2026-08-26 to
+  2026-08-28; the logs have expired, so the cause is an inference). The first
+  ingest publishes the whole migrated site and needs the operator's explicit go;
+  see the public events calendar line in `docs/TODO.md`.
 
 ## Not applicable yet
 

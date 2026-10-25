@@ -3,11 +3,42 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-25 (v0.42.3, session handling hardening, is live as of its 2026-10-25 deploy; v0.42.4, the provider-email check, is integrated on its branch; retro workflow-efficiency is merged to `main` with no version bump).
+Updated 2026-10-25 (later): the public events calendar (events Increment 4) is integrated on its branch as v0.44.0 and waits for migration 0067 to be applied to production BEFORE it merges; v0.42.5 is on `main`; v0.43.0 (platform admin dashboard, PR #55) is open.
 
 ---
 
-## RESUME HERE — 2026-10-25: v0.42.4 (sign-in provider email check, F231) is integrated; v0.42.3 is live; five other pipelines are open
+## RESUME HERE — 2026-10-25 (later): the public events calendar is integrated as v0.44.0; apply 0067 to production BEFORE merging
+
+`pipeline/public-events-calendar` (worktree `presby-cal`, Neon `pipeline-public-events-calendar`, port 3500) is merged up to `main` at v0.42.5 and
+integrated as **v0.44.0** (v0.43.0 is PR #55, the platform admin dashboard, open; if it merges first nothing here changes, and the v0.42/v0.43
+release-note links need a one-line merge resolution). QA run 2 PASS, Phase 6 **SHIP WITH NOTES**. A congregation's public website can show an
+events calendar (a month grid on a computer, a list on a phone) through a new `eventsCalendar` live slot. Nothing is public until all three
+happen: an administrator turns on the `org_portal.public_calendar` toggle (seeded off, self-service), the site's maintainer places the slot on a
+page, and an editor ticks the new per-event box `events.website_listed` ("Show on our website's public calendar", off by default, only possible on
+an "open to everyone" event). DECISION-238-241; findings F250-F256 in `docs/schema-design-2.md` §2ab (F257 returned unused); migration **0067**
+(journal idx 67, with idx 65 and 66 left for Community 2b and 3a).
+
+**Deploy order matters: apply 0067 to production BEFORE merging.** Every merge to `main` auto-deploys, and the new code selects
+`events.website_listed`, so the events admin pages would error until the column exists. Old code against the new schema is unaffected. The runbook
+is `docs/deployment.md` "Public events calendar (0067)". Also apply 0067 and `scripts/public-calendar/seed-dev-public-calendar.sql` to the shared
+`development` branch, then run the full `scripts/test-rls.sql` as `presby_app` there (section 67 adds 58 passes; the three known drift failures at
+lines 217, 516 and 7927 are pre-existing).
+
+**Not done, and not a code change (the integration step, operator-owned):** (1) a real iPhone check of the `<details>` rows; it gates turning the
+toggle on for a congregation, not merging. (2) The FPCW public-site integration: replace `site-fpcw/content/upcoming-events.json`'s Google
+Calendar `prose` block with `{ "type": "liveSlot", "props": { "slot": "eventsCalendar" } }` on a branch; `site-fpcw` has no repository
+variables and has never ingested, and the first real ingest publishes the whole migrated site, so it needs the operator's explicit go. (3) The
+custom-host check at FPCW's cutover (only simulated on `*.invalid` hosts today), and the Track K event import must land before DNS moves or the
+calendar is empty on day one. All three are `docs/TODO.md` lines. The what's-new post is drafted and deferred until the first toggle goes on.
+
+**Next:** `/pre-push`, snapshot production, apply 0067, `/merge-pr`, deploy, smoke the events admin page and an anonymous public-site page, then
+remove the worktree and Neon branch.
+
+**Numbers:** this pipeline used DECISION-238-241, F250-F256 and migration 0067; F257 was reserved and returned unused. The next-free numbers in the section below are unchanged by it.
+
+---
+
+## Previous handoff — 2026-10-25 (earlier): v0.42.4 (sign-in provider email check, F231) is integrated; v0.42.3 is live; five other pipelines are open
 
 `pipeline/google-email-verified` (worktree `presby-gauth`, no migration) is merged up to `main` (`77be511`: 0.42.3 plus PR #52 workflow-efficiency)
 and integrated as **v0.42.4**, F231 **closed in code and tests**. `evaluateSignIn()` now refuses every non-credentials sign-in unless the provider
@@ -44,7 +75,7 @@ DECISION-231, F239 (`docs/schema-design-2.md` §2z), TODO lines for its residual
 | F231, refuse an unverified Google email claim (`2026-10-25-google-email-verified`) | `presby-gauth` | Integrated on its branch as **0.42.4** (Phase 6 SHIP WITH NOTES) | DECISION-246; F231; no migration; port 3520 | `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
 | Retro workflow-efficiency (`2026-10-25-retro-workflow-efficiency`, promoted to a full Feature by QA run 1) | `presby-wf` | Integrated on its branch (Phase 6 SHIP WITH NOTES) | DECISION-231; F239; no migration; port 3480 | `/pre-push`, `/merge-pr`, then remove the worktree |
 | Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Phase 3 (3a) running | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | Phase 3, then Phase 4 |
-| Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Phase 3 done | migration 0067; DECISION-238-241; F250-F257; port 3500 | Phase 4 queued |
+| Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Integrated on its branch as **0.44.0** (Phase 6 SHIP WITH NOTES) | migration 0067; DECISION-238-241; F250-F256; port 3500 | Snapshot production, apply 0067, `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
 | Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Phase 3 done | migration 0068; DECISION-242-245; F258-F265; port 3510 | Phase 4 queued |
 
 **Next free numbers:** DECISION-**251**, F**274**, migration **0070**. F234-F236 and F238 were returned unused. Integration of these branches is

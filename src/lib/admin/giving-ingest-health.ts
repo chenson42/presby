@@ -81,6 +81,40 @@ export async function listIngestHealth(): Promise<IngestHealthRow[]> {
   }));
 }
 
+export interface IngestHealthSummary {
+  /** Connections the health function returned. */
+  connections: number;
+  /** Events waiting on something, summed over every connection (`parkedCount`). */
+  waiting: number;
+  /** Events given up on, summed over every connection (`deadLetterCount`). */
+  deadLetters: number;
+  /** Connections whose status is `restricted`. */
+  restricted: number;
+}
+
+/**
+ * The dashboard's Giving notices card (docs/work-log/
+ * 2026-10-25-platform-admin-redesign-inc1.md): four numbers reduced from the
+ * rows `listIngestHealth` returns. Pure. Nothing here carries an id, an amount or
+ * a donor, because the rows it reduces do not.
+ */
+export function summarizeIngestHealth(rows: readonly IngestHealthRow[]): IngestHealthSummary {
+  let waiting = 0;
+  let deadLetters = 0;
+  let restricted = 0;
+  for (const r of rows) {
+    waiting += r.parkedCount;
+    deadLetters += r.deadLetterCount;
+    if (r.status === "restricted") restricted += 1;
+  }
+  return { connections: rows.length, waiting, deadLetters, restricted };
+}
+
+/** One call of `presby_giving_ingest_health()`, reduced. */
+export async function readIngestHealthSummary(): Promise<IngestHealthSummary> {
+  return summarizeIngestHealth(await listIngestHealth());
+}
+
 /**
  * One dead-lettered event, as `presby_giving_dead_letters()` returns it (0055,
  * C2). Identifiers, a type, a time, a count and an error code - nothing a donor

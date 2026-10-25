@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete; recommends relabel to Accelerated Feature; Phase 2 skippable, short Phase 3 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Skipped (Accelerated Feature; see rulings) | — | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (Accelerated tier; nine items, one commit each; Appendices A-D hold the parser reference, DECISION-231, F239 and the twelve briefings drafts) | Design complete; implementer named | 2026-10-25 |
-| 4 — Implementation | full-stack-developer | Pending (starts after the orchestrator creates the pipeline Neon branch and the hardlinked node_modules) | — | — |
+| 4 — Implementation | full-stack-developer | Complete (11 code commits plus 1 docs follow-up; failing-first recorded; gates green; ready for QA) | Phase 4 complete | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -826,33 +826,89 @@ Claims checked (drafter): zod/looser id rule/compat refusal/CI exception (DECISI
 
 # Phase 4 — Implementation
 
+**Implementer:** full-stack-developer, 2026-10-25. Branch `pipeline/retro-workflow-efficiency`, base `ce661d7`. No push. `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, the briefings entries (Appendix D), `vitest.config.ts`, `src/auth.ts`, `CLAUDE.md`, `.claude/agents/*` and `scripts/seed.ts` untouched.
+
+## Commits
+
+Every commit carries `Work-Log: 2026-10-25-retro-workflow-efficiency` and the `Co-Authored-By` line; the three `fix:` commits that fix defects on `main` carry `Caught-By: agent-review` and `Discovered-In: post-merge`.
+
+| # | SHA | Commit |
+|---|-----|--------|
+| 0 | `b8e5e6d` | `docs(work-log)`: the pipeline through Phase 3 (tree starts clean) |
+| 1 | `e3cebb1` | `fix(hooks)`: refuse one command that moves HEAD and pushes, and read quoted text as text |
+| 2 | `069ba1d` | `fix(docs)`: commit AGENTS.md in the form next dev writes, with a drift test |
+| 3 | `5ef2ec8` | `fix(briefings)`: count decisions the digest does not name, not max minus marker |
+| 4 | `8fcdf60` | `feat(stats)`: add --since to stats:escape |
+| 5 | `f3cf3cd` | `feat(e2e)`: add the guarded flag reset and its seed drift test |
+| 6 | `b09229f` | `feat(e2e)`: refuse port 3000 from a linked worktree |
+| 7a | `da8af6e` | `refactor(e2e)`: move withDbRetry into db.ts |
+| 7b | `0f1dda2` | `fix(e2e)`: retry connection drops only, not constraint errors or statement timeouts |
+| 7c-A | `fe72689` | `feat(e2e)`: retry teardown and idempotent fixture steps on connection drops |
+| 7c-B | `8465dc4` | `feat(e2e)`: retry teardown in the calendar, community and home fixtures |
+| 8 | `d6da996` | `feat(tooling)`: add a report-only disk and worktree report |
+| 9 | `b7a8b1d` | `docs(testing)`: document worktrees:report and annotate the worktree recipe's test literals (not in the design's list; see Implementer Notes) |
+
+The Phase 4 work-log update itself is committed after this section (`docs(work-log)`).
+
 ## Files Created
 
-- `path/to/file` — purpose
+- `scripts/agents-md.test.mjs`, `scripts/briefings-check.test.mjs`, `scripts/stats-escape.test.mjs`, `scripts/e2e-reset-flags.test.mjs`, `scripts/dev-port-guard.test.mjs`, `scripts/with-db-retry.test.mjs`, `scripts/worktree-report.test.mjs` - the new unit tests (all under vitest's existing `scripts/**/*.test.mjs` include; no config change).
+- `scripts/ci/e2e-reset-flags.sql` - the guarded flag reset (39 seeded flags, one transaction).
+- `e2e/support/dev-port-guard.ts` - `resolveDevPort`, `isLinkedWorktree`, `devLaneGuardMessage`, `assertDevLaneAllowed`.
+- `scripts/worktree-report.mjs` - report-only disk and worktree script; `npm run worktrees:report`.
 
 ## Files Modified
 
-- `path/to/file` — what changed
+- `scripts/pre-push-gate.mjs` (lexer, `analyzeGitInvocations`, `HEAD_MOVERS`, `decideHook`; header rewritten with the accepted residuals), `scripts/pre-push-gate.test.mjs` (17 existing tests kept, 58 added), `.claude/skills/pre-push/SKILL.md` (one sentence).
+- `AGENTS.md` (line 17, `#` to `##`).
+- `scripts/briefings-check.mjs` (exports, unnamed-above-floor counting, `main()` guarded; `execSync` to `execFileSync`), `docs/briefings.md` (explanatory paragraph only; no entries, no marker).
+- `scripts/stats-escape.mjs` (`--since`, `execFileSync` with an argument array, exports, `main` guarded).
+- `scripts/ci/e2e-baseline-flags.sql` (header comment only), `playwright.config.ts` (import and one guarded call), `docs/testing.md` (sections: Running Playwright from a worktree; Fixture database calls: withDbRetry; Reports for the retrospective; one paragraph at the CI baseline-flags text for the reset file and its run command), `package.json` (one `scripts` line).
+- `e2e/support/db.ts` (`isDbDrop`, `withDbRetry` with nesting, rules R1-R6 in a header comment), `domains-ui-fixture.ts` and `invitation-fixture.ts` (import from `./db`), and the wrapped fixtures: `flags.ts`, `global-setup.ts`, `totp-fixture.ts`, `statistics-fixture.ts`, `sasr-fixture.ts`, `assert-fixture-invariants.ts`, `custom-hosts.ts`, `giving-fixture.ts`, `person-emails-fixture.ts` (7c-A); `calendar-fixture.ts`, `community-fixture.ts`, `home-cards-fixture.ts` (7c-B).
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+None. No migration, route, server action, `SECURITY DEFINER` function, dependency, flag or permission. The only database writes are `e2e-reset-flags.sql` against the pipeline Neon branch and fixture teardown, now retried.
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+None (dev tooling; the push gate is a Rule 5 control with a test, not an `audit_events` writer).
+
+## Failing-First Record
+
+- Commit 1: the new `scripts/pre-push-gate.test.mjs` was run against the old gate (stashed): **51 failed of 75** (quoting and wrapped-form cases, the chained refusals, target-repo and fail-open cases, and the hook spawn, which got the old "no pre-push marker" message). Against the new gate: **75 passed**.
+- Commit 2: `agents-md.test.mjs` failed (`AGENTS.md does not match the block this version of Next writes`) before the one-character fix, passed after.
+- Commit 3: `briefings-check.test.mjs` could not import the new exports (no tests ran) before the change; 22 pass after. Real repo: the banner went from "62 decisions" to "50 decisions not yet named".
+- Commit 4: `stats-escape.test.mjs` run with the old script stashed: **26 failed**. Default output compared byte-for-byte (`cmp`) against the old script on the real log and by two golden strings captured from the old script: identical.
+- Commit 5: no red phase for the drift test (SQL generated from the seed afterward); instead the structure pins and the real-database refusal runs below. Parser self-checks prove the test can fail (comment containing `enabled: true`, non-literal `enabled`).
+- Commit 8 (7b): `with-db-retry.test.mjs` run against the moved helper before the fix: **32 failed of 39** (constraint error and statement timeout were retried five times, bare `timeout` and `NeonDbError` matched, no `isDbDrop`).
+- Commits 6, 7a, 7c-A, 7c-B, 9: no bug-fix claim; tested by their unit tests (dev-port-guard 25), typecheck, `--list` runs and e2e runs below. 7c itself is verified by e2e, not by a red test: a real connection drop cannot be induced on demand, and the retry path is pinned only by the injected-failure tests in `with-db-retry.test.mjs`.
+
+## Gates
+
+- `npm run typecheck`: clean. `npm run lint`: clean. `npm run check`: all eight tripwires passed (the first run caught one `check:secrets` soft finding in the new docs recipe; fixed and annotated in commit 9).
+- Plain `npm test`: **549 files passed | 77 skipped (DB-backed, no `.env` loaded); 8520 tests passed | 2442 skipped; 0 failed.** The new script tests: pre-push-gate 75, agents-md 1, briefings-check 22, stats-escape 26, e2e-reset-flags 11, dev-port-guard 25, with-db-retry 39, worktree-report 16.
+- `npx playwright test --list` from this worktree: no environment -> refused with the Copy-table message; `PW_ALLOW_3000=0` -> refused (only exactly `1` allows); `E2E_BASE_URL=http://localhost:3480` -> lists 515 tests in 61 files; `PW_ALLOW_3000=1` -> lists; `PW_PROD_BUILD=1` -> lists 76 tests in 12 files (production lane untouched). Main-checkout behavior (design check (d)): the main checkout does not contain the new config, so verified through the module instead: `isLinkedWorktree('/Users/.../presby')` is false, this worktree true, `devLaneGuardMessage` for the main path with the default port is null; the unit test builds a real temp repo plus `git worktree add` and asserts the same.
+- Flag reset against **this pipeline's Neon branch only** (`pipeline-retro-workflow-efficiency`, endpoint ep-fancy-credit-axnbpmku; never `development`): (a) without `-v pipeline_branch=1`, with `ON_ERROR_STOP`: refused, 35 of 39 flags still on; (b) without the variable and without `ON_ERROR_STOP`: every later statement errored, `ROLLBACK`, still 35 on; (c) with the variable: `UPDATE 3` for the baseline, notices "set 39 seeded flags", "Per-organization toggles ... were not touched", ends with 10 flags on (the 7 seed-ON flags plus the 3 baseline flags), `COMMIT`; (d) with a deleted seeded key (`auth.local_login`, restored after): raised "seeded flag(s) missing from feature_flags: auth.local_login. Nothing was changed."; (e) with an extra table-only key `zzz.extra` (deleted after): left as found and named in the notice. Both temporary rows were restored/removed; the branch is back to 10 on of 39.
+- Real e2e runs against my own server on :3480 (`npx next dev -p 3480`, `E2E_BASE_URL=http://localhost:3480`, test fakes and `RATE_LIMIT_DISABLED=true` set on the server, no `AUTH_URL`): `admin-login` 4 passed (sign-in works on a non-3000 port with no `AUTH_URL` when `.env.local` defines none, which settles the G10 doubt for this setup); 7c-A set 69 passed (`giving-admin`, `giving-connect`, `invitation-fixture-sweep`, `statistics-submit`, `presbytery-reports`, `totp-recovery-code`, `custom-domains/domains-admin`: covers giving, invitation, statistics, sasr, totp, domains-ui, custom-hosts' toggle/site-org helpers, flags and global-setup); 7c-B set 86 passed (`member-calendar`, `portal-home-cards`, `community-approval`, `community-participants`, `person-emails`, `custom-domains/serving`: covers calendar, home-cards, community, person-emails, custom-hosts' world/teardown). 155 e2e tests, 0 failed. The server was stopped by PID.
+- AGENTS.md: a `next dev` start under the agent environment (and the later full e2e runs) leaves `git status` clean; the only AGENTS.md diff was the intended `#` -> `##`. No `console.log` added in production paths (`console.warn` stays in `withDbRetry`, as before).
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+Deviations from the design, each small:
 
-Strings added or changed: [file:line each, or "none"]
+1. **`DECISION-A to DECISION-B` ranges in `briefings-check`.** The design expands hyphen and en-dash ranges only, but Appendix D's own entries write "DECISION-215 to DECISION-219", "DECISION-202 to DECISION-206", "DECISION-194 to DECISION-196", "DECISION-183 to DECISION-193", "DECISION-176 to DECISION-182", "DECISION-168 to DECISION-175" and "DECISION-197 to DECISION-201"; with dash-only the interior numbers would stay "not yet named" after the orchestrator commits the entries, and the banner would not go silent. I also accept `to`. A reversed or wider-than-60 range expands to nothing (its first number, and its second when written with its own `DECISION-`, still count as plain mentions).
+2. **Commit 9, `docs(testing)`** (not in the design's commit list): the `worktrees:report` line in `docs/testing.md` and the `check:secrets` annotation for the recipe's two test literals (the gate caught them on the first `npm run check`). Kept out of commit 11 so the docs line and the annotation are one reviewable change.
+3. **Gate lexer.** Based on Appendix A with three changes: a here-string (`<<<`) is not a heredoc; a literal `(`/`)` pair inside a `$(...)` no longer ends the substitution early (paren depth); a `cd -` or bare `cd` leaves the tracked directory unchanged. `commandContainsGitPush` resolves relative to `process.cwd()` since its signature takes no cwd.
+4. **`e2e-reset-flags.sql`:** the flag update only touches rows whose value differs and sets `updated_at = now()`; the final evidence select prints the keys that are on. The "refusing to run" notice also prints a blank `set_config` row from the confirmation `select` (harmless).
+5. **`withDbRetry` text** also reads the `cause`'s `code` (a wrapped `UND_ERR_*` or `ECONNRESET`), not only its message; the SQLSTATE test needs a digit so Node's `EPIPE` is read as a Node error.
+6. **7c scope calls**: `sweepCommunityPeople` and `removeSessionGroup` and the giving `removeGivingFixtureById` get the domains-ui shape (one retried unit, plus a `finally` that re-enables the trigger, with its own retry); `sweepCommunityPeople`'s `update people set deletable_until` moved inside the retried unit so a retry re-stamps. Not wrapped, per the table: `setupGivingFixture`, `addForeignEntry`, `setConnection`, `addLiveSite`, `seedReturnIntent`, `addDonor`, `addOfflineGift`, `addLiveOnlineGift`, `addRefund`, `addUnsettledOnlineGift`, `addSettlement`, `addInboxEvent`, `addContactEmail`, `addOpenStaffPosition`, `stagePublishedReturn`, `setupCalendarFixture`, `setupCommunityFixture`, `setupHomeFixture`, `createParticipantViaSql`, `createStaffAnchorViaSql`, `createProposalViaSql`, `setupDomainsUiFixture`, `setDomainsRole`, `setupInviteOrg`, `addRosterPerson`, `createThrowawayUser`, `seedInvitation`, and in `custom-hosts.ts` `insertBundle`, `insertImage`, `createSiteOrg`, `addDomain`, `addExpiredClaim`, `walkDomain`, `stepDomain`, `buildWorld`. Spec-inline `afterAll` SQL remains uncovered (TODO line is the orchestrator's).
+7. **The worktree report's "merged" is true for a brand-new pipeline worktree whose HEAD equals main** (nothing committed yet), so it would suggest `git worktree remove` for it. The output says it deletes nothing and the footer says the commands are suggestions; a one-clause caveat in the footer was not added because the Copy table fixes that sentence. Noted for QA.
+8. **G10 / Q7:** the dev lane's `command: "npm run dev"` is unchanged (no `-p`). The new docs section says to start your own server first.
 
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
+Unverified: that a wrapped teardown survives a real Neon drop (cannot be induced; the retry classification is covered by injected-failure tests, the idempotence of each step by reading against R1-R6); that `reuseExistingServer` plus the guard behave identically in each Playwright worker (the config reloads per worker and the throw repeats; not observed under a real failing worker).
+
+Strings added or changed (all in the Copy table): `scripts/pre-push-gate.mjs` `CHAINED_MESSAGE` (C1); `e2e/support/dev-port-guard.ts` `devLaneGuardMessage` (C2); `scripts/ci/e2e-reset-flags.sql` refusal, missing-key and three notice lines (C3); `scripts/briefings-check.mjs` `renderBehindLine` (C4); `scripts/stats-escape.mjs` `parseSinceArg` error, `windowLabel`, "in this window" line (C5); `e2e/support/db.ts` `[e2e-db] <label>: connection dropped, retry n/m` (C6); `scripts/agents-md.test.mjs` failure messages (C7); `scripts/worktree-report.mjs` disk lines and footer (C8); `docs/testing.md` additions (C9).
 
 ---
 

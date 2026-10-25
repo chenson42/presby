@@ -16,7 +16,7 @@ import {
   features,
 } from "@/lib/db/schema";
 import { authConfig } from "@/lib/auth/config";
-import { evaluateSignIn } from "@/lib/auth/sign-in-gate";
+import { evaluateSignIn, isEmailClaimVerified } from "@/lib/auth/sign-in-gate";
 import { ADMIN_ROLE, FEATURES, MEMBER_ROLE } from "@/lib/permissions";
 import { getRequestIp } from "@/lib/request-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -87,11 +87,14 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
-      // Google verifies email ownership at sign-in, so linking an existing
-      // user record by email is safe with Google alone. If a fork adds a
-      // second OAuth provider (GitHub, Microsoft, etc.) that does NOT verify
-      // email, set this to `false` or the second provider can impersonate a
-      // Google user by claiming their email.
+      // Linking an existing user record by email is only safe because the signIn
+      // callback refuses any sign-in whose provider did not assert
+      // `email_verified === true` (evaluateSignIn, DECISION-246). Google verifies
+      // an address only when that claim says so; Auth.js does not check it. Do
+      // not remove the gate without removing this flag. A second OAuth provider
+      // is refused by that same gate until it is designed in (the claim is
+      // required for every non-credentials provider); setting this to `false` is
+      // the further step if it can never prove ownership of an email.
       allowDangerousEmailAccountLinking: true,
     }),
     Credentials({
@@ -215,24 +218,40 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ],
   callbacks: {
     ...authConfig.callbacks,
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       // Delegate to the extracted gate so all branches are unit-testable.
       // See src/lib/auth/sign-in-gate.ts and DECISION-015 for rationale:
       //   - credentials → true unconditionally (authorize() already checked isActive)
+      //   - OAuth, email_verified not strictly true → false (DECISION-246),
+      //     logged without PII
       //   - OAuth, no row → true (adapter will create the user row after this)
       //   - OAuth, isActive=false → false (soft-deactivation block)
       //   - OAuth, no email → false (fail-safe)
-      return evaluateSignIn(
-        account?.provider ?? "credentials",
-        user,
-        (email) =>
-          db.query.users
-            .findFirst({
-              where: eq(users.email, email),
-              columns: { isActive: true },
-            })
-            .then((row) => row ?? null),
+      const provider = account?.provider ?? "credentials";
+      const claims = { emailVerified: profile?.email_verified };
+      const allowed = await evaluateSignIn(provider, user, claims, (email) =>
+        db.query.users
+          .findFirst({
+            where: eq(users.email, email),
+            columns: { isActive: true },
+          })
+          .then((row) => row ?? null),
       );
+      if (
+        !allowed &&
+        provider !== "credentials" &&
+        !isEmailClaimVerified(claims.emailVerified)
+      ) {
+        // Refusal is otherwise invisible (the user sees only Auth.js's generic
+        // Access Denied page). Provider and claim type only: never the email,
+        // subject id or name. No audit row: a refusal is not a mutation, and
+        // an unauthenticated party would be writing it.
+        console.warn("signIn refused: provider email not verified", {
+          provider,
+          claimType: typeof claims.emailVerified,
+        });
+      }
+      return allowed;
     },
     // The `session` callback lives in the shared authConfig so the edge
     // runtime (proxy.ts) sees the same projection.

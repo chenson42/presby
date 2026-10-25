@@ -3,12 +3,11 @@
  * Orchestration tests for `/admin`'s page.tsx — commit 1 of docs/work-log/
  * 2026-08-27-platform-home-and-portal.md (Phase 3, DECISION-123/125). Pins:
  *
- *   1. A support_operator-shaped session (post seed-fix, ADMIN_DASHBOARD +
- *      ADMIN_TICKETS + ADMIN_FEEDBACK) sees exactly 2 tiles, both under
- *      "Content & Communications" — the acceptance criterion this whole
- *      pipeline is built around.
- *   2. A full-admin-shaped session (every FEATURES.* value) sees all 10
- *      tiles across all 3 domains.
+ * The tile grid is retired (platform admin redesign, Increment 1); the
+ * tile assertions that stood here are replaced, and Batch C re-pins the card
+ * zones (E1-E4). What remains pinned:
+ *
+ *   1. A session holding tool keys does not get the door-only empty state.
  *   3. An ADMIN_DASHBOARD-only session sees the honest empty state, not a
  *      blank grid.
  *   4. The GreetingBand renders in place of the old bare <h1> + roles
@@ -33,45 +32,17 @@ function session(features: string[], name = "Sam") {
   return { user: { name, features } };
 }
 
-describe("AdminDashboard — support_operator-shaped session (the acceptance criterion)", () => {
-  it("renders exactly 2 tiles, both under Content & Communications, and no empty state", async () => {
+describe("AdminDashboard — a session holding tool keys", () => {
+  it("does not render the door-only empty state (Batch C adds the cards)", async () => {
     mockAuth.mockResolvedValue(
       session([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS, FEATURES.ADMIN_FEEDBACK]),
     );
 
-    const el = await AdminDashboard();
-    render(el);
+    render(await AdminDashboard());
 
-    const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(2);
-    expect(screen.getByRole("link", { name: /feedback/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /tickets/i })).toBeTruthy();
-    expect(
-      screen.getByRole("heading", { name: "Content & Communications" }),
-    ).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "People & Access" })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Platform Operations" })).toBeNull();
     expect(
       screen.queryByText(/don.t have access to any admin tools/i),
     ).toBeNull();
-  });
-});
-
-describe("AdminDashboard — full admin session", () => {
-  it("renders all 10 tiles across all 3 domains", async () => {
-    mockAuth.mockResolvedValue(session(Object.values(FEATURES)));
-
-    const el = await AdminDashboard();
-    render(el);
-
-    expect(screen.getAllByRole("link")).toHaveLength(10);
-    expect(screen.getByRole("heading", { name: "People & Access" })).toBeTruthy();
-    expect(
-      screen.getByRole("heading", { name: "Platform Operations" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("heading", { name: "Content & Communications" }),
-    ).toBeTruthy();
   });
 });
 

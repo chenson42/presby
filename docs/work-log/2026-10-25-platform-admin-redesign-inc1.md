@@ -21,7 +21,8 @@
 | 3 — Technical design | tech-lead | Complete (this file); S1–S5 ruled; copy table and carry-forward below; two operator questions | Design complete | 2026-10-25 |
 | 4 — Implementation | api-developer (Batch B), ux-developer (Batches A and C) | Batches A, B and C complete (A: 3 commits, B: 2, C: 3) | — | 2026-10-25 |
 | 5 — Verification | qa | Run 1: all green; FAIL on two test gaps (boundaries allow-list misses 4 forms; org-list description untested) | FAIL | 2026-10-25 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification (run 5, final) | qa | Complete; scan catches every careless form; residual sentence true; runs 1–4 stand | PASS | 2026-10-25 |
+| 6 — Shipped vs intent | analyst | Complete; 12 follow-ups, none blocking; release 0.43.0 | SHIP WITH NOTES | 2026-10-25 |
 
 ---
 
@@ -1056,13 +1057,204 @@ Next: qa (scoped re-run per its Verdict: the boundaries mutation set, the three 
 
 # Phase 6 — Shipped vs Intent (analyst)
 
-Pending.
+**Slug:** `2026-10-25-platform-admin-redesign-inc1`. **Worktree:** `/Users/cshenso/git/presby-platform/presby-padmin`, HEAD `96fda21` plus the uncommitted run-5 text. **Date:** 2026-10-25. Read-only. The orchestrator records this section.
 
-## Operator rulings on Increment 1 Phase 3 (2026-10-25)
+## VERDICT
 
-- **S2 / Question 1: yes** — the create-form `HydrationGate` ships now as a standalone bug-fix pipeline (`2026-10-25-create-org-hydration`, carries F275), not inside Increment 1.
-- **Question 2: keep the Two-factor card** — count only, linking to `/admin/2fa`, recorded as part of the existing 2FA exception (DECISION-252).
-- The tech-lead's other defaults (version line in nav foot, skip link, single-item Content group, `/home` Admin card title) stand.
+**SHIP WITH NOTES.** Increment 1 delivers what the operator asked for at the platform tier. Every note below is non-blocking and needs a TODO line (Workflow Rule 10).
+
+## ONE-LINE TAKE
+
+> The platform console now opens on a dashboard that says where to act, behind a short, grouped, permission-filtered menu with a phone version. Organization management is first on the page and in the menu, but the organization-level workspace the operator also asked for is Increments 2 to 4.
+
+## What I verified and what I didn't
+
+**Verified myself:**
+- I re-read the Phase 1 and Phase 2 parent log, the Increment 1 Phase 3 through Phase 5 runs 1 to 5, and the diff stat against the merge-base `77be511`.
+- I read `nav.ts`, `layout.tsx`, `page.tsx`, `error.tsx` and `admin-nav.tsx`.
+- `find` shows no `loading.tsx` anywhere under `(admin)`.
+- A grep for `ADMIN_TILES`, `visibleAdminTiles`, `tile-icons` and `visible-tiles` finds no admin-side hits. The remaining hits are the org portal's own files and one comment in `nav.ts`.
+- There is no palette literal (`text-red/amber/yellow/green`) in the new shell, shared or dashboard files.
+- I looked at four of QA's screenshots: `dash-360.png`, `dash-1280.png`, `menu-open-360.png` and `docs-360.png`.
+
+**Not verified myself:** I started no server and ran no suite. The 360px and desktop walk below comes from QA's screenshots and measurements (run 1 browser pass). I took all test counts, e2e 420/420, the 404 checks, EXPLAIN and the mutation results from QA's runs.
+
+**Phase 6 founder walk (CLAUDE.md Phase 6 step 2): not triggered.**
+- Increment 1 is read-only. It adds no route, mutation or account path.
+- It changes no role grant and nothing a newly created account can reach.
+- No founding-administrator path is created or altered here.
+- The walk is mandatory for Increment 3, which changes what a new organization starts with.
+
+## What's Working
+
+The walk is as the operator, from QA's evidence.
+
+**360px, `/admin`:**
+- The header fits one row. Menu is 94×44, "← PresbyPortal" is 114×44, and the avatar is 44×44.
+- Below that: the greeting, then a full-width "New organization" button at 44px.
+- The "Find an organization" box has the input on top and Search below it.
+- Then "Updated {time}", then the zones Organizations, Support, Access and settings, and Recent operator changes. Cards are one column at 328px with no horizontal overflow.
+- Every card in the screenshot is a whole-card link with a title, a chevron, and an icon plus words for status. The words are "Needs attention", or "Nothing waiting." with a check icon.
+- Organizations at a glance is deliberately neutral. It reads "15 organizations, 9 congregations, 5 presbyteries, 1 synod / 12 managed, 1 invited, 2 unmanaged / 13 still on the default palette".
+- Recent operator changes rows wrap, with the time on its own line and the actor on another.
+
+**Phone menu:**
+- It opens as a left Sheet at 85vw, titled "Platform admin".
+- All 15 links are 44px, the close control is 44×44, and the list scrolls.
+- Navigating closes it, and Escape returns focus to Menu.
+- The active item was Domains on `/admin/organizations/domains`, matching the longest-href rule.
+
+**Desktop, 1280px:**
+- A 220px sidebar with grouped, labelled sections, and Dashboard active.
+- The three-column zones fit with no overflow, and the avatar menu replaces the old inline "Sign out (email)" button.
+
+**Failure and empty copy:**
+- A failed card shows "We can't load this right now." and "Try again", never zero or "Nothing waiting."
+- A thrown error shows the calm "We couldn't load this page" boundary and never `error.message`.
+- A door-only viewer gets the byte-identical "You don't have access to any admin tools yet." state.
+- A failed `isPlatformAdmin` read degrades to no Developer item instead of crashing the shell.
+
+**Permission gate:**
+- Each card is mounted only for a holder of its key.
+- `/admin/docs` now checks `ADMIN_RELEASE_NOTES` at the page (F281) as well as at the proxy, with a failing-first test.
+- The two layout redirects are byte-identical, pinned by unit tests, and the MFA-enrolled `totp-full-login` e2e is green.
+
+## Intent-vs-Shipped Diff
+
+| Phase 1 / 3 said | Shipped | Verdict |
+|---|---|---|
+| "Dashboard is going to be pretty important… the screen is all about managing the platform." A dashboard of what needs attention, per-card isolation, zero never shown on failure (G1, U2). | Ten count cards in three static zones, each its own `Suspense` and async component, mounted only for a key holder. The error state is a distinct union member. | **Matches** |
+| Organization management is central. | Organizations is first in the menu and first on the page. The find box and "New organization" are first. The card shows type and status counts and the default-palette count. | **Matches Increment 1's scope.** "Waiting for a first administrator" and invitation cards (Phase 1 cards 1 and 2) were deliberately deferred to Increment 2 (G14). |
+| Nav pass: some items not needed, some more important. Grouped, permission-filtered, active state, landmarks. | Groups: (Dashboard), Organizations, Support, Access and settings, Content, Reference footer. Active state by longest href, with `aria-current`. Landmarks `Platform admin` and `Account`, plus a skip link. | **Matches** |
+| Feedback was missing from the nav. | Added under Support. | **Matches** |
+| Demote Design system and Release notes. | Footer "Reference" group. | **Matches.** One deliberate drift (see the next row). |
+| Design system's reachability should be gated or documented (G17). | Documented as door-level, since the page has no key. A door-only viewer sees it. | **Acceptable drift** (F281) |
+| Phase 1's `Platform` group had one item (Feature flags). | Merged into "Access and settings" (Q5). Single-item "Content" kept. | **Matches rulings** |
+| Phone menu: not `<details>`, 44px, focus returns. | Radix `Sheet`, keyed by pathname, 44px links, focus return pinned in QA's browser pass. | **Matches** |
+| Shared avatar menu on the admin shell (Q10). | `AvatarMenu` mounted. Sign-out lives in one place. | **Matches** |
+| Same UX principles as the org portal (operator quote 3, U1–U13). | See the table below. | **Mostly matches**; four principles are deliberately Increments 2 to 4. |
+| Error boundary, **no `loading.tsx`** (R1c, F274). | `error.tsx` exists. No `loading.tsx` under `(admin)`, pinned by `shell-boundaries.test.ts`. The four `notFound()` routes return 404. | **Matches** |
+| Retire the tile grid (Q2). | `tiles.ts`, `visible-tiles.ts` and `tile-icons.ts` are deleted. `DomainTileSections` and `TileGrid` remain for `(org)`. | **Matches** |
+| Stale copy fixed (G6, Group H). | `ADMIN_ORGANIZATIONS` name and description corrected, with a key/map/order snapshot test. The org list description, the three forbidden blocks and the `/home` card are fixed. Each has an exact-text test that fails on the old text. | **Matches** |
+| Platform tier shows platform-axis data only (G3, DECISION-252). | Allow-only scan of the readers in `dashboard/` (65 tests). The 2FA exception is confined to one module. `member_count` stays page-local. The operator kept the card. | **Matches, with the honest limit.** The scan guards against careless readers, not evasive ones. |
+
+**UX principles carried in this increment:**
+
+| Principle | Status |
+|---|---|
+| U1, U2, U3 (calm failure, never "none", one forbidden state) | Applied on the dashboard. `AdminForbidden` is used only on the four pages touched here. Nine hand-copied blocks remain (Increment 4). |
+| U4 (empty states) | Applied: door-only, zero-organization card, recent-changes empty text. |
+| U6 (whole-card destinations) | Applied. |
+| U7 (44px, single column at 360px) | Shell and dashboard only. `/admin/users` is Increment 4. |
+| U9 (tokens only) | New files only. The 43 existing palette literals remain (Increment 4). |
+| U10 (page header, back link, `?from=`) | Workspace is Increment 2. |
+| U11 (plain language) | "tenant" removed from the strings this increment owns. The platform-status help text is Increment 3. |
+| U12 (loading) | Per-card `Suspense`. |
+| U13 (dates through `FormattedDate`) | Applied to the "Updated" line and the recent-changes times. |
+
+**Naming drift (G20):** the console is "Platform admin" everywhere except the `/home` card title, which stays "Admin" because `e2e/member-home.spec.ts:152` pins it. This is known and tracked below.
+
+**DECISION drafts, checked against what shipped:**
+- **251, 253, 255:** accurate as drafted. Screenshots confirm 255's attention treatment (heavy border, triangle icon and the words "Needs attention").
+- **252:** the Phase 3 draft is superseded. Place **only the run-5 residual sentence** (loop-back 4, "The boundaries scan guards against a careless reader…") in the Enforcement and residual clauses. The Phase 3 wording "anything unlisted is forbidden by default" and its older residual would overstate what the scan catches. QA run 5 confirmed that sentence is true against everything that still passes: N01b, R01, P06 and R02.
+
+## Edge Cases
+
+- **Empty state: pass.**
+  - A door-only viewer gets the byte-identical state.
+  - Zero organizations turns the first card into "No organizations yet. Create the first one.", unit-pinned.
+  - Per-card all-clear is "Nothing waiting."
+- **Failure microcopy: pass.** Calm copy, no error text, and a working "Try again". Failure is never rendered as zero, pinned by `present.test.ts` and the card, recent-changes and error tests.
+- **Permission gate: pass.**
+  - Per-key mounting is pinned at unit level, including that a non-holder's reader is never called.
+  - `/admin/docs` is gated at the page.
+  - The login e2e set is green.
+  - The support-operator subset has no browser evidence (see follow-up 5).
+- **Audit event: not applicable.** There is no new mutation. Card 12 *reads* the audit trail, so the DECISION-194 residual (revoke, self-addressed invitation, accept) is now visible on the dashboard. It is still not prevented, and the card copy says "worth a second look", not "protected".
+- **Mobile (360px): pass for the shell and dashboard.** Overflow is 0 on `/admin`, `/admin/organizations`, `/admin/2fa`, `/admin/organizations/domains`, `/admin/sites` and `/admin/giving`. `/admin/docs` overflows by 153px (E30). That is pre-existing and Increment 4's.
+
+## Follow-Ups
+
+### TODO lines to add or close (Rule 10; orchestrator, at integration)
+
+**Close (same commit as the work):**
+- "`/admin/sites` … has no tile in the new `ADMIN_TILES` registry". Sites is now a nav item and a card.
+- "`layout.tsx`'s left-sidebar `nav` array is a hardcoded, unfiltered … list". The nav is permission-filtered.
+
+(`main` has moved, so match them by text, not by line number 416 and 417.)
+
+**Add:**
+1. **Three non-UUID 500s.** `/admin/users/<non-uuid>`, `/admin/tickets/<non-uuid>` and `/admin/whats-new/<non-uuid>` return 500 (Postgres `22P02`). These pages pass the raw id to the query with no `UUID_RE` check. The files are identical to `main`. With this diff the 500 renders the calm `error.tsx`, but it should be a 404. Small bug-fix pipeline, or fold into Increment 4.
+2. **E30.** `/admin/docs` overflows 153px at 360px (`grid-cols-[200px_1fr]`). Increment 4.
+3. **E27.** The recent-changes statement runs 0.23 ms at 872 audit rows. The `OR` over metadata-narrowed invitation keys stops `ix_audit_action_time` being used, and the plan is a backward scan of `ix_audit_created` with a filter. Attach QA's plan, and add an index or split the `OR` if the closed-list actions turn sparse at production volume.
+4. **E28.** A long organization name in the recent-changes row is unverified. A long flag key wrapped correctly, but the dev data had no long organization name.
+5. **Support-operator e2e fixture gap.** Deliberate (needs `e2e/support/users.ts`, a Rule 16 shared file). That viewer is pinned at unit level only. `AdminForbidden` and `error.tsx` at 360px are also not browser-checked.
+6. **New from the screenshot: sidebar Reference group and "Version" are below the fold on a short laptop.**
+   - The nav is `sticky top-0 max-h-screen overflow-y-auto`, so the full-page desktop shot ends at "What's new" and the divider. "Release notes", "Design system" and "Version" need an inner scroll with no visible hint.
+   - Its comment claims a short laptop viewport "cannot hide" the group.
+   - Low priority. Consider a scroll fade or tighter spacing, and check at 1280×720 in a browser. I could not tell the capture's viewport height.
+7. **A holder of only nav-only keys** (flags or what's-new, no card) gets the greeting and no zone. That is intended (no false "no access"). A one-line pointer to the menu would help; that is a copy call for Increment 4.
+8. **Increment 2 dashboard cards owed:** "Waiting for a first administrator" and "Invitations". The operator named organization management as central, so this is the highest-value next item.
+9. Rename the `/home` Admin card title to "Platform admin" and update `e2e/member-home.spec.ts:152` (G20).
+10. Documentation review (S4): consolidate `src/lib/admin/` and `src/lib/admin-portal/`. Blocked by `check:giving-boundaries` B6's path pin.
+11. Migrate the nine hand-copied forbidden and failure blocks and the existing "can't load" variants onto `AdminForbidden` and `LoadError` (Increment 4).
+12. Accepted and recorded, no action: E29 (the Menu button is inert before hydration; the desktop nav is plain links), and the owner pool's `max: 10` with up to 10 statements for a holder of every key.
+
+### Release-note entry (`/release-notes` skill; tech-lead)
+
+- **Version: confirm 0.43.0, a minor bump.** This is a new operator-visible feature with no fix-only character.
+- **Merge `main` first.** `main` is at 0.42.5 and this branch's `package.json` is still 0.42.3. The nav footer's "Version 0.42.3" in the screenshots will read the new version after the bump.
+- Start a new `docs/release-notes/v0.43.md`; `v0.42.md` holds the 0.42.x entries.
+- Type: Feature. Neutral wording for a non-engineer, along these lines: "The platform admin area now opens on a dashboard of what needs attention, with a grouped menu, a phone menu, and the same account menu as the rest of the app."
+- **Copy hazards:**
+  - Do not say the dashboard "shows only platform data". The two-factor card resolves through people and memberships (DECISION-252's exception), and the scan is a guard, not a proof.
+  - Do not say the Design system page is gated.
+  - Do not present the page-level release-notes check as a security fix. The proxy already enforced it, and F281 is defense in depth.
+  - Mention the corrected organization wording only if it earns a line.
+
+### Functionality map (Rule 14)
+
+- Rewrite `docs/product/functionality-map.md` line 36, the Admin bullet. It still says "redesigned 2026-08-27 as a domain-sectioned tile grid… `src/lib/admin-portal/tiles.ts`". Replace it with the dashboard (ten cards in three zones plus Recent operator changes), the grouped nav registry (`nav.ts`) with the Reference footer and the phone Sheet, the shared avatar menu, `error.tsx` and the no-`loading.tsx` rule, and the `/admin/docs` gate.
+- The work-log link at the end of that bullet should point at the Increment 1 child log.
+- Update the Index entry for the surface. The map's index is loaded into every session, so a stale "tile grid" actively misleads.
+- Line 30 ("header controls — avatar menu … `/admin` and `/developer` when entitled") is still true. The admin shell now mounts it too.
+
+### `docs/architecture.md` (Rule 15)
+
+- **No change.** There is no new subsystem or data-flow change. `src/components/admin-portal/` is composition, and the "Platform admin pages → `getPlatformDb()`" line stays true.
+- CLAUDE.md's Project Layout does need the two `admin-portal` entries (`src/components/admin-portal/` and `src/lib/admin-portal/`, DECISION-253). The tech-lead planned this.
+- Suggested addition for the same edit: one sentence beside the `(org)` contract's "No `loading.tsx` on a segment whose job is to redirect or 404", saying the rule also covers `(admin)/admin/**` (DECISION-251).
+
+### What's-new advisory (Rule 13)
+
+**None needed.** This is internal admin tooling. Feedback origin (Rule 12): none, so there is no row to mark `done`.
+
+### Integration reminders
+
+- Write DECISION-251, 252, 253 and 255 and F274, F276 and F281. Place the run-5 residual sentence verbatim in 252.
+- Carry R3 and R8 and the deferred R1a, R1b, R1e, R1f, R7c and R7d items into Increment 2's Phase 3, as the Increment 1 Carry-forward table says.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent (Increment 1) | analyst | Complete. Matches Phase 1 and Phase 3 for the platform tier. Founder walk not triggered (read-only, no account or role path). Twelve follow-ups listed, none blocking. Release 0.43.0 after merging `main` (0.42.5). Functionality-map line 36 and Index to rewrite. `architecture.md` unchanged. No what's-new entry. | SHIP WITH NOTES | 2026-10-25 |
+
+## Handoff
+
+**Next agent: tech-lead.** Do the ship-time housekeeping: merge `main`, bump to 0.43.0, add the `v0.43.md` release note, rewrite functionality-map line 36 and the Index, and add the CLAUDE.md layout lines. The orchestrator writes the decisions and F-numbers and reconciles `docs/TODO.md` per the lists above.
+
+Then Increment 2's Phase 3 starts, carrying R3, R8 and the deferred rulings. That is where the first-administrator cards and the organization workspace the operator asked for arrive.
+
+Evidence files read (absolute):
+- `/Users/cshenso/git/presby-platform/presby-padmin/docs/work-log/2026-10-25-platform-admin-redesign.md`
+- `/Users/cshenso/git/presby-platform/presby-padmin/docs/work-log/2026-10-25-platform-admin-redesign-inc1.md`
+- `/Users/cshenso/git/presby-platform/presby-padmin/src/lib/admin-portal/nav.ts`
+- `/Users/cshenso/git/presby-platform/presby-padmin/src/app/(admin)/admin/layout.tsx`
+- `/Users/cshenso/git/presby-platform/presby-padmin/src/app/(admin)/admin/page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-padmin/src/app/(admin)/admin/error.tsx`
+- `/Users/cshenso/git/presby-platform/presby-padmin/src/components/admin-portal/admin-nav.tsx`
+- Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/shots/dash-360.png`, `dash-1280.png`, `menu-open-360.png`, `docs-360.png`
 
 ---
 
@@ -1601,3 +1793,153 @@ Against QA run 4's passing set: N01b is class 1, P06 is class 2, and P08b, P09, 
 ## Handoff
 
 Next: qa (run 5, the last scan iteration per the ruling: M1–M11, N01–N10, P01–P14 per the fixes; confirm the recorded sentence is true against whatever still passes; the touched file; the four gates). No schema, env var, `FEATURES` entry or flag change.
+
+---
+
+# Phase 5 — run 5 (qa)
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**HEAD:** `96fda21`, branch `pipeline/platform-admin-redesign`
+
+**Verdict: PASS.** The boundaries scan now catches every careless way of reaching a tenant table that I could construct, and the recorded residual sentence is true against everything that still gets through. Under the orchestrator's stopping rule, this was the last scan iteration.
+
+**Scope run:**
+- Typecheck, lint, `npm run check` and plain `npm test`, all in full.
+- The touched test file.
+- 47 mutation cases in a scratch copy of HEAD: M1–M11, N01–N10, N01b, P01–P14, P08b, eight new forms (Q01–Q08) and two more forms built to evade the scan (R01–R02).
+- `tsc --noEmit` on every form that passed, plus one live Postgres read for the SQL-side assembly form.
+
+**What carries over.** `git diff --stat cc6b5fa..HEAD` touches only:
+- `src/lib/admin-portal/dashboard/boundaries.test.ts`
+- `docs/work-log/2026-10-25-platform-admin-redesign-inc1.md`
+
+No source, config, fixture or e2e file changed since run 1's `fa742f7`. So runs 1–4 stand for everything else: build, the DB-backed scope, chromium e2e 420/420 including the MFA login set, the 404 checks, the 360px browser pass, E27 EXPLAIN, the feature-gate audit, copy truthfulness, all failing-first checks, and run 2's page tests.
+
+## Type Check
+
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS (`--max-warnings=0`)
+- `npm run check`: PASS, 8/8 tripwires
+
+## Unit Tests
+
+- **Plain `npm test`:** 663 files (583 passed, 80 skipped), 11,263 tests (8,805 passed, 2,458 skipped). The 80 skipped files are the same database-gated set as before. The 11 new tests match loop-back 4's count.
+- **`boundaries.test.ts` on its own:** 65/65 passed.
+
+Failures: none.
+
+## End-to-End Tests
+
+Not re-run (test-only diff). Run 1 stands: 420 passed, 0 failed, 0 skipped.
+
+## Regression Tests Added
+
+Loop-back 4 adds 11 synthetic cases:
+- P08b, a `\x` escape and a `\u{…}` escape
+- P09 and P10, each in two forms
+- `readCard` imported from the wrong module
+- P11 and P11b (`n--`)
+- a regex literal spelling a table name
+
+It also adds two positive controls (a real `readCard("accounts")` key, and `sql.identifier("organizations")`) and unit checks of the scanner. Loop-back 4 also fixed a scanner bug where everything inside a `${…}` interpolation was dropped from the code view.
+
+My mutation results below agree with its failing-first evidence. I confirmed my own P08 and P08b case files contain the literal backslash escape `\u005f`, not a decoded underscore.
+
+## Mutation check (scratch copy of HEAD, one `zz-mutant.ts` per case; the unmodified copy passes 65/65)
+
+**Caught: 43 of 47.**
+- **Earlier forms:** M1–M11, N01–N10 (except N01b), P01–P05, P07, P08, **P08b**, **P09**, **P10**, **P11**, P12–P14. The four run 4 misses (bold) are now caught: P08b and P11 by the table-name rule; P09 and P10 by both the table-name rule and the literal-only rule for `sql.raw`/`sql.identifier`.
+- **New careless forms, all caught:**
+  - **Q01:** `officerTerms` imported through the `@/lib/db/schema` re-export, then `.from(officerTerms)`.
+  - **Q02:** `.innerJoin(people, …)`.
+  - **Q06:** `sql.empty().append(sql`… from officer_terms`)`.
+  - **Q08:** a correlated subquery counting `memberships`, the most likely careless member-derived reader.
+- **New evasive forms, all caught:**
+  - **Q03:** `String.fromCharCode` into `sql.identifier(t)`.
+  - **Q04:** a base64-decoded name concatenated into `sql.raw`.
+  - **Q05:** a destructured `raw` with an interpolated name.
+- **Q07:** `count(*) as people` is reported, a false positive. That is the documented fail-closed behaviour: a column or alias that shares a tenant table's name is reported too.
+
+**Passes: 4 of 47. All four compile, and each falls in a class the recorded residual names:**
+
+| # | Form | Residual class |
+|---|---|---|
+| N01b | `(getPlatformDb() as any)[k][t].findMany()`, with `k` and `t` built by `+` | (1) computed property access |
+| R01 | `Reflect.get(getPlatformDb(), k)[t].findMany()` | (1) computed property access, and (4) written to evade |
+| P06 | `query_to_xml(format('select count(*) from %I', concat('officer','_terms')), …)` | (2) a name assembled SQL-side |
+| R02 | `query_to_xml('select count(*) from ' \|\| chr(111) \|\| 'fficer_terms', …)`. I ran it live on the pipeline branch and it reads the table | (2) SQL-side assembly (`\|\|` on string pieces) |
+
+## Is the residual sentence true?
+
+The DECISION-252 sentence recorded in loop-back 4 matches the test file header (`boundaries.test.ts:65` onward). It describes the scan as a guard against a **careless** reader, and says the scan cannot see:
+1. a computed property access;
+2. a name assembled at runtime in JavaScript or SQL;
+3. a helper module outside the directory, including any allow-listed `@/lib/*` module, that itself reads a tenant table;
+4. a reader written to evade a source-text scan.
+
+All four forms that still pass fall in classes 1, 2 or 4. Nothing passes outside those classes.
+
+The sentence admits a little more than actually gets through: several assembly forms (N04, P05, P07, P12) are caught today, incidentally. That is a conservative overstatement, not a denial, so it satisfies the copy-truthfulness rule.
+
+The sentence also no longer claims that a name written verbatim in a literal is invisible. That claim was false in runs 3 and 4 and is now gone.
+
+## Coverage on Critical Modules
+
+Unchanged (no source changed): `permissions.ts` 100%, `flags.ts` 100%, `two-factor.ts` 91.3% statements.
+
+## Feature-Gate Audit
+
+No route, page or action changed. Run 1's table stands. Every page the increment touches checks `auth()` and the correct `FEATURES.*` key:
+- `/admin/docs`: `ADMIN_RELEASE_NOTES` (new in this increment)
+- the three organization pages: `ADMIN_ORGANIZATIONS`
+- `/admin/2fa`: `ADMIN_TWO_FACTOR`
+- dashboard cards: mounted per key
+
+The `/admin` door stays with the proxy, unchanged.
+
+## Copy Truthfulness
+
+- [x] Every added or changed string is in the design's Copy table. Run 1: groups A–H.
+- [x] The query behind each claim was opened. Run 1. "Nothing waiting." can never appear on a failed read.
+- [x] Each instruction was traced to a role that can carry it out. Run 1.
+- [x] Older strings were grepped, and every fixed string has an exact-text test that fails on the old text. Runs 1 and 2.
+
+The DECISION-252 residual sentence is true against the run 5 evidence, per the section above.
+
+## Verdict
+
+**PASS.** All required checks across runs 1–5 are green:
+- Typecheck, lint, all eight tripwires, build, unit tests, and the DB-backed scope with no skips.
+- Full chromium e2e 420/420 against a real dev server, including `admin-login` and `totp-full-login` with an MFA-enrolled user (R9).
+- Layout redirects pinned by unit tests.
+- No `loading.tsx` under `(admin)/admin`, and the four `[id]` routes answer HTTP 404 for an unknown UUID.
+- Per-key card mounting (unit-pinned).
+- The 360px real-browser pass.
+- Failing-first confirmed for all three fix commits and for finding 2.
+- The boundaries scan catches every careless form I built, and the residual sentence describes exactly what it does not catch.
+
+**Carried to the orchestrator.** None of these blocks shipping; each needs a TODO line or a record at integration:
+- **Pre-existing:** `/admin/users/<non-uuid>`, `/admin/tickets/<non-uuid>` and `/admin/whats-new/<non-uuid>` return 500, not 404. Those pages pass the raw id to the query with no UUID check. The files are identical on `origin/main`.
+- **E30, pre-existing:** `/admin/docs` overflows by 153px at 360px. Recorded for Increment 4.
+- **E27:** the recent-changes statement takes 0.23 ms at 872 audit rows, via a backward scan of `ix_audit_created` with a filter. The `OR` stops `ix_audit_action_time` being used. Keep the planned index or rewrite follow-up.
+- **E28:** only partly confirmed. A long flag key wraps; there was no long organization name in the data to test with.
+- **Deliberate gap:** there is no support-operator e2e fixture, so that viewer is pinned only at unit level.
+- **At integration:** place the loop-back 4 residual sentence in DECISION-252 verbatim. It is the one checked here.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 5, final) | qa | Complete. Run 5: typecheck, lint, check 8/8, unit 583 files / 8,805 tests, boundaries 65/65; 47 mutation cases, 43 caught including every careless form and all run 4 misses; the 4 that pass (N01b, R01, P06, R02) compile and fall in residual classes 1, 2 and 4; the DECISION-252 sentence is true. Runs 1–4 stand (test-only diff since `fa742f7`): build, DB scope 811/811, chromium e2e 420/420 including the MFA login set, 404 status, 360px browser pass, E27, feature-gate audit, copy truthfulness, failing-first on all fixes | PASS | 2026-10-25 |
+
+## Handoff
+
+**Next agent: analyst (Phase 6, shipped vs intent)** for Increment 1. The orchestrator records runs 1–5 and the carried items above in the work-log, and at integration places the DECISION-252 residual sentence and adds the TODO lines.
+
+Evidence:
+- Run 5 logs: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs5/`
+- Mutation cases (47): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/mut5/cases/`
+- tsc output for the passing forms: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/tsc-run5.log`
+
+Git status in the worktree is as I found it: only the orchestrator's change to `docs/work-log/2026-10-25-platform-admin-redesign-inc3.md`. No dev server is left running on :3530.

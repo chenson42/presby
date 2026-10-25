@@ -45,3 +45,9 @@ Pending.
 # Phase 6 — Shipped vs Intent (analyst)
 
 Pending.
+
+## Note from the orchestrator (2026-10-25)
+
+The create-form `HydrationGate` shipped separately as `2026-10-25-org-create-hydration-gate` (v0.42.5, PR #54). Increment 3 drops that item and keeps the permanence line, the type panel and S3. F275 closure sentence for the parent's integration (fold into the F274–F281 section of `docs/schema-design-2.md`):
+
+> **F275 (low likelihood, permanent consequence) — the create-organization form was operable before hydration, and type/slug permanence is `paper`.** (a) The type and parent selects and hidden fields are `useState`-controlled outside react-hook-form, so `check:hydration-gate` could not see them and a pre-hydration pick was overwritten. **Closed by** `2026-10-25-org-create-hydration-gate` (v0.42.5): the form is wrapped in `HydrationGate`. The wider class stays open at F124 and `check:hydration-gate`'s scope. (b) Nothing in the database prevents `organization_type` or `slug` being rewritten after creation (`e2e/designation-revoke.spec.ts:307` rewrites the type). **Open**, Increment 3, migration 0070 only if S3 is adopted.

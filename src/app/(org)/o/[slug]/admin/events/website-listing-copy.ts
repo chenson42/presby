@@ -57,7 +57,7 @@ export const MARKED_FOR_WEBSITE_NOTE =
 /** E8, extend-series form, only when `inheritsOnExtend` */
 export function extendWebsiteLine(additionalCount: number | null): string {
   if (additionalCount === null) {
-    return "New events will be put on the website, like the latest one in this series.";
+    return "New events will be marked for the website, like the latest one in this series.";
   }
-  return `${additionalCount} new ${additionalCount === 1 ? "event" : "events"} will be put on the website, like the latest one in this series.`;
+  return `${additionalCount} new ${additionalCount === 1 ? "event" : "events"} will be marked for the website, like the latest one in this series.`;
 }

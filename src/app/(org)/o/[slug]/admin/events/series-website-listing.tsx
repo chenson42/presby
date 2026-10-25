@@ -15,6 +15,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { useHydrated } from "@/components/shared/use-hydrated";
 import { formatLongDate } from "@/lib/calendar/month";
 import type { SeriesListingOutcome, SeriesWebsiteSummary } from "@/lib/events";
 import { setSeriesWebsiteListingAction } from "./actions";
@@ -34,12 +35,12 @@ function events(n: number): string {
 export function putToast(outcome: SeriesListingOutcome): string {
   if (outcome.changed === 0) return "Nothing needed to change.";
   const skipped = outcome.skippedCancelled + outcome.skippedMembersOnly;
-  return `${events(outcome.changed)} put on the website.${skipped > 0 ? ` ${skipped} left out.` : ""}`;
+  return `${events(outcome.changed)} marked for the website.${skipped > 0 ? ` ${skipped} left out.` : ""}`;
 }
 
 export function takeToast(outcome: SeriesListingOutcome): string {
   if (outcome.changed === 0) return "Nothing needed to change.";
-  return `${events(outcome.changed)} taken off the website.`;
+  return `${events(outcome.changed)} no longer marked for the website.`;
 }
 
 /** " 2 cancelled events and 1 members-only event are left out." (each clause only above zero) */
@@ -73,6 +74,7 @@ export function SeriesWebsiteListing({
   summary: SeriesWebsiteSummary;
 }) {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [pending, setPending] = useState(false);
   const fromDate = formatLongDate(summary.fromStartsAt.slice(0, 10));
   const { put, take } = summary;
@@ -112,7 +114,7 @@ export function SeriesWebsiteListing({
         {put.changes > 0 && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button type="button" variant="outline" className={TRIGGER_CLASS} disabled={pending}>
+              <Button type="button" variant="outline" className={TRIGGER_CLASS} disabled={!hydrated || pending}>
                 Put this and later events on the website
               </Button>
             </AlertDialogTrigger>
@@ -139,7 +141,7 @@ export function SeriesWebsiteListing({
         {take.changes > 0 && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button type="button" variant="outline" className={TRIGGER_CLASS} disabled={pending}>
+              <Button type="button" variant="outline" className={TRIGGER_CLASS} disabled={!hydrated || pending}>
                 Take this and later events off the website
               </Button>
             </AlertDialogTrigger>

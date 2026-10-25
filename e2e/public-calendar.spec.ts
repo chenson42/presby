@@ -50,7 +50,7 @@ import {
 
 const FLAGS = ["sites.public_render", "org_portal.events", "org_portal.feature_categories"];
 const UNAVAILABLE = "Our events calendar isn't available right now. Please check back soon.";
-const EMPTY = "No events have been posted on this calendar yet.";
+const EMPTY = "No events are on this calendar right now.";
 const MARKED = [PUBCAL_TITLES.today, PUBCAL_TITLES.listed, PUBCAL_TITLES.second, PUBCAL_TITLES.long];
 const NEVER = [PUBCAL_TITLES.membersOnly, PUBCAL_TITLES.cancelled, PUBCAL_TITLES.unlisted, "Session business"];
 
@@ -414,13 +414,17 @@ test.describe("Public events calendar - the editor flow (e2e-alpha)", () => {
     await page.waitForURL(/\/admin\/events\/[0-9a-f-]{36}$/);
     await expect(page.getByRole("heading", { name: "Website listing" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Put this and later events on the website" })).toHaveCount(0); // nothing to put
-    // The dialog trigger is a client component: a click before hydration does nothing, so retry it.
+    // The trigger is disabled until the page hydrates (Phase 5 N3). The retry stays for a different
+    // reason, found when the gate was added: a click in the instant after the client-side navigation
+    // to this page can still be lost (the page re-renders once more under it), gate or no gate.
+    const takeButton = page.getByRole("button", { name: "Take this and later events off the website" });
+    await expect(takeButton).toBeEnabled();
     await expect(async () => {
-      await page.getByRole("button", { name: "Take this and later events off the website" }).click();
+      await takeButton.click();
       await expect(page.getByText("Take 3 events off the website?")).toBeVisible({ timeout: 1500 });
     }).toPass({ timeout: 20_000 });
     await page.getByRole("button", { name: "Yes, take 3 off the website" }).click();
-    await expect(page.getByText("3 events taken off the website.")).toBeVisible();
+    await expect(page.getByText("3 events no longer marked for the website.")).toBeVisible();
 
     expect(await listedCount()).toBe(1); // the parent, an earlier occurrence, stays
     const rows = (await sql`

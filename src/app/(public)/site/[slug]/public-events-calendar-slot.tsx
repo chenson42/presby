@@ -78,7 +78,7 @@ export async function PublicEventsCalendarSlot({
     return (
       <section aria-label="Events calendar" className={SECTION}>
         <p data-testid="public-calendar-empty" className="text-base">
-          No events have been posted on this calendar yet. Please check back soon.
+          No events are on this calendar right now. Please check back soon.
           {calendar.contactPhone ? ` You can also call us at ${calendar.contactPhone}.` : ""}
         </p>
         {memberPrompt}

@@ -107,10 +107,10 @@ describe("ExtendSeriesForm", () => {
   });
   it("says nothing about the website unless new events would be put on it", () => {
     render(<ExtendSeriesForm slug="alder-creek" parentEventId="parent-1" currentPattern="weekly" />);
-    expect(screen.queryByText(/put on the website/i)).toBeNull();
+    expect(screen.queryByText(/marked for the website/i)).toBeNull();
   });
 
-  it("when new events would be put on the website, says so - generic first, then with the typed count, singular and plural", () => {
+  it("when new events would be marked for the website, says so - generic first, then with the typed count, singular and plural", () => {
     render(
       <ExtendSeriesForm
         slug="alder-creek"
@@ -120,20 +120,20 @@ describe("ExtendSeriesForm", () => {
       />,
     );
     expect(
-      screen.getByText("New events will be put on the website, like the latest one in this series."),
+      screen.getByText("New events will be marked for the website, like the latest one in this series."),
     ).toBeTruthy();
     const count = screen.getByLabelText(/additional occurrences to add/i);
     fireEvent.change(count, { target: { value: "4" } });
     expect(
-      screen.getByText("4 new events will be put on the website, like the latest one in this series."),
+      screen.getByText("4 new events will be marked for the website, like the latest one in this series."),
     ).toBeTruthy();
     fireEvent.change(count, { target: { value: "1" } });
     expect(
-      screen.getByText("1 new event will be put on the website, like the latest one in this series."),
+      screen.getByText("1 new event will be marked for the website, like the latest one in this series."),
     ).toBeTruthy();
     fireEvent.change(count, { target: { value: "abc" } });
     expect(
-      screen.getByText("New events will be put on the website, like the latest one in this series."),
+      screen.getByText("New events will be marked for the website, like the latest one in this series."),
     ).toBeTruthy();
   });
 });

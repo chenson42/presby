@@ -61,7 +61,7 @@ async function slot(filter: Record<string, unknown> = {}, urls = slugUrls) {
 }
 
 const UNAVAILABLE = "Our events calendar isn't available right now. Please check back soon.";
-const EMPTY = "No events have been posted on this calendar yet. Please check back soon.";
+const EMPTY = "No events are on this calendar right now. Please check back soon.";
 
 describe("PublicEventsCalendarSlot - states", () => {
   it("reads by the slug it was given and by nothing else", async () => {

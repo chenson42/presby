@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import type { SeriesWebsiteSummary } from "@/lib/events";
 
 const mockAction = vi.hoisted(() => vi.fn());
@@ -123,7 +124,7 @@ describe("SeriesWebsiteListing - the put dialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "Yes, put 4 on the website" }));
     });
     expect(mockAction).toHaveBeenCalledWith("alder-creek", { eventId: "event-1", listed: true });
-    expect(toastSuccess).toHaveBeenCalledWith("3 events put on the website. 2 left out.");
+    expect(toastSuccess).toHaveBeenCalledWith("3 events marked for the website. 2 left out.");
     expect(mockRefresh).toHaveBeenCalled();
   });
 
@@ -165,7 +166,7 @@ describe("SeriesWebsiteListing - the take dialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "Yes, take 5 off the website" }));
     });
     expect(mockAction).toHaveBeenCalledWith("alder-creek", { eventId: "event-1", listed: false });
-    expect(toastSuccess).toHaveBeenCalledWith("1 event taken off the website.");
+    expect(toastSuccess).toHaveBeenCalledWith("1 event no longer marked for the website.");
   });
 });
 
@@ -190,5 +191,28 @@ describe("SeriesWebsiteListing - failure", () => {
       fireEvent.click(screen.getByRole("button", { name: "Yes, put 4 on the website" }));
     });
     expect(toastError).toHaveBeenCalledWith("We couldn't save that change. Try again.");
+  });
+});
+
+describe("SeriesWebsiteListing - before hydration", () => {
+  it("renders both trigger buttons disabled in the server HTML, so a tap is never swallowed (Phase 5 N3)", () => {
+    const html = renderToString(
+      <SeriesWebsiteListing
+        slug="alder-creek"
+        eventId="event-1"
+        summary={summary({ take: { changes: 1 } })}
+      />,
+    );
+    for (const label of [PUT, TAKE]) {
+      const button = html.match(new RegExp(`<button[^>]*>${label}</button>`));
+      expect(button, label).not.toBeNull();
+      expect(button![0]).toMatch(/\sdisabled(=|\s|>)/);
+    }
+  });
+
+  it("enables them once mounted in the browser", () => {
+    mount(summary({ take: { changes: 1 } }));
+    expect((screen.getByRole("button", { name: PUT }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: TAKE }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

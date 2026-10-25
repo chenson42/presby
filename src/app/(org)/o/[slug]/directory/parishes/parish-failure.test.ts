@@ -107,6 +107,19 @@ describe("describeParishFailure", () => {
     );
   });
 
+  it("a bulk not_found is a district (the household set is derived server-side), never a household (QA run 1, Finding 4)", () => {
+    expect(describeParishFailure({ kind: "not_found" }, { action: "bulk" })).toBe(
+      "We couldn't find that district. We've refreshed the list.",
+    );
+    // The move, assign and undo rows are unchanged.
+    expect(describeParishFailure({ kind: "not_found" }, { action: "move" })).toBe(
+      "We couldn't find that household. We've refreshed the list.",
+    );
+    expect(describeParishFailure({ kind: "not_found" }, { action: "undo" })).toBe(
+      "Can't undo: this household has been moved since.",
+    );
+  });
+
   it("no refusal anywhere says to move households `in smaller groups with Move` (QA run 1, Finding 3)", () => {
     expect(describeParishFailure({ kind: "too_many" }, { action: "bulk" })).not.toMatch(/smaller groups/);
   });

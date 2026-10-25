@@ -140,3 +140,10 @@ describe("archived-notice strings (QA run 1, Finding 3)", () => {
     expect(noActiveDistrictsCopy(false)).toBe("There are no active districts to move them to.");
   });
 });
+
+describe("movedToastCopy fallback (QA run 1, Finding 4)", () => {
+  it("`Removed from its district.` is the fallback when the previous district's name is unknown (a move with no previous district writes nothing, so this is unreachable by design)", () => {
+    expect(movedToastCopy("move", { fromName: null, toName: null })).toBe("Removed from its district.");
+    expect(movedToastCopy("move", { fromName: "North", toName: null })).toBe("Removed from North.");
+  });
+});

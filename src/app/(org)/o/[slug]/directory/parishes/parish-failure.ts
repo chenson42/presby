@@ -77,7 +77,9 @@ export function describeParishFailure(
       return PERMISSION_COPY;
     case "not_found":
       if (undo) return "Can't undo: this household has been moved since.";
-      if (action === "move" || action === "assign" || action === "bulk") {
+      // A bulk `not_found` is the source or target DISTRICT: the household set
+      // is derived server-side (QA run 1, Finding 4).
+      if (action === "move" || action === "assign") {
         return "We couldn't find that household. We've refreshed the list.";
       }
       return "We couldn't find that district. We've refreshed the list.";

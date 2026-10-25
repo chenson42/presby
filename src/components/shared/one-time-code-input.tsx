@@ -26,6 +26,9 @@ import { useHydrated } from "./use-hydrated";
  *    box 1, and no `maxLength`, so an autofill or paste that delivers several
  *    characters can land in the first box and be spread across the rest.
  *  - Nothing is validated only here. The server action stays the authority.
+ *  - `onComplete(code, { exact })` is the only completion signal. The component
+ *    never submits; a consumer submits from it (DECISION-257) only when `exact`
+ *    is true, and from an effect rather than the handler (see the prop doc).
  *
  * The group is a `role="group"` named by the visible label, never a
  * `<fieldset>`/`<legend>` (HydrationGate forbids a legend).

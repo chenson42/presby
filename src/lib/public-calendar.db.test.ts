@@ -16,10 +16,9 @@
  * (uncommitted DDL is invisible to, and would block, another connection);
  * the property there is the definer's own WHERE clause, not the grant.
  *
- * NOT HERE, on purpose: T3 (the differential test against
- * orgFeatureEnabledInTx over axis x category x toggle) needs the
- * `org_portal.public_calendar` catalog entry, which is Batch 2's; it joins
- * this file in Batch 2. T5's literal pins live in public-calendar.test.ts.
+ * T3 (the differential test against orgFeatureEnabledInTx over axis x
+ * category x toggle) is the last describe block. T5's literal pins live in
+ * public-calendar.test.ts.
  *
  * Fixtures: throwaway organizations stamped `deletable_until` by
  * createCalendarFixture(); every site, toggle, profile, type and event row
@@ -33,6 +32,12 @@ import { sql, type SQL } from "drizzle-orm";
 import type { CalendarFixture } from "@/lib/testing/calendar-fixture";
 
 vi.mock("server-only", () => ({}));
+// org-features.ts (imported by T3) pulls in audit.ts for its toggle writer, which
+// reaches next-auth; the differential test reads only, so the writer is stubbed.
+vi.mock("@/lib/audit", () => ({
+  AUDIT_ACTIONS: { ORG_FEATURE_TOGGLED: "tenant.org_feature.toggled" },
+  recordAudit: vi.fn(),
+}));
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 180_000 });
 
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL);
@@ -337,5 +342,116 @@ describe.skipIf(!hasDb)("presby_public_events_calendar (drizzle/0067, Postgres-b
       expect(e!.org_today).not.toBe(w!.org_today);
       expect(String(e!.org_today) > String(w!.org_today)).toBe(true);
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // T3: the SQL composition cannot drift from orgFeatureEnabledInTx
+  // -------------------------------------------------------------------------
+  describe("T3: the definer's availability equals orgFeatureEnabledInTx over axis x category x toggle", () => {
+    type Tri = "on" | "off" | "missing";
+    const TRI: Tri[] = ["on", "off", "missing"];
+    const AXIS_FLAG = "org_portal.feature_categories";
+
+    it(
+      "agrees for org_portal.public_calendar (state) and org_portal.calendar (member_calendar_on) across all 81 combinations",
+      async () => {
+        const { orgFeatureEnabledInTx, isCategoryAxisOn } = await import("@/lib/org-features");
+        const { PUBLIC_CALENDAR_FEATURE_KEY } = await import("@/lib/calendar/public-contract");
+        const appDb = app as unknown as {
+          transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T>;
+        };
+
+        // A live site and NO toggle or category rows: each combination writes its own.
+        const org = await fx.makeOrg("t3-matrix", { timeZone: "America/New_York", calendarToggle: null });
+        const [orgRow] = await owner(sql`select slug from organizations where id = ${org}`);
+        const slug = String(orgRow!.slug);
+        await owner(sql`
+          insert into organization_sites (organization_id, repo, status)
+          values (${org}, ${`fixture/public-calendar-t3-${org}`}, 'live')`);
+
+        // The global axis flag is captured and restored, whatever happens.
+        const [original] = await owner(sql`select enabled from feature_flags where key = ${AXIS_FLAG}`);
+        const setAxis = async (state: Tri) => {
+          if (state === "missing") {
+            await owner(sql`delete from feature_flags where key = ${AXIS_FLAG}`);
+          } else {
+            await owner(sql`
+              insert into feature_flags (key, enabled) values (${AXIS_FLAG}, ${state === "on"})
+              on conflict (key) do update set enabled = excluded.enabled`);
+          }
+        };
+        const setCategory = async (state: Tri) => {
+          await owner(sql`delete from organization_feature_categories where organization_id = ${org}`);
+          if (state !== "missing") {
+            await owner(sql`
+              insert into organization_feature_categories (organization_id, category, enabled)
+              values (${org}, 'worship', ${state === "on"})`);
+          }
+        };
+        const setToggle = async (key: string, state: Tri) => {
+          await owner(sql`
+            delete from organization_feature_toggles where organization_id = ${org} and feature_key = ${key}`);
+          if (state !== "missing") {
+            await owner(sql`
+              insert into organization_feature_toggles (organization_id, feature_key, enabled)
+              values (${org}, ${key}, ${state === "on"})`);
+          }
+        };
+        const viaTs = async (key: string, axisOn: boolean) =>
+          appDb.transaction(async (tx) => {
+            await (tx as { execute(q: SQL): Promise<unknown> }).execute(
+              sql`select set_config('app.current_org_id', ${org}, true)`,
+            );
+            return orgFeatureEnabledInTx(
+              tx as Parameters<typeof orgFeatureEnabledInTx>[0],
+              org,
+              key,
+              axisOn,
+            );
+          });
+
+        let compared = 0;
+        let sawAvailable = 0;
+        let sawUnavailable = 0;
+        try {
+          for (const axis of TRI) {
+            await setAxis(axis);
+            const axisOn = await isCategoryAxisOn(); // the application's own read of the flag
+            expect(axisOn, `axis ${axis}`).toBe(axis === "on");
+            for (const category of TRI) {
+              await setCategory(category);
+              for (const pub of TRI) {
+                await setToggle(PUBLIC_CALENDAR_FEATURE_KEY, pub);
+                for (const member of TRI) {
+                  await setToggle("org_portal.calendar", member);
+                  const label = `axis=${axis} category=${category} public=${pub} member=${member}`;
+                  const [row] = await readAsApp(slug);
+                  const tsPublic = await viaTs(PUBLIC_CALENDAR_FEATURE_KEY, axisOn);
+                  expect(row!.state === "available", `${label}: public_calendar`).toBe(tsPublic);
+                  if (tsPublic) {
+                    sawAvailable += 1;
+                    const tsMember = await viaTs("org_portal.calendar", axisOn);
+                    expect(row!.member_calendar_on, `${label}: member_calendar_on`).toBe(tsMember);
+                  } else {
+                    sawUnavailable += 1;
+                  }
+                  compared += 1;
+                }
+              }
+            }
+          }
+        } finally {
+          if (original) {
+            await setAxis(original.enabled ? "on" : "off");
+          } else {
+            await setAxis("missing");
+          }
+        }
+        expect(compared).toBe(81);
+        expect(sawAvailable).toBeGreaterThan(0);
+        expect(sawUnavailable).toBeGreaterThan(0);
+      },
+      300_000,
+    );
   });
 });

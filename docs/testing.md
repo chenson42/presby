@@ -473,6 +473,33 @@ database for some reason, (b) set the password back to the exact value
 
 ---
 
+## Fixture database calls: `withDbRetry`
+
+Fixtures talk to Neon over its HTTP driver, which now and then answers `fetch failed`
+or `Connection terminated`. `withDbRetry(label, step)` in `e2e/support/db.ts` retries
+a step five times (0.5, 1, 2, 4 s) **only** for a dropped connection (SQLSTATE class
+08, `57P01`-`57P03`, `53300`, or a reset/refused/connect-timeout message); a unique
+violation, a missing table, a statement or lock timeout, or a bug throws at once, and
+the original error is rethrown after the last attempt. Only the outermost call retries.
+
+The catch: a dropped reply can mean the statement **landed**, so a step may be wrapped
+only if repeating it ends in the same state.
+
+- **R1** Wrap a step only if a repeat after "committed but the reply was lost" leaves the same end state.
+- **R2** Wrap whole units: disable-trigger / work / enable-trigger is one step with the re-enable in `finally`.
+- **R3** Safe by shape: reads, `delete`, `update ... set x = <constant>`, `insert ... on conflict ... do nothing|update`, `insert ... where not exists`, a `delete`-then-`insert` that re-clears first.
+- **R4** Never wrap a unit that reads a value and overwrites it when the read is kept as "prior state" (the retry would capture the new value); wrap the read and the write separately.
+- **R5** Never wrap a plain `insert` or a state-machine edge (`set state = '<next>'`).
+- **R6** Wrap inside the fixture function so no spec changes. Spec-inline `afterAll` SQL is not covered.
+
+Teardown and sweeps are wrapped in every fixture; setup is wrapped only where the
+rules allow, so setup functions that insert plainly (`setupGivingFixture`,
+`setupInviteOrg`, `buildWorld` ...) are deliberately not. A real drop cannot be
+induced on demand, so the retry path is pinned by injected-failure tests
+(`scripts/with-db-retry.test.mjs`) and each wrapped step's idempotence rests on this reading.
+
+---
+
 ## Reports for the retrospective
 
 `npm run stats:escape` prints the escape-rate breakdown for the last 30 days.

@@ -20,7 +20,7 @@
  * already happened once.
  */
 
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 
 export const RESERVED_YEAR_MIN = 2090;
 export const RESERVED_YEAR_MAX = 2099;
@@ -58,9 +58,9 @@ function assertReservedYear(reportYear: number): void {
  * Creek incident; a comment would not have.
  */
 async function assertE2EOrg(sql: Sql, organizationId: string): Promise<void> {
-  const rows = (await sql`
+  const rows = (await withDbRetry("read fixture org slug", () => sql`
     select slug from organizations where id = ${organizationId}::uuid
-  `) as { slug: string }[];
+  `)) as { slug: string }[];
   const slug = rows[0]?.slug;
   if (!slug || !slug.startsWith("e2e-")) {
     throw new Error(
@@ -153,7 +153,8 @@ export async function removePublishedReturn(
   assertReservedYear(opts.reportYear);
   await assertE2EOrg(sql, opts.congregationOrgId);
 
-  await sql.query(`
+  // Deletes only, and the DO block is one atomic statement: a repeat after a lost reply ends the same.
+  await withDbRetry("remove published return", () => sql.query(`
     do $cleanup$
     begin
       alter table congregation_statistics disable trigger congregation_statistics_freeze;
@@ -193,19 +194,19 @@ export async function removePublishedReturn(
       alter table congregation_statistics enable trigger congregation_statistics_freeze;
     end
     $cleanup$;
-  `);
+  `));
   // Defensive belt, not the primary mechanism — idempotent regardless of
   // whether the DO block's own re-enables above already ran.
-  await sql`alter table statistical_returns enable trigger statistical_returns_freeze`;
-  await sql`alter table publications enable trigger publications_freeze`;
-  await sql`alter table congregation_statistics enable trigger congregation_statistics_freeze`;
+  await withDbRetry("re-enable statistical_returns freeze", () => sql`alter table statistical_returns enable trigger statistical_returns_freeze`);
+  await withDbRetry("re-enable publications freeze", () => sql`alter table publications enable trigger publications_freeze`);
+  await withDbRetry("re-enable congregation_statistics freeze", () => sql`alter table congregation_statistics enable trigger congregation_statistics_freeze`);
 
   // F115: VERIFY the final state rather than trust the enables above ran.
   // Constrained by `tgrelid` (via `c.relname`) as well as `tgname` (QA Phase 5
   // observation, sasr-fixture.ts:208): `tgname` alone is not unique across the
   // catalog, so the WHERE clause below pins each trigger name to the specific
   // table it must live on rather than matching a same-named trigger anywhere.
-  const rows = (await sql`
+  const rows = (await withDbRetry("verify freeze triggers", () => sql`
     select c.relname as table_name, t.tgenabled
       from pg_trigger t
       join pg_class c on c.oid = t.tgrelid
@@ -214,7 +215,7 @@ export async function removePublishedReturn(
        ('publications_freeze', 'publications'),
        ('statistical_returns_freeze', 'statistical_returns')
      )
-  `) as { table_name: string; tgenabled: string }[];
+  `)) as { table_name: string; tgenabled: string }[];
   const notEnabled = rows.filter((r) => r.tgenabled !== "O");
   if (notEnabled.length > 0) {
     throw new Error(

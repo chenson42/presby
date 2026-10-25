@@ -14,10 +14,13 @@
  * must throw loudly rather than pass quietly.
  */
 
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 
 export async function getFlag(sql: Sql, key: string): Promise<boolean> {
-  const rows = (await sql`select enabled from feature_flags where key = ${key}`) as {
+  const rows = (await withDbRetry(
+    `get flag ${key}`,
+    () => sql`select enabled from feature_flags where key = ${key}`,
+  )) as {
     enabled: boolean;
   }[];
   if (rows.length === 0) {
@@ -27,7 +30,7 @@ export async function getFlag(sql: Sql, key: string): Promise<boolean> {
 }
 
 export async function setFlag(sql: Sql, key: string, enabled: boolean): Promise<void> {
-  await sql`update feature_flags set enabled = ${enabled} where key = ${key}`;
+  await withDbRetry(`set flag ${key}`, () => sql`update feature_flags set enabled = ${enabled} where key = ${key}`);
 }
 
 export interface FlagCapture {

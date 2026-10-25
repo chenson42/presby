@@ -85,6 +85,24 @@ export function isDbDrop(err: unknown): boolean {
   return DB_DROP.test(text);
 }
 
+/*
+ * WHAT MAY BE WRAPPED (rules R1-R6; the same list is in docs/testing.md).
+ *
+ * R1  A step may be wrapped only if running it again after "it committed but the reply was lost"
+ *     leaves the same end state. A `fetch failed` can mean the statement landed.
+ * R2  Wrap whole units: a disable-trigger / work / enable-trigger sequence is ONE step with the
+ *     re-enable in `finally` (the domains-ui shape), never one statement of it.
+ * R3  Safe by shape: reads; `delete`; `update ... set x = <constant>`; `insert ... on conflict ...
+ *     do nothing|update`; `insert ... where not exists`; a `delete`-then-`insert` pair that
+ *     re-clears first.
+ * R4  Never wrap a unit that reads a value and then overwrites it if the read is kept as "prior
+ *     state": a retry after the overwrite committed would capture the NEW value as "prior" and
+ *     teardown would restore the wrong thing. Wrap the read and the write as separate steps.
+ * R5  Never wrap a plain `insert` (a duplicate row or a unique violation on retry), or a
+ *     state-machine edge (`update ... set state = '<next>'`) whose trigger may reject a repeat.
+ * R6  Wrap inside the fixture function, so no spec changes. Spec-inline SQL is not covered.
+ */
+
 /** Set while a withDbRetry step runs, so a nested withDbRetry does not multiply attempts. */
 const inRetry = new AsyncLocalStorage<true>();
 

@@ -9,7 +9,7 @@
  * not (0064). Addresses are synthetic `example.invalid`.
  */
 
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 import { COMMUNITY_ORG, FIXTURE_FIRST_NAME } from "./community-fixture";
 
 export interface FixtureEmail {
@@ -46,16 +46,16 @@ export interface EmailRow {
 
 /** Every address row for a person, oldest first, active and ended. */
 export async function emailRows(sql: Sql, personId: string): Promise<EmailRow[]> {
-  return (await sql`
+  return (await withDbRetry("read email rows", () => sql`
     select value, subtype, is_primary, do_not_contact, ended_at is not null as ended
       from contact_methods
      where person_id = ${personId}::uuid and kind = 'email'
-     order by created_at, id`) as EmailRow[];
+     order by created_at, id`)) as EmailRow[];
 }
 
 /** The database's clock, as text (keeps microseconds), to bound `emailAudit` to rows written after this moment. */
 export async function dbNow(sql: Sql): Promise<string> {
-  return ((await sql`select clock_timestamp()::text as t`) as { t: string }[])[0].t;
+  return ((await withDbRetry("read db clock", () => sql`select clock_timestamp()::text as t`)) as { t: string }[])[0].t;
 }
 
 /**
@@ -68,19 +68,21 @@ export async function emailAudit(
   personId: string,
   since?: string,
 ): Promise<{ action: string; metadata: Record<string, unknown> }[]> {
-  return (await sql`
+  return (await withDbRetry("read email audit", () => sql`
     select action, metadata from audit_events
      where resource_id = ${personId} and action like 'tenant.person_email.%'
        and (${since ?? null}::timestamptz is null or created_at > ${since ?? null}::timestamptz)
-     order by created_at, id`) as { action: string; metadata: Record<string, unknown> }[];
+     order by created_at, id`)) as { action: string; metadata: Record<string, unknown> }[];
 }
 
 /** Removes what this file added for the given people: staff positions and the address audit rows. */
 export async function removeEmailExtras(sql: Sql, personIds: string[]): Promise<void> {
   if (personIds.length === 0) return;
-  await sql`delete from staff_positions where person_id = any(${personIds}::uuid[])`;
-  await sql`delete from audit_events
-             where resource_id = any(${personIds}) and (action like 'tenant.person_email.%' or action = 'tenant.person.updated')`;
+  await withDbRetry("remove email extras", async () => {
+    await sql`delete from staff_positions where person_id = any(${personIds}::uuid[])`;
+    await sql`delete from audit_events
+               where resource_id = any(${personIds}) and (action like 'tenant.person_email.%' or action = 'tenant.person.updated')`;
+  });
 }
 
 /**
@@ -91,10 +93,10 @@ export async function removeEmailExtras(sql: Sql, personIds: string[]): Promise<
  * audit rows (tidiness only: the audit assertion is bounded by `dbNow`, not by this).
  */
 export async function sweepEmailExtras(sql: Sql): Promise<void> {
-  const rows = (await sql`
+  const rows = (await withDbRetry("list email-extras people", () => sql`
     select id from people
      where first_name = ${FIXTURE_FIRST_NAME}
        and exists (select 1 from memberships m where m.person_id = people.id and m.organization_id = ${COMMUNITY_ORG.id}::uuid)
-  `) as { id: string }[];
+  `)) as { id: string }[];
   await removeEmailExtras(sql, rows.map((r) => r.id));
 }

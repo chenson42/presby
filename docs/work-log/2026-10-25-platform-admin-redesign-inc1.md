@@ -20,7 +20,7 @@
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (this file); S1–S5 ruled; copy table and carry-forward below; two operator questions | Design complete | 2026-10-25 |
 | 4 — Implementation | api-developer (Batch B), ux-developer (Batches A and C) | Batches A, B and C complete (A: 3 commits, B: 2, C: 3) | — | 2026-10-25 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1: all green; FAIL on two test gaps (boundaries allow-list misses 4 forms; org-list description untested) | FAIL | 2026-10-25 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -780,7 +780,277 @@ none (no mutation in this increment)
 
 # Phase 5 — Verification (qa)
 
-Pending. QA must run the R9 regression set (`admin-login`, `totp-full-login`, `role-boundaries`, `session-claim-integrity`, `totp-callback-bypass`) against a real dev server on **:3530** with the MFA-enrolled seeded user; a deferred or skipped e2e is `BLOCKED`, not `PASS`. Also required: the Copy Truthfulness checklist against the Copy table above, the Feature-Gate Audit for `/admin`, `/admin/docs` and the organizations pages, E27 `EXPLAIN`, and the 360px browser checks.
+**Date:** 2026-10-25
+**Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-padmin`, `pipeline/platform-admin-redesign` at `fa742f7`. Database: the `pipeline-platform-admin-redesign` Neon branch. I checked that its host differs from the main checkout's `.env.local` by comparing hashes; no connection value was printed. `node_modules/node_modules` does not exist. Disk is at 38%.
+
+**Scope run.** Typecheck, lint, `npm run check`, plain `npm test` and `npm run build`, all in full. The DB-backed set over every area the diff touches (`src/lib/admin-portal`, `src/lib/admin`, `src/lib/domains/platform-read.db.test.ts`, `src/app/(admin)/admin`), run with `--no-file-parallelism`. The full `--project=chromium` e2e suite, required because a layout and `src/components/` changed, on a Playwright-started server at :3530. I reset flags first (below). The diff touches no migration, `authz.ts`, `src/lib/db/` or shared fixture, so I did not run the whole DB-backed suite or `test-rls.sql`. I did not run `custom-hosts` or the prod-build lane; the PR's CI covers them. Nothing here rests on the implementer's run.
+
+**Flag state.** Before the e2e run I ran `/Users/cshenso/git/presby-platform/presby/scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1` against this worktree's `PLATFORM_DATABASE_URL` only. It committed 10 seeded flags. It is byte-identical to the worktree's copy.
+
+## Type Check
+
+`npm run typecheck`: PASS
+`npm run lint`: PASS (`--max-warnings=0`)
+`npm run check`: PASS. All eight tripwires passed: audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports.
+`npm run build`: PASS
+
+## Unit Tests
+
+- **Plain `npm test`:** 661 files (581 passed, 80 skipped), 11,205 tests (8,747 passed, 2,458 skipped), 30.0s. The 80 skipped files are the DB-gated suites (`describe.skipIf(!hasDb)`); the next line covers the ones in scope.
+- **DB-backed, in scope** (`dotenv -e .env.local -- vitest run --no-file-parallelism …`): 76 files, 811 tests, 811 passed, **0 skipped**, 38.9s. Verbose run of the four DB files the diff adds or changes:
+  - `readers.db.test.ts`
+  - `recent-changes.db.test.ts`
+  - `two-factor-stranded.db.test.ts`
+  - `platform-read.db.test.ts`
+  - Result: 29/29.
+- **Card-vs-destination parity (E21), all passing against the real schema:**
+  - `countStranded() === listStranded().total`
+  - `countDomainsNeedingAttention() === listDomainsAcrossOrgs("attention", 100000).rows.length`, with `truncated === false`
+  - the sites counts sum to `listSitesForAdmin().length`
+- **Extraction checks:**
+  - `STRANDED_WHERE` is byte-for-byte the predicate removed from `2fa/page.tsx`. The old page also used `LIMIT 50`.
+  - `attentionCondition()` is the predicate removed from `listDomainsAcrossOrgs`.
+
+Failures: none.
+
+## End-to-End Tests
+
+Total: 420 | Passed: 420 | Failed: 0 | Skipped: 0 | Flaky: 0 | Duration: 17.1 min (chromium, :3530, Playwright-started `npm run dev`, workers 1)
+
+R9 / E26 regression set, all green in that run:
+- `admin-login` (4)
+- `totp-full-login` (MFA-enrolled user: password, then a wrong code rejected, then the real code signs in)
+- `role-boundaries` (5, including the mfa-admin two-hop redirect from `/admin`)
+- `session-claim-integrity`
+- `totp-callback-bypass` (7)
+- `admin-audit`, `admin-email-queue`, `admin-organizations`, `whats-new`, `member-home`, `giving-admin`
+- `admin-shell` (7)
+
+The layout redirect unit tests (E10) pin `/signin?callbackUrl=/admin` and `/totp?callbackUrl=/admin`, and pin that neither fires otherwise. I also read the redirects against `77be511`: they are byte-identical.
+
+**404 status (R1c / E15).** Requested on my own server with the admin session:
+
+| Route (nil UUID) | Status |
+|---|---|
+| `/admin/organizations/<nil uuid>` | 404 |
+| `/admin/users/<nil uuid>` | 404 |
+| `/admin/tickets/<nil uuid>` | 404 |
+| `/admin/whats-new/<nil uuid>` | 404 |
+| `/admin/organizations/not-a-uuid` | 404 |
+
+`find` reports no `loading.tsx` under `src/app/(admin)/admin`, and `shell-boundaries.test.ts` pins that.
+
+**Pre-existing, not this pipeline.** `/admin/users/not-a-uuid`, `/admin/tickets/not-a-uuid` and `/admin/whats-new/not-a-uuid` return **500**. Postgres raises `22P02 invalid input syntax for type uuid` because those pages pass the raw id to the query with no `UUID_RE` check. All three page files are identical to `origin/main` (3af650a). With this diff the 500 now renders the calm `error.tsx` instead of Next's default. Recommend a TODO line for Increment 2 or 4.
+
+**Real-browser pass** (own dev server on :3530 with Playwright's webServer env, stopped by PID):
+
+At 360×740 on `/admin`:
+- No horizontal overflow.
+- Header fits one row at y=8: Menu 94×44, "← PresbyPortal" 114×44, avatar 44×44. The "Platform admin" label is hidden.
+- `<main>` padding is 16px, giving a 328px content column. Cards are a single column at 328px.
+- "New organization" is full width at 44px. The find input (328×44) sits above "Search" (328×44).
+- No `a[href^="/o/"]` on the page. Zero cards in the failed state.
+
+Phone menu:
+- The Sheet settles at 306px (85vw) with the title "Platform admin".
+- All 15 links are 44px. The nav scrolls (`overflow-y: auto`, content 971px in 683px).
+- The close control is 44×44.
+- Clicking Organizations navigates and closes the menu. A click on the current page's own link also closes it. Escape returns focus to Menu.
+- On `/admin/organizations/domains` the active item is Domains.
+
+Other pages at 360px:
+- `/admin/organizations`: overflow 0.
+- `/admin/2fa`, `/admin/organizations/domains`, `/admin/sites`, `/admin/giving`: overflow 0.
+- `/admin/docs`: **overflows by 153px**. This is E30 and pre-existing: `grid-cols-[200px_1fr]` is unchanged, and the diff only adds the gate. It stays recorded for Increment 4.
+
+At 1280px:
+- No overflow, and the Menu button is hidden.
+- The sidebar groups match the Copy table and end with "Version 0.42.3". `/admin/organizations/domains` lights Domains only.
+- The first Tab reaches "Skip to main content", and Enter moves focus to `#admin-main`. One `<h1>`.
+
+E28 (long name wrapping):
+- Every recent-changes row has `scrollWidth == width` (278px).
+- The longest flag key, `org_portal.members_roll_action_edit`, wraps inside the card.
+- There is no long organization name in the data, so E28 is only partly confirmed. `break-words` and `min-w-0` are present on the row.
+
+Not browser-checked:
+- `error.tsx` at 360px, because the design has no hook to force it. `LoadError` uses `flex-col items-stretch`, and `error.test.tsx` passes.
+- `AdminForbidden` at 360px, because there is no non-holder fixture. It is heading and text only.
+
+**Environment note.** My first dev server on :3530 went into an HMR full-reload loop on every page, `/home` included (65–90 navigations in 8s). It cleared when I restarted with Playwright's webServer env, and the Playwright-run server never showed it. It is not caused by this diff. If anyone hits it, restart the server with that env.
+
+**E27 EXPLAIN** (pipeline DB, `EXPLAIN (ANALYZE, BUFFERS)` of the reader's exact statement):
+- `audit_events` has 872 rows. Execution 0.232 ms, planning 0.290 ms, 43 shared-buffer hits.
+- Plan: backward index scan on `ix_audit_created`, then a filter (351 rows removed to find 11), then a hash left join to `organizations`.
+- `ix_audit_action_time` is not used, because the `OR` over the metadata-narrowed invitation keys defeats it.
+- At production volume, cost grows with how many audit rows are newer than the 10th match. If closed-list actions become sparse, the scan walks far.
+- Acceptable now. Keep the planned `docs/TODO.md` follow-up (an index, or splitting the `OR`), with this plan attached.
+
+## Regression Tests Added
+
+Failing-first confirmed for all three fix commits in scratch copies. Each was taken at `<fix>^` from `git archive`, with the fix's tests overlaid, watched failing, then the fix's sources overlaid and watched passing. The worktree was not touched.
+
+- **`92b3047` docs gate.** `src/app/(admin)/admin/docs/page.test.tsx:41` "renders AdminForbidden and reads no release file without ADMIN_RELEASE_NOTES — regression for /admin/docs relying on the proxy alone".
+  - Before the fix: 1 failed, 1 passed ("Unable to find … heading 'Release notes'").
+  - After the fix: 2/2.
+- **`4b04620` catalog copy.** `src/lib/permissions.test.ts:71` "describes ADMIN_ORGANIZATIONS as organization management, not only branding". The key, map, order and category snapshot sits alongside it at `:42`.
+  - Before the fix: 1 failed (Expected "Manage organizations", Received "Manage organization branding").
+  - After the fix: 9/9.
+- **`e0df3d3` stale copy.**
+  - `src/app/(admin)/admin/organizations/forbidden.test.tsx:44`: list, new and detail each render `AdminForbidden` and touch no database.
+  - `src/app/(member)/home/page.test.tsx:221`: the new Admin card description.
+  - Before the fix: 4 failed. After the fix: 12/12.
+- **Gap in this commit (see Verdict):** the organizations list description it changed has no exact-text test.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100% statements, branches and functions
+- `src/lib/two-factor.ts`: 91.3% statements, 100% branches (lines 35–39 uncovered; not touched by this diff)
+- `src/lib/flags.ts`: 100% statements, branches and functions
+
+## Feature-Gate Audit
+
+No route handlers or server actions were added or changed; the increment is RSC reads only. These pages were read in full:
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| `/admin` layout | yes (`cachedAuth`) | n/a (door is the proxy: `src/proxy.ts:43`, `ADMIN_DASHBOARD`) | redirects unchanged |
+| `/admin` page (dashboard) | yes | yes, per card: each card is mounted only if `hasFeature(features, card.requiredFeature)` (`_dashboard/visible.ts`). Action bar gated `ADMIN_ORGANIZATIONS`. No page-level door check, same as before (proxy). | registry keys match the Copy-table audience; each card's key equals its destination's |
+| `/admin/docs` | yes (new) | yes (new, before any `readdir`) | `FEATURES.ADMIN_RELEASE_NOTES` |
+| `/admin/organizations` | yes | yes | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `/admin/organizations/new` | yes | yes | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `/admin/organizations/[id]` | yes | yes (before the UUID check and any read) | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `/admin/2fa` | yes | yes (before `listStranded`) | `FEATURES.ADMIN_TWO_FACTOR` |
+| `/admin/design-system` | n/a | none, by design (F281, door-level; comment added) | n/a |
+| `/home` (Admin card) | unchanged | unchanged (`canAccessAdmin`) | description text only |
+
+**Per-key mounting.**
+- **Unit level:** `page.test.tsx` pins it.
+  - Support operator: exactly `["feedback", "tickets"]` called, one "Support" heading, no find box or New organization.
+  - Door-only: the byte-identical empty state, zero cards called, zero links.
+  - The nav subset is pinned in `visible-nav.test.ts`.
+- **Code:** read and confirmed.
+- **Browser:** no support-operator fixture exists. That is a deliberate gap in the design, because adding one touches `e2e/support/users.ts`.
+
+The new `admin-portal` components never call `getPlatformDb` or `BrandTokens`.
+
+## Copy Truthfulness
+
+Groups A–H were checked string by string against `git diff -U0 77be511...HEAD`.
+
+- [x] **Every added or changed string is in the design's Copy table.** "Search", "Updated", "Find an organization", "Back to the dashboard", "Version …", "System" and "Unknown organization" are all in groups A, B, E or F. None is off-table.
+- [x] **The query behind each claim was opened, and what it does not read was named.**
+  - **"Nothing waiting." is never shown on a failed read:**
+    - Every presenter in `_dashboard/present.ts` returns `ERROR` first.
+    - `RecentChangesCard` returns early on `kind: "error"`, so "No recent changes of this kind." cannot appear on a failure.
+    - The helper modules a reader goes through (`listSitesForAdmin`, `listIngestHealth`, `countDomainsNeedingAttention`, `countStranded`) contain no `try/catch`, so a DB error reaches `readCard` and becomes `{kind:"error"}`, never `[]` or 0.
+    - Pinned by `present.test.ts`, `cards.test.tsx` and `recent-changes-card.test.tsx`.
+  - **"Locked after too many failed sign-ins."** The only non-null writer of `locked_until` is `src/auth.ts:177`. The other writers (`:161`, `:255`, password reset, `users/actions.ts:174`) only clear it.
+  - **The ten recent-changes labels.** Each action has exactly one writer, and every writer is platform-side:
+    - `designation-holders.ts`: writes the revoke action only on outcome `revoked`, with `resource_id` = organization id. Its only caller is `(admin)/…/[id]/actions.ts`.
+    - `issue.ts:600`: `selfAddressed` boolean. Imported only from `(admin)`.
+    - `accept.ts:236`: `inviterIsInvitee`.
+    - `users/actions.ts`, `flags/actions.ts`, `users/[id]/actions.ts`: the platform-role, flag, 2FA-reset and account actions.
+  - **Organization types.** The five type words match the `organization_type` enum exactly.
+  - **"Unknown organization" on the dev data.** Four rows show it because they belong to e2e fixture organizations removed at teardown through the `deletable_until` exemption. That is the truthful fallback; the DB test pins name resolution for a live organization.
+- [x] **Each instruction was traced to the role that sees it.**
+  - "Try again" goes to `/admin`, which is reachable by any card viewer.
+  - "View the audit log" is shown only to `ADMIN_AUDIT` holders, and `/admin/audit` admits them.
+  - "Ask a platform administrator" / "Contact a platform administrator" is actionable: an `admin` role holder assigns roles at `/admin/users`.
+  - Every card's link target admits the card's key.
+- [x] **Older strings were grepped.** "Manage organization branding", "operations shell", "permission to manage organization branding", "brand colour, logo and type pairing" and "Audit Log" have no remaining user-facing hits. `docs/product/functionality-map.md:36` is rewritten at ship, as planned.
+
+The wording is truthful. **One coverage gap:** the fixed organizations-list description has no exact-text test (finding 2 below).
+
+## Verdict
+
+**FAIL.** Two named gaps, both small; nothing wrong with the product behaviour itself.
+
+1. **The boundaries test does not enforce "a new tenant table is forbidden by default" (E19, DECISION-252's "Enforcement" clause).** Owner: api-developer, Batch B. I ran a mutation check in a scratch copy of HEAD, adding a reader `zz-mutant.ts` to `src/lib/admin-portal/dashboard/` that reaches `officer_terms`, a tenant table:
+
+   | Form | Result |
+   |---|---|
+   | `import { officerTerms } from "@/lib/db/domain/officers"` plus `sql\`… from officer_terms\`` | **caught** (2 tests red) |
+   | `import { officerTerms } from "@/lib/db/domain"` (the barrel) plus `.from(officerTerms)` | **not caught**, 11/11 green |
+   | `sql\`… from organizations o, officer_terms t …\`` (comma join) | **not caught** |
+   | `sql\`… from "officer_terms"\`` (quoted identifier) | **not caught** |
+   | `import * as domain from "@/lib/db/domain/officers"` plus `.from(domain.officerTerms)` | **not caught** |
+
+   The causes are in `src/lib/admin-portal/dashboard/boundaries.test.ts`:
+   - `:114` matches only `{…}` imports from `@/lib/db/schema` or `@/lib/db/domain/<file>`. It misses the barrel `@/lib/db/domain` and `import * as`.
+   - `:152` (`mod === "db" && rest.startsWith("db/")`) then waves the barrel and namespace forms through the module allow-list.
+   - `:129` captures only the first identifier after `from`, and only unquoted ones.
+
+   The test checks the specific idiom the readers use today, not the property the design promises. Fix:
+   - Allow `@/lib/db` exactly; anything under `@/lib/db/` must go through the table-name check.
+   - Treat any namespace import from `@/lib/db/**` as an offender.
+   - Scan comma-separated `from` lists and quoted identifiers, or reject them outright.
+   - Add each of the four forms to "the scan is not vacuous" as a synthetic offender.
+
+2. **The fixed organizations-list description has no exact-text test that fails on the old text.** Owner: ux-developer, the `e0df3d3` scope. The new description is at `src/app/(admin)/admin/organizations/page.tsx:150` ("Find an organization, see how it is set up, and open it to manage its administrators, brand, public site and domains."). It renders only for `ADMIN_ORGANIZATIONS` holders. `forbidden.test.tsx` exercises only the non-holder branch, so nothing fails if the old "brand colour … abusive tenant's brand is neutralised" text came back. Add a holder-branch assertion: the new string is present and `/brand colour|neutralis|abusive tenant/` is absent.
+   - **Recommended, not a gate:** the new 2FA truncation note at `src/app/(admin)/admin/2fa/page.tsx:162` also has no render test. The DB test pins the `total` semantics behind it.
+
+Everything else required is green and can stand once those two land: typecheck, lint, all eight tripwires, build, unit, DB scope, 420/420 chromium e2e including the R9 MFA login set, 404 status, 360px browser pass, failing-first on the three fix commits, and EXPLAIN. On re-verification QA re-runs the boundaries mutation set, the two touched test files and plain `npm test`, and keeps everything else from this run unless the fix touches other files.
+
+**Not FAILs, carried forward:**
+- Non-UUID `[id]` 500s on users, tickets and what's-new. Pre-existing and identical on `origin/main`; recommend a TODO line.
+- E30: `/admin/docs` overflows by 153px at 360px. Pre-existing; Increment 4.
+- E27: the plan noted above; keep the planned TODO.
+- E28: only partly confirmed (no long organization name in the data).
+- The support-operator e2e fixture gap is deliberate in the design.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. Typecheck, lint, check (8/8), build, unit (581 files), DB scope (76 files / 811, 0 skipped), chromium e2e 420/420 (flags reset), R9 MFA set green, 404s, 360px browser pass, E27 EXPLAIN, failing-first on 3 fix commits all green. Two named gaps: the boundaries allow-list misses 4 mutation forms; the org-list description has no exact-text test. | FAIL | 2026-10-25 |
+
+## Handoff
+
+**Next agent: the Phase 4 implementers.**
+- **api-developer:** finding 1, harden `src/lib/admin-portal/dashboard/boundaries.test.ts` at `:114`, `:129` and `:152`, with the four synthetic offenders added.
+- **ux-developer:** finding 2, a holder-branch exact-text test for `src/app/(admin)/admin/organizations/page.tsx:150`.
+
+Neither touches product code or the design, so there is no Phase 3 escalation. Then back to QA for a scoped re-run.
+
+Evidence files:
+- Logs: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/`
+- Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/shots/` (`dash-360.png`, `menu-open-360.png`, `orgs-360.png`, `docs-360.png`, `dash-1280.png`)
+- Mutation copy: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/mut`
+
+Worktree git status is as I found it: only the orchestrator's `docs/work-log/2026-10-25-platform-admin-redesign-inc3.md` modification. Port 3530 is free.
+
+---
+
+# Phase 4 — loop-back 1 (full-stack-developer, after Phase 5 FAIL)
+
+**Date:** 2026-10-25. Test-only; no product code, design or copy changed. Commits `b7b0d7f` (finding 1) and `d1ae359` (finding 2), on `pipeline/platform-admin-redesign`.
+
+## Finding 1 — boundaries scan (`b7b0d7f`)
+
+`src/lib/admin-portal/dashboard/boundaries.test.ts`:
+- `@/lib/db` is allowed exactly and carries only `getPlatformDb`. Anything under `@/lib/db/` must be `@/lib/db/schema`, the `@/lib/db/domain` barrel or a file under it, and name only allow-listed tables (`dbImportOffenders`). Namespace, default, re-export (`export *`), side-effect and dynamic `import()` forms are offenders, because the names behind them cannot be read. Imports are found in either quote style and across line breaks. The old `"db" && startsWith("db/")` wave-through in `moduleAllowed` is gone, so `@/lib/db/errors` and similar are now rejected too (no reader uses them).
+- `sqlTables` reads a whole comma-separated `from` list (with `AS` aliases), unquotes quoted identifiers (also as escaped inside a JS string), keeps the table of a schema-qualified name, and reports an interpolated `${...}` table as `${}`. Import statements are removed before the scan so `from "@/lib/db"` is not read as a quoted table.
+- The "scan is not vacuous" block gained a composite `offenders(code)` and 12 synthetic offenders: QA's four forms (barrel plus `.from(officerTerms)`, comma join, quoted identifier, namespace import) and eight more (single-quoted multi-line barrel, dynamic import, `export *`, escaped schema-qualified quoted identifier, schema-qualified table, interpolated table, comma join with `AS` and loose spacing, a table named only on a `join`). Each must be reported for the tenant table or db module itself, not by accident of another rule. A positive control confirms the real idioms (`getPlatformDb`, schema table import, `left join audit_events`) report nothing.
+
+**Failing-first.**
+- The four QA forms were added first, against the unchanged scan: 4 failed, 12 passed.
+- A real mutant reader `zz-mutant.ts` in the directory (barrel import plus `.from(officerTerms)`): old test file 11/11 green; new test file 1 failed (`imports from @/lib/db/** name only allow-listed tables`). The mutant was deleted afterwards.
+- The real readers pass the new scan (24/24).
+
+## Finding 2 — holder-branch copy and the 2FA note (`d1ae359`)
+
+- New `src/app/(admin)/admin/organizations/page.test.tsx`: renders the list for an `ADMIN_ORGANIZATIONS` holder, asserts the exact description and that `/brand colour|neutralis|abusive tenant/i` is absent. **Failing-first:** with the pre-`e0df3d3` text restored in `page.tsx` it fails ("Unable to find an element with the text: /^Find an organization,/"); `page.tsx` was restored byte-for-byte afterwards and is untouched in the commit.
+- New `src/app/(admin)/admin/2fa/page.test.tsx` (recommended item): "Showing the first 2 of 7 accounts." appears when the cap hides accounts; absent when every account is listed; empty list shows "Nobody is required without being enrolled." and no cap note. This note is existing behaviour, so these pass on first write (no failing-first applies).
+
+## Gates (run in the worktree)
+
+`npm run typecheck` PASS · `npm run lint` PASS (`--max-warnings=0`) · `npm run check` PASS (8/8) · plain `npm test` 583 files passed / 80 skipped, 8,764 tests passed / 2,458 skipped.
+
+## Handoff
+
+Next: qa (scoped re-run per its Verdict: the boundaries mutation set, the three touched test files, plain `npm test`; everything else stands). No schema, env var, `FEATURES` entry or flag change.
 
 ---
 

@@ -38,6 +38,16 @@
  *          (`sql.join(` builds a fragment list, not a table, and is exempt);
  *        - a db handle comes from `getPlatformDb` in `@/lib/db` and nowhere else:
  *          `drizzle(`, `neon(`, `new Pool(` and `new Client(` are offenders.
+ *   7. RAW SQL IS ALLOW-ONLY OVER A CLOSED NAME SET (loop-back 3: a parser of table
+ *      positions was beaten four ways, N02 and N05-N07). The set is every
+ *      `pgTable("...")` in `src/lib/db/schema.ts` and `src/lib/db/domain/**`, read
+ *      at test time. In the UNSTRIPPED text of every string and template literal
+ *      (any `sql` alias, any string handed to `execute`; only the `readCard("key"`
+ *      key is exempt), any identifier token that is a real table name outside the
+ *      allow-list is an offender, wherever it sits: after `from`, `join`, `table`, a
+ *      comma, a parenthesis, a comment, a cast, quoted or not, any case. It fails
+ *      closed: a column sharing a tenant table's name is reported too. `.raw(` is
+ *      allowed only with a single string literal (no `+`, no interpolation).
  * The allow-list covers the Increment 2 cards as well as Increment 1's subset,
  * because they share this directory (the Phase 2 list, not Increment 1's).
  *
@@ -51,9 +61,11 @@
  * and the retrospective are the controls.
  *
  * ACCEPTED RESIDUAL OF THE SCAN ITSELF (`paper`): it reads source text. It cannot
- * see a computed property access (`db[key]`), a table reached through a value
- * produced elsewhere, or an allow-listed module (`@/lib/sites`, `@/lib/flags`,
- * ...) that itself reaches a tenant table.
+ * see a computed property access (`db[key]`), a table name assembled at runtime
+ * instead of written in a literal (JS concatenation into a variable that reaches
+ * `execute`, or SQL-side assembly such as `format()`, `||` on string pieces or a
+ * `U&"..."` escape), or an allow-listed module (`@/lib/sites`, `@/lib/flags`, ...)
+ * or a helper outside the directory that itself reaches a tenant table.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -239,6 +251,146 @@ function sqlTables(code: string): string[] {
   return tables;
 }
 
+// ---- raw SQL, allow-only over the closed set of real table names (loop-back 3) ----
+
+/** Every table the schema declares: each `pgTable("name"` in `schema.ts` and `domain/**`. */
+function realTableNames(): Set<string> {
+  const files = [path.join(SRC, "lib", "db", "schema.ts"), ...walk(path.join(SRC, "lib", "db", "domain")).filter((f) => !isTest(f))];
+  const names = new Set<string>();
+  for (const file of files) {
+    for (const m of readFileSync(file, "utf8").matchAll(/\bpgTable\(\s*["'`]([a-z0-9_]+)["'`]/g)) names.add(m[1]!);
+  }
+  return names;
+}
+const REAL_TABLES = realTableNames();
+/** Real tables a dashboard reader may not name in any literal. Position, quoting, case and comments do not matter. */
+const FORBIDDEN_TABLES: ReadonlySet<string> = new Set([...REAL_TABLES].filter((t) => !(ALLOWED_TABLES_SQL as readonly string[]).includes(t)));
+
+/**
+ * Splits TypeScript source into (a) `code`: comments removed, every string and
+ * template literal replaced by a placeholder (`"STR"` for a literal with no
+ * interpolation, `` `TPL` `` otherwise), and (b) `literals`: the UNSTRIPPED text of
+ * every string and template literal, interpolations marked `${}`. Comments are
+ * skipped by the scanner, so a `/* ... *\/` inside SQL text is kept. EVERY literal is
+ * SQL text for this purpose (an alias of `sql`, a string handed to `execute`, a
+ * variable later passed on), except the first argument of `readCard(`. A quote that
+ * is not closed on its own line is code (JSX text), not a literal.
+ */
+function scanSource(src: string): { code: string; literals: string[] } {
+  const literals: string[] = [];
+  let code = "";
+  let i = 0;
+
+  const regexAllowed = () => {
+    const tail = code.trimEnd();
+    return tail === "" || /[(,=:[!&|?{};+\-*%<>~^]$/.test(tail) || /\breturn$/.test(tail);
+  };
+
+  function readTemplate(): string {
+    i++;
+    let text = "";
+    let interpolated = false;
+    while (i < src.length && src[i] !== "`") {
+      if (src[i] === "\\") {
+        text += src.slice(i, i + 2);
+        i += 2;
+      } else if (src[i] === "$" && src[i + 1] === "{") {
+        i += 2;
+        interpolated = true;
+        text += " ${} ";
+        scanCode(true);
+      } else text += src[i++];
+    }
+    i++;
+    literals.push(text);
+    return interpolated ? "`TPL`" : '"STR"';
+  }
+
+  function scanCode(stopAtBrace: boolean): void {
+    let depth = 0;
+    while (i < src.length) {
+      const c = src[i]!;
+      const n = src[i + 1];
+      if (c === "/" && n === "/") {
+        const nl = src.indexOf("\n", i);
+        i = nl < 0 ? src.length : nl;
+      } else if (c === "/" && n === "*") {
+        const end = src.indexOf("*/", i + 2);
+        i = end < 0 ? src.length : end + 2;
+        code += " ";
+      } else if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < src.length && src[j] !== c && src[j] !== "\n") j += src[j] === "\\" ? 2 : 1;
+        if (src[j] === c) {
+          // The one literal that is not SQL text is a card key: `readCard("accounts", ...)`.
+          if (!/\breadCard\s*\(\s*$/.test(code)) literals.push(src.slice(i + 1, j));
+          code += '"STR"';
+          i = j + 1;
+        } else code += src[i++];
+      } else if (c === "`") {
+        code += readTemplate();
+      } else if (c === "/" && regexAllowed()) {
+        let j = i + 1;
+        let inClass = false;
+        while (j < src.length && src[j] !== "\n" && (inClass || src[j] !== "/")) {
+          if (src[j] === "\\") j++;
+          else if (src[j] === "[") inClass = true;
+          else if (src[j] === "]") inClass = false;
+          j++;
+        }
+        if (src[j] === "/") {
+          j++;
+          while (/[a-z]/.test(src[j] ?? "")) j++;
+          code += "/RE/";
+          i = j;
+        } else code += src[i++];
+      } else {
+        if (stopAtBrace) {
+          if (c === "{") depth++;
+          else if (c === "}") {
+            if (depth === 0) {
+              i++;
+              return;
+            }
+            depth--;
+          }
+        }
+        code += c;
+        i++;
+      }
+    }
+  }
+
+  scanCode(false);
+  return { code, literals };
+}
+
+/**
+ * Every identifier token, in any string or template literal of the (UNSTRIPPED)
+ * source, that is a real table name outside the allow-list. A token is a run of
+ * identifier characters, so quoting, case, schema qualification, a comment or a
+ * parenthesis between it and its keyword change nothing. Fails closed: a column
+ * that shares a tenant table's name is reported too.
+ */
+function closedNameOffenders(src: string): string[] {
+  const out: string[] = [];
+  for (const text of scanSource(src).literals) {
+    for (const token of text.toLowerCase().match(/[a-z_][a-z0-9_$]*/g) ?? []) {
+      if (FORBIDDEN_TABLES.has(token)) out.push(`table name ${token}`);
+    }
+  }
+  return out;
+}
+
+/** `.raw` is allowed only as `.raw("a single string literal")`; `sql[...]` is not a way around it. */
+function rawCallOffenders(src: string): string[] {
+  const { code } = scanSource(src);
+  return [
+    ...[...code.matchAll(/\.\s*raw\b(?!\s*\(\s*"STR"\s*\))/g)].map(() => "sql.raw argument is not a single string literal"),
+    ...[...code.matchAll(/\bsql\s*\[/g)].map(() => "sql.raw argument via bracket access"),
+  ];
+}
+
 /** The only bare (package) modules a reader may import. A driver, a pool or a second client is not on this list. */
 const ALLOWED_BARE_MODULES = ["server-only", "drizzle-orm"] as const;
 
@@ -335,6 +487,8 @@ function offenders(code: string): string[] {
     ...queryApiAccess(code),
     ...builderTableOffenders(code),
     ...dbHandleOffenders(code),
+    ...closedNameOffenders(code),
+    ...rawCallOffenders(code),
   ];
 }
 
@@ -347,6 +501,15 @@ describe("the scan is not vacuous", () => {
     expect(FILES.length).toBeGreaterThanOrEqual(12);
     expect(FILES.map((f) => path.basename(f))).toEqual(expect.arrayContaining(["tickets.ts", "recent-changes.ts", "read-card.ts"]));
 
+    // The closed name set is read from the schema, not typed here, and holds every allowed table.
+    expect(REAL_TABLES.size).toBeGreaterThan(80);
+    expect([...REAL_TABLES]).toEqual(expect.arrayContaining(["officer_terms", "people", "memberships", "roll_actions"]));
+    expect(ALLOWED_TABLES_SQL.filter((t) => !REAL_TABLES.has(t))).toEqual([]);
+    expect(FORBIDDEN_TABLES.has("officer_terms")).toBe(true);
+    expect(FORBIDDEN_TABLES.has("audit_events")).toBe(false);
+    // The scanner skips comments and regex literals but keeps SQL-comment text inside a literal.
+    expect(scanSource("a /* c */ // d\nb('x' + `y${z('w')}`, /'/.test(q), `from/**/t`)").literals).toEqual(["x", "w", "y ${} ", "from/**/t"]);
+    expect(scanSource(`readCard("accounts", async () => 1); const k = "feedback";`).literals).toEqual(["feedback"]);
     expect(dbImportOffenders(`import { people, users as u, type Foo } from "@/lib/db/domain/people";`)).toEqual([
       "@/lib/db/domain/people: people",
       "@/lib/db/domain/people: Foo",
@@ -452,6 +615,30 @@ describe("the scan is not vacuous", () => {
     expect(offenders(code).some((o) => label.test(o))).toBe(true);
   });
 
+  // QA run 3 (N02, N04-N07) and further forms of the same class: the table's name is
+  // written verbatim in SQL text, in a position the from/join parser does not read. The
+  // raw-SQL rule is allow-only over the closed set of real table names, so position
+  // does not matter, and `sql.raw` takes one string literal or nothing.
+  it.each([
+    [
+      "N02: a CTE reusing the tenant table's name excuses it in another statement",
+      "export const a = sql`with officer_terms as (select 1 as id) select id from officer_terms`;\nexport const b = sql`select count(*) from officer_terms`;",
+      /^table name officer_terms/,
+    ],
+    ["N04: sql.raw with a concatenated string", `export const q = sql.raw("select count(*) from " + table);`, /^sql\.raw argument/],
+    ["N04b: sql.raw with a template that has an interpolation", "export const q = sql.raw(`select count(*) from ${table}`);", /^sql\.raw argument/],
+    ["N04c: sql.raw taken as a value", `const r = sql.raw;\nexport const q = r("select 1");`, /^sql\.raw argument/],
+    ["N05: a comment between the keyword and the table", "export const q = sql`select count(*) from/**/officer_terms`;", /^table name officer_terms/],
+    ["N06: a parenthesised join list", "export const q = sql`select count(*) from (officer_terms t cross join organizations o)`;", /^table name officer_terms/],
+    ["N07: the TABLE command", "export const q = sql`table officer_terms`;", /^table name officer_terms/],
+    ["a table named inside a string passed to execute()", `export const q = () => getPlatformDb().execute("select count(*) from officer_terms");`, /^table name officer_terms/],
+    ["a quoted identifier escaped in a JS string, upper case", 'export const q = sql.raw("select 1 from public.\\"OFFICER_TERMS\\"");', /^table name officer_terms/],
+    ["a regclass cast", "export const q = sql`select 1 from organizations where 'officer_terms'::regclass is not null`;", /^table name officer_terms/],
+    ["an aliased sql tag", "import { sql as s } from \"drizzle-orm\";\nexport const q = s`select count(*) from officer_terms`;", /^table name officer_terms/],
+  ])("reports %s", (_form, code, label) => {
+    expect(offenders(code).some((o) => label.test(o))).toBe(true);
+  });
+
   it("does not report the idioms the real readers use", () => {
     expect(
       offenders(
@@ -517,6 +704,14 @@ describe("R7b: dashboard readers reach platform-axis tables only", () => {
 
   it("no reader builds its own db handle", () => {
     expect(FILES.flatMap((f) => dbHandleOffenders(read(f)).map((o) => `${rel(f)}: ${o}`))).toEqual([]);
+  });
+
+  it("no string or template literal names a real table outside the allow-list, whatever its position", () => {
+    expect(FILES.flatMap((f) => closedNameOffenders(readFileSync(f, "utf8")).map((o) => `${rel(f)}: ${o}`))).toEqual([]);
+  });
+
+  it("sql.raw is called only with a single string literal", () => {
+    expect(FILES.flatMap((f) => rawCallOffenders(readFileSync(f, "utf8")).map((o) => `${rel(f)}: ${o}`))).toEqual([]);
   });
 
   it("metadata appears only as a metadata->>'path' extraction (E17)", () => {

@@ -28,6 +28,10 @@ import {
   ACCOUNT_INVITATION_PURPOSES,
   ACCOUNT_INVITATION_ORIGINS,
   ACCOUNT_INVITATION_BLOCKED_REASONS,
+  ACCOUNT_INVITATION_DESIGNATION_PURPOSES,
+  ACCOUNT_INVITATION_PURPOSES_ALLOWED,
+  ACCOUNT_INVITATION_ORIGINS_ALLOWED,
+  ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED,
   ACCOUNT_INVITATION_ACCEPT_MARKER,
   ACCOUNT_INVITATION_MAX_RESENDS,
   ACCOUNT_INVITATION_MAX_EXPIRY_DAYS,
@@ -43,13 +47,28 @@ const MIGRATION = readFileSync(
 /** The migration with `--` comments removed, so prose cannot satisfy a code assertion. */
 const CODE = MIGRATION.replace(/--[^\n]*/g, "");
 
-function namesCreatedByMigration(): Set<string> {
+/**
+ * drizzle/0065 section 5 amends the table (Community Increment 2b): widened
+ * vocabularies, two new CHECKs, the re-predicated open-address index and two
+ * new indexes. Its sections 1-10 are Batch A1; A2 appends 11-15.
+ */
+const MIGRATION_0065 = readFileSync(
+  fileURLToPath(new URL("../../../../drizzle/0065_presby_sign_in_and_connect.sql", import.meta.url)),
+  "utf8",
+);
+const CODE_0065 = MIGRATION_0065.replace(/--[^\n]*/g, "");
+
+function namesCreatedBy(code: string): Set<string> {
   const names = new Set<string>();
-  for (const m of CODE.matchAll(/alter table account_invitations add constraint (\w+)/g)) names.add(m[1]);
-  for (const m of CODE.matchAll(/create (?:unique )?index if not exists (\w+)\s+on account_invitations/g)) names.add(m[1]);
-  const create = CODE.match(/create table if not exists account_invitations \(([\s\S]*?)\n\);/);
+  for (const m of code.matchAll(/alter table account_invitations add constraint (\w+)/g)) names.add(m[1]);
+  for (const m of code.matchAll(/create (?:unique )?index if not exists (\w+)\s+on account_invitations/g)) names.add(m[1]);
+  const create = code.match(/create table if not exists account_invitations \(([\s\S]*?)\n\);/);
   for (const c of create?.[1].matchAll(/constraint (\w+)/g) ?? []) names.add(c[1]);
   return names;
+}
+
+function namesCreatedByMigration(): Set<string> {
+  return namesCreatedBy(CODE);
 }
 
 function namesDeclaredByDrizzle(): Set<string> {
@@ -66,8 +85,8 @@ function namesDeclaredByDrizzle(): Set<string> {
 }
 
 /** The quoted list inside `check (<col> in (...))` for one named constraint. */
-function checkList(constraint: string): string[] {
-  const m = CODE.match(new RegExp(`add constraint ${constraint}\\s+check \\(\\w+ in \\(([^)]*)\\)\\)`));
+function checkList(constraint: string, code: string = CODE): string[] {
+  const m = code.match(new RegExp(`add constraint ${constraint}\\s+check \\(\\w+ in \\(([^)]*)\\)\\)`));
   if (!m) throw new Error(`no IN-list CHECK named ${constraint}`);
   return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
 }
@@ -109,8 +128,58 @@ describe("drizzle/0059 constraint and index names are mirrored in the domain mod
     );
   });
 
-  it("accountInvitations declares every name 0059 creates, and nothing 0059 does not", () => {
-    expect([...namesDeclaredByDrizzle()].sort()).toEqual([...created].sort());
+  it("0065 creates exactly the names its section 5 lists (re-created and new)", () => {
+    expect([...namesCreatedBy(CODE_0065)].sort()).toEqual(
+      [
+        "account_invitations_purpose_allowed",
+        "account_invitations_origin_allowed",
+        "account_invitations_purpose_origin_tie",
+        "account_invitations_names_by_purpose",
+        "account_invitations_sign_in_has_person",
+        "account_invitations_blocked_reason_allowed",
+        "account_invitations_open_address_uq",
+        "account_invitations_open_sign_in_person_uq",
+        "account_invitations_person_created_ix",
+      ].sort(),
+    );
+  });
+
+  it("accountInvitations declares every name 0059 and 0065 create, and nothing they do not", () => {
+    const both = new Set([...created, ...namesCreatedBy(CODE_0065)]);
+    expect([...namesDeclaredByDrizzle()].sort()).toEqual([...both].sort());
+  });
+});
+
+describe("drizzle/0065 enumerations equal the TypeScript lists (Increment 2b)", () => {
+  it("purpose, origin and blocked_reason CHECK lists equal the *_ALLOWED vocabularies", () => {
+    expect(checkList("account_invitations_purpose_allowed", CODE_0065)).toEqual([...ACCOUNT_INVITATION_PURPOSES_ALLOWED]);
+    expect(checkList("account_invitations_origin_allowed", CODE_0065)).toEqual([...ACCOUNT_INVITATION_ORIGINS_ALLOWED]);
+    expect(checkList("account_invitations_blocked_reason_allowed", CODE_0065)).toEqual([
+      ...ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED,
+    ]);
+  });
+
+  it("each widened list is the 0059 list plus exactly the 2b value, in order", () => {
+    expect(ACCOUNT_INVITATION_PURPOSES_ALLOWED).toEqual([...ACCOUNT_INVITATION_PURPOSES, "sign_in"]);
+    expect(ACCOUNT_INVITATION_ORIGINS_ALLOWED).toEqual([...ACCOUNT_INVITATION_ORIGINS, "org"]);
+    expect(ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED).toEqual([...ACCOUNT_INVITATION_BLOCKED_REASONS, "person_deceased"]);
+  });
+
+  it("re-predicates open_address_uq to every purpose but sign_in, keeping the open predicate and no expiry term (R28)", () => {
+    const m = CODE_0065.match(/create unique index if not exists account_invitations_open_address_uq([\s\S]*?);/);
+    expect(m).not.toBeNull();
+    const def = m![1].replace(/\s+/g, " ");
+    expect(def).toContain("(organization_id, purpose, email_normalized)");
+    expect(def).toContain("where purpose <> 'sign_in' and accepted_at is null and revoked_at is null and superseded_at is null and blocked_at is null");
+    expect(def).not.toMatch(/expires_at/);
+    // dropped first, so a re-apply really re-predicates the 0059 index
+    expect(CODE_0065.indexOf("drop index if exists account_invitations_open_address_uq")).toBeLessThan(
+      CODE_0065.indexOf("create unique index if not exists account_invitations_open_address_uq"),
+    );
+  });
+
+  it("leaves the D-2 designation index alone", () => {
+    expect(CODE_0065).not.toMatch(/account_invitations_open_designation_uq/);
   });
 });
 
@@ -121,9 +190,9 @@ describe("drizzle/0059 enumerations equal the TypeScript lists", () => {
     expect(checkList("account_invitations_blocked_reason_allowed")).toEqual([...ACCOUNT_INVITATION_BLOCKED_REASONS]);
   });
 
-  it("the D-2 designation index covers exactly the TypeScript purposes", () => {
+  it("the D-2 designation index covers exactly the two designation purposes", () => {
     const m = CODE.match(/create unique index if not exists account_invitations_open_designation_uq[\s\S]*?purpose in \(([^)]*)\)/);
-    expect([...m![1].matchAll(/'([^']+)'/g)].map((x) => x[1])).toEqual([...ACCOUNT_INVITATION_PURPOSES]);
+    expect([...m![1].matchAll(/'([^']+)'/g)].map((x) => x[1])).toEqual([...ACCOUNT_INVITATION_DESIGNATION_PURPOSES]);
   });
 
   it("the resend cap and expiry cap numbers", () => {
@@ -166,5 +235,63 @@ describe("drizzle/0059 structural promises", () => {
     expect(handler).toMatch(/get stacked diagnostics v_con = constraint_name/);
     expect(handler).toMatch(/if v_con = 'users_email_unique' then/);
     expect(handler).toMatch(/else\s+raise;/);
+  });
+});
+
+describe("drizzle/0065 structural promises (Increment 2b, Batch A1 sections)", () => {
+  /** The body of one function in 0065, `as $$ ... $$`. */
+  function body0065(fn: string): string {
+    const start = CODE_0065.indexOf(`create or replace function ${fn}(`);
+    if (start < 0) throw new Error(`${fn} not in 0065`);
+    const open = CODE_0065.indexOf("$$", start);
+    const close = CODE_0065.indexOf("$$", open + 2);
+    return CODE_0065.slice(open + 2, close);
+  }
+
+  it("carries no top-level begin/commit of its own (apply with psql -1)", () => {
+    expect(CODE_0065).not.toMatch(/^\s*(begin|commit)\s*;/im);
+  });
+
+  it("grants presby_app only EXECUTE, never a table privilege, and grants presby_platform nothing", () => {
+    const grants = [...CODE_0065.matchAll(/grant ([^;]*?) to (\w+);/g)];
+    expect(grants.length).toBeGreaterThan(0);
+    for (const g of grants) {
+      expect(g[2]).toBe("presby_app");
+      expect(g[1]).toMatch(/^execute on function /);
+    }
+  });
+
+  it("the two proof writers are EXECUTE-granted to presby_app after a revoke from every application role", () => {
+    for (const sig of ["presby_record_google_email_proof(uuid, text)", "presby_complete_email_change(text)"]) {
+      const revoke = CODE_0065.indexOf(`revoke all on function ${sig} from public, presby_app, presby_platform;`);
+      const grant = CODE_0065.indexOf(`grant execute on function ${sig} to presby_app;`);
+      expect(revoke).toBeGreaterThan(-1);
+      expect(grant).toBeGreaterThan(revoke);
+    }
+  });
+
+  it("the users and people guards decide 'owner' from pg_class.relowner and name no role (A1)", () => {
+    for (const fn of ["presby_users_guard_email_proof", "presby_guard_people_user_link"]) {
+      const b = body0065(fn);
+      expect(b).toMatch(/c\.relowner = \(select r\.oid from pg_roles r where r\.rolname = current_user\)/);
+      expect(b).toMatch(/c\.oid = tg_relid/);
+      expect(b).not.toMatch(/presby_app|presby_platform|neondb_owner/);
+    }
+  });
+
+  it("the proof writers are SECURITY DEFINER with a pinned search_path and the column-wins pragma", () => {
+    for (const fn of ["presby_record_google_email_proof", "presby_complete_email_change"]) {
+      const start = CODE_0065.indexOf(`create or replace function ${fn}(`);
+      const header = CODE_0065.slice(start, CODE_0065.indexOf("$$", start));
+      expect(header).toMatch(/security definer/);
+      expect(header).toMatch(/set search_path = public, pg_temp/);
+      expect(body0065(fn)).toMatch(/^\s*#variable_conflict use_column/);
+    }
+  });
+
+  it("no proof writer reads contact_methods (R43: proof comes from the account side only)", () => {
+    for (const fn of ["presby_record_google_email_proof", "presby_complete_email_change", "presby_users_guard_email_proof"]) {
+      expect(body0065(fn)).not.toMatch(/contact_methods|verified_at/);
+    }
   });
 });

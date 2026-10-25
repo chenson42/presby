@@ -47,7 +47,9 @@ const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_
 const MIGRATION_PATH = path.join(process.cwd(), "drizzle", "0064_presby_person_emails.sql");
 const GUARD_IMMUTABLE = /id, person_id, kind, value and created_at are immutable/;
 const GUARD_ENDED = /is ended and cannot change/;
-const GUARD_VERIFIED = /verified_at is set only by presby_accept_invitation/;
+// drizzle/0065 section 7 (R43) re-states 0064's message: two owner-path
+// writers now, invitation acceptance and sign-in connection.
+const GUARD_VERIFIED = /verified_at is set only on the owner path, by invitation acceptance or by sign-in connection/;
 const NO_MAIN = /has active email addresses and no main address/;
 
 // The driver's transaction object, typed loosely so one helper serves both

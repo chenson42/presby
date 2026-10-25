@@ -419,6 +419,16 @@ database for some reason, (b) set the password back to the exact value
 
 ---
 
+## Reports for the retrospective
+
+`npm run stats:escape` prints the escape-rate breakdown for the last 30 days.
+The retrospective cadence is 14 days, so `npm run stats:escape -- --since=<date>`
+(or `"N days ago"`) counts from the last retrospective instead of double-counting
+the overlap; the header then reads "since <date>". git compares the committer
+date, so an amended or rebased commit counts from when it was rewritten.
+
+---
+
 ## Two things that will bite you
 
 **Rate limiting.** Sign-in is capped at 5/min per ip:email, and a blocked

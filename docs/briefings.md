@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=26a876d -->
+<!-- covers: decision=224 commit=c1c586b -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,10 @@ is checked.*
 ---
 
 ## 2026-10-25
+
+- [ ] **`defect` · The new-organization form could silently drop a type or parent picked before the page finished loading; it now waits (0.42.5; F275).** On `/admin/organizations/new`, a choice made in the first moment after the page appeared could be reset by the page's own startup, creating a root or wrong-type organization that the product cannot repair (the type is permanent and there is no reparent control). The whole form now stays greyed out until it is ready. Nothing already created is affected, but if you created an organization very quickly after opening the page, open it from the organizations list and check its type and parent. **Still open:** the type and slug are permanent only by convention (nothing in the database stops a direct rewrite); that is the platform admin redesign's Increment 3.
+
+- [ ] **`decision` · Sign-in now refuses an outside-provider email the provider has not confirmed, before Google is switched on anywhere (0.42.4; DECISION-246).** The platform used to trust the address an outside provider reported without checking the provider's own "email confirmed" flag, so an unconfirmed claim of someone's address could have signed in as them (an enrolled person would still have met the authenticator code), and a claim of an unused address could have created an account that, for an address on the initial-administrator list, received administrator rights. Nothing was exposed: Google is configured in no environment and production has no outside-provider accounts. **Still owed:** no real Google sign-in has ever run against this, so confirm on `development` when you first configure Google that the flag arrives as expected; a refused person sees only the generic "Access Denied" page, with the server log as the only explanation (existing TODO). **Rule to remember:** the check passes any provider that confirms an address, so a second provider needs its own review first.
 
 - [ ] **`decision` · A security update to how sign-in sessions are handled shipped with no visible change (0.42.3; DECISION-230).** The platform now accepts that the second sign-in step is complete only from its own verification screens (the authenticator code and the recovery code); other requests to change a session's state are refused, and the session-update path reads nothing from the request. Signing in, authenticator codes and recovery codes work as before, and nobody is asked for a code again. **You ruled on 2026-10-25 that existing sessions are not rotated:** the two active production accounts are both yours, so no member is affected. The change covers new activity and cannot show whether an older session already holds a claim it did not earn, so such a session stays as it is until it expires (about 30 days). **Accepted limit:** a verified session outlives an administrator's reset of someone's authenticator, or a sign-out elsewhere, until it expires; a per-session server record would fix that and is tracked in `docs/TODO.md`. **Still owed:** a production sign-in check with an MFA-enrolled account (the change relies on request context reaching the session callback, proven on a production-mode build but not yet on Vercel), and a neutral heads-up to the owners of repositories seeded from the same starter. A smaller finding came with it (F237, low): a recovery code can be used twice if two submissions race, and an authenticator code can be reused within its time window; both need a session that already passed the password step and a valid code, and the fix is its own pipeline.
 

@@ -32,10 +32,16 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush }) }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+const mockHydrated = vi.hoisted(() => ({ value: true }));
+vi.mock("@/components/shared/use-hydrated", () => ({
+  useHydrated: () => mockHydrated.value,
+}));
+
 import { CreateOrganizationForm } from "./create-organization-form";
 
 afterEach(() => {
   cleanup();
+  mockHydrated.value = true;
   mockCreateAction.mockReset();
   mockPush.mockReset();
 });
@@ -273,5 +279,27 @@ describe("CreateOrganizationForm — general_assembly and degraded states", () =
       fireEvent.submit(container.querySelector("form")!);
     });
     expect(mockCreateAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("<CreateOrganizationForm> hydration gate (DECISION-159) — regression for F275 create-org form operable before hydration", () => {
+  it("holds the whole form inoperable until it has hydrated", () => {
+    mockHydrated.value = false;
+    render(<CreateOrganizationForm eligibleParents={PARENTS} />);
+    const gate = document.querySelector('fieldset[data-slot="hydration-gate"]');
+    expect(gate).not.toBeNull();
+    expect((gate as HTMLFieldSetElement).disabled).toBe(true);
+    expect(gate!.contains(typeSelect())).toBe(true);
+    expect(gate!.contains(screen.getByRole("button", { name: "Create organization" }))).toBe(true);
+    expect(screen.getByRole("button", { name: "Create organization" }).matches(":disabled")).toBe(true);
+    expect(typeSelect().matches(":disabled")).toBe(true);
+  });
+
+  it("is operable once hydrated", () => {
+    mockHydrated.value = true;
+    render(<CreateOrganizationForm eligibleParents={PARENTS} />);
+    const gate = document.querySelector('fieldset[data-slot="hydration-gate"]');
+    expect((gate as HTMLFieldSetElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Create organization" }).matches(":disabled")).toBe(false);
   });
 });

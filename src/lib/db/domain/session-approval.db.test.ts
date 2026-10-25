@@ -523,13 +523,17 @@ describe.skipIf(!hasDb)("drizzle/0062 session approval (Postgres-backed)", () =>
       expect(by.presby_roll__actor_holds).toMatchObject({ prosecdef: true, config: "search_path=public, pg_temp", app_exec: false, public_exec: false });
       expect(by.presby_deny_roll_decision).toMatchObject({ prosecdef: false, app_exec: true, public_exec: false });
       expect(by.presby_guard_pastor_no_roll).toMatchObject({ prosecdef: true, config: "search_path=public, pg_temp", app_exec: false, public_exec: false });
-      // The derived-group sync and the freeze stay invoker, as before.
-      const invokers = await q(sql`
-        select proname, prosecdef from pg_proc
+      // The freeze stays invoker, as before. The derived-group sync was
+      // invoker here in 0062; drizzle/0068 (parish management, Phase 3
+      // amendment 1, 1.3) re-creates it SECURITY DEFINER with a pinned
+      // search_path and EXECUTE revoked, matching 0066 (DECISION-236), so the
+      // two apply in either order. Pinned in full by parishes.db.test.ts.
+      const attrs = await q(sql`
+        select proname, prosecdef, array_to_string(proconfig, ',') as config from pg_proc
          where proname in ('presby_sync_derived_group', 'presby_freeze_approved_roll_action') order by proname`);
-      expect(invokers).toEqual([
-        { proname: "presby_freeze_approved_roll_action", prosecdef: false },
-        { proname: "presby_sync_derived_group", prosecdef: false },
+      expect(attrs).toEqual([
+        { proname: "presby_freeze_approved_roll_action", prosecdef: false, config: null },
+        { proname: "presby_sync_derived_group", prosecdef: true, config: "search_path=public, pg_temp" },
       ]);
     });
 

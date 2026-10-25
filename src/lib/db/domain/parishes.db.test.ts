@@ -38,6 +38,24 @@ import { rowsOf, type Row } from "@/lib/testing/invitation-fixture";
 vi.mock("server-only", () => ({}));
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 240_000 });
 
+// `@/lib/audit` transitively imports `@/auth` (next-auth), which this test
+// environment cannot resolve. Only the NFC companion (QA run 1, Finding 2)
+// imports src/lib/parishes.ts; the keys are restated as in parishes.test.ts
+// and pinned to audit.ts by audit.test.ts. The audit row itself is the real
+// insertAuditRow in the define transaction.
+vi.mock("@/lib/audit", () => ({
+  AUDIT_ACTIONS: {
+    ORG_FEATURE_TOGGLED: "tenant.org_feature.toggled",
+    DISTRICT_CREATED: "tenant.district.created",
+    DISTRICT_RENAMED: "tenant.district.renamed",
+    DISTRICT_ARCHIVED: "tenant.district.archived",
+    DISTRICT_RESTORED: "tenant.district.restored",
+    HOUSEHOLD_DISTRICT_CHANGED: "tenant.household.district_changed",
+    HOUSEHOLD_DISTRICT_BULK_MOVED: "tenant.household.district_bulk_moved",
+  },
+  recordAudit: vi.fn().mockResolvedValue(undefined),
+}));
+
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL);
 
 // Found by name, not number: the orchestrator may renumber at integration.
@@ -110,6 +128,7 @@ describe.skipIf(!hasDb)("drizzle/0068 parishes (Postgres-backed)", () => {
   let counter = 0;
   const orgIds: string[] = [];
   const personIds: string[] = [];
+  const userIds: string[] = [];
 
   let rosterTypeId: string;
   let courtTypeId: string;
@@ -290,6 +309,10 @@ describe.skipIf(!hasDb)("drizzle/0068 parishes (Postgres-backed)", () => {
     }
     for (const id of personIds) {
       await platform.execute(sql`delete from people where id = ${id}`);
+    }
+    for (const id of userIds) {
+      await platform.execute(sql`delete from audit_events where actor_user_id = ${id}`);
+      await platform.execute(sql`delete from users where id = ${id}`);
     }
   });
 
@@ -689,6 +712,98 @@ describe.skipIf(!hasDb)("drizzle/0068 parishes (Postgres-backed)", () => {
       const r = await appRefusal(sql`delete from org_units where id = ${unit}`);
       expect(r.code).toBe("42501");
       expect(r.message).toBe("permission denied for table org_units");
+    });
+  });
+
+  // Phase 3 amendment 1, ruling 1.3 (QA run 1, Finding 1). 0066 (Community 3a,
+  // DECISION-236) makes this function SECURITY DEFINER because its owner-only
+  // derived-row guard refuses any non-owner derived write. `create or replace`
+  // resets every attribute, so if 0068 re-created it as invoker, a fresh
+  // database applying 0066 then 0068 would refuse every officer term that
+  // materialises a roster row. 0068 must therefore be correct in either order.
+  describe("presby_sync_derived_group() stays a pinned SECURITY DEFINER (amendment 1.3)", () => {
+    it("the catalog: prosecdef, search_path pinned, owned by neondb_owner, no EXECUTE for either application role", async () => {
+      const rows = await q(sql`
+        select p.prosecdef,
+               p.proconfig,
+               pg_get_userbyid(p.proowner) as owner,
+               has_function_privilege('presby_app', p.oid, 'EXECUTE') as app_execute,
+               has_function_privilege('presby_platform', p.oid, 'EXECUTE') as platform_execute
+          from pg_proc p
+         where p.proname = 'presby_sync_derived_group' and p.pronamespace = 'public'::regnamespace`);
+      expect(rows).toEqual([{
+        prosecdef: true,
+        proconfig: ["search_path=public, pg_temp"],
+        owner: "neondb_owner",
+        app_execute: false,
+        platform_execute: false,
+      }]);
+    });
+
+    it("the source: 0068's definition header carries `security definer` and the pinned search_path, and the file revokes EXECUTE", () => {
+      const src = code(M68_TEXT);
+      const lead = "create or replace function presby_sync_derived_group()";
+      const start = src.indexOf(lead);
+      expect(start, "0068 no longer re-creates presby_sync_derived_group()").toBeGreaterThanOrEqual(0);
+      const header = src.slice(start, src.indexOf("as $$", start));
+      expect(header).toMatch(/\bsecurity\s+definer\b/i);
+      expect(header).toMatch(/\bset\s+search_path\s*=\s*public,\s*pg_temp\b/i);
+      expect(src).toMatch(
+        /revoke\s+all\s+on\s+function\s+presby_sync_derived_group\(\)\s+from\s+public,\s*presby_app,\s*presby_platform\s*;/i,
+      );
+    });
+
+    it("a presby_app officer-term insert still materialises the seat row through the definer (no EXECUTE needed to fire a trigger)", async () => {
+      const holder = await member(orgA, "Definerseat");
+      const rows = await asApp(orgA, async (tx) => {
+        const [t] = rowsOf(await tx.execute(sql`
+          insert into officer_terms (organization_id, person_id, office, starts_on)
+          values (${orgA}, ${holder}, 'deacons_moderator', '2026-09-01') returning id`));
+        return rowsOf(await tx.execute(sql`
+          select g.derived_from, gm.source from group_memberships gm
+            join groups g on g.id = gm.group_id where gm.officer_term_id = ${t!.id}`));
+      });
+      expect(rows).toEqual([{ derived_from: "deacons_moderator", source: "derived" }]);
+    });
+  });
+
+  // Phase 3 amendment 1, Finding 2's database companion: the normaliser is the
+  // single guard in front of org_units_name_shape (`name is nfc normalized`).
+  // Stripping a zero-width character that separated a base letter from a
+  // combining mark must leave NFC text, or the CHECK refuses the insert with a
+  // 23514 that src/lib/parishes.ts deliberately does not map.
+  describe("a district name is stored NFC after stripping (QA run 1, Finding 2)", () => {
+    it("defineDistrict as presby_app accepts 'Cafe<ZWSP><combining acute> District' and stores 'Café District'", async () => {
+      const P = await import("@/lib/parishes");
+      const org = await makeOrg("congregation", "nfc");
+      await q(sql`
+        insert into organization_feature_toggles (organization_id, feature_key, enabled)
+        values (${org}, 'org_portal.parishes', true)
+        on conflict (organization_id, feature_key) do update set enabled = true`);
+      await q(sql`
+        insert into permissions (key, module, description, sensitivity_tier)
+        values ('officers.manage', 'officers', 'officers.manage (fixture)', 1) on conflict do nothing`);
+      const definer = await member(org, "Definer");
+      const [role] = await q(sql`
+        insert into app_roles (organization_id, key, name, role_kind, is_protected)
+        values (${org}, ${`par_nfc_${stamp}`}, 'Fixture district definer', 'custom', false) returning id`);
+      await q(sql`insert into app_role_permissions (role_id, permission_key) values (${role!.id}, 'officers.manage')`);
+      await q(sql`
+        insert into role_grants (organization_id, role_id, person_id, starts_on)
+        values (${org}, ${role!.id}, ${definer}, '2020-01-01')`);
+      const [user] = await q(sql`
+        insert into users (email, name)
+        values (${`parishes-db-nfc-${stamp}@example.invalid`}, 'Parishes DB NFC Actor') returning id`);
+      userIds.push(String(user!.id));
+
+      const raw = "Cafe​́ District";
+      const result = await P.defineDistrict(definer, org, { userId: String(user!.id), email: null }, { name: raw });
+
+      expect(result).toMatchObject({ kind: "ok", name: "Café District" });
+      const stored = await q(sql`
+        select name, name is nfc normalized as nfc from org_units
+         where organization_id = ${org} and unit_type = 'district'`);
+      expect(stored).toEqual([{ name: "Café District", nfc: true }]);
     });
   });
 });

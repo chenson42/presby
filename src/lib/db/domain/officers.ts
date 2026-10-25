@@ -210,7 +210,10 @@ export const officerTerms = pgTable(
     //     G-3.0201). moderator stays unmapped. drizzle/0068 section 8a adds
     //     one arm: deacons_moderator materialises into the derived
     //     `deacons_moderator` roster group, whose baseline role carries the
-    //     seat-only key parishes.assign (DECISION-242).
+    //     seat-only key parishes.assign (DECISION-242). Since 0068 the
+    //     function is SECURITY DEFINER, search_path = public, pg_temp, with
+    //     EXECUTE revoked from the application roles, matching 0066
+    //     (DECISION-236) so the two apply in either order.
     //   * trigger officer_terms_org_unit_target_guard,
     //     presby_guard_org_unit_target() (drizzle/0068 section 6): a new,
     //     re-opened or re-pointed OPEN term cannot name an archived, campus

@@ -25,7 +25,9 @@
 -- The whole file is idempotent: every statement is `if not exists`,
 -- `on conflict do nothing`, drop-then-add, `create or replace`, a revoke, or
 -- a loop whose predicate no longer matches once applied. Proven by applying
--- the whole file twice (work-log, Phase 4 Batch A). Unreleased until shipped,
+-- the whole file twice (work-log, Phase 4 Batch A), and again after the
+-- section 8a correction (Phase 3 amendment 1, 1.3; Phase 4 loop-back).
+-- Unreleased until shipped,
 -- so it may be corrected in place until then (CLAUDE.md -> Project Layout ->
 -- drizzle/).
 --
@@ -68,7 +70,8 @@
 --     discriminator; the role KEY is.
 --
 -- ROLLBACK (rehearsed on the pipeline branch inside a rolled-back
--- transaction, Phase 4 Batch A). Data (archived_at values, the seat groups,
+-- transaction, Phase 4 Batch A; step 4's two variants re-rehearsed after the
+-- section 8a correction, Phase 4 loop-back). Data (archived_at values, the seat groups,
 -- roles, grants and any recorded seat terms) is left in place: nothing is
 -- deleted, and without the application the parishes.assign key is inert.
 -- Step 4's CHECK is narrowed back to 0062's list ONLY when no
@@ -90,7 +93,12 @@
 --      alter table org_units drop constraint if exists org_units_name_shape;
 --      drop index if exists org_units_active_name_idx;
 --      (households_org_unit_idx and archived_at may stay; both are inert)
---   4. the 0062 section 8a presby_sync_derived_group() body; then, only if
+--   4. the 0062 section 8a presby_sync_derived_group() body: restore it
+--      `security definer set search_path = public, pg_temp` if 0066 has been
+--      applied; restore the invoker body only if it has not (0066's
+--      owner-only derived-row guard refuses an invoker sync run as
+--      presby_app). The EXECUTE revoke may stay either way: firing a trigger
+--      needs no EXECUTE. Then, only if
 --      not exists (select 1 from officer_terms where office = 'deacons_moderator'):
 --      alter table officer_terms drop constraint if exists officer_terms_office_allowed;
 --      + the 0062 section 8b CHECK.
@@ -538,14 +546,24 @@ create trigger org_delegations_seat_key_guard
 -- 8. vocabulary and the derived group (DECISION-242)
 -- ---------------------------------------------------------------------------
 -- (a) 0062 section 8a's body plus ONE arm: deacons_moderator materialises into
--- the derived deacons_moderator group. Same signature, language, security
--- mode (invoker) and missing-group error text; the '-> session' arms are
--- untouched (pinned to SESSION_OFFICES by officer-offices.test.ts, which reads
--- this file). moderator stays unmapped (DECISION-079). Only congregations
--- have the group; src/lib/officers.ts refuses the office elsewhere before
--- this error can fire.
+-- the derived deacons_moderator group. Same signature, language and
+-- missing-group error text; `SECURITY DEFINER` with a pinned `search_path`,
+-- matching what 0066 sets (Community 3a, DECISION-236), so the two migrations
+-- apply in either order. The organization comes from `NEW`, and the elevation
+-- only affects the sync's own writes. (`create or replace` resets every
+-- attribute: re-created as invoker here, a fresh database applying 0066 then
+-- 0068 would have 0066's owner-only derived-row guard refuse every officer
+-- term that materialises a roster row. Work-log Phase 3 amendment 1, 1.3.)
+-- EXECUTE is revoked from both application roles: a trigger function is
+-- never called directly, and firing a trigger needs no EXECUTE. The
+-- '-> session' arms are untouched (pinned to SESSION_OFFICES by
+-- officer-offices.test.ts, which reads this file); the definer attributes are
+-- pinned by parishes.db.test.ts and test-rls-68.sql (68a). moderator stays
+-- unmapped (DECISION-079). Only congregations have the group;
+-- src/lib/officers.ts refuses the office elsewhere before this error can fire.
 create or replace function presby_sync_derived_group()
-returns trigger language plpgsql
+returns trigger language plpgsql security definer
+set search_path = public, pg_temp
 as $$
 declare
   target_group uuid;
@@ -583,6 +601,7 @@ begin
 
   return new;
 end $$;
+revoke all on function presby_sync_derived_group() from public, presby_app, presby_platform;
 
 -- (b) The office vocabulary, validated. Pinned to OFFICER_OFFICES by
 -- officer-offices.test.ts (keep this exact textual shape: one

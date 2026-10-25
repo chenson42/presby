@@ -81,6 +81,12 @@ begin;
     5, '68a: the seat-key map and the four seat guards are SECURITY DEFINER, owned by neondb_owner, search_path pinned (F26)');
   select assert_eq(
     (select count(*) from pg_proc p
+      where p.prosecdef and pg_get_userbyid(p.proowner) = 'neondb_owner'
+        and p.proconfig = array['search_path=public, pg_temp']
+        and p.oid = 'presby_sync_derived_group()'::regprocedure),
+    1, '68a: presby_sync_derived_group() is SECURITY DEFINER, owned by neondb_owner, search_path pinned, so 0066 and 0068 apply in either order (amendment 1.3)');
+  select assert_eq(
+    (select count(*) from pg_proc p
       where not p.prosecdef
         and p.proconfig = array['search_path=public, pg_temp']
         and p.oid in ('presby_guard_org_unit_target()'::regprocedure,
@@ -93,7 +99,8 @@ begin;
                                   ('presby_guard_seat_role_shape()'),
                                   ('presby_guard_seat_key_grant()'),
                                   ('presby_guard_seat_key_downward()'),
-                                  ('presby_org_units_guard_delete()')) v(f)
+                                  ('presby_org_units_guard_delete()'),
+                                  ('presby_sync_derived_group()')) v(f)
       where has_function_privilege(v.f::regprocedure, 'EXECUTE')
          or has_function_privilege('presby_platform', v.f::regprocedure, 'EXECUTE')),
     0, '68a: neither presby_app nor presby_platform may EXECUTE any 0068 function directly');

@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete; G1–G14, Q1–Q10; 'published' = new explicit default-off switch | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete; R1–R7, DECISION-238/239/240 proposed, F250–F253 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; names, 0067 + definer, reader, slot/island, series action, Copy, T1–T20; F254–F256, DECISION-241 drafted; G9 deferred (operator to confirm) | Design complete, implementers named | 2026-10-25 |
-| 4 — Implementation | database-admin (Batch 1: 0067, definer, RLS suite), then full-stack-developer (Batches 2–4) | Pending; queued behind higher-priority pipelines; port 3500 | — | — |
+| 4 — Implementation | database-admin (Batch 1: 0067, definer, RLS suite), then full-stack-developer (Batches 2–4) | Batch 1 complete (0067 applied and re-applied, section 67 58/58 as presby_app, DB suite 13/13, from-empty green); Batches 2–4 pending; port 3500 | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -972,6 +972,69 @@ Line 597's note ("`is_public` present but inert until Increment 4") is history a
 ---
 
 # Phase 4 — Implementation
+
+## Phase 4 — Batch 1 (database-admin, 2026-10-25)
+
+Commits on `pipeline/public-events-calendar`: `6c830ff` (feat, schema), `920ccac` (test, suite/fixture/DB tests). Neon branch `pipeline-public-events-calendar` only.
+
+**Migration mode: hand-written.** `drizzle/0067_presby_public_events_calendar.sql`, applied as the owner with `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0067_presby_public_events_calendar.sql`. Idempotence proof: whole file applied, then re-applied whole; both exit 0; `events` 16 rows / 15 `is_public` / 0 `website_listed` before and after. Journal: **staged, not edited** (Rule 16): `scripts/public-calendar/_journal.json.integration.patch` adds `{ idx: 67, tag: "0067_presby_public_events_calendar", when: 1787705573186 }` (0064's `when` + 3 days, leaving room for 0065/0066). The orchestrator applies it at integration and renumbers if needed. **From-empty acceptance:** in a scratch `CREATE DATABASE` on the pipeline branch, with all three patches applied: `db:migrate` 65 rows (main's 64 journal entries + 0067; the newest ledger `created_at` is 0067's `when`), `check:schema-parity` 0 failing, `db:seed`, `seed-dev.sql`, `ci/db-baseline.sql`, test helpers, then the full patched `scripts/test-rls.sql` as `presby_app`: **exit 0, 1307 passes (58 in section 67), zero failures**. Re-applying 0067 and the fixture on top: still 1307. Scratch database dropped.
+
+**Catalog re-read on the branch (F38/F152), not from the DDL:** `proacl = {neondb_owner=X/neondb_owner,presby_app=X/neondb_owner}` (identical to the other public definers); `has_function_privilege` public f / presby_platform f / presby_app t; `prosecdef` t, `provolatile` s, `proconfig {"search_path=public, pg_temp"}`, owner `neondb_owner`; `events_website_requires_public` `convalidated` t, `CHECK (((NOT website_listed) OR is_public))`; `events` `relrowsecurity`/`relforcerowsecurity` t/t, one `tenant_isolation` ALL policy; table grants unchanged.
+
+### Files
+
+- Created: `drizzle/0067_presby_public_events_calendar.sql`; `scripts/public-calendar/test-rls-67.sql`, `seed-dev-public-calendar.sql`, `test-rls.sql.integration.patch`, `seed-dev.sql.integration.patch`, `_journal.json.integration.patch` (all three patches `git apply --check` clean against main); `src/lib/public-calendar.db.test.ts`.
+- Modified: `src/lib/db/domain/events.ts` (`websiteListed`, the CHECK, a comment on `isPublic`: "members-only veto, NOT website publication"). `npm run docs:erd` regenerated with no diff.
+
+### Deviations from the design
+
+1. **Fixture: Fernwood only, not Bramblewood.** Feasibility re-run: `scripts/giving/test-rls-46.sql` 46l (line 1098) asserts `presby_public_giving_config('bramblewood')` is byte-identical to `absent`, and a live site turns it into `unavailable`. Fernwood has no site-state assertion in `scripts/` or `e2e/`. Alder Creek stays `provisioning`. The second live org for both cross-tenant directions is in the Vitest file. A live site with no bundle still resolves `not_found` (`src/lib/sites.ts:414`), so `/site/fernwood` 404s as before. To browse the calendar in dev, Batch 4 needs a bundle that carries the marker.
+2. **Fixture events are relative-dated and asserted only absent.** Six demo events at Fernwood, dated from the day the seed runs, so dev has something to show. The suite's positive and edge cases insert their own rows inside rolled-back transactions, so date drift cannot move an assertion. No Alder events are added, because sections 27 and 45 count them.
+3. **Definer restructured, semantics unchanged.** The design allowed this ("the tests, not this text, are the contract"). One CTE with the listing predicate once, `row_number()`, and a `left join cut` replaces the reference body's aggregate `FILTER` with a scalar subquery. T5's pinned literals are kept verbatim: `c_cap  constant integer := 400;`, `'America/New_York'`, `interval '1 month'`, `interval '13 months'`, `'org_portal.public_calendar'`, `'org_portal.calendar'`, `'worship'`, `'org_portal.feature_categories'`.
+4. **T1 is split between psql and Vitest.** `presby_app` cannot write `organization_sites` or `organizations`, and `organization_profiles.updated_by` needs a `users` row. So four cases moved to `src/lib/public-calendar.db.test.ts`: inactive org, a suspended site, both cross-tenant directions, and `contact_phone`. `neondb_owner` is a member of `presby_app` without the SET option, so `set local role presby_app` is refused. The file uses two connections instead: owner fixtures, then the definer on `db` with no GUC. T2 alone calls the definer inside the owner transaction that dropped the CHECK.
+5. **T3 and T5 are left to Batch 2.** T3, the differential against `orgFeatureEnabledInTx`, cannot pass until `org_portal.public_calendar` is in `ORG_FEATURE_CATALOG`. T5 needs the TS constants. Batch 2 adds T3 to `public-calendar.db.test.ts`.
+
+### For Batch 2 (full-stack-developer)
+
+- **Invalid time zone.** If `organization_settings.time_zone` holds an invalid zone, the definer raises at `now() at time zone`. The reader's single `catch` then maps it to `unavailable`. That fails closed, and T6's thrown-error case covers it.
+- **`events_json` shape.** The driver returns `events_json` as an array (pinned in the DB suite). Each element has exactly the seven keys. Absent fields are JSON `null`, and the key is still present.
+- **Apply locally:** `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0067_presby_public_events_calendar.sql`, then `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/public-calendar/seed-dev-public-calendar.sql`. Both are already applied on this pipeline branch.
+
+### Tests (failing-first)
+
+- **`scripts/public-calendar/test-rls-67.sql` (new section 67; T1):** 58 assertions as `presby_app`, exit 0. Each mechanism was broken on the branch and the suite went red at the named line, then 0067 was re-applied:
+
+  | Mechanism broken | First failing assertion |
+  |---|---|
+  | CHECK dropped | `:82` 67a CHECK. Run alone, 67b fails with "FAIL 67b - presby_app inserted a listed members-only event" |
+  | `grant execute … to public` | `:109` 67a PUBLIC |
+  | Category axis ignored | `:217` 67c axis |
+  | Cancelled filter removed | `:292` 67d never-appear |
+  | `website_listed` filter removed | `:292` 67d never-appear |
+  | An `id` key emitted | `:303` 67d allow-list |
+  | Clipping removed | `:351` 67e |
+  | Provisioning sites served | `:192` 67c gate 2 |
+  | Missing toggle row treated as on | `:204` 67c |
+  | Missing member-calendar row treated as on | `:386` 67g |
+  | Window +14 months | `:276` 67d window |
+
+- **`src/lib/public-calendar.db.test.ts` (T2, T4, rest of T1):** 13/13. Each mutation turned exactly one test red. Removing the `is_public` re-filter broke T2. Removing the active-org gate broke gate 1. Setting the cap to 401 broke the first-month cut. Reading "today" in the default zone broke Kiritimati. That last run showed a time-of-day gap: Kiritimati and Pago Pago each share New York's date for part of the day. A 25-hours-apart assertion was added and confirmed red under the same mutation.
+- **Full `scripts/test-rls.sql` on the dev-lineage branch,** as a non-stopping copy with section 67 appended (the person-emails precedent): 1298 passes. The failures are only the known drift: line 217 (untracked membership), line 516 (2FA definer, previously 505) and line 7927 (statistics.publish, previously 7916). 46i and 46j now pass. None touches events, sites or Fernwood.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm run check` | exit 0, all eight tripwires |
+| `npm run check:schema-parity` | 85 tables, 0 failing |
+| Plain `npm test` | 542 files passed, 78 skipped; 8322 tests passed |
+| Events-adjacent DB suites (`event-types`, `events`, `calendar`, `org-provisioning`, `public-calendar.db`; `--no-file-parallelism`) | 5 files, 277 tests passed |
+
+No audit events (schema only). No strings added or changed.
+
+**Next:** full-stack-developer, Batch 2: catalog entry, audit keys, `SiteUrls.portalCalendar()`, contract/reader/mapper, T3/T5, then the `events.ts` write paths. Batch 2 should begin with the F251/F252 regressions, written first and seen to fail.
 
 ## Files Created
 

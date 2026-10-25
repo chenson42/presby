@@ -41,6 +41,15 @@ vi.mock("@/lib/parishes", () => ({
   getParishesOverview: (...args: unknown[]) => getParishesOverview(...args),
 }));
 
+vi.mock("./actions", () => ({
+  defineDistrictAction: vi.fn(),
+  renameDistrictAction: vi.fn(),
+  archiveDistrictAction: vi.fn(),
+  restoreDistrictAction: vi.fn(),
+}));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
 const redirectMock = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
 });
@@ -50,6 +59,7 @@ const notFoundMock = vi.fn(() => {
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => redirectMock(url),
   notFound: () => notFoundMock(),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 import ParishesPage from "./page";
@@ -223,6 +233,72 @@ describe("ParishesPage — the ok path", () => {
     expect(parishesTab.getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Members" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Households" })).toBeTruthy();
+  });
+});
+
+describe("ParishesPage - managed mode (the org toggle on)", () => {
+  const AUTHORITY = {
+    canDefine: true,
+    canMove: true,
+    canListHouseholds: true,
+    canReadRoster: true,
+    seesHiddenNames: true,
+    holdsSeatKey: false,
+  };
+
+  it("renders linked districts, the Add form, archived districts and the unassigned card from the overview", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsOn();
+    getParishesOverview.mockResolvedValue({
+      kind: "ok",
+      managed: true,
+      authority: AUTHORITY,
+      districts: [
+        { orgUnitId: "u1", name: "North District", unitType: "district", archived: false, deaconName: null, householdCount: 2 },
+      ],
+      archived: [
+        { orgUnitId: "u2", name: "East District", unitType: "district", archived: true, deaconName: null, householdCount: 1 },
+      ],
+      unassignedCount: 5,
+      seatFilled: false,
+    });
+
+    const el = await ParishesPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.getByRole("link", { name: "View households in North District" }).getAttribute("href")).toBe(
+      "/o/alder-creek/directory/parishes/u1",
+    );
+    expect(screen.getByRole("heading", { name: "Archived districts" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add district" })).toBeTruthy();
+    expect(screen.getByText("5 households aren't in a district.")).toBeTruthy();
+    expect(screen.getByTestId("seat-callout")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Parishes" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("a seat holder (cannot define) sees districts and the unassigned card but no Add form", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsOn();
+    getParishesOverview.mockResolvedValue({
+      kind: "ok",
+      managed: true,
+      authority: { ...AUTHORITY, canDefine: false, holdsSeatKey: true },
+      districts: [
+        { orgUnitId: "u1", name: "North District", unitType: "district", archived: false, deaconName: null, householdCount: 2 },
+      ],
+      archived: [],
+      unassignedCount: 0,
+      seatFilled: null,
+    });
+
+    const el = await ParishesPage({ params: makeParams() });
+    render(el);
+
+    expect(screen.queryByRole("button", { name: "Add district" })).toBeNull();
+    expect(screen.queryByTestId("seat-callout")).toBeNull();
+    expect(screen.getByRole("link", { name: "View households in North District" })).toBeTruthy();
   });
 });
 

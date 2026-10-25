@@ -256,6 +256,9 @@ export interface ParishUnitEntry {
 export interface ParishTarget {
   orgUnitId: string;
   name: string;
+  /** The district's open Deacon, or `null` when the seat is vacant (named in
+   * the bulk-move confirmation). */
+  deaconName: string | null;
 }
 
 /** One person on a household row: a name (or "Private") and a connection
@@ -439,9 +442,16 @@ async function loadActiveTargets(
        ${excludeId ? sql`and id <> ${excludeId}::uuid` : sql``}
      order by lower(name), id
   `);
-  return rowsOf<{ id: string; name: string }>(result).map((row) => ({
+  const rows = rowsOf<{ id: string; name: string }>(result);
+  const deacons = await deriveDeaconsByOrgUnit(
+    tx,
+    organizationId,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => ({
     orgUnitId: row.id,
     name: row.name,
+    deaconName: deacons.get(row.id) ?? null,
   }));
 }
 
@@ -946,7 +956,13 @@ export type MoveHouseholdResult =
   | DistrictMutationFailure
   | { kind: "not_found" }
   | { kind: "conflict" }
-  | { kind: "target_unavailable"; reason: TargetUnavailableReason };
+  | {
+      kind: "target_unavailable";
+      reason: TargetUnavailableReason;
+      /** The unavailable district's name (a district name is not private); it
+       * lets an Undo refusal say which district is archived. */
+      districtName?: string;
+    };
 
 export interface MoveHouseholdInput {
   householdId: string;
@@ -1019,10 +1035,10 @@ export async function moveHousehold(
       const target = rowsOf<UnitRow>(targetResult)[0];
       if (!target) return { kind: "not_found" };
       if (target.unit_type === "campus") {
-        return { kind: "target_unavailable", reason: "campus" };
+        return { kind: "target_unavailable", reason: "campus", districtName: target.name };
       }
       if (target.archived_at !== null) {
-        return { kind: "target_unavailable", reason: "archived" };
+        return { kind: "target_unavailable", reason: "archived", districtName: target.name };
       }
       toName = target.name;
     }
@@ -1111,7 +1127,7 @@ export type BulkMoveResult =
   | { kind: "not_found" }
   | { kind: "source_not_archived" }
   | { kind: "same_unit" }
-  | { kind: "target_unavailable"; reason: TargetUnavailableReason }
+  | { kind: "target_unavailable"; reason: TargetUnavailableReason; districtName?: string }
   | { kind: "too_many" }
   | { kind: "count_changed" };
 
@@ -1172,10 +1188,10 @@ export async function bulkMoveHouseholds(
       return { kind: "source_not_archived" };
     }
     if (target.unit_type === "campus") {
-      return { kind: "target_unavailable", reason: "campus" };
+      return { kind: "target_unavailable", reason: "campus", districtName: target.name };
     }
     if (target.archived_at !== null) {
-      return { kind: "target_unavailable", reason: "archived" };
+      return { kind: "target_unavailable", reason: "archived", districtName: target.name };
     }
 
     const lockedResult = await tx.execute(sql`

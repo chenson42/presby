@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -98,10 +99,13 @@ export function AddOfficerTermForm({
   const office = useWatch({ control: form.control, name: "office" });
   const isDeacon = office === "deacon";
   const selectedPersonId = useWatch({ control: form.control, name: "personId" });
-  const recordingSelf =
+  const recordingSelfAsSession =
     viewerPersonId !== undefined &&
     selectedPersonId === viewerPersonId &&
     isSessionOffice(office);
+  const isSeat = office === "deacons_moderator";
+  const recordingSelfAsSeat =
+    viewerPersonId !== undefined && selectedPersonId === viewerPersonId && isSeat;
 
   // H3 (docs/reviews/2026-08-26-portal-ux.md) — this form has no in-form
   // Back/Cancel link of its own; the guard's document-level click
@@ -220,7 +224,19 @@ export function AddOfficerTermForm({
           </p>
         )}
 
-        {recordingSelf && (
+        {isSeat && (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="seat-helper"
+          >
+            The Moderator of the Board of Deacons can assign households to
+            districts when Parish management is turned on and they have a
+            PresbyPortal account. Administrators can assign households too.
+            Record this only for the person the Board has chosen.
+          </p>
+        )}
+
+        {recordingSelfAsSession && (
           <p
             className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
             data-testid="self-note"
@@ -230,11 +246,38 @@ export function AddOfficerTermForm({
           </p>
         )}
 
+        {recordingSelfAsSeat && (
+          <p
+            className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+            data-testid="self-note"
+          >
+            You&apos;re recording yourself as Moderator of the Board of
+            Deacons. That&apos;s allowed, and the record will show it as
+            self-recorded.
+          </p>
+        )}
+
         {isDeacon &&
           (districtListEmpty ? (
-            <p className="text-sm text-muted-foreground">
-              No districts exist at this organization yet. Add one before
-              recording a deacon term.
+            <p className="text-sm text-muted-foreground" data-testid="no-districts">
+              {options.parishesEnabled ? (
+                <>
+                  No districts exist at this organization yet. Add districts on
+                  the{" "}
+                  <Link
+                    href={`/o/${slug}/directory/parishes`}
+                    className="text-primary underline-offset-4 hover:underline"
+                  >
+                    Parishes page
+                  </Link>
+                  , then record the deacon term.
+                </>
+              ) : (
+                <>
+                  Districts aren&apos;t turned on for this congregation yet. An
+                  administrator can turn on Parish management under Features.
+                </>
+              )}
             </p>
           ) : (
             <div>

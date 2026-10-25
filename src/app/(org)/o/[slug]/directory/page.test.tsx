@@ -85,6 +85,11 @@ vi.mock("@/lib/directory", () => ({
   DIRECTORY_STATUSES: ["active", "baptized", "affiliate", "other_participant"],
 }));
 
+const canReadParishRoster = vi.fn();
+vi.mock("@/lib/parishes", () => ({
+  canReadParishRoster: (...args: unknown[]) => canReadParishRoster(...args),
+}));
+
 vi.mock("@/lib/storage/blob-store", () => ({
   getBlobStore: () => ({
     resolve: vi.fn().mockResolvedValue(null),
@@ -114,6 +119,7 @@ afterEach(() => {
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
   hasPermission.mockReset().mockResolvedValue(false);
+  canReadParishRoster.mockReset().mockResolvedValue(false);
   getDirectory.mockReset();
   getHouseholds.mockReset();
   redirectMock.mockClear();
@@ -524,6 +530,63 @@ describe("DirectoryPage — Increment 4 (directory.view_hidden, Parishes tab)", 
       pageSize: 25,
       includeHidden: true,
     });
+  });
+
+  // G4, the first-day wall: a founding administrator (people.manage,
+  // officers.manage) or the Moderator-seat holder holds no
+  // directory.view_hidden, but must still be offered the Parishes tab.
+  it("a viewer without directory.view_hidden who canReadParishRoster (the seat, people.manage or officers.manage) sees the Parishes tab, and getDirectory() is STILL called without includeHidden", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsV2();
+    canReadParishRoster.mockResolvedValue(true);
+    getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
+
+    const el = await DirectoryPage({
+      params: makeParams(),
+      searchParams: makeSearchParams(),
+    });
+    render(el);
+
+    expect(screen.getByRole("link", { name: "Parishes" }).getAttribute("href")).toBe(
+      "/o/alder-creek/directory/parishes",
+    );
+    expect(canReadParishRoster).toHaveBeenCalledWith("person-1", "org-1");
+    expect(getDirectory).toHaveBeenCalledWith("person-1", "org-1", {
+      search: "",
+      status: undefined,
+      page: 1,
+      pageSize: 25,
+    });
+  });
+
+  it("an elevated viewer (directory.view_hidden) does not need the second parishes read", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsV2();
+    hasPermission.mockResolvedValue(true);
+    getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
+
+    await DirectoryPage({
+      params: makeParams(),
+      searchParams: makeSearchParams(),
+    });
+
+    expect(canReadParishRoster).not.toHaveBeenCalled();
+  });
+
+  it("canReadParishRoster is never called when directory_v2 is OFF - Parishes rides on the same flag", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlagsV1Only();
+    getDirectory.mockResolvedValue({ kind: "ok", entries: [] });
+
+    await DirectoryPage({
+      params: makeParams(),
+      searchParams: makeSearchParams(),
+    });
+
+    expect(canReadParishRoster).not.toHaveBeenCalled();
   });
 
   it("hasPermission is never called when directory_v2 is OFF — Parishes rides on the SAME flag as the rest of Increment 4", async () => {

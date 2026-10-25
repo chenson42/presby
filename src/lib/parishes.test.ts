@@ -903,7 +903,7 @@ describe.skipIf(!hasDb)("parishes.ts (Postgres-backed, real dev database)", () =
       await archiveUnit(prev);
       expect(
         await P.moveHousehold(M.seat, orgM, actor, { householdId, expectedOrgUnitId: dNorth, targetOrgUnitId: prev, undo: true }),
-      ).toEqual({ kind: "target_unavailable", reason: "archived" });
+      ).toMatchObject({ kind: "target_unavailable", reason: "archived" });
       expect(await unitIdOfHousehold(householdId)).toBe(dNorth);
     });
 
@@ -911,14 +911,8 @@ describe.skipIf(!hasDb)("parishes.ts (Postgres-backed, real dev database)", () =
       const archived = await mkUnit(orgM, "Closed", "district", true);
       const { householdId } = await mkHouseholdWithPerson(orgM, "Targets");
       const base = { householdId, expectedOrgUnitId: null };
-      expect(await P.moveHousehold(M.seat, orgM, actor, { ...base, targetOrgUnitId: archived })).toEqual({
-        kind: "target_unavailable",
-        reason: "archived",
-      });
-      expect(await P.moveHousehold(M.seat, orgM, actor, { ...base, targetOrgUnitId: dCampus })).toEqual({
-        kind: "target_unavailable",
-        reason: "campus",
-      });
+      expect(await P.moveHousehold(M.seat, orgM, actor, { ...base, targetOrgUnitId: archived })).toMatchObject({ kind: "target_unavailable", reason: "archived" });
+      expect(await P.moveHousehold(M.seat, orgM, actor, { ...base, targetOrgUnitId: dCampus })).toMatchObject({ kind: "target_unavailable", reason: "campus" });
       expect(await P.moveHousehold(M.seat, orgM, actor, { ...base, targetOrgUnitId: dForeign })).toEqual({ kind: "not_found" });
       expect(await P.moveHousehold(M.seat, orgM, actor, { ...base, targetOrgUnitId: randomUUID() })).toEqual({ kind: "not_found" });
       expect(await P.moveHousehold(M.seat, orgM, actor, { ...base, targetOrgUnitId: "nope" })).toEqual({ kind: "not_found" });
@@ -1022,8 +1016,8 @@ describe.skipIf(!hasDb)("parishes.ts (Postgres-backed, real dev database)", () =
       expect(await P.bulkMoveHouseholds(M.admin, orgM, actor, { sourceOrgUnitId: dNorth, targetOrgUnitId: dSouth, expectedCount: 1 })).toEqual({ kind: "source_not_archived" });
       expect(await P.bulkMoveHouseholds(M.admin, orgM, actor, { sourceOrgUnitId: unit, targetOrgUnitId: unit, expectedCount: 1 })).toEqual({ kind: "same_unit" });
       const closed = await mkUnit(orgM, "Closed Target", "district", true);
-      expect(await P.bulkMoveHouseholds(M.admin, orgM, actor, { sourceOrgUnitId: unit, targetOrgUnitId: closed, expectedCount: 1 })).toEqual({ kind: "target_unavailable", reason: "archived" });
-      expect(await P.bulkMoveHouseholds(M.admin, orgM, actor, { sourceOrgUnitId: unit, targetOrgUnitId: dCampus, expectedCount: 1 })).toEqual({ kind: "target_unavailable", reason: "campus" });
+      expect(await P.bulkMoveHouseholds(M.admin, orgM, actor, { sourceOrgUnitId: unit, targetOrgUnitId: closed, expectedCount: 1 })).toMatchObject({ kind: "target_unavailable", reason: "archived" });
+      expect(await P.bulkMoveHouseholds(M.admin, orgM, actor, { sourceOrgUnitId: unit, targetOrgUnitId: dCampus, expectedCount: 1 })).toMatchObject({ kind: "target_unavailable", reason: "campus" });
       expect(await P.bulkMoveHouseholds(M.admin, orgM, actor, { sourceOrgUnitId: unit, targetOrgUnitId: dForeign, expectedCount: 1 })).toEqual({ kind: "not_found" });
       expect(await P.bulkMoveHouseholds(M.admin, orgM, actor, { sourceOrgUnitId: unit, targetOrgUnitId: "nope", expectedCount: 1 })).toEqual({ kind: "not_found" });
     });

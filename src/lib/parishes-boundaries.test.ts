@@ -239,3 +239,126 @@ describe("the seat-only key list matches the database function (drizzle/0068)", 
     expect(arms.sort()).toEqual([...SEAT_ONLY_PERMISSION_KEYS].sort());
   });
 });
+
+describe("the three actions.ts files and the acting identity (G14, gate order)", () => {
+  const actionFiles = walk(PARISHES_ROUTE).filter((f) => f.endsWith("actions.ts"));
+
+  it("the design's three action files exist", () => {
+    expect(actionFiles.map((f) => path.relative(PARISHES_ROUTE, f)).sort()).toEqual([
+      "[orgUnitId]/actions.ts",
+      "actions.ts",
+      "unassigned/actions.ts",
+    ]);
+  });
+
+  it.each(["actions.ts", "[orgUnitId]/actions.ts", "unassigned/actions.ts"])(
+    "%s is a 'use server' module that takes its identity from resolveActingIdentity and never the platform connection",
+    (rel) => {
+      const source = read(path.join(PARISHES_ROUTE, rel));
+      expect(source.trimStart().startsWith('"use server"')).toBe(true);
+      const code = stripComments(source);
+      expect(code).toMatch(/\bresolveActingIdentity\(slug\)/);
+      expect(code).toMatch(/from "(\.\.\/)?\.\/acting-identity"|from "\.\.\/acting-identity"/);
+      expect(code).not.toMatch(/getPlatformDb|cachedAuth/);
+    },
+  );
+
+  it("each action resolves the identity BEFORE it validates or calls the library", () => {
+    for (const file of actionFiles) {
+      const code = stripComments(read(file));
+      for (const match of code.matchAll(/export async function (\w+Action)\([\s\S]*?\n\}\n/g)) {
+        const body = match[0];
+        const identity = body.indexOf("resolveActingIdentity(");
+        const firstUse = body.search(/\b(parse\w+|safeParse|defineDistrict|renameDistrict|archiveDistrict|restoreDistrict|moveHousehold|bulkMoveHouseholds)\(/);
+        expect(identity, `${match[1]} resolves identity`).toBeGreaterThan(-1);
+        expect(identity, `${match[1]} resolves identity first`).toBeLessThan(firstUse);
+      }
+    }
+  });
+
+  it("acting-identity.ts is NOT a 'use server' module (it would become an exported action), and uses auth(), never cachedAuth()", () => {
+    const source = read(path.join(PARISHES_ROUTE, "acting-identity.ts"));
+    expect(source).not.toMatch(/^["']use server["']/m);
+    const code = stripComments(source);
+    expect(code).toMatch(/\bauth\(\)/);
+    expect(code).not.toMatch(/cachedAuth/);
+    expect(code).toMatch(/resolveOrgContext\(session\.user\.id, slug\)/);
+  });
+
+  it("no action file takes an organization id or person id from its input type", () => {
+    for (const file of actionFiles) {
+      const code = stripComments(read(file));
+      expect(code, path.relative(root, file)).not.toMatch(/organizationId\s*:\s*string\s*[;,}]/);
+      expect(code, path.relative(root, file)).not.toMatch(/\bpersonId\s*:\s*string\s*[;,}]/);
+    }
+  });
+});
+
+describe("the row picker never commits on selection (F261, P3-1)", () => {
+  const rowAssign = stripComments(read(path.join(PARISHES_ROUTE, "row-assign.tsx")));
+
+  it("row-assign.tsx has no onChange handler anywhere, and no onInput/onKeyDown commit either", () => {
+    expect(rowAssign).not.toMatch(/\bonChange\b/);
+    expect(rowAssign).not.toMatch(/\bonInput\b/);
+    expect(rowAssign).not.toMatch(/\bonKey(Down|Up)\b/);
+  });
+
+  it("the select is uncontrolled (read through a ref on click) and sits inside HydrationGate", () => {
+    expect(rowAssign).toContain("useRef<HTMLSelectElement>");
+    expect(rowAssign).toContain("selectRef.current?.value");
+    expect(rowAssign).toMatch(/<HydrationGate>/);
+    expect(rowAssign).not.toMatch(/<select[^>]*\bvalue=/);
+  });
+
+  it("the Move/Assign button is the only thing that calls an action", () => {
+    const calls = [...rowAssign.matchAll(/\bact\(/g)];
+    // one in submit(), one in the Undo handler
+    expect(calls).toHaveLength(2);
+    expect(rowAssign).toMatch(/onClick=\{submit\}/);
+  });
+});
+
+describe("hydration and dialogs (DECISION-159, Workflow Rule 2)", () => {
+  const files = walk(PARISHES_ROUTE).filter(
+    (f) => /\.(ts|tsx)$/.test(f) && !/\.test\./.test(f),
+  );
+
+  it("every client component that opens a dialog or form gates its trigger on hydration", () => {
+    for (const file of files) {
+      const code = stripComments(read(file));
+      if (!/^"use client"/.test(read(file).trimStart())) continue;
+      if (/<(Dialog|AlertDialog)\b/.test(code) || /<form\b/.test(code) || /<select\b/.test(code)) {
+        expect(
+          /useHydrated\(\)|<HydrationGate>/.test(code),
+          `${path.relative(root, file)} gates on hydration`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("no native browser dialog anywhere in the parish tree", () => {
+    for (const file of files) {
+      const code = stripComments(read(file));
+      expect(code, path.relative(root, file)).not.toMatch(
+        /(?<!function\s)(?<![\w.$])(window\.)?(alert|confirm|prompt)\(/,
+      );
+    }
+  });
+
+  it("no console.log is left in a production path", () => {
+    for (const file of [PARISHES_TS, ...files]) {
+      expect(stripComments(read(file)), path.relative(root, file)).not.toMatch(/console\.log\(/);
+    }
+  });
+
+  it("no parish page reads a return parameter: the only query keys are page and hide, and no page redirects to a request-supplied URL", () => {
+    for (const file of files) {
+      const code = stripComments(read(file));
+      expect(code, path.relative(root, file)).not.toMatch(/\b(returnTo|callbackUrl|next|from|redirectTo)\?:/);
+      // redirect() appears only for the fixed /signin?callbackUrl=<this page> bounce.
+      for (const match of code.matchAll(/\bredirect\(([^)]*)\)/g)) {
+        expect(match[1], path.relative(root, file)).toMatch(/\/signin\?callbackUrl=/);
+      }
+    }
+  });
+});

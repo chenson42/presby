@@ -141,7 +141,11 @@ export function OfficerRoster({
             </TableCell>
             {hasDistrict && (
               <TableCell className="hidden text-muted-foreground sm:table-cell">
-                {entry.orgUnitName ?? "—"}
+                {entry.orgUnitName
+                  ? entry.orgUnitArchived
+                    ? `${entry.orgUnitName} (archived)`
+                    : entry.orgUnitName
+                  : "—"}
               </TableCell>
             )}
             <TableCell className="hidden sm:table-cell">

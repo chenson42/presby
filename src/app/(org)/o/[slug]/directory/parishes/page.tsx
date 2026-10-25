@@ -17,26 +17,27 @@ import { DirectoryNav } from "../directory-nav";
 import { ParishRoster } from "../parish-roster";
 
 /**
- * `/o/<slug>/directory/parishes` — the deacon roster (Phase 3 Increment 4).
+ * `/o/<slug>/directory/parishes` - the Parishes page: the district list, and (when
+ * the org's `org_portal.parishes` toggle is on) where districts are defined,
+ * renamed, archived and restored, and the way in to a district's households and
+ * to the households with no district (docs/work-log/2026-10-25-parish-
+ * management.md, Phase 3 "Component / Page Plan").
  *
- * REPEATS THE `(org)` AUTH PATTERN IN FULL, same as every sibling page in
- * this tree — see `directory/page.tsx`'s header for the fuller rationale.
+ * REPEATS THE `(org)` AUTH PATTERN IN FULL, same as every sibling page in this
+ * tree - see `directory/page.tsx`'s header for the fuller rationale.
  *
- * REACHABILITY rides on `org_portal.directory_v2` alone (no new flag — the
- * Phase 3 design's own text: "reachability rides on `org_portal.
- * directory_v2` (already on)"). The ACTUAL gate is `getParishesOverview()`'s own
- * `directory.view_hidden` re-check, one layer down — this page never
- * second-guesses it with its own `hasPermission()` call; `DirectoryNav`
- * (rendered by `directory/page.tsx`) already only offers this route's link
- * to a viewer who holds the permission, but a deep link bypasses that, so
- * `getParishesOverview()` returning `{ kind: "forbidden" }` is what actually
- * protects this page — mapped to the SAME `DirectoryForbidden`-shaped state
- * every other permission denial in this tree uses (Phase 3 design: "renders
- * the existing `DirectoryForbidden`-shaped state, not a 404").
+ * REACHABILITY rides on the two existing platform flags
+ * (`org_portal.directory`, `org_portal.directory_v2`); the new surfaces ALSO sit
+ * behind the per-org toggle, read inside `getParishesOverview()`. The ACTUAL gate
+ * is that function's own live authority read: with the toggle ON, any of
+ * `parishes.assign` (the Moderator seat), `people.manage`, `officers.manage` or
+ * `directory.view_hidden`; with it OFF, `directory.view_hidden` alone, exactly as
+ * before - a deep link bypasses the nav, so the page never second-guesses it with
+ * its own check. `{ kind: "forbidden" }` renders the same `DirectoryForbidden`
+ * state every other permission denial in this tree uses (not a 404).
  *
- * NO `loading.tsx` — this segment renders unconditionally once past the
- * flag/permission checks (it never calls `notFound()`), so this is a
- * stylistic consistency choice with its siblings, not a correctness one.
+ * NO `loading.tsx` - this segment renders unconditionally once past the
+ * flag/permission checks (it never calls `notFound()`).
  */
 export default async function ParishesPage({
   params,
@@ -112,9 +113,24 @@ export default async function ParishesPage({
         slug={slug}
         view="parishes"
         search=""
-        canViewHidden
+        showParishes
       />
-      <ParishRoster parishes={result.districts} orgName={resolved.org.name} />
+      <ParishRoster
+        parishes={result.districts}
+        orgName={resolved.org.name}
+        managed={
+          result.managed
+            ? {
+                slug,
+                canDefine: result.authority.canDefine,
+                canListHouseholds: result.authority.canListHouseholds,
+                archived: result.archived,
+                unassignedCount: result.unassignedCount,
+                seatFilled: result.seatFilled,
+              }
+            : undefined
+        }
+      />
     </section>
   );
 }

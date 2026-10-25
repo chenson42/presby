@@ -311,7 +311,7 @@ test.describe("Parish management", () => {
       await person.selectOption({ label: "Marguerite Oakhollow" });
       await page.getByLabel(/^Office/).selectOption({ label: "Moderator of the Board of Deacons" });
       await expect(page.getByTestId("seat-helper")).toContainText(
-        "The Moderator of the Board of Deacons can assign households to districts when Parish management is turned on and they have a PresbyPortal account. Administrators can assign households too. Record this only for the person the Board has chosen.",
+        "In a congregation, the Moderator of the Board of Deacons can assign households to districts once Parish management is turned on and they have a PresbyPortal account. Administrators can assign households too. Record this only for the person the Board has chosen.",
       );
       await expect(page.getByTestId("self-note")).toContainText(
         "You're recording yourself as Moderator of the Board of Deacons. That's allowed, and the record will show it as self-recorded.",
@@ -425,7 +425,8 @@ test.describe("Parish management at 360px", () => {
       await noHorizontalOverflow(page);
       await targetsAre44(page, moveButtons);
       const selectBox = await page.getByLabel(/^Move to/).first().boundingBox();
-      expect(selectBox!.height).toBeGreaterThanOrEqual(40);
+      expect(selectBox!.height).toBeGreaterThanOrEqual(44);
+      await targetsAre44(page, page.getByRole("link", { name: "Back to Parishes" }));
       expect(selectBox!.width).toBeGreaterThan(250); // full width of a 360px card, not a squeezed inline control
       await shot(page, "2-district-page");
 
@@ -438,13 +439,33 @@ test.describe("Parish management at 360px", () => {
       // The four toggle pills wrap onto more than one line rather than scrolling sideways.
       const toggleBoxes = await page.getByTestId("group-toggles").getByRole("link").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
       expect(new Set(toggleBoxes.map((t) => Math.round(t))).size).toBeGreaterThan(1);
+      await targetsAre44(page, page.getByRole("link", { name: "Back to Parishes" }));
       await shot(page, "3-unassigned");
+
+      // The groups-shown-are-empty state: leave only the member household unassigned, hide that group,
+      // and "Show all groups" must be a 44px target. Restored whatever happens.
+      const movedAway = (await sql`
+        select id from households
+        where organization_id = ${fx.orgId}::uuid and org_unit_id is null and id <> ${fx.households.unMember}::uuid`) as { id: string }[];
+      try {
+        for (const row of movedAway) await sql`update households set org_unit_id = ${fx.districts.north}::uuid where id = ${row.id}::uuid`;
+        await page.goto(`${base}/unassigned?hide=members`);
+        await expect(page.getByTestId("none-in-groups-shown")).toBeVisible();
+        await noHorizontalOverflow(page);
+        await targetsAre44(page, page.getByRole("link", { name: "Show all groups" }));
+        await shot(page, "3b-unassigned-none-shown");
+      } finally {
+        for (const row of movedAway) await sql`update households set org_unit_id = null where id = ${row.id}::uuid`;
+      }
 
       await page.goto(`${base}/${fx.districts.east}`);
       await expect(page.getByRole("button", { name: "Move all 2 households to…" })).toBeEnabled({ timeout: ACTION_MS });
       await noHorizontalOverflow(page);
+      await targetsAre44(page, page.getByRole("link", { name: "Back to Parishes" }));
+      await targetsAre44(page, page.getByRole("button", { name: "Move all 2 households to…" }));
       await page.getByRole("button", { name: "Move all 2 households to…" }).click();
       const picker = page.getByRole("dialog");
+      await targetsAre44(page, picker.getByLabel("Move to"));
       await picker.getByLabel("Move to").selectOption({ index: 1 });
       await noHorizontalOverflow(page);
       await shot(page, "4-bulk-pick");

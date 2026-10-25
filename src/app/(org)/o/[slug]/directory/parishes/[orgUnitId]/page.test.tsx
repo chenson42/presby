@@ -219,6 +219,7 @@ describe("DistrictPage - an active district", () => {
     expect(screen.getByRole("link", { name: "Back to Parishes" }).getAttribute("href")).toBe(
       "/o/alder-creek/directory/parishes",
     );
+    expect(screen.getByRole("link", { name: "Back to Parishes" }).className).toContain("min-h-11");
     expect(screen.getAllByTestId("household-row")).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: /^Move / })).toHaveLength(2);
     expect(screen.getByText("Private")).toBeTruthy();

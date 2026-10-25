@@ -85,6 +85,7 @@ describe("RowAssign - the controls", () => {
   it("is a full-width control with 44px targets (the 360px rules)", () => {
     renderRow("move");
     expect(select().className).toContain("w-full");
+    expect(select().className).toContain("min-h-11");
     expect(screen.getByRole("button", { name: /^Move/ }).className).toContain("min-h-11");
   });
 });

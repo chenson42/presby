@@ -162,8 +162,9 @@ export default async function OfficersPage({
         <p className="text-sm text-muted-foreground">
           This records who holds the office. Apart from seating the Session
           (see above) and the Moderator of the Board of Deacons, who can
-          assign households to districts, recording someone here does not
-          change what they can do in the app. Other access is granted under
+          assign households to districts where Parish management is turned
+          on, recording someone here does not change what they can do in the
+          app. Other access is granted under
           Administration → Roles.
         </p>
         <AddOfficerTermForm

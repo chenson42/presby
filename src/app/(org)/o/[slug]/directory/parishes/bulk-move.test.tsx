@@ -96,6 +96,13 @@ describe("BulkMove - step one, the picker", () => {
     expect(bulkAction).not.toHaveBeenCalled();
   });
 
+  it("the destination select is a 44px target (QA run 1, Finding 5)", async () => {
+    renderBulk(3);
+    await openPicker();
+    const select = within(screen.getByRole("dialog")).getByLabelText("Move to");
+    expect(select.className).toContain("min-h-11");
+  });
+
   it("Cancel closes without writing", async () => {
     renderBulk(3);
     await openPicker();

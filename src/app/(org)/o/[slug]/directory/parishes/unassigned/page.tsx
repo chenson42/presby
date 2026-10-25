@@ -117,7 +117,7 @@ export default async function UnassignedPage({
     <section>
       <Link
         href={`/o/${slug}/directory/parishes`}
-        className="text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         Back to Parishes
       </Link>
@@ -131,7 +131,7 @@ export default async function UnassignedPage({
           <p>Every household is in a district.</p>
           <Link
             href={`/o/${slug}/directory/parishes`}
-            className="mt-2 inline-block text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="mt-2 inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             Back to Parishes
           </Link>
@@ -177,7 +177,7 @@ export default async function UnassignedPage({
               <p>No households in the groups shown.</p>
               <Link
                 href={basePath}
-                className="mt-2 inline-block text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="mt-2 inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 Show all groups
               </Link>

@@ -234,6 +234,28 @@ describe("UnassignedPage - rendering", () => {
     expect(screen.queryByText("Every group is hidden. Show a group to see its households.")).toBeNull();
   });
 
+  it("every text link on the page is a 44px target: the back links and `Show all groups` (QA run 1, Finding 5)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    flagsOn();
+    getUnassignedPage.mockResolvedValue(okResult({ households: [], totalShown: 0 }));
+    await renderPage({ hide: "members,participants,visitors" });
+    const show = screen.getByRole("link", { name: "Show all groups" });
+    expect(show.className).toContain("min-h-11");
+    expect(show.className).toContain("inline-flex");
+    for (const back of screen.getAllByRole("link", { name: "Back to Parishes" })) {
+      expect(back.className).toContain("min-h-11");
+    }
+    cleanup();
+    getUnassignedPage.mockResolvedValue(
+      okResult({ counts: { members: 0, participants: 0, visitors: 0, others: 0 }, households: [], totalShown: 0 }),
+    );
+    await renderPage();
+    const backs = screen.getAllByRole("link", { name: "Back to Parishes" });
+    expect(backs.length).toBe(2);
+    for (const back of backs) expect(back.className).toContain("min-h-11");
+  });
+
   it("nothing hidden and zero households everywhere stays `Every household is in a district.` (not the groups-shown text)", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);

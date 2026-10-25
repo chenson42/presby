@@ -229,10 +229,11 @@ export function AddOfficerTermForm({
             className="text-sm text-muted-foreground"
             data-testid="seat-helper"
           >
-            The Moderator of the Board of Deacons can assign households to
-            districts when Parish management is turned on and they have a
-            PresbyPortal account. Administrators can assign households too.
-            Record this only for the person the Board has chosen.
+            In a congregation, the Moderator of the Board of Deacons can assign
+            households to districts once Parish management is turned on and
+            they have a PresbyPortal account. Administrators can assign
+            households too. Record this only for the person the Board has
+            chosen.
           </p>
         )}
 
@@ -274,7 +275,7 @@ export function AddOfficerTermForm({
                 </>
               ) : (
                 <>
-                  Districts aren&apos;t turned on for this congregation yet. An
+                  Districts aren&apos;t turned on yet. A congregation&apos;s
                   administrator can turn on Parish management under Features.
                 </>
               )}

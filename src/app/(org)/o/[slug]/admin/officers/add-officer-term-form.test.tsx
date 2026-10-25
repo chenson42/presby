@@ -125,6 +125,48 @@ describe("AddOfficerTermForm — the org_unit conditional field", () => {
   });
 });
 
+describe("AddOfficerTermForm — Moderator seat and no-districts copy at any organization type (QA run 1, Finding 5)", () => {
+  it("the seat helper is true at a presbytery as well as a congregation: it names the congregation", () => {
+    render(<AddOfficerTermForm slug="alder-creek" options={OPTIONS} />);
+    fireEvent.change(screen.getByLabelText(/^office/i), {
+      target: { value: "deacons_moderator" },
+    });
+    expect(screen.getByTestId("seat-helper").textContent).toBe(
+      "In a congregation, the Moderator of the Board of Deacons can assign households to districts once Parish management is turned on and they have a PresbyPortal account. Administrators can assign households too. Record this only for the person the Board has chosen.",
+    );
+  });
+
+  it("the toggle-off no-districts line says nothing a non-congregation cannot act on", () => {
+    render(
+      <AddOfficerTermForm
+        slug="alder-creek"
+        options={{ ...OPTIONS, orgUnits: [], parishesEnabled: false }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/^office/i), {
+      target: { value: "deacon" },
+    });
+    expect(screen.getByTestId("no-districts").textContent).toBe(
+      "Districts aren't turned on yet. A congregation's administrator can turn on Parish management under Features.",
+    );
+  });
+
+  it("the toggle-on no-districts line is unchanged and links to the Parishes page", () => {
+    render(
+      <AddOfficerTermForm
+        slug="alder-creek"
+        options={{ ...OPTIONS, orgUnits: [], parishesEnabled: true }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/^office/i), {
+      target: { value: "deacon" },
+    });
+    expect(screen.getByTestId("no-districts").textContent).toBe(
+      "No districts exist at this organization yet. Add districts on the Parishes page, then record the deacon term.",
+    );
+  });
+});
+
 describe("AddOfficerTermForm — submit and error surfacing", () => {
   it("submits with optional fields converted (blank → undefined, class year → number)", async () => {
     mockStartOfficerTermAction.mockResolvedValueOnce({

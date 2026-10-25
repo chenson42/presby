@@ -487,6 +487,17 @@ export interface CreateEventInput {
 }
 
 /**
+ * The two switches the listing derives from must be real booleans. A server
+ * action is a public entry point: the TypeScript types do not survive the
+ * wire, and `undefined`/`"false"` would otherwise pick a branch by truthiness
+ * (a false audit row, or a CHECK violation). Phase 5 FAIL-2.
+ */
+const SWITCH_INVALID = "Choose whether this event is open to everyone and whether it appears on the website.";
+function switchesAreBooleans(input: { isPublic: unknown; websiteListed: unknown }): boolean {
+  return typeof input.isPublic === "boolean" && typeof input.websiteListed === "boolean";
+}
+
+/**
  * Inserts one row. When `input.recurrence` is present, inserts the first
  * occurrence, then generates `count - 1` further discrete rows via the
  * ported recurrence math, each carrying `parentEventId` = the first row's
@@ -505,6 +516,10 @@ export async function createEvent(
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasEventsManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
+    }
+
+    if (!switchesAreBooleans(input)) {
+      return { kind: "invalid_input", message: SWITCH_INVALID };
     }
 
     const lengthError = validateFieldLengths(input);
@@ -660,6 +675,10 @@ export async function updateEvent(
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasEventsManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
+    }
+
+    if (!switchesAreBooleans(input)) {
+      return { kind: "invalid_input", message: SWITCH_INVALID };
     }
 
     const [existing] = await tx

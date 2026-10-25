@@ -1275,6 +1275,104 @@ describe.skipIf(!hasDb)("events.ts (Postgres-backed, real dev database)", () => 
       });
     });
 
+    describe("regression for a payload that omits or mistypes the website switch (Phase 5 FAIL-2)", () => {
+      // A hand-crafted server-action payload is not the form: the lib must not trust the types.
+      const bad: Array<[string, unknown]> = [
+        ["omitted", undefined],
+        ["a string", "false"],
+        ["a number", 0],
+        ["null", null],
+      ];
+
+      it.each(bad)(
+        "updateEvent with websiteListed %s returns invalid_input, leaves the column and writes no audit row - regression for omitted websiteListed",
+        async (_label, value) => {
+          const { eventId } = await make({ websiteListed: true });
+          expect(await audits(eventId)).toHaveLength(1); // the create only
+
+          const result = await updateEvent(
+            managerPerson,
+            orgA,
+            actor,
+            edit(eventId, { websiteListed: value as never }),
+          );
+          expect(result.kind).toBe("invalid_input");
+          expect(await flags([eventId])).toEqual([{ listed: true, isPublic: true }]);
+          expect(await audits(eventId)).toHaveLength(1);
+        },
+      );
+
+      it("unticking 'Open to everyone' with the website field omitted is invalid_input, not an uncaught 23514 - regression for omitted websiteListed", async () => {
+        const { eventId } = await make({ websiteListed: true });
+        const result = await updateEvent(
+          managerPerson,
+          orgA,
+          actor,
+          edit(eventId, { isPublic: false, websiteListed: undefined as never }),
+        );
+        expect(result.kind).toBe("invalid_input");
+        expect(await flags([eventId])).toEqual([{ listed: true, isPublic: true }]);
+        expect(await audits(eventId)).toHaveLength(1);
+      });
+
+      it.each([
+        ["omitted", undefined],
+        ["a string", "false"],
+      ])("updateEvent with isPublic %s returns invalid_input and changes nothing - regression for mistyped isPublic", async (_label, value) => {
+        const { eventId } = await make({ websiteListed: true });
+        const result = await updateEvent(
+          managerPerson,
+          orgA,
+          actor,
+          edit(eventId, { isPublic: value as never, websiteListed: true }),
+        );
+        expect(result.kind).toBe("invalid_input");
+        expect(await flags([eventId])).toEqual([{ listed: true, isPublic: true }]);
+        expect(await audits(eventId)).toHaveLength(1);
+      });
+
+      it.each(bad)(
+        "createEvent with websiteListed %s returns invalid_input and creates nothing - regression for omitted websiteListed",
+        async (_label, value) => {
+          const title = `Never created ${Math.random().toString(36).slice(2)}`;
+          const result = await createEvent(managerPerson, orgA, actor, {
+            title,
+            startsAt: ONE,
+            isPublic: true,
+            websiteListed: value as never,
+            allowsCheckin: false,
+          });
+          expect(result.kind).toBe("invalid_input");
+          const rows = await getPlatformDb()
+            .select({ id: events.id })
+            .from(events)
+            .where(eq(events.title, title));
+          expect(rows).toHaveLength(0);
+        },
+      );
+
+      it("createEvent with isPublic as a string returns invalid_input and creates nothing - regression for mistyped isPublic", async () => {
+        const title = `Never created ${Math.random().toString(36).slice(2)}`;
+        const result = await createEvent(managerPerson, orgA, actor, {
+          title,
+          startsAt: ONE,
+          isPublic: "false" as never,
+          websiteListed: false,
+          allowsCheckin: false,
+        });
+        expect(result.kind).toBe("invalid_input");
+        const rows = await getPlatformDb().select({ id: events.id }).from(events).where(eq(events.title, title));
+        expect(rows).toHaveLength(0);
+      });
+
+      it("an update that does not change the listing writes no audit row", async () => {
+        const { eventId } = await make({ websiteListed: true });
+        const result = await updateEvent(managerPerson, orgA, actor, edit(eventId, { websiteListed: true, title: "Renamed" }));
+        expect(result.kind).toBe("ok");
+        expect(await audits(eventId)).toHaveLength(1);
+      });
+    });
+
     describe("regression for extending a series re-listing occurrences that were unlisted (F252)", () => {
       it("new occurrences inherit from the LATEST occurrence, not the parent row - regression for F252", async () => {
         const { eventId: parentId, occurrenceIds } = await make({

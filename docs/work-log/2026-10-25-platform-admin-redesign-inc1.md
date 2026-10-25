@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Shared; recorded in the parent | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (this file); S1–S5 ruled; copy table and carry-forward below; two operator questions | Design complete | 2026-10-25 |
-| 4 — Implementation | api-developer (Batch B), ux-developer (Batches A and C) | Pending | — | — |
+| 4 — Implementation | api-developer (Batch B), ux-developer (Batches A and C) | Batch B complete (2 commits); Batches A and C see their own sections | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -643,7 +643,65 @@ Smaller defaults taken that you can veto at review: the nav footer shows the ver
 
 # Phase 4 — Implementation
 
-Pending.
+## Phase 4 — Batch B (api-developer): readers, extractions, boundaries test
+
+**Status:** complete. Commits on `pipeline/platform-admin-redesign`: `refactor(admin): share the two-factor and domains attention predicates with the dashboard` and `feat(admin): platform dashboard readers held to platform-axis tables`. Not pushed.
+
+### Contract the next agent (ux-developer, Batch C) consumes
+
+All readers are `import "server-only"`, run on `getPlatformDb()`, issue one statement, and return `CardResult<T>` from `src/lib/admin-portal/dashboard/read-card.ts` (`({ kind: "ok" } & T) | { kind: "error" }`). Import each from `@/lib/admin-portal/dashboard/<file>`.
+
+| Reader (file) | `ok` fields |
+|---|---|
+| `readTicketsCard` (tickets.ts) | `newCount`, `unassignedOpen`, `oldestNewSeconds: number \| null` |
+| `readFeedbackCard` (feedback.ts) | `newCount` |
+| `readEmailCard` (email.ts) | `failed`, `overdue` |
+| `readGivingCard` (giving.ts) | `connections`, `waiting`, `deadLetters`, `restricted` |
+| `readDomainsCard` (domains.ts) | `needAttention` |
+| `readSitesCard` (sites.ts) | `live`, `provisioning`, `suspended` |
+| `readTwoFactorCard` (two-factor.ts) | `notEnrolled` |
+| `readAccountsCard` (accounts.ts) | `locked` |
+| `readOrganizationsCard` (organizations.ts) | `total`, `byType: Record<OrgTypeKey, number>`, `byStatus: Record<PlatformStatusKey, number>`, `inactive`, `defaultPalette`; also exports `ORG_TYPE_KEYS`, `PLATFORM_STATUS_KEYS`, `OrgTypeKey`, `PlatformStatusKey` |
+| `readRecentChangesCard` (recent-changes.ts) | `rows: { action: ChangeAction; subject: string \| null; actorEmail: string \| null; at: string (ISO) }[]`, at most 10, newest first |
+
+Additions beyond the design's signatures (all pure, for the presenters):
+
+- `src/lib/admin-portal/dashboard/change-labels.ts`: `CHANGE_ACTIONS`, `ChangeAction`, `CHANGE_LABELS` (the ten Copy-group-E labels, one per action key), `UNKNOWN_ORGANIZATION`. The reader already substitutes "Unknown organization" for an organization that no longer resolves, so `subject` is never an id. A test pins every key to `AUDIT_ACTIONS`.
+- `byStatus` keys are `managed | invited | unmanaged`. `oldestNewSeconds` is whole seconds from SQL (feed it to `formatAge` from `@/lib/admin/format-age`).
+- No auth or feature check is inside a reader (callers mount a card only for a holder, E4). No caching.
+
+Shared extractions (behavior-preserving):
+
+- `src/lib/admin/two-factor-stranded.ts`: `STRANDED_WHERE`, `countStranded()`, `listStranded(limit)` returning `{ rows, total }` (`total` is `count(*) over ()` from the same statement). `2fa/page.tsx` now calls `listStranded(50)` and shows "Showing the first {shown} of {total} accounts." only when truncated. The `orgs` query and `member_count` stay inline and page-local. `limit` clamps to 1..1000.
+- `src/lib/domains/platform-read.ts`: `attentionCondition()` (private) now backs the `attention` filter of `listDomainsAcrossOrgs`, and `countDomainsNeedingAttention()` is the card's count (same inner join to `organizations` as the list).
+- `src/lib/admin/giving-ingest-health.ts`: `summarizeIngestHealth(rows)` (pure) and `readIngestHealthSummary()` (one `listIngestHealth()` call). `check:giving-boundaries` B6 still passes.
+
+No routes, no server actions, no schema, no migration, no `FEATURES` or seed change, no audit event (read only).
+
+### Files created
+
+- `src/lib/admin-portal/dashboard/`: `read-card.ts`, `change-labels.ts`, `tickets.ts`, `feedback.ts`, `email.ts`, `giving.ts`, `domains.ts`, `sites.ts`, `two-factor.ts`, `accounts.ts`, `organizations.ts`, `recent-changes.ts`; tests `read-card.test.ts`, `tickets.test.ts`, `feedback.test.ts`, `email.test.ts`, `giving.test.ts`, `domains.test.ts`, `sites.test.ts`, `two-factor.test.ts`, `accounts.test.ts`, `organizations.test.ts`, `recent-changes.test.ts`, `boundaries.test.ts`; DB tests `recent-changes.db.test.ts`, `readers.db.test.ts`.
+- `src/lib/admin/two-factor-stranded.ts`, `two-factor-stranded.db.test.ts`, `giving-ingest-health.test.ts`.
+
+### Files modified
+
+- `src/app/(admin)/admin/2fa/page.tsx` (uses `listStranded`; truncation note), `src/lib/admin/giving-ingest-health.ts`, `src/lib/domains/platform-read.ts`, `src/lib/domains/platform-read.db.test.ts` (parity test added).
+
+### Edge cases pinned (Batch B share)
+
+E5 (each reader's rejecting-execute test, and `read-card.test.ts`), E6 (class-only logging; a message containing SQL text is absent), E17 (`recent-changes.db.test.ts` seeds a revoke whose metadata carries a marker; the serialised result never contains it; `boundaries.test.ts` allows `metadata` only as `metadata->>'...'`), E18 (key-exact results for tickets and feedback), E19 (allow-list scan over imports, `from`/`join` identifiers incl. CTE names, `presby_*` names, `@/` modules, `/o/` literals; with synthetic-offender proofs so the scan is not vacuous), E20 (`member_count` appears only in `2fa/page.tsx` across `(admin)`, `lib/admin`, `lib/admin-portal`; `two-factor-stranded.ts` exports no member count), E21 (`countStranded() == listStranded(1).total`; `countDomainsNeedingAttention() == listDomainsAcrossOrgs("attention").rows.length`; sites counts sum to `listSitesForAdmin().length`), E22 (each reader's unit test counts one `execute` call).
+
+### Verification
+
+`npm run typecheck`, `npm run lint`, `npm run check` (all eight tripwires), plain `npm test` (575 files passed, 80 skipped), and the DB-backed suites (`dotenv -e .env.local -- vitest run --no-file-parallelism` over `src/lib/admin`, `src/lib/admin-portal/dashboard`, `src/lib/domains/platform-read.db.test.ts`) all pass against the `pipeline-platform-admin-redesign` Neon branch. The recent-changes DB test dates its fixture rows two days ahead and deletes them by id.
+
+### Implementer notes
+
+- Design deviations: none in behavior. Two small choices for the record: (1) the tickets statement restricts to the three open statuses (`where status in (...)`) so it can use `tickets_status_created_idx`; the three numbers are unchanged. (2) It uses `date_part('epoch', ...)` rather than `extract(epoch from ...)` so a source scan for `from <table>` is not fooled by the `from` inside `extract`.
+- The Giving and Sites readers go through existing modules (`readIngestHealthSummary`, `listSitesForAdmin`), as designed, so the unit tests mock those modules or the `execute` the module calls rather than SQL text.
+- Statement bounds: every reader is an aggregate or `limit 10`; no `statement_timeout` is set (it would be a second statement per read, contradicting E22). The Neon pool default (`max` 10) matches the design's E22 note.
+- Unverified for Phase 5 (unchanged from the design): E27, `EXPLAIN` of the recent-changes statement at production volume.
+- Hand-off: Batch C (ux-developer) writes `_dashboard/present.ts` against the table above. QA next after Batches A and C.
 
 ## Files Created
 

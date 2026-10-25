@@ -510,10 +510,13 @@ the overlap; the header then reads "since <date>". git compares the committer
 date, so an amended or rebased commit counts from when it was rewritten.
 
 `npm run worktrees:report` prints the free disk space and, for each git worktree,
-its branch, whether it is merged into main, and its `node_modules` / `.next` sizes,
-with suggested cleanup commands. It deletes nothing (`--no-sizes` skips the slow
-`du`). Below 20 GiB free it says so: a full disk has surfaced as a Neon
-`fetch failed`.
+its branch, whether it has commits of its own and, if so, whether all of them are
+on `origin/main` ("merged"), whether it has uncommitted or untracked files, and
+its `node_modules` / `.next` sizes, with suggested cleanup commands. It suggests
+`git worktree remove` only for a merged, clean worktree: never for a new pipeline
+worktree, a squash-merged or fast-forwarded one, or one with changes. It deletes
+nothing (`--no-sizes` skips the slow `du`). Below 20 GiB free it says so: a full
+disk has surfaced as a Neon `fetch failed`.
 
 ---
 

@@ -5,17 +5,44 @@
  * Disk hit 1.9 GiB free during the 2026-10-24 retrospective, and a full disk
  * was read as a Neon "fetch failed" twice. This prints how much space is free
  * on the volume holding the repository, and for each git worktree: its branch,
- * whether its HEAD is already merged into main, and how big `node_modules`,
- * `.next` and everything else are, then the commands you could run to reclaim
- * space. The commands are text for you to run; nothing here runs them.
+ * a merge state, whether it has uncommitted or untracked files, and how big
+ * `node_modules`, `.next` and everything else are, then the commands you could
+ * run to reclaim space. The commands are text for you to run; nothing here
+ * runs them.
+ *
+ * The merge state separates look-alikes. "Is HEAD an ancestor of origin/main"
+ * is ALSO true for a worktree with no commits at all (its HEAD is a commit main
+ * reached), which is how a brand-new pipeline worktree was once offered for
+ * removal. So the state is computed from:
+ *   1. does it have commits of its own: HEAD is NOT on origin/main's
+ *      first-parent line (a branch merged by a merge commit is the SECOND
+ *      parent of that merge, so it is off the line; a fresh worktree is on it);
+ *   2. are all of them on origin/main: HEAD is an ancestor of origin/main;
+ *   3. is it clean: `git status --porcelain` prints nothing (ignored files do
+ *      not count); and
+ *   4. is it a named branch: a detached HEAD is never classified.
+ * `git worktree remove` is suggested ONLY when all four hold ("merged" and
+ * clean). "No commits of its own", "not merged", detached, unknown, dirty and
+ * dirty-unknown get no removal suggestion; the only other suggestion is the
+ * regenerable `.next`. `origin/main` is the remote-tracking ref, as of your
+ * last fetch, with no fallback to a local `main` (which can be ahead of what
+ * was published).
+ *
+ * Known and accepted classification residuals (stated in the footer): a
+ * fast-forwarded branch reads as "no commits of its own"; a squash-merged
+ * branch reads as "not merged"; both err toward not suggesting removal. A
+ * branch deliberately created from a commit that is itself off main's
+ * first-parent line (the tip of an already-merged feature branch) would read as
+ * "merged" while having no work of its own; the removal still needs a clean
+ * tree, and the suggestion is only text.
  *
  * Usage: node scripts/worktree-report.mjs [--no-sizes]
  *        npm run worktrees:report
  *
  * `--no-sizes` skips the `du` calls (slow with a large node_modules). Always
- * exits 0. Caveats, stated in the output: a hardlinked node_modules is counted
- * in full for every worktree, and a branch merged by squash shows as "not
- * merged" (this project merges with merge commits).
+ * exits 0. Every git call here is read-only (`worktree list`, `rev-parse`,
+ * `rev-list`, `merge-base`, `status --no-optional-locks`); a test scans this
+ * file to keep it so.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync, statfsSync } from "node:fs";
@@ -56,29 +83,54 @@ export function shellQuote(p) {
 }
 
 /**
- * Text-only suggestions. The main checkout and bare entries get none; a merged
- * worktree gets `git worktree remove`; any other gets the regenerable `.next`.
+ * The four facts reduced to one state.
  *
- * @param {{ path: string, isMain: boolean, merged: boolean | null, bare: boolean }[]} entries
+ * @param {{ detached: boolean, ancestor: boolean | null, onFirstParent: boolean | null }} facts
+ * @returns {"merged" | "none" | "unmerged" | null}
+ *   merged: has commits of its own and all are on origin/main;
+ *   none: HEAD is a commit main already had (new, unused, or fast-forwarded);
+ *   unmerged: HEAD is not on origin/main; null: not classified.
+ */
+export function worktreeState({ detached, ancestor, onFirstParent }) {
+  if (detached || ancestor === null || ancestor === undefined) return null;
+  if (ancestor === false) return "unmerged";
+  if (onFirstParent === null || onFirstParent === undefined) return null;
+  return onFirstParent ? "none" : "merged";
+}
+
+/**
+ * Text-only suggestions. The main checkout and bare entries get none.
+ * `git worktree remove` only for a merged, clean worktree; otherwise the
+ * regenerable `.next` removal, only when `.next` exists. Nothing else, ever.
+ *
+ * @param {{ path: string, isMain: boolean, bare: boolean, state: string | null, dirty: boolean | null, nextExists: boolean }[]} entries
  * @returns {string[]}
  */
 export function removalSuggestions(entries) {
   const out = [];
   for (const e of entries) {
     if (e.isMain || e.bare) continue;
-    if (e.merged === true) out.push(`git worktree remove ${shellQuote(e.path)}`);
-    else out.push(`rm -rf ${shellQuote(`${e.path}/.next`)}`);
+    if (e.state === "merged" && e.dirty === false) out.push(`git worktree remove ${shellQuote(e.path)}`);
+    if (e.nextExists) out.push(`rm -rf ${shellQuote(`${e.path}/.next`)}`);
   }
   return out;
 }
 
 const gib = (n) => n.toFixed(1);
 
+const STATE_LABEL = {
+  merged: "merged into origin/main",
+  none: "no commits of its own (new or unused)",
+  unmerged: "not merged",
+};
+
 /**
  * @param {{
  *   repoRoot: string,
  *   freeGiB: number,
- *   worktrees: { path: string, branch: string | null, detached: boolean, merged: boolean | null, isMain: boolean, bare: boolean,
+ *   baseFound: boolean,
+ *   worktrees: { path: string, branch: string | null, detached: boolean, isMain: boolean, bare: boolean,
+ *                state: "merged" | "none" | "unmerged" | null, dirty: boolean | null, nextExists: boolean,
  *                sizes: { nodeModules: number, next: number, rest: number } | null }[],
  * }} model
  * @returns {string}
@@ -94,20 +146,33 @@ export function formatReport(model) {
   }
   lines.push("");
   for (const w of model.worktrees) {
-    const where = w.bare ? "bare" : w.detached ? "detached" : (w.branch ?? "unknown");
-    const merged = w.isMain || w.merged === null ? "" : w.merged ? "  merged into main" : "  not merged";
-    const sizes = w.sizes
-      ? `  node_modules ${gib(w.sizes.nodeModules)} GiB, .next ${gib(w.sizes.next)} GiB, rest ${gib(w.sizes.rest)} GiB`
-      : "";
-    lines.push(`${w.path}  ${where}${merged}${sizes}`);
+    const segments = [w.path, w.bare ? "bare" : w.detached ? "detached" : (w.branch ?? "unknown")];
+    if (!w.isMain && !w.bare && !w.detached && w.state) segments.push(STATE_LABEL[w.state]);
+    if (!w.isMain && w.dirty === true) segments.push("uncommitted or untracked files");
+    if (w.sizes) {
+      segments.push(
+        `node_modules ${gib(w.sizes.nodeModules)} GiB, .next ${gib(w.sizes.next)} GiB, rest ${gib(w.sizes.rest)} GiB`,
+      );
+    }
+    lines.push(segments.join("  "));
   }
+  if (!model.baseFound) lines.push("Merge state is not shown: origin/main was not found in this repository.");
   lines.push("");
   lines.push(
-    'Hardlinked node_modules are counted in full for each worktree. A branch merged by squash shows as "not merged". This report deletes nothing; the commands below are suggestions for you to run.',
+    'Hardlinked node_modules are counted in full for each worktree. "merged into origin/main" means the branch has commits of its own and every one of them is on origin/main as of your last fetch. A branch that was squash-merged or fast-forwarded cannot be told from an unmerged or an unused one, so no worktree removal is suggested for it. This report deletes nothing.',
   );
   const suggestions = removalSuggestions(model.worktrees);
   if (suggestions.length) {
     lines.push("");
+    lines.push("Suggestions for you to run (nothing here has been run):");
+    if (suggestions.some((s) => s.startsWith("git worktree remove"))) {
+      lines.push(
+        '"git worktree remove" also deletes the ignored files in that worktree, such as .env.local and node_modules; the branch is kept.',
+      );
+    }
+    if (suggestions.some((s) => s.startsWith("rm -rf"))) {
+      lines.push('".next" is regenerable; stop that worktree\'s dev server before removing it.');
+    }
     for (const s of suggestions) lines.push(`  ${s}`);
   }
   return lines.join("\n");
@@ -115,8 +180,22 @@ export function formatReport(model) {
 
 // ── Gathering (the only part that touches the machine; all read-only) ────────
 
-function git(args, cwd) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+/**
+ * The ONE place git is spawned. Never throws: `code` is the exit status (null
+ * when git could not run at all). Every caller passes a read-only subcommand.
+ */
+function gitRun(args, cwd) {
+  try {
+    const out = execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 256 * 1024 * 1024,
+    });
+    return { code: 0, out };
+  } catch (err) {
+    return { code: err && typeof err.status === "number" ? err.status : null, out: "" };
+  }
 }
 
 function duGiB(target) {
@@ -129,29 +208,49 @@ function duGiB(target) {
   }
 }
 
-/** Exit code only: true when `head` is an ancestor of origin/main (or main). */
-function isMerged(head, cwd) {
-  for (const base of ["origin/main", "main"]) {
-    try {
-      execFileSync("git", ["merge-base", "--is-ancestor", head, base], { cwd, stdio: "ignore" });
-      return true;
-    } catch (err) {
-      if (err && err.status === 1) return false; // a real answer: not an ancestor
-      // 128 / missing ref: try the next base
-    }
-  }
-  return null;
+/**
+ * The commit origin/main points at, or null. No fallback to a local `main`: it
+ * can be ahead of what was published, and "merged" is a claim about origin/main.
+ */
+export function resolveBase(cwd) {
+  const r = gitRun(["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"], cwd);
+  const sha = r.out.trim();
+  return r.code === 0 && sha ? sha : null;
 }
 
-function main() {
-  const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-  const withSizes = !process.argv.includes("--no-sizes");
-  let entries = [];
-  try {
-    entries = parseWorktreePorcelain(git(["worktree", "list", "--porcelain"], repoRoot));
-  } catch {
-    console.log("worktrees:report: git worktree list failed; showing disk only.");
-  }
+/** The set of commits on origin/main's first-parent line, or null on failure. */
+export function firstParentLine(base, cwd) {
+  const r = gitRun(["rev-list", "--first-parent", base], cwd);
+  return r.code === 0 ? new Set(r.out.split("\n").filter(Boolean)) : null;
+}
+
+/**
+ * @returns {{ ancestor: boolean | null, onFirstParent: boolean | null }}
+ *   ancestor: exit code of `merge-base --is-ancestor` (0 true, 1 false, else null).
+ */
+export function worktreeFacts(head, base, line, cwd) {
+  const r = gitRun(["merge-base", "--is-ancestor", head, base], cwd);
+  const ancestor = r.code === 0 ? true : r.code === 1 ? false : null;
+  return { ancestor, onFirstParent: line ? line.has(head) : null };
+}
+
+/**
+ * Whether the worktree has uncommitted or untracked files (ignored files do not
+ * count). `--no-optional-locks` keeps this from refreshing the worktree's index.
+ * `--untracked-files=normal` makes the answer independent of a user's
+ * status.showUntrackedFiles setting. null when it could not be read.
+ */
+export function isDirty(worktreePath) {
+  const r = gitRun(["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal"], worktreePath);
+  return r.code === 0 ? r.out.length > 0 : null;
+}
+
+/** Everything the report prints, gathered from the machine. Read-only. */
+export function buildModel(repoRoot, { sizes: withSizes = true } = {}) {
+  const listed = gitRun(["worktree", "list", "--porcelain"], repoRoot);
+  const entries = listed.code === 0 ? parseWorktreePorcelain(listed.out) : [];
+  const base = resolveBase(repoRoot);
+  const line = base ? firstParentLine(base, repoRoot) : null;
   const st = statfsSync(repoRoot);
   const worktrees = entries.map((e) => {
     let sizes = null;
@@ -161,13 +260,27 @@ function main() {
       const total = duGiB(e.path);
       sizes = { nodeModules, next, rest: Math.max(0, total - nodeModules - next) };
     }
+    const classifiable = !e.isMain && !e.bare && !!e.head;
+    const state =
+      classifiable && base
+        ? worktreeState({ detached: e.detached, ...worktreeFacts(e.head, base, line, repoRoot) })
+        : null;
     return {
       ...e,
-      merged: e.isMain || e.bare || !e.head ? null : isMerged(e.head, repoRoot),
+      state,
+      dirty: e.isMain || e.bare ? null : isDirty(e.path),
+      nextExists: existsSync(path.join(e.path, ".next")),
       sizes,
     };
   });
-  console.log(formatReport({ repoRoot, freeGiB: (st.bavail * st.bsize) / 1024 ** 3, worktrees }));
+  return { repoRoot, freeGiB: (st.bavail * st.bsize) / 1024 ** 3, baseFound: base !== null, listFailed: listed.code !== 0, worktrees };
+}
+
+function main() {
+  const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+  const model = buildModel(repoRoot, { sizes: !process.argv.includes("--no-sizes") });
+  if (model.listFailed) console.log("worktrees:report: git worktree list failed; showing disk only.");
+  console.log(formatReport(model));
 }
 
 const invoked = process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));

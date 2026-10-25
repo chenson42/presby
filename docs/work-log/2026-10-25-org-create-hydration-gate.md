@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Skipped (bug confirmed from code by platform-admin-redesign Phase 1 G8, Phase 2 F275 and Inc1 Phase 3 bug-fix note; also TODO.md:185) | — | 2026-10-25 |
 | 2 — Architectural review | architect | Skipped — no invariant touched; one component wrapped in the existing HydrationGate (DECISION-159) | — | 2026-10-25 |
 | 3 — Technical design | tech-lead | Brief: the Inc1 Phase 3 bug-fix note (below) is the design | — | 2026-10-25 |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 4 — Implementation | ux-developer | Complete | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -149,31 +149,28 @@
 
 ## Files Created
 
-- `path/to/file` — purpose
+- `e2e/hydration/create-organization-form.spec.ts` — prod-lane held-chunks case for /admin/organizations/new (specs each carry their own `holdScripts`; no shared helper exists, so followed that convention)
 
 ## Files Modified
 
-- `path/to/file` — what changed
+- `src/app/(admin)/admin/organizations/new/create-organization-form.tsx` — `<form>` wrapped in `<HydrationGate>`; nothing else
+- `src/app/(admin)/admin/organizations/new/create-organization-form.test.tsx` — `useHydrated` mocked; two gate tests
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+none
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+none
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+Failing-first: with the form unchanged, both new tests failed (`expected null not to be null`; `Cannot read properties of null (reading 'disabled')` — no gate fieldset). With the fix, 47/47 in the directory pass. Test names carry `regression for F275`. The repo has no jest-dom, so disabled state is asserted with `.matches(":disabled")` (jsdom resolves fieldset disablement).
 
-Strings added or changed: [file:line each, or "none"]
+Gates: typecheck, lint, `npm run check` (0 violations), `npm test` (553 files passed, 8592 tests passed, 2442 skipped), `npm run build` all pass. `PW_PROD_PORT=3551 npm run test:e2e:prod -- e2e/hydration/create-organization-form.spec.ts`: 1 passed. `e2e/admin-organizations*.spec.ts` on :3550 (Playwright-started dev server, stopped): 31 passed.
 
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
+Strings added or changed: none
 
 ---
 

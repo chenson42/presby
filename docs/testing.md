@@ -388,6 +388,23 @@ database lacks and the suites assume: `scripts/ci/e2e-baseline-flags.sql`
 shards only, never the rls job). A spec that asserts against a flag it does not
 set belongs in the first file.
 
+**Before a QA e2e run on a pipeline branch**, reset the global flags: a branch
+inherits `development`'s flags plus whatever earlier runs left, so a spec can pass
+there that CI's from-empty database fails. `scripts/ci/e2e-reset-flags.sql` sets
+every `feature_flags` row to its `scripts/seed.ts` value and then applies the
+baseline, in one transaction. It refuses unless you pass `-v pipeline_branch=1`
+(it would switch off flags an operator turned on for a demo if run against
+`development`), and `scripts/e2e-reset-flags.test.mjs` fails `npm test` if its
+list drifts from the seed. Run it with `psql -f` (so `\ir` resolves), keeping
+the connection string in the environment:
+
+```bash
+npx dotenv -e .env.local -- sh -c 'psql "$PLATFORM_DATABASE_URL" -v ON_ERROR_STOP=1 -v pipeline_branch=1 -f scripts/ci/e2e-reset-flags.sql'
+```
+
+It resets global `feature_flags.enabled` only; `rollout_percent` and the
+per-organization toggles are not touched. State in the verdict that you ran it.
+
 `db-tests` deliberately does **not** set `RATE_LIMIT_DISABLED` — it is the
 one place in this repo's test suites where the sign-in limiter is exercised
 live, for real, under the standard config. `e2e` keeps `RATE_LIMIT_DISABLED=

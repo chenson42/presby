@@ -585,7 +585,7 @@ importing `@/lib/db` breaks the build — no longer holds, but the rule stands
 would be a second enumeration-sensitive path (DECISION-040), and it must stay a
 pure function of host, path and session claims. It imports `edgeAuth`, the
 permission constants, and `src/lib/domains/host.ts`, `probe.ts` and
-`cron-passthrough.ts` — nothing else. `npm run check:proxy-imports` enforces it.
+`cron-passthrough.ts` — nothing else. `npm run check:proxy-imports` enforces it. Because the proxy trusts the session's 2FA claim, that claim is set only inside a server-side verification grant (`src/lib/auth/two-factor-grant.ts`); the jwt callback's update branch reads nothing from the update payload (DECISION-230).
 
 ### A Custom Host Is a Key, Not an Identity
 

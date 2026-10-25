@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 import dotenv from "dotenv";
+import { assertDevLaneAllowed } from "./e2e/support/dev-port-guard";
 
 dotenv.config({ path: path.resolve(__dirname, ".env.local") });
 
@@ -67,6 +68,14 @@ if (isProdBuildRun) {
       `PW_PROD_PORT must be an integer 1024-65535 other than 3000 (got "${process.env.PW_PROD_PORT}").`,
     );
   }
+}
+
+// Workflow Rule 16: a pipeline never attaches to :3000. From a linked worktree
+// this throws unless E2E_BASE_URL names your own port or PW_ALLOW_3000=1
+// (e2e/support/dev-port-guard.ts). Covers the dev lane and the visual run; the
+// production lane has its own, stricter checks above.
+if (!isProdBuildRun) {
+  assertDevLaneAllowed({ baseUrl: process.env.E2E_BASE_URL, projectDir: __dirname });
 }
 
 const baseURL = isProdBuildRun

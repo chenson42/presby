@@ -26,6 +26,7 @@
  */
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
+import { withDbRetry } from "./db";
 
 type Sql = ReturnType<typeof neon<false, false>>;
 
@@ -58,11 +59,14 @@ function hashRecoveryCodeForFixture(code: string): string {
  * E2E_RECOVERY_CODE. Idempotent; safe to call before every test.
  */
 export async function seedRecoveryCode(sql: Sql, userId: string): Promise<void> {
-  await sql`DELETE FROM user_totp_recovery_codes WHERE user_id = ${userId}`;
-  await sql`
-    INSERT INTO user_totp_recovery_codes (user_id, code_hash)
-    VALUES (${userId}, ${hashRecoveryCodeForFixture(E2E_RECOVERY_CODE)})
-  `;
+  // One step: delete-then-insert re-clears first, so a repeat after a lost reply ends the same.
+  await withDbRetry("seed recovery code", async () => {
+    await sql`DELETE FROM user_totp_recovery_codes WHERE user_id = ${userId}`;
+    await sql`
+      INSERT INTO user_totp_recovery_codes (user_id, code_hash)
+      VALUES (${userId}, ${hashRecoveryCodeForFixture(E2E_RECOVERY_CODE)})
+    `;
+  });
 }
 
 function encryptForFixture(plain: string): string {
@@ -103,12 +107,14 @@ export async function seedTotpEnrollment(
   userId: string,
 ): Promise<void> {
   const ciphertext = encryptForFixture(E2E_TOTP_TEST_SECRET);
-  await sql`
-    INSERT INTO user_totp (user_id, secret_ciphertext, enrolled_at)
-    VALUES (${userId}, ${ciphertext}, now())
-    ON CONFLICT (user_id) DO UPDATE SET
-      secret_ciphertext = EXCLUDED.secret_ciphertext,
-      last_used_at      = NULL
-  `;
-  await seedRecoveryCode(sql, userId);
+  await withDbRetry("seed totp enrollment", async () => {
+    await sql`
+      INSERT INTO user_totp (user_id, secret_ciphertext, enrolled_at)
+      VALUES (${userId}, ${ciphertext}, now())
+      ON CONFLICT (user_id) DO UPDATE SET
+        secret_ciphertext = EXCLUDED.secret_ciphertext,
+        last_used_at      = NULL
+    `;
+    await seedRecoveryCode(sql, userId);
+  });
 }

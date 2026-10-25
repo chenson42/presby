@@ -15,6 +15,7 @@
  * of it.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { neon } from "@neondatabase/serverless";
 
 export type Sql = ReturnType<typeof neon<false, false>>;
@@ -40,4 +41,93 @@ export function platformSql(specName: string): Sql {
     );
   }
   return neon(url);
+}
+
+/** A SQLSTATE: five characters, at least one digit (so Node's `EPIPE` is not one). */
+const SQLSTATE = /^(?=.*\d)[0-9A-Z]{5}$/;
+/** Connection-level SQLSTATEs: class 08, admin/crash shutdown and startup, too many connections. */
+const DROP_SQLSTATE = /^(08...|57P01|57P02|57P03|53300)$/;
+/** A query the server cancelled on purpose: retrying a stall only makes it longer. */
+const NOT_A_DROP = /statement timeout|lock timeout|canceling statement|idle-in-transaction/i;
+/** The shape of a dropped Neon connection (the HTTP driver's `fetch failed`, the pool's reset, a connect timeout). */
+const DB_DROP =
+  /fetch failed|Connection terminated|terminating connection|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket hang up|UND_ERR_(CONNECT_TIMEOUT|SOCKET)|Connect Timeout Error/i;
+
+function textOf(err: unknown): string {
+  if (typeof err !== "object" || err === null) return "";
+  const e = err as { message?: unknown; code?: unknown; cause?: unknown; sourceError?: unknown };
+  const parts = [e.message];
+  for (const inner of [e.cause, e.sourceError]) {
+    if (typeof inner === "object" && inner !== null) {
+      const i = inner as { message?: unknown; code?: unknown };
+      parts.push(i.message, i.code);
+    } else {
+      parts.push(inner);
+    }
+  }
+  return parts.filter((p) => p !== undefined && p !== null).map(String).join(" ");
+}
+
+/**
+ * True only for a dropped connection. In order: (1) a server-side cancel
+ * (statement, lock or idle-in-transaction timeout) is never a drop; (2) an error
+ * with a SQLSTATE `code` is a drop only for connection-level states, so a unique
+ * violation (23505) or a missing table (42P01) throws at once; (3) otherwise the
+ * message, plus its `cause` and `sourceError` (a `fetch failed` arrives wrapped,
+ * with no code), must read like a lost connection. The bare word "timeout" and
+ * the bare class name `NeonDbError` retry nothing.
+ */
+export function isDbDrop(err: unknown): boolean {
+  const text = textOf(err);
+  if (NOT_A_DROP.test(text)) return false;
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  if (typeof code === "string" && SQLSTATE.test(code)) return DROP_SQLSTATE.test(code);
+  return DB_DROP.test(text);
+}
+
+/*
+ * WHAT MAY BE WRAPPED (rules R1-R6; the same list is in docs/testing.md).
+ *
+ * R1  A step may be wrapped only if running it again after "it committed but the reply was lost"
+ *     leaves the same end state. A `fetch failed` can mean the statement landed.
+ * R2  Wrap whole units: a disable-trigger / work / enable-trigger sequence is ONE step with the
+ *     re-enable in `finally` (the domains-ui shape), never one statement of it.
+ * R3  Safe by shape: reads; `delete`; `update ... set x = <constant>`; `insert ... on conflict ...
+ *     do nothing|update`; `insert ... where not exists`; a `delete`-then-`insert` pair that
+ *     re-clears first.
+ * R4  Never wrap a unit that reads a value and then overwrites it if the read is kept as "prior
+ *     state": a retry after the overwrite committed would capture the NEW value as "prior" and
+ *     teardown would restore the wrong thing. Wrap the read and the write as separate steps.
+ * R5  Never wrap a plain `insert` (a duplicate row or a unique violation on retry), or a
+ *     state-machine edge (`update ... set state = '<next>'`) whose trigger may reject a repeat.
+ * R6  Wrap inside the fixture function, so no spec changes. Spec-inline SQL is not covered.
+ */
+
+/** Set while a withDbRetry step runs, so a nested withDbRetry does not multiply attempts. */
+const inRetry = new AsyncLocalStorage<true>();
+
+/**
+ * Retries `step` with exponential backoff (0.5 s, 1 s, 2 s, 4 s; five attempts) while it fails with a
+ * connection drop (`isDbDrop`); any other error (a constraint, a timeout, a bug) is thrown at once, and the
+ * ORIGINAL error is rethrown after the last attempt. Only the outermost call retries: a withDbRetry inside
+ * another runs its step once, so wrapping a composite and its parts never multiplies attempts.
+ *
+ * A step may be wrapped only if running it again after "it committed but the reply was lost" leaves the same
+ * end state (a `fetch failed` can mean the statement landed). See the rules R1-R6 in docs/testing.md.
+ */
+export async function withDbRetry<T>(label: string, step: () => Promise<T>, opts: { attempts?: number; baseMs?: number } = {}): Promise<T> {
+  if (inRetry.getStore()) return step();
+  const attempts = opts.attempts ?? 5;
+  const baseMs = opts.baseMs ?? 500;
+  return inRetry.run(true, async () => {
+    for (let n = 1; ; n++) {
+      try {
+        return await step();
+      } catch (err) {
+        if (n >= attempts || !isDbDrop(err)) throw err;
+        console.warn(`[e2e-db] ${label}: connection dropped, retry ${n}/${attempts - 1}`);
+        await new Promise((resolve) => setTimeout(resolve, baseMs * 2 ** (n - 1)));
+      }
+    }
+  });
 }

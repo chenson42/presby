@@ -25,6 +25,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { evaluateSignIn } from "./sign-in-gate";
 
+const VERIFIED = { emailVerified: true } as const;
+
 // ---------------------------------------------------------------------------
 // Faithful encoding of the OLD (pre-fix) id-keyed callback logic.
 // Used only to demonstrate the regression in test 1.
@@ -63,6 +65,7 @@ describe("evaluateSignIn", () => {
       const result = await evaluateSignIn(
         "google",
         { id: googleSubAsId, email: "new@example.com" },
+        VERIFIED,
         findUserByEmail,
       );
       expect(result).toBe(true);
@@ -82,6 +85,7 @@ describe("evaluateSignIn", () => {
     const result = await evaluateSignIn(
       "google",
       { email: "dead@example.com" },
+      VERIFIED,
       findUserByEmail,
     );
 
@@ -99,6 +103,7 @@ describe("evaluateSignIn", () => {
     const result = await evaluateSignIn(
       "credentials",
       { id: "a-real-db-uuid", email: "user@example.com" },
+      VERIFIED,
       findUserByEmail,
     );
 
@@ -112,7 +117,7 @@ describe("evaluateSignIn", () => {
   it("OAuth user with no email — returns false (fail-safe)", async () => {
     const findUserByEmail = vi.fn();
 
-    const result = await evaluateSignIn("google", {}, findUserByEmail);
+    const result = await evaluateSignIn("google", {}, VERIFIED, findUserByEmail);
 
     expect(result).toBe(false);
     expect(findUserByEmail).not.toHaveBeenCalled();
@@ -130,10 +135,118 @@ describe("evaluateSignIn", () => {
     const result = await evaluateSignIn(
       "google",
       { email: "User.Name@Example.COM" },
+      VERIFIED,
       findUserByEmail,
     );
 
     expect(result).toBe(true);
     expect(findUserByEmail).toHaveBeenCalledWith("user.name@example.com");
+  });
+  // -------------------------------------------------------------------------
+  // Email-verified claim (F231, DECISION-246) — regression for the unchecked
+  // provider email claim. Each case below failed against the gate as it stood
+  // before the claim argument existed: the old gate ignored the claim and went
+  // on to ask the lookup.
+  // -------------------------------------------------------------------------
+  describe("provider email claim (DECISION-246)", () => {
+    const user = { id: "117483729384657382910", email: "someone@example.com" };
+
+    it("claim false — returns false and never reads users — regression for unverified provider email", async () => {
+      const findUserByEmail = vi.fn().mockResolvedValue(null);
+      const result = await evaluateSignIn(
+        "google",
+        user,
+        { emailVerified: false },
+        findUserByEmail,
+      );
+      expect(result).toBe(false);
+      expect(findUserByEmail).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["undefined", undefined],
+      ["null", null],
+      ['the string "true"', "true"],
+      ["the number 1", 1],
+      ['the string "false"', "false"],
+      ["the number 0", 0],
+      ["an object", {}],
+    ])("claim %s — returns false and never reads users", async (_label, claim) => {
+      const findUserByEmail = vi.fn().mockResolvedValue(null);
+      const result = await evaluateSignIn(
+        "google",
+        user,
+        { emailVerified: claim },
+        findUserByEmail,
+      );
+      expect(result).toBe(false);
+      expect(findUserByEmail).not.toHaveBeenCalled();
+    });
+
+    it("an unverified claim is refused even when the row is active (no row-dependent outcome)", async () => {
+      const findUserByEmail = vi.fn().mockResolvedValue({ isActive: true });
+      expect(
+        await evaluateSignIn("google", user, { emailVerified: false }, findUserByEmail),
+      ).toBe(false);
+      expect(findUserByEmail).not.toHaveBeenCalled();
+    });
+
+    it("verified, no row — returns true", async () => {
+      const findUserByEmail = vi.fn().mockResolvedValue(null);
+      expect(await evaluateSignIn("google", user, VERIFIED, findUserByEmail)).toBe(true);
+    });
+
+    it("verified, active row — returns true", async () => {
+      const findUserByEmail = vi.fn().mockResolvedValue({ isActive: true });
+      expect(await evaluateSignIn("google", user, VERIFIED, findUserByEmail)).toBe(true);
+    });
+
+    it("verified, deactivated row — returns false", async () => {
+      const findUserByEmail = vi.fn().mockResolvedValue({ isActive: false });
+      expect(await evaluateSignIn("google", user, VERIFIED, findUserByEmail)).toBe(false);
+    });
+
+    it("verified, no email — returns false without a lookup", async () => {
+      const findUserByEmail = vi.fn();
+      expect(await evaluateSignIn("google", { id: "x" }, VERIFIED, findUserByEmail)).toBe(false);
+      expect(findUserByEmail).not.toHaveBeenCalled();
+    });
+
+    it.each([true, false, undefined])(
+      "credentials with claim %s — returns true without a lookup",
+      async (claim) => {
+        const findUserByEmail = vi.fn();
+        const result = await evaluateSignIn(
+          "credentials",
+          user,
+          { emailVerified: claim },
+          findUserByEmail,
+        );
+        expect(result).toBe(true);
+        expect(findUserByEmail).not.toHaveBeenCalled();
+      },
+    );
+
+    it("a non-credentials provider other than google is held to the same claim", async () => {
+      const findUserByEmail = vi.fn().mockResolvedValue(null);
+      expect(
+        await evaluateSignIn("github", user, { emailVerified: undefined }, findUserByEmail),
+      ).toBe(false);
+    });
+
+    it("lookup throws with a verified claim — the gate rejects (Auth.js ends in AccessDenied)", async () => {
+      const findUserByEmail = vi.fn().mockRejectedValue(new Error("db down"));
+      await expect(
+        evaluateSignIn("google", user, VERIFIED, findUserByEmail),
+      ).rejects.toThrow("db down");
+    });
+
+    it("the claim argument is required — the old three-argument shape does not typecheck", async () => {
+      const findUserByEmail = vi.fn();
+      // @ts-expect-error claims is a required third parameter; no default-allow
+      const result = await evaluateSignIn("google", user, findUserByEmail);
+      // Behavioural backstop for the type pin: a missed call site refuses.
+      expect(result).toBe(false);
+    });
   });
 });

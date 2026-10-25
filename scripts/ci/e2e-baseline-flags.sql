@@ -12,9 +12,10 @@
 --
 -- Specs that need a flag in a particular state still capture, set and restore
 -- it themselves (e2e/support/flags.ts); this file only fixes the BASELINE they
--- restore to. Applied by e2e.yml only, on the throwaway branch, as the owner.
--- db.yml never applies it: the DB-backed unit suite must run against seeded
--- defaults.
+-- restore to. Applied by e2e.yml, on the throwaway branch, as the owner, and by
+-- e2e-reset-flags.sql (which first sets every global flag back to its seed
+-- value, for a QA run on a pipeline branch). db.yml never applies it: the
+-- DB-backed unit suite must run against seeded defaults.
 --
 -- Add a key here only when a spec asserts against it and does not set it.
 update feature_flags

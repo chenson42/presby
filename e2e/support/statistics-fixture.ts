@@ -13,7 +13,7 @@
  * `hydration/statistics-congregation.spec.ts` (year 2096).
  */
 
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 
 const E2E_ORG_ID_PREFIX = "e2e00000-";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -38,7 +38,8 @@ export async function removeCongregationStatistics(
         "e2e fixtures live in the reserved 2090-2099 band (DECISION-157).",
     );
   }
-  await sql.query(`
+  // The DO block is one atomic statement and a delete, so a repeat after a lost reply ends the same.
+  await withDbRetry("remove congregation statistics", () => sql.query(`
     do $cleanup$
     begin
       alter table congregation_statistics disable trigger congregation_statistics_freeze;
@@ -49,11 +50,11 @@ export async function removeCongregationStatistics(
       alter table congregation_statistics enable trigger congregation_statistics_freeze;
     end
     $cleanup$;
-  `);
-  await sql`alter table congregation_statistics enable trigger congregation_statistics_freeze`;
-  const rows = (await sql`
+  `));
+  await withDbRetry("re-enable statistics freeze trigger", () => sql`alter table congregation_statistics enable trigger congregation_statistics_freeze`);
+  const rows = (await withDbRetry("verify statistics freeze trigger", () => sql`
     select tgenabled from pg_trigger where tgname = 'congregation_statistics_freeze'
-  `) as { tgenabled: string }[];
+  `)) as { tgenabled: string }[];
   if (rows[0]?.tgenabled !== "O") {
     throw new Error(
       "[statistics-fixture] teardown left congregation_statistics_freeze " +

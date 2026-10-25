@@ -249,7 +249,7 @@ export async function acceptSignedInAction(
     // committed, so a failed refresh must not turn success into an error: the
     // pages that hold tier-2 data gate 2FA themselves from a fresh auth().
     try {
-      await unstable_update({ user: {} });
+      await unstable_update({});
     } catch {
       console.error("[invite] session refresh after accept failed");
     }

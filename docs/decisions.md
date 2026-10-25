@@ -4,6 +4,22 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-230 — The session's 2FA claim is set only inside a server-side verification grant; the jwt callback's update branch reads nothing from the update payload; client session updates are refused at the route.**
+
+**Status:** Resolved (architect, Phase 2; operator ruling on existing sessions, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-24-session-update-hardening` (v0.42.3; no migration)
+
+- **Mechanism.** The TOTP and recovery verification actions wrap `unstable_update({})` in `withTwoFactorGrant(userId, method, ...)`, an `AsyncLocalStorage` scope in a `server-only` module (`src/lib/auth/two-factor-grant.ts`). The jwt callback sets `twoFactorVerified = true` only when `trigger === "update"` and `takeTwoFactorGrant(token.sub)` finds a single-use grant for that user in the current request. Nothing is serialized, so there is nothing to replay. The update branch accepts no boolean, roles or features from the payload; every legitimate caller only wants the refresh, which `trigger === "update"` already causes. The sign-in reset of the claim is unchanged.
+- **Route.** `POST /api/auth/session` answers 405 with `Allow: GET` and no body or cookie, at `src/app/api/auth/[...nextauth]/route.ts`. This is defence in depth: `unstable_update` calls `Auth()` in-process and never reaches the route, so it is unaffected, and the proxy stays a pure function of host, path and claims.
+- **The grant helper is never exported from, or wrapped by, a `'use server'` module,** because every exported async function in such a file is a callable endpoint. It is not imported by `src/lib/auth/config.ts` or the proxy (`check:proxy-imports` backs this).
+- **Fallback, not used.** If request context ever stopped reaching the jwt callback, the approved alternative is an HMAC proof derived from `AUTH_SECRET`, bound to the subject and a per-session id, short-lived, compared in constant time. It was not needed: the grant propagated in the dev and `next start` runs. The failure mode is fail-closed (a loop on `/totp`).
+- **Rejected for this fix.** A per-user `users.two_factor_verified_at` cannot tell one session from another. A per-session server record is the right design for revocation and is tracked in `docs/TODO.md`.
+- **Operator ruling, 2026-10-25: existing sessions are not rotated.** There are two active production accounts, both the operator's, so no member is forced to verify again. The fix covers new activity; it cannot show whether an existing session already carries a claim it did not earn, because that leaves no audit mark. Such a session stays verified until its token expires (about 30 days).
+- **Accepted residual (`paper`).** A verified claim outlives an administrator's TOTP reset or a sign-out elsewhere until the token expires. Tracked as the revocation follow-up.
+- **Disclosure hygiene.** Release notes, commit titles and the PR stay neutral until deploy.
+- **Revisit if** Auth.js or Next changes how async context reaches the jwt callback, `next.config.ts` sets `trailingSlash` or `skipTrailingSlashRedirect` (the route check matches `/api/auth/session` exactly; the callback layer does not depend on it).
+
+---
+
 **DECISION-229 — Accelerated Feature tier: low-risk Feature-class work skips the architect and a separate design spawn, and keeps QA whole.**
 
 **Status:** Resolved (operator, "Adopt it", 2026-10-24) · **Date:** 2026-10-24 · **Feature:** the 2026-10-24 retrospective, `docs/reviews/2026-10-24-retrospective.md` ("The risk-tiered pipeline"; implementation, tech-lead)

@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Shared; recorded in the parent | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (this file); S1–S5 ruled; copy table and carry-forward below; two operator questions | Design complete | 2026-10-25 |
-| 4 — Implementation | api-developer (Batch B), ux-developer (Batches A and C) | Batches A and B complete (A: 3 commits, B: 2 commits); Batch C pending | — | 2026-10-25 |
+| 4 — Implementation | api-developer (Batch B), ux-developer (Batches A and C) | Batches A, B and C complete (A: 3 commits, B: 2, C: 3) | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -729,6 +729,38 @@ E5 (each reader's rejecting-execute test, and `read-card.test.ts`), E6 (class-on
 - Not done in this batch, still on the design's Fixes list: the organizations list description, the three organization forbidden blocks (`AdminForbidden`), and the `/home` Admin card description (Group H). The stale `admin-login.spec.ts` comment is Batch C's.
 - Unverified (Phase 5 owns them): E28 (long name wrapping in the recent-changes card, not built yet), E30 (release-notes markdown at 328px; the page's `grid-cols-[200px_1fr]` is unchanged and is likely to be tight at 360px, pre-existing, recorded for Increment 4).
 - Hand-off: Batch C (ux-developer) next, then QA.
+
+## Phase 4 — Batch C (ux-developer): the dashboard
+
+**Status:** complete. Commits on `pipeline/platform-admin-redesign` (not pushed): `feat(admin): the platform dashboard replaces the tile grid`; `fix(admin): correct the stale organization and home-card copy`; `test(e2e): admin shell and dashboard at 360px`.
+
+### What shipped
+
+- `(admin)/admin/_dashboard/`: `registry.ts` (pure data: zones, ten cards, keys), `visible.ts` (the one place features meet the registry; empty zones omitted), `present.ts` (all card copy as pure `CardResult -> CountCardState` presenters), `cards.tsx` (nine thin async wrappers plus the `DASHBOARD_CARD_VIEWS` map the page tests replace with stubs), `recent-changes-card.tsx` (wide list card; rows are plain text, time on its own line, `break-words`), `find-organization.tsx` (plain GET form to `/admin/organizations?q=`, no `useForm`).
+- `page.tsx`: `GreetingBand` (testid kept), action bar for `ADMIN_ORGANIZATIONS` holders (New organization first in DOM, full width on a phone; find form stacks), "Updated {FormattedDate}", four static zones, each card its own `Suspense` with `CountCardSkeleton`, mounted only for a key holder. Door-only viewers get the byte-identical empty state. A holder of only nav-only keys (flags, what's new) gets the greeting and no false "no access" message.
+- Copy group H: organizations list description; three organization forbidden blocks now `AdminForbidden` ("managing organizations"); `/home` Admin card description. Stale comment in `e2e/admin-login.spec.ts`. The tile registry was already retired in Batch A.
+- Recent-changes zone: the zone `<h2>` is the card's title; the card carries the Copy subtitle (no duplicated heading). Its error state is inline (same words and 44px "Try again" as `CountCard`).
+
+### Tests
+
+- Unit: `present.test.ts` (error never becomes "Nothing waiting.", plurals, every Copy-D string, E5/E7/E23), `visible.test.ts` (E1-E3), `cards.test.tsx` (wiring, failed read renders the error state, destinations, map covers the registry), `recent-changes-card.test.tsx`, `find-organization.test.tsx`, `page.test.tsx` re-pinned (E1 "support operator sees exactly the Support cards", E2, E3, E4 stub spies never called for a non-holder, no `/o/` link, mixed keys), `organizations/forbidden.test.tsx` (three pages, no database touched), `/home` description assertion.
+- e2e `e2e/admin-shell.spec.ts` (7 tests, admin storage state, no flags): zones and no failed card, `a[href^="/o/"]` count 0, find box, nav headings and `aria-current` (longest href), avatar-menu sign-out, 404 status, 360px no-overflow with stacked action bar, Menu flow (44px links, Escape returns focus, navigation closes). Card failure isolation in a running server has no forcing hook in the design, so it is pinned at unit level only (gap, deliberate).
+- R9 regression set on :3530 (own server via `PORT=3530`): `admin-login`, `totp-full-login` (MFA-enrolled), `role-boundaries`, `session-claim-integrity`, `totp-callback-bypass`, `admin-audit`, `admin-email-queue`, `admin-organizations`, `whats-new`, `member-home`, `giving-admin`, `admin-shell`: 89 passed, 0 failed.
+
+### Gates
+
+`npm run typecheck`, `npm run lint`, `npm run check` (eight tripwires), plain `npm test` (581 files passed, 80 skipped), `npm run build`, DB suites (admin, dashboard readers, platform-read: 104 passed) all pass.
+
+### Real-browser pass (own dev server on :3530, stopped by PID), development data
+
+Same on both widths, no horizontal overflow at 360px or 1280px: Organizations at a glance "15 organizations" (9 congregations, 5 presbyteries, 1 synod; 12 managed, 1 invited, 2 unmanaged; 13 still on the default palette); Giving notices "Needs attention, 1 dead letter, 1 notice waiting"; Domains "Nothing waiting."; Sites "Needs attention, 1 provisioning, 1 live"; Tickets "1 new ticket, oldest has waited 71 days, 1 open and not assigned"; Feedback "1 new"; Email queue "48 waiting over 30 minutes"; Two-factor "8 accounts not enrolled"; Locked accounts "Nothing waiting."; Recent operator changes: ten "Feature flag changed" rows with flag key, actor and local time, wrapping (the longest key wrapped onto two lines at 360px; E28 only partly confirmed, no long organization name in the data). Phone: cards single column, New organization full width, find input above Search, Menu button and avatar on one row. Desktop: sidebar plus three-column zones; sidebar is not sticky.
+
+### Notes for QA / the orchestrator
+
+- Unverified still: E27 (EXPLAIN), E28 with a long organization name, E30 (release notes at 328px).
+- The dev "Updated" line and times render in the browser's zone through `FormattedDate`.
+- `docs/work-log/...-inc3.md` shows an uncommitted orchestrator note; not touched or committed here.
+- New copy for a fork's branding pass: none beyond the Copy table; "Updated", "Search" and "Find an organization" are the strings added in this batch.
 
 ## Files Created
 

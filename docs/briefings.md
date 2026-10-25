@@ -17,8 +17,11 @@ either of those.
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
-if decisions or feat/fix commits have landed since. Move it when you write new
-entries — that is the one piece of discipline this file needs, and it is checked.*
+if decisions above the marker that no entry names (write `DECISION-NNN`, or a
+range like `DECISION-215–219`, in the entry) or feat/fix commits since the marker
+commit have landed. Name each decision in an entry and move the marker when you
+write new entries — that is the one piece of discipline this file needs, and it
+is checked.*
 
 ---
 

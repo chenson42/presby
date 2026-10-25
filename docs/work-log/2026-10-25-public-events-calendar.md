@@ -18,7 +18,9 @@
 | 2 — Architectural review | architect | Complete; R1–R7, DECISION-238/239/240 proposed, F250–F253 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; names, 0067 + definer, reader, slot/island, series action, Copy, T1–T20; F254–F256, DECISION-241 drafted; G9 deferred (operator to confirm) | Design complete, implementers named | 2026-10-25 |
 | 4 — Implementation | database-admin (Batch 1: 0067, definer, RLS suite), then full-stack-developer (Batches 2–4) | Batch 1 complete (0067 applied and re-applied, section 67 58/58 as presby_app, DB suite 13/13, from-empty green); Batches 2–4 complete (lib, catalog, audit, editor surface, public slot and island, unit/DB/e2e/hydration specs; all gates green); port 3500 | — | 2026-10-25 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1: all suites green; FAIL-1 360px overflow on event detail; FAIL-2 false audit row when websiteListed omitted; copy + payload notes to tech-lead | FAIL | 2026-10-25 |
+| 4 — Implementation (loop-back 1) | full-stack-developer | Complete; FAIL-1 (360px buttons) and FAIL-2 (boolean narrowing, false audit row) fixed failing-first; amendment 1 strings, N3 gate, size ceiling (321,865 B measured, 410,000 ceiling), N4 placeholder filled; all gates green; awaiting QA re-run | Ready for QA re-run | 2026-10-25 |
+| 3 — Technical design (amendment 1) | tech-lead | Complete; QA run 1 rulings: put/take toasts and E8 reworded to "marked" (state the row knows), P2 reworded (no "yet"), payload claim corrected and accepted with a size-ceiling test, N3 gated, N7 TODO text; Phase 4 additions for the implementer; QA re-run scope named | Amendment complete | 2026-10-25 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1115,87 +1117,258 @@ Editor: `admin/events/website-listing-copy.ts` (E1 to E6, E8, E9), `series-websi
 - **Copy-truthfulness anchors:** "Marked for the website" and "For website" say what the row says (`website_listed` and not cancelled), not that it is live; the E2 hint and F2 are the only places that name the toggle and the page placement; the public sentences make no claim about "all events".
 - **Integration items (orchestrator, Rule 16)** are unchanged from the design list plus: nothing new in shared files. The optional `seed-dev-bundle.sql` is deliberately not in the seed-dev patch.
 
-## Files Created
+## Files, schema, audit (filled in at loop-back 1; QA N4)
 
-- `path/to/file` — purpose
-
-## Files Modified
-
-- `path/to/file` — what changed
-
-## Schema Changes
-
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
-
-## Audit Events
-
-- [Action key written when the security-sensitive mutation fires]
-
-## Implementer Notes
-
-[Tradeoffs taken, anything that diverged from the design and why.]
-
-Strings added or changed: [file:line each, or "none"]
-
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
+- **Created:** `drizzle/0067_presby_public_events_calendar.sql`; `src/lib/public-calendar.ts` (+ tests), `src/lib/calendar/public-contract.ts`, `src/lib/events/website-listing.ts`; `series-website-listing.tsx` and `website-listing-copy.ts` under `admin/events/`; the public slot, panel, switcher and model under `src/app/(public)/site/[slug]/`; `e2e/public-calendar.spec.ts`, `e2e/custom-domains/public-calendar.spec.ts`, `e2e/hydration/public-events-calendar.spec.ts`, `e2e/support/public-calendar-fixture.ts`; `scripts/public-calendar/*` (RLS section 67, seeds, integration patches).
+- **Modified:** `src/lib/events.ts` and `src/lib/db/domain/events.ts` (the `website_listed` column, derivation, the series writer), `src/lib/audit.ts`, `src/lib/org-features.ts`, `src/lib/site-urls.ts`, `src/lib/calendar.ts`, `src/lib/calendar/month.ts`, `render-site-page.tsx`, the event forms, list, detail page and actions under `admin/events/`. The full list is `git diff --name-status main...HEAD`.
+- **Schema:** migration 0067 (the `events.website_listed` column, its CHECK, `presby_public_events_calendar()`), hand-written and applied with `psql` to the pipeline branch (Batch 1).
+- **Audit events:** `event.listed_on_website` and `event.unlisted_from_website`, written in the same transaction as the change by the four writers (DECISION-240).
+- **Strings added or changed:** see "Strings added or changed" above, and Phase 3 amendment 1 for the three rewordings (E7 toasts, E8, P2).
 
 ---
 
-# Phase 5 — Verification (qa)
+# Phase 5: Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-10-25
 **Verified by:** qa
+**Branch / HEAD:** `pipeline/public-events-calendar` at `8a56f06`. The merge-base with main is `ce661d7`, and `origin/main` is 31 commits ahead. No file overlaps this diff, but see Notes N6.
+**Database:** the Neon branch `pipeline-public-events-calendar` only.
+
+**Scope I ran:**
+- **Full:** typecheck, lint, `npm run check`, plain `npm test`, `npm run build`.
+- **Full DB-backed Vitest set** (`npm run test:db`). The diff adds migration 0067, so the whole set was required.
+- **RLS:**
+  - section 67 run standalone as `presby_app`;
+  - the full `scripts/test-rls.sql` with the staged integration patch applied, in a scratch copy;
+  - main's suite run on the same database, as the drift baseline.
+- **e2e:**
+  - the full `--project=chromium` suite (the diff adds a file under `e2e/support/`);
+  - the full `custom-hosts` project;
+  - the production lane (`npm run test:e2e:prod`, which runs the `prod-build` and `prod-custom-hosts` projects) on :3501;
+  - every calendar spec re-run with each test forced to 360px.
+- **Other checks:** a scratch Playwright walk of the editor at 360px, my own adversarial probes against the database and the HTML, payload measured on `next start`, and failing-first checked by mutation.
+
+**Flag state:** before any e2e run I reset the global flags to the CI baseline. The command was `psql "$PLATFORM_DATABASE_URL" -v ON_ERROR_STOP=1 -v pipeline_branch=1 -f /Users/cshenso/git/presby-platform/presby/scripts/ci/e2e-reset-flags.sql`, using main's copy, against this branch's database only.
+- It set 39 seeded flags back to their seed values.
+- The branch had been polluted: 28 flags were on, including `org_portal.events` and `sites.public_staff_directory`.
+- The flag state from before the reset is saved at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa/flags-before.txt`. Anyone browsing dev on this branch will now see baseline flags.
+
+**Environment incident:** my first chromium run on :3500 is discarded (2 failures, then aborted).
+- **Cause:** `next.config.ts` sets `turbopack.root` to the parent directory (`presby-platform/`). Another pipeline (`presby-padmin`) was writing test results and `tsbuildinfo` there at the same moment, so my dev server went into a Fast Refresh full-reload loop and `/signin` never hydrated.
+- **Not this branch's defect.** It is a Rule 16 hazard for parallel pipelines and is worth a TODO line.
+- **What I did:** I re-ran from a byte-identical isolated copy of HEAD (`git archive HEAD`, same `.env.local` and the same server env) on :3500. All results below come from that server. I stopped it by PID and deleted the copy afterwards.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS** (exit 0).
+- `npm run lint`: PASS (`--max-warnings=0`).
+- `npm run check`: PASS, all eight tripwires.
+- `npm run build`: PASS. `node_modules/node_modules` was absent before the build.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+| Run | Files | Tests | Duration | Notes |
+|---|---|---|---|---|
+| Plain `npm test` | 549 passed, 78 skipped | 8448 passed, 2475 skipped | 25.8s | The skips are the DB-backed files (`describe.skipIf(!hasDb)`), as designed. |
+| `npm run test:db` (all files, `--no-file-parallelism`) | 627 passed | 10922 passed, 1 skipped | 36m | The one skip is `it.skipIf(!process.env.STATEMENT_SAMPLE_DIR)`. It is a pre-existing manual generator, unrelated to this change. |
+
+Failures: none.
+
+**RLS suite (as `presby_app`):**
+- I confirmed the connection role is `presby_app` and that `rolbypassrls = f`.
+- `scripts/public-calendar/test-rls-67.sql` standalone: exit 0, 58 passes, 0 FAIL.
+- The full `scripts/test-rls.sql` with `test-rls.sql.integration.patch` applied (scratch copy, non-stopping): 1298 passes. Section 67 passed 58 of 58 with 0 errors.
+  - There were 3 failures, at `test-rls.sql:217` (presbytery members, expected 2, got 3), `:516` (2FA definer) and `:7927` (statistics.publish, expected 1, got 2).
+  - **These are pre-existing, not regressions.** `origin/main`'s `test-rls.sql`, run against this same database, fails at the same three lines (1240 passes; 1240 + 58 = 1298). They are data drift on the branch, and Phase 4 reported the same three.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+| Run | Total | Passed | Failed | Skipped | Duration |
+|---|---|---|---|---|---|
+| `--project=chromium`, dev server :3500 | 430 | 430 | 0 | 0 | 17.9m |
+| `--project=custom-hosts`, :3500 | 111 | 111 | 0 | 0 | 4.1m |
+| Production lane (`PW_PROD_PORT=3501 npm run test:e2e:prod`) | 78 | 78 | 0 | 0 | 2.8m |
+| Calendar specs forced to 360px (scratch config, worktree specs unchanged) | 24 | 24 | 0 | 0 | 48s |
+
+- **Pipeline specs:** all green on every lane. That covers `public-calendar.spec.ts` (16), `custom-domains/public-calendar.spec.ts` (8), and `hydration/public-events-calendar.spec.ts` (2 on dev, 2 on the production build).
+- **Blast-radius specs**, all green inside the full run: `member-calendar`, `public-sites`, `portal-home-cards`, and the `custom-domains/*` specs.
+
+**Real-browser 360px check** (Chromium mobile emulation; I read the screenshots):
+- **Public page, platform host:** a list layout and `scrollWidth` 360, including the 200-character unbroken title. `<details>` opens in place, and the controls are at least 44px.
+- **Public page, custom-host simulation** (`*.invalid`): the same.
+- **Editor, new-event form** (`scrollWidth` 360): the website box and its hint are correct. In the members-only state the box is disabled and unticked, with "Only events open to everyone can be shown on the website."
+- **Series dialogs:** they fit the screen.
+- **Event detail page:** fails. See FAIL-1.
+- **Not verified:** a real iPhone (`<details>` on iOS Safari). That stays with the Phase 6 walk.
+
+Failures: see FAIL-1 below. No spec failed, because no spec measures the detail page at 360px.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+Failing-first was verified by mutation in a scratch copy of HEAD; the worktree was untouched. I put the pre-fix behaviour back in and watched each test go red, then green on the unmutated code.
+
+- **`saves without a constraint error and clears the listing in the same statement - regression for F251`** (`src/lib/events.test.ts:1255`)
+  - Guards against: the CHECK being tripped by a routine "Open to everyone" untick.
+  - Mutation: drop `websiteListed: listed` from `updateEvent`'s SET (the pre-fix shape).
+  - Result: red with Postgres `23514 events_website_requires_public`.
+- **`new occurrences inherit from the LATEST occurrence, not the parent row - regression for F252`** (`src/lib/events.test.ts:1279`)
+  - Guards against: extend re-listing a series after a "this and later" unlisting.
+  - Mutation: inherit from `parent.websiteListed && parent.isPublic`.
+  - Result: red, `expected [ true, true, true ] to deeply equal [ false, false, false ]`.
+- **Implementer-side checks:** the implementer's own mutation checks on T1, T2, T3 and T20 are recorded in Phase 4. I re-ran those suites green and did not repeat the mutations.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100% (untouched by the diff).
+- `src/lib/two-factor.ts`: 91.3% statements (untouched).
+- `src/lib/flags.ts`: 100% (untouched).
+- New modules:
+  - `src/lib/public-calendar.ts`: 100% statements, 98.6% branches.
+  - `src/lib/events/website-listing.ts`: 100% statements, 88.5% branches.
+  - `src/lib/calendar/public-contract.ts`: 100%.
+  - `events-calendar-model.ts`: 100% statements, 93.9% branches.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+Verified by reading the action and lib bodies, not from green tests. Tenant authorization here is `presby_has_permission(..., 'events.manage')` (`hasEventsManage`), not `hasFeature(FEATURES.*)`. `permissions.ts` is platform-only and frozen, and none of these routes are platform-shell routes.
 
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct key? |
+|---|---|---|---|
+| `setSeriesWebsiteListingAction` (new) | yes, via `resolveActingIdentity`, then `resolveOrgContext` | n/a (tenant) | `events.manage` checked first inside the `withOrgContext` transaction (`events.ts:941`). The organization id never comes from input. A non-UUID id is `invalid_target`; a non-boolean `listed` is `invalid_input`. |
+| `createEventAction`, `updateEventAction`, `extendSeriesPatternAction` (changed: pass `EventActor`) | yes | n/a | `events.manage` in the lib (`events.ts:506`, `661`, `785`). The gates are unchanged. |
+| `admin/events/[eventId]/page.tsx` (mounts the Website listing section) | yes | n/a | `getEvent` requires `events.manage` (`events.ts:364`). |
+| `presby_public_events_calendar` / `readPublicCalendar` (anonymous by design) | n/a | n/a | Site live, then the toggle, then the category axis, all inside the definer. Probed below. |
+
+Pre-existing and unchanged: these actions do not re-check the `org_portal.events` platform flag server-side. The pages do.
+
+## Schema/RLS Audit (live catalog, pipeline branch)
+
+- **`proacl`** = `{neondb_owner=X/neondb_owner,presby_app=X/neondb_owner}`. `aclexplode` shows no PUBLIC grantee. `has_function_privilege` gives `presby_app` t and `presby_platform` f. Also `prosecdef` t, `provolatile` s, `proconfig {"search_path=public, pg_temp"}`, owner `neondb_owner`.
+- **The CHECK:** `events_website_requires_public` has `convalidated` t, `CHECK (((NOT website_listed) OR is_public))`. The column is `boolean not null default false`.
+- **RLS:** `relrowsecurity` and `relforcerowsecurity` are t/t on `events`, `event_types`, `organization_feature_toggles` and `organization_sites`. `events` has one `tenant_isolation` ALL policy and no user triggers. Table grants are unchanged (F253's DELETE for `presby_app`/`presby_platform` is still present; tracked).
+- **Which layer refuses what:**
+  - **Members-only listing:** the **CHECK constraint** refuses it, on both connections. As `presby_app` it is 67b. As the owner (`neondb_owner`, the `getPlatformDb()` role) I ran a probe insert of `website_listed=true, is_public=false` in a rolled-back transaction, and it was refused with `check_violation` (23514). So the CHECK, not a grant, an RLS policy or a trigger, is what holds on the owner path.
+  - **The definer re-filter:** T2 drops the CHECK and confirms the read still excludes the row.
+  - **Tenancy:** as `presby_app` with no GUC, `select count(*) from events` returns 0. The definer reads through, and its event objects carry exactly the keys `{description,ends_at,location,starts_at,title,type_color,type_name}`.
+
+## Adversarial checks (mine, against :3500 and the database)
+
+- **Never shown.** I fetched Fernwood's raw HTML with curl, which includes the RSC flight data. The listed, in-window titles are present. Absent are the members-only "Session stated meeting", the cancelled "Bake sale" (which is listed), the unlisted "Building committee", and the far-future (out-of-window) "Anniversary service". There are no uuid-shaped strings at all: no event id, no org id. None of `website_listed`, `is_public`, `allows_checkin`, `created_by` or `parent_event_id` appears.
+- **"Isn't available" states.**
+  - Toggle off: the P1 notice, and no events.
+  - Category axis on with worship off: the P1 notice, and no events.
+  - Site suspended: a 404 for the whole site, with no events in it.
+  - Each state was restored afterwards and confirmed by SELECT.
+  - From the definer as `presby_app`: `alder-creek` (toggle on, site `provisioning`), an unknown slug and `bramblewood` all return `unavailable`, with every other column null.
+- **Cross-org.** Only Fernwood has listed events on this branch. Both cross-tenant directions with two live sites pass in `public-calendar.db.test.ts`.
+- **Closure discipline.** I read `render-site-page.tsx`. The resolver closes over the DB-returned `slug` and `urls` only. T9 and the host-mode case pass.
+- **Freshness.** `Cache-Control` is `no-store` on dev. On `next start` it is `private, no-cache, no-store, max-age=0, must-revalidate`. The reload-after-unmark spec passes.
+- **Writers of `website_listed`.** I grepped for them. There are exactly four code writers (`createEvent`, `updateEvent`, `extendSeriesPattern`, `setSeriesWebsiteListing`), plus fixtures.
+
+## Payload (measured on `next start`, Fernwood, against the design's Edge Cases)
+
+| Case | HTML | gzip | brotli | DOM elements | Load / hydrated at 360px, 4× CPU throttle |
+|---|---|---|---|---|---|
+| Calendar off (baseline) | 19 KB | 4.8 KB | — | — | — |
+| 2 listed events (typical) | 774 KB | 28.6 KB | — | 2,049 | 0.86s / 0.98s |
+| 400 max-length events inserted (382 served, truncated) | 4.13 MB | 61 KB | 26 KB | 7,997 | 0.89s / 1.06s |
+
+The 400 probe events were inserted, measured and deleted; the count is back to 6, confirmed by SELECT.
+
+**Judgment: a note, not a FAIL.**
+- The stated caps hold: 400 rows, with title, location and description clipped (T1/T4). No byte cap is stated anywhere.
+- But the design's Payload line (work-log line 776) is wrong in both directions. It says "worst case ≈ 1 MB of HTML … typical use is a few tens of kilobytes".
+  - Two events already cost about 755 KB of HTML, because all 14 month panels with roughly 425 day cells are rendered and every panel is shipped twice (HTML and flight data).
+  - The worst case is 4.1 MB, about four times the accepted figure.
+- On the wire it is small, and the timing is fine. Tech-lead should correct the claim, or rule on the panel duplication.
 
 ## Copy Truthfulness
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
+- [x] **Every added or changed string is in the design's Copy table.** P1–P8, E1–E9, F1–F2. The only variant is the "is/are left out" grammar (Phase 4 deviation 1), which is acceptable.
+- [x] **The query behind each claim was opened.**
+  - E4's "stays out of Copy month" holds: `clipboard.ts:69` filters `isPublic && !isCancelled`.
+  - E4's "members of {orgName} who have calendar access" holds: `events.view` or `events.manage`.
+  - P7 is gated on `member_calendar_on`, which is composed with the category axis (T3 differential).
+  - E5 and E6 say "marked", which matches what the row knows.
+- [x] **Each instruction was traced to its role.** E7 and E9 tell an `events.manage` holder to "use Edit event / Website listing"; the page requires `events.manage`. In F2 the `org_features.manage` holder is asked to request placement, which is not an in-tool action.
+- [x] **Older strings were grepped.** The old "Visible on the public calendar" and "It just stays off the public website" strings, and the "Public" labels, are all gone from `src/`. Release notes v0.18 and v0.32 are history.
 
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
+**copy truthfulness: two low-severity findings, both design-originated, routed to tech-lead for a Copy-table ruling. They are not the reason for the FAIL.**
+
+1. **The put toast claims a state the row cannot know.** `series-website-listing.tsx:28-31`, viewer: `events.manage` holder. The text is "{n} events put on the website." It reads only `website_listed`, not the org toggle, the site status or where the calendar is placed. That is the same reason the design rejected the analyst's "On the website" badge. When the toggle is off, the toast is false. Suggested wording: "{n} events marked for the website."
+2. **The "no events" state says "yet".** `public-events-calendar-slot.tsx:81`, viewer: anonymous visitor. The text is "No events have been posted on this calendar yet." The read only covers the 14-month window. A congregation whose only listed events are more than a month old, or more than 12 months ahead, is told nothing has been posted "yet".
+
+## Findings that make this a FAIL
+
+**FAIL-1: the event detail page scrolls sideways at 360px (new UI from this diff).** Viewer: an `events.manage` holder on a phone.
+- **Where:**
+  - `src/app/(org)/o/[slug]/admin/events/series-website-listing.tsx:137`, the "Take this and later events off the website" button. Its right edge is at 374px, so the page `scrollWidth` is 374.
+  - `series-website-listing.tsx:110`, the "Put this and later events on the website" button. Right edge 361px.
+- **Cause:** the `Button` primitive is `whitespace-nowrap` (`src/components/ui/button.tsx:90`) and the labels are longer than 360px minus the page padding.
+- **How it was measured:** element scan (`getBoundingClientRect().right > 360`) and a full-page screenshot.
+- **Why the tests missed it:** T19 and the 360px specs measure only the public page. No editor spec checks `scrollWidth` at 360px.
+- **Hand-back:** fix the layout (let the label wrap, or make the button full-width), and add a 360px `scrollWidth <= 360` assertion on the event detail page with the Website listing section showing.
+
+**FAIL-2: an update that leaves out `websiteListed` writes a false audit row, and can trip the CHECK.** Proven on this branch's database with a scratch-only probe; the worktree was not edited.
+- **Where:**
+  - `src/lib/events.ts:708`: `deriveListed(input.websiteListed, input.isPublic)` returns `undefined` when the field is missing.
+  - Drizzle then leaves the column out of the SET, so it is unchanged.
+  - `events.ts:728`: `undefined !== existing.websiteListed` is true, so an audit row is written anyway.
+- **Probe A**, on a listed, open-to-everyone event, posted without `websiteListed`: the result is `ok`. The event is **still listed** (`{listed:true,isPublic:true}`), but the audit trail now reads `["event.listed_on_website","event.unlisted_from_website"]`.
+  - The authoritative record (DECISION-240/241, which declined the `_by`/`_at` columns because "the audit row is authoritative") says the event was taken off the internet while it is still public.
+  - A non-boolean value such as the string `"false"` produces the same mismatch: `action: listed ? …` picks by truthiness.
+- **Probe B**, the same omission while unticking "Open to everyone": the call throws an uncaught `23514 events_website_requires_public`. That is the F251 class again, reached through the action contract instead of the form.
+- **Who can trigger it:** any `events.manage` holder who crafts the server-action payload, or any future caller.
+- **Why it matters:** Phase 1 Pass 5 says "server-side validation of the switch … lives in the action, not the form". `setSeriesWebsiteListing` narrows `listed` (`events.ts:945`), but `createEvent`/`updateEvent` do not narrow `websiteListed` or `isPublic`. T14 pins audit rows only for well-typed inputs. Per the regression-discipline rule, this is the "slightly different bypass in the same class".
+- **Hand-back:**
+  - Narrow `typeof === "boolean"` for `websiteListed` and `isPublic` in both lib functions (`invalid_input`).
+  - Add a regression test: an omitted or string `websiteListed` returns `invalid_input`, leaves the column unchanged, and writes no audit row. It must fail before the fix.
+
+## Notes (not blocking; for the record and for Phase 6)
+
+- **N1. Payload:** see the section above. Tech-lead should correct work-log line 776.
+- **N2. iOS:** `<details>` on real iOS Safari is still unverified. That is for the Phase 6 walk.
+- **N3. Series buttons before hydration:** they are not disabled before hydration, so a tap then does nothing. The e2e spec retries the click for this reason. It is not a `useForm` root, so no HydrationGate rule is broken. It is a small UX gap.
+- **N4. Work-log leftovers:** the Phase 4 section still carries the template placeholders (the "Files Created … `path/to/file`" block, work-log lines 1118–1144).
+- **N5. `next dev` rewrote `AGENTS.md`** on this branch. Main fixed this after the merge-base (`scripts/agents-md.test.mjs`). I restored the file with `git checkout -- AGENTS.md` after stopping the server; `git status` is clean. It resolves when main is merged in.
+- **N6. Integration:** this branch is 31 commits behind `origin/main`, which changed `e2e/support/*`, `playwright.config.ts` and auth. The PR's CI run on the merge is the authority for the combined tree.
+- **N7. Shared Turbopack root:** a `turbopack.root` on the parent directory breaks dev servers whenever parallel pipelines run (see "Environment incident" above). It is worth a TODO line under Rule 16.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** Every suite is green: unit, the DB-backed set, RLS section 67, chromium, custom-hosts, the production lane and the forced 360px runs. The fixes that were promised failing-first are real. The two findings are:
+- **FAIL-1:** the 360px horizontal overflow on the event detail page, from the new Website listing section.
+- **FAIL-2:** an update that omits `websiteListed`, or sends a non-boolean, writes a false website-listing audit row and can trip the CHECK.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+Both are Phase 4 fixes and need no design change. The two copy findings and the payload estimate (N1) go to tech-lead for a ruling, in parallel.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. All suites green: unit 8448; DB 10922 (627 files); RLS section 67 58/58 as presby_app, the full patched suite 1298 with 3 pre-existing drift failures matching main; chromium 430/430; custom-hosts 111/111; production lane 78/78; forced 360px 24/24. Flags reset to the CI baseline. FAIL-1 (360px overflow on the detail page) and FAIL-2 (false audit row when `websiteListed` is omitted). Copy and payload notes go to tech-lead. | FAIL | 2026-10-25 |
+
+## Handoff
+
+**Next:** full-stack-developer (Phase 4), for FAIL-1 and FAIL-2:
+- **FAIL-1:** `series-website-listing.tsx:110` and `:137`, plus a 360px `scrollWidth` assertion on the event detail page.
+- **FAIL-2:** `events.ts:550`, `:708` and `:728`, with boolean narrowing in `createEvent`/`updateEvent` and a regression test that fails before the fix.
+
+In parallel, tech-lead (Phase 3) should rule on:
+- the put-toast wording (`series-website-listing.tsx:28-31`);
+- the P2 "yet" wording (`public-events-calendar-slot.tsx:81`);
+- the Payload edge-case claim in the work-log (line 776).
+
+After the fixes, QA re-runs `events.test.ts`, the editor spec at 360px, and the copy checks. The rest of this run stands.
+
+Files referenced:
+- /Users/cshenso/git/presby-platform/presby-cal/src/app/(org)/o/[slug]/admin/events/series-website-listing.tsx
+- /Users/cshenso/git/presby-platform/presby-cal/src/lib/events.ts
+- /Users/cshenso/git/presby-platform/presby-cal/src/app/(public)/site/[slug]/public-events-calendar-slot.tsx
+- /Users/cshenso/git/presby-platform/presby-cal/docs/work-log/2026-10-25-public-events-calendar.md
+- /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa/flags-before.txt
+- /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa/logs/editor-360/3-detail-parent.png
+- /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa/logs/probe-omit.out
 
 ---
 
@@ -1243,3 +1416,152 @@ Failures: [...]
 ## Public-site integration step (operator, 2026-10-25)
 
 Added to this pipeline's definition of done: after Phase 6 and the merge, place the `eventsCalendar` liveSlot on the congregation's **upcoming-events page** in the site-content repo (`../site-fpcw/content/upcoming-events.json`), replacing the external calendar link, publish the site bundle per that repo's README, turn `org_portal.public_calendar` on for that congregation only as part of this step, list at least one test event, and verify at 360px on the platform host (and the custom host where one is live). The operator tests after this step.
+
+---
+
+# Phase 3 amendment 1 — QA run 1 rulings (tech-lead)
+
+Date 2026-10-25. Scope: the two copy findings, the Payload claim (work-log line 776, Edge Cases), N3 and N7 from the "Phase 5: Verification (qa)" section above. FAIL-1 and FAIL-2 are Phase 4 defects needing no design change and are not re-ruled here. This amendment is append-only: Phase 3's Copy table and Edge Cases stay as written; where a string or claim below differs, **this amendment governs** and the implementer applies the strings below, not the original rows.
+
+## Ruling 1 — The series toasts (and one neighbour the same finding makes false)
+
+**Finding upheld.** "{n} events put on the website." asserts a state the row cannot establish: `website_listed` says "marked", not "shown" (the toggle, the site status and the page placement are all outside the row). The design rejected "On the website" as a badge for exactly this reason (Phase 3 Copy, E check "Source of truth"), and the toast made the same claim.
+
+**The take toast needs the same repair.** I looked at whether "taken off the website" could stay on the argument that absence is guaranteed (after unmarking, nothing shows, whatever the toggle). Absence is guaranteed, but "taken off" still *asserts that the event was on*, and with the toggle off it never was. One vocabulary is better than a principled asymmetry: the checkbox is "Show on our website's public calendar", the badge is "For website", the detail line is "Marked for the website", so the toasts use "marked" in both directions.
+
+**Neighbour found by the grep (check 4).** E8 on the extend form ("… will be put on the website, like the latest one in this series") promises the same unknown state. Reworded below. `website-listing-copy.ts:60,62` and `extend-series-form.test.tsx:113-136` change.
+
+**Left alone, by decision (they say what the *act* is, not what the outcome is):** the E7 buttons "Put this and later events on the website" / "Take this and later events off the website", the dialog titles "Put {n} {event|events} on the website?" / "Take {n} … off the website?", the confirm buttons "Yes, put {n} on the website" / "Yes, take {n} off the website", and the take dialog body "will no longer appear on your public website" (true whatever the toggle). A question or a button names the thing being requested; only a statement after the fact has to be true. The put dialog body already says "are marked to appear on your public website's calendar", which is the honest form.
+
+**Strings (exact; replace E7 toasts and E8):**
+
+| ID | Where | String |
+|---|---|---|
+| E7-toast-put | `putToast()` in `series-website-listing.tsx` | "{changed} {event\|events} marked for the website." with " {s} left out." appended when `skippedCancelled + skippedMembersOnly` is above zero. Examples: "1 event marked for the website." / "3 events marked for the website. 2 left out." |
+| E7-toast-take | `takeToast()` | "{changed} {event\|events} no longer marked for the website." Examples: "1 event no longer marked for the website." / "3 events no longer marked for the website." |
+| E7-toast-zero | both | "Nothing needed to change." (unchanged) |
+| E8 | `website-listing-copy.ts`, extend form | "{n} new {event\|events} will be marked for the website, like the latest one in this series." Before a valid number is typed: "New events will be marked for the website, like the latest one in this series." Singular: "1 new event will be marked for the website, like the latest one in this series." |
+
+**The four checks.**
+- *Residuals.* Nothing here denies the crawl/archive or free-text residual (those live in E2 and the dialogs, untouched). "Marked" does not claim privacy or finality.
+- *Source of truth.* The toast numbers are the **returned** `SeriesListingOutcome` (`changed`, `skippedCancelled`, `skippedMembersOnly`); "marked" / "no longer marked" is `events.website_listed` as the action just wrote it, which is exactly what the write established. E8's "will be marked" is `inheritedListing()` (the latest non-cancelled occurrence), which the write also uses.
+- *Audience.* Read by an `events.manage` holder (the page requires it). No instruction in these strings.
+- *Neighbours.* Grepped `src`, `e2e`, `scripts`, `docs/release-notes`, `docs/product` for "put on the website", "taken off the website", "marked for the website", "no longer marked". Stale and to modify: `series-website-listing.tsx:31` and `:36` (toasts), `website-listing-copy.ts:60,62` (E8), `series-website-listing.test.tsx:126` ("3 events put on the website. 2 left out." becomes "3 events marked for the website. 2 left out.") and `:168` ("1 event taken off the website." becomes "1 event no longer marked for the website."), `extend-series-form.test.tsx:110-136` (the `/put on the website/i` negative assertion at :110 becomes `/marked for the website/i`; the three positive strings follow E8), `e2e/public-calendar.spec.ts:423` ("3 events taken off the website." becomes "3 events no longer marked for the website."). Release-note line 5 ("puts this event and all later ones on the website, or takes them off") describes the act, not a state, and stands. Not stale: `org-features.ts:135` (already says "marked").
+
+## Ruling 2 — P2 (nothing in the window)
+
+**Finding upheld.** The definer's window is the previous month through 12 months ahead, so an empty `events_json` proves only that the window is empty. "Have been posted … yet" asserts a history (nothing was ever posted, and something is expected) that the read does not establish: a congregation whose only marked events are older than last month would be told nothing has been posted.
+
+**Exact string (replaces P2):** "No events are on this calendar right now. Please check back soon." and, only when the profile has a phone: "You can also call us at {phone}."
+
+- *Residuals.* Says nothing about privacy, copies or members-only events. "On this calendar" is scoped to what this calendar shows, and does not deny that members-only events exist (P7 already says the member calendar "can include events not shown here").
+- *Source of truth.* A **successful** read (state `available`) whose `events_json` is empty for the 14-month window; "right now" ties it to the moment of the read, not to history; "on this calendar" is the window. It is still reachable only on success: a failure maps to `unavailable` (P1). The phone is `organization_profiles.phone`, as before.
+- *Audience.* An anonymous visitor; "check back soon" and "call us" are things a visitor can do.
+- *Neighbours.* Stale and to modify: `public-events-calendar-slot.tsx:81`, `public-events-calendar-slot.test.tsx:64` (the `EMPTY` constant), `e2e/public-calendar.spec.ts:53` (the `EMPTY` constant; the e2e case "toggle on and nothing marked shows …", T19). The custom-host spec has no copy of the string (grepped). P3 ("Nothing is on the calendar for {Month Year}") is month-scoped and stays true.
+
+## Ruling 3 — The Payload claim: correct it, accept it, pin it
+
+**The original claim (line 776) is wrong in both directions and is withdrawn.** "Worst case ≈ 1 MB of HTML … typical use is a few tens of kilobytes" was an estimate of event text only. I did not count the structure: the page renders all 14 month panels, about 425 day cells, and every panel is sent twice (once as HTML, once as RSC flight data, because the panels are passed through the client island as `ReactNode` props). QA's measurement: 2 events cost 774 KB of HTML (28.6 KB gzip, 2,049 DOM elements) against a 19 KB page without the calendar; the 400-event maximum costs 4.13 MB (61 KB gzip, 26 KB brotli, 7,997 elements). Almost all of the typical figure is empty day cells (about 0.9 KB each, doubled), not events.
+
+**Corrected claim (this replaces line 776):** the calendar adds about 0.75 MB of uncompressed HTML (about 29 KB gzip) to a page with a handful of events, and at most about 4.1 MB (about 61 KB gzip, 26 KB brotli) at the 400-event cap with every title, location and description filled to its limit; the latter is reachable only by an authorised editor deliberately filling 400 descriptions to 2,000 characters. Measured on `next start` at 360px with 4x CPU throttle, the page was loaded in 0.86 s (typical) and 0.89 s (maximum), hydrated at 0.98 s and 1.06 s. *Measured by QA run 1; pinned by the ceiling test in Phase 4 addition A for the typical case only; the maximum case is not asserted.*
+
+**Decision: accept, do not require a reduction now.** Weighing it:
+- *Operator's 360px/mobile priority.* The measure that matters on a phone is wire size and time to a usable page. Both are small and the throttled timing is inside a second at the maximum; the heavy figures are parse-side (DOM element count) and still did not move the timing between 2 events and 400. There is no measured user harm to buy back.
+- *DECISION-239 and the redline.* The two reductions that remove the doubling both touch the island contract. Panels as server HTML outside the client boundary, with the island toggling `hidden` and `data-*` on them through the DOM, replaces a tested React state model (T11) with imperative DOM writes, and the island's "no `Date`, no request" guarantee has to be re-proved. Fewer pre-rendered months changes the product (the 14-month window is mirrored in SQL, TypeScript and a pin test, T5, in an unreleased migration). Neither is a patch to make inside a QA loop-back on a run whose suites are otherwise green.
+- *The cheap, low-risk reduction exists and is recorded for later* (estimated, *unverified*, to remove most of the typical payload): render a day with no events as one `aria-hidden` grid cell holding the day number, instead of a `<section>` with a heading, two spans and an `aria-label` (empty days are already `hidden` in the list layouts, and an empty day's heading is noise to a screen reader in the grid). It lives in one component (`events-calendar-panel.tsx`, `Day`) and its tests, and touches the two `public-calendar-day` counts in `e2e/public-calendar.spec.ts:235,283`. Trigger to do it: a measured load above 1.5 s at 4x throttle on the maximum case, a church complaint, or the page being embedded in a heavier host page. It goes into TODO (text below), not into this pipeline.
+
+**Why Phase 4 addition A (a ceiling test) is required even though the reduction is not:** the corrected claim should cite a test or say unverified. A typical-case HTML ceiling is cheap, deterministic, and fails if someone doubles the per-day cost (a new wrapper, a longer class string), which is the likely way this regresses.
+
+## Ruling 4 — N3 (series buttons inert before hydration): require a gate
+
+The island's own rule, written in Phase 3 and implemented, is that a control that does nothing is never presented as live (`disabled` until `useHydrated()`). The two Website listing trigger buttons are the same case: before hydration a tap opens no dialog and the page gives no sign. The DECISION-159 form gate does not apply (no `useForm` root, nothing is overwritten, so no data is at risk), so this is a small consistency fix, not a safety one. It is two attributes in a file the implementer is already editing for FAIL-1, and it lets the e2e spec drop its click-retry. **Required:** `disabled={!hydrated || pending}` on the "Put" and "Take" trigger buttons, using the same `useHydrated` hook as the calendar island. No new string. (No hydration spec is required; a unit assertion that the trigger renders `disabled` under `renderToString` suffices.)
+
+## Ruling 5 — N7: TODO line text (for the orchestrator; Rule 16 shared file, not edited here)
+
+```text
+- [ ] **Parallel pipelines break each other's dev servers: `turbopack.root` spans the shared parent directory.** `next.config.ts` sets `turbopack.root` to the repo's PARENT (`presby-platform/`) so a symlinked `presby-site-kit` resolves. In a worktree layout that parent also holds every sibling worktree, so one pipeline's test results, `tsbuildinfo` and builds trigger another's Fast Refresh: a full-reload loop in which `/signin` never hydrates and e2e fails with no defect in the branch (public-events-calendar QA run 1, 2026-10-25, against presby-padmin; QA had to re-run from a `git archive` copy of HEAD). Same root as the line above about the intermittent `next build` flake in a worktree. Options: set the root only when the sibling symlink exists (`fs.existsSync` on `node_modules/presby-site-kit` being a symlink), or point it at a per-worktree directory containing both the repo and the kit; and until fixed, document in `docs/testing.md` that a parallel QA run uses a copy outside `~/git/presby-platform/`. Candidate for deployment-engineer. — public-events-calendar Phase 5 N7
+```
+
+(Also appended for the orchestrator, from Ruling 3, as a TODO line:)
+
+```text
+- [ ] **Public calendar: lighten the page weight (revisit trigger in the work-log).** Typical page adds about 0.75 MB of uncompressed HTML (29 KB gzip) for 2 events, almost all of it empty day cells rendered into 14 pre-rendered panels and sent twice (HTML + flight). Cheap fix: render an event-less day as one `aria-hidden` grid cell with the day number (`events-calendar-panel.tsx`, `Day`; adjust the two `public-calendar-day` counts in `e2e/public-calendar.spec.ts`). Larger fix if needed: panels as sibling server HTML with the island toggling `hidden` by DOM, or a narrower pre-rendered window. Do it if the 400-event maximum measures above 1.5 s at 4x throttle on 360px, or on a church complaint. — public-events-calendar Phase 3 amendment 1
+```
+
+## Phase 4 additions for the implementer (full-stack-developer; on top of FAIL-1 and FAIL-2)
+
+1. **Strings.** Apply Ruling 1 (E7 toasts, E8) and Ruling 2 (P2) exactly as written above, and update every test and spec string listed in each ruling's Neighbours line. An implementer who needs any other string stops for a ruling.
+2. **N3 gate.** `disabled={!hydrated || pending}` on both trigger buttons in `series-website-listing.tsx` (Ruling 4), with a unit assertion (`renderToString` shows them `disabled`); remove the click-retry from the e2e spec if it exists only for this reason.
+3. **Addition A — typical-case size ceiling.** One unit test in `public-events-calendar-slot.test.tsx` (or a sibling file): render the slot's HTML (`renderToString`, no flight) for a 2-event window across the full 14 months and assert its length is under a fixed ceiling. Set the ceiling to the measured HTML-only length rounded up by 25% to the next 10 KB; record the measured figure and the ceiling in Implementer Notes. The test name states what it guards ("per-day markup cost; see Phase 3 amendment 1, Ruling 3"). Do not assert the 400-event maximum.
+4. **FAIL-1 and FAIL-2** as already handed back (360px overflow on the detail page with an editor-surface `scrollWidth <= 360` assertion; narrowing `websiteListed` and `isPublic` to booleans in `createEvent`/`updateEvent`, with a regression test written first). The labels of the two buttons are Copy E7 and do not change; the fix is layout (wrap or full width).
+5. **Documentation.** Replace the stale Payload sentence in Implementer Notes if it repeats the original claim; the Phase 4 section still carries the template placeholder block (QA N4, lines ~1118-1144): fill or remove it.
+
+Not required of the implementer: any change to the definer, the migration, the window, the cap, the island's props, or the panel structure.
+
+## QA re-run scope
+
+- **Re-run:** `src/lib/events.test.ts` and the new FAIL-2 regression (fails before the fix, passes after); `series-website-listing.test.tsx`, `extend-series-form.test.tsx`, `public-events-calendar-slot.test.tsx` and the new ceiling test; the editor surface at 360px (event detail page with the Website listing section showing: `scrollWidth <= 360`, and the new assertion exists in a spec); `e2e/public-calendar.spec.ts` on chromium and at forced 360px, and `e2e/custom-domains/public-calendar.spec.ts` (shared fixtures); `e2e/hydration/public-events-calendar.spec.ts` on both lanes only if the island file changed (it should not); typecheck, lint and `npm run check`.
+- **Copy check, re-done on the new strings:** open the source of each claim (Ruling 1 and 2's Source-of-truth lines), confirm the toasts report the returned counts, and re-grep `src`, `e2e`, `scripts`, `docs/release-notes` and `docs/product` for the old strings ("put on the website", "taken off the website", "No events have been posted", "yet") to confirm none survived outside the history files named.
+- **Not re-run:** the DB-backed set, RLS section 67, the full chromium, custom-hosts and production lanes (no migration, definer, window or panel change); the payload measurement (Ruling 3 stands on QA run 1's figures). Per the 2026-10-25 environment incident, run the e2e on a server that is not sharing a `turbopack.root` with another active pipeline (isolated copy, as in run 1) until N7 is fixed.
+- **Verdict on re-run:** FAIL-1 and FAIL-2 closed and the strings above verified makes this a PASS; the iOS `<details>` check (N2) stays with the Phase 6 walk.
+
+## Carry-forward (this amendment)
+
+| Item | Disposition |
+|---|---|
+| Copy finding 1 (put toast) | Addressed: Ruling 1; take toast and E8 reworded with it |
+| Copy finding 2 (P2 "yet") | Addressed: Ruling 2 |
+| N1 payload claim | Addressed: Ruling 3, claim corrected, accepted, ceiling test required; lighter markup *deferred* (tech-lead, on the measured evidence; operator to confirm), TODO line above |
+| N3 | Addressed: Ruling 4, gate required |
+| N7 | TODO text above (orchestrator writes it) |
+| N2, N4, N5, N6 | N2 Phase 6 walk; N4 Phase 4 addition 5; N5 and N6 are integration items (merge main; `AGENTS.md` fixed on main) |
+
+---
+
+# Phase 4 — loop-back 1 (full-stack-developer, 2026-10-25)
+
+Source: "Phase 5: Verification (qa)" FAIL-1 and FAIL-2, plus "Phase 3 amendment 1" (Rulings 1 to 4, Phase 4 additions 1 to 5). `main` was merged first (`3db60f2`, no conflicts; this also takes main's `AGENTS.md` fix). Commits, in order:
+
+| SHA | Subject | Closes |
+|---|---|---|
+| `626d88f` | `fix(events): refuse a non-boolean website switch in createEvent and updateEvent` | FAIL-2 |
+| `cb9281a` | `fix(events): stop the Website listing buttons overflowing a 360px screen` | FAIL-1 |
+| `8eecf3a` | `fix(events): say only what the row knows in the series toasts, the extend line and the empty calendar` | Rulings 1, 2 and 4 (copy, N3) |
+| `46f958a` | `test(events): pin the public calendar's typical-case HTML size` | Ruling 3, addition A |
+| (this commit) | `docs(work-log): …` | addition 5 (QA N4) |
+
+## FAIL-2 (events.ts)
+
+`createEvent` and `updateEvent` now require `typeof isPublic === "boolean"` and `typeof websiteListed === "boolean"` and return `invalid_input` otherwise, as the first check after the permission check (before any read or write). The audit row in `updateEvent` is therefore compared only against a value that was actually written. The message ("Choose whether this event is open to everyone and whether it appears on the website.") is unreachable from the forms, which always send booleans; it follows the wording of the series action's own `invalid_input`.
+
+Failing-first (recorded before the fix): 12 of the 85 tests in `src/lib/events.test.ts` failed, all in the new block "regression for a payload that omits or mistypes the website switch (Phase 5 FAIL-2)": `updateEvent` with `websiteListed` omitted, a string, a number and null (each expected `invalid_input`, column unchanged, no extra audit row); the untick-"open to everyone"-with-the-field-omitted case (threw the uncaught `23514`); `isPublic` omitted and a string; `createEvent` with the same four `websiteListed` values and a string `isPublic` (the null case failed with `23502` not-null). After the fix all 85 pass; the "an update that does not change the listing writes no audit row" case passes before and after, as a control.
+
+## FAIL-1 (series-website-listing.tsx)
+
+The two trigger buttons take `h-auto min-h-11 w-full whitespace-normal py-2 text-center sm:w-auto` on the instance (the generated `Button` is untouched): full width with a wrapping label on a phone, natural width from `sm`. New e2e, "the event detail page does not scroll sideways at 360px with the Website listing section showing - regression for Phase 5 FAIL-1" (`e2e/public-calendar.spec.ts`): a 4-occurrence marked series, the third occurrence unmarked by SQL so that both buttons show on the second occurrence's page; asserts `scrollWidth <= 360`, each button's right edge <= 360 and height >= 44. It failed on `scrollWidth` against the unfixed component and passes with the fix.
+
+## Amendment 1 (strings, N3, ceiling)
+
+- **Strings, exact as ruled:** `putToast` "{n} event(s) marked for the website." (+ " {s} left out."), `takeToast` "{n} event(s) no longer marked for the website.", E8 `extendWebsiteLine` "… will be marked for the website, like the latest one in this series." (three forms), P2 "No events are on this calendar right now. Please check back soon." Stale strings updated at: `series-website-listing.test.tsx` (put and take toast expectations), `extend-series-form.test.tsx` (the negative regex and four positive strings), `public-events-calendar-slot.test.tsx` (`EMPTY`), `e2e/public-calendar.spec.ts` (`EMPTY`, the "3 events no longer marked for the website." toast). A final grep of `src`, `e2e`, `scripts`, `docs/release-notes` and `docs/product` for the old strings finds only the unchanged E7 button, dialog and form-hint wordings (the act, left alone by Ruling 1) and a test title ("cannot be put on the website from the form", about the act).
+- **N3:** `disabled={!hydrated || pending}` on both trigger buttons, via `useHydrated`. Unit test: `renderToString` shows both buttons `disabled` (red when `!hydrated ||` is removed; restored), and mounted in jsdom they are enabled.
+- **The click-retry in the series e2e was kept, deliberately, with its comment corrected.** The amendment says to drop it if it existed only for the hydration reason. It does not: with the gate in place and the test waiting for `toBeEnabled()`, a click straight after the client-side navigation to the occurrence page still did not open the dialog (reproduced; a 2.5 s pause also fixed it), so the page re-renders once more under the click, gate or no gate. The spec now waits for the button to be enabled, then retries. Worth a look in Phase 6 or the retro as a possible dev-mode double-request (the dev log shows the occurrence page requested twice), not chased here.
+- **Addition A:** `public-events-calendar-size.test.tsx`. A 2-event, 14-month window renders **321,865 bytes** of HTML (`renderToString`, no flight data); ceiling = x1.25 = 402,331, rounded up to the next 10 KB = **410,000**. Mutation check: lengthening the class string of every day (+30%, 420,271 bytes) turns it red; restored. (QA's 774 KB figure includes the flight copy, which `renderToString` does not produce; the two are consistent with a roughly doubled payload.)
+- **N4:** the template placeholder block is replaced by "Files, schema, audit" above. The Payload sentence in Batches 2 to 4's browser checks says only that the dev figure was about 840 KB and "the design accepts a payload of this order"; it does not repeat the withdrawn claim, so it stands. Phase 3 line 777 is history and is superseded by amendment 1, Ruling 3.
+
+## Gates
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 (`--max-warnings=0`) |
+| `npm run check` | all eight tripwires pass |
+| plain `npm test` | 562 files passed, 78 skipped; 8753 tests passed |
+| `npm run build` | passes; `node_modules/node_modules` absent afterwards |
+| DB-backed: `events.test.ts`, `public-calendar.db.test.ts` (`--no-file-parallelism`) | 2 files, 99 tests passed |
+| e2e on :3500 (own `next dev` from this worktree; stopped by PID; no reload loop this time), `chromium` + `custom-hosts`: `public-calendar` (incl. the new 360px case), `custom-domains/public-calendar`, `hydration/public-events-calendar`, `member-calendar` | all passed (member-calendar in the first run: 39 passed, the one failure there was the series-panel click race described above, since fixed) |
+
+Not re-run (no migration, definer, window, panel structure or island change): the full DB set, RLS section 67, the full chromium, custom-hosts and production lanes.
+
+## For QA re-run
+
+Re-run the scope listed in "QA re-run scope" in amendment 1. The new tests: `events.test.ts` (the FAIL-2 block), `series-website-listing.test.tsx` ("before hydration"), `public-events-calendar-size.test.tsx`, and the FAIL-1 case in `e2e/public-calendar.spec.ts`. Use an isolated server if another pipeline is active (N7). The new `fix(events)` commits all carry `Caught-By: agent-review` / `Discovered-In: Phase-5`.

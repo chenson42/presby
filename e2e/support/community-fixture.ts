@@ -44,7 +44,7 @@
  * every other fixture teardown does, inside a try/finally that re-enables them.
  */
 
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 import { E2E_ORGS } from "./seed-orgs";
 import { E2E_USERS } from "./users";
 
@@ -71,7 +71,7 @@ export interface CommunityFixtureState {
 }
 
 async function adminUserId(sql: Sql): Promise<string> {
-  const rows = (await sql`select id from users where email = ${E2E_USERS.admin.email}`) as { id: string }[];
+  const rows = (await withDbRetry("community admin user id", () => sql`select id from users where email = ${E2E_USERS.admin.email}`)) as { id: string }[];
   if (!rows[0]) throw new Error("[community-fixture] the admin fixture user does not exist");
   return rows[0].id;
 }
@@ -166,26 +166,26 @@ export async function setupCommunityFixture(sql: Sql): Promise<CommunityFixtureS
 /** Grants or removes `roll.approve` on the spec-owned approver role (the clerk keeps `roll.propose`). */
 export async function setRollApprove(sql: Sql, granted: boolean): Promise<void> {
   if (granted) {
-    await sql`
+    await withDbRetry("grant roll.approve", () => sql`
       insert into app_role_permissions (role_id, permission_key)
       values (${APPROVER_ROLE_ID}::uuid, 'roll.approve')
       on conflict do nothing
-    `;
+    `);
   } else {
-    await sql`delete from app_role_permissions where role_id = ${APPROVER_ROLE_ID}::uuid and permission_key = 'roll.approve'`;
+    await withDbRetry("revoke roll.approve", () => sql`delete from app_role_permissions where role_id = ${APPROVER_ROLE_ID}::uuid and permission_key = 'roll.approve'`);
   }
 }
 
 /** Removes or restores the one permission the limited-state spec toggles. */
 export async function setDirectoryView(sql: Sql, granted: boolean): Promise<void> {
   if (granted) {
-    await sql`
+    await withDbRetry("grant directory.view", () => sql`
       insert into app_role_permissions (role_id, permission_key)
       values (${ROLE_ID}::uuid, 'directory.view')
       on conflict do nothing
-    `;
+    `);
   } else {
-    await sql`delete from app_role_permissions where role_id = ${ROLE_ID}::uuid and permission_key = 'directory.view'`;
+    await withDbRetry("revoke directory.view", () => sql`delete from app_role_permissions where role_id = ${ROLE_ID}::uuid and permission_key = 'directory.view'`);
   }
 }
 
@@ -309,32 +309,44 @@ export async function createProposalViaSql(
 
 /** Deletes every person this fixture's specs created, by the guarded first name. */
 export async function sweepCommunityPeople(sql: Sql): Promise<number> {
-  const rows = (await sql`
+  const rows = (await withDbRetry("list fixture people", () => sql`
     select id from people
      where first_name = ${FIXTURE_FIRST_NAME}
        and exists (select 1 from memberships m where m.person_id = people.id and m.organization_id = ${COMMUNITY_ORG.id}::uuid)
-  `) as { id: string }[];
+  `)) as { id: string }[];
   if (rows.length === 0) return 0;
   const ids = rows.map((r) => r.id);
-  await sql`update people set deletable_until = now() + interval '1 hour' where id = any(${ids}::uuid[])`;
+  // The whole disable / delete / enable unit is ONE retried step (deletes and a constant update only), so a
+  // drop between the statements can never leave a trigger off: the next attempt re-disables, deletes and
+  // re-enables; a final failure still tries to re-enable.
   try {
-    await sql`alter table roll_actions disable trigger roll_actions_freeze`;
-    await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
-    await sql`delete from audit_events where action in ('tenant.roll_action.recorded', 'tenant.roll_action.voided',
-                   'tenant.roll_action.approved', 'tenant.roll_action.denied', 'tenant.roll_action.withdrawn')
-                 and resource_id in (select id::text from roll_actions where person_id = any(${ids}::uuid[]))`;
-    // A void references its target: voids first.
-    await sql`delete from roll_actions where person_id = any(${ids}::uuid[]) and kind = 'void'`;
-    await sql`delete from roll_actions where person_id = any(${ids}::uuid[])`;
-    await sql`delete from group_memberships where person_id = any(${ids}::uuid[])`;
-    await sql`delete from memberships where person_id = any(${ids}::uuid[])`;
-    await sql`delete from contact_methods where person_id = any(${ids}::uuid[])`;
-    await sql`delete from people where id = any(${ids}::uuid[])`;
+    await withDbRetry("sweep community people", async () => {
+      await sql`update people set deletable_until = now() + interval '1 hour' where id = any(${ids}::uuid[])`;
+      try {
+        await sql`alter table roll_actions disable trigger roll_actions_freeze`;
+        await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
+        await sql`delete from audit_events where action in ('tenant.roll_action.recorded', 'tenant.roll_action.voided',
+                       'tenant.roll_action.approved', 'tenant.roll_action.denied', 'tenant.roll_action.withdrawn')
+                     and resource_id in (select id::text from roll_actions where person_id = any(${ids}::uuid[]))`;
+        // A void references its target: voids first.
+        await sql`delete from roll_actions where person_id = any(${ids}::uuid[]) and kind = 'void'`;
+        await sql`delete from roll_actions where person_id = any(${ids}::uuid[])`;
+        await sql`delete from group_memberships where person_id = any(${ids}::uuid[])`;
+        await sql`delete from memberships where person_id = any(${ids}::uuid[])`;
+        await sql`delete from contact_methods where person_id = any(${ids}::uuid[])`;
+        await sql`delete from people where id = any(${ids}::uuid[])`;
+      } finally {
+        await sql`alter table roll_actions enable trigger roll_actions_freeze`;
+        await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+      }
+    });
   } finally {
-    await sql`alter table roll_actions enable trigger roll_actions_freeze`;
-    await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+    await withDbRetry("re-enable roll and roster triggers", async () => {
+      await sql`alter table roll_actions enable trigger roll_actions_freeze`;
+      await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+    });
   }
-  const left = (await sql`select 1 from people where id = any(${ids}::uuid[])`) as unknown[];
+  const left = (await withDbRetry("confirm fixture people gone", () => sql`select 1 from people where id = any(${ids}::uuid[])`)) as unknown[];
   if (left.length > 0) throw new Error("[community-fixture] fixture people survived the sweep");
   return ids.length;
 }
@@ -347,40 +359,52 @@ export async function removeCommunityFixture(sql: Sql, state: CommunityFixtureSt
   if (state?.createdSessionGroupId) await removeSessionGroup(sql, state.createdSessionGroupId);
   if (!state) return;
   for (const [key, enabled] of Object.entries(state.priorFlags)) {
-    await sql`update feature_flags set enabled = ${enabled} where key = ${key}`;
-    const rows = (await sql`select enabled from feature_flags where key = ${key}`) as { enabled: boolean }[];
+    await withDbRetry(`restore flag ${key}`, () => sql`update feature_flags set enabled = ${enabled} where key = ${key}`);
+    const rows = (await withDbRetry(`verify flag ${key}`, () => sql`select enabled from feature_flags where key = ${key}`)) as { enabled: boolean }[];
     if (rows[0]?.enabled !== enabled) throw new Error(`[community-fixture] ${key} was not restored`);
   }
   if (state.priorToggle === null) {
-    await sql`
+    await withDbRetry("clear members_create toggle", () => sql`
       delete from organization_feature_toggles
        where organization_id = ${COMMUNITY_ORG.id}::uuid and feature_key = ${MEMBERS_CREATE}
-    `;
+    `);
   } else {
-    await sql`
+    await withDbRetry("restore members_create toggle", () => sql`
       update organization_feature_toggles set enabled = ${state.priorToggle}
        where organization_id = ${COMMUNITY_ORG.id}::uuid and feature_key = ${MEMBERS_CREATE}
-    `;
+    `);
   }
 }
 
 /** Removes the spec-owned approver role (grant, permission, role). Fixture plumbing only. */
 async function removeApproverRole(sql: Sql): Promise<void> {
-  await sql`delete from role_grants where role_id = ${APPROVER_ROLE_ID}::uuid`;
-  await sql`delete from app_role_permissions where role_id = ${APPROVER_ROLE_ID}::uuid`;
-  await sql`delete from app_roles where id = ${APPROVER_ROLE_ID}::uuid`;
+  await withDbRetry("remove approver role", async () => {
+    await sql`delete from role_grants where role_id = ${APPROVER_ROLE_ID}::uuid`;
+    await sql`delete from app_role_permissions where role_id = ${APPROVER_ROLE_ID}::uuid`;
+    await sql`delete from app_roles where id = ${APPROVER_ROLE_ID}::uuid`;
+  });
 }
 
 /** Removes the Session group this fixture created (never one that already existed). */
 async function removeSessionGroup(sql: Sql, groupId: string): Promise<void> {
+  // One retried step for the disable / delete / enable unit; a final failure still tries to re-enable.
   try {
-    await sql`alter table groups disable trigger groups_reject_derived_edit`;
-    await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
-    await sql`delete from role_grants where group_id = ${groupId}::uuid`;
-    await sql`delete from group_memberships where group_id = ${groupId}::uuid`;
-    await sql`delete from groups where id = ${groupId}::uuid and organization_id = ${COMMUNITY_ORG.id}::uuid`;
+    await withDbRetry("remove session group", async () => {
+      try {
+        await sql`alter table groups disable trigger groups_reject_derived_edit`;
+        await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
+        await sql`delete from role_grants where group_id = ${groupId}::uuid`;
+        await sql`delete from group_memberships where group_id = ${groupId}::uuid`;
+        await sql`delete from groups where id = ${groupId}::uuid and organization_id = ${COMMUNITY_ORG.id}::uuid`;
+      } finally {
+        await sql`alter table groups enable trigger groups_reject_derived_edit`;
+        await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+      }
+    });
   } finally {
-    await sql`alter table groups enable trigger groups_reject_derived_edit`;
-    await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+    await withDbRetry("re-enable group triggers", async () => {
+      await sql`alter table groups enable trigger groups_reject_derived_edit`;
+      await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+    });
   }
 }

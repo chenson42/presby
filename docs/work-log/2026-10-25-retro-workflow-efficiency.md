@@ -21,7 +21,8 @@
 | 4 — Implementation | full-stack-developer | Complete (11 code commits plus 1 docs follow-up; failing-first recorded; gates green; ready for QA) | Phase 4 complete | 2026-10-25 |
 | 4 — Implementation, loop-back 1 | full-stack-developer | Complete (amendment 1 implemented: 4 code/test commits plus this docs commit; failing-first recorded; gates green; ready for QA run 2) | Phase 4 complete | 2026-10-25 |
 | 5 — Verification | qa | Run 1: FAIL-1 (design C8, promotes to full Feature) and FAIL-2 (implementation); everything else green | FAIL | 2026-10-25 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification (run 2) | qa | Complete; FAIL-1/FAIL-2 closed with failing-first + mutation evidence; run 1 e2e stands | PASS | 2026-10-25 |
+| 6 — Shipped vs intent | analyst | Complete; all IN items delivered; briefings needs 9 corrections; no version bump | SHIP WITH NOTES | 2026-10-25 |
 
 ---
 
@@ -1122,48 +1123,207 @@ Evidence logs are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Pipeline:** `2026-10-25-retro-workflow-efficiency`, Full Feature after QA run 1 promoted it. I am read-only and wrote no files.
+
+**What I read:** the work-log through QA run 2, and `git diff main...HEAD`. I confirmed 37 files, no `src/` and no `drizzle/` change, and `package.json` changed only by the `worktrees:report` script line. I also read:
+- the shipped gate header and `playwright.config.ts`;
+- `e2e-reset-flags.sql`, `AGENTS.md` and the pre-push skill diff;
+- the live `node scripts/briefings-check.mjs` output;
+- the release notes, decisions and work-logs that the twelve briefing entries cite.
+
+I did not re-run suites. QA run 2 PASS stands.
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.** Every IN item is delivered and its copy is true. Every deferral is either already a TODO line or listed below as one to add. The notes are:
+- corrections to the unwritten briefings text, which must land before the `docs(briefings)` commit;
+- two changes to the DECISION-231 draft;
+- the TODO list below.
+
+None of these requires reopening Phase 3 or 4.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> The operator's three recurring workflow costs are now mechanical: a chained commit-and-push is refused, a worktree can't silently attach to :3000, and QA can reset flags. The remaining costs are cheaper (retry, stats window, disk report), and the one thing still unwritten is the briefings prose, which needs six factual fixes before it is committed.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The chained commit-and-push hole is closed.** QA showed the old gate returning exit 0 and the new gate exit 2 on the same fresh-marker command. The false-positive side (G1) is pinned too: the house heredoc commit message is not refused.
+- **The worktree guard works from the real failure.** It was verified in both directions, including a real `git worktree add`. Phase 5 also settled G10 for this setup: sign-in works on :3480 with no `AUTH_URL`.
+- **The flag reset is safe by construction.** One transaction, with the refusal raised inside it, so a caller who forgets `ON_ERROR_STOP` still changes nothing. A drift test ties it to `seed.ts`. Real-branch runs: refused, refused without `ON_ERROR_STOP`, applied.
+- **The Phase 5 FAIL-1 loop-back caught a real hazard.** The old report offered `git worktree remove` for a fresh worktree, and that command silently deletes `.env.local` (reproduced in run 2 with the old script). Removal is now suggested only for merged, clean, named-branch worktrees. Today nobody qualifies, which is the correct output.
+- **The briefings banner now reads 50 (not 45, not 62).** A guard test reads the real `docs/briefings.md` preamble, so the preamble cannot undercount again.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+| Phase 1 IN item | Phase 1 intent | Shipped | Verdict |
+|---|---|---|---|
+| Push-gate refusal (G1–G4) | Refuse HEAD-mover plus push; quote/heredoc-aware; wrapped forms; `pull`/`revert`/`reset`; target-repo check first; pure `decideHook`; test never writes the real marker | Lexer plus `decideHook`; 80 tests; one read-only spawn asserting the marker bytes are unchanged; residuals in the header, including N2's two | Matches. Header text is true after the N2 amendment. |
+| Playwright worktree guard (G10) | Throw in a worktree on :3000 with the real remedy; optional `-p` only if verified | Guard shipped; `-p` and `AUTH_URL` deferred; Phase 5 showed no `AUTH_URL` is needed here | Matches. A one-line follow-up is possible but not owed. |
+| `withDbRetry` (G5–G7) | Teardown first; no plain INSERTs; constraint errors and statement timeouts throw at once; test lives in `scripts/` | Rules R1–R6, a call-site table, `isDbDrop`, nesting guard, 39 tests | Matches. N1: the "constraint errors were retried" claim was overstated and is corrected in the test header and the Phase 4 amendment. |
+| `e2e-reset-flags.sql` (G8, G9) | Guard plus drift test; documented command that never echoes the URL | Done, with real-branch runs | Matches. The per-org toggle and `rollout_percent` residual is stated in the file notice. |
+| `briefings-check` (G11) | Distinct unnamed numbers above the floor | `recordedDecisions`, `namedDecisions` and friends; `to` ranges accepted (deviation 1, accepted) | Matches. FAIL-2 fixed. |
+| `stats-escape --since` | Allowlist, `execFileSync`, default output unchanged | Byte-identical default, 26 tests, injection strings refused | Matches. |
+| Disk and worktree report (optional) | Report-only, cut first | Shipped, then redefined after FAIL-1; read-only property verified live and in scratch | Acceptable drift. It is better than Phase 1 specified. |
+| AGENTS.md (orchestrator addition) | Dev start leaves a clean tree | `#` to `##` plus a drift test; verified under `next dev` | Matches. |
+| Close stale `TODO.md:431` (G12) | Rule 10 housekeeping | Not in the diff (integration) | Pending, correct as planned. |
+| Briefings backlog (own commit) | Twelve entries, non-author read | Draft in Appendix D, not committed | This review is the non-author read. See below. |
+
+**OUT items:**
+- **Already TODO lines:** the Neon orphan-branch janitor (`:209`), the Turbopack flake (`:391`, `:487`), the fixture-orphan sweeper (`:165`, `:489`) and the gate `cd`-tracking repro (`:118`).
+- **Need new lines:** the vitest-side DB retry, and the CLAUDE.md `--since` edit (see the TODO list).
+- **Closed:** `rate-limit` is verified fixed and needs no line.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** not applicable (no UI). The nearest analogues are correct:
+  - no `origin/main` gives "Merge state is not shown";
+  - no recorded decisions gives no briefings line.
+- **Failure microcopy:** pass. C1, C2 and C3 name the remedy, and QA confirmed each remedy works for the person who sees it. C3's "Nothing was changed" is true because of the single transaction.
+- **Permission gate:** not applicable. There is no `FEATURES.*`, route, action or `src/` change, so the feature-gate audit is empty. The reset file's guard is a different kind of gate (`-v pipeline_branch=1`), and it is verified.
+- **Audit event:** not applicable (dev tooling, as decided in Phase 3).
+- **Mobile (360px):** not applicable, nothing renders.
+- **"Walk as the person the path creates":** not applicable. The change touches no invitation, role grant, org connection or newly created account.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Residuals (all recorded; none silently open)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+- **Gate**, in the header:
+  - aliases and variable indirection;
+  - non-shell wrappers;
+  - `checkout` and `switch`;
+  - nesting deeper than 6;
+  - a plain terminal;
+  - a commit in another repo paired with a push here;
+  - `git push $(git commit …)` with a fresh marker;
+  - prefixes that carry flags (`nice -n`, `time -p`, `command -p`, `env -u`, `exec -a`).
+- **Reset:** per-org toggles and `rollout_percent` are not reset.
+- **`withDbRetry`:**
+  - survival of a real drop is unverified;
+  - plain INSERTs and spec-inline `afterAll` SQL are not covered.
+- **Report:**
+  - squash-merged and fast-forwarded branches are invisible;
+  - R2-N3: a branch started from an already-merged feature tip reads "merged". It needs a clean tree to be offered for removal.
+- **Briefings:** a decision mentioned in passing silences the banner.
+- **e2e:** the intermittent `invitation-new-account.spec.ts:66` (N4) failed once in the full run and passed alone.
+- **Cosmetic:** R2-N1, `docs/briefings.md:23` is 97 columns and the record says 80.
 
-## Red Flags (if NEEDS REWORK)
+## The briefings backlog
 
-- [Specific. What has to change before this ships.]
+**Must it land in this PR? No, not to ship. I recommend it land in the same integration cluster, as the last commit of the PR.** Reasons:
+- Nothing in the shipped code depends on the entries. The banner is already red on `main` (62 behind) and remains correct.
+- Entry 12 and the marker describe this pipeline. The marker commit must be this pipeline's last feat/fix SHA, or a commit after it. Landing on the branch makes that SHA reachable under this project's merge-commit style. A squash would break the marker's `commit=` reference.
+- It must come after DECISION-231 is recorded in `docs/decisions.md`, so entry 12 does not cite a decision that does not exist yet.
+- Ship order if both pipelines are in flight:
+  - **If `presby-sess` (0.42.3, DECISION-230) lands first:** DECISION-230 and its `fix` commits will be unnamed. The banner will say so correctly. Add a thirteenth entry, or a clause in entry 12, naming DECISION-230.
+  - **If this lands first:** the sess integration must add its own entry. Its diff does not touch `docs/briefings.md`.
+  - Either way, `docs/TODO.md`, `docs/decisions.md` and `docs/STATE.md` conflict at integration, as Rule 16 expects.
+- The reading load becomes 82 + 12 = 94 unread. Q6, whether to bulk-tick the old ones, remains the operator's call and is not done.
 
-## Orchestrator rulings on the Phase 1 defaults (2026-10-25)
+### Non-author truthfulness read of the twelve entries
 
-- **Relabelled Accelerated Feature** (Q1). **Skipping Phase 2 — no new dependency, no new directory or structural change, no invariant touched. `e2e/support/db.ts` and `scripts/` are existing homes; no `src/` code is added. Rule 16's shared-file list is noted and handled in Phase 1.**
-- Q2–Q9 on the analyst's defaults. The disk prerequisite is cleared (541 GiB free at 2026-10-25).
-- **Added to scope from QA (session-update-hardening, Phase 5 run 1):** Next 16 rewrites the tracked `AGENTS.md` heading on every dev-server start, dirtying every worktree; fix it (commit the generator's form, or disable the generator) — Phase 3 picks, verified by a dev start leaving `git status` clean. The qa agent file names `scripts/ci/e2e-reset-flags.sql`, which this pipeline creates, so that reference becomes correct.
+I read each against the release notes, decisions and work-logs it cites. Ten entries are accurate. Ranges, deploy orders, limits, quotes (DECISION-206 "Yes, include them", DECISION-194 "No block, audit only"), and the 7/30-day and 3/10/20 numbers all match. No real congregation name appears. Redirect permanence is confirmed (`next.config.ts` `permanent: true`).
 
-## Orchestrator: QA run 1 FAIL — loop-back (2026-10-25)
+**Corrections needed before the commit:**
 
-- **Promoted to a full Feature** (CLAUDE.md Accelerated row: a QA FAIL tracing to a design claim). FAIL-1 traces to Copy C8 / Item 8; Phase 2 stays skipped for this loop-back (the change is to a report script's copy and predicate, no structural question).
-- **FAIL-1 → tech-lead** for a Phase 3 amendment on C8/Item 8. **FAIL-2 → full-stack-developer** after the amendment (briefings.md:21 placeholder, real-file guard test, Phase 4 record correction, N1 test-header wording).
+1. **Entry 12, "skips … the separate design step":** not true. DECISION-229 and CLAUDE.md keep a short tech-lead design with Copy and Edge Cases. Say: "skips the architecture review and the full design document, keeping a short design."
+2. **Entry 12, "(the checks used to be satisfied by the commit before it)":** muddled. The accurate statement is that a `/pre-push` stamp made before the commit used to satisfy a command that committed and pushed in one call.
+3. **Entry 12 omissions to add:**
+   - `npm run worktrees:report` (report-only, never suggests removal for a fresh or dirty worktree);
+   - the reset covers global flags only;
+   - the gate catches mistakes, not an adversary, with its listed residuals.
+4. **Entry 12's `[CONFIRM AT INTEGRATION]`, resolved:** the pipeline is shipped as described, with QA run 2 PASS. The two additions above are the only gaps. Re-check only that DECISION-231 is recorded before the commit.
+5. **Advisories entry:**
+   - "Three security advisories … landed" undercounts: it is three rounds, and 0.38.0 alone carries three critical advisories.
+   - "the 0.38.0 ones applied to production as well" implies 0.33.1's did not. The answer to the drafter's open question is that 0.33.1's audit was `--omit=dev` (production dependencies), and `docs/TODO.md:539` is titled "Production dependency advisories closed". Say all three rounds were production dependencies.
+6. **Person-emails entry:** "an invitation to an address shared by two people is refused unless the invitee accepts while signed in as that person" merges two rules. The release note has them separately:
+   - a shared address means the invitation won't go through;
+   - an address already on file for a signing-in roster person is refused unless the invitee accepts while signed in as that person.
+
+   Split them.
+7. **Giving entry header:** "(0.33.1 to 0.34.0 …)". 0.33.1 is the dependency fix. Giving shipped in 0.34.0 and reached production in 0.35.0. Use "0.34.0".
+8. **Invitations entry:** the `[CONFIRM AT INTEGRATION]` is still open as written. `presby-sess` is at 0.42.3, "Phase 6 SHIP WITH NOTES, integration done", but is not merged to `origin/main` (`ce661d7`).
+   - **To confirm at integration:** whether it merged first.
+   - **If merged:** change to "fixed in 0.42.3 (DECISION-230)".
+   - **If not:** the text stands, and 0.42.3 will bring its own entry.
+9. **Zod entry:** "a real email row being refused on save was caught by a guard test" is slightly loose. The guard test flagged the `.uuid()` calls, and the golden test failed on the two non-RFC ids. Say "email rows with non-standard ids".
+
+## Release note
+
+**Recommendation: no version bump and no release-notes entry.**
+- The release-notes skill exempts documentation-only changes. This diff touches no `src/` or `drizzle/` and ships nothing to Vercel: scripts, `e2e/` support, `playwright.config.ts`, docs and `AGENTS.md`.
+- `presby-sess` already holds 0.42.3 in `v0.42.md` and `package.json`, so a second 0.42.x entry would conflict.
+- Rule 13 (what's-new): none, nothing member-visible. Rule 12: no feedback row; the origin is the retrospective.
+- Rule 14 (functionality map) and Rule 15 (architecture doc): no change.
+
+If the operator wants a trace in the notes, fold this into whichever release ships next, as an "also in this release" line:
+
+> **Infrastructure (also in this release):** developer-workflow guardrails, with no visible change. The push-safety hook now refuses a single command that both commits and pushes. The browser-test runner refuses to attach to the shared development port from a git worktree. Test-fixture cleanup retries dropped database connections, and only those. QA can reset feature flags to their seeded values with a guarded script. The dev server no longer rewrites `AGENTS.md`. `stats:escape` accepts `--since`. A read-only `npm run worktrees:report` shows free disk and worktree state, and suggests removing only a worktree that is merged and clean. The operator-briefings reminder now counts decisions that no entry names.
+
+## Orchestrator corrections to DECISION-231 (Appendix B)
+
+- **Residual list:** add the two N2 items and the `env -u` / `exec -a` precision. QA's handoff asked for this.
+- **Playwright bullet:** "The dev lane does not yet pass `-p`/`AUTH_URL` (unproven)" is now settled for this setup. Phase 5 ran sign-in on :3480 with no `AUTH_URL` set. Reword to "not needed where `.env.local` sets no `AUTH_URL`".
+- **Optional:** mention the disk and worktree report and `--since`.
+
+## TODO lines for integration (Rule 10)
+
+**Close or move:**
+- `docs/TODO.md:211`: move to Done only after the briefings commit lands, since the line includes the eleven-entry backlog. It should say twelve entries, marker 224, and note that the code items are delivered.
+- `:431`: close as stale. `src/lib/rate-limit.test.ts:195-206` stubs `RATE_LIMIT_DISABLED=false`, and `:210` item 1 already records it.
+- `:494`: strike the `--since` half and keep the `fileURLToPath` half.
+
+**Add:**
+1. **Item 9 residuals:**
+   - the gate: `git push $(git commit …)`, and flag-carrying prefixes, as one follow-up (N2);
+   - `git checkout` and `git switch` in the gate;
+   - the per-org toggle and `rollout_percent` reset.
+2. **N4:** watch `e2e/invitation-new-account.spec.ts:66`. It failed once in the full run and passed alone, with a similar one-off on `invitation-existing-account.spec.ts`. If it recurs, investigate the enrolment step's wait.
+3. **Worktree report blind spot:** it cannot see squash-merged or fast-forwarded branches (it would need the PR list). It also cannot tell a branch cut from an already-merged feature tip (R2-N3).
+4. **Fixtures:**
+   - Route spec-inline `afterAll` SQL (36 specs) through fixture functions, so it can be retried.
+   - Retry for setup INSERTs and the state-edge helpers (`stepDomain`, `walkDomain`) needs idempotent forms first.
+5. **Vitest-side DB retry** helper (an OUT item without a line).
+6. **CLAUDE.md "Common Commands"** should mention `--since` and `worktrees:report`. This needs operator approval.
+7. **AGENTS.md stale shim bullets:** "Edge proxy can't import `@/lib/db`" contradicts DECISION-177, and "`schema.ts` is the schema source of truth" contradicts CLAUDE.md.
+8. **R2-N1:** `docs/briefings.md:23` is 97 columns, against a record that says 80. It can ride along with any later docs touch.
+9. **Optional:** pass `-p <port>` to the dev lane command, now that Phase 5 showed it is safe.
+10. **Tracking only:** unverified claims that a wrapped teardown survives a real Neon drop, and that the guard behaves identically in each Playwright worker.
+
+## Follow-Ups
+
+Each becomes a TODO line as above. The briefings corrections 1–9 and the DECISION-231 edits are pre-commit edits by the orchestrator, not new work-logs. The `docs/briefings.md` marker procedure from Item 9 stands:
+- Run `git log --format='%h %s' ce661d7..HEAD | grep -E ' (feat|fix)'` and require every line to be this pipeline's or to have its own entry.
+- Note that `git log 2761de8..HEAD` finds 69 feat/fix commits today, and 0.39.1 (the admin back link) has no entry. It is trivial and acceptable.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. All IN items delivered and true to copy; OUT items tracked or listed for TODO; residuals recorded; no walk needed (no account, role or org-connection path); briefings backlog reviewed: nine corrections to make before the `docs(briefings)` commit, which should land as the PR's last commit after DECISION-231; recommend no version bump. | SHIP WITH NOTES | 2026-10-25 |
+
+## Handoff
+
+- **Next agent:** orchestrator, at integration. The order is:
+  1. Apply the Item 9 additions.
+  2. Write DECISION-231 and F239 with the corrections above.
+  3. Apply briefings corrections 1–9.
+  4. Commit `docs(briefings)` with marker `decision=224` and the SHA from the grep.
+  5. Check whether `presby-sess` merged first and name DECISION-230 if so.
+  6. Move TODO items per Rule 10.
+  7. Run `/pre-push`, then `/merge-pr`.
+- **At SHIP:** Rule 12 and Rule 13 do not apply; Rules 14 and 15 are not touched.
+
+**Files referenced** (worktree `/Users/cshenso/git/presby-platform/presby-wf`):
+- `docs/work-log/2026-10-25-retro-workflow-efficiency.md` (Appendix B at ~768, Appendix D at ~786)
+- `docs/briefings.md`
+- `docs/TODO.md` (lines 211, 431, 494, 118, 165, 489, 209, 391, 487)
+- `scripts/pre-push-gate.mjs`
+- `scripts/ci/e2e-reset-flags.sql`
+- `e2e/support/dev-port-guard.ts`
+- `playwright.config.ts`
+- `docs/release-notes/v0.42.md`
+
+Cross-checked in `/Users/cshenso/git/presby-platform/presby-sess`: `docs/release-notes/v0.42.md` (0.42.3) and `docs/decisions.md` (DECISION-230).
 
 ---
 
@@ -1386,3 +1546,167 @@ Both reproduced against the live gate before anything was written: `decideHook` 
 ## Handoff
 
 Next: qa (Phase 5, run 2) per the "Exact QA re-run scope" above, with the `presby-inc3` expectation corrected to `not merged`. Orchestrator at integration: Item 9 additions (TODO lines, DECISION-231 residual list) as the amendment states; the second `Phase 4 deviation 7` is superseded.
+
+---
+
+# Phase 5, run 2: Verification (qa)
+
+**Date:** 2026-10-25
+**Verified by:** qa. I am read-only: I wrote no tests and edited no files. The worktree `/Users/cshenso/git/presby-platform/presby-wf` is clean at `ff4b506` before and after the run, and so is the main checkout. The main checkout's pre-push marker is byte-unchanged, sha256 prefix `3a7141414b5bcfb0`, the same as in run 1. Every mutation (failing-first swaps, mutation checks, scratch repos) happened only under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/wf2/`.
+
+**Scope run:** exactly the amendment's re-run scope, items 1 to 8:
+- typecheck, lint, `npm run check` and plain `npm test`, all in full
+- the four changed test files, each run alone
+- failing-first for `worktree-report` and briefings, plus two mutation checks
+- the live `worktrees:report` with read-only before/after snapshots
+- a scratch-repo reproduction of the incident
+- the live briefings banner, plus a simulation of the backlog commit
+- the Copy re-check of C8 and C4, plus N1 and N2
+- the diff-stat condition
+
+**Not re-run, standing on run 1:** the gate's behaviour apart from the two residual pins, the Playwright guard, the reset file, `stats:escape`, `AGENTS.md` under `next dev`, the full chromium e2e (411 of 412, N4 watch) and the coverage reading. No DB-backed suites ran, because the diff has no migration, `authz.ts`, `src/lib/db/` or shared fixture.
+
+**Prerequisites:** 572 GiB free on `/System/Volumes/Data`. **No flag reset this run**, because no e2e ran. Run 1's reset stands for run 1's e2e.
+
+**Diff condition (item 8):** `git diff --stat 0f9f3ee..HEAD` lists exactly these files, and nothing under `e2e/`, `playwright.config.ts`, `src/` or `scripts/ci/`, so run 1's full chromium run stands:
+- `docs/briefings.md`, `docs/testing.md`
+- `scripts/briefings-check.test.mjs`
+- `scripts/pre-push-gate.mjs`, `scripts/pre-push-gate.test.mjs`
+- `scripts/with-db-retry.test.mjs`
+- `scripts/worktree-report.mjs`, `scripts/worktree-report.test.mjs`
+- the work-log
+
+The `pre-push-gate.mjs` change is comment-only; I filtered the diff and no non-comment line changed.
+
+## Type Check
+
+- `npm run typecheck`: PASS.
+- `npm run lint`: PASS (0 warnings).
+- `npm run check`: PASS, all eight tripwires.
+
+## Unit Tests
+
+**Full suite (plain `npm test`):** 626 files: 549 passed, 77 skipped. 11,008 tests: 8,566 passed, 2,442 skipped, 0 failed, 25.7 s.
+- This matches the implementer's numbers exactly.
+- There are 46 more tests than run 1's 8,520. That equals the new tests: 38 + 3 + 5 + 0.
+- The 77 skipped files are the DB-backed suites (no `.env` loaded), the same set as run 1. None is in the diff.
+
+**The four changed files, each run alone with `--reporter=verbose`:**
+
+| File | Result | Implementer's count |
+|---|---|---|
+| `worktree-report` | 54 passed, 0 skipped | 54 |
+| `briefings-check` | 25 passed, 0 skipped | 25 |
+| `pre-push-gate` | 80 passed, 0 skipped | 80 |
+| `with-db-retry` | 39 passed, 0 skipped | 39 |
+
+**Failing-first.** Each check ran in a scratch copy made with `git archive HEAD`, with the old file swapped in:
+
+| Check | Result | Behavioural or import-only |
+|---|---|---|
+| New `worktree-report` tests against `d6da996`'s script (byte-identical to `0f9f3ee`'s) | **38 failed, 16 passed**, as claimed | Both. The incident test itself fails on import (`buildModel is not a function`). The `formatReport` and `removalSuggestions` failures are behavioural: the old script suggests `.next` removal where the new one suggests a worktree removal, and its strings differ. |
+| Behavioural red for the incident, using the old script as a CLI in a scratch repo with a real bare origin | The old script printed `fresh  merged into main` and `git worktree remove '…/fresh'` (also for the fast-forwarded branch). Running that command exited 0 and deleted `.env.local` silently. | Behavioural |
+| Mutation 1: `worktreeState` returns `"merged"` for every ancestor | 4 tests fail, including the incident test, the fast-forward case and the truth table | Behavioural |
+| Mutation 2: remove the `dirty === false` requirement | 3 tests fail | Behavioural |
+| Real-file briefings test against `0f9f3ee`'s `docs/briefings.md` | **1 failed**, with `expected [ 215, 216, 217, 218, 219 ] to deeply equal []`. Restored: 25 of 25 pass. | Behavioural |
+| Two residual pins | Green on the current gate. Because the gate's code is unchanged, they are green on `0f9f3ee` as well, which is correct for pins that document behaviour. | n/a |
+
+## End-to-End Tests
+
+Not re-run. Item 8's condition holds, so run 1's full `--project=chromium` result stands: 412 tests, 411 passed, and the one failure, `invitation-new-account.spec.ts:66`, passed on re-run (N4 watch). The 360px check does not apply, since nothing renders.
+
+## Regression Tests Added (this loop-back)
+
+- **`buildModel and worktreeFacts against real repositories › fresh worktree with only ignored files … (the incident)`**, `scripts/worktree-report.test.mjs:331`. Guards against a fresh pipeline worktree being labelled "merged" and offered for removal. Seven sibling real-repo cases cover dirty, merged and clean, merged but dirty, unmerged, fast-forward and squash, detached, no `origin/main`, and the main checkout.
+- **`worktreeState › truth table`**, `:89`. **`removalSuggestions › table`**, `:107`. **`formatReport › exact strings`**, `:146`. These pin the amended C8 strings and the removal rule.
+- **`worktree-report › reads and never writes`**, `:473`. A source scan: git is spawned once, only read-only subcommands are called, and `status` carries `--no-optional-locks`.
+- **`real docs/briefings.md › the explanatory preamble names no decision`**, `scripts/briefings-check.test.mjs:167`. It includes a self-check showing it can fail (`:174`). Guards against the preamble silently undercounting the banner.
+- **`commandContainsGitPush › accepted residuals`**, `scripts/pre-push-gate.test.mjs:354`. Pins today's behaviour for the two residuals, with the unflagged-prefix control.
+
+## Coverage on Critical Modules
+
+Not re-run; none is touched. Run 1's reading stands: `permissions.ts` 100%, `two-factor.ts` 91.3%, `flags.ts` 100%.
+
+## Feature-Gate Audit
+
+No protected routes touched: no file under `src/` or `drizzle/` is in the diff. Schema/RLS audit: not applicable.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none | n/a | n/a | n/a |
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the design's Copy table.** The amended C8 strings match `scripts/worktree-report.mjs` byte-for-byte: the three state labels, the changes label, the base-missing line, the footer, both suggestion notes and the header. The C4 banner string is unchanged. The one string outside the table, `worktrees:report: git worktree list failed; showing disk only.`, is unchanged since `d6da996` and still true.
+- [x] **The query behind each claim was opened.**
+  - "merged into origin/main" comes from three facts: `rev-parse refs/remotes/origin/main`, the `merge-base --is-ancestor` exit code, and whether HEAD is in `rev-list --first-parent`. It does not read squash or fast-forward history, and the footer says so.
+  - "uncommitted or untracked files" comes from `status --porcelain --untracked-files=normal`, which excludes ignored files.
+  - "as of your last fetch" is accurate: the report reads the remote-tracking ref and has no local-main fallback. In a scratch run with `origin/main` deleted, every state was blank and the base-missing line was printed.
+  - "the branch is kept" is true: the branch `fresh` survived `git worktree remove` in the scratch repo.
+  - "nothing here has been run" and "deletes nothing" are true, and the source scan pins them.
+- [x] **Each instruction was traced to the role that sees it, and that role can do it.** The reader is the orchestrator or the operator. The scratch run printed the remove command only for the merged, clean worktree, after the ignored-files note. Adding an untracked file removed it. A `.next` directory added the regenerable note and its `rm -rf` line. A moved ("prunable") merged worktree has an unknown dirty state, and got no removal suggestion. A detached HEAD got no state and no removal.
+- [x] **Older strings were grepped.** `git grep "merged into main"` outside work-logs returns nothing. The new `docs/testing.md:512-519` paragraph is accurate against the runs. `.claude/skills/new-feature/SKILL.md:54` is unchanged and still true.
+
+**C8, live run (item 4): PASS, with expectations updated for the moving tree.**
+- Output: every non-main worktree reads `not merged`. `presby-2b` and `presby-cal` also read `uncommitted or untracked files`. There is **no `git worktree remove` line**, only four `rm -rf '<path>/.next'` lines under the regenerable note. The main checkout has no state.
+- `presby-inc3` reads `not merged`, as the loop-back predicted.
+- `presby-cal` and `presby-parish` also read `not merged`, not the amendment's predicted `no commits of its own`. I checked by hand: other sessions committed their work-logs about 6 minutes before my run (`b511eb8` and `2689a63`, one own commit each, not ancestors of `origin/main` `ce661d7`). So `not merged` is the correct output of the rules.
+- No live worktree is currently in the "none" state. That state is proven by the scratch reproduction and the real-repo tests, not by the live run.
+
+**Read-only property (item 4).** I took three before/after snapshot pairs around the live report. Each snapshot covered the worktree list, a hash of all refs, every worktree's `--no-optional-locks` status, and every index's mtime and size.
+- **Run 3** (`--no-sizes`, tight window): identical.
+- **Run 2:** no index changed. The only difference was an untracked `presby-cal/scripts/public-calendar/seed-dev-public-calendar.sql` that another session created during the window.
+- **Run 1:** `presby-cal`'s index mtime changed. That worktree is under active work by another session.
+- **To isolate the report from that noise:** in the scratch repo, a stat-dirty index was left untouched by two report runs (with and without sizes). A plain `git status` then rewrote it, which shows the probe was sensitive. Across the 6 scratch worktrees, every index mtime was identical before and after.
+- I attribute the live run-1 change to the other session, not the report.
+
+**C4, briefings banner (item 6): PASS.**
+- The live banner reads `82 unread briefings` and `briefings are BEHIND by 50 decisions not yet named (newest DECISION-229) and 69 feat/fix commits`.
+- My own count agrees: 50 decisions are recorded above 167, and the file names none of them. `git log --format=%s 2761de8..HEAD | grep -cE '^(feat|fix)'` returns 69.
+- **Simulation in scratch:** Appendix D's 12 entries inserted, the marker set to `decision=224`, and DECISION-231 prepended to `decisions.md`. The banner shows only `94 unread briefings`, with no behind line, and the guard test still passes on the simulated file.
+
+**N1: PASS.** The new header of `scripts/with-db-retry.test.mjs:1-13` matches run 1's probe of `0f1dda2^`: a unique violation was not retried, because the class name is in `name`, not `message`, and the bare word "timeout" was retried.
+
+**N2: PASS.** Probed against `decideHook` and `commandContainsGitPush`:
+- `git push $(git commit -m x)` is seen as a push, allowed with a fresh marker, and refused (exit 2) with none.
+- `nice -n 5`, `time -p`, `command -p`, `env -u FOO` and `exec -a x` are not seen, and are allowed with no marker.
+- `env -i` and the unflagged `nice` are seen, and refused with no marker.
+
+The header at `scripts/pre-push-gate.mjs:38-40,63-69` states exactly this, including the implementer's added `env -u` / `exec -a` precision.
+
+**Non-blocking notes**
+- **R2-N1.** `docs/briefings.md:23` is 97 columns. The loop-back record says the paragraph was "reflowed to 80 columns". This is cosmetic and the record is slightly inaccurate.
+- **R2-N2.** The main checkout's current (unfixed) gate refused one of my scratch scripts, because its heredoc body contained a push command and a `cd "$R"` it could not resolve. Nothing ran. This is G1 again, live on `main`, and is the defect this pipeline fixes.
+- **R2-N3.** The amendment's third residual, a branch started from an already-merged feature tip, still reads "merged into origin/main", which the footer's definition does not cover. It is accepted, unverified by test, and cannot produce a removal line without a clean tree.
+
+## Verdict
+
+**PASS.** FAIL-1 and FAIL-2 are closed:
+- The worktree report no longer labels or offers a fresh worktree for removal. This was shown with tests that fail on the old code, two mutation checks, the old script versus the new one in a scratch repo, and the live run.
+- The briefings banner reads 50, and a guard against the real file is in place.
+
+N1 and N2 are as specified. All gates are green, the full unit suite has 0 failures and no unexpected skips, and the read-only property holds. Not auth-touching, so the stricter gate does not apply.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 2) | qa | Complete. Ran exactly the amendment's re-run scope. FAIL-1 and FAIL-2 closed, with failing-first and mutation evidence. Live `worktrees:report` offers no removal, and the read-only property holds (live, plus an isolated scratch control). Banner reads 50. Run 1's chromium e2e stands, since the diff touches no e2e, src or config file. No flag reset (no e2e this run). | PASS | 2026-10-25 |
+
+## Handoff
+
+- **Next: analyst (Phase 6).**
+- **Orchestrator at integration:** the Item 9 additions as the amendment states:
+  - TODO lines: the two gate residuals (N2), the `invitation-new-account.spec.ts:66` watch (N4), and the squash/fast-forward blind spot.
+  - DECISION-231's residual list gains the two residuals, plus the `env -u` / `exec -a` precision.
+  - The briefings backlog commit, after which the guard test keeps the preamble honest.
+- R2-N1 can ride along with any later docs touch.
+
+Evidence is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/wf2/`:
+- gate logs: `typecheck.log`, `lint.log`, `check.log`, `unit.log`
+- per-file runs: `new-*.log`
+- failing-first: `ff-worktree.log`, `ff-briefings.log`
+- live report: `live-report.txt`, `live-report3.txt`
+- snapshots: `snap-before.txt`, `snap-after.txt`, `snap-ctl1.txt`, `snap-after2.txt`, `snap-b3.txt`, `snap-a3.txt`
+- scratch reproduction: `incident.sh`, with the repos at `inc-new/` and `inc-old/`
+- gate probe: `probe-n2.mjs`

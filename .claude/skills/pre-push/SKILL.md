@@ -242,6 +242,6 @@ Report results:
 node scripts/pre-push-gate.mjs --stamp
 ```
 
-A PreToolUse hook (`scripts/pre-push-gate.mjs`, registered in `.claude/settings.json`) blocks any in-session `git push` unless this marker exists and matches the current HEAD — committing anything after the stamp invalidates it, so re-run `/pre-push` after late commits (Workflow Rule 5, mechanized).
+A PreToolUse hook (`scripts/pre-push-gate.mjs`, registered in `.claude/settings.json`) blocks any in-session `git push` unless this marker exists and matches the current HEAD — committing anything after the stamp invalidates it, so re-run `/pre-push` after late commits (Workflow Rule 5, mechanized). It also refuses one command that both moves HEAD (commit, merge, rebase, cherry-pick, am, pull, revert, reset) and pushes; run the commit in its own call, then `/pre-push`, then the push.
 
 **Do not push.** The user pushes manually.

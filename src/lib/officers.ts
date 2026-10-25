@@ -234,8 +234,8 @@ export async function listOfficerRoster(
     const result = await tx.execute(sql`
       with all_offices(office) as (
         values ('ruling_elder'), ('installed_pastor'), ('co_pastor'),
-               ('associate_pastor'), ('deacon'), ('clerk_of_session'),
-               ('moderator'), ('treasurer'), ('trustee')
+               ('associate_pastor'), ('deacon'), ('deacons_moderator'),
+               ('clerk_of_session'), ('moderator'), ('treasurer'), ('trustee')
       ),
       roster as (
         select o.office, r.person_id, r.term_id, r.class_year,
@@ -445,13 +445,17 @@ export interface OfficerActingOptions {
 
 /**
  * The derived group an office needs at its organization: the Session offices
- * (elders and pastors) need `session`, a deacon needs `diaconate`, everything
- * else needs none. Only congregations have either group, so this is how a
- * Session, pastor or diaconate office at a presbytery becomes the typed
+ * (elders and pastors) need `session`, a deacon needs `diaconate`, the
+ * Moderator of the Board of Deacons needs `deacons_moderator` (drizzle/0068,
+ * DECISION-242), everything else needs none. Only congregations have these
+ * groups, so this is how such an office at a presbytery becomes the typed
  * `invalid_office_for_org` instead of the trigger's raw foreign-key error.
  */
-function requiredDerivedGroup(office: OfficerOffice): "session" | "diaconate" | null {
+type RequiredDerivedGroup = "session" | "diaconate" | "deacons_moderator";
+
+function requiredDerivedGroup(office: OfficerOffice): RequiredDerivedGroup | null {
   if (office === "deacon") return "diaconate";
+  if (office === "deacons_moderator") return "deacons_moderator";
   if (isSessionOffice(office)) return "session";
   return null;
 }
@@ -459,7 +463,7 @@ function requiredDerivedGroup(office: OfficerOffice): "session" | "diaconate" | 
 async function hasDerivedGroup(
   tx: OrgTx,
   organizationId: string,
-  derivedFrom: "session" | "diaconate",
+  derivedFrom: RequiredDerivedGroup,
 ): Promise<boolean> {
   const [row] = await tx
     .select({ id: groups.id })

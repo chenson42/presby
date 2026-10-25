@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete; G1–G15; seat shape to architect | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete; seat via resolver (DECISION-242), DB archive guard (243), placement + single count (244), overwrite+audit + lock order (245); R1 seat-key guards, R2 revoke DELETE; F258–F264 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; migration 0068 designed in order; `src/lib/parishes.ts` is the only writer; explicit-button picker (F261); S1 declined; F265 raised; staged files and pre-ship reads listed; CLAUDE.md sentence awaits operator approval | Design complete, implementer named | 2026-10-25 |
-| 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batches B, C) | Batch A complete: 0068 hand-written, applied twice (idempotent), rollback rehearsed, journal idx 68; test-rls-68 64/64 as presby_app; parishes.db.test.ts 25/25; staged seed + two integration patches. Batches B, C pending | Batch A done | 2026-10-25 |
+| 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batches B, C) | Batch A complete: 0068 hand-written, applied twice (idempotent), rollback rehearsed, journal idx 68; test-rls-68 64/64 as presby_app; parishes.db.test.ts 25/25; staged seed + two integration patches. Batches B and C complete: library, actions, pages, components, Officers UI, e2e (parishes 10/10, hydration 3/3 on :3510 incl. the MFA-enrolled seat holder), 360px walk, global-setup patch staged; typecheck, lint, `npm run check`, `npm test` (8551), build and the parish DB suites green. Eight items for Phase 5/6 attention (see Implementer Notes) | Batches A, B, C done | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1201,6 +1201,72 @@ Per-person district assignment (`memberships.org_unit_id` stays unused); bulk as
 Strings added or changed:
 - `src/lib/officer-offices.ts`, `OFFICE_LABELS.deacons_moderator`: "Moderator of the Board of Deacons" (design C7).
 - No other user-facing string. The migration's `raise exception` texts are database refusals, mapped by Batch B, never shown verbatim.
+
+
+## Phase 4 - Batches B and C (full-stack-developer)
+
+**Date:** 2026-10-25 · **Branch:** `pipeline/parish-management`, Neon branch `pipeline-parish-management` · **Dev server:** `:3510`, started and stopped by PID 68666 (the listening node process; its npm parent 68649).
+
+### Files Created
+
+Library and tests: `src/lib/parishes.ts` (the only writer of `org_units` and `households.org_unit_id`), `src/lib/parishes-pure.ts`, `parishes.test.ts` (56 DB-backed), `parishes-pure.test.ts` (19), `parishes-boundaries.test.ts` (40 source scans).
+
+Under `src/app/(org)/o/[slug]/directory/parishes/`: `acting-identity.ts`, `actions.ts`, `move-input.ts`, `parish-failure.ts`, `parish-copy.ts`, `parishes-states.tsx`, `add-district-form.tsx`, `district-card-controls.tsx`, `household-row.tsx`, `row-assign.tsx`, `bulk-move.tsx`, `archived-notice.tsx`, `[orgUnitId]/page.tsx`, `[orgUnitId]/actions.ts`, `unassigned/page.tsx`, `unassigned/actions.ts`, `unassigned/group-toggles.tsx`, and a test beside each (acting-identity, the three `actions.test.ts`, move-input, parish-copy, parish-failure, row-assign, bulk-move, district-card-controls, add-district-form, presentational, the two page tests). Plus `admin/roles/new/actions.test.ts` and `admin/roles/[id]/edit/actions.test.ts`.
+
+E2E: `e2e/parishes.spec.ts` (10 tests, 9 at the congregation plus the 360px walk), `e2e/hydration/parishes-controls.spec.ts` (3), `e2e/support/parish-fixture.ts` (person ids `00000000-0000-4068-8000-0000000000NN`, orgs `e2e-parish-<stamp>`), staged `scripts/parishes/global-setup.integration.patch` (`git apply --check` clean on this tree).
+
+### Files Modified
+
+`audit.ts` + `audit.test.ts` (six keys), `audit-tx.ts` (`insertAuditRows`), `directory.ts` (exports `DIRECTORY_HIDDEN_SQL` and `deriveDeaconsByOrgUnit`; `getParishRoster` removed; F265 fix), `officers.ts`, `officer-offices.ts` (`AUTHORITY_OFFICES`, `isAuthorityOffice`), `groups.ts`, `org-provisioning.ts`, `org-features.ts` (`org_portal.parishes`), `role-grants.ts`, `role-definitions.ts`, the roles and officers `actions.ts`, `directory/page.tsx`, `directory-nav.tsx` (`showParishes`), `parishes/page.tsx`, `parish-roster.tsx` (legacy and managed modes), the Officers form, roster and page, and the existing tests these changed (directory, officers, org-provisioning, role-grants, role-definitions, org-feature-catalog, officer-offices, parish-roster, both page tests, `e2e/admin-organizations-create.spec.ts` for four groups).
+
+### Endpoints and action signatures (all `ActionResult<T>`; identity from `resolveActingIdentity(slug)`, never client input)
+
+| Action | Gate | Library call |
+|---|---|---|
+| `defineDistrictAction`, `renameDistrictAction`, `archiveDistrictAction`, `restoreDistrictAction` (`parishes/actions.ts`) | session, then toggle `org_portal.parishes`, then `officers.manage` (inside `parishes.ts`, same transaction) | `defineDistrict`, `renameDistrict`, `archiveDistrict`, `restoreDistrict` |
+| `moveHouseholdAction`, `bulkMoveAction` (`[orgUnitId]/actions.ts`) | toggle, then `parishes.assign` or `people.manage` | `moveHousehold`, `bulkMoveHouseholds` (request carries no household ids) |
+| `assignHouseholdAction` (`unassigned/actions.ts`) | same | `moveHousehold` |
+
+Pages: `/o/<slug>/directory/parishes`, `.../parishes/<orgUnitId>`, `.../parishes/unassigned`; each behind `org_portal.directory` and `org_portal.directory_v2`, then the per-org toggle and the live authority read in the library. No platform flag added. Audit rows are written by `parishes.ts` in the same transaction; no action file calls `recordAudit()`.
+
+### Schema change / new env / FEATURES
+
+None in this batch (0068 is Batch A's). No env var. No `FEATURES` entry. One `ORG_FEATURE_CATALOG` entry, `org_portal.parishes` (toggle-only, congregations, off).
+
+### Deviations from the design (each noted, none weakens a ruling)
+
+1. **Early Batch C glue in the Batch B commit.** Removing `getParishRoster` and widening `OfficersResult`/`GrantResult` broke the typecheck in app files, so the minimal adapters (roles and officers action mappings, the legacy page on `getParishesOverview`, fixture props) went in the B commit; the rest is the C commit.
+2. **`getParishAuthority` takes a fourth parameter `managed` (default true) and returns a sixth field `holdsSeatKey`** (the audit `viaSeat`). With `managed` false it returns the legacy shape (design table, last paragraph).
+3. **`ParishTarget` carries `deaconName`** (the bulk confirmation names the destination's deacon) and `target_unavailable` carries `districtName` (so an Undo refusal can say which district is archived, C4).
+4. **Toggle pills are custom wrapping `Link`s, not `ButtonGroup`.** `ButtonGroup` is `flex-nowrap` with horizontal scroll and has no per-item `aria-label`; the design needs wrapping pills at 360px and the "Hide Members (27)" names.
+5. **`normalizeDistrictName` removes zero-width characters before collapsing whitespace** (JavaScript's `\s` matches U+FEFF, which would have turned one inside a word into a space). Found by the pure test.
+6. **The `adoptTemplate` `seat_only_key` branch is unreachable against a real database** (the binding guard refuses the key on a template role, which is not org-owned), so it is defence in depth and untested; `createRole`, `setRolePermissions`, `grantRole` and the catalog are tested against Postgres.
+7. **`failureWantsRefresh` was written and removed**: `RowAssign` refreshes on every refusal, which is simpler and harmless.
+8. **`listOfficerRoster` still returns `selfRecorded` computed in SQL for every office**; the TypeScript gate is `isAuthorityOffice`, so the badge shows for the seat and the Session offices only.
+
+### Strings not in the Copy table (stopped-for-ruling candidates; shipped as the narrowest honest wording)
+
+- District page, archived, no active district to move to: "There are no active districts to move them to." (in `[orgUnitId]/page.tsx`).
+- Unassigned page where some but not all groups are hidden and the shown groups are empty: **no text** (the toggles and counts still render). The design has copy for "every group hidden" and "zero" only; analyst/tech-lead to rule whether that case needs a line.
+- `same_unit` and a campus target map to the generic "Could not move..." line (neither is reachable from the UI).
+
+### Tests (written by this implementer)
+
+- **Failing-first.** F265: `directory.test.ts` "deriveDeaconsByOrgUnit - the half-open rule" - both regression tests failed against the old `ends_on is null` predicate ("a deacon whose term is open today but has a FUTURE end date IS the district's deacon", "a term that has NOT STARTED yet is not the district's deacon") and pass now. The `parishes-pure` whitespace/zero-width case failed first (an FEFF inside a word became a space) and was fixed. The `org_unit_target_*` and seat-guard behaviours were proven failing-first in Batch A.
+- **LIB `parishes.test.ts` (56, real Postgres, `createOrganization()` as the fixture):** the seat provisioned by production code; the authority matrix (admin, seat, view-hidden, definer-only, plain), a `moderator`, a `deacon`, a future seat and an ended seat each confer nothing, the half-open boundary (starts today yes, ends today no), a cross-org seat grants nothing, toggle off refuses everything and writes nothing; define/rename/archive/restore with names, collisions, audit-in-transaction rollback; single move (conflict, quiet no-op, concurrent double submit writes one audit row, clear, Undo, Undo into an archived district refused, archived/campus/foreign/nonexistent targets, forbidden-before-state oracle check, platform admin confers nothing, a seat ended mid-session); bulk (counts only, one row per household plus one batch row, skipped, count_changed, active source refused, same unit, archived and campus targets, 101 households refused with no write and 100 moved, audit rollback); the Unassigned buckets, `hide`, masking ("Private" for a seat holder, named for `people.manage` and `directory.view_hidden`), no contact-shaped key anywhere in a row, the district page's 404 matrix, the overview's single count, seat-filled (including a lapsed holder, who gets `OrgAccessError`), and a 600-household shape (no timing assertion).
+- **PURE (19), BND (40), ACT (acting-identity + 3 action files + 2 roles actions), CMP (row picker never commits on change, bulk dialogs, controls, form, pages, panels, legacy roster).**
+- **E2E on :3510 (`e2e/parishes.spec.ts`, 10/10):** an MFA-enrolled user completes a real TOTP challenge, then: the platform `admin` role with no seat is refused (page, Unassigned, district) and recording the seat allows the very next request; the seat holder (no admin key) sees districts, the unassigned card, masked names; assign with Undo and a `viaSeat` audit row; arrow keys on the picker commit nothing; the toggles keep state in the URL; the archived district is emptied (counts, per-household and batch audit rows); the administrator defines, renames, archives and restores; the administrator records the seat from Officers, stamped self-recorded, after which the seat works with every admin key removed; toggle off. `e2e/hydration/parishes-controls.spec.ts` 3/3 (held JS chunks; persisted values asserted). Also green: `admin-organizations-create.spec.ts` (four groups), `portal-home-cards.spec.ts`.
+- **360px, real browser** (screenshots in `test-results/parish-360-*.png`, gitignored): the district list, an 80-character district name (wraps), the district page, the Unassigned page (the four pills wrap onto two lines), the bulk-move picker and confirmation. No horizontal overflow on any; every control 44px (a dialog's `zoom-in-95` animation makes buttons measure 95% until it settles, so the spec polls); the confirmation's buttons stack, primary first. One cosmetic observation, unchanged and not mine: on the overview the three-tab `ButtonGroup` scrolls sideways so the Parishes tab is partly cut off at 360px (the existing component's documented behaviour).
+
+### Gates
+
+`npm run typecheck` pass; `npm run lint` pass (0 warnings); `npm run check` 8 of 8; plain `npm test` 560 files, 8551 tests pass, 79 skipped; `npm run build` pass; DB-backed suites against the pipeline branch serial: `parishes.test.ts`, `parishes.db.test.ts`, `officers`, `directory`, `role-grants`, `role-definitions`, `org-provisioning`, `groups`, `my-groups`, `imports`, `invitations.db`, `designation-parity.db`, `designation-revoke.db`, `session-approval.db` all pass (390 + 262). Not run: the full 34-minute `npm run test:db`, and the `npm run test:e2e:prod` production-build lane (it needs `next build && next start` on :3800; the hydration spec ran on the dev server).
+
+### Handoff
+
+- **Browser walk for Phase 5/6** (as the founding administrator at 360px on `development`): add a district, record the seat under Officers (self-recorded stamp shown), assign a household, Undo, archive a district with households and empty it with Move all. A seeded fixture will not do; the e2e fixture is a throwaway congregation.
+- **For the orchestrator at integration:** apply `scripts/parishes/global-setup.integration.patch` (with Batch A's two patches); `docs/decisions.md` 242-245, the CLAUDE.md sentence (approved), TODO lines and the release note (tech-lead after Phase 6) are not written here.
+- **Next agent:** qa (Phase 5).
 
 ---
 

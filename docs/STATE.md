@@ -3,11 +3,20 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-25 (v0.42.3, session handling hardening, is live as of its 2026-10-25 deploy; retro workflow-efficiency is integrated on its branch with no version bump).
+Updated 2026-10-25 (v0.42.3, session handling hardening, is live as of its 2026-10-25 deploy; v0.42.4, the provider-email check, is integrated on its branch; retro workflow-efficiency is merged to `main` with no version bump).
 
 ---
 
-## RESUME HERE — 2026-10-25: v0.42.3 (session handling hardening) is live; retro workflow-efficiency is integrated; five other pipelines are open
+## RESUME HERE — 2026-10-25: v0.42.4 (sign-in provider email check, F231) is integrated; v0.42.3 is live; five other pipelines are open
+
+`pipeline/google-email-verified` (worktree `presby-gauth`, no migration) is merged up to `main` (`77be511`: 0.42.3 plus PR #52 workflow-efficiency)
+and integrated as **v0.42.4**, F231 **closed in code and tests**. `evaluateSignIn()` now refuses every non-credentials sign-in unless the provider
+asserted `email_verified === true`, before any user lookup, so an unverified claim can neither link to an existing account nor create one (and the
+`INITIAL_ADMIN_EMAILS` bootstrap is unreachable through it). DECISION-246 amends DECISION-015 point 2 and fulfils the `evaluateSignIn()` clause of
+DECISION-187. QA PASS, Phase 6 SHIP WITH NOTES. **The limit:** no real Google exchange has happened anywhere (Google is configured in no environment,
+production `accounts` has 0 rows); the claim's arrival rests on `src/auth.sign-in.test.ts` and a tripwire on the installed `@auth/core`. The
+`Invitations Increment 3: Google` TODO line now carries the first-exchange check. **Community Increment 2b's Phase 4 is unblocked on this fix**
+(it was blocked on 0.42.3 and F231). Next: `/pre-push`, then `/merge-pr`, then deploy.
 
 `pipeline/session-update-hardening` (worktree `presby-sess`, Neon `pipeline-session-update`, no migration) is merged up to `main` (`ce661d7`,
 the 2026-10-24 retrospective's agent edits) and integrated as **v0.42.3**, a security patch with neutral wording. The server now accepts that
@@ -31,8 +40,8 @@ DECISION-231, F239 (`docs/schema-design-2.md` §2z), TODO lines for its residual
 
 | Pipeline | Worktree | Phase | Numbers | Next |
 |---|---|---|---|---|
-| Community Increment 2b, sign-in invitations (`pipeline/signin-invites`, `docs/work-log/2026-10-22-founding-admin-directory.md` in `../presby-2b`) | `presby-2b` | Phase 3 amendment 2 done | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Phase 4 is **blocked** on 0.42.3 and the F231 fix |
-| F231, refuse an unverified Google email claim (`2026-10-25-google-email-verified`) | `presby-gauth` | Phase 5 (QA) | DECISION-246; F231; no migration; port 3520 | QA, then ship as **0.42.4** |
+| Community Increment 2b, sign-in invitations (`pipeline/signin-invites`, `docs/work-log/2026-10-22-founding-admin-directory.md` in `../presby-2b`) | `presby-2b` | Phase 3 amendment 2 done | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Phase 4 is unblocked once 0.42.4 merges (0.42.3 is live; F231 is fixed on `pipeline/google-email-verified`) |
+| F231, refuse an unverified Google email claim (`2026-10-25-google-email-verified`) | `presby-gauth` | Integrated on its branch as **0.42.4** (Phase 6 SHIP WITH NOTES) | DECISION-246; F231; no migration; port 3520 | `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
 | Retro workflow-efficiency (`2026-10-25-retro-workflow-efficiency`, promoted to a full Feature by QA run 1) | `presby-wf` | Integrated on its branch (Phase 6 SHIP WITH NOTES) | DECISION-231; F239; no migration; port 3480 | `/pre-push`, `/merge-pr`, then remove the worktree |
 | Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Phase 3 (3a) running | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | Phase 3, then Phase 4 |
 | Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Phase 3 done | migration 0067; DECISION-238-241; F250-F257; port 3500 | Phase 4 queued |

@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete; G1–G14, Q1–Q10; 'published' = new explicit default-off switch | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete; R1–R7, DECISION-238/239/240 proposed, F250–F253 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; names, 0067 + definer, reader, slot/island, series action, Copy, T1–T20; F254–F256, DECISION-241 drafted; G9 deferred (operator to confirm) | Design complete, implementers named | 2026-10-25 |
-| 4 — Implementation | database-admin (Batch 1: 0067, definer, RLS suite), then full-stack-developer (Batches 2–4) | Batch 1 complete (0067 applied and re-applied, section 67 58/58 as presby_app, DB suite 13/13, from-empty green); Batches 2–4 pending; port 3500 | — | 2026-10-25 |
+| 4 — Implementation | database-admin (Batch 1: 0067, definer, RLS suite), then full-stack-developer (Batches 2–4) | Batch 1 complete (0067 applied and re-applied, section 67 58/58 as presby_app, DB suite 13/13, from-empty green); Batches 2–4 complete (lib, catalog, audit, editor surface, public slot and island, unit/DB/e2e/hydration specs; all gates green); port 3500 | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1035,6 +1035,85 @@ Commits on `pipeline/public-events-calendar`: `6c830ff` (feat, schema), `920ccac
 No audit events (schema only). No strings added or changed.
 
 **Next:** full-stack-developer, Batch 2: catalog entry, audit keys, `SiteUrls.portalCalendar()`, contract/reader/mapper, T3/T5, then the `events.ts` write paths. Batch 2 should begin with the F251/F252 regressions, written first and seen to fail.
+
+## Phase 4 — Batches 2–4 (full-stack-developer, 2026-10-25)
+
+Commits on `pipeline/public-events-calendar`: `6888ca8` (feat, lib + catalog + audit + editor surface), `65116ea` (feat, public slot, island, wiring), `a5d9444` (test, e2e + hydration specs + fixture + optional dev bundle), `703628d` (test, give fall-through mock). No schema change (Batch 1 owns 0067). Neon branch `pipeline-public-events-calendar`; dev server on :3500 started by me and stopped by PID at the end.
+
+### Files created
+
+- Lib / pure: `src/lib/calendar/public-contract.ts` (+ test), `src/lib/public-calendar.ts` (+ `public-calendar.test.ts`: T5 pins, T6 mapper and reader), `src/lib/events/website-listing.ts` (+ test, T12).
+- Editor: `admin/events/website-listing-copy.ts` (every editor string, one place), `series-website-listing.tsx` (+ test).
+- Public: `(public)/site/[slug]/public-events-calendar-slot.tsx`, `events-calendar-model.ts`, `events-calendar-panel.tsx`, `events-calendar-switcher.tsx`, each with a test (T8, T10, T11).
+- e2e: `e2e/support/public-calendar-fixture.ts`, `e2e/public-calendar.spec.ts`, `e2e/custom-domains/public-calendar.spec.ts`, `e2e/hydration/public-events-calendar.spec.ts`.
+- `scripts/public-calendar/seed-dev-bundle.sql`: OPTIONAL, run by hand, NOT included by the seed-dev patch. It gives Fernwood's live site a bundle carrying the `eventsCalendar` slot so `/site/fernwood` can be browsed in dev (Batch 1's "needs a dev bundle" note).
+
+### Files modified
+
+`src/lib/events.ts` (derive, inherit, in-transaction audit on four paths, `setSeriesWebsiteListing`, `getEvent`'s `seriesWebsite`, header paragraph rewritten), `admin/events/actions.ts` (actor, new action, stale audit paragraph rewritten), `event-schema.ts`, both forms, `events-list.tsx`, `[eventId]/page.tsx`, `extend-series-form.tsx`, `src/lib/org-features.ts` (catalog entry), `src/lib/audit.ts` (two keys), `src/lib/site-urls.ts` (`portalCalendar()`), `src/lib/calendar/month.ts` (`groupByDay`; `(org)` `groupEntriesByDay` delegates), `src/lib/calendar.ts` (stale comment), `render-site-page.tsx` (the `eventsCalendar` resolver), `src/lib/public-calendar.db.test.ts` (T3). Existing tests updated for the new signatures and strings: `events.test.ts`, `audit.test.ts`, `org-feature-catalog.test.ts`, `site-urls.test.ts`, `month.test.ts`, the events-admin component and schema tests, `[eventId]/page.test.tsx`, `[[...path]]/page.test.tsx` (T9 and a host-mode case), `give/fall-through.test.tsx` (mocks the new reader).
+
+### Schema / audit / env
+
+No schema change. New `AUDIT_ACTIONS`: `event.listed_on_website`, `event.unlisted_from_website`, written with `insertAuditRow(tx, ...)` in the same transaction as the change on `createEvent`, `updateEvent`, `extendSeriesPattern` and `setSeriesWebsiteListing`; none for a no-op, a cancel or a forbidden call. No new env var. No `FEATURES` entry. No new platform flag. One `ORG_FEATURE_CATALOG` entry: `org_portal.public_calendar` (toggle-only, provisioned off, self-service, `worship`, `orgTypes: null`).
+
+### Actions, gates
+
+| Signature | Auth / gate |
+|---|---|
+| `setSeriesWebsiteListingAction(slug, { eventId, listed })` | `auth()` then `resolveOrgContext`; `events.manage` inside the lib transaction; org id never from the form |
+| `createEventAction`, `updateEventAction`, `extendSeriesPatternAction` | unchanged gates; now pass `EventActor { userId, email }` |
+| `readPublicCalendar(slug)` / `presby_public_events_calendar` | anonymous; site live and the toggle composed inside the definer |
+
+### Deviations from the design (small, each named)
+
+1. **Series dialog grammar.** E7's left-out sentence is "are left out"; for exactly one left-out event it reads "is left out" (otherwise "1 cancelled event are left out"). Same string family, no new wording.
+2. **`seriesWebsite` is null for a series of fewer than two rows** (a parent with `recurrenceCount` 1 and no children), so no "Website listing" section is offered where the edit form already covers it. `setSeriesWebsiteListing` itself still works on a standalone event (a series of one); the UI does not offer it.
+3. **`updateEvent`'s UPDATE is also scoped by `organization_id`** (it was by id only); behaviour unchanged for a legitimate call.
+4. **The sign-in button needs `text-primary-foreground!`.** The site stylesheet (`presby-site-kit/styles.css`) sets `.presby-site a { color: var(--primary) }`, which outranks a utility class and painted the button label the colour of its own background (found in the browser, not by a test). Any future link-styled-as-button inside a live slot has the same trap.
+5. **The desktop detail card worked as designed** (absolute, under the chip, right-anchored in the last two weekday columns); the permitted in-cell fallback was not needed.
+6. **e2e fixture world.** The throwaway `e2e-pubcal-<stamp>` congregation carries no people. The editor flow reuses the existing e2e-alpha clerk through `calendar-fixture.ts` and gives e2e-alpha a temporary live site (refused if a site row already exists, removed and confirmed in teardown). No person-id range was needed; no `e2e/support/*` file that already existed was edited.
+7. **T11's "never constructs a Date" is a source scan, not a runtime spy.** React's scheduler and the test renderer construct Dates, so a spy cannot tell them from the island's reads (the spy fired 3 times with no island code involved). The scan bans `Date`, `performance`, `fetch`, `XMLHttpRequest`, `location` and `window` in the island's source, and a separate test asserts no `fetch` during any interaction.
+
+### Tests (failing-first where specified)
+
+- **F251 and F252 were written first and seen red for the right reasons**: F251 failed with Postgres `23514` on `events_website_requires_public` (the routine edit tripping the CHECK); F252 failed with `[true, true, true]` against `[false, false, false]` (extend re-listing after a "this and later" unlisting). Then fixed and green.
+- **T3 mutation check**: making a missing category row read as OFF in the definer turned the differential test red at `axis=on category=missing public=on member=on: public_calendar: expected false to be true`; the file was re-applied afterwards. 81 combinations, both keys.
+- **T20 negative control**: removing `!hydrated ||` from the Next button turned both hydration cases red (`toBeDisabled`); restored.
+- T5 (pins), T6 (mapper, reader, log shape), T7, T8, T9, T10, T11, T12, T13 to T15, T16, T17, T18 as in the design table; T19 and T20 in the three e2e files.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm run check` | all eight tripwires pass |
+| plain `npm test` | 549 files passed, 78 skipped; 8448 tests passed |
+| DB-backed (`--no-file-parallelism`): events, public-calendar.db, calendar, event-types, org-provisioning, org-features, org-feature-categories, org-feature-warnings.db, sites, sites-render-fail-closed | 10 files, 434 tests passed |
+| `scripts/public-calendar/test-rls-67.sql` as `presby_app` | exit 0, no FAIL |
+| `npm run build` | passes |
+| e2e on :3500, chromium: `public-calendar`, `hydration/public-events-calendar`, `member-calendar`, `public-sites`, `portal-home-cards` | 51 passed |
+| e2e on :3500, custom-hosts project: all `custom-domains/` | 111 passed (8 are the new spec) |
+| prod lane (`PW_PROD_BUILD=1 PW_PROD_PORT=3501`, `prod-build` project) hydration spec | 2 passed |
+
+Fixture cleanup confirmed by SELECT: no `e2e-pubcal-*` organization, no `pubcal` site row, no `E2E Editor flow` event left; `sites.public_render`, `org_portal.events` and `org_portal.feature_categories` back at their captured values.
+
+### Browser checks (real Chromium)
+
+- **360px, platform host and a custom-host simulation** (`pubcal-church.invalid`): list layout, `scrollWidth` 360 including the 200-character unbroken title, arrows and summaries at least 44px, `<details>` opens by tap, the new-event form and the members-only state of its two boxes fit. Screenshots read for the Fernwood page and the editor form.
+- **1280px**: seven-column grid, today ringed, an event's card opens over the neighbouring cells, List button flips the layout.
+- **Not done**: a real iPhone (`<details>` and the 360px look on iOS Safari), and the e2e-visible "payload" size in production. Dev HTML for a Fernwood page is about 840 KB because Next streams every month panel twice (HTML and flight data); the production figure was not measured. The design accepts a payload of this order; QA may want a production number.
+
+### Strings added or changed
+
+Editor: `admin/events/website-listing-copy.ts` (E1 to E6, E8, E9), `series-website-listing.tsx` (E7), both forms and the list/detail page use them. Public: `public-events-calendar-slot.tsx` (P1, P2, P7), `events-calendar-panel.tsx` (P3, P4 legend and weekday headers, P5 "No more events...", P8 "Where:" / "Event type:"), `events-calendar-switcher.tsx` (P4 buttons, P5 toggle, P6 via the model). Features page: `org-features.ts` entry (F1, F2). Every string is in the design's Copy table; deviation 1 is the only wording variant.
+
+### For QA and the next phase
+
+- **Next agent: qa (Phase 5).** Run the specs above against your own server with `E2E_BASE_URL`; the custom-host spec needs the `DOMAINS_*` test env on the server (`playwright.config.ts` documents it; I started mine with `RATE_LIMIT_DISABLED=true STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=<repo>/.tmp/domains-fake-state.json CRON_SECRET=giving-e2e-cron-secret`).
+- **Browser-only checks left for QA / Phase 6:** iOS `<details>`; both host modes at 360px on a real phone.
+- **Copy-truthfulness anchors:** "Marked for the website" and "For website" say what the row says (`website_listed` and not cancelled), not that it is live; the E2 hint and F2 are the only places that name the toggle and the page placement; the public sentences make no claim about "all events".
+- **Integration items (orchestrator, Rule 16)** are unchanged from the design list plus: nothing new in shared files. The optional `seed-dev-bundle.sql` is deliberately not in the seed-dev patch.
 
 ## Files Created
 

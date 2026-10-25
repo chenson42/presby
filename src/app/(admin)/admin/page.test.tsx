@@ -1,65 +1,151 @@
 // @vitest-environment jsdom
 /**
- * Orchestration tests for `/admin`'s page.tsx — commit 1 of docs/work-log/
- * 2026-08-27-platform-home-and-portal.md (Phase 3, DECISION-123/125). Pins:
+ * Orchestration tests for `/admin`'s page.tsx (platform admin redesign,
+ * Increment 1, Batch C). The card components are replaced with synchronous
+ * stubs (RTL cannot render an async server component inside Suspense), which
+ * also lets the test prove that a card is MOUNTED ONLY for a holder of its key
+ * (E4). Pins:
  *
- * The tile grid is retired (platform admin redesign, Increment 1); the
- * tile assertions that stood here are replaced, and Batch C re-pins the card
- * zones (E1-E4). What remains pinned:
- *
- *   1. A session holding tool keys does not get the door-only empty state.
- *   3. An ADMIN_DASHBOARD-only session sees the honest empty state, not a
- *      blank grid.
- *   4. The GreetingBand renders in place of the old bare <h1> + roles
- *      paragraph.
- *   5. The retired demo.new_dashboard banner is gone.
+ *   E1  a support operator sees exactly the Support cards, no find box, no
+ *       "New organization"
+ *   E2  a door-only viewer gets the honest empty state and no zones/cards
+ *   E3  a full operator sees every zone and the recent-changes card
+ *   E4  a non-holder's card component is never called
+ *   plus the GreetingBand (testid kept) and the retired-banner regressions.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { FEATURES } from "@/lib/permissions";
 
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: () => mockAuth() }));
+
+const called = vi.hoisted(() => [] as string[]);
+vi.mock("./_dashboard/cards", () => {
+  const ids = [
+    "organizations", "giving", "domains", "sites", "tickets",
+    "feedback", "email", "two_factor", "accounts", "recent_changes",
+  ];
+  return {
+    DASHBOARD_CARD_VIEWS: Object.fromEntries(
+      ids.map((id) => [
+        id,
+        () => {
+          called.push(id);
+          return <div data-testid={`card-${id}`}>stub {id}</div>;
+        },
+      ]),
+    ),
+  };
+});
 
 import AdminDashboard from "./page";
 
 afterEach(() => {
   cleanup();
   mockAuth.mockReset();
+  called.length = 0;
 });
 
 function session(features: string[], name = "Sam") {
   return { user: { name, features } };
 }
 
-describe("AdminDashboard — a session holding tool keys", () => {
-  it("does not render the door-only empty state (Batch C adds the cards)", async () => {
-    mockAuth.mockResolvedValue(
-      session([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS, FEATURES.ADMIN_FEEDBACK]),
-    );
+const SUPPORT = [FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS, FEATURES.ADMIN_FEEDBACK];
 
+describe("AdminDashboard - a support operator (E1, E4)", () => {
+  it("sees exactly the Support cards, under one Support heading", async () => {
+    mockAuth.mockResolvedValue(session(SUPPORT));
     render(await AdminDashboard());
 
-    expect(
-      screen.queryByText(/don.t have access to any admin tools/i),
-    ).toBeNull();
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Support"]);
+    expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual([
+      "card-tickets",
+      "card-feedback",
+    ]);
+    expect(screen.queryByText(/don.t have access to any admin tools/i)).toBeNull();
+  });
+
+  it("has no find box and no 'New organization' action", async () => {
+    mockAuth.mockResolvedValue(session(SUPPORT));
+    render(await AdminDashboard());
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(screen.queryByRole("link", { name: "New organization" })).toBeNull();
+    expect(screen.queryByLabelText("Find an organization")).toBeNull();
+  });
+
+  it("never calls a card component it does not hold the key for (E4)", async () => {
+    mockAuth.mockResolvedValue(session(SUPPORT));
+    render(await AdminDashboard());
+    expect(called.sort()).toEqual(["feedback", "tickets"]);
   });
 });
 
-describe("AdminDashboard — ADMIN_DASHBOARD-only session (the reachable empty-state edge case)", () => {
-  it("renders the honest empty state, not a blank grid", async () => {
+describe("AdminDashboard - ADMIN_DASHBOARD-only session (E2)", () => {
+  it("renders the honest empty state, no zones, no find box", async () => {
     mockAuth.mockResolvedValue(session([FEATURES.ADMIN_DASHBOARD]));
-
-    const el = await AdminDashboard();
-    render(el);
+    render(await AdminDashboard());
 
     expect(screen.queryAllByRole("link")).toHaveLength(0);
-    expect(
-      screen.getByText(/you don.t have access to any admin tools yet/i),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/contact a platform administrator/i),
-    ).toBeTruthy();
+    expect(screen.getByText("You don't have access to any admin tools yet.")).toBeTruthy();
+    expect(screen.getByText("Contact a platform administrator to request the features you need.")).toBeTruthy();
+    expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(screen.queryAllByTestId(/^card-/)).toHaveLength(0);
+    expect(called).toEqual([]);
+  });
+});
+
+describe("AdminDashboard - a full operator (E3)", () => {
+  it("sees every zone in order with four, three, two and one cards", async () => {
+    mockAuth.mockResolvedValue(session(Object.values(FEATURES)));
+    render(await AdminDashboard());
+
+    const sections = screen.getAllByRole("region");
+    expect(sections.map((s) => within(s).getByRole("heading", { level: 2 }).textContent)).toEqual([
+      "Organizations",
+      "Support",
+      "Access and settings",
+      "Recent operator changes",
+    ]);
+    expect(sections.map((s) => within(s).getAllByTestId(/^card-/).length)).toEqual([4, 3, 2, 1]);
+  });
+
+  it("shows the action bar: New organization (a link to /new) and a find form", async () => {
+    mockAuth.mockResolvedValue(session(Object.values(FEATURES)));
+    render(await AdminDashboard());
+
+    expect(screen.getByRole("link", { name: "New organization" }).getAttribute("href")).toBe(
+      "/admin/organizations/new",
+    );
+    const form = screen.getByRole("search");
+    expect(form.getAttribute("action")).toBe("/admin/organizations");
+    expect(form.getAttribute("method")).toBe("get");
+    expect(screen.getByLabelText("Find an organization")).toBeTruthy();
+    expect(screen.getByText(/^Updated/)).toBeTruthy();
+  });
+
+  it("links nowhere under /o/ (no tenant route from the console)", async () => {
+    mockAuth.mockResolvedValue(session(Object.values(FEATURES)));
+    const { container } = render(await AdminDashboard());
+    expect(container.querySelectorAll('a[href^="/o/"]')).toHaveLength(0);
+  });
+});
+
+describe("AdminDashboard - mixed keys", () => {
+  it("an organizations-only holder gets the action bar and the four Organizations cards, no other zone", async () => {
+    mockAuth.mockResolvedValue(session([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_ORGANIZATIONS]));
+    render(await AdminDashboard());
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Organizations"]);
+    expect(called.sort()).toEqual(["domains", "giving", "organizations", "sites"]);
+    expect(screen.getByRole("search")).toBeTruthy();
+  });
+
+  it("a flags-only holder has tools but no card: no false 'no access' message", async () => {
+    mockAuth.mockResolvedValue(session([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_FLAGS]));
+    render(await AdminDashboard());
+    expect(screen.queryByText(/don.t have access to any admin tools/i)).toBeNull();
+    expect(screen.queryAllByTestId(/^card-/)).toHaveLength(0);
   });
 });
 

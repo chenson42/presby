@@ -4,6 +4,19 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-229 — Accelerated Feature tier: low-risk Feature-class work skips the architect and a separate design spawn, and keeps QA whole.**
+
+**Status:** Resolved (operator, "Adopt it", 2026-10-24) · **Date:** 2026-10-24 · **Feature:** the 2026-10-24 retrospective, `docs/reviews/2026-10-24-retrospective.md` ("The risk-tiered pipeline"; implementation, tech-lead)
+
+- **Rule.** CLAUDE.md's Classification table gains an **Accelerated Feature** row. A Feature or bug fix that adds no migration or schema change, touches none of `src/auth.ts`, `src/proxy.ts`, `src/lib/authz.ts`, the permission catalog or a flag seed, and adds no route, server action, `SECURITY DEFINER` function or dependency runs: analyst brief, a short tech-lead design with Copy and Edge Cases (architect skipped with explicit notation), Phase 4, a scoped Phase 5, Phase 6. Anything ambiguous is a full Feature.
+- **What it keeps, with no exemption.** QA, including the copy-truthfulness check and the 360px check; the failing-first regression test; `npm run check`; a Copy section read by someone other than its author.
+- **Promotion.** A QA FAIL that traces to a design claim, or any discovery that the change crosses an excluded line, promotes the pipeline to a full Feature at that point.
+- **Why.** Sixteen pipelines in the window were low-risk by the retrospective's reading; five of them had a first-run QA FAIL, each closed the same day, and none was a permission, schema or auth miss, the classes the tier excludes. The informal "Accelerated" mode already existed in the work-log template and four pipelines ran it with explicit notation; this makes it a named class with a stated floor. It closes the 2026-10-22 efficiency question parked in `docs/TODO.md`.
+- **Numbering.** The retrospective suggested DECISION-225; 225 to 228 are reserved for Community Increment 2b, so this is 229.
+- **Revisit if** a second period shows an Accelerated pipeline's QA FAIL traced to a skipped architect or design step, or a production escape from an Accelerated pipeline.
+
+---
+
 **DECISION-224 — zod 4 conversion rules: parity at the first message, ids through `z.guid`, tests that pin only what a user can see.**
 
 **Status:** Resolved · **Date:** 2026-10-24 · **Feature:** `2026-10-23-zod-4` (Phase 3 with the Phase 3a amendment; implementation, tech-lead)

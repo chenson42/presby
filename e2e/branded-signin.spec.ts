@@ -336,7 +336,6 @@ test.describe.serial("Org-branded /signin", () => {
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
     await enterTotpCode(page, code);
-    await page.getByRole("button", { name: /^verify$/i }).click();
 
     // Same admin-role, no-organizations shape totp-full-login.spec.ts
     // exercises — /launch's matrix lands it on /admin once verified.

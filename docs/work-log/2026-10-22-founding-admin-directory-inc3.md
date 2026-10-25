@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete; G1–G19; recommends split 3a/3b | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete; R48–R66; Option 1 via narrowed active_membership + all-live kind + events.view role; one standing classifier; F240 derived-row guard; F240–F244, F266–F268; DECISION-232–236, 247–249; returns F245–F249, F269–F273, DECISION-237/250 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete for 3a; migration 0066, D1 to D8 departures (all accepted; D4 operator-approved); batches 0, A1, A2, B, C, D. Updated 2026-10-25 for the architect's arch-A1 to arch-A4 (F245 closed in 0066; S16 declined) | Design complete (updated) | 2026-10-25 |
-| 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Pending (waits for 2b to merge, except Batch 0) | — | — |
+| 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Batch 0 done 2026-10-25; rest waits for 2b | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 

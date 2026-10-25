@@ -27,6 +27,7 @@ import { useHydrated } from "@/components/shared/use-hydrated";
 import { BULK_MOVE_MAX } from "@/lib/parishes-pure";
 import { bulkMoveAction } from "./[orgUnitId]/actions";
 import {
+  BULK_TOO_MANY_COPY,
   bulkConfirmBodyCopy,
   bulkConfirmTailCopy,
   bulkSuccessCopy,
@@ -47,8 +48,9 @@ type Target = { orgUnitId: string; name: string; deaconName: string | null };
  * count the viewer saw (`expectedCount`). The server re-derives the set, so a
  * household moved by someone else in the meantime is counted as `skipped`, not
  * moved twice, and a set that GREW (a restore and a re-archive) is refused
- * outright. Over `BULK_MOVE_MAX` there is no picker at all - a message says to
- * use Move - because the server refuses rather than truncates. There is no bulk
+ * outright. Over `BULK_MOVE_MAX` there is no picker at all - a message says
+ * they can't be moved all at once (single moves are unlimited) - because the
+ * server refuses rather than truncates. There is no bulk
  * Undo; the confirmation says so. The trigger is disabled until the page has
  * hydrated (DECISION-159). The picker is a controlled select INSIDE a dialog
  * that mounts after hydration, so it carries no pre-hydration divergence, and it
@@ -74,8 +76,7 @@ export function BulkMove({
   if (count > BULK_MOVE_MAX) {
     return (
       <p className="text-sm text-muted-foreground" data-testid="bulk-over-cap">
-        This district has more than {BULK_MOVE_MAX} households, so move them in smaller groups
-        with Move.
+        {BULK_TOO_MANY_COPY}
       </p>
     );
   }

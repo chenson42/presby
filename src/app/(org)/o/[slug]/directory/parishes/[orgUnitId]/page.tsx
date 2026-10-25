@@ -10,13 +10,13 @@ import {
 } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { getDistrictPage } from "@/lib/parishes";
-import { BULK_MOVE_MAX, parsePage } from "@/lib/parishes-pure";
+import { parsePage } from "@/lib/parishes-pure";
 import { OrgAccessDenied, OrgAccessEnded } from "../../../org-states";
 import { DirectoryFlagOff } from "../../directory-states";
 import { ArchivedNotice } from "../archived-notice";
 import { BulkMove } from "../bulk-move";
 import { HouseholdRow } from "../household-row";
-import { householdsLabel } from "../parish-copy";
+import { archivedMoveState, householdsLabel, noActiveDistrictsCopy } from "../parish-copy";
 import { ParishesForbidden, ParishesLoadError, ParishesOff } from "../parishes-states";
 import { RowAssign } from "../row-assign";
 
@@ -111,6 +111,12 @@ export default async function DistrictPage({
 
   const { district, authority, households, total, activeTargets: targets } = result;
   const totalPages = Math.max(1, Math.ceil(total / result.pageSize));
+  // One decision for the notice's sentence AND the control beneath it.
+  const moveState = archivedMoveState({
+    canMove: authority.canMove,
+    householdCount: district.householdCount,
+    activeTargetCount: targets.length,
+  });
 
   return (
     <section>
@@ -130,19 +136,19 @@ export default async function DistrictPage({
       </div>
 
       {district.archived ? (
-        <ArchivedNotice householdCount={district.householdCount} canMove={authority.canMove}>
-          {district.householdCount > BULK_MOVE_MAX || targets.length > 0 ? (
+        <ArchivedNotice householdCount={district.householdCount} state={moveState}>
+          {moveState === "bulk" || moveState === "over_cap" ? (
             <BulkMove
               slug={slug}
               source={{ orgUnitId: district.orgUnitId, name: district.name }}
               count={district.householdCount}
               targets={targets}
             />
-          ) : (
+          ) : moveState === "no_target" ? (
             <p className="text-sm text-muted-foreground">
-              There are no active districts to move them to.
+              {noActiveDistrictsCopy(authority.canDefine)}
             </p>
-          )}
+          ) : null}
         </ArchivedNotice>
       ) : null}
 

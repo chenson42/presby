@@ -189,7 +189,7 @@ describe("bulkMoveAction", () => {
     signedIn();
     expect(await bulkMoveAction("alder-creek", { ...input, expectedCount: 101 })).toEqual({
       ok: false,
-      error: "This district has more than 100 households, so move them in smaller groups with Move.",
+      error: "This district has more than 100 households, so they can't be moved all at once.",
     });
     for (const bad of [0, -1, 1.5, Number.NaN]) {
       const result = await bulkMoveAction("alder-creek", { ...input, expectedCount: bad });
@@ -210,7 +210,7 @@ describe("bulkMoveAction", () => {
     const table: Array<[unknown, string]> = [
       [{ kind: "forbidden" }, "You don't have permission to do that."],
       [{ kind: "source_not_archived" }, "Only an archived district can be emptied this way."],
-      [{ kind: "too_many" }, "This district has more than 100 households, so move them in smaller groups with Move."],
+      [{ kind: "too_many" }, "This district has more than 100 households, so they can't be moved all at once."],
       [
         { kind: "count_changed" },
         "The households in this district changed while you were looking. We've refreshed the page. Check the count and try again.",

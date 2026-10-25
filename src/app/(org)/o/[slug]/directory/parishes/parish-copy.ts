@@ -6,6 +6,8 @@
  * an improvisation. Plurals follow "1 household" / "N households".
  */
 
+import { BULK_MOVE_MAX } from "@/lib/parishes-pure";
+
 export function householdsLabel(count: number): string {
   return `${count} ${count === 1 ? "household" : "households"}`;
 }
@@ -63,4 +65,51 @@ export function bulkConfirmBodyCopy(args: {
 
 export function bulkConfirmTailCopy(source: string): string {
   return `${source} is archived, so households can't be moved back into it. This can't be undone in one step; households can be moved again one at a time.`;
+}
+
+/**
+ * The archived district's way out, as ONE decision the notice and the control
+ * beneath it both read, so the sentence that promises a way out can never
+ * disagree with what renders under it (QA run 1, Finding 3; Phase 3 amendment 1).
+ * Precedence: `none` if the viewer cannot move households or there are none;
+ * else `no_target` if no active district exists; else `over_cap` above the bulk
+ * cap; else `bulk`.
+ */
+export type ArchivedMoveState = "none" | "bulk" | "over_cap" | "no_target";
+
+export function archivedMoveState(args: {
+  canMove: boolean;
+  householdCount: number;
+  activeTargetCount: number;
+}): ArchivedMoveState {
+  const { canMove, householdCount, activeTargetCount } = args;
+  if (!canMove || householdCount === 0) return "none";
+  if (activeTargetCount === 0) return "no_target";
+  if (householdCount > BULK_MOVE_MAX) return "over_cap";
+  return "bulk";
+}
+
+export const ARCHIVED_BASE_COPY = "This district is archived. No households can be moved into it.";
+
+/** The sentence appended to the base for a state; only `bulk` promises "all at once below". */
+export function archivedMoveSentence(state: ArchivedMoveState): string {
+  switch (state) {
+    case "bulk":
+      return " Move households out one at a time, or all at once below.";
+    case "over_cap":
+      return " Move households out one at a time below.";
+    case "no_target":
+    case "none":
+      return "";
+  }
+}
+
+/** The over-cap child and the `too_many` refusal toast: one sentence, one constant. */
+export const BULK_TOO_MANY_COPY = `This district has more than ${BULK_MOVE_MAX} households, so they can't be moved all at once.`;
+
+/** The `no_target` child; the instruction is for the viewer who can define or restore districts. */
+export function noActiveDistrictsCopy(canDefine: boolean): string {
+  return canDefine
+    ? "There are no active districts to move them to. Add a district or restore an archived one on the Parishes page first."
+    : "There are no active districts to move them to.";
 }

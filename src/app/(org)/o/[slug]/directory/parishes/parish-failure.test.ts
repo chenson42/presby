@@ -107,9 +107,13 @@ describe("describeParishFailure", () => {
     );
   });
 
+  it("no refusal anywhere says to move households `in smaller groups with Move` (QA run 1, Finding 3)", () => {
+    expect(describeParishFailure({ kind: "too_many" }, { action: "bulk" })).not.toMatch(/smaller groups/);
+  });
+
   it("the bulk kinds carry the bulk copy", () => {
     expect(describeParishFailure({ kind: "too_many" }, { action: "bulk" })).toBe(
-      "This district has more than 100 households, so move them in smaller groups with Move.",
+      "This district has more than 100 households, so they can't be moved all at once.",
     );
     expect(describeParishFailure({ kind: "count_changed" }, { action: "bulk" })).toBe(
       "The households in this district changed while you were looking. We've refreshed the page. Check the count and try again.",

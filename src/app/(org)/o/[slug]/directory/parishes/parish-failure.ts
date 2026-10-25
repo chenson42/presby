@@ -7,6 +7,7 @@ import type {
   RenameDistrictResult,
   RestoreDistrictResult,
 } from "@/lib/parishes";
+import { BULK_TOO_MANY_COPY } from "./parish-copy";
 
 /**
  * The one error-to-copy mapping for the three parish `actions.ts` files
@@ -106,7 +107,7 @@ export function describeParishFailure(
     case "same_unit":
       return genericFailureCopy(action);
     case "too_many":
-      return "This district has more than 100 households, so move them in smaller groups with Move.";
+      return BULK_TOO_MANY_COPY;
     case "count_changed":
       return "The households in this district changed while you were looking. We've refreshed the page. Check the count and try again.";
   }

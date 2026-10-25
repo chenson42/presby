@@ -293,9 +293,98 @@ describe("DistrictPage - an archived district", () => {
     getDistrictPage.mockResolvedValue(archived(150, { households: HOUSEHOLDS }));
     await renderPage();
     expect(screen.getByTestId("bulk-over-cap").textContent).toBe(
-      "This district has more than 100 households, so move them in smaller groups with Move.",
+      "This district has more than 100 households, so they can't be moved all at once.",
     );
     expect(screen.queryByRole("button", { name: /^Move all/ })).toBeNull();
+  });
+
+  const BASE = "This district is archived. No households can be moved into it.";
+  const BULK_SENTENCE = "Move households out one at a time, or all at once below.";
+  const AUTH_ADMIN = { ...AUTH_MOVER, canDefine: true, holdsSeatKey: false };
+  const AUTH_DEFINER_ONLY = { ...AUTH_MOVER, canDefine: true, canMove: false, holdsSeatKey: false };
+  const AUTH_NEITHER = { ...AUTH_MOVER, canMove: false, holdsSeatKey: false };
+  const OTHER = [{ orgUnitId: "u2", name: "South District", deaconName: null }];
+
+  async function mount(count: number, authority: Record<string, unknown>, activeTargets: unknown[]) {
+    cachedAuth.mockResolvedValue({ user: { id: "u" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    flagsOn();
+    getDistrictPage.mockResolvedValue(
+      archived(count, { authority, activeTargets, households: count > 0 ? HOUSEHOLDS : [] }),
+    );
+    await renderPage();
+    return screen.getByTestId("archived-notice");
+  }
+
+  it("bulk state: the sentence promises `all at once below` and the bulk trigger is beneath it", async () => {
+    const notice = await mount(5, AUTH_MOVER, OTHER);
+    expect(notice.textContent).toContain(`${BASE} ${BULK_SENTENCE}`);
+    expect(within(notice).getByRole("button", { name: "Move all 5 households to…" })).toBeTruthy();
+    expect(screen.queryByTestId("bulk-over-cap")).toBeNull();
+  });
+
+  it("over_cap state: `one at a time below` and the exact cap message; no `all at once below`", async () => {
+    const notice = await mount(101, AUTH_MOVER, OTHER);
+    expect(notice.textContent).toContain(`${BASE} Move households out one at a time below.`);
+    expect(notice.textContent).not.toMatch(/all at once below/);
+    expect(notice.textContent).not.toMatch(/smaller groups/);
+    expect(within(notice).getByTestId("bulk-over-cap").textContent).toBe(
+      "This district has more than 100 households, so they can't be moved all at once.",
+    );
+    expect(within(notice).queryByRole("button")).toBeNull();
+  });
+
+  it("exactly 100 is the bulk state and exactly 101 is over_cap", async () => {
+    const at100 = await mount(100, AUTH_MOVER, OTHER);
+    expect(at100.textContent).toContain(BULK_SENTENCE);
+    cleanup();
+    const at101 = await mount(101, AUTH_MOVER, OTHER);
+    expect(at101.textContent).not.toContain("all at once below");
+  });
+
+  it("no_target state, a seat holder: the base sentence and the plain fact, no promise, no instruction to add a district", async () => {
+    const notice = await mount(5, AUTH_MOVER, []);
+    expect(notice.textContent).toBe(`${BASE}There are no active districts to move them to.`);
+    expect(within(notice).queryByRole("button")).toBeNull();
+    expect(screen.queryByTestId("bulk-over-cap")).toBeNull();
+  });
+
+  it("no_target state, a viewer who can move and define: the fact plus how to fix it", async () => {
+    const notice = await mount(5, AUTH_ADMIN, []);
+    expect(notice.textContent).toBe(
+      `${BASE}There are no active districts to move them to. Add a district or restore an archived one on the Parishes page first.`,
+    );
+  });
+
+  it("no_target wins over 101+ households: the cap message is not shown when there is nowhere to move them", async () => {
+    const notice = await mount(150, AUTH_ADMIN, []);
+    expect(notice.textContent).not.toMatch(/more than 100/);
+    expect(notice.textContent).toContain("There are no active districts to move them to.");
+  });
+
+  it("none state: a viewer who cannot move (defining alone does not move) sees the base sentence and nothing else", async () => {
+    for (const authority of [AUTH_DEFINER_ONLY, AUTH_NEITHER]) {
+      const notice = await mount(5, authority, OTHER);
+      expect(notice.textContent).toBe(BASE);
+      expect(within(notice).queryByRole("button")).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("`all at once below` appears if and only if the bulk trigger is present, for every viewer and count", async () => {
+    const viewers = [AUTH_MOVER, AUTH_ADMIN, AUTH_DEFINER_ONLY, AUTH_NEITHER];
+    for (const authority of viewers) {
+      for (const count of [0, 1, 100, 101]) {
+        for (const targets of [[], OTHER]) {
+          const notice = await mount(count, authority, targets);
+          const hasTrigger = within(notice).queryByRole("button", { name: /^Move all/ }) !== null;
+          const promises = /all at once below/.test(notice.textContent ?? "");
+          expect(promises, `canMove=${String(authority.canMove)} n=${count} targets=${targets.length}`).toBe(hasTrigger);
+          expect(notice.textContent).not.toMatch(/smaller groups/);
+          cleanup();
+        }
+      }
+    }
   });
 
   it("a viewer who cannot move sees the notice without the move sentence or any control", async () => {

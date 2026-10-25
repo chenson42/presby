@@ -4,7 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  ARCHIVED_BASE_COPY,
+  BULK_TOO_MANY_COPY,
   archiveBodyCopy,
+  archivedMoveSentence,
+  archivedMoveState,
+  noActiveDistrictsCopy,
   archiveDeaconCopy,
   bulkConfirmBodyCopy,
   bulkConfirmTailCopy,
@@ -83,5 +88,55 @@ describe("bulk confirmation copy (C5)", () => {
     expect(bulkConfirmTailCopy("East")).toBe(
       "East is archived, so households can't be moved back into it. This can't be undone in one step; households can be moved again one at a time.",
     );
+  });
+});
+
+describe("archivedMoveState (QA run 1, Finding 3)", () => {
+  it("is the four-state table over canMove x households (0, 1, 100, 101) x active targets (0, 1)", () => {
+    for (const householdCount of [0, 1, 100, 101]) {
+      for (const activeTargetCount of [0, 1]) {
+        const label = `${householdCount} households, ${activeTargetCount} targets`;
+        expect(archivedMoveState({ canMove: false, householdCount, activeTargetCount }), `no canMove: ${label}`).toBe("none");
+        const expected =
+          householdCount === 0
+            ? "none"
+            : activeTargetCount === 0
+              ? "no_target"
+              : householdCount > 100
+                ? "over_cap"
+                : "bulk";
+        expect(archivedMoveState({ canMove: true, householdCount, activeTargetCount }), label).toBe(expected);
+      }
+    }
+  });
+
+  it("no_target wins over over_cap (nowhere to move them, so no promise about how)", () => {
+    expect(archivedMoveState({ canMove: true, householdCount: 150, activeTargetCount: 0 })).toBe("no_target");
+  });
+});
+
+describe("archived-notice strings (QA run 1, Finding 3)", () => {
+  it("the base sentence is unchanged", () => {
+    expect(ARCHIVED_BASE_COPY).toBe("This district is archived. No households can be moved into it.");
+  });
+
+  it("only the bulk and over_cap states append a sentence, and only bulk promises `all at once below`", () => {
+    expect(archivedMoveSentence("bulk")).toBe(" Move households out one at a time, or all at once below.");
+    expect(archivedMoveSentence("over_cap")).toBe(" Move households out one at a time below.");
+    expect(archivedMoveSentence("no_target")).toBe("");
+    expect(archivedMoveSentence("none")).toBe("");
+  });
+
+  it("the too-many sentence is shared by the over-cap child and the refusal toast", () => {
+    expect(BULK_TOO_MANY_COPY).toBe(
+      "This district has more than 100 households, so they can't be moved all at once.",
+    );
+  });
+
+  it("the no-active-district line adds the instruction only for a viewer who can define districts", () => {
+    expect(noActiveDistrictsCopy(true)).toBe(
+      "There are no active districts to move them to. Add a district or restore an archived one on the Parishes page first.",
+    );
+    expect(noActiveDistrictsCopy(false)).toBe("There are no active districts to move them to.");
   });
 });

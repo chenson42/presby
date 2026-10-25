@@ -89,32 +89,59 @@ describe("HouseholdRow", () => {
 });
 
 describe("ArchivedNotice", () => {
-  it("says the district is archived and nothing can move into it, and (for a mover with households) how to move them out, with the control", () => {
+  const BASE = "This district is archived. No households can be moved into it.";
+
+  it("bulk: says how to move them out (one at a time, or all at once below), with the control", () => {
     render(
-      <ArchivedNotice householdCount={3} canMove>
+      <ArchivedNotice householdCount={3} state="bulk">
         <button type="button">Move all</button>
       </ArchivedNotice>,
     );
     const notice = screen.getByTestId("archived-notice");
-    expect(notice.textContent).toContain("This district is archived. No households can be moved into it.");
+    expect(notice.textContent).toContain(BASE);
     expect(notice.textContent).toContain("Move households out one at a time, or all at once below.");
     expect(within(notice).getByRole("button", { name: "Move all" })).toBeTruthy();
   });
 
-  it("without authority to move, it never tells the reader to move anything and shows no control", () => {
+  it("over_cap: promises one at a time only, never `all at once below`", () => {
     render(
-      <ArchivedNotice householdCount={3} canMove={false}>
+      <ArchivedNotice householdCount={150} state="over_cap">
+        <p>cap child</p>
+      </ArchivedNotice>,
+    );
+    const notice = screen.getByTestId("archived-notice");
+    expect(notice.textContent).toBe(`${BASE} Move households out one at a time below.cap child`);
+    expect(notice.textContent).not.toMatch(/all at once below/);
+  });
+
+  it("no_target: the base sentence alone, with the child beneath", () => {
+    render(
+      <ArchivedNotice householdCount={3} state="no_target">
+        <p>no targets child</p>
+      </ArchivedNotice>,
+    );
+    const notice = screen.getByTestId("archived-notice");
+    expect(notice.textContent).toBe(`${BASE}no targets child`);
+  });
+
+  it("none (cannot move): never tells the reader to move anything and shows no control", () => {
+    render(
+      <ArchivedNotice householdCount={3} state="none">
         <button type="button">Move all</button>
       </ArchivedNotice>,
     );
     const notice = screen.getByTestId("archived-notice");
-    expect(notice.textContent).not.toMatch(/Move households out/);
+    expect(notice.textContent).toBe(BASE);
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("an empty archived district says it has no households", () => {
-    render(<ArchivedNotice householdCount={0} canMove />);
-    expect(screen.getByTestId("archived-notice").textContent).toContain("It has no households.");
+  it("an empty archived district says it has no households and renders no child", () => {
+    render(
+      <ArchivedNotice householdCount={0} state="none">
+        <p>child</p>
+      </ArchivedNotice>,
+    );
+    expect(screen.getByTestId("archived-notice").textContent).toBe(`${BASE} It has no households.`);
   });
 });
 

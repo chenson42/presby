@@ -52,11 +52,11 @@ describe("BulkMove - the trigger", () => {
     expect(trigger.className).toContain("w-full");
   });
 
-  it("over 100 households there is NO picker, only the smaller-groups message", () => {
+  it("over 100 households there is NO picker, only the cap message", () => {
     renderBulk(101);
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByTestId("bulk-over-cap").textContent).toBe(
-      "This district has more than 100 households, so move them in smaller groups with Move.",
+      "This district has more than 100 households, so they can't be moved all at once.",
     );
   });
 

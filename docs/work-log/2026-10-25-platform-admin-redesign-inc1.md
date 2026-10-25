@@ -1416,3 +1416,188 @@ It no longer claims that a name written verbatim as SQL text is unseen: those ar
 ## Handoff
 
 Next: qa (run 4: M1–M11, N01–N10 including N01b, and new forms of its own; the touched file; the four gates). No schema, env var, `FEATURES` entry or flag change.
+
+---
+
+# Phase 5 — run 4 (qa)
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**HEAD:** `cc6b5fa`, branch `pipeline/platform-admin-redesign`
+
+**Verdict: FAIL.** The closed-name rewrite works: every form from runs 1–3 is now caught except the two the residual already admits. But I found three new ways to name a tenant table verbatim in a reader that still pass the scan, and the revised DECISION-252 residual sentence says they don't exist. Each needs only a small change to the test file, or a one-line wording ruling.
+
+**Scope run:**
+- Typecheck, lint, `npm run check` and plain `npm test`, all in full.
+- The touched test file.
+- 37 mutation cases in a scratch copy of HEAD: M1–M11, N01–N10, N01b and 15 new forms (P01–P14, P08b).
+- `tsc --noEmit` over every form that passed the scan, and Postgres `EXPLAIN` on the pipeline branch for the forms whose SQL had not been checked before.
+
+**What carries over.** `git diff --stat 1c1819f..HEAD` touches only:
+- `src/lib/admin-portal/dashboard/boundaries.test.ts`
+- `docs/work-log/2026-10-25-platform-admin-redesign-inc1.md`
+
+No source, config, fixture or e2e file changed. So these earlier results stand and were not re-run: build, the DB-backed scope, chromium e2e 420/420 including the MFA login set, the 404 checks, the 360px browser pass, E27 EXPLAIN, the feature-gate audit, copy truthfulness, all failing-first checks, and run 2's page tests.
+
+## Type Check
+
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS (`--max-warnings=0`)
+- `npm run check`: PASS, 8/8 tripwires
+
+## Unit Tests
+
+- **Plain `npm test`:** 663 files (583 passed, 80 skipped), 11,252 tests (8,794 passed, 2,458 skipped). The 80 skipped files are the same database-gated set as before. The 13 new tests match loop-back 3's count.
+- **`boundaries.test.ts` on its own:** 54/54 passed.
+
+Failures: none.
+
+## End-to-End Tests
+
+Not re-run (test-only diff). Run 1 stands: 420 passed, 0 failed, 0 skipped.
+
+## Regression Tests Added
+
+Loop-back 3 adds 11 synthetic cases (N02, N04, N04b, N04c, N05, N06, N07, a table named in a plain string passed to `execute`, an escaped upper-case quoted identifier, a `::regclass` cast, an aliased `sql` tag) and a unit check of the literal scanner. My mutation results below agree with the failing-first evidence it records.
+
+## Mutation check (scratch copy of HEAD, one `zz-mutant.ts` per case; the unmodified copy passes 54/54)
+
+**Earlier forms:**
+- **M1–M11:** all caught.
+- **N01–N10:** all caught. N02, N05, N06 and N07 were the run 3 misses and are now caught by the closed-name rule, with the label `table name officer_terms`.
+- **N01b**, computed property access `(getPlatformDb() as any)[k][t]`: **passes**. This is the documented residual.
+
+**New forms, run 4:**
+
+| # | Form | Result |
+|---|---|---|
+| P01 | `import { sql as s }`, then `` s`select … from officer_terms` `` | caught |
+| P02 | the SQL stored in a const, then `execute(text)` | caught |
+| P03 | `public.officer_terms` | caught |
+| P04 | `'officer_terms'::regclass` | caught |
+| P05 | `query_to_xml('select … from officer' \|\| '_terms', …)` | caught, but only incidentally: the from/join rule rejects the fragment `officer`, which is not a table |
+| P06 | `query_to_xml(format('select count(*) from %I', concat('officer','_terms')), …)` | **passes**. SQL-side assembly is the documented residual. Postgres builds and runs the query text itself, so the plan only shows `Result` |
+| P07 | `U&"officer\005fterms"` | caught incidentally (`officer` after `from`). Documented residual either way |
+| P08 | `sql.raw('… from officer\u005fterms')` | caught incidentally (`officer` after `from`) |
+| **P08b** | the same JavaScript escape in a parenthesised join: `sql.raw('select count(*) from (officer\u005fterms t cross join organizations o)')`. At run time the string is `… from (officer_terms t …)` | **passes** |
+| **P09** | a local `function readCard(name)` that builds `` sql`select count(*) as n from `.append(sql`${sql.identifier(name)}`) ``, called as `readCard("officer_terms")` | **passes** |
+| **P10** | `const readCard = run`, where `run` uses `sql.join([sql`… from`, sql.identifier(name)], …)`, called as `readCard("officer_terms")` | **passes** |
+| **P11** | on one line: ``const z = n++ / 2; export const q = () => getPlatformDb().execute(sql`table officer_terms`); export const w = z / 1;`` | **passes** |
+| P12 | `execute('select count(*) from officer' + '_terms')` | caught incidentally (`officer` after `from`). Documented residual either way |
+| P13 | ``String.raw`select … from officer_terms` `` | caught |
+| P14 | `sql.identifier('officer_terms')` with a literal argument | caught |
+
+**These are real forms.** All six that pass (N01b, P06, P08b, P09, P10, P11) compile cleanly. Postgres plans `Seq Scan on officer_terms` for the statement P09 and P10 produce (`select count(*) as n from "officer_terms"`); P11's `TABLE` form and P08b's runtime join were already confirmed in run 3.
+
+## Does what passes match the revised residual sentence?
+
+The residual sentence says the scan "allows only a closed set of table names in the literals of a dashboard reader, so it does not see a computed property access, a table name assembled at runtime rather than written in a literal (JS concatenation into a variable that reaches `execute`, or SQL-side assembly such as `format()`, `||` or a `U&"…"` escape), or a helper module outside the directory."
+
+**Matches the sentence:**
+- N01b (computed property access).
+- P06 (SQL-side `format()`).
+- P05, P07 and P12 belong to the documented class as well. They happen to be caught today because a fragment lands right after `from`, but the sentence does not promise that, so it admits more than the scan misses and denies nothing.
+
+**Not in the sentence: three new classes, each with `officer_terms` (or an escape of it) written in a literal in the scanned directory:**
+
+1. **P08b: a JavaScript escape inside a literal.** The scanner tokenises the literal's source text (`officer\u005fterms`), not the string JavaScript actually produces (`officer_terms`). The sentence covers SQL-side `U&` escapes and runtime assembly, not escapes inside a literal.
+2. **P09 and P10: the `readCard(` exemption can be used to hide a table name.**
+   - The exemption is a text check on the characters before the literal (`boundaries.test.ts:326`, `/\breadCard\s*\(\s*$/`). It does not check that `readCard` is the real import from `./read-card`, so a local function or alias with that name works.
+   - The table name then reaches SQL through `sql.identifier(name)`, which the scan does not check unless the argument is a literal.
+3. **P11: the scanner can be made to lose track of where literals are.**
+   - `regexAllowed` (`boundaries.test.ts:284`) treats a `/` that follows text ending in `+` as the start of a regex, so after `n++` the expression `/ 2; … /` is read as one regex literal and skipped. The SQL template inside it never reaches the closed-name check.
+   - The old from/join rule also misses it, because there is no `from` or `join`.
+
+## Coverage on Critical Modules
+
+Unchanged (no source changed): `permissions.ts` 100%, `flags.ts` 100%, `two-factor.ts` 91.3% statements.
+
+## Feature-Gate Audit
+
+No route, page or action changed. Run 1's table stands.
+
+## Copy Truthfulness
+
+No user-facing string changed. Run 1 and run 2 stand.
+
+The decision-record residual drafted in loop-back 3 is **not** accurate yet: it says a name written in a literal is always seen, and P08b, P09, P10 and P11 contradict that.
+
+## Verdict
+
+**FAIL.** Three narrow classes are left, and the residual sentence as drafted rules them out. There are two ways to close this.
+
+**Route A: fix the scan (test file only, small).**
+1. **P08b:** decode JavaScript string escapes (`\xHH`, `\uHHHH`, `\u{…}`, and the single-character escapes) in each literal before splitting it into tokens.
+2. **P09 and P10:** allow `sql.identifier(` only with a single string literal, the same rule as `.raw(`. This closes both forms whatever the exemption does. Also narrow the `readCard` exemption to files that import `readCard` from `./read-card` and declare no other binding with that name.
+3. **P11:** never trust the regex guess. Add the text of anything the scanner classes as a regex literal to the literals it checks, so a misread can never hide a name. Separately, treat text ending in `++` or `--` as a value, not a place where a regex can start.
+4. Add P08b, P09, P10 and P11 as synthetic cases.
+
+**Route B: widen the residual (an orchestrator or tech-lead ruling).** Add to the DECISION-252 sentence: "…or a reader written to evade the scan: an escape sequence inside a literal, a local binding that shadows `readCard`, or an expression that misleads the scanner's literal tokenizer." That would make the sentence true against everything that passes in this run.
+
+**On diminishing returns.** Every miss since run 3 needs deliberately evasive code. An honest reader written in this directory's idioms is caught by every rule. If the orchestrator is satisfied that the scan is a guard against careless readers rather than evasive ones, Route B is a reasonable stopping point, and review plus the retrospective stay the control for evasive code, as DECISION-252 already says for readers outside the directory. That call belongs to the orchestrator or tech-lead, not QA.
+
+**On run 5:**
+- **Route A:** re-run all 37 cases plus new forms, the touched file and the four gates.
+- **Route B:** check the recorded sentence against this run's passing set (N01b, P06, P08b, P09, P10, P11); with no code change, no other re-run is needed.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 4) | qa | Complete. Typecheck, lint, check 8/8, unit 583 files / 8,794 tests, boundaries 54/54; M1–M11 and N01–N10 caught (run 3 misses N02/N05/N06/N07 closed); of 15 new forms, P06 passes as documented SQL-side assembly and N01b as documented computed access; P08b (escape inside a literal), P09/P10 (`readCard(` exemption plus `sql.identifier(name)`) and P11 (regex-guess desync after `n++`) pass, compile, and are not covered by the revised residual sentence; loop-back diff is test file and work-log only, so runs 1–3 stand | FAIL | 2026-10-25 |
+
+## Handoff
+
+**Next:**
+- **Route A:** the orchestrator sends this to api-developer (Phase 4, loop-back 4). Fix `src/lib/admin-portal/dashboard/boundaries.test.ts:284` and `:326`, check escapes and `sql.identifier(`, and add P08b, P09, P10 and P11.
+- **Route B:** the orchestrator or tech-lead rules a widened DECISION-252 residual, then QA confirms the sentence against the passing set.
+
+Evidence:
+- Run 4 logs: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs4/`
+- Mutation cases (all 37): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/mut4/cases/`
+- tsc output for the passing forms: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/tsc-run4.log`
+
+Git status in the worktree is as I found it: only the orchestrator's change to `docs/work-log/2026-10-25-platform-admin-redesign-inc3.md`.
+
+## Orchestrator ruling after QA run 4 (2026-10-25) — stopping rule for the boundaries scan
+
+Both routes, and then the loop ends:
+
+1. **Route A, the four cheap fixes** (test file only): decode JavaScript string escapes in each literal before tokenizing; `sql.identifier(` only with a single string literal; narrow the `readCard(` exemption to files importing it from `./read-card` with no other binding of that name; add regex-classified text to the scanned literals and treat text ending `++`/`--` as a value. Add P08b, P09, P10, P11 as synthetic cases.
+2. **Route B, the residual wording for DECISION-252:** the scan is a guard against **careless** readers written in this directory's idioms, not against deliberately evasive code. The sentence names, as `paper`: computed property access; names assembled at runtime or SQL-side; helper modules outside the directory; and any reader written to evade a source-text scan (escape tricks, shadowed helpers, tokenizer-misleading expressions). Review and the retrospective are the control for evasion, as for readers outside the directory.
+3. **QA run 5 is the last scan iteration:** it confirms M1–M11, N01–N10, P01–P14 per the fixes, and checks the recorded sentence is true against whatever still passes. A further evasive form that the sentence already covers is not a FAIL.
+
+---
+
+# Phase 4 — loop-back 4 (api-developer, after Phase 5 run 4 FAIL and the orchestrator ruling)
+
+**Date:** 2026-10-25. Test-only; no product code, design or copy changed. Commit `cf21e4a` on `pipeline/platform-admin-redesign`. This is the last scan iteration per the ruling.
+
+## Route A, as ruled (`src/lib/admin-portal/dashboard/boundaries.test.ts`)
+
+- **P08b, escapes.** `decodeJsEscapes` turns each literal's source text into what JavaScript produces (`\xHH`, `\uHHHH`, `\u{H+}`, `\n \t \r \b \f \v \0`, any other `\c` to `c`, line continuations to nothing) before tokenising. Applied to strings and to the static parts of templates.
+- **P09 and P10, `sql.identifier(`.** Allowed only with a single string literal, the same rule as `.raw(` (`rawCallOffenders`, label `sql.identifier argument is not a single string literal`). The `.append(sql\`${sql.identifier(name)}\`)` and `sql.join([…, sql.identifier(name)], …)` shapes are both reported.
+- **P09 and P10, the `readCard(` exemption.** `readCardKeysExempt(src)`: exempt only if exactly one binding named `readCard` exists, it is `import { readCard } from "./read-card"`, and every other occurrence in the comment-stripped body is a plain `readCard(` call (not preceded by `function`, a member dot or a word character; not text inside a literal). Anything doubtful loses the exemption, so the literal is scanned. In the real readers the exemption still holds (`accounts.ts` passes).
+- **P11, tokenizer.** Regex-classified text is added to the scanned literals. A slash after text ending `++` or `--` is a division. A "regex" whose body holds a quote or backtick is a misread division and is rescanned as code (so a misread cannot hide a `.raw(` call either).
+- **One fix I found on the way.** `code += readTemplate()` read `code` before the nested scan ran, so everything inside a `${…}` interpolation was dropped from the scanner's code view and `.raw(` / `.identifier(` calls inside an interpolation were never checked (this is why the first P09 identifier case failed after the first edit). It now assigns the placeholder first. A unit check pins `sql.identifier(n)` inside `${…}` appearing in `code`.
+
+## Synthetic cases and failing-first
+
+Eleven new cases: P08b, a `\x` escape, a `\u{…}` escape, P09 (table-name label and identifier label), P10 (rebound `readCard`, and `sql.identifier` inside `sql.join`), `readCard` imported from the wrong module, P11, P11b (`n--`), and a regex literal spelling the table. Positive controls added: a `readCard("accounts")` key in a file with the real import reports nothing, and `sql.identifier("organizations")` reports nothing. Scanner unit checks cover escape decoding, `n++ / 2`, the exemption's loss on a rebinding or a member call, and regex text.
+
+- **Cases first:** all eleven failed (54 passed).
+- **Real mutants** (each compiles, `tsc --noEmit` clean): P09, P10 and P11 each left the previous test file 54/54 green; against the new file they are reported (`table name officer_terms`, `sql.identifier argument …`). P08b: the previous file was 54/54 green and the new file reports `table name officer_terms`. A note on method: my first P08b mutant went through a shell heredoc that turned `_` into `_`, so it contained the plain name and the old scan caught it. I rewrote it with a script (file verified to contain the backslash escape) and re-ran both scans before relying on it. Mutants deleted.
+
+## Gates (run in the worktree)
+
+`npm run typecheck` PASS · `npm run lint` PASS · `npm run check` PASS (8/8) · plain `npm test` 583 files passed / 80 skipped, 8,805 tests passed / 2,458 skipped (11 new over run 4).
+
+## Route B: the DECISION-252 residual (replaces the loop-back 2 and 3 drafts; same text is in the test header)
+
+> The boundaries scan guards against a careless reader written in this directory's idioms, not a deliberately evasive one: it reads source text and cannot see (1) a computed property access (`db[key]`); (2) a table name assembled at runtime rather than written in a literal, whether in JavaScript (concatenation into a variable that reaches `execute`) or in SQL (`format()`, `||` on string pieces, a `U&"…"` escape); (3) a helper module outside the directory, including any allow-listed `@/lib/*` module, that itself reads a tenant table; or (4) a reader written to evade a source-text scan, such as an escape trick the decoder does not model, a shadowed helper, or an expression that misleads the scanner's own tokenizer. These are `paper`; review and the retrospective are the control for all four, as for readers outside the directory.
+
+Against QA run 4's passing set: N01b is class 1, P06 is class 2, and P08b, P09, P10 and P11 are now closed by the scan; any similar form that still passes is class 4.
+
+## Handoff
+
+Next: qa (run 5, the last scan iteration per the ruling: M1–M11, N01–N10, P01–P14 per the fixes; confirm the recorded sentence is true against whatever still passes; the touched file; the four gates). No schema, env var, `FEATURES` entry or flag change.

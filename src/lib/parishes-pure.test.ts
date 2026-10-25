@@ -50,6 +50,20 @@ describe("normalizeDistrictName", () => {
     expect(normalizeDistrictName("\u0000a\u009Fb")).toEqual({ ok: true, name: "ab" });
   });
 
+  it("normalizeDistrictName returns NFC text after stripping zero-width characters (QA run 1, Finding 2)", () => {
+    expect(normalizeDistrictName("Cafe\u200B\u0301 District")).toEqual({ ok: true, name: "Caf\u00E9 District" });
+    // Each invisible or control character placed between a base letter and a
+    // combining mark: stripping them joins the pair, so the result must be
+    // composed AFTER the strip.
+    for (const between of ["\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF", "\u0007", "\u009F"]) {
+      const result = normalizeDistrictName(`Cafe${between}\u0301 District`);
+      expect(result.ok, JSON.stringify(between)).toBe(true);
+      if (!result.ok) continue;
+      expect(result.name, JSON.stringify(between)).toBe(result.name.normalize("NFC"));
+      expect(result.name, JSON.stringify(between)).toBe("Caf\u00E9 District");
+    }
+  });
+
   it("refuses an empty result as `empty` (blank, whitespace-only, only invisible characters, not a string)", () => {
     for (const raw of ["", "   ", "\u200B\u200C\u200D", "\n\t", undefined, null, 42]) {
       expect(normalizeDistrictName(raw), String(raw)).toEqual({ ok: false, reason: "empty" });

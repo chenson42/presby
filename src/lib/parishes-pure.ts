@@ -90,22 +90,26 @@ const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/g;
 
 /**
  * The stored form of a district name, matching `org_units_name_shape`
- * (trimmed, NFC-normalized, 1 to 80 characters): NFC, every whitespace run
- * (tabs and newlines included) to one space, control and zero-width characters
- * removed, trimmed. Length is counted in characters (code points), as the
+ * (trimmed, NFC-normalized, 1 to 80 characters): every whitespace run (tabs
+ * and newlines included) to one space, control and zero-width characters
+ * removed, trimmed, then NFC last so the result is NFC whatever was stripped.
+ * Length is counted in characters (code points), as the
  * database's `char_length` counts them. The caller compares names
  * case-insensitively; the unique index on `lower(name)` is the real guard.
  */
 export function normalizeDistrictName(raw: unknown): NormalizedDistrictName {
   if (typeof raw !== "string") return { ok: false, reason: "empty" };
   if (raw.length > RAW_NAME_CEILING) return { ok: false, reason: "too_long" };
+  // NFC runs LAST: removing a zero-width or control character can join a base
+  // letter to a combining mark that was separated by it, and the stored form
+  // must be NFC (QA run 1, Finding 2).
   const name = raw
-    .normalize("NFC")
     .replace(INVISIBLE_CHARS, "")
     .replace(/\s+/g, " ")
     .replace(CONTROL_CHARS, "")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .normalize("NFC");
   if (name.length === 0) return { ok: false, reason: "empty" };
   if ([...name].length > DISTRICT_NAME_MAX) {
     return { ok: false, reason: "too_long" };

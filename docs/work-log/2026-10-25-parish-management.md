@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete; G1–G15; seat shape to architect | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete; seat via resolver (DECISION-242), DB archive guard (243), placement + single count (244), overwrite+audit + lock order (245); R1 seat-key guards, R2 revoke DELETE; F258–F264 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; migration 0068 designed in order; `src/lib/parishes.ts` is the only writer; explicit-button picker (F261); S1 declined; F265 raised; staged files and pre-ship reads listed; CLAUDE.md sentence awaits operator approval | Design complete, implementer named | 2026-10-25 |
-| 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batches B, C) | Pending; prerequisites: Neon branch and `.env.local` for this worktree, e2e person-id range | — | — |
+| 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batches B, C) | Batch A complete: 0068 hand-written, applied twice (idempotent), rollback rehearsed, journal idx 68; test-rls-68 64/64 as presby_app; parishes.db.test.ts 25/25; staged seed + two integration patches. Batches B, C pending | Batch A done | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1026,33 +1026,181 @@ Per-person district assignment (`memberships.org_unit_id` stays unused); bulk as
 
 # Phase 4 — Implementation
 
-## Files Created
+## Phase 4 — Batch A (database-admin)
 
-- `path/to/file` — purpose
+**Date:** 2026-10-25 · **Branch:** `pipeline/parish-management`, Neon branch `pipeline-parish-management` (never `development` or production) · **Base:** `ce661d7`.
 
-## Files Modified
+### Files Created
 
-- `path/to/file` — what changed
+- `drizzle/0068_presby_parishes.sql`: the migration, sections 1 to 11 in the design's order.
+- `src/lib/db/domain/parishes.db.test.ts`: owner-path and two-connection proofs (25 tests).
+- `scripts/parishes/test-rls-68.sql`: section 68, run as `presby_app` (64 assertions).
+- `scripts/parishes/seed-dev-parishes.sql`: the dev fixture (standalone, idempotent).
+- `scripts/parishes/test-rls.sql.integration.patch`: the F262 rewrite, the two count bumps and the `\ir parishes/test-rls-68.sql` line.
+- `scripts/parishes/seed-dev.sql.integration.patch`: the one `\ir parishes/seed-dev-parishes.sql` line.
 
-## Schema Changes
+### Files Modified
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- `src/lib/db/domain/org.ts`: `orgUnits.archivedAt`, the two CHECKs, `org_units_active_name_idx` (partial, `lower(name)`), and a NOT EXPRESSIBLE comment for the revoke and the two triggers.
+- `src/lib/db/domain/people.ts`: `households_org_unit_idx` and a comment on the target guard.
+- `src/lib/db/domain/officers.ts`: the widened `officer_terms_office_allowed` and its comments.
+- `drizzle/meta/_journal.json`: `{ idx: 68, tag: "0068_presby_parishes" }`. The orchestrator asked for it in Batch A; the design had put it at integration. Every `.sql` on disk has an entry and every `idx` equals its file number.
+- `src/lib/officer-offices.ts`, `src/lib/officers.ts`: vocabulary sync only (see deviation 5).
+- `src/lib/officer-offices.test.ts`: re-pointed at 0068 (see Tests).
+- `src/lib/db/domain/session-approval.db.test.ts`: pins that read 0062 as current now read it as history (see Tests).
 
-## Audit Events
+### Schema Changes
 
-- [Action key written when the security-sensitive mutation fires]
+- **Mode: hand-written.** The file is `drizzle/0068_presby_parishes.sql`, applied with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0068_presby_parishes.sql`. `db:generate` is broken repo-wide.
+- **Stop-blocks (counts only), measured on the branch before the first apply:** bad `unit_type` 0, bad name 0, case-duplicate names 0, households at a campus 0, open terms at a campus 0, office outside the vocabulary 0. The `roster` group type is present. Congregations 9, existing seat groups 0, seat roles 0, `parishes.assign` 0. `server_version_num` is 180006 (`IS NFC NORMALIZED` needs at least 130000).
+- **Idempotence, proven on the final text.** The whole file was applied twice. Both runs exited 0 with no errors, and a 12-table row-count snapshot is identical before the first and after each run. The first-ever apply added 9 seat groups, 9 roles, 9 bindings, 9 grants (one of each per congregation) and 1 permission. The final re-applies changed nothing. `parishes.db.test.ts` also re-applies the whole file in a rolled-back transaction on every run and asserts no row change.
+- **Catalog re-read after apply:**
+  - `org_units`, `households` and `officer_terms` are `relforcerowsecurity = t`.
+  - `org_units` ACL: `presby_app` and `presby_platform` hold INSERT, SELECT and UPDATE, with no DELETE.
+  - The three CHECKs are `convalidated`.
+  - Both indexes exist as designed.
+  - The 8 triggers are `BEFORE` and enabled (`O`).
+  - The seat map and 4 seat guards are `SECURITY DEFINER`. The target and delete guards are invoker. All six guards plus the map have `search_path=public, pg_temp`, owner `neondb_owner`, and `proacl {neondb_owner=X}`, so neither `presby_app` nor `presby_platform` can execute them.
+  - All 9 seat roles are org-owned, protected and constitutional. All 9 groups are `roster`, derived and protected. No seat grant is person-arm, and every seat grant has `starts_on = current_date`.
+- **Rollback, rehearsed** inside a transaction that was then rolled back. Every trigger and function is dropped, the CHECKs and index are dropped, the 0062 sync body is restored, and DELETE is granted back. The office CHECK was correctly left widened because a seat term exists. Afterwards the branch was unchanged (8 triggers, no DELETE).
+- **For the next implementer:**
+  - `org_units.archived_at` (null means active).
+  - Constraint names and codes the library maps:
 
-## Implementer Notes
+    | Constraint | Code | Meaning |
+    |---|---|---|
+    | `org_unit_target_archived` | 23514 | target district is archived |
+    | `org_unit_target_campus` | 23514 | target is a campus |
+    | `org_unit_target_missing` | 23503 | target missing, including another org's id |
+    | `org_units_active_name_idx` | 23505 | name taken among active districts |
+    | `org_units_name_shape` | 23514 | stored name not normalized |
+    | `org_units_unit_type_check` | 23514 | unit type outside the vocabulary |
+    | `seat_key_binding` | 42501 | seat-only key on the wrong role |
+    | `seat_role_shape` | 42501 | seat role re-keyed, unprotected or made custom |
+    | `seat_key_grant` | 42501 | seat role granted other than to its group |
+    | `seat_key_downward` | 42501 | seat role on a commission or delegation |
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+    An owner-path DELETE raises `org_units_permanent` (42501). A `presby_app` DELETE gets "permission denied for table org_units".
+  - The exact refusal literals are pinned in `parishes.db.test.ts` ("what src/lib/parishes.ts maps").
+  - Seat role key `deacons_moderator`, group `derived_from = 'deacons_moderator'`, permission `parishes.assign` (module `parishes`, tier 1).
 
-Strings added or changed: [file:line each, or "none"]
+### Audit Events
 
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
+- None in Batch A. A migration backfill has no actor. The six `AUDIT_ACTIONS` keys are Batch B.
+
+### Implementer Notes
+
+**Deviations from the design** (each strengthens it or follows the operator's rules; none weakens a ruling):
+
+1. **Two seat-guard additions beyond step 7.** The design's step 7 left two bypasses of R1 open:
+   - **Binding guard, reverse order.** It also refuses the key on a role that has *ever* been granted on another arm: a person grant, a non-seat group, a commission or a delegation. Without this, a tenant could make a seat-shaped role at an org with no seat role, grant it to a person, and then bind the key. "Ever", not "currently", follows 0055's "any reference" reasoning: re-opening an ended grant by moving `ends_on` does not fire the `role_id` trigger.
+   - **New `app_roles_seat_role_guard` / `presby_guard_seat_role_shape()`**, `BEFORE UPDATE OF key, organization_id, role_kind, is_protected`. Without it, the seat role could be unprotected or made custom and then edited. The application only ever updates `deactivated_at`, which the guard does not watch.
+   - The result is 8 triggers and 6 guard functions (the design said 6 and 4). The header's rollback lists all of them.
+2. **The group checks also require `membership_source = 'derived'`.** `groups_derived_check` allows a *managed* group to carry `derived_from`, so the derived_from value alone does not identify the seat group.
+3. **Section 1's duplicate-name stop-block counts only active rows once `archived_at` exists** (dynamic SQL, since the column may not exist yet). Without this, re-applying 0068 on a database where an archived district shares its name with an active one would stop, and the index allows exactly that. It was found while writing the DB test, which pins it with a regression test proven failing-first.
+4. **Rollback, steps 4 and 6.** Step 4 narrows the office CHECK only when no `deacons_moderator` term exists. Step 6 no longer deletes the permission row (all deletes are soft).
+5. **The TS vocabulary sync landed in Batch A, not Batch B:**
+   - `OFFICER_OFFICES` gains `deacons_moderator` after `deacon`.
+   - `OFFICE_LABELS.deacons_moderator` = "Moderator of the Board of Deacons" (design C7).
+   - `listOfficerRoster()`'s `all_offices` list gains the office.
+   - `requiredDerivedGroup()` maps the office to its group, so a presbytery gets the typed `invalid_office_for_org`, not the trigger's raw error.
+   - Why here: re-pointing `officer-offices.test.ts` at 0068 cannot pass without the vocabulary, and adding the office without the `requiredDerivedGroup` arm would ship a raw-error path.
+   - Side effect: the office already appears in the Add-officer-term dropdown, without Batch C's helper copy, until Batch C lands.
+   - Batch B should not redo these. `AUTHORITY_OFFICES`, `selfRecorded`, `getOfficerFormOptions`, `district_unavailable` and the rest of the officers.ts list remain Batch B's.
+6. **The F262 patch splits the old F2 assertion in two.** Since 0068, an *open* deacon term naming another org's district is refused first by the target guard (`org_unit_target_missing`, the same `foreign_key_violation`). The old block would therefore still pass without proving the FK. The patch keeps the open-term case (guard or FK) and adds a *closed* term, which the guard skips, so `officer_terms_org_unit_fk` must refuse it by name.
+7. **The seed replays 0068's seat provisioning for every congregation**, not only Alder Creek. On a database built from empty, the backfill runs before `seed-dev.sql` creates any organization. Replaying it here makes CI and `development` count the same.
+8. **The seed's two opening balances are dated 2021 and 2023.** `test-rls.sql` section 10 asserts that nobody is on Alder Creek's roll before 2010.
+9. **Not staged here:** `scripts/parishes/global-setup.integration.patch`. It calls `sweepStaleParishFixtures` from `e2e/support/parish-fixture.ts`, which is Batch C's file. Batch C stages it.
+
+**Branch hygiene (pipeline branch only, both rows created by this batch's own runs minutes earlier):**
+- The pre-patch suite's line-1150 delete was refused (R2, as intended), leaving `Bramblewood Fixture District` (`a2000000-...-00ff`) behind. I removed it as owner, with `org_units_guard_delete` disabled inside one transaction, so the patched suite can re-insert it.
+- After moving the seed's opening-balance dates, I re-dated the two approved `roll_actions` rows already on the branch, with `roll_actions_freeze` disabled inside one transaction.
+- Both triggers were confirmed re-enabled (`O`).
+
+**Tests:**
+- **`scripts/parishes/test-rls-68.sql` as `presby_app`:** exit 0, 64 passes. Sections:
+  - (a) shape and ACL;
+  - (b) vocabulary, name shape, active-name index, archived-name reuse, restore collision, DELETE refused;
+  - (c) household target guard: archived, campus, missing and cross-org targets are refused; clear and unrelated edits pass; `FOR SHARE` works under RLS;
+  - (d) deacon-term guard: a new open term is refused, a historical term records, shorten and end pass, re-open is refused;
+  - (e) every seat arm: binding, person, wrong group, re-point, shape, commission, delegation, grant-then-bind, bind-then-grant, presbytery; each with positive controls;
+  - (f) the resolver: seat holder yes; deacon, pastor, moderator and ended seat no; future seat boundary at start date (yes) and end date (no, half-open); cross-org no;
+  - (g) isolation.
+- **Failing-first, section 68.** Each mechanism was removed on the branch, the section re-run with stop off, then the mechanism restored by re-applying 0068 (back to 64/64). First behavioural failure for each:
+
+  | Mechanism removed | Assertion that failed |
+  |---|---|
+  | `households_org_unit_target_guard` | "FAIL 68c - a household moved into an archived district" |
+  | `officer_terms_org_unit_target_guard` | "FAIL 68d - a new open deacon term was recorded in an archived district" |
+  | binding guard | "FAIL 68e - parishes.assign was bound to a custom role" and "...a role already granted to a person" |
+  | shape guard | "FAIL 68e - the seat role was unprotected" |
+  | grant guard | "FAIL 68e - the seat role was granted to a person" and "bind-then-grant to a person succeeded" |
+  | commission guard | "FAIL 68e - a commission was pointed at the seat role" |
+  | delegation guard | "FAIL 68e - a delegation carried the seat role" |
+  | DELETE grant restored | "FAIL 68a: R2/F258 - neither presby_app nor presby_platform holds DELETE" (the 68b delete is still refused, because the BEFORE DELETE guard also fires on the `presby_app` path) |
+  | `org_units_unit_type_check` dropped | "FAIL 68b - a unit_type outside the vocabulary was accepted" |
+  | `org_units_name_shape` dropped | "FAIL 68b - a mis-shaped name was accepted" |
+  | `org_units_active_name_idx` dropped | "FAIL 68b - a case-only duplicate of an active name was accepted" |
+  | 0062's CASE body (no new arm) | "FAIL 68f: it confers parishes.assign on its start date — expected 1, got 0" |
+
+  Each trigger removal also failed "68a: all eight 0068 triggers exist and are enabled".
+- **Full `scripts/test-rls.sql`, patched, with the seed:**
+  - Baseline before 0068: 1240 passes and three pre-existing drift failures. The same three were reported in the 0061 work-log: line 217 "presbytery: sees only its own members", line 516 "2fa policy: definer function sees the requirement with no org GUC set", and line 7927 "DECISION-152 ... statistics.publish".
+  - After 0068 with the unpatched file: one new failure, line 1150 "permission denied for table org_units". This is F262, failing-first for R2.
+  - After 0068, the seed and the patch: **1305 passes** (1240 + 64 + the new closed-term F2 assertion) and **the same three pre-existing failures, no new one**.
+  - The unmodified file with its own `ON_ERROR_STOP` still halts at line 217 on this branch, before and after 0068. A whole-file green run needs a clean `development` seed.
+- **`src/lib/db/domain/parishes.db.test.ts`**, 25 tests:
+  - Owner-path delete refusal with its literal.
+  - The fixture-teardown cascade (districts, an archived district, households and a deacon term).
+  - The target and seat guards firing on the owner connection.
+  - **The archive race on two connections in both orders.** Archive first: the move waits on the row lock and is then refused. Move first: the archive waits, and both stand.
+  - The whole-file re-apply with no row change, and the active-only re-apply regression.
+  - The backfill shape, run twice, giving a presbytery nothing and skipping a tenant-made `deacons_moderator` role untouched.
+  - No existing row gaining authority.
+  - All six stop-blocks with their count messages, plus a positive control.
+  - Seat-term materialisation and its end propagating, and the presbytery refusal literal.
+  - The codes, constraint names and literals the library will map, as `presby_app`. The refusals are the designed literals, never "permission denied for function".
+- **Failing-first, DB test:**
+  - `for share` removed from the guard: "AssertionError: the move never waited on the archive's row lock". The move then committed into the archived district, which is the race 0068 closes.
+  - `org_units_guard_delete` disabled: "expected undefined to be '42501'".
+  - Section 1 reverted to count every row: the re-apply test raised "0068: % organization(s) have two org_units whose names differ only in case".
+- **`src/lib/officer-offices.test.ts`, re-pointed:**
+  - The pins now read the *newest* migration that defines the CHECK and the CASE, found by scanning `drizzle/` (renumber-safe), and assert it is the parishes migration.
+  - A new test pins the whole CASE map. `deacons_moderator` comes directly after `deacon`, and `moderator` keeps its label (S1 declined).
+  - Before the vocabulary sync, the re-pointed CHECK pin failed (`deacons_moderator` absent from `OFFICER_OFFICES`). Now 13 of 13 pass.
+- **`session-approval.db.test.ts`:**
+  - The fixture congregation gains the seat group, as `groupSeedPlan()` will.
+  - The CASE test expects `deacons_moderator -> deacons_moderator`.
+  - The 0062-text pin now compares against the 0062-era vocabulary, with the new office excluded.
+  - 49 of 49 pass.
+- **Gates:**
+  - `npm run typecheck` passes.
+  - `npm run lint` passes.
+  - `npm run check`: 8 of 8 tripwires pass.
+  - Plain `npm test`: 542 files and 8325 tests pass, 78 files skipped, 0 failed.
+  - `check:schema-parity`: 85 tables, 0 failing.
+  - `npm run test:db` (the whole suite, serial, against the pipeline branch): 620 of 620 files and 10791 tests pass, 1 skipped, in 34 minutes. That includes `parishes.db.test.ts`, `session-approval.db.test.ts`, `officers.test.ts` and `directory.test.ts`. The final renumber-safe `parishes.db.test.ts`, re-run alone, passes 25 of 25.
+  - No `par-*` fixture organization or person remains on the branch after teardown.
+
+**For the orchestrator at integration:**
+- `git apply scripts/parishes/test-rls.sql.integration.patch scripts/parishes/seed-dev.sql.integration.patch`. Both pass `git apply --check` on `ce661d7`.
+- Re-run `scripts/test-rls.sql` as `presby_app` on merged `development`.
+- The journal entry is already in.
+- If 0068 is renumbered: `officer-offices.test.ts` and `parishes.db.test.ts` find the file by name. The `drizzle/0068` mentions in comments, the work-log and the patch text would need a find-and-replace. `test-rls-68.sql` keeps its name, like the other section files.
+- 0068 depends on nothing in 0065 to 0067. If a migration landing first redefines `presby_sync_derived_group()` or `officer_terms_office_allowed`, rebase sections 8a and 8b on it. Neither is redefined on `main` today.
+
+**Local apply for anyone rebuilding the branch:**
+1. `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0068_presby_parishes.sql`
+2. `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/parishes/seed-dev-parishes.sql`
+3. `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/parishes/test-rls-68.sql`
+
+**Next:** Batch B (full-stack-developer).
+- Batch B owns the existing DB-backed tests that build a congregation through `createOrganization()`. Once `groupSeedPlan()` and `baselineRoleSeedPlan()` gain the seat, those tests need updating. Batch A changed only the one fixture that pins the vocabulary (`session-approval.db.test.ts`).
+- The seat role is protected, constitutional and keyed `deacons_moderator`. `role-grants.ts` and `role-definitions.ts` should refuse before the database does; the database refusals above are the backstop.
+
+Strings added or changed:
+- `src/lib/officer-offices.ts`, `OFFICE_LABELS.deacons_moderator`: "Moderator of the Board of Deacons" (design C7).
+- No other user-facing string. The migration's `raise exception` texts are database refusals, mapped by Batch B, never shown verbatim.
 
 ---
 

@@ -1,11 +1,13 @@
 /**
  * Unit tests for withDbRetry / isDbDrop (e2e/support/db.ts). The helper retries
- * a fixture step ONLY on a dropped connection. The old regex also matched the
- * bare word "timeout" and the class name NeonDbError, so a unique violation or
- * a statement timeout was retried five times (a 20 s stall became 100 s+); the
- * spec was always "fetch failed, Connection terminated, ECONNRESET, connection
- * timeouts". This pins the classification, the schedule, the rethrow of the
- * ORIGINAL error, and that nested wrappers do not multiply attempts.
+ * a fixture step ONLY on a dropped connection. The old pattern also matched the
+ * bare word "timeout", so a statement timeout was retried five times (a 20 s
+ * stall became 100 s+). A unique violation was already not retried by accident
+ * (the driver puts the class name in name, not message); this pins that as a
+ * rule, with the timeout cases. The spec was always "fetch failed, Connection
+ * terminated, ECONNRESET, connection timeouts". This pins the classification,
+ * the schedule, the rethrow of the ORIGINAL error, and that nested wrappers do
+ * not multiply attempts.
  *
  * Run via: npm test
  */

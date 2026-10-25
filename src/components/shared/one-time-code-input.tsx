@@ -45,8 +45,17 @@ export interface OneTimeCodeInputProps {
   invalid?: boolean;
   /** Id of the error or hint element, set as `aria-describedby` on every box. */
   describedBy?: string;
-  /** Fires on a user edit that leaves the code complete and changed. Never on mount; never submits. */
-  onComplete?: (code: string) => void;
+  /**
+   * Fires on a user edit that leaves the code complete and changed. Never on
+   * mount. The component itself never submits; a consumer that does must do so
+   * only when `exact` is true (DECISION-257), and must not do it from inside
+   * this callback if it reads the hidden value, which has not committed yet.
+   *
+   * `exact` is false when a paste or autofill delivered MORE than `length`
+   * digits and was truncated (a phone number, an order number): the boxes fill,
+   * but the caller should wait for its own button rather than spend an attempt.
+   */
+  onComplete?: (code: string, info: { exact: boolean }) => void;
   /** Base id; defaults to a generated one. */
   id?: string;
   className?: string;
@@ -106,14 +115,17 @@ export function OneTimeCodeInput({
     boxes.current[clamped]?.focus();
   }
 
-  /** Applies an edit: stores the slots, reports the joined value, reports completion. */
-  function commit(next: string[]) {
+  /**
+   * Applies an edit: stores the slots, reports the joined value, reports
+   * completion. `exact` is false only for a truncated over-length run.
+   */
+  function commit(next: string[], exact = true) {
     const before = slots.join("");
     const joined = next.join("");
     setSlots(next);
     if (joined === before) return;
     onValueChange(joined);
-    if (joined.length === length) onComplete?.(joined);
+    if (joined.length === length) onComplete?.(joined, { exact });
   }
 
   /** Writes `digits` from box `start`, advancing; a full-length run always starts at box 1. */
@@ -121,6 +133,7 @@ export function OneTimeCodeInput({
     const next = [...slots];
     let from = start;
     let run = digits;
+    const exact = digits.length <= length;
     if (run.length >= length) {
       run = run.slice(0, length);
       from = 0;
@@ -128,7 +141,7 @@ export function OneTimeCodeInput({
     for (let k = 0; k < run.length && from + k < length; k++) {
       next[from + k] = run[k]!;
     }
-    commit(next);
+    commit(next, exact);
     const firstEmpty = next.findIndex((s) => s === "");
     focusBox(firstEmpty === -1 ? length - 1 : firstEmpty);
   }

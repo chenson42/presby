@@ -362,7 +362,7 @@ describe("OneTimeCodeInput — onComplete", () => {
     expect(onComplete).not.toHaveBeenCalled();
     type(boxes()[5]!, "6");
     expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onComplete).toHaveBeenCalledWith("123456");
+    expect(onComplete).toHaveBeenCalledWith("123456", { exact: true });
   });
 
   it("does not fire on mount, even with a complete initial value", () => {
@@ -396,7 +396,55 @@ describe("OneTimeCodeInput — onComplete", () => {
     type(boxes()[2]!, "3");
     expect(hidden().value).toBe("123496");
     expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onComplete).toHaveBeenCalledWith("123496");
+    expect(onComplete).toHaveBeenCalledWith("123496", { exact: true });
+  });
+
+  // DECISION-257: a consumer may submit only when `exact` is true.
+  it("C-1: a typed sixth digit reports exact", () => {
+    const onComplete = vi.fn();
+    render(<Harness onComplete={onComplete} />);
+    "123456".split("").forEach((d, i) => type(boxes()[i]!, d));
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith("123456", { exact: true });
+  });
+
+  it("C-2: a paste of more than six digits fills six boxes and reports not-exact, once", () => {
+    const onComplete = vi.fn();
+    render(<Harness onComplete={onComplete} />);
+    paste(boxes()[0]!, "1234567");
+    expect(values()).toEqual(["1", "2", "3", "4", "5", "6"]);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith("123456", { exact: false });
+  });
+
+  it("C-2b: a multi-character autofill of more than six digits reports not-exact", () => {
+    const onComplete = vi.fn();
+    render(<Harness onComplete={onComplete} />);
+    type(boxes()[0]!, "98765432");
+    expect(onComplete).toHaveBeenCalledWith("987654", { exact: false });
+  });
+
+  it("C-3: a spaced paste and a whole-code fill on box 1 report exact", () => {
+    const onPaste = vi.fn();
+    const { unmount } = render(<Harness onComplete={onPaste} />);
+    paste(boxes()[0]!, "123 456");
+    expect(onPaste).toHaveBeenCalledWith("123456", { exact: true });
+    unmount();
+
+    const onFill = vi.fn();
+    render(<Harness onComplete={onFill} />);
+    type(boxes()[0]!, "482915");
+    expect(onFill).toHaveBeenCalledTimes(1);
+    expect(onFill).toHaveBeenCalledWith("482915", { exact: true });
+  });
+
+  it("C-4: a repeated identical whole-code input event reports completion once", () => {
+    const onComplete = vi.fn();
+    render(<Harness onComplete={onComplete} />);
+    type(boxes()[0]!, "482915");
+    type(boxes()[0]!, "482915");
+    paste(boxes()[0]!, "482915");
+    expect(onComplete).toHaveBeenCalledTimes(1);
   });
 });
 

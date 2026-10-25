@@ -230,6 +230,7 @@ been independently verified.
 - [ ] **`person_relationships` still has no DB-level CHECK constraint enforcing `related_person_id IS NOT NULL OR related_name IS NOT NULL`.** `docs/schema-design.md`'s original design specified one; `drizzle/0008_presby_domain.sql` never applied it. Children's ministry Increment A closes the gap at the app layer (`addGuardianLink`/`updateGuardianLink`'s own XOR validation) — the first application code to touch this table at all — but the DB-level gap itself is unfixed; a direct INSERT bypassing the app still can land a fully-null row. — `docs/work-log/2026-08-26-childrens-ministry.md` Phase 3 Edge Cases
 - [ ] **`person_relationships`' INSERT policy still has no check on `related_person_id`** — DECISION-111 named this "a thin existence-oracle, not F21-shaped" and left it unfixed at the RLS layer; Increment A narrows it at the app layer instead (`addGuardianLink`/`updateGuardianLink` verify the related person holds an active membership at the acting org before allowing the write), which is a real mitigation but not a DB-level fix. — `docs/work-log/2026-08-26-childrens-ministry.md` Phase 3 Edge Cases / DECISION-111
 - [ ] **`check:audit`'s `MUTATION_RE` regex only matches literal `db.insert/update/delete`, not `tx.`/`platformDb.`** — a file using only `tx.insert`/`platformDb.execute` and forgetting `recordAudit()` would pass the tripwire silently. Two files now share this gap (`admin/2fa/actions.ts`, `admin/organizations/[id]/actions.ts`); broaden the regex at the next monthly code review — `docs/work-log/2026-08-19-brand-foundation.md` Phase 4 commit `c2`
+- [ ] **Real-DB tests for the platform-admin audited mutations** (users/actions.ts, users/[id]/actions.ts, flags/actions.ts, password-reset consume, account actions) + e2e for deactivate→bounce and flag-toggle→next-request. — docs/reviews/2026-10-24-test-coverage.md C-2
 
 ### Blocking a flag flip / go-live
 
@@ -515,6 +516,14 @@ been independently verified.
 - [ ] **`docs/briefings.md:23` is 97 columns against a stated 80.** Ride along with the next docs touch of that file. — `docs/work-log/2026-10-25-retro-workflow-efficiency.md` R2-N1
 - [ ] **Optional: pass `-p <port>` to the Playwright dev lane command.** Phase 5 showed sign-in works on :3480 with no `AUTH_URL`, so it is safe where `.env.local` sets none. — `docs/work-log/2026-10-25-retro-workflow-efficiency.md` Phase 6
 - [ ] **Unverified, tracking only:** that a `withDbRetry`-wrapped teardown survives a real Neon connection drop, and that the Playwright port guard behaves identically in every worker. — `docs/work-log/2026-10-25-retro-workflow-efficiency.md` Phase 6
+- [ ] **e2e flag drift: invitation-new-account.spec.ts:218 and domains-platform.spec.ts:86 pass vacuously in CI (flag off renders the same heading)** — set flags per spec, real positive controls, and pin e2e-baseline-flags.sql to a declared manifest (chrome_v2/v3 included). — docs/reviews/2026-10-24-test-coverage.md N-1
+- [ ] **DB flakes on main:** statements.db.test.ts:497 ("123" vs timestamped slug, ~1.4%/run) and org-features.test.ts:529 (18-combination loop in one it → timeout → leftover loop breaks the next case; also flips a global flag). — docs/reviews/2026-10-24-test-coverage.md N-2
+- [ ] **Replace the 4 copy-the-logic specs (64 tests) with tests of the real modules** — account-actions, password-reset-actions, admin/users/[id]/actions, totp-pending. — docs/reviews/2026-10-24-test-coverage.md N-3
+- [ ] **Collect coverage from the db.yml shards** (blob reporter + merge-reports job) so the church domain has a measured number. — docs/reviews/2026-10-24-test-coverage.md N-4
+- [ ] **e2e: officers roster and the tier-3 sensitive-info editor (who can see and save it)**; the bootstrap spec is already TODO:291. — docs/reviews/2026-10-24-test-coverage.md N-5
+- [ ] **Shared fixture-teardown helper (one FREEZE_TRIGGERS list)** to retire 75 hand-rolled trigger-disable statements in 34 files. — docs/reviews/2026-10-24-test-coverage.md N-6
+- [ ] **Fixture tests for check-audit-coverage, check-sql-date, check-deps-drift.** — docs/reviews/2026-10-24-test-coverage.md N-7
+- [ ] **Minor test hygiene:** two-factor.ts:35-39 test; move the test-rls.sql banner to the end with a count; settle the regression-suffix form; remove the committed .integration.patch. — docs/reviews/2026-10-24-test-coverage.md Minor
 
 ### Deferred, low urgency
 

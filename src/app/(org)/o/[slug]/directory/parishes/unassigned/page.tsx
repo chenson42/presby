@@ -167,6 +167,21 @@ export default async function UnassignedPage({
             <p className="mt-6 rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
               Every group is hidden. Show a group to see its households.
             </p>
+          ) : totalShown === 0 ? (
+            // Some groups are hidden and the groups still shown are empty. Never blank: a blank
+            // list reads as "every household is in a district", which is false here.
+            <div
+              className="mt-6 rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground"
+              data-testid="none-in-groups-shown"
+            >
+              <p>No households in the groups shown.</p>
+              <Link
+                href={basePath}
+                className="mt-2 inline-block text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Show all groups
+              </Link>
+            </div>
           ) : (
             <ul className="mt-6 space-y-3">
               {households.map((household) => (

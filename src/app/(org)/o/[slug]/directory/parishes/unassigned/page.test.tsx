@@ -8,7 +8,7 @@
  * hidden-everything state are never the same text).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 
 const cachedAuth = vi.fn();
 vi.mock("@/lib/auth/cached-auth", () => ({ cachedAuth: () => cachedAuth() }));
@@ -217,6 +217,33 @@ describe("UnassignedPage - rendering", () => {
     expect(screen.getByText("Every group is hidden. Show a group to see its households.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Show Members (2)" })).toBeTruthy();
     expect(screen.queryByText("Every household is in a district.")).toBeNull();
+  });
+
+  it("some groups hidden and the groups still shown empty is never blank: `No households in the groups shown.` with a fixed link that clears ?hide=", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    flagsOn();
+    getUnassignedPage.mockResolvedValue(okResult({ households: [], totalShown: 0 }));
+    await renderPage({ hide: "members,participants,visitors" });
+    const panel = screen.getByTestId("none-in-groups-shown");
+    expect(panel.textContent).toContain("No households in the groups shown.");
+    expect(within(panel).getByRole("link", { name: "Show all groups" }).getAttribute("href")).toBe(
+      "/o/alder-creek/directory/parishes/unassigned",
+    );
+    expect(screen.queryByText("Every household is in a district.")).toBeNull();
+    expect(screen.queryByText("Every group is hidden. Show a group to see its households.")).toBeNull();
+  });
+
+  it("nothing hidden and zero households everywhere stays `Every household is in a district.` (not the groups-shown text)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    flagsOn();
+    getUnassignedPage.mockResolvedValue(
+      okResult({ counts: { members: 0, participants: 0, visitors: 0, others: 0 }, households: [], totalShown: 0 }),
+    );
+    await renderPage();
+    expect(screen.getByText("Every household is in a district.")).toBeTruthy();
+    expect(screen.queryByTestId("none-in-groups-shown")).toBeNull();
   });
 
   it("with no active district, an administrator is pointed to add one and no Assign control is offered", async () => {

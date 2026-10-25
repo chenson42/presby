@@ -7,6 +7,7 @@
  * Run via: npm test
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   recordedDecisions,
   namedDecisions,
@@ -147,5 +148,50 @@ describe("renderBehindLine", () => {
   it("is null when there is nothing behind", () => {
     expect(renderBehindLine([], 0)).toBe(null);
     expect(renderBehindLine([], null)).toBe(null);
+  });
+});
+
+// The explanatory preamble of docs/briefings.md once gave its example as a range
+// of real numbers (DECISION-215–219). namedDecisions reads the whole file, so
+// the example "named" five decisions no entry describes and the banner
+// under-counted by five. The preamble must name none.
+describe("real docs/briefings.md", () => {
+  const FIRST_ENTRY = /^## \d{4}-\d{2}-\d{2}/m;
+  const preambleOf = (text) => {
+    const m = FIRST_ENTRY.exec(text);
+    expect(m, "no dated entry heading found").not.toBeNull();
+    expect(m.index, "the preamble is empty").toBeGreaterThan(0);
+    return text.slice(0, m.index);
+  };
+
+  it("the explanatory preamble names no decision", () => {
+    const text = readFileSync(new URL("../docs/briefings.md", import.meta.url), "utf8");
+    const preamble = preambleOf(text);
+    expect(preamble).toContain("covers:"); // the marker lives in the preamble: we read the right text
+    expect([...namedDecisions(preamble)]).toEqual([]);
+  });
+
+  it("can fail: the old paragraph, with its real example range, names five decisions", () => {
+    const old = [
+      "# Operator briefings",
+      "",
+      "if decisions above the marker that no entry names (write `DECISION-NNN`, or a",
+      "range like `DECISION-215–219`, in the entry) or feat/fix commits since the marker",
+      "",
+      "---",
+      "",
+      "## 2026-10-15",
+      "",
+    ].join("\n");
+    expect([...namedDecisions(preambleOf(old))].sort((a, b) => a - b)).toEqual([215, 216, 217, 218, 219]);
+  });
+
+  it("the replacement wording names none", () => {
+    const fixed = [
+      "# Operator briefings",
+      "(write `DECISION-NNN`, or a range like `DECISION-NNN to DECISION-MMM`, in the entry)",
+      "## 2026-10-15",
+    ].join("\n");
+    expect(namedDecisions(preambleOf(fixed)).size).toBe(0);
   });
 });

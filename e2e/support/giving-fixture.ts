@@ -31,7 +31,7 @@
 import { createHash } from "node:crypto";
 import { generateSync } from "otplib";
 import type { Browser, BrowserContext } from "@playwright/test";
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 import { E2E_TOTP_TEST_SECRET } from "./totp-fixture";
 import { enterTotpCode } from "./totp-page";
 import { E2E_USERS, storageStatePath } from "./users";
@@ -179,13 +179,13 @@ export async function setupGivingFixture(sql: Sql, stamp = Date.now()): Promise<
 /** Turns the org's Giving toggle on/off (`null` removes the row: the default, off). */
 export async function setGivingToggle(sql: Sql, fx: GivingFixture, enabled: boolean | null): Promise<void> {
   if (enabled === null) {
-    await sql`delete from organization_feature_toggles where organization_id = ${fx.orgId}::uuid and feature_key = ${GIVING_TOGGLE_KEY}`;
+    await withDbRetry("clear giving toggle", () => sql`delete from organization_feature_toggles where organization_id = ${fx.orgId}::uuid and feature_key = ${GIVING_TOGGLE_KEY}`);
     return;
   }
-  await sql`
+  await withDbRetry("set giving toggle", () => sql`
     insert into organization_feature_toggles (organization_id, feature_key, enabled)
     values (${fx.orgId}::uuid, ${GIVING_TOGGLE_KEY}, ${enabled})
-    on conflict (organization_id, feature_key) do update set enabled = excluded.enabled`;
+    on conflict (organization_id, feature_key) do update set enabled = excluded.enabled`);
 }
 
 /**
@@ -199,16 +199,19 @@ export async function setGivingRole(
   role: GivingRoleName,
   options: { features?: boolean } = {},
 ): Promise<void> {
-  await sql`
-    delete from role_grants where organization_id = ${fx.orgId}::uuid and person_id = ${fx.actingPersonId}::uuid`;
   const grants: string[] = [];
   if (role !== "none") grants.push(fx.roleIds[role]);
   if (options.features) grants.push(fx.featuresRoleId);
-  for (const roleId of grants) {
+  // One step: the delete re-clears first, so a repeat after a lost reply ends the same.
+  await withDbRetry("set giving role", async () => {
     await sql`
-      insert into role_grants (organization_id, role_id, person_id, starts_on, granted_by)
-      values (${fx.orgId}::uuid, ${roleId}::uuid, ${fx.actingPersonId}::uuid, date '2020-01-01', ${fx.actingUserId}::uuid)`;
-  }
+      delete from role_grants where organization_id = ${fx.orgId}::uuid and person_id = ${fx.actingPersonId}::uuid`;
+    for (const roleId of grants) {
+      await sql`
+        insert into role_grants (organization_id, role_id, person_id, starts_on, granted_by)
+        values (${fx.orgId}::uuid, ${roleId}::uuid, ${fx.actingPersonId}::uuid, date '2020-01-01', ${fx.actingUserId}::uuid)`;
+    }
+  });
 }
 
 /**
@@ -219,18 +222,21 @@ export async function setGivingRole(
  */
 export async function addActiveMonthlyGift(sql: Sql, fx: GivingFixture): Promise<void> {
   const accountId = `acct_fixture${fx.slug.replace(/\D/g, "")}`.slice(0, 40);
-  await sql`
-    insert into giving_provider_connections (id, organization_id, provider, external_account_id, livemode, status,
-           charges_enabled, payouts_enabled, details_submitted, card_enabled, ach_enabled)
-    values (${id(40)}::uuid, ${fx.orgId}::uuid, 'stripe', ${accountId}, false, 'onboarding', false, false, false, false, false)
-    on conflict (id) do nothing`;
-  await sql`
-    insert into giving_checkout_intents (id, organization_id, connection_id, fund_id, donor_id, frequency, method_choice,
-           cover_fees, gift_amount_cents, donor_covered_fee_cents, total_cents, livemode, idempotency_key, status,
-           subscription_id, expires_at, completed_at)
-    values (${id(41)}::uuid, ${fx.orgId}::uuid, ${id(40)}::uuid, ${fx.funds.general}::uuid, ${fx.donors.imogen}::uuid, 'monthly',
-            'card', false, 2500, 0, 2500, false, ${id(42)}, 'completed', 'sub_fixture_e2e_0001', now() + interval '1 day', now())
-    on conflict (id) do nothing`;
+  // Both inserts are `on conflict (id) do nothing`: a repeat after a lost reply ends the same.
+  await withDbRetry("add active monthly gift", async () => {
+    await sql`
+      insert into giving_provider_connections (id, organization_id, provider, external_account_id, livemode, status,
+             charges_enabled, payouts_enabled, details_submitted, card_enabled, ach_enabled)
+      values (${id(40)}::uuid, ${fx.orgId}::uuid, 'stripe', ${accountId}, false, 'onboarding', false, false, false, false, false)
+      on conflict (id) do nothing`;
+    await sql`
+      insert into giving_checkout_intents (id, organization_id, connection_id, fund_id, donor_id, frequency, method_choice,
+             cover_fees, gift_amount_cents, donor_covered_fee_cents, total_cents, livemode, idempotency_key, status,
+             subscription_id, expires_at, completed_at)
+      values (${id(41)}::uuid, ${fx.orgId}::uuid, ${id(40)}::uuid, ${fx.funds.general}::uuid, ${fx.donors.imogen}::uuid, 'monthly',
+              'card', false, 2500, 0, 2500, false, ${id(42)}, 'completed', 'sub_fixture_e2e_0001', now() + interval '1 day', now())
+      on conflict (id) do nothing`;
+  });
 }
 
 /**
@@ -267,9 +273,11 @@ let connectionCounter = 0;
 
 /** Removes this fixture org's inbox events, intents and connections (owner path; no gift or reversal exists to block it). */
 export async function clearConnections(sql: Sql, fx: GivingFixture): Promise<void> {
-  await sql`delete from giving_provider_events where organization_id = ${fx.orgId}::uuid`;
-  await sql`delete from giving_checkout_intents where organization_id = ${fx.orgId}::uuid`;
-  await sql`delete from giving_provider_connections where organization_id = ${fx.orgId}::uuid`;
+  await withDbRetry("clear connections", async () => {
+    await sql`delete from giving_provider_events where organization_id = ${fx.orgId}::uuid`;
+    await sql`delete from giving_checkout_intents where organization_id = ${fx.orgId}::uuid`;
+    await sql`delete from giving_provider_connections where organization_id = ${fx.orgId}::uuid`;
+  });
 }
 
 /**
@@ -329,9 +337,9 @@ export async function offerFundOnline(
   which: "general" | "building" = "general",
 ): Promise<void> {
   const name = which === "general" ? "Giving" : "Building campaign";
-  await sql`
+  await withDbRetry("offer fund online", () => sql`
     update giving_funds set offered_online = ${on}, online_display_name = ${on ? name : null}
-     where id = ${fx.funds[which]}::uuid`;
+     where id = ${fx.funds[which]}::uuid`);
 }
 
 /**
@@ -360,7 +368,7 @@ export async function addLiveSite(sql: Sql, fx: GivingFixture, bundle?: { pages:
 
 export async function removeSite(sql: Sql, fx: GivingFixture): Promise<void> {
   assertFixtureSlug(fx.slug);
-  await sql`delete from organization_sites where organization_id = ${fx.orgId}::uuid`;
+  await withDbRetry("remove site", () => sql`delete from organization_sites where organization_id = ${fx.orgId}::uuid`);
 }
 
 export type ReturnKind = "confirming" | "received" | "received_monthly" | "bank_pending" | "failed";
@@ -409,12 +417,12 @@ export async function seedReturnIntent(
  */
 export async function addGivingSettings(sql: Sql, fx: GivingFixture): Promise<void> {
   assertFixtureSlug(fx.slug);
-  await sql`
+  await withDbRetry("add giving settings", () => sql`
     insert into giving_settings (organization_id, donee_legal_name, donee_address_line1, donee_city, donee_region,
            donee_postal_code, donee_ein, signatory_name, signatory_title, greeting_text, closing_text)
     values (${fx.orgId}::uuid, 'E2E Fixture Presbyterian Church', '1 Fixture Way', 'Fixtureville', 'OH', '00000',
             '00-0000000', 'Octavia Marchetti', 'Treasurer', 'Dear {donor_name},', 'With gratitude for your generosity,')
-    on conflict (organization_id) do nothing`;
+    on conflict (organization_id) do nothing`);
 }
 
 /** An identified donor with no email and no address (the "can't be sent" exception), or a plate-cash donor. */
@@ -433,11 +441,11 @@ export async function addDonor(
 
 /** Links a donor to a member's membership (what a confirmed proposal does), so the notice email has someone to go to. */
 export async function linkDonorToMember(sql: Sql, fx: GivingFixture, donorId: string, personId: string): Promise<void> {
-  await sql`
+  await withDbRetry("link donor to member", () => sql`
     update giving_donors
        set linked_membership_id = (select id from memberships where organization_id = ${fx.orgId}::uuid and person_id = ${personId}::uuid),
            link_source = 'recorder_confirmed', linked_at = now()
-     where id = ${donorId}::uuid and organization_id = ${fx.orgId}::uuid`;
+     where id = ${donorId}::uuid and organization_id = ${fx.orgId}::uuid`);
 }
 
 /** A succeeded offline gift of `amountCents` on `occurredOn` (the write marker armed in the same statement). */
@@ -623,28 +631,38 @@ export async function verifiedContext(browser: Browser, callbackPath = "/home"):
 
 /** Removes every `e2e-giving-<digits>` congregation a crashed run left behind, then the fixed-id people. */
 async function removeStaleGivingFixtures(sql: Sql): Promise<void> {
-  const stale = (await sql`select id from organizations where slug ~ '^e2e-giving-[0-9]+$'`) as { id: string }[];
+  const stale = (await withDbRetry("list stale giving orgs", () => sql`select id from organizations where slug ~ '^e2e-giving-[0-9]+$'`)) as { id: string }[];
   for (const { id: orgId } of stale) await removeGivingFixtureById(sql, orgId);
-  await sql`delete from people where id in (${id(2)}::uuid, ${id(3)}::uuid, ${id(4)}::uuid)`;
+  await withDbRetry("delete giving fixture people", () => sql`delete from people where id in (${id(2)}::uuid, ${id(3)}::uuid, ${id(4)}::uuid)`);
 }
 
 async function removeGivingFixtureById(sql: Sql, orgId: string): Promise<void> {
   // The derived-roster trigger refuses the cascade a fixture org's delete fires
   // against its group_memberships; disabled around the delete, as every other
   // fixture teardown in this repo does (one http call per statement).
-  await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
+  //
+  // The whole disable/delete/enable unit is ONE retried step (a drop between the statements can never
+  // leave the trigger off: the next attempt re-disables, deletes and re-enables), and a final failure
+  // still tries to re-enable, as domains-ui-fixture.ts does.
   try {
-    await sql`delete from organizations where id = ${orgId}::uuid`;
+    await withDbRetry(`delete giving org ${orgId}`, async () => {
+      await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
+      try {
+        await sql`delete from organizations where id = ${orgId}::uuid`;
+      } finally {
+        await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+      }
+    });
   } finally {
-    await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
+    await withDbRetry("re-enable roster trigger", () => sql`alter table group_memberships enable trigger group_memberships_reject_derived`);
   }
-  await sql`delete from people where id in (${id(2)}::uuid, ${id(3)}::uuid, ${id(4)}::uuid)`;
+  await withDbRetry("delete giving fixture people", () => sql`delete from people where id in (${id(2)}::uuid, ${id(3)}::uuid, ${id(4)}::uuid)`);
 }
 
 /** Removes everything the fixture made: the org cascades every giving row, then the people. */
 export async function removeGivingFixture(sql: Sql, fx: GivingFixture): Promise<void> {
   assertFixtureSlug(fx.slug);
   await removeGivingFixtureById(sql, fx.orgId);
-  const left = (await sql`select 1 from organizations where id = ${fx.orgId}::uuid`) as unknown[];
+  const left = (await withDbRetry("confirm giving org gone", () => sql`select 1 from organizations where id = ${fx.orgId}::uuid`)) as unknown[];
   if (left.length > 0) throw new Error(`[giving-fixture] the fixture organization ${fx.slug} was not removed`);
 }

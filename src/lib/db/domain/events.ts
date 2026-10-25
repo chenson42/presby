@@ -138,7 +138,20 @@ export const events = pgTable(
     // organizationServiceTimes' existing time-of-day columns in spirit.
     startsAt: timestamp("starts_at").notNull(),
     endsAt: timestamp("ends_at"),
+    // The members-only VETO, NOT website publication: true means "open to
+    // everyone, not only members" (shown in Copy month and eligible for the
+    // website). It defaults to true, so it must never be read as "published"
+    // (G1, DECISION-238) — `websiteListed` below is that decision.
     isPublic: boolean("is_public").notNull().default(true),
+    // On the congregation's public website calendar (drizzle/0067 section 1,
+    // DECISION-238). Default false, so every existing and new event starts off
+    // the website. Set only through src/lib/events.ts, which derives it as
+    // (wanted AND isPublic) and audits every change (DECISION-240). Tied to
+    // isPublic by the events_website_requires_public CHECK below, and
+    // re-filtered on is_public and cancelled_at at read time by
+    // presby_public_events_calendar() (drizzle/0067 section 3, which Drizzle
+    // cannot express).
+    websiteListed: boolean("website_listed").notNull().default(false),
     // The FROZEN check-in contract column (DECISION-113 ruling 4). Adopted
     // name over fpcw's `is_drop_off` — generic beyond children's ministry.
     // Children's-ministry Increment C's FK must be the composite
@@ -210,5 +223,13 @@ export const events = pgTable(
       foreignColumns: [t.id, t.organizationId],
       name: "events_parent_fk",
     }),
+    // A members-only event is never on the website: "if website_listed then
+    // is_public". DDL (NOT VALID then VALIDATE): drizzle/0067 section 2. An
+    // update that makes a listed event members-only must clear
+    // website_listed in the same statement (F251).
+    check(
+      "events_website_requires_public",
+      sql`not ${t.websiteListed} or ${t.isPublic}`,
+    ),
   ],
 );

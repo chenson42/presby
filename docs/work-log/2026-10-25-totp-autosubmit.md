@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete; Decisions 1–10, Gaps 1–7 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Skipped — Accelerated Feature: no new directory, dependency, route, action, schema or invariant | — | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; implementer named (full-stack-developer); F282 registered | Design complete | 2026-10-25 |
-| 4 — Implementation | full-stack-developer | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Complete; all Phase 4 gates green (dev lane :3560, prod-build lane :3561) | Ready for QA | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -531,33 +531,68 @@ Order: write the tests, run them red against the unmodified source (the e2e on a
 
 # Phase 4 — Implementation
 
+**Implementer:** full-stack-developer · **Date:** 2026-10-25 · **Branch:** `pipeline/totp-autosubmit` (worktree `presby-otp`, Neon branch `pipeline-totp-autosubmit`) · **Commits:** `27d596a` work-log, `6c0c9cc` feat(auth), `3fdc4fa` test(e2e), `eb12dac` docs.
+
 ## Files Created
 
-- `path/to/file` — purpose
+- None (the status probe and toggle are file-local to `totp-challenge-form.tsx`).
 
 ## Files Modified
 
-- `path/to/file` — what changed
+- `src/components/shared/one-time-code-input.tsx`: `onComplete(code, { exact })`; `commit(next, exact = true)`, `spread()` passes `digits.length <= length`; prop and header docs.
+- `src/app/(auth)/totp/totp-challenge-form.tsx`: submit effect after the commit (`armed` / `submitted` / `pendingRef` refs, `formRef.requestSubmit()`), `FormStatusProbe` (pending mirror, settle callback, `role="status"` region), `ModeToggle` (disabled while pending), `key={attempt}` remount on settle, focus-to-Verify effect and `verifyRef` removed. `action={verifyTotpAction}` unchanged.
+- `src/app/(account)/account/2fa/totp-enroll-form.tsx`: `confirm(c)` with `inFlight` / `submitted` guards and a `finally`, `onComplete` calls it when `exact`, `key={attempt}` with `autoFocus={attempt > 0}`, status region.
+- Unit tests: `one-time-code-input.test.tsx` (C-1 to C-4, existing `onComplete` assertions now `{ exact: true }`), `totp-challenge-form.test.tsx` (F-1 to F-12, S-1), `totp-enroll-form.test.tsx` (N-1 to N-6).
+- e2e: `support/totp-page.ts` (header, `enterTotpCode` doc, new `waitForTotpVerified`); the 15 call sites in the design table (`totp-full-login` x2, `session-claim-integrity`, `totp-callback-bypass` x5, `branded-signin`, `invitation-new-account` (Confirm click), `hydration/totp-challenge`, `support/domains-ui-fixture`, `support/giving-fixture`, `support/invitation-ui`, `totp-code-entry` wrong-code test); `totp-code-entry.spec.ts` rewritten (header; E-1 to E-9); `account-page.spec.ts` comment.
+- Docs and comments (the nine drift locations minus `docs/decisions.md`): `docs/ui-standards.md:407`, `docs/product/functionality-map.md:54`, `one-time-code-input.tsx` prop and header docs, `totp-challenge-form.tsx` header, `totp-code-entry.spec.ts` header and tests, `totp-page.ts`, `account-page.spec.ts`. One location beyond the table: `docs/testing.md:65` ("Neither helper presses Verify"), updated. **Left to the orchestrator (Rule 16):** `docs/decisions.md` (DECISION-257, the DECISION-193(a) pointer at `decisions.md:336`), `docs/TODO.md` (Gap 6 line), `docs/STATE.md`.
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- None. No route, action, flag, permission, dependency or audit key. `src/auth.ts`, `src/proxy.ts`, `src/lib/authz.ts`, both `actions.ts` and `page.tsx` are untouched.
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+- None added. `totp.verify_succeeded` / `totp.verify_failed` fire from the unchanged action; E-1, E-5 and E-6 count them against the database clock (one success; one failed row per wrong code; two failed plus one success for the two-wrong-then-right run).
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+**Deviations from the design (one).** `confirm()` on `/account/2fa` has a `catch` (not only the designed `finally`) that clears the `submitted` guard and swallows the rejection. Reason: the auto path is fire-and-forget (`void confirm(c)`), and an unhandled rejection from a rejected server action failed the unit run (N-5). The design adds no copy for a thrown action, so none was added: the boxes re-enable, the guard is released, and the same code can be sent with the Confirm button. The user sees no message in that case (as before: the old code let the rejection go unhandled). Flag for Phase 5/6 as a pre-existing gap, not a regression.
 
-Strings added or changed: [file:line each, or "none"]
+**Failing-first record (red runs against the unmodified source).**
 
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
+| Suite | Red run | Notes |
+|---|---|---|
+| `one-time-code-input.test.tsx` | 6 failed / 55 | C-1, C-2, C-2b, C-3, the two existing `{ exact: true }` assertions; then 55/55 green |
+| `totp-challenge-form.test.tsx` | 9 failed / 33 | F-1, F-3 x2, F-8, F-9, F-9b, F-10, F-11, F-12. F-2, F-4, F-4b, F-5, F-6, F-7 and S-1 pin behaviour that already held (negative assertions), so they pass red-run and stay as guards |
+| `totp-enroll-form.test.tsx` | 6 failed / 12 | the pasted-code auto submit, N-1, N-4, N-4b, N-5, N-6; N-2, N-3 are pins |
+| `totp-code-entry.spec.ts` (e2e, old `src/` checked out over the new tests, dev server on 3560) | 6 failed / 17 | E-1, E-3, E-4 x2, E-5, E-6/E-7; E-2, E-8, E-9 and the unchanged tests pass on the old code (negative pins). The old source was then restored with `git checkout HEAD -- src` |
+| `invitation-new-account.spec.ts` | not run red | the change is a deleted click: on the old source the spec would hang on "you enrolled on". Not separately red-run |
+
+**Gates (all on the final tree `eb12dac`).**
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | pass |
+| `npm run lint` (`--max-warnings=0`) | pass |
+| `npm run check` | all eight tripwires pass (incl. `check:hydration-gate` H3, `check:audit`, `check:proxy-imports`) |
+| `npm test` (plain) | 554 files passed / 77 skipped; 8654 tests passed / 2442 skipped (the skips are the DB-backed suites) |
+| `npm run build` | pass |
+| Auth e2e on :3560, MFA-enrolled user (`totp-code-entry` E-1 to E-9, `totp-full-login`, `totp-callback-bypass` x7, `totp-recovery-code`, `session-claim-integrity`, `branded-signin`, `post-login-routing`, `invitation-new-account`, `invitation-existing-account`, `hydration/totp-challenge`, `account-page`) | 58 / 58 passed (1.4 min) |
+| Full suite on :3560 (`chromium` and `custom-hosts` projects, flags reset first with `e2e-reset-flags.sql -v pipeline_branch=1` against this worktree's DB) | 523 / 523 passed (18.1 min), 0 skipped, 0 flaky |
+| Prod-build lane: `PW_PROD_PORT=3561 npm run test:e2e:prod -- e2e/hydration/totp-challenge.spec.ts`, then the whole `e2e/hydration` directory (three other hydration specs use the changed `verifiedContext`) | 1 / 1, then 13 / 13 passed |
+| Real-browser 360px look (Pixel 7 emulation, 360x740, POST held with a route): `/totp` rest, pending, failure | pending: "Verifying…" on the button, status region reads "Verifying your code.", 0 px horizontal overflow, focus stays on box 6; failure: boxes cleared, box 1 focused, `role="alert"` copy unchanged and wrapping to two lines, 0 px overflow. Screenshots are in the session scratchpad only |
+
+**What QA should know.**
+
+- 0.42.3 invariant: `totp-challenge-form.tsx` imports nothing from `@/auth`, `@/lib/auth/two-factor-grant` or `unstable_update` and never calls the action; S-1 scans the source for that and for `action={verifyTotpAction}`. The four guard specs (`totp-full-login`, `totp-callback-bypass`, `session-claim-integrity`, `branded-signin`) changed only by a deleted click and pass.
+- F282 was exercised in a real browser: E-6 types the same wrong code twice, asserts the URL is identical both times, and that the boxes clear and refocus and a second POST is sent each time. Whether Next remounts the page on a same-URL redirect was not determined; the settle-based reset does not depend on it.
+- The disabled recovery toggle (`variant="link"`) looks the same as the enabled one in the pending screenshot (no visible dimming), though it is `disabled` (E-3 asserts it). Cosmetic and outside the design; noted for Phase 6 rather than changed.
+- A real-device check (iOS one-time-code autofill, Android keyboard suggestion, a screen reader reading the status region) was not possible here. Autofill is emulated by `fill()` and a clipboard paste; the status region is asserted in the DOM only.
+- Environment incident, no code impact: running `npm run build` in the worktree while the dev server was up corrupted the dev server's `next/font/google` resolution (`.next` shared), and the first auth e2e run (53 failed) was discarded; the server was stopped by PID, `.next` removed and restarted, and the whole set re-run clean. The prod lane also builds into `.next`, so it was run only after the dev server was stopped. Separately, a stray `git stash` / `git stash pop` in this worktree applied another pipeline's stash (`stash@{0}: On pipeline/signin-invites: a1-e33-lane`; stashes are repository-wide). It was undone with `git reset --hard` to my own HEAD and removal of the three untracked files it restored; the stash entry itself is intact (`git stash list` still shows it) and nothing of this pipeline's was lost.
+
+Strings added or changed: "Verifying your code." at `src/app/(auth)/totp/totp-challenge-form.tsx` (`FormStatusProbe`) and `src/app/(account)/account/2fa/totp-enroll-form.tsx` (status `<p>`), the only new user-facing string, from the design's Copy table. Existing strings unchanged.
+
+**Handoff to Phase 5 (qa):** run the three unit files and the full suite, then the auth e2e set against a real server with the MFA-enrolled user (:3560 for this pipeline; the dev server is stopped now), reset flags first, and the prod lane on :3561 for `e2e/hydration/totp-challenge.spec.ts`. Browser look to repeat: `/totp?callbackUrl=%2Fadmin` at 360px, type `000000` (pending, then failure), a 7-digit paste (fills, waits for Verify), and `/account/2fa` enrolment by typing the sixth digit. Release notes (proposed 0.42.6, Polish), the what's-new row and the TODO/decision lines remain for Phase 6 and integration.
 
 ---
 

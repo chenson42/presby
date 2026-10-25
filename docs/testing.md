@@ -270,9 +270,10 @@ checkout and CI are unaffected, and the production-build lane
 # 1. Your own server, on the port the orchestrator assigned (here 3480), with the
 #    fakes the specs expect. The config injects these only into a server IT starts;
 #    one you start yourself needs them in its own environment. Note the pid.
+# <!-- leak-ok: non-key-shaped test literals, not credentials -->
+export CRON_SECRET=giving-e2e-cron-secret STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret
 RATE_LIMIT_DISABLED=true DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake \
   DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE="$PWD/.tmp/domains-fake-state.json" \
-  CRON_SECRET=giving-e2e-cron-secret STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret \
   npx next dev -p 3480 &
 
 # 2. Point Playwright at it.
@@ -507,6 +508,12 @@ The retrospective cadence is 14 days, so `npm run stats:escape -- --since=<date>
 (or `"N days ago"`) counts from the last retrospective instead of double-counting
 the overlap; the header then reads "since <date>". git compares the committer
 date, so an amended or rebased commit counts from when it was rewritten.
+
+`npm run worktrees:report` prints the free disk space and, for each git worktree,
+its branch, whether it is merged into main, and its `node_modules` / `.next` sizes,
+with suggested cleanup commands. It deletes nothing (`--no-sizes` skips the slow
+`du`). Below 20 GiB free it says so: a full disk has surfaced as a Neon
+`fetch failed`.
 
 ---
 

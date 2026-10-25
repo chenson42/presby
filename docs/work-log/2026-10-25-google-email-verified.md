@@ -18,8 +18,8 @@
 | 2 — Architectural review | architect | Skipped: F231 ruled in 2b addendum 2 (R38); DECISION-187 fixes placement; no dep/route/schema/flag/invariant change | — | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (bug-fix variant) | Design complete; implementer api-developer | 2026-10-25 |
 | 4 — Implementation | api-developer | Complete | Gates green; e2e 25/25 on :3520; committed on branch, not pushed | 2026-10-25 |
-| 5 — Verification | qa | Pending | — | — |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete; full chromium e2e 413/413 on :3520 incl. MFA full login; failing-first 27/40 | PASS | 2026-10-25 |
+| 6 — Shipped vs intent | analyst | Complete; defect closed in code and tests; no live Google round trip | SHIP WITH NOTES | 2026-10-25 |
 
 ---
 
@@ -518,93 +518,389 @@ Next: qa (Phase 5). Auth-touching, so the e2e above must be re-run by QA on a re
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-10-25
 **Verified by:** qa
+**Tree:** `/Users/cshenso/git/presby-platform/presby-gauth`, branch `pipeline/google-email-verified`, HEAD `9e75953`. This HEAD includes main `4c837c6` (0.42.3).
+
+**Scope run:**
+- Typecheck, lint, `npm run check`, plain `npm test` and `npm run build`, each in full.
+- The two new or changed test files and `src/auth.session-update.test.ts`.
+- Failing-first against the pre-fix sources, in a throwaway copy.
+- The five named auth specs, then the **full `--project=chromium` e2e suite**. The full suite is required because the diff touches `src/auth.ts`.
+- Coverage on the critical modules.
+
+**Not re-run:**
+- DB-backed suites (`npm run test:db`). The diff touches no migration, `authz.ts`, `src/lib/db/` or shared fixture.
+- The prod-build lane. No hydration or custom-host surface is touched.
+
+**Flag state:**
+- The branch had drifted from the CI baseline: 25 global flags were ON that the seed has OFF, `ui.branded_signin` among them.
+- Before each e2e run I reset global flags to the seeded defaults plus `scripts/ci/e2e-baseline-flags.sql`, leaving 10 enabled. The script `scripts/ci/e2e-reset-flags.sql` does not exist, so I derived the reset from `scripts/seed.ts`.
+- After the runs I restored the branch's previous flag state. A diff of before and after is identical.
+
+**Server:** my own `next dev -p 3520` with the `playwright.config.ts` webServer env (`RATE_LIMIT_DISABLED`, the domains fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`) and `AUTH_URL=http://localhost:3520`. `E2E_BASE_URL=http://localhost:3520`. Stopped by PID.
+
+**Environment checks:**
+- Disk: 573 GiB free.
+- `.env.local` points at a different Neon host from the main checkout (compared by hash; nothing echoed).
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS** (exit 0). The `@ts-expect-error` pin on the old three-argument call is live: the call is still a type error, so the pin compiles.
+`npm run lint`: **PASS** (exit 0, `--max-warnings=0`).
+`npm run check`: **PASS**, all eight tripwires (exit 0).
+`npm run build`: **PASS** (exit 0).
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Plain `npm test`:**
+- Files: 547 passed, 77 skipped (624).
+- Tests: 8380 passed, 2442 skipped (10822). Duration 25.8s. Failures: none.
+- All the skips are the DB-backed files gated on `.env.local` (`npm run test:db`), and are out of scope above.
+
+**Targeted run:**
+- `src/lib/auth/sign-in-gate.test.ts` 25, `src/auth.sign-in.test.ts` 15, `src/auth.session-update.test.ts` 6: **46/46 passed**.
+- The 0.42.3 session-update tests pass on the rebased branch.
+
+**Failing-first:**
+- Method: a `git archive HEAD` copy in the scratchpad, with `src/auth.ts` and `src/lib/auth/sign-in-gate.ts` swapped for their `4c837c6` versions and `node_modules` symlinked. The worktree was never modified.
+- Result: **27 failed | 13 passed (40)**, matching the implementer's 18 + 9.
+
+**`src/auth.sign-in.test.ts`, 9 failures:**
+- They fail for the right reason, and they do not depend on the gate's signature.
+- Seven cases fail with `expected true to be false`: claim false, absent, `"true"`, `1`, `null`, no profile, and the linked account. The pre-fix callback ignored `profile`, asked the lookup and allowed the sign-in.
+- Both log-line cases fail because `console.warn` is never called.
+- The verified, credentials, no-warn and tripwire cases pass before and after, as expected.
+
+**`sign-in-gate.test.ts`, 18 failures:**
+- Most fail with `findUserByEmail is not a function`. The fixed tests call the gate with the new argument order, so the old gate receives the claims object where it expects the lookup.
+- That is the intended compile-time break, but it means these failures do not show the claim semantics failing first.
+- **The failing-first evidence for the property itself is the wiring file**, and it is sound.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+**Named auth set** (`totp-full-login`, `post-login-routing`, `branded-signin`, `totp-callback-bypass`, `session-claim-integrity`):
+- Total 26, passed 26, failed 0, skipped 0. Duration 47.7s.
+- `totp-full-login.spec.ts:24` did a fresh email and password sign-in as the MFA-enrolled fixture (`admin-2fa-enrolled@presby.invalid`): `/totp`, a wrong code rejected, the real code accepted, then the landing page.
+- `branded-signin.spec.ts:308` also completed a full TOTP-verified login.
+
+**Full `--project=chromium` suite:**
+- Total 413, **passed 413**, failed 0, skipped 0, flaky 0. Duration 16.7m. Exit 0.
+
+**Refusal page:**
+- `GET /api/auth/error?error=AccessDenied` on :3520 returns HTTP 403 with "Access Denied / You do not have permission to sign in. / Sign in".
+- At 360px and at 1280px the page has no horizontal overflow. I viewed the screenshot at 360px.
+- This is the single page every `signIn` → `false` refusal reaches.
+
+**Dev log:** zero `signIn refused` lines across both runs, so the credentials path never warns.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+- `email_verified false — refuses and never reads users — regression for unverified provider email`, at `src/auth.sign-in.test.ts:96`.
+  - Guards against the `signIn` callback ignoring the provider's claim.
+  - This is the wiring proof. It failed before the fix and passes after.
+- `claim false — returns false and never reads users — regression for unverified provider email`, at `src/lib/auth/sign-in-gate.test.ts:146`.
+  - Guards against the gate allowing an unverified claim, or reading `users` before deciding.
+- `it.each` refusals:
+  - `sign-in-gate.test.ts:158`: undefined, null, `"true"`, `1`, `"false"`, `0`, `{}`.
+  - `auth.sign-in.test.ts:106`: absent, `"true"`, `1`, `null`.
+  - Together they pin strict `=== true`. A truthy check or a `?? true` default would fail them.
+- `an unverified claim for a linked account (DB-style id) is still refused`, at `auth.sign-in.test.ts:143`.
+- `a claim refusal warns once with provider and claim type, and nothing identifying`, at `auth.sign-in.test.ts:167`. It asserts that neither the email nor the subject id appears in the serialized warn arguments.
+- `the claim argument is required`, at `sign-in-gate.test.ts:234`: a type-level pin plus a behavioural backstop.
+- Dependency tripwire, at `auth.sign-in.test.ts:190`.
+  - It asserts that the installed `@auth/core` OAuth `handleAuthorized` call still passes `profile`.
+  - It is a dependency assertion, not a failing-first test.
+
+**Property check:** the tests encode the property ("a claim that is not strictly `true` is refused, with no `users` read"), not the fix's literal shape. Reordering the check after the lookup, defaulting the claim, or loosening it to truthy would each turn at least one test red.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100% statements, 100% branches.
+- `src/lib/two-factor.ts`: 91.3% statements, 100% branches. Lines 35-39 are uncovered; that was already true and meets the 90%+ target.
+- `src/lib/flags.ts`: 100% statements, 100% branches.
+- `src/lib/auth/sign-in-gate.ts`: 100% statements, 100% branches.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+No protected routes touched. The diff adds no `route.ts` and no `"use server"` action. Sign-in runs before authentication and involves no `FEATURES.*` key.
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| none touched | n/a | n/a | n/a |
+
+## Adversarial reading
+
+**Claim checked before any lookup:**
+- At `sign-in-gate.ts:84`, the claim is checked immediately after the credentials short-circuit. That is before the no-email check and before `findUserByEmail`.
+- For an unverified claim the result cannot depend on whether an account exists.
+
+**Strict `=== true`:** `isEmailClaimVerified` is `claim === true`, and the type is `unknown`.
+
+**Where the claim comes from:**
+- I confirmed from the installed `@auth/core` 0.41.3.
+- Google is `type: "oidc"`. The OAuth `profile` is the validated ID-token claims (`oauth/callback.js:167-169`), and Google sends `email_verified` there as a boolean.
+- `index.js:46` returns before `handleAuthorized` if `account` or the profile is missing, so the pre-existing `account?.provider ?? "credentials"` default cannot be reached on the OAuth path.
+
+**Refusal identical to other refusals:**
+- Every refusal (unverified, deactivated, no email) returns `false`.
+- A lookup that throws is a non-`AuthError` exception, which `handleAuthorized` (`index.js:393-405`) converts to `AccessDenied`.
+- All of these go through the same `throw new AccessDenied("AccessDenied")` and redirect, so page, status and `Location` are identical by construction. I confirmed the rendered page above.
+- The only differences are server-side: the warn line, and the unverified path skipping one database round trip. The design accepts both, and neither reveals anything about an account.
+
+**Warn line logs no PII:** it logs only `{ provider, claimType: typeof … }` (`auth.ts:250-253`). The test asserts that the email and the subject id are absent.
+
+**`jwt` callback untouched:** the diff has no hunk in `jwt`. The 0.42.3 session-update tests and `session-claim-integrity.spec.ts` pass.
+
+**No other provider path bypasses the gate:**
+- `src/auth.ts` registers only Google and Credentials.
+- `authConfig.callbacks` (`src/lib/auth/config.ts`) defines no `signIn`, so `src/auth.ts`'s override is the only one.
+- The `email` and `webauthn` `handleAuthorized` calls pass no profile, so the gate would refuse them. Neither is configured.
+- `src/app/(auth)/signin/actions.ts` calls only `signIn("credentials")`.
+
+**`INITIAL_ADMIN_EMAILS` bootstrap:** closed. The refusal happens inside `handleAuthorized`, before `handleLoginOrRegister` creates a row, so `ensureDefaultRole` never runs for an unverified claim.
 
 ## Copy Truthfulness
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
+No strings changed. `git diff -U0 origin/main...HEAD` over `.tsx`, `*-copy.ts`, email templates and release notes adds no lines. The one new text is an operator-facing server log line.
 
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
+- [x] Every added or changed string is in the design's Copy table. There are none; the table says "No strings change."
+- [x] The query behind each claim was opened. Not applicable: no claim about a person, account, date or state was added. The log line reports only `account.provider` and `typeof` of the claim.
+- [x] Each instruction traced to its role. Not applicable: the Access Denied page is Auth.js's own, unchanged.
+- [x] Older strings about the same subject were grepped. None user-facing is made false. The stale prose items are tracked under "Notes for the orchestrator" below.
+
+**Corrected comments:**
+- `sign-in-gate.ts:12-18` and the callback comment at `auth.ts:224-225` are accurate.
+- `auth.ts:90-97` is accurate for Google. One sentence overstates (note 1 below). It does not affect behaviour.
+
+## Notes for the orchestrator (non-blocking)
+
+1. **Comment imprecision at `src/auth.ts:95-96`.**
+   - The text reads: "A second OAuth provider is refused by that same gate until it is designed in."
+   - That is true only for a provider that does not send `email_verified: true`.
+   - A provider that does send it would pass the gate without any design work, for example a tenant-controlled OIDC IdP that can assert verification for any address.
+   - Today only Google is registered, so behaviour is correct.
+   - Suggested wording, for a later touch: "…is refused unless it asserts `email_verified === true`; the claim is only as trustworthy as its issuer, so design any second provider in before adding it."
+2. **`next dev` rewrites `AGENTS.md`.**
+   - Next 16.4.2 changes the agent-rules heading in the tracked `AGENTS.md` from `#` to `##` whenever a dev server starts. It happened on both of my server starts.
+   - I reverted it each time with `git checkout -- AGENTS.md`, the only worktree touch in this run, which undid a side effect of my own commands. The final `git status` is clean.
+   - This was already true and is not caused by this diff. It will dirty every worktree that runs e2e. Worth a TODO line, either to commit the `##` form or to find the setting that stops the rewrite.
+3. **Integration carry-forwards (Rule 16):**
+   - DECISION-246 is not yet in `docs/decisions.md`, although both changed comments cite it.
+   - DECISION-015's text at `docs/decisions.md:3047` still reads "which Google verifies at token issuance". It is left as history and amended by DECISION-246.
+   - The TODO line the analyst called 311 is now **line 315** ("Invitations Increment 3: Google"). Split it at ship. `docs/decisions.md:389` describes the same gate as future Increment 3 work.
+4. **Honest limit (Phase 3 and 4 agree):**
+   - No automated test drives a real Google round trip, and Google is configured in no environment.
+   - Coverage that "the claim arrives" rests on the wiring test plus the `@auth/core` tripwire, and on my reading of the installed OIDC path.
+   - Verify the claim shape on `development` when Google is first configured.
+5. **Shared-database warning.** globalSetup prints "DATABASE_URL points at a Neon shared database" for any `*.neon.tech` host. The connection here is the dedicated `pipeline-google-email-verified` branch, so the warning does not apply. The specs that matter do fresh sign-ins rather than relying on reused storage states.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**PASS** — auth-touching gate satisfied.
+- Typecheck, lint, all eight tripwires, the unit suite and the build are green.
+- Failing-first is confirmed against the pre-fix sources: 27 failures, and the 9 wiring failures fail for the right reason.
+- The 0.42.3 session tests pass.
+- The full chromium e2e suite passed 413/413 with no skips, against my own dev server on :3520 with flags reset to the CI baseline. That includes `totp-full-login` with the MFA-enrolled seeded user (password, then TOTP, then landing).
+- The adversarial reading found no bypass. No strings changed.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete | PASS (auth gate met: full chromium e2e 413/413 on :3520 incl. MFA-enrolled full login; failing-first 27/40 confirmed on pre-fix sources) | 2026-10-25 |
+
+## Handoff
+
+- **Next: analyst (Phase 6).**
+- Phase 6 inputs:
+  - The Google round trip remains unverifiable, since Google is unconfigured everywhere. Per the Phase 1 note, that points to SHIP WITH NOTES.
+  - I have already verified the refusal page at 360px on :3520. Phase 6 may still want to look at it on `development`.
+- Orchestrator at integration: notes 1-3 above (DECISION-246 entry, the TODO line 315 split, the AGENTS.md hazard TODO, optionally the comment wording).
+- Evidence logs are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/`: `e2e-full.log`, `e2e-desktop.log`, `unit.log`, `build.log`, and `access-denied-360.png`.
+- Pre-fix copy: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/prefix/`.
 
 ---
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Work-log:** `2026-10-25-google-email-verified` (F231), bug-fix variant
+**Reviewed:** `/Users/cshenso/git/presby-platform/presby-gauth`, HEAD `9e75953` (on main `4c837c6` = 0.42.3), plus the uncommitted work-log update.
+
+I re-read the Phase 1 review, Phase 3 design, Phase 4 and Phase 5. I read the full `git diff main...HEAD` over `src/` myself. I re-ran `src/lib/auth/sign-in-gate.test.ts` and `src/auth.sign-in.test.ts`: 40 of 40 pass. I did not repeat QA's e2e, build or failing-first runs. I took those from Phase 5.
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.** The defect is closed in code and in tests. The notes are limits and follow-ups, not defects. The main limit is that no real Google exchange has happened anywhere.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A sign-in through any provider other than credentials is now refused unless the provider asserted `email_verified === true`. The refusal comes before any user lookup, so no account is linked or created, and the `INITIAL_ADMIN_EMAILS` bootstrap cannot be reached through an unverified claim. This is latent hardening, proven by unit and wiring tests but not by a live Google exchange.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The gate is where DECISION-187 said it should be.** `evaluateSignIn` checks `isEmailClaimVerified(claims.emailVerified)` right after the credentials short-circuit. That is before the no-email check and before `findUserByEmail`.
+  - For an unverified claim the outcome cannot depend on whether an account exists.
+  - The check is strictly `=== true` on an `unknown`. `false`, absent, `null`, `"true"`, `1`, `0` and `{}` all refuse.
+- **It cannot be skipped by accident.** `claims` is a required parameter with no default. The old three-argument call is a type error, pinned by a live `@ts-expect-error`, and also refuses at runtime.
+- **The claim is actually fed.** `src/auth.ts` destructures `profile` and passes `{ emailVerified: profile?.email_verified }`.
+  - `src/auth.sign-in.test.ts` drives the real callback. It failed 9 of 15 against the pre-fix sources and passes now.
+  - A tripwire test reads the installed `@auth/core` and fails if an upgrade stops passing `profile` to the callback.
+- **No account is created or linked by an unverified claim.** The refusal happens in `handleAuthorized`, before `handleLoginOrRegister`. The adapter never creates a row, so `ensureDefaultRole` and `INITIAL_ADMIN_EMAILS` are never reached.
+  - The "already linked" case is covered too: an unverified claim is refused even when `user` carries a DB-style id.
+- **Behaviour preserved.** The diff has no hunk in `jwt`, and `allowDangerousEmailAccountLinking` stays `true`. The other paths are unchanged:
+  - credentials sign-in returns `true` with no lookup;
+  - verified with no row returns `true`;
+  - verified with an active row returns `true`;
+  - verified with a deactivated row returns `false`;
+  - no email returns `false`;
+  - a lookup error still ends in Access Denied.
+  - QA ran the full chromium e2e suite: 413 of 413, including the MFA-enrolled full login. The session-update tests from 0.42.3 pass on the rebased branch.
+- **No user-visible string changed.** Refusals all reach Auth.js's own `/api/auth/error?error=AccessDenied` page. QA viewed it at 360px: HTTP 403, "Access Denied / You do not have permission to sign in. / Sign in", no horizontal overflow. The only new text is an operator-facing `console.warn` with provider and claim type, and no email, subject id or name (asserted by a test).
+- **No state change from `signIn`.** The claim is not persisted to the token or to `users.emailVerified`, and there is no audit row. That keeps DECISION-187 honest and avoids an attacker-writable audit table.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Phase 1:** refuse an unverified or absent claim before any lookup. **Shipped:** done, with a strict-boolean predicate and a required argument. **Matches.**
+- **Phase 1:** a wiring test, so a correct gate that `auth.ts` never feeds cannot pass. **Shipped:** `src/auth.sign-in.test.ts` plus the dependency tripwire. **Matches.**
+- **Phase 1:** keep the unverified refusal indistinguishable from the deactivated refusal. **Shipped:** same `false` return, same Auth.js page and redirect. **Matches by construction, and the page was viewed by QA.**
+  - Two server-side differences are accepted in the design: the warn line, and one skipped DB round trip on the unverified path.
+- **Phase 1:** no new strings, UI, routes, flags or schema. **Shipped:** none. **Matches.**
+- **Phase 1:** correct the false comments. **Shipped:** the `sign-in-gate.ts` header and JSDoc and the `signIn` callback comment are accurate. The comment above `allowDangerousEmailAccountLinking` overstates one sentence (see Follow-Up 1). **Acceptable drift.**
+- **Phase 1:** "Phase 6 should hit the refusal page on `development` at 360px, and walk Google as the created person." **Shipped:** the page was viewed on QA's :3520 dev server, not on `development`. The walk is impossible because Google is unconfigured in every environment. **Limit, recorded below; this is what moves the verdict to WITH NOTES.**
+- **Phase 1:** split TODO line 311. **Shipped:** not yet done. It is an integration step and appears below as text, now at line 315.
+
+## Limits (stated plainly)
+
+- **No real Google round trip exists anywhere.**
+  - "The claim arrives" rests on three things: the wiring test, the `@auth/core` tripwire, and QA's reading of the installed OIDC path (profile is the validated ID-token claims, and Google sends `email_verified` as a boolean).
+  - The shape of Google's real claim has never been seen by this code.
+- **The "walk as the person this path creates" requirement cannot run.** Google is unconfigured in every Vercel environment, and production `accounts` has 0 rows.
+  - I therefore make no claim about what a verified Google user sees on `/launch` or `/home` at 360px.
+  - The unchanged credentials path covers the shared callback, but not the Google refusal and not a verified Google landing.
+- **This is a latent hardening, not an active exposure.** `INITIAL_ADMIN_EMAILS` is set in Production, so the bootstrap consequence would have been real the moment Google was configured. It must not reach `development` or production Google configuration before this ships.
+- **The Access Denied page is generic and third-party.** "You do not have permission to sign in" is slightly off for an unverified address, and a legitimate Workspace user whose profile reports `false` gets no explanation. The log line is the only diagnostic. Accepted in Phase 3.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: not applicable (no new surface).
+- Failure microcopy: pass for "no change" (Auth.js's own page, 403, 360px-clean per QA). The wording is not tailored to this refusal. See Follow-Up 3.
+- Permission gate: not applicable. Sign-in is pre-authentication and there is no `FEATURES.*` key. There is no flag, by decision.
+- Audit event: not applicable by design. A refusal is not a mutation, and the PII-free warn line stands in.
+- Mobile (360px): pass on the refusal page (QA). The Google verified-landing walk is not run (limit above).
+- 2FA gate: unchanged. `jwt` is untouched, and an enrolled user still meets `/totp`.
+- Adversarial: no bypass found.
+  - `src/auth.ts` registers only Google and Credentials.
+  - `authConfig.callbacks` defines no `signIn`, so the `src/auth.ts` override is the only one.
+  - The email and webauthn paths pass no profile, so they would be refused.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+1. **Comment wording at `src/auth.ts:95-96`. Recommendation: fix in this PR, comment-only, as its own `docs(auth)` commit.**
+   - The sentence "A second OAuth provider is refused by that same gate until it is designed in" is false for any provider that does send `email_verified: true`. A tenant-controlled OIDC IdP can assert that for any address, and it would pass.
+   - This change exists to remove a false security premise from a comment. Leaving a softer false one in the same lines, one commit after fixing the first, defeats the point.
+   - DECISION-246 will state the corrected rule, and a comment that contradicts its own decision is worse than a few more minutes of work.
+   - The change is comment-only, so QA's PASS stands for executable code. Re-run `npm run typecheck`, `npm run lint` and the two test files once. A separate commit also avoids amending (Rule 11).
+   - Suggested wording: "…is refused unless it asserts `email_verified === true`. That claim is only as trustworthy as its issuer, so design any second provider in, and consider setting this flag to `false`, before registering it."
+   - If the orchestrator would rather not touch `src/auth.ts` again, the fallback is a TODO line. I do not recommend that.
+2. **Verify the real Google claim shape on `development` when Google is first configured.** Carry this on the Increment 3 TODO line (text below).
+3. **A truthful `/signin` message for refused OAuth sign-ins (existing TODO line 257).** No new line. Add this pipeline as context: an unverified-claim refusal now lands on the same generic page, and the log line is its only diagnostic.
+4. **Drop the `AGENTS.md` TODO.** QA's note 2 was already fixed by the workflow-efficiency PR #52, so no action.
+5. **Documentation carry-forwards at ship (Rules 10, 14, 15).**
+   - `docs/decisions.md` line 389 still describes the gate as future Increment 3 work. Add "shipped in 0.42.4 (DECISION-246)".
+   - DECISION-015 point 2 stays as history, amended by DECISION-246.
+   - `docs/product/functionality-map.md` line 32 (Public / Auth) and the sign-in bullet at line 53 gain "refuses a provider email the provider has not verified".
+   - Rule 15: not architectural, so no `docs/architecture.md` change.
+   - Rule 13: no what's-new entry, because it is not member-visible.
+   - Rule 12: no originating feedback row.
+   - Starter-generic: stage a `/downstream-sync` candidate note.
 
-## Red Flags (if NEEDS REWORK)
+## TODO.md text
 
-- [Specific. What has to change before this ships.]
+Replace line 315, "Invitations Increment 3: Google", with:
 
-## Orchestrator note on the Phase 1 open questions (2026-10-25)
+```
+- [ ] **Invitations Increment 3: Google.** Configure Google (`AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET`, operator, `development` first), add a Flow 4 e2e through Google, and on that first real exchange confirm `email_verified` arrives as a boolean `true` in the profile and walk a verified sign-in plus the Access Denied page at 360px (the 0.42.4 gate has no live Google round trip behind it; only the wiring test and the `@auth/core` tripwire). No claim in `signIn`/`jwt` (DECISION-187). The `email_verified === true` gate shipped in 0.42.4 (DECISION-246). — `docs/work-log/2026-10-21-invitations.md` Phase 2/6; `docs/work-log/2026-10-25-google-email-verified.md` Phase 6
+```
 
-- **Production exposure: latent, not live.** `vercel env ls` (names only) shows no `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` in any Vercel environment, so the Google button ends in an Auth.js configuration error there. Production `accounts` holds **0 rows** (read-only count by provider), so no Google sign-in has ever completed. `INITIAL_ADMIN_EMAILS` **is set in Production** (created 55 days ago), so the role-bootstrap consequence would be real the moment Google is configured: this fix must land before Google is configured in any environment (Increment 3 of invitations, and 2b's auto-connect).
-- Severity for the release note: a latent sign-in hardening, not an active exposure. Neutral wording still applies.
+Add to Done:
+
+```
+- [x] 2026-10-25 — F231: sign-in refuses a provider email the provider has not verified (`email_verified === true` in `evaluateSignIn()`, before any lookup) — SHIP WITH NOTES (no live Google round trip; Google unconfigured everywhere) — `docs/work-log/2026-10-25-google-email-verified.md`
+```
+
+On line 257, append: "(0.42.4 adds a second route to this page: a provider email that is not verified; the server log line `signIn refused: provider email not verified` is the only diagnostic.)"
+
+## DECISION-246 draft (for `docs/decisions.md`, newest first, above DECISION-230)
+
+This follows the log's current bullet style. It corrects the Phase 3 draft's "other providers are refused" wording.
+
+```
+**DECISION-246 — A non-credentials sign-in must carry `email_verified === true`; the gate refuses before any user lookup. Amends DECISION-015 point 2; fulfils the `evaluateSignIn()` clause of DECISION-187.**
+
+**Status:** Resolved (operator-visible finding F231, architect ruling in the 2b addendum 2, R38) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-google-email-verified` (v0.42.4; no migration)
+
+- **Rule.** `evaluateSignIn(provider, user, claims, findUserByEmail)` returns `false` for every non-credentials provider unless `claims.emailVerified === true` (strict boolean: `false`, absent, `null`, `"true"`, `1` all refuse), and decides that before the no-email check and before it reads `users`. The `signIn` callback in `src/auth.ts` feeds `{ emailVerified: profile?.email_verified }`. `claims` is a required parameter with no default, so a call site that forgets it is a compile error.
+- **Amendment to DECISION-015 point 2.** That point said keying the OAuth lookup on `user.email` is safe because Google "verifies [the email] at token issuance". The protocol does not guarantee that: the profile carries an `email_verified` claim that may be `false` or absent, and Auth.js does not enforce it. With `allowDangerousEmailAccountLinking: true`, an unverified claim of an existing user's address signed in as that user (an enrolled user still met `/totp`: a mitigation, not the fix), and a claim of an unused address created a pre-claimed account that, for an address in `INITIAL_ADMIN_EMAILS`, received `ADMIN_ROLE`. The verified claim, not the issuer, is the proof. The email-keyed lookup, the soft-deactivation rule and the credentials short-circuit in DECISION-015 stand.
+- **Fulfils DECISION-187.** The refusal is a pure decision inside `evaluateSignIn()`. Nothing is applied from `signIn` or `jwt`, no verified flag is persisted to the token or to `users.emailVerified`, and `jwt` is untouched.
+- **Refusal behaviour.** A refusal returns `false`, so Auth.js shows its generic "Access Denied" page, byte-identical to a deactivated or no-email refusal (no string changes; no enumeration). One PII-free `console.warn` (`provider` and `typeof` the claim only; never email, subject id or name) records a claim refusal. No audit row: a refusal is not a mutation and an unauthenticated party would be writing it. No flag: a security refusal must not be switchable.
+- **What it does and does not cover.** The gate is a property of the claim, not of the provider's name. A second provider that asserts `email_verified: true` passes it with no further design work, and the claim is only as trustworthy as its issuer (a tenant-controlled OIDC IdP can assert it for any address). Any second provider therefore needs its own design review before it is registered, and `allowDangerousEmailAccountLinking` should be set to `false` for it. The email and WebAuthn Auth.js paths pass no profile and would be refused; neither is configured.
+- **Rejected.** Persisting the claim (a state change from `signIn`/`jwt`; a design question for Increment 2b). Removing `allowDangerousEmailAccountLinking` (breaks existing-account Google sign-in; unnecessary once gated). An optional claim argument defaulting to allow (reopens the hole at any missed call site). An audit row per refusal. A flag.
+- **Accepted residual (`paper`).** No automated test drives a real Google exchange: that the claim arrives rests on the wiring test (`src/auth.sign-in.test.ts`), a dependency tripwire that reads the installed `@auth/core`, and a reading of its OIDC path. Google is configured in no environment, and production `accounts` has 0 rows, so the defect was latent. Verify the claim shape on `development` when Google is first configured. A user whose profile reports the address unverified sees the generic Access Denied page and is told nothing specific (TODO: `/signin` message for OAuth failures).
+- **Revisit if** `@auth/core` stops passing `profile` to the `signIn` callback (the tripwire fails first), a second provider is added, or Increment 2b decides to persist a verified flag.
+```
+
+## Release note draft, 0.42.4 (patch)
+
+For the `v0.42.md` table of contents:
+
+```
+| [0.42.4](#0.42.4) | 2026-10-25 | Security | A security update to how sign-in with an outside account is checked |
+```
+
+Entry:
+
+```
+<a name="0.42.4"></a>
+## 0.42.4 — 2026-10-25
+
+**Security: a security update to how sign-in with an outside account is checked.**
+
+**Value:** Before sign-in with an outside account such as Google is switched on, we added a check that the platform only accepts an email address the outside provider says it has confirmed.
+
+#### What's New
+
+- **Nothing should look different.** Signing in with your email and password, entering your authenticator code, and using a recovery code all work as before, and you land where you did before.
+- **You do not need to do anything.** You will not be signed out.
+- **What changed behind the scenes.** The sign-in check now requires the outside provider to say the email address is confirmed before the platform looks at any account. If it does not, the sign-in is refused with the same "Access Denied" page that appears for other refused sign-ins.
+- **Sign-in with Google is not turned on yet.** This update is groundwork for turning it on safely.
+- **If anything looks off,** such as being refused when signing in with an outside account, please tell us with the feedback button.
+```
+
+This avoids "vulnerability", "exposure" and "exploit", and it does not claim any account was affected. It says "not turned on yet", which is true: Google is unconfigured everywhere. It denies no residual: the refusal page is described as the same generic page, and the live round trip is not claimed.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES (defect closed in code and tests; no live Google round trip anywhere; verified-Google 360px walk not runnable; comment fix at `src/auth.ts:95-96` recommended in-PR; TODO line 315 split; DECISION-246 and the 0.42.4 note drafted) | 2026-10-25 |
+
+## Handoff
+
+- **Next: orchestrator, at integration.**
+  1. Make the comment-only fix at `src/auth.ts:95-96` as a separate `docs(auth)` commit. Then re-run typecheck, lint and the two test files.
+  2. Replace the Phase 6 placeholder section in the work-log with this text. Keep the orchestrator note about the Google environment variables and `INITIAL_ADMIN_EMAILS`.
+  3. Write DECISION-246 into `docs/decisions.md`, and update line 389.
+  4. Apply the TODO edits above (Rule 10).
+  5. Update the functionality-map lines 32 and 53 (Rule 14).
+  6. Run `/release-notes` for 0.42.4 and `package.json`.
+  7. Stage the `/downstream-sync` note.
+  8. Run `/pre-push`, with the push as a separate gesture and the user's approval first (Rule 1 and Rule 5).
+- I made no file changes, per role.
+- Key files:
+  - `/Users/cshenso/git/presby-platform/presby-gauth/src/lib/auth/sign-in-gate.ts`
+  - `/Users/cshenso/git/presby-platform/presby-gauth/src/auth.ts`
+  - `/Users/cshenso/git/presby-platform/presby-gauth/src/auth.sign-in.test.ts`
+  - `/Users/cshenso/git/presby-platform/presby-gauth/src/lib/auth/sign-in-gate.test.ts`
+  - `/Users/cshenso/git/presby-platform/presby-gauth/docs/work-log/2026-10-25-google-email-verified.md`
+

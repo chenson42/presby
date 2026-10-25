@@ -4,6 +4,21 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-246 — A non-credentials sign-in must carry `email_verified === true`; the gate refuses before any user lookup. Amends DECISION-015 point 2; fulfils the `evaluateSignIn()` clause of DECISION-187.**
+
+**Status:** Resolved (operator-visible finding F231, architect ruling in the 2b addendum 2, R38) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-google-email-verified` (v0.42.4; no migration)
+
+- **Rule.** `evaluateSignIn(provider, user, claims, findUserByEmail)` returns `false` for every non-credentials provider unless `claims.emailVerified === true` (strict boolean: `false`, absent, `null`, `"true"`, `1` all refuse), and decides that before the no-email check and before it reads `users`. The `signIn` callback in `src/auth.ts` feeds `{ emailVerified: profile?.email_verified }`. `claims` is a required parameter with no default, so a call site that forgets it is a compile error.
+- **Amendment to DECISION-015 point 2.** That point said keying the OAuth lookup on `user.email` is safe because Google "verifies [the email] at token issuance". The protocol does not guarantee that: the profile carries an `email_verified` claim that may be `false` or absent, and Auth.js does not enforce it. With `allowDangerousEmailAccountLinking: true`, an unverified claim of an existing user's address signed in as that user (an enrolled user still met `/totp`: a mitigation, not the fix), and a claim of an unused address created a pre-claimed account that, for an address in `INITIAL_ADMIN_EMAILS`, received `ADMIN_ROLE`. The verified claim, not the issuer, is the proof. The email-keyed lookup, the soft-deactivation rule and the credentials short-circuit in DECISION-015 stand.
+- **Fulfils DECISION-187.** The refusal is a pure decision inside `evaluateSignIn()`. Nothing is applied from `signIn` or `jwt`, no verified flag is persisted to the token or to `users.emailVerified`, and `jwt` is untouched.
+- **Refusal behaviour.** A refusal returns `false`, so Auth.js shows its generic "Access Denied" page, byte-identical to a deactivated or no-email refusal (no string changes; no enumeration). One PII-free `console.warn` (`provider` and `typeof` the claim only; never email, subject id or name) records a claim refusal. No audit row: a refusal is not a mutation and an unauthenticated party would be writing it. No flag: a security refusal must not be switchable.
+- **What it does and does not cover.** The gate is a property of the claim, not of the provider's name. A second provider that asserts `email_verified: true` passes it with no further design work, and the claim is only as trustworthy as its issuer (a tenant-controlled OIDC IdP can assert it for any address). Any second provider therefore needs its own design review before it is registered, and `allowDangerousEmailAccountLinking` should be set to `false` for it. The email and WebAuthn Auth.js paths pass no profile and would be refused; neither is configured.
+- **Rejected.** Persisting the claim (a state change from `signIn`/`jwt`; a design question for Increment 2b). Removing `allowDangerousEmailAccountLinking` (breaks existing-account Google sign-in; unnecessary once gated). An optional claim argument defaulting to allow (reopens the hole at any missed call site). An audit row per refusal. A flag.
+- **Accepted residual (`paper`).** No automated test drives a real Google exchange: that the claim arrives rests on the wiring test (`src/auth.sign-in.test.ts`), a dependency tripwire that reads the installed `@auth/core`, and a reading of its OIDC path. Google is configured in no environment, and production `accounts` has 0 rows, so the defect was latent. Verify the claim shape on `development` when Google is first configured. A user whose profile reports the address unverified sees the generic Access Denied page and is told nothing specific (TODO: `/signin` message for OAuth failures).
+- **Revisit if** `@auth/core` stops passing `profile` to the `signIn` callback (the tripwire fails first), a second provider is added, or Increment 2b decides to persist a verified flag.
+
+---
+
 **DECISION-231 — Workflow guardrails: the push gate parses commands instead of scanning them and refuses a command that moves HEAD and pushes; Playwright refuses port 3000 from a worktree; `withDbRetry` is one shared helper whose scope is idempotence; the flag reset is a guarded SQL file checked against the seed.**
 
 **Status:** Resolved (tech-lead, implementation; operator rulings Q1-Q9 on the analyst's defaults, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-retro-workflow-efficiency` (Phase 3; no `src/` or `drizzle/` change, no version bump)
@@ -401,7 +416,7 @@ Google's published fill, stroke, text and "G" colours for the light and dark but
 
 **Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 2, R3; amends Phase 1 C4, Flow 8, G11, Q8)
 
-`src/auth.ts` and `src/lib/auth/` are unchanged in Increment 1. Google sign-in for an invitee (Increment 3) means configuring Google, adding `email_verified === true` to `evaluateSignIn()`, and a Flow 4 e2e through Google; it never adds an automatic claim to the auth callbacks.
+`src/auth.ts` and `src/lib/auth/` are unchanged in Increment 1. Google sign-in for an invitee (Increment 3) means configuring Google and a Flow 4 e2e through Google (the `email_verified === true` gate in `evaluateSignIn()` shipped in 0.42.4, DECISION-246); it never adds an automatic claim to the auth callbacks.
 
 (2026-10-21, Phase 2.)
 

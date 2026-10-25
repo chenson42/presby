@@ -1063,3 +1063,173 @@ Pending.
 - **S2 / Question 1: yes** — the create-form `HydrationGate` ships now as a standalone bug-fix pipeline (`2026-10-25-create-org-hydration`, carries F275), not inside Increment 1.
 - **Question 2: keep the Two-factor card** — count only, linking to `/admin/2fa`, recorded as part of the existing 2FA exception (DECISION-252).
 - The tech-lead's other defaults (version line in nav foot, skip link, single-item Content group, `/home` Admin card title) stand.
+
+---
+
+# Phase 5 — run 2 (qa)
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**HEAD:** `b0308d6`, branch `pipeline/platform-admin-redesign`, worktree `/Users/cshenso/git/presby-platform/presby-padmin`
+
+The loop-back closed every form I named in run 1 and finding 2 is fixed, but I am returning **FAIL** again. Three new forms I tried in the same class still get a tenant table past the boundaries scan, and all three compile. One of them needs no import and no SQL text at all.
+
+**Scope of this run:**
+- Typecheck, lint, `npm run check` and plain `npm test`, all in full.
+- The three touched test files.
+- A mutation set against the new boundaries scan, in a scratch copy.
+- Failing-first for finding 2, in a scratch copy.
+
+**What carries over from run 1.** `git diff --stat fa742f7..HEAD` touches only:
+- `src/lib/admin-portal/dashboard/boundaries.test.ts`
+- `src/app/(admin)/admin/organizations/page.test.tsx` (new)
+- `src/app/(admin)/admin/2fa/page.test.tsx` (new)
+- `docs/work-log/2026-10-25-platform-admin-redesign-inc1.md`
+
+No source, config, fixture or e2e file changed. So these run 1 results stand and were not re-run: build, the DB-backed scope (76 files / 811 tests), chromium e2e 420/420 including the MFA login set, the 404 status checks, the 360px browser pass, E27 EXPLAIN, the feature-gate audit, copy truthfulness, and failing-first on the three earlier fix commits.
+
+## Type Check
+
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS (`--max-warnings=0`)
+- `npm run check`: PASS, all eight tripwires (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports)
+
+## Unit Tests
+
+- **Plain `npm test`:** 663 files (583 passed, 80 skipped), 11,222 tests (8,764 passed, 2,458 skipped). The 80 skipped files are the database-gated suites, the same set as run 1. The two extra files over run 1 are the new page tests.
+- **Touched files, verbose:** 3 files, 28 tests, all passed, none skipped.
+  - `boundaries.test.ts`: 24
+  - `2fa/page.test.tsx`: 3
+  - `organizations/page.test.tsx`: 1
+
+Failures: none.
+
+## End-to-End Tests
+
+Not re-run; only test files changed. Run 1 stands: 420 passed, 0 failed, 0 skipped.
+
+## Regression Tests Added
+
+- **`src/app/(admin)/admin/organizations/page.test.tsx:44`**, "describes the page as finding and managing an organization, not as a brand-colour tool — regression for the stale list description". It pins the exact Group H string and fails if "brand colour", "neutralis" or "abusive tenant" appear.
+  - **Failing-first confirmed** in a scratch copy at HEAD with `organizations/page.tsx` put back to its pre-fix version (`98d4c5d`): 1 failed ("Unable to find … /^Find an organization,/").
+  - With the current `page.tsx` restored in the same copy: 1 passed.
+- **`src/app/(admin)/admin/2fa/page.test.tsx`** (3 tests) pins "Showing the first {shown} of {total} accounts." It appears only when the list is capped, not when every account is listed, and not on the empty list. This is a new string rather than a fixed one, so I did not require a failing-first check.
+- **`boundaries.test.ts`** now carries 12 synthetic-offender cases, plus a check that the idioms the real readers use are not reported.
+
+## Mutation check of the boundaries scan (finding 1)
+
+Each row adds one file, `zz-mutant.ts`, to `src/lib/admin-portal/dashboard/` in a scratch copy of HEAD, reaching the tenant table `officer_terms`. The unmodified copy passes 24/24.
+
+| # | Form | Result |
+|---|---|---|
+| M1 | `import { officerTerms } from "@/lib/db/domain/officers"` plus raw `from officer_terms` | **caught** (2 red) |
+| M2 | barrel `import { officerTerms } from "@/lib/db/domain"` plus `.from(officerTerms)` | **caught** (run 1: missed) |
+| M3 | comma join `from organizations o, officer_terms t` | **caught** (run 1: missed) |
+| M4 | quoted `from "officer_terms"` | **caught** (run 1: missed) |
+| M5 | `import * as domain from "@/lib/db/domain/officers"` | **caught** (run 1: missed) |
+| M9 (new) | `SELECT COUNT(*)\n FROM\n OFFICER_TERMS` (upper case, split across lines) | **caught** |
+| M10 (new) | `export { officerTerms } from "@/lib/db/domain/officers"` | **caught** |
+| M11 (new) | `where exists (select 1 from officer_terms t …)` | **caught** |
+| **M6** (new) | relative import `import { officerTerms } from "../../db/domain/officers"` plus `.from(officerTerms)` | **not caught**, 24/24 green |
+| **M7** (new) | `getPlatformDb().query.officerTerms.findMany({ columns: { id: true } })`: no import, no SQL | **not caught**, 24/24 green |
+| **M8** (new) | `getPlatformDb().select({ n: count() }).from(sql\`officer_terms\`)` | **not caught**, 24/24 green |
+
+**The three misses compile.** I ran `tsc --noEmit` over the scratch copy with M6, M7 and M8 in place and it reported no errors. To confirm the M7 result was not a fluke, I added `query.noSuchTable` beside it: tsc rejected that line (TS2339) and accepted `query.officerTerms`.
+
+**Why M7 works.** `src/lib/db/schema.ts:531` contains `export * from "./domain"`. `getPlatformDb()` is `drizzle(platformPool, { schema })` (`src/lib/db/index.ts:87`). So every tenant table is on the platform connection's relational query API. The same `db.query.<table>` style is already used in the codebase (`users/[id]/page.tsx:25`), so this is a normal way to write a reader, not an exotic one.
+
+**Why the scan misses them** (`boundaries.test.ts` as of `b7b0d7f`):
+- **M6:** `dbImportOffenders` and `aliasImports` only examine `@/` paths. A relative path into `src/lib/db/` is never checked.
+- **M7:** nothing scans `.query.<name>`.
+- **M8:** `sqlTables` needs whitespace after `from`/`join`. A `sql` fragment passed to the query builder's `.from(` has a table name with no keyword in front of it.
+
+## Coverage on Critical Modules
+
+Unchanged from run 1 (no source changed): `permissions.ts` 100%, `flags.ts` 100%, `two-factor.ts` 91.3% statements.
+
+## Feature-Gate Audit
+
+No route, page or action changed since run 1. Run 1's table stands.
+
+## Copy Truthfulness
+
+No user-facing string changed since run 1; run 1's result stands.
+- [x] The one gap from run 1, a fixed string with no exact-text test, is now closed by `organizations/page.test.tsx:44`, which fails on the old text.
+
+## Verdict
+
+**FAIL: finding 1 is narrowed but still open.** The scan now catches M1–M5 and M9–M11, but not M6–M8. So "a new tenant table is forbidden by default" (E19, and the "Enforcement" line drafted for DECISION-252) is still not true inside the scanned directory.
+
+The narrowest change that holds the property is to stop adding patterns for each new form and instead list the only forms allowed:
+- **Relative imports:** allow only `./` sibling imports inside the dashboard directory. Report any relative path that leaves it.
+- **Relational query API:** report `.query.` used on the platform connection in this directory, or allow only `.query.<allow-listed table>`.
+- **Query-builder tables:** the first argument of `.from(` and of any `…Join(` must be an identifier imported from an allow-listed table import. Report a `sql` fragment or any other expression there.
+- **Synthetic cases:** add M6, M7 and M8 to the "reports a tenant table reached through …" list.
+
+**If tech-lead would rather not keep extending the scan,** the alternative is a written ruling: name the forms the scan cannot see as accepted `paper` in DECISION-252, beside its existing residual for readers outside the directory, and drop the "forbidden by default" wording from the enforcement claim. That is a design ruling; QA cannot accept the risk on the pipeline's behalf.
+
+Finding 2 is **closed**. Everything else in run 1 stands. On a run 3, QA will re-run the full mutation set (M1–M11 plus any new forms), the touched files, typecheck, lint, check and plain `npm test`. Run 1 will stand again if the diff is still test-only.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 2) | qa | Complete. Typecheck, lint, check 8/8, unit 583 files / 8,764 tests, touched files 28/28; finding 2 closed (failing-first confirmed); finding 1 narrowed but open: M6 relative import, M7 `getPlatformDb().query.<table>`, M8 `.from(sql\`table\`)` pass the scan, and all three compile; loop-back diff is test files and work-log only, so run 1's e2e, DB, browser and audit results stand | FAIL | 2026-10-25 |
+
+## Handoff
+
+**Next agent: api-developer (Phase 4, loop-back 2).** Harden `src/lib/admin-portal/dashboard/boundaries.test.ts` against M6, M7 and M8 as above, test file only. Alternatively, the orchestrator sends the question to **tech-lead** for a DECISION-252 ruling that accepts those forms as `paper`.
+
+Evidence:
+- Run 2 logs: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs2/`
+- Mutation copy: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/mut2`
+- Failing-first copy for finding 2: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/ff2`
+
+Git status in the worktree is as I found it: only the orchestrator's change to `docs/work-log/2026-10-25-platform-admin-redesign-inc3.md`.
+
+---
+
+# Phase 4 — loop-back 2 (api-developer, after Phase 5 run 2 FAIL)
+
+**Date:** 2026-10-25. Test-only; no product code, design or copy changed. Commit `b8d33c4` on `pipeline/platform-admin-redesign`.
+
+**Orchestrator ruling:** stop adding deny patterns. `src/lib/admin-portal/dashboard/boundaries.test.ts` becomes an allow-only scan of how a reader touches the database, for every non-test file in the directory.
+
+## What the scan allows now (and reports everything else)
+
+| Rule | Allowed | Reported as |
+|---|---|---|
+| Relative imports (`moduleSpecOffenders`) | only a `./name` sibling | `relative import <spec>` (any path leaving the directory, any `..`, including dynamic `require`/`import`) |
+| Bare modules (same function) | `server-only`, `drizzle-orm` | `bare module <spec>` (a driver, a pool, `drizzle-orm/neon-serverless`, ...) |
+| `@/` imports | the existing module and table allow-lists | unchanged |
+| Relational API (`queryApiAccess`) | none | `.query access` (dot, optional chain, literal bracket key) |
+| Query-builder tables (`builderTableOffenders`) | `.from(x)`, `.xxxJoin(x, ...)`, `.join(x)` where `x` is an identifier bound directly by a named import of an allow-listed table from `@/lib/db/schema` or `@/lib/db/domain` (an `as` alias of such an import counts) | `builder table argument .from(...)`: a `sql` fragment, member expression, call, local alias, anything else. `sql.join(` is exempt (fragment list, not a table position) |
+| Db handle (`dbHandleOffenders`) | `getPlatformDb` from `@/lib/db`, nothing else | `db handle drizzle(` / `neon(` / `new Pool(` / `new Client(` |
+| Raw `sql` text | the existing from/join table-list check | unchanged |
+
+The new rules are in the composite `offenders(code)` and each has its own per-file test over the real readers. The real readers use `getPlatformDb().execute(sql\`...\`)` only, so they pass all four new rules unchanged.
+
+## Synthetic offenders and failing-first
+
+Thirteen new cases in the "scan is not vacuous" block, each asserting the rule's label (so none is caught by accident of another rule):
+- **QA's M6, M7, M8:** relative import `"../../db/domain/officers"` plus `.from(officerTerms)`; `getPlatformDb().query.officerTerms.findMany(...)` (no import, no SQL); `.from(sql\`officer_terms\`)`.
+- **Ten more:** a `sql` fragment as a joined table (`.leftJoin(sql\`...\`)`); a local alias of an allowed table (`const t = pick() ?? organizations; .from(t)`); a member expression as the builder's table; bracket access `["query"]`; optional-chained `?.query`; a dynamic relative `require("../../db/...")`; `"./../read-card"` (climbs out and back in, looks like a sibling); a second connection built from `@neondatabase/serverless`; a `drizzle(` handle imported from `drizzle-orm/neon-serverless`; a bare `drizzle(` call with no import in view.
+- **Positive control kept and extended:** the real idioms (`getPlatformDb`, schema table import, `left join audit_events`, `sql.join(`) plus an allowed query-builder use (`.from(organizations).leftJoin(events, ...)` with an `as`-aliased table import, a `./` sibling and `server-only`) report nothing.
+
+**Failing-first.**
+- The 13 cases were added first against the unchanged scan: **13 failed, 24 passed.**
+- Then a real `zz-mutant.ts` in the directory carrying M6, M7 and M8 (`tsc --noEmit` clean, so all three compile): against the old scan, **every per-directory test was green** (only the 13 synthetic cases red). After the allow-only scan, the new per-file tests failed on it with `relative import ../../db/domain/officers`, `.query access`, and two `builder table argument` lines (`.from(officerTerms)` and `.from(sql\`officer_terms\`)`). The mutant was deleted afterwards; the real readers pass 41/41.
+
+## Gates (run in the worktree)
+
+`npm run typecheck` PASS · `npm run lint` PASS · `npm run check` PASS (8/8) · plain `npm test` 583 files passed / 80 skipped, 8,781 tests passed / 2,458 skipped (17 new tests over run 2).
+
+## Residual for DECISION-252 (draft sentence, for the orchestrator to place at integration)
+
+> The boundaries scan is a source-text scan, so a reader that reaches a tenant table by a route that never appears as text in the scanned directory is not seen: a computed property access (`db[key]`), a table value produced elsewhere, or a helper module outside the directory (including any allow-listed `@/lib/*` module) that itself reads a tenant table; this residual is `paper`, controlled by review and the retrospective, beside the existing residual for readers outside the directory.
+
+The same sentence's short form is in the test file header.
+
+## Handoff
+
+Next: qa (run 3: the full mutation set M1–M11 plus the new forms, the touched file, typecheck, lint, check, plain `npm test`; run 1 and run 2 results stand if the diff stays test-only). No schema, env var, `FEATURES` entry or flag change.

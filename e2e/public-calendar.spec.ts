@@ -435,6 +435,37 @@ test.describe("Public events calendar - the editor flow (e2e-alpha)", () => {
     expect(rows[0]).toMatchObject({ changed: "3", via: "series" });
   });
 
+  test("the event detail page does not scroll sideways at 360px with the Website listing section showing - regression for Phase 5 FAIL-1", async ({ page }) => {
+    const title = `${ALPHA_EVENT_PREFIX} narrow`;
+    await fillAndCreate(page, title, async () => {
+      await page.getByLabel("Show on our website's public calendar").check();
+      await page.getByLabel("This event repeats").check();
+      await page.getByLabel(/^Number of occurrences/).fill("4");
+    });
+    // Leave the third occurrence unmarked so that, from the second, BOTH buttons show.
+    await sql`
+      update events set website_listed = false
+       where id = (select id from events where organization_id = ${E2E_ORGS.alpha.id}::uuid and title = ${title}
+                    order by starts_at offset 2 limit 1)`;
+    await page.setViewportSize({ width: 360, height: 800 });
+    const children = page.locator("table a");
+    await expect(children.first()).toBeVisible();
+    await children.first().click();
+    await page.waitForURL(/\/admin\/events\/[0-9a-f-]{36}$/);
+    await expect(page.getByRole("heading", { name: "Website listing" })).toBeVisible();
+    const put = page.getByRole("button", { name: "Put this and later events on the website" });
+    const take = page.getByRole("button", { name: "Take this and later events off the website" });
+    await expect(put).toBeVisible();
+    await expect(take).toBeVisible();
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+    for (const button of [put, take]) {
+      const box = await button.boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+  });
+
   test("a members-only event cannot be put on the website from the form", async ({ page }) => {
     const title = `${ALPHA_EVENT_PREFIX} members`;
     await fillAndCreate(page, title, async () => {

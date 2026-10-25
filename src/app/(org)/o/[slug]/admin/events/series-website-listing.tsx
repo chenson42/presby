@@ -19,6 +19,12 @@ import { formatLongDate } from "@/lib/calendar/month";
 import type { SeriesListingOutcome, SeriesWebsiteSummary } from "@/lib/events";
 import { setSeriesWebsiteListingAction } from "./actions";
 
+/**
+ * The Button primitive is `whitespace-nowrap`, and these two labels are longer than a 360px
+ * screen: full width and a wrapping label on a phone, natural width from `sm` up (Phase 5 FAIL-1).
+ */
+const TRIGGER_CLASS = "h-auto min-h-11 w-full whitespace-normal py-2 text-center sm:w-auto";
+
 /** "1 event" / "3 events" */
 function events(n: number): string {
   return `${n} ${n === 1 ? "event" : "events"}`;
@@ -106,7 +112,7 @@ export function SeriesWebsiteListing({
         {put.changes > 0 && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button type="button" variant="outline" className="min-h-11" disabled={pending}>
+              <Button type="button" variant="outline" className={TRIGGER_CLASS} disabled={pending}>
                 Put this and later events on the website
               </Button>
             </AlertDialogTrigger>
@@ -133,7 +139,7 @@ export function SeriesWebsiteListing({
         {take.changes > 0 && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button type="button" variant="outline" className="min-h-11" disabled={pending}>
+              <Button type="button" variant="outline" className={TRIGGER_CLASS} disabled={pending}>
                 Take this and later events off the website
               </Button>
             </AlertDialogTrigger>

@@ -54,6 +54,9 @@ vi.mock("../actions", () => ({
 // server-only, database-backed); neither runs in this orchestration test.
 vi.mock("../give/actions", () => ({ createPublicGiveSessionAction: vi.fn() }));
 vi.mock("@/lib/giving/public-config", () => ({ readPublicGivingConfig: vi.fn() }));
+// The `eventsCalendar` slot's reader is database-backed and server-only; the resolver
+// closure is what this orchestration test exercises, never the read.
+vi.mock("@/lib/public-calendar", () => ({ readPublicCalendar: vi.fn() }));
 
 // resolveLogoUrl()'s dynamically-imported getPlatformDb() chain — mocked
 // the same way @/lib/sites is mocked above, and for the identical reason:
@@ -90,6 +93,7 @@ import PublicSitePage, { generateMetadata } from "./page";
 import { PublicStaffDirectory } from "../staff-directory";
 import { PublicCommitteeDirectory } from "../committee-directory";
 import { PublicGivingSlot } from "../public-giving-slot";
+import { PublicEventsCalendarSlot } from "../public-events-calendar-slot";
 
 afterEach(() => {
   cleanup();
@@ -614,7 +618,31 @@ describe("PublicSitePage — the ok path", () => {
     expect(resolved.props).toEqual({ slug: "alder-creek", siteKey: "alder-creek", filter: suppliedFilter });
   });
 
-  it("exposes exactly staffDirectory, committeeDirectory and giving — no other named slot", async () => {
+  it("passes a liveSlots.eventsCalendar resolver that closes over the DB slug and urls ONLY, handing the marker's filter through (DECISION-132, DECISION-239)", async () => {
+    mockSite({ kind: "ok", site: SITE });
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await renderPage({ params: makeParams("alder-creek") });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
+    };
+    const suppliedFilter = { view: "list" };
+    const resolved = call.liveSlots?.eventsCalendar?.(suppliedFilter) as {
+      type: unknown;
+      props: Record<string, unknown>;
+    };
+    expect(resolved.type).toBe(PublicEventsCalendarSlot);
+    // Exactly these three props: no site key, no request, nothing a visitor controls.
+    expect(Object.keys(resolved.props).sort()).toEqual(["filter", "slug", "urls"]);
+    expect(resolved.props).toEqual({
+      slug: "alder-creek",
+      urls: expect.objectContaining({ mode: "slug" }),
+      filter: suppliedFilter,
+    });
+  });
+
+  it("exposes exactly staffDirectory, committeeDirectory, giving and eventsCalendar — no other named slot", async () => {
     mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
@@ -625,6 +653,7 @@ describe("PublicSitePage — the ok path", () => {
     };
     expect(Object.keys(call.liveSlots ?? {}).sort()).toEqual([
       "committeeDirectory",
+      "eventsCalendar",
       "giving",
       "staffDirectory",
     ]);
@@ -748,6 +777,25 @@ function mockHostSite(opts: { redirectHost?: string | null; canonicalHost?: stri
 }
 
 describe("PublicSitePage - host mode: clean URLs, the DB slug, nothing the visitor controls", () => {
+  it("the eventsCalendar slot on a custom host receives the DATABASE slug and urls - never the host key - and its sign-in link stays on the platform", async () => {
+    mockHostSite();
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await renderPage({ params: makeParams(HOST, ["events"]) });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots?: Record<string, (filter: Record<string, unknown>) => unknown>;
+    };
+    const resolved = call.liveSlots?.eventsCalendar?.({}) as {
+      props: { slug: string; urls: { portalCalendar(): string }; filter: unknown };
+    };
+    expect(resolved.props.slug).toBe(DB_SLUG);
+    expect(resolved.props.slug).not.toBe(HOST);
+    expect(Object.keys(resolved.props).sort()).toEqual(["filter", "slug", "urls"]);
+    expect(resolved.props.urls.portalCalendar()).toBe(`http://localhost:3000/o/${DB_SLUG}/calendar`);
+    expect(JSON.stringify(Object.values(resolved.props).filter((v) => typeof v === "string"))).not.toContain(HOST);
+  });
+
   it("hands site-kit a clean-path URL space on the verified canonical host, and the portal link on the PLATFORM", async () => {
     mockHostSite();
     renderSiteBundle.mockReturnValue(<div />);

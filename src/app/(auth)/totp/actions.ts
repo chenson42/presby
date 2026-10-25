@@ -17,6 +17,7 @@ import {
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { sanitizeCallbackUrl } from "@/lib/auth/safe-callback";
+import { withTwoFactorGrant } from "@/lib/auth/two-factor-grant";
 
 function totpRedirectUrl(callbackUrl: string, error?: "invalid" | "rate_limited"): string {
   const params = new URLSearchParams({ callbackUrl });
@@ -82,7 +83,9 @@ export async function verifyTotpAction(formData: FormData) {
       resourceType: "user",
       resourceId: session.user.id,
     });
-    await unstable_update({ user: { twoFactorVerified: true } });
+    await withTwoFactorGrant(session.user.id, "totp", () =>
+      unstable_update({}),
+    );
     redirect(callbackUrl);
   }
 
@@ -126,6 +129,8 @@ export async function verifyTotpAction(formData: FormData) {
     resourceId: session.user.id,
     metadata: { codeId: match.id },
   });
-  await unstable_update({ user: { twoFactorVerified: true } });
+  await withTwoFactorGrant(session.user.id, "recovery", () =>
+    unstable_update({}),
+  );
   redirect(callbackUrl);
 }

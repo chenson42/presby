@@ -31,6 +31,7 @@ import {
   computeEffectiveTwoFactor,
 } from "@/lib/auth/local-login";
 import { verifyTurnstile } from "@/lib/turnstile";
+import { takeTwoFactorGrant } from "@/lib/auth/two-factor-grant";
 
 const INITIAL_ADMIN_EMAILS = (process.env.INITIAL_ADMIN_EMAILS ?? "")
   .split(",")
@@ -255,20 +256,13 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
           .where(eq(users.id, user.id));
       }
 
-      // Server-action-triggered updates (e.g. 2FA verified, role assigned)
-      // call `unstable_update`; we merge the partial session payload back into
-      // the token here so subsequent requests see the new state.
-      if (trigger === "update" && session?.user) {
-        if (typeof session.user.twoFactorVerified === "boolean") {
-          token.twoFactorVerified = session.user.twoFactorVerified;
-        }
-        if (Array.isArray(session.user.roles)) {
-          token.roles = session.user.roles;
-        }
-        if (Array.isArray(session.user.features)) {
-          token.features = session.user.features;
-        }
-      }
+      // An update (`trigger === "update"`) reads NOTHING from its payload: the
+      // same trigger arrives from a server action's `unstable_update()` and
+      // from a request a browser can make itself, and the callback cannot tell
+      // them apart. Everything an update changes is re-derived below from the
+      // database (activity, 2FA requirement, roles, features); the one claim
+      // that is not derivable, `twoFactorVerified`, is set only inside a
+      // server-side verification grant (DECISION-230).
 
       // Stale-JWT defense + role refresh.
       //
@@ -277,7 +271,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
       // only thing standing between a deleted/deactivated user and a still-
       // valid signed cookie. For role + feature changes to apply mid-session,
       // call `unstable_update({})` from the mutating action; this re-runs
-      // the role lookup below.
+      // the role lookup below (an update never carries data into the token).
       if (!token.sub) return token;
 
       const userId = token.sub;
@@ -291,6 +285,13 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         return {};
       }
       token.isActive = dbUser.isActive;
+      // The only writer of `twoFactorVerified` besides the sign-in reset above:
+      // the TOTP / recovery-code action wraps its `unstable_update({})` in a
+      // single-use grant for this user. A request with no grant, or one for
+      // another user, leaves the claim exactly as it was.
+      if (trigger === "update" && takeTwoFactorGrant(userId)) {
+        token.twoFactorVerified = true;
+      }
       // Effective twoFactorRequired: (this user's column OR any congregation
       // they belong to requiring it) AND the auth.require_2fa master switch.
       // The per-church arm goes through a SECURITY DEFINER function — no org

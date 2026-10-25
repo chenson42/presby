@@ -41,3 +41,26 @@ export function platformSql(specName: string): Sql {
   }
   return neon(url);
 }
+
+/** The shape of a dropped Neon connection (the HTTP driver's `fetch failed`, the pool's reset, a socket timeout). */
+const DB_DROP = /fetch failed|Connection terminated|terminating connection|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|timeout|NeonDbError/i;
+
+/**
+ * Retries `step` with exponential backoff (0.5 s, 1 s, 2 s, 4 s) while it fails with a connection-drop error;
+ * any other error (a constraint, a bug) is thrown at once. Every caller passes an IDEMPOTENT step, so a drop
+ * that landed after the statement committed is harmless on the retry.
+ */
+export async function withDbRetry<T>(label: string, step: () => Promise<T>, opts: { attempts?: number; baseMs?: number } = {}): Promise<T> {
+  const attempts = opts.attempts ?? 5;
+  const baseMs = opts.baseMs ?? 500;
+  for (let n = 1; ; n++) {
+    try {
+      return await step();
+    } catch (err) {
+      const message = String((err as { message?: unknown })?.message ?? err) + String((err as { cause?: unknown })?.cause ?? "");
+      if (n >= attempts || !DB_DROP.test(message)) throw err;
+      console.warn(`[e2e-db] ${label}: connection dropped, retry ${n}/${attempts - 1}`);
+      await new Promise((resolve) => setTimeout(resolve, baseMs * 2 ** (n - 1)));
+    }
+  }
+}

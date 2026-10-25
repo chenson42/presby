@@ -1233,3 +1233,186 @@ The same sentence's short form is in the test file header.
 ## Handoff
 
 Next: qa (run 3: the full mutation set M1–M11 plus the new forms, the touched file, typecheck, lint, check, plain `npm test`; run 1 and run 2 results stand if the diff stays test-only). No schema, env var, `FEATURES` entry or flag change.
+
+---
+
+# Phase 5 — run 3 (qa)
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**HEAD:** `1c1819f`, branch `pipeline/platform-admin-redesign`
+
+The allow-only rewrite holds: every earlier form (M1–M11) is still caught, and so are the new import, query-builder and handle shapes I tried. The verdict is still **FAIL**, because I found four new SQL forms that read a tenant table and pass the scan, and they are not the residual the orchestrator ruled on.
+
+**Scope of this run:**
+- Typecheck, lint, `npm run check` and plain `npm test`, all in full.
+- The one touched test file.
+- The mutation set M1–M11 plus eleven new evasions, in a scratch copy of HEAD.
+- A Postgres syntax check of the forms that slipped through: plain `EXPLAIN` (no ANALYZE) on the pipeline branch.
+
+**What carries over from runs 1 and 2.** `git diff --stat b0308d6..HEAD` touches only:
+- `src/lib/admin-portal/dashboard/boundaries.test.ts`
+- `docs/work-log/2026-10-25-platform-admin-redesign-inc1.md`
+
+No source, config, fixture or e2e file changed. So these earlier results stand and were not re-run: build, the DB-backed scope, chromium e2e 420/420 including the MFA login set, the 404 status checks, the 360px browser pass, E27 EXPLAIN, the feature-gate audit, copy truthfulness, all failing-first checks, and run 2's page tests.
+
+## Type Check
+
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS (`--max-warnings=0`)
+- `npm run check`: PASS, 8/8 tripwires
+
+## Unit Tests
+
+- **Plain `npm test`:** 663 files (583 passed, 80 skipped), 11,239 tests (8,781 passed, 2,458 skipped). The 80 skipped files are the same database-gated set as before. The 17 new tests match loop-back 2's count.
+- **`boundaries.test.ts` on its own:** 41/41 passed, nothing skipped.
+
+Failures: none.
+
+## End-to-End Tests
+
+Not re-run (test-only diff). Run 1 stands: 420 passed, 0 failed, 0 skipped.
+
+## Regression Tests Added
+
+`boundaries.test.ts` gains 13 synthetic-offender cases. Each asserts the label of the rule that should report it, plus a positive control for the idioms the real readers use. Loop-back 2 reports watching them fail first against the old scan. My mutation results below agree with that.
+
+## Mutation check (scratch copy of HEAD)
+
+Each row puts one `zz-mutant.ts` into `src/lib/admin-portal/dashboard/` and runs `boundaries.test.ts`. The unmodified copy passes 41/41. I typechecked every form that passed the scan (`tsc --noEmit`, no errors), and ran each slipped SQL form through `EXPLAIN` on the pipeline branch: Postgres plans `Seq Scan on officer_terms` for every one.
+
+**Earlier forms, all still caught:**
+
+| # | Form | Result (rule that fired) |
+|---|---|---|
+| M1 | subpath table import plus raw `from officer_terms` | caught (import rule, raw-SQL rule) |
+| M2 | barrel import plus `.from(officerTerms)` | caught (import rule, builder-table rule) |
+| M3 | comma join | caught (raw SQL) |
+| M4 | quoted identifier | caught (raw SQL) |
+| M5 | namespace import | caught (import rule, builder-table rule) |
+| M6 | `../../db/domain/officers` | caught (sibling-import rule, builder-table rule) |
+| M7 | `getPlatformDb().query.officerTerms` | caught (relational-API rule) |
+| M8 | `.from(sql\`officer_terms\`)` | caught (builder-table rule) |
+| M9 | upper case across line breaks | caught (raw SQL) |
+| M10 | named re-export | caught (import rule) |
+| M11 | `exists (select … from officer_terms …)` | caught (raw SQL) |
+
+**New evasions, run 3:**
+
+| # | Form | Result |
+|---|---|---|
+| N01 | computed key built with `[…].join('')`, then `db[k][t].findMany()` | caught, **but only by accident**: the builder rule flags the array's `.join('')` |
+| N01b | the same computed key built with `+`, then `(getPlatformDb() as any)[k][t].findMany()` | **passes** |
+| N02 | a CTE named `officer_terms` in one statement makes the real table pass in another statement in the same file (`with officer_terms as (select 1 as id) …`, then `select count(*) from officer_terms`) | **passes** |
+| N03 | template-literal table name: `sql.raw(\`select … from ${part}_terms\`)` | caught (`${}`) |
+| N04 | string concatenation into `sql.raw('select count(*) from ' + table)`, where `table = 'officer_' + 'terms'` | **passes** |
+| N05 | SQL comment between keyword and table: `from/**/officer_terms` | **passes** |
+| N06 | parenthesised join: `from (officer_terms t cross join organizations o)` | **passes** |
+| N07 | Postgres `TABLE` command: `table officer_terms` | **passes** |
+| N08 | template-literal bracket: ``getPlatformDb()[`query`].officerTerms`` | caught (relational-API rule) |
+| N09 | `getPlatformDb().$client.query('select … from officer_terms')` | caught (raw SQL, relational-API rule) |
+| N10 | `${sql.identifier('officer_terms')}` | caught (`${}`) |
+
+### Which misses are the documented residual, and which are new
+
+The residual the orchestrator ruled on (draft for DECISION-252) covers "a route that never appears as text in the scanned directory: a computed property access (`db[key]`), a table value produced elsewhere, or a helper module outside the directory."
+
+**Inside the residual:**
+- **N01b** is exactly the computed property access the residual names.
+- **N04** is close enough to count. The table name is built at runtime and never appears whole in the source. But it is a computed table *string* in the same file, not a property access and not a value "produced elsewhere". The sentence should say so; see the wording note under Verdict. The scan could also close it cheaply by allowing `sql.raw(` only with a string literal.
+- **N01** confirms the residual is real: the scan does not handle computed access on purpose, and that case was caught only because the code happened to call `.join`.
+
+**A new class, outside the residual: N02, N05, N06, N07.** In all four the tenant table's name appears verbatim as SQL text in the scanned directory, and the raw-SQL check sees the text but does not recognise the position:
+- **N02:** the set of CTE names is collected across the whole file, so declaring a CTE with a tenant table's name in any statement excuses that table everywhere in the file (`boundaries.test.ts`, `sqlTables`, the two `ctes.add` loops).
+- **N05:** `stripComments` removes `/* … */` before the scan, including inside SQL template strings. `from/**/officer_terms` becomes `fromofficer_terms`, which no longer matches `\b(from|join)\s+`. Postgres reads the original text as `from officer_terms`.
+- **N06:** after `from`, a `(` is assumed to start a subquery and the scan stops. A parenthesised join list is valid SQL, and its first table is never read.
+- **N07:** only `from` and `join` start a table reference in the scan. Postgres's `TABLE <name>` reads a whole table without either keyword.
+
+The raw-SQL check is the one part of the scan that still lists the shapes it forbids instead of the shapes it allows. That is why each new shape so far has needed its own fix.
+
+## Coverage on Critical Modules
+
+Unchanged (no source changed): `permissions.ts` 100%, `flags.ts` 100%, `two-factor.ts` 91.3% statements.
+
+## Feature-Gate Audit
+
+No route, page or action changed. Run 1's table stands.
+
+## Copy Truthfulness
+
+No user-facing string changed. Run 1 and run 2 stand.
+
+## Verdict
+
+**FAIL. Finding 1 is narrowed to the raw-SQL check only.** Every form from runs 1 and 2 is closed, and so are the new import, relational-API, query-builder and handle shapes. Four valid forms (N02, N05, N06, N07) still read a tenant table through a name written verbatim in the scanned directory. They are not covered by the residual as worded, so "forbidden by default" is still not true for raw SQL.
+
+**Suggested fix (test file only).** Make the raw-SQL rule allow-only over a closed list of names instead of parsing table positions:
+- Build the set of every real table name from the `pgTable("…")` declarations in `src/lib/db/schema.ts` and `src/lib/db/domain/**`.
+- In each reader file, read the unstripped text of every `sql\`…\``, `sql.raw(…)` and string literal passed to an `execute` or `query` call, and split it into identifier tokens. Unquote quoted identifiers and treat SQL comments as whitespace.
+- Report any token that is a real table name but not on the allow-list, whatever its position.
+- This fails closed. A column that happens to share a tenant table's name would be reported too; that cost is acceptable.
+- It closes N02, N05, N06 and N07 without new position rules, and stays correct if future SQL uses shapes nobody has tried yet.
+- Separately, allowing `sql.raw(` only with a string literal would close N04.
+- Add N02, N04, N05, N06 and N07 as synthetic cases.
+
+**Alternative (an operator or tech-lead ruling, not mine).** Widen the DECISION-252 residual to name these forms explicitly: "SQL whose table reference the scan does not parse (a comment between keyword and table, a parenthesised join, the `TABLE` command, a CTE name reused across statements)." This also needs the wording fix below.
+
+**Wording note for the residual sentence in either case.** As drafted, "never appears as text in the scanned directory" does not describe N04, and it denies N02, N05, N06 and N07, whose table names do appear as text. Under the copy-truthfulness rule, a decision record must not deny a residual the evidence shows. Either fix the scan or change the sentence.
+
+On a run 4, QA will re-run M1–M11, N01–N10 and new forms of its own, plus the touched file and the four gates. Earlier results will stand again if the diff is still test-only.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 3) | qa | Complete. Typecheck, lint, check 8/8, unit 583 files / 8,781 tests, boundaries 41/41; M1–M11 all caught; of 11 new evasions, N01b and N04 pass as the computed-name residual and N02 (file-wide CTE name), N05 (`/**/` comment), N06 (parenthesised join) and N07 (`TABLE` command) pass as a new class outside the documented residual (all compile; Postgres plans each as a scan of the tenant table); loop-back diff is test file and work-log only, so runs 1 and 2 stand | FAIL | 2026-10-25 |
+
+## Handoff
+
+**Next agent: api-developer (Phase 4, loop-back 3).** Make the raw-SQL rule in `src/lib/admin-portal/dashboard/boundaries.test.ts` allow-only over the closed set of table names, and add N02, N04, N05, N06 and N07. Test file only.
+
+The other route: the orchestrator takes the new forms to **tech-lead** (or the operator) for a widened DECISION-252 residual, and then the sentence must match what the scan actually misses.
+
+Evidence:
+- Run 3 logs: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs3/`
+- Mutation cases (M01–M11, N01–N10, N01b): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/mut3/cases/`
+- Postgres syntax check script: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/syntax.sql`
+
+Git status in the worktree is as I found it: only the orchestrator's change to `docs/work-log/2026-10-25-platform-admin-redesign-inc3.md`.
+
+---
+
+# Phase 4 — loop-back 3 (api-developer, after Phase 5 run 3 FAIL)
+
+**Date:** 2026-10-25. Test-only; no product code, design or copy changed. Commit `c4eee98` on `pipeline/platform-admin-redesign`.
+
+**Orchestrator ruling:** implement QA's suggested fix. The raw-SQL rule stops parsing table positions and becomes allow-only over a closed set of real table names.
+
+## What changed in `src/lib/admin-portal/dashboard/boundaries.test.ts`
+
+- **Closed name set (`realTableNames`).** Every `pgTable("…")` in `src/lib/db/schema.ts` and `src/lib/db/domain/**` (test files excluded), read at test time. `FORBIDDEN_TABLES` is that set minus the allow-list. The non-vacuity block asserts the set has more than 80 names, contains `officer_terms`, `people`, `memberships` and `roll_actions`, and is a superset of `ALLOWED_TABLES_SQL` (so a typo in the allow-list fails).
+- **`scanSource` / `closedNameOffenders`.** A small scanner (comments, strings, templates with nested `${}`, regex literals; an unterminated quote is code, so JSX text cannot desync it) returns the UNSTRIPPED text of every string and template literal. Every identifier token in them (lower-cased; quotes, schema prefix, SQL comments, parentheses and escaping are all just separators) that is in `FORBIDDEN_TABLES` is reported as `table name <x>`, in any position. This closes N02, N05, N06, N07 with no position rule, and the CTE-name exemption no longer applies to it. The old from/join check stays in addition (it still catches names outside the pgTable set, such as `${}` and catalogue tables).
+- **Scope note, wider than the ruling.** The ruling named `sql` templates, `sql.raw` and strings passed to `execute`/`query`. I scan EVERY string and template literal in a reader instead, because an alias (`import { sql as s }`) or a variable later handed to `execute` would escape a context list. The one exemption is the first argument of `readCard(`: `readCard("accounts", …)` is a card key, and `accounts` is also the NextAuth table, so it was the one false positive in the real readers. A `readCard("officer_terms", …)` key would be harmless too.
+- **`rawCallOffenders`.** `.raw` is allowed only as `.raw("one string literal")` (a no-interpolation template counts). A concatenation, an interpolated template, `const r = sql.raw` and `sql["raw"]` are reported as `sql.raw argument …`. Closes N04.
+- Both are in the composite `offenders(code)` and have per-file tests over the real readers, which pass unchanged.
+
+## Synthetic cases and failing-first
+
+Eleven new cases in the "scan is not vacuous" block, each asserting its rule's label: N02, N04, N04b (interpolated template), N04c (`sql.raw` taken as a value), N05, N06, N07, a table inside a plain string passed to `execute()`, an escaped upper-case quoted identifier, a `'officer_terms'::regclass` cast, and an aliased `sql` tag. A scanner unit check (comments and regex literals skipped, SQL comment text kept, `readCard` key exempt) is in the same block.
+
+- **Cases first, old scan:** all eleven failed (41 passed). I also printed the old scan's output: N02, N04, N04c, N05, N06, N07 and the regclass cast reported **nothing at all**; the rest were reported only under a different label.
+- **Real mutant:** `zz-mutant.ts` carrying N02 (two statements), N04, N05, N06, N07 compiles (`tsc --noEmit` clean). The previous test file (`git show HEAD:`) ran **41/41 green** against it. The new file fails two per-file tests on it: six `table name officer_terms` lines and one `sql.raw argument is not a single string literal`. Mutant deleted; real readers pass 54/54.
+
+## Gates (run in the worktree)
+
+`npm run typecheck` PASS · `npm run lint` PASS · `npm run check` PASS (8/8) · plain `npm test` 583 files passed / 80 skipped, 8,794 tests passed / 2,458 skipped (13 new tests over run 3).
+
+## Residual for DECISION-252 (replaces the loop-back 2 draft; true against run 3 and this fix)
+
+> The boundaries scan reads source text and allows only a closed set of table names in the literals of a dashboard reader, so it does not see a computed property access (`db[key]`), a table name assembled at runtime rather than written in a literal (JavaScript concatenation into a variable that reaches `execute`, or SQL-side assembly such as `format()`, `||` on string pieces or a `U&"…"` escape), or a helper module outside the directory (including any allow-listed `@/lib/*` module) that itself reads a tenant table; this residual is `paper`, controlled by review and the retrospective, beside the existing residual for readers outside the directory.
+
+It no longer claims that a name written verbatim as SQL text is unseen: those are reported wherever they sit, and a column sharing a tenant table's name is reported too (fails closed, accepted). The same residual is in the test file header.
+
+## Handoff
+
+Next: qa (run 4: M1–M11, N01–N10 including N01b, and new forms of its own; the touched file; the four gates). No schema, env var, `FEATURES` entry or flag change.

@@ -256,6 +256,43 @@ If the build ever flakes anyway, `rm -rf "$SCRATCH/app/.next"` and retry. A nega
 
 ---
 
+## Running Playwright from a worktree
+
+Workflow Rule 16: a pipeline starts its own server on its assigned port and never
+attaches to `:3000`, which belongs to the main checkout (or to whichever sibling
+started a server there first). `playwright.config.ts` now enforces it: from a
+linked git worktree, with the resolved base URL on a loopback host at port 3000
+and `PW_ALLOW_3000` unset, loading the config throws with the remedy. The main
+checkout and CI are unaffected, and the production-build lane
+(`npm run test:e2e:prod`) has its own stricter checks.
+
+```bash
+# 1. Your own server, on the port the orchestrator assigned (here 3480), with the
+#    fakes the specs expect. The config injects these only into a server IT starts;
+#    one you start yourself needs them in its own environment. Note the pid.
+RATE_LIMIT_DISABLED=true DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake \
+  DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE="$PWD/.tmp/domains-fake-state.json" \
+  CRON_SECRET=giving-e2e-cron-secret STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret \
+  npx next dev -p 3480 &
+
+# 2. Point Playwright at it.
+E2E_BASE_URL=http://localhost:3480 npx playwright test e2e/admin-login.spec.ts --project=chromium
+
+# 3. Stop it by pid (never `pkill -f next`: that kills your siblings' servers).
+kill <pid>
+```
+
+The config's own `webServer` entry runs `npm run dev`, which binds `:3000`, so do
+not rely on it to start a server on another port: start yours first, as above.
+A sign-in run on `:3480` worked without setting `AUTH_URL` when `.env.local` does
+not define one; if yours sets `AUTH_URL=http://localhost:3000` and sign-in bounces
+to `:3000`, start the server with `AUTH_URL=http://localhost:3480` as well.
+`PW_ALLOW_3000=1` accepts the shared-server risk knowingly (for example, the only
+checkout running anything). The giving and custom-domain recipes below list the
+extra variables those specs need.
+
+---
+
 ## Custom domains: real hosts without real domains (Track F)
 
 `e2e/custom-domains/` proves that a church's own domain serves that church and nothing else, with no real domain, DNS or Vercel call. The Playwright project **`custom-hosts`** launches Chromium with `--host-resolver-rules=MAP *.invalid 127.0.0.1`, so `http://www.church-one.invalid:<port>/` is a real page load with that name in `Host` (`.invalid` is reserved by RFC 2606: it can never resolve publicly, and No Real Data holds). A test that needs a request that *lies* about its `Host` sets the header explicitly on the `request` fixture (`rawGet` in `e2e/support/custom-hosts.ts`). Non-production treats loopback as a platform host and `*.invalid` as a custom host; `next.config.ts` allows `**.invalid` in `allowedDevOrigins` so the dev server hydrates there.

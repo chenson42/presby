@@ -5,7 +5,7 @@
 > **Permission(s):** TBD in Phase 1/3
 > **Flag(s):** none expected (operator: per-org toggles, not new platform flags, pre-live)
 > **Estimated complexity:** small
-> **Pipeline mode:** Accelerated Feature (relabelled from Polish at Phase 1, DECISION-229 row)
+> **Pipeline mode:** Full Feature (promoted at Phase 5 run 1, QA FAIL-1 traced to design Copy C8; was Accelerated, relabelled from Polish at Phase 1)
 > **Numbers (pre-assigned 2026-10-25, Rule 16):** no migration; DECISION-231; F239; dev port 3480; no Neon branch until Phase 4 needs one
 
 ---
@@ -17,8 +17,10 @@
 | 1 — Functional refinement | analyst | Complete; recommends relabel to Accelerated Feature; Phase 2 skippable, short Phase 3 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Skipped (Accelerated Feature; see rulings) | — | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (Accelerated tier; nine items, one commit each; Appendices A-D hold the parser reference, DECISION-231, F239 and the twelve briefings drafts) | Design complete; implementer named | 2026-10-25 |
+| 3 — Technical design, amendment 1 | tech-lead | Complete (QA run 1 loop-back: FAIL-1 resolved by redefining Item 8 / Copy C8, keep and make removal depend on merged-with-own-commits and clean; FAIL-2, N1, N2 specified; N3 none; N4 TODO watch; implementer full-stack-developer; QA re-run scope named) | Amendment complete; implementer named | 2026-10-25 |
 | 4 — Implementation | full-stack-developer | Complete (11 code commits plus 1 docs follow-up; failing-first recorded; gates green; ready for QA) | Phase 4 complete | 2026-10-25 |
-| 5 — Verification | qa | Pending | — | — |
+| 4 — Implementation, loop-back 1 | full-stack-developer | Complete (amendment 1 implemented: 4 code/test commits plus this docs commit; failing-first recorded; gates green; ready for QA run 2) | Phase 4 complete | 2026-10-25 |
+| 5 — Verification | qa | Run 1: FAIL-1 (design C8, promotes to full Feature) and FAIL-2 (implementation); everything else green | FAIL | 2026-10-25 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -467,6 +469,8 @@ Tests (`scripts/with-db-retry.test.mjs`, imports `../e2e/support/db.ts`, `baseMs
 
 ### Item 8 — Disk and worktree report (optional; first to cut) (`feat(tooling)`)
 
+> **Superseded by "Phase 3 amendment 1" (end of this file) after QA run 1 FAIL-1.** The "merged" predicate and the removal suggestion below are replaced; kept as the record.
+
 `scripts/worktree-report.mjs`, `npm run worktrees:report`. Report-only: it prints and deletes nothing. Reads: `fs.statfsSync(repoRoot)` for free GiB (no shell); `git worktree list --porcelain` (path, branch, HEAD) via `execFileSync`; `du -sk` via `execFileSync` for `node_modules`, `.next` and the whole worktree (rest = total minus the two); `git merge-base --is-ancestor <HEAD> origin/main` (falling back to `main`) via `execFileSync`, exit code only. `--no-sizes` skips `du`. Always exits 0. A hardlinked `node_modules` is counted in full in each worktree, and the output says so; a branch merged by squash would show as not merged (the project merges with merge commits). Suggestions are text only: `git worktree remove '<path>'` for a merged worktree other than the main checkout, `rm -rf '<path>/.next'` (regenerable) for any other, with `shellQuote` handling spaces and single quotes. Tests: porcelain parsing (detached HEAD, bare entry, main entry), quoting (`a b`, `it's`), the merged/not-merged suggestion split, the low-disk line below 20 GiB (the new-feature checklist's threshold, `.claude/skills/new-feature/SKILL.md:54`), and that the main checkout never gets a removal suggestion.
 
 ### Item 9 — Housekeeping and the briefings commit (orchestrator, at integration)
@@ -614,7 +618,7 @@ where `<d>` is `n decision(s) not yet named (DECISION-226, DECISION-228)` for n 
 **C7. `AGENTS.md` drift test failure**: `AGENTS.md does not match the block this version of Next writes on next dev. Run: node -e "require('next/dist/server/lib/generate-agent-files').writeAgentFiles('.')" and commit AGENTS.md.` and, when the module is gone, `Next no longer exports generate-agent-files at this path; update scripts/agents-md.test.mjs.`
 - Source of truth: `hasCurrentAgentRules(repoRoot)`. Audience: the developer after a Next upgrade. Neighbours: the block's own sentence "Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean" is Next's text, kept verbatim; the two stale shim bullets are a TODO line.
 
-**C8. Worktree report** (stdout):
+**C8. Worktree report** (stdout). *Superseded by Phase 3 amendment 1 (QA run 1 FAIL-1); kept as the record.*
 `Disk: <x.x> GiB free on the volume holding <repo root> (checklist minimum 20 GiB: OK)`, or `...: BELOW the 20 GiB the new-feature checklist asks for. A full disk has surfaced as a Neon "fetch failed" before; free space before running suites.` Per worktree: `<path>  <branch or detached>  <merged into main | not merged>  node_modules <x.x> GiB, .next <x.x> GiB, rest <x.x> GiB`. Footer: `Hardlinked node_modules are counted in full for each worktree. A branch merged by squash shows as "not merged". This report deletes nothing; the commands below are suggestions for you to run.`
 - Residuals: the squash and hardlink caveats are stated. Source of truth: `statfsSync`, `git worktree list`, `du -sk`, `merge-base --is-ancestor` (exit code). Audience: the orchestrator and operator, who own worktree cleanup. Neighbours: `.claude/skills/new-feature/SKILL.md:54` (the 20 GiB rule and cleanup) stays true.
 
@@ -914,55 +918,205 @@ Strings added or changed (all in the Copy table): `scripts/pre-push-gate.mjs` `C
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
-**Verified by:** qa
+**Date:** 2026-10-25
+**Verified by:** qa (read-only; I wrote no tests and edited no files). The worktree `/Users/cshenso/git/presby-platform/presby-wf` is clean at `0f9f3ee`. The main checkout is clean and its pre-push marker is byte-unchanged (sha256 prefix `3a7141414b5bcfb0` before and after). No marker was created in the worktree.
+
+**Scope run:** typecheck, lint, `npm run check` and plain `npm test`, all in full. Each of the 8 new or changed test files was run on its own. Failing-first was re-run for all four `fix` commits and for `--since`, in a scratch copy made with `git archive`. The gate was tested in `decideHook` and in hook mode, and the Playwright guard in both directions. The reset file was refused and then applied, on the pipeline branch only. Also checked: the briefings count (live, and simulated after the backlog commit), `stats:escape` byte-identity, `AGENTS.md` under `next dev`, and `worktrees:report` against the real worktree list.
+
+e2e ran as the **full `--project=chromium` suite**, not the requested sample. My Run Scope rule requires the full suite because the diff touches `e2e/support/` and `playwright.config.ts`. It ran against my own server on :3480. Not re-run: the `custom-hosts` project (`domains-admin`, `serving`, 155 tests together with Phase 4's other specs) rests on the implementer's Phase 4 run. No DB-backed vitest suites ran: no migration, `authz.ts`, `src/lib/db/` or shared vitest fixture is in the diff.
+
+**Prerequisites:**
+- Disk: 573 GiB free.
+- `.env.local`: all three URLs point at endpoint `ep-fancy-credit-axnbpmku`, the pipeline branch per Phase 4. The main checkout points at `ep-lingering-meadow-axnarpsq`. Endpoint IDs were extracted; no URL was printed.
+- **Flag reset:** I ran `scripts/ci/e2e-reset-flags.sql` with the documented command before the e2e run. Result: 10 of 39 flags on, and the 3 baseline flags on.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: PASS. `npm run lint`: PASS (0 warnings). `npm run check`: PASS, all eight tripwires.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+Plain `npm test`: 626 files, 549 passed, 77 skipped. 10,962 tests, 8,520 passed, 2,442 skipped, 0 failed, 25.3 s.
+
+The 77 skipped files are the DB-backed suites, which skip when no `.env` is loaded. None of them is in this diff.
+
+The eight files for this pipeline, run alone with `--reporter=verbose`, give **215 passed, 0 skipped**:
+
+| File | Tests |
+|---|---|
+| pre-push-gate | 75 |
+| agents-md | 1 |
+| briefings-check | 22 |
+| stats-escape | 26 |
+| e2e-reset-flags | 11 |
+| dev-port-guard | 25 |
+| with-db-retry | 39 |
+| worktree-report | 16 |
+
+These match Phase 4's numbers exactly.
+
+**Failing-first.** Each new test was run against the pre-change source, swapped in from `<sha>^`, in a scratch copy at `.../scratchpad/wf/ff`:
+
+| Commit | Claimed | Reproduced | Behavioural or import-only |
+|---|---|---|---|
+| `e3cebb1` gate | 51 of 75 fail | **51 of 75 fail** | Behavioural for every quoting and wrapped-form test, because the old `commandContainsGitPush` existed. The 33 `decideHook` tests fail on import. The hole itself is shown below. |
+| `069ba1d` AGENTS.md | red | **red**, with the exact C7 message | Behavioural |
+| `5ef2ec8` briefings | import failure | **`recordedDecisions is not a function`, no tests ran** | Import-only. Behavioural evidence comes from the live banner (see C4). |
+| `8fcdf60` `--since` (feat) | 26 fail | **26 of 26 fail** | Import-only. The real property, default byte-identity, is verified separately below. |
+| `0f1dda2` withDbRetry | 32 of 39 fail | **32 of 39 fail** | Behavioural for "a statement timeout runs once" and "the bare message 'timeout' runs once". See N1. |
+
+**The chained-push hole, shown behaviourally.** I stamped a marker inside the scratch copy's own `.claude/`, never the real one, then spawned the gate in hook mode with `git commit -m x && git <push>`. The old gate returned **exit 0**. The new gate returned **exit 2** with C1.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+The server was started per `docs/testing.md` "Running Playwright from a worktree": `npx next dev -p 3480` with the test fakes, **no `AUTH_URL`**, `E2E_BASE_URL=http://localhost:3480`. Afterwards I stopped it by its recorded PID. Killing the `npx` PID took down the listener, so the docs' "kill <pid>" is accurate.
+
+Full `--project=chromium`: 412 tests, **411 passed, 1 failed, 16.7 min**.
+
+- Failure: `e2e/invitation-new-account.spec.ts:66`, at `:204`. It waited 20 s for "you enrolled on". The snapshot shows all six TOTP digits entered and the page still on "Enroll in two-factor authentication".
+- **Re-run of the single file: 1 passed (8.1 s).** Under the timeout rule this is intermittent, not a FAIL.
+- It is unrelated to the diff: the spec is untouched, and the only change on its path is `invitation-fixture.ts`'s import (`withDbRetry, type Sql` from `./db`).
+- G10 is settled for this setup: sign-in, TOTP and admin specs pass on :3480 with no `AUTH_URL`, so that docs sentence is accurate.
+
+After the run the flag state was back to 10 of 39 on.
+
+The 360px check does not apply: nothing renders, and the diff has no `src/` change.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+- `commandContainsGitPush › quoting`, `scripts/pre-push-gate.test.mjs:145`. Guards against commit-message, heredoc and comment text being read as a push (G1).
+- `commandContainsGitPush › wrapped forms`, `:183`. Guards against `bash -c`, `eval`, subshells and prefixes hiding a push (G2).
+- `decideHook › chained`, `:220`; `› target repo`, `:270`; `› fail-open`, `:322`; hook spawn (read-only marker), around `:350`. Guard against the commit-then-push hole, wrongly gating `scratch/` checkouts, and the gate bricking Bash.
+- `scripts/agents-md.test.mjs:20`. Guards against `next dev` dirtying `AGENTS.md` after a Next upgrade.
+- `scripts/briefings-check.test.mjs:88` ("50, not 62"). Guards against high-water-mark counting. It uses synthetic input, so it does not see the real-file defect in C4.
+- `scripts/stats-escape.test.mjs:98`. Guards against default output drift. I also confirmed byte-identity myself: old and new produce the same 676 bytes, directly and through `npm run`.
+- `scripts/e2e-reset-flags.test.mjs:65,70`. Guards against the reset list drifting from `seed.ts`.
+- `scripts/dev-port-guard.test.mjs:110,140`. Guards against a worktree attaching to :3000.
+- `scripts/with-db-retry.test.mjs:100,107,119,141`. Guard against constraint errors and timeouts being retried, and against nested wrappers multiplying attempts.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+None of these is touched by the diff; this is a smoke reading.
+
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.3% statements (lines 35 to 39; this gap predates the pipeline)
+- `src/lib/flags.ts`: 100%
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+No protected routes touched. The diff has 0 files under `src/` and 0 under `drizzle/`, and no route, action, auth, proxy, authz, seed or permissions path. Schema/RLS audit: not applicable.
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| none | n/a | n/a | n/a |
 
 ## Copy Truthfulness
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
+- [x] Every added or changed string is in the design's Copy table. C1 to C9 match the code. C1 and C2 match their thrown or printed output byte-for-byte.
+- [x] The query behind each claim was opened. Two claims are false; see FAIL-1 and FAIL-2.
+- [x] Each instruction was traced to the role that sees it, and that role can follow it. For C2, I started my own server and set `E2E_BASE_URL`, and the run then listed and ran. For C3, the documented command works. For C1, a commit, then `/pre-push`, then a push works.
+- [x] Older strings were grepped. None is made false, apart from FAIL-2's Phase 4 record. `qa.md:64` is now accurate. The remaining `[domains-ui-fixture]` lines (`domains-ui-fixture.ts:59,64,177,179`) are that fixture's own refusal errors and are still accurate.
 
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
+**C1, gate (`scripts/pre-push-gate.mjs:399-402`): PASS.**
+- Hook-mode stderr matches the Copy table exactly.
+- Refused with a fresh marker (34 cases): every separator (`&&`, `;`, newline, `||`, `|`, `&`, no spaces); all 8 HEAD movers; `bash -c`, `sh -lc` nested in `bash -c`, `eval`, subshell, braces, `bash <<EOF`; the `-C`, `-c`, `/usr/bin/git`, `command`, `env` and `FOO=1` prefixes; escaped (`g\it`) and quoted `"git"`; line continuation; the house heredoc commit followed by a push; and an unresolvable `cd`.
+- Allowed (13 false-positive strings): the house heredoc commit, `-m` text describing a chained push, a `-F -` heredoc body, a comment, a `gh pr --body` heredoc, single-quoted `echo`, `grep "git push"`, a here-string, and other-repo commit-and-push (both `cd` and `-C`).
+- "even when it changes nothing" is accurate for a no-op `pull`.
+
+**Live G1 evidence on `main`:** the main checkout's current gate refused one of my own probe commands because its heredoc text contained a chained push. This is the defect this pipeline fixes.
+
+**C2, Playwright guard: PASS.**
+
+| Run | Result |
+|---|---|
+| Worktree, no env | throws |
+| `127.0.0.1:3000` | throws |
+| `PW_ALLOW_3000=true` | throws |
+| `:3480` | lists 515 |
+| `PW_ALLOW_3000=1` | lists |
+| `CI=1` | lists |
+| Production lane | lists 76 |
+| Plain (non-worktree) scratch checkout | no throw |
+| Linked worktree I added to the scratch repo | throws |
+
+**C3, reset file: PASS.** Before the runs I turned on one seed-OFF flag (`org_portal.staff`), giving 11 of 39 on.
+
+| Run | Result |
+|---|---|
+| No variable, `ON_ERROR_STOP` | refused, still 11 on |
+| No variable, no `ON_ERROR_STOP` | refused, every later statement errors, `ROLLBACK`, still 11 on |
+| `pipeline_branch=0` | refused, still 11 on |
+| Documented command | "set 39 seeded flags…", baseline `UPDATE 3`, per-org notice, `COMMIT`; 10 on, `org_portal.staff=false` |
+
+"Nothing was changed." is accurate. The missing-key path rests on Phase 4's run and on reading the code: the raise comes before the update in the same block.
+
+**C4, briefings banner: `copy truthfulness: FAIL`.** See FAIL-2.
+
+**C5, `stats:escape`: PASS.**
+- The default output is byte-identical to the old script.
+- With the flag, the title and labels read "since <value>" and no `30d` remains.
+- The empty-window line is shown.
+- 6 bad values are refused with the C5 message and exit 2: `2026-13-45`, `;rm`, `$(id)`, `1000 days ago`, the empty string and `--output=x`.
+- The script uses `execFileSync` with an argument array.
+
+**C6** (`db.ts:128`) and **C7** (`agents-md.test.mjs:26,31,36`): PASS. **C9 (docs):** PASS. The recipe, the reset command, R1 to R6 and the AUTH_URL sentence were all checked against the running system.
+
+**C8, worktree report: `copy truthfulness: FAIL`.** See FAIL-1.
+
+**AGENTS.md:** with the agent environment present (`CLAUDECODE`, `AI_AGENT`), a `next dev -p 3480` start plus requests and the whole e2e run left `git status` empty.
+
+**Briefings count now and after the planned commit:**
+- **Now**, from the worktree, the banner reads: `82 unread briefings — docs/briefings.md` and `briefings are BEHIND by 45 decisions not yet named (newest DECISION-229) and 67 feat/fix commits — …`.
+- **After** Appendix D's twelve entries, marker `decision=224`, and DECISION-231 recorded (simulated in scratch): only `94 unread briefings — docs/briefings.md`. There is no behind line, and the entries name every number from 168 to 224 (excluding 207 to 214), plus 229 and 231.
+
+### FAIL-1: worktree report calls in-flight worktrees "merged into main" and suggests removing them
+
+`scripts/worktree-report.mjs:98` (label), `:69` (suggestion), `:133-144` (`isMerged`), `:106` (footer). Affects the orchestrator and operator.
+
+"merged into main" is computed as `merge-base --is-ancestor HEAD origin/main`. A worktree with no commits of its own passes that check. Against today's real worktrees, `npm run worktrees:report` labels **`presby-cal`, `presby-inc3` and `presby-parish`** "merged into main" and prints `git worktree remove '<path>'` for each. All three are live pipelines with 0 commits beyond `origin/main` and an uncommitted work-log.
+
+Git refuses those three because of the untracked file. But a fresh worktree holding only ignored files is **deleted silently with exit 0**; I reproduced this in a scratch repo. That is the state right after `/new-feature` creates it: `.env.local` and `node_modules`. The footer states the squash caveat but not this case.
+
+**This traces to a design claim:** Copy C8 and Item 8 define the label and its source. Phase 4 flagged it as deviation 7 and was bound by the Copy table. So it goes to **tech-lead (Phase 3)** for a ruling. Item 8 is designated "first to cut", so cutting it is one option. The other is to separate "no commits of its own" (for example, HEAD on `origin/main`'s first-parent line) from "merged", never suggest removal for a worktree with changes, and amend C8. Per CLAUDE.md's Accelerated Feature row, a QA FAIL that traces to a design claim promotes the pipeline to a full Feature at that point. The orchestrator should record that.
+
+### FAIL-2: briefings banner undercounts by five
+
+`docs/briefings.md:21`, read by `scripts/briefings-check.mjs:76-91`. Affects the operator at session start.
+
+The new explanatory paragraph's example, `` range like `DECISION-215–219` ``, is itself parsed as naming DECISION-215 to 219. The live banner therefore says **45** decisions not yet named, when 50 recorded decisions above the marker are named by no entry. I decomposed the count: the five "named" numbers above 167 are exactly 215 to 219.
+
+Phase 4's record ("the banner went from 62 to 50") is false at HEAD. The test at `:88` uses synthetic input and cannot see this.
+
+The effect disappears once the backlog commit moves the marker to 224, but until then it steers whoever writes the entries away from 215 to 219, and it remains a trap in the file. This traces to implementation, not a design claim. Fix: use a placeholder that contains no digits (for example `DECISION-NNN–MMM`). Add a test that the real `docs/briefings.md`, outside its dated entries, names no recorded decision. Correct the Phase 4 line.
+
+### Non-blocking notes (fix opportunistically)
+
+- **N1.** The 7b claim is partly overstated. The old helper tested only `message` and `cause`, and the Neon driver sets `name = "NeonDbError"` while keeping the server's text as `message`. So a unique violation was not being retried: `withDbRetry › a unique violation runs once and throws` passed against the old helper. The timeout retry was real. The same overstatement appears in the header of `scripts/with-db-retry.test.mjs:3-5` and in the body of commit `0f1dda2`.
+- **N2.** Two gate residuals are missing from the header list. Neither is a regression; the old gate missed both.
+  - `git push $(git commit -m x)`: an unquoted `$()` is ordered after its enclosing command, so with a fresh marker this is allowed.
+  - Prefixes that carry flags (`nice -n 5`, `time -p`, `command -p`) hide the push entirely, so it is allowed even with no marker. Header lines 38-39 say these prefixes are followed.
+- **N3.** The design's claim that `rg '\[domains-ui-fixture\]'` finds only the renamed line is inaccurate; four refusal lines remain, correctly named. No action.
+- **N4.** The intermittent `invitation-new-account.spec.ts:66` failure (above) is worth watching. A prior session's logs in this scratchpad show a similar one-off on `invitation-existing-account.spec.ts`.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** Two copy-truthfulness defects. FAIL-1 traces to design Copy C8, so it goes to tech-lead and, per the Accelerated rule, the pipeline is promoted to a full Feature. FAIL-2 is an implementation fix in `docs/briefings.md:21` plus a guard test. Everything else passed: gates, the 215 new tests, failing-first, the gate's behaviour, the Playwright guard, the reset file, `stats:escape` byte-identity, `AGENTS.md`, and full-chromium e2e (411 of 412, with the single failure passing on re-run).
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+Not auth-touching, so the stricter gate does not apply.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. FAIL-1 traces to design C8, so Accelerated promotes to a full Feature (orchestrator to record). FAIL-2 is implementation. Flag reset ran on the pipeline branch. | FAIL | 2026-10-25 |
+
+## Handoff
+
+- **FAIL-1 → tech-lead (Phase 3):** a ruling on Copy C8 and Item 8, either cut item 8 or redefine "merged" and the removal suggestion. Then the implementer.
+- **FAIL-2 → full-stack-developer (Phase 4):** `docs/briefings.md:21` placeholder, a real-file guard test, and the correction to the Phase 4 record. N1 (the test header comment) can go in the same commit.
+- **Then QA re-runs:** `briefings-check` and `worktree-report` tests, the live banner, `worktrees:report` against the real worktree list, and `npm test` / `npm run check`. Everything else stands on this run unless those files change.
+
+Evidence logs are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/wf/`: `e2e-chromium.log`, `e2e-rerun.log`, `unit.log`, `check.log`, `newtests.log`, `probe-gate.mjs`, `probe-hook.mjs`, `stats-old.txt` and `stats-new.txt`.
 
 ---
 
@@ -1005,3 +1159,230 @@ Failures: [...]
 - **Relabelled Accelerated Feature** (Q1). **Skipping Phase 2 — no new dependency, no new directory or structural change, no invariant touched. `e2e/support/db.ts` and `scripts/` are existing homes; no `src/` code is added. Rule 16's shared-file list is noted and handled in Phase 1.**
 - Q2–Q9 on the analyst's defaults. The disk prerequisite is cleared (541 GiB free at 2026-10-25).
 - **Added to scope from QA (session-update-hardening, Phase 5 run 1):** Next 16 rewrites the tracked `AGENTS.md` heading on every dev-server start, dirtying every worktree; fix it (commit the generator's form, or disable the generator) — Phase 3 picks, verified by a dev start leaving `git status` clean. The qa agent file names `scripts/ci/e2e-reset-flags.sql`, which this pipeline creates, so that reference becomes correct.
+
+## Orchestrator: QA run 1 FAIL — loop-back (2026-10-25)
+
+- **Promoted to a full Feature** (CLAUDE.md Accelerated row: a QA FAIL tracing to a design claim). FAIL-1 traces to Copy C8 / Item 8; Phase 2 stays skipped for this loop-back (the change is to a report script's copy and predicate, no structural question).
+- **FAIL-1 → tech-lead** for a Phase 3 amendment on C8/Item 8. **FAIL-2 → full-stack-developer** after the amendment (briefings.md:21 placeholder, real-file guard test, Phase 4 record correction, N1 test-header wording).
+
+---
+
+# Phase 3 amendment 1 (tech-lead) — QA run 1 loop-back
+
+**Author:** tech-lead, 2026-10-25. **Pipeline mode:** Full Feature (promoted by the orchestrator; Phase 2 stays skipped for this loop-back, no structural question). **Checked against:** the live tree of this worktree at `0f9f3ee`: `scripts/worktree-report.mjs` and its test, `docs/briefings.md:10-26`, `scripts/briefings-check.mjs`, `scripts/pre-push-gate.mjs:1-66`, `docs/testing.md:512-518`, and the real worktree list (`git worktree list --porcelain`, the classification below run by hand against every entry). Scope: Item 8 and Copy C8 are re-specified; FAIL-2, N1 and N2 are specified; N3 and N4 are dispositioned. Nothing else in Phase 3 changes. **Item 8 / C8 above are superseded by this amendment; the original text is kept as the record.**
+
+## Rulings
+
+**FAIL-1: keep Item 8 and redefine it.** Cutting would drop the disk-and-size report that exists because a full disk was read as a Neon "fetch failed" twice; the defect is only the predicate and the suggestion, which are small to fix. The root cause is one conflation: `git merge-base --is-ancestor HEAD origin/main` is also true for a worktree that has no commits at all (HEAD *is* a commit on main). "Is an ancestor" answers "are this HEAD's commits on main", not "has this branch been merged". The amended report therefore separates four facts and bases its one destructive-looking suggestion on all of them:
+
+1. **has commits of its own**: HEAD is not on `origin/main`'s first-parent line. A branch merged by a merge commit (this project's merge style, `Merge pull request #N`) has its tip as the *second* parent of that merge, so it is off the first-parent line; a fresh pipeline worktree, whose HEAD is some commit that main itself reached, is on it.
+2. **all of them are on `origin/main`**: HEAD is an ancestor of `origin/main` (the old test, kept).
+3. **clean**: `git --no-optional-locks status --porcelain` (tracked changes and untracked files, not ignored files) prints nothing. The flag keeps the report from refreshing any worktree's index; the script stays read-only.
+4. **a named branch**: a detached HEAD is never classified.
+
+`git worktree remove` is suggested **only when 1, 2, 3 and 4 all hold**. Everything else, including "no commits of its own", "not merged", detached, unknown, and dirty-or-unknown, gets no removal suggestion. The only remaining suggestion for those is `rm -rf '<path>/.next'`, and only when `.next` exists.
+
+Against the real worktrees (run by hand with the rules above): `presby-cal`, `presby-inc3`, `presby-parish` are on the first-parent line and dirty, so "no commits of its own (new or unused)" and "uncommitted or untracked files", no removal; `presby-2b`, `presby-gauth`, `presby-sess` and this worktree are not ancestors, so "not merged". Nobody currently qualifies for removal, which is the correct output today.
+
+**Known and accepted classification residuals (stated in the footer, not hidden):** a fast-forwarded branch looks like "no commits of its own"; a squash-merged branch looks like "not merged" (the old caveat); a branch deliberately created from a commit that is itself off main's first-parent line (the tip of an already-merged feature branch) would read as "merged" while having no work of its own. For that last case the removal still needs a clean tree, the suggestion is text, and the suggestions header names what `git worktree remove` deletes. All three err toward *not* suggesting removal except the last, which is a rare operator action. [unverified: no test pins the last one; it is a deliberate-branching case.]
+
+## Item 8 (amended) — Disk and worktree report (`fix(tooling)`)
+
+`scripts/worktree-report.mjs` stays report-only: it prints and deletes nothing, always exits 0. Changed surface, all pure except the gatherers, all exported for tests:
+
+- `worktreeState(facts): "merged" | "none" | "unmerged" | null` with `facts = { detached: boolean, ancestor: boolean | null, onFirstParent: boolean | null }`. `detached` or `ancestor === null` gives `null`; `ancestor === false` gives `"unmerged"`; `onFirstParent === null` gives `null`; `onFirstParent === true` gives `"none"`; otherwise `"merged"`.
+- `resolveBase(cwd): string | null` runs `git rev-parse --verify --quiet refs/remotes/origin/main^{commit}`. There is **no fallback to a local `main`**: a local main can be ahead of what was published, and "merged" is a statement about `origin/main`. Missing gives `null` and every state is `null`.
+- `firstParentLine(base, cwd): Set<string> | null` runs `git rev-list --first-parent <base>` once per report (301 entries today) with a raised `maxBuffer`; `null` on failure.
+- `worktreeFacts(head, base, line, cwd)`: `ancestor` from `git merge-base --is-ancestor` exit code (0 true, 1 false, anything else `null`); `onFirstParent` is `line.has(head)`.
+- `isDirty(worktreePath): boolean | null` runs `git --no-optional-locks status --porcelain` in that path; non-empty output is `true`, empty `false`, error `null`. Not computed for the main checkout or a bare entry (`null`).
+- `buildModel(repoRoot, { sizes }): Model` assembles the model (extracted from `main()` so the regression test can run the real gatherers against a temp repo): `{ repoRoot, freeGiB, baseFound, worktrees: [{ path, branch, detached, isMain, bare, state, dirty, nextExists, sizes }] }`. `nextExists` is `existsSync(<path>/.next)`.
+- `removalSuggestions(entries)`: skip main and bare. `git worktree remove '<path>'` iff `state === "merged" && dirty === false`. Otherwise `rm -rf '<path>/.next'` iff `nextExists`. Nothing else, ever. (Signature unchanged; the entry shape gains `state`, `dirty`, `nextExists` and loses `merged`.)
+- `formatReport(model)`: the strings of amended C8 below.
+
+Unchanged: `--no-sizes`, `shellQuote`, `parseWorktreePorcelain`, the 20 GiB line, `du -sk`, `statfsSync`. The header comment (lines 3-17) and the file's caveat sentence are rewritten to the new definition (they say "whether its HEAD is already merged into main").
+
+**Tests** (extend `scripts/worktree-report.test.mjs`; the existing 16 are updated for the new entry shape, not deleted):
+
+- `worktreeState › truth table`: each of the nine fact combinations, including `detached`, `ancestor: null`, `onFirstParent: null`.
+- `worktreeFacts` and `buildModel` against **real temporary git repositories** (as `scripts/dev-port-guard.test.mjs` does for `git worktree add`; `GIT_CONFIG_GLOBAL` and identity set so no user config leaks; `refs/remotes/origin/main` made with `git update-ref` to stand in for a fetch):
+  1. a fresh worktree on a new branch at the main tip, holding only an ignored `.env.local` and a `node_modules/` directory, gives state `none`, `dirty === false`, and **`formatReport` contains no `git worktree remove` line for it** (the FAIL-1 reproduction; red on the shipped `d6da996`).
+  2. the same with an untracked work-log file gives `dirty === true`.
+  3. a branch with its own commit, merged into main with `merge --no-ff`, then `origin/main` updated, gives `merged`; clean gives `git worktree remove '<path>'`; with one untracked file added, no `worktree remove` line and a `.next` removal only if `.next` exists.
+  4. a branch with its own commit, not merged, gives `unmerged` and no removal line.
+  5. a branch fast-forwarded into main gives `none`; a squash-merged branch gives `unmerged`; neither gets a removal line.
+  6. a detached worktree gives `null` state and no removal line, whatever its ancestry.
+  7. no `refs/remotes/origin/main` gives `baseFound === false`, all states `null`, no removal line, and the "Merge state is not shown" line.
+  8. the main checkout never gets a state, a dirty flag or a suggestion.
+- `removalSuggestions › table`: merged and clean gives remove; merged and dirty gives no remove; merged and `dirty: null` gives no remove; each of `none`, `unmerged`, `null` gives no remove; `.next` removal only when `nextExists`; a path with a space or a single quote is quoted; main and bare never appear.
+- `formatReport › exact strings`: every line of amended C8 pinned (state labels, dirty label, footer, both suggestion header lines, the base-missing line, the OK and BELOW disk lines), and the suggestion headers appear only when their kind of suggestion is present.
+- `worktree-report › reads and never writes`: a source scan of `scripts/worktree-report.mjs` that every `git(...)`/`execFileSync("git"` call names one of `worktree list`, `rev-parse`, `rev-list`, `merge-base`, `status` (and `status` carries `--no-optional-locks`), and that no call names `remove`, `prune`, `clean`, `checkout`, `switch`, `reset`, `rm` or `mv`.
+
+**Docs:** `docs/testing.md:512-518` is rewritten (see C8 Neighbours). The `package.json` script line is unchanged.
+
+## Copy C8 (amended) — worktree report (stdout)
+
+Disk lines unchanged:
+`Disk: <x.x> GiB free on the volume holding <repo root> (checklist minimum 20 GiB: OK)`, or `Disk: <x.x> GiB free on the volume holding <repo root>: BELOW the 20 GiB the new-feature checklist asks for. A full disk has surfaced as a Neon "fetch failed" before; free space before running suites.`
+
+Per worktree, one line, segments separated by two spaces, a segment omitted when it does not apply:
+`<path>  <branch | detached | bare | unknown>  <state>  <changes>  node_modules <x.x> GiB, .next <x.x> GiB, rest <x.x> GiB`
+
+- `<state>` is exactly one of: `merged into origin/main` · `no commits of its own (new or unused)` · `not merged`. Omitted for the main checkout, a bare entry, a detached HEAD and an unknown state.
+- `<changes>` is exactly `uncommitted or untracked files`, shown when `dirty === true`; omitted otherwise (and for the main checkout).
+
+When `origin/main` is not found, after the worktree lines:
+`Merge state is not shown: origin/main was not found in this repository.`
+
+Footer (one paragraph, after a blank line):
+`Hardlinked node_modules are counted in full for each worktree. "merged into origin/main" means the branch has commits of its own and every one of them is on origin/main as of your last fetch. A branch that was squash-merged or fast-forwarded cannot be told from an unmerged or an unused one, so no worktree removal is suggested for it. This report deletes nothing.`
+
+Suggestions, only when there is at least one, after a blank line:
+`Suggestions for you to run (nothing here has been run):`
+then, only when a `git worktree remove` is listed:
+`"git worktree remove" also deletes the ignored files in that worktree, such as .env.local and node_modules; the branch is kept.`
+then, only when an `rm -rf .../.next` is listed:
+`".next" is regenerable; stop that worktree's dev server before removing it.`
+then the commands, each indented two spaces.
+
+The four checks:
+
+- **Residuals.** The footer states the squash and fast-forward limits and the hardlink counting. The third accepted residual (a branch started from an already-merged feature tip) is not stated in the output; it is in the amendment and the script header, and it cannot produce a removal line without a clean tree. It denies no Phase 2 ruling (Phase 2 was skipped) and no accepted residual in the Phase 1 record.
+- **Source of truth.** `merged into origin/main`: `refs/remotes/origin/main` resolved by `rev-parse`; `merge-base --is-ancestor` exit code; membership of HEAD in the set from `rev-list --first-parent origin/main`. `no commits of its own`: HEAD on that first-parent set and an ancestor. `not merged`: not an ancestor. `uncommitted or untracked files`: `git --no-optional-locks status --porcelain` output non-empty. "as of your last fetch": the claim reads a remote-tracking ref, which is only as fresh as the last fetch. "the branch is kept": `git worktree remove` does not touch refs. "nothing here has been run": true, the script has no mutating call (pinned by the source-scan test). Free GiB: `statfsSync` of the repo root; sizes: `du -sk`.
+- **Audience.** The orchestrator and the operator, who own worktree cleanup (`.claude/skills/new-feature/SKILL.md:54`); both can run the printed commands and stop a dev server. The surface's default reader is the orchestrator at a retrospective or before a new pipeline.
+- **Neighbours.** Grepped the live tree for `worktrees:report`, `worktree-report`, "merged into main", "merged", "worktree remove": modify targets are `scripts/worktree-report.mjs:3-17` (header: "whether its HEAD is already merged into main" and the squash caveat), `scripts/worktree-report.test.mjs` (header comment and the footer and label assertions), and `docs/testing.md:512-518` ("whether it is merged into main" becomes: "whether it has commits of its own and, if so, whether all of them are on `origin/main` ('merged'), whether it has uncommitted or untracked files, ..., with suggested cleanup commands. It suggests `git worktree remove` only for a merged, clean worktree: never for a new pipeline worktree, a squash-merged or fast-forwarded one, or one with changes."). `.claude/skills/new-feature/SKILL.md:54` ("At cleanup: remove the worktree...") stays true and is not edited. The original C8 and the Phase 4 Implementer Notes item 7 are superseded by this amendment (pointer lines added above).
+
+## FAIL-2 (implementation) — the briefings paragraph
+
+Root cause: `docs/briefings.md:21` gives its example as a range of real recorded numbers (`DECISION-215–219`), and `namedDecisions` reads the whole file, so the example names five decisions no entry describes.
+
+- **Fix.** Reword the paragraph at `docs/briefings.md:18-24` so it contains no `DECISION-<digits>` token: `(write `DECISION-NNN`, or a range like `DECISION-NNN to DECISION-MMM`, in the entry)`. The letters N and M never match `DECISION-0*(\d+)`. No other word of the paragraph changes; no entry and not the marker is touched (Rule 16 shared-file list does not name `docs/briefings.md`, and the orchestrator's backlog commit lands after this one).
+- **Guard test** in `scripts/briefings-check.test.mjs`: `real docs/briefings.md › the explanatory preamble names no decision`. It reads the real `docs/briefings.md`, takes the text before the first line matching `^## \d{4}-\d{2}-\d{2}` (asserts that heading exists and is not at index 0, so the test cannot pass vacuously), and expects `namedDecisions(preamble).size === 0`. Self-check (in the same file, synthetic): the old paragraph text fed through the same function fails the same assertion, so the test is shown able to fail.
+- **Phase 4 record correction** (the implementer appends this to the work-log as a Phase 4 amendment, it does not edit the old section): the `Gates`/`Failing-First Record` line "the banner went from '62 decisions' to '50 decisions not yet named'" was false at HEAD; the live banner read 45 because of this paragraph. After the fix, the banner reads **50 decisions not yet named (newest DECISION-229)**, which the implementer confirms by running `node scripts/briefings-check.mjs` and records with the commit count shown.
+- **Copy (C4 re-check).** The banner string is unchanged; its Source-of-truth claim ("not matched by `DECISION-0*N` ... in `docs/briefings.md`") was true of the file as written but not of what the operator means by "named in an entry"; the guard test now makes the two the same for the preamble. Neighbours: `docs/briefings.md:18-24` is the one modify target; `scripts/briefings-check.mjs:13-18` describes the measure and stays true.
+
+## N1, N2, N3, N4
+
+- **N1 (`fix(e2e)` 7b claim, accept QA's reading).** The old helper tested only `message` and the `cause`'s message; the Neon driver puts the class name in `name`, not `message`, so a unique violation was not being retried by the old code. The behavioural fixes are the bare word "timeout" and a cancelled statement ("canceling statement due to statement timeout"). Replace the header of `scripts/with-db-retry.test.mjs` (lines 2-9) with: `Unit tests for withDbRetry / isDbDrop (e2e/support/db.ts). The helper retries a fixture step ONLY on a dropped connection. The old pattern also matched the bare word "timeout", so a statement timeout was retried five times (a 20 s stall became 100 s+). A unique violation was already not retried by accident (the driver puts the class name in name, not message); this pins that as a rule, with the timeout cases. The spec was always "fetch failed, Connection terminated, ECONNRESET, connection timeouts". This pins the classification, the schedule, the rethrow of the ORIGINAL error, and that nested wrappers do not multiply attempts.` Commit `0f1dda2`'s body and Phase 3 Item 7b/Summary say "constraint errors" were retried; that cannot be amended (history), so the implementer's Phase 4 amendment records the correction, and the Phase 4 `Failing-First Record` line for commit 8 is read as: 32 failed because `isDbDrop` did not exist and two behaviours were real fixes (statement timeout, bare "timeout"). DECISION-231 (Appendix B) says only that constraint errors and timeouts "throw at once", which is true; no edit.
+- **N2 (`test(hooks)`).** Two accepted residuals, neither a regression. (a) `git push $(git commit -m x)`: an unquoted `$()` is ordered after the command that encloses it, so the commit is not seen as preceding the push; with a fresh marker it is allowed. (b) Prefixes that carry flags of their own (`nice -n 5`, `time -p`, `command -p`): the flag is read as the command, so the push behind it is not seen at all, allowed even with no marker. Add both to the `ACCEPTED RESIDUALS` list in `scripts/pre-push-gate.mjs`, and change the sentence at lines 38-39 to say the prefixes are followed **when they carry no flags of their own**. Pin both in `scripts/pre-push-gate.test.mjs` as `commandContainsGitPush › accepted residuals`: the test asserts today's behaviour (a) `decideHook` allows with a fresh marker, (b) the gate sees no push, each with a comment "accepted residual: remove this test only when the gate is changed to catch it". The implementer first reproduces both against the live gate; if either does not reproduce, they stop and report rather than write the header sentence. DECISION-231's residual list (Appendix B, "Accepted residuals: aliases, ...") gains the same two items when the orchestrator writes `docs/decisions.md`. TODO lines (orchestrator, Item 9): the two residuals, each as a gate follow-up.
+- **N3.** No action (design claim `rg '\[domains-ui-fixture\]'` was inexact; the four remaining lines are that fixture's own correct refusals).
+- **N4.** Watch item, no code change. TODO line (orchestrator, Item 9): `invitation-new-account.spec.ts:66` failed once in the full chromium run and passed alone, and a similar one-off was seen on `invitation-existing-account.spec.ts`; if it recurs, investigate the enrolment step's wait.
+
+## Retroactive check (the rule discovered here)
+
+The rule from FAIL-1 is: *a label that names a state must be computed from the facts that distinguish that state from its look-alikes, and a suggestion that deletes anything must require every fact that makes it safe.* Re-read against every string and table already specified: C1 to C3, C5 to C7 and C9 name no state derived from a predicate with a look-alike (C3's "Nothing was changed" is backed by the single transaction and was exercised by QA; C2's "probably another checkout's server" already hedges); C4's "named" had the look-alike found as FAIL-2 and is fixed above; Item 7's R1 to R6 are rules about not repeating non-idempotent steps and were reviewed against that principle in the original design; the push-gate messages name only what the tokenizer read. No further string changes.
+
+## Edge Cases (amended, each cites its test)
+
+- A fresh pipeline worktree (only ignored files) is never offered for removal. [test: `buildModel › fresh worktree with ignored files`]
+- A worktree with an untracked file is never offered for removal, merged or not. [test: `buildModel › merged but dirty`]
+- Merged by merge commit and clean is offered, with the ignored-files warning. [test: `buildModel › merged and clean`; `formatReport › suggestion headers`]
+- Squash-merged, fast-forwarded, unmerged, detached, no `origin/main`, main and bare: no removal line. [tests: items 4-8 above]
+- `git status` does not refresh any index. [unverified beyond the flag; the source scan pins that the flag is present, not that git honours it]
+- A stale `origin/main` (no fetch) can call a just-merged branch "not merged" or miss a recent merge; safe direction; the footer says "as of your last fetch". [test: footer string]
+- A branch created from a merged feature tip reads as "merged" with no work of its own. [unverified; accepted residual above]
+- The briefings preamble never again names a decision. [test: `real docs/briefings.md`]
+- **E2E blast radius:** none. No file under `e2e/`, `playwright.config.ts` or `src/` changes in this amendment, and no spec depends on `worktree-report`, `briefings-check`, the gate header, or the retry-test header. No feature flag is named or changed.
+
+## Carry-forward (amendment)
+
+| Item | Addressed here, or deferred (who accepted) |
+|---|---|
+| QA FAIL-1 worktree report | Item 8 amended; C8 amended; tests above |
+| QA FAIL-2 briefings banner | Specified above (paragraph reword, guard test, Phase 4 record correction) |
+| QA N1 withDbRetry claim | Specified above (test header; Phase 4 amendment records the commit-body correction) |
+| QA N2 two gate residuals | Header list, pinned tests, DECISION-231 list, TODO lines |
+| QA N3 | No action |
+| QA N4 intermittent invitation spec | Deferred: TODO watch line (orchestrator) |
+| Phase 4 deviation 7 | Superseded by this amendment |
+| Phase 4 deviations 1-6, 8 | Unchanged; accepted by this tech-lead in this amendment (the `to` range form, commit 9 docs, lexer changes, reset-file details, retry text, 7c scope, G10) |
+| All earlier Phase 1 gaps and rulings, Q1-Q9 | Unchanged from the Phase 3 table above |
+
+## Commits (the implementer's list, in order)
+
+Each carries `Work-Log: 2026-10-25-retro-workflow-efficiency` and the `Co-Authored-By` line; each `fix` also carries `Caught-By: agent-review` and `Discovered-In: Phase-5` (found by QA run 1 before merge).
+
+1. `fix(tooling): suggest removing only a merged, clean worktree and say when one has no commits of its own` (FAIL-1: script, tests, header, `docs/testing.md` paragraph). Failing-first: the new tests run against `d6da996`'s script, red recorded.
+2. `fix(briefings): keep the explanatory paragraph from naming a decision, and test the real file` (FAIL-2). Failing-first: the guard test against the current `docs/briefings.md`, red recorded.
+3. `test(hooks): pin two accepted gate residuals and list them in the header` (N2).
+4. `test(e2e): correct the withDbRetry test header` (N1).
+5. `docs(work-log): record the Phase 4 amendment` (corrected lines for the 62-to-50 claim, deviation 7, and the 7b claim).
+
+No migration, route, action, dependency, flag or permission: the full Feature classification is the QA-FAIL promotion, not new surface.
+
+## Item 9 additions (orchestrator, at integration)
+
+TODO lines to add: the two gate residuals (N2); the intermittent `invitation-new-account.spec.ts:66` watch (N4); "worktree report cannot see squash-merged or fast-forwarded branches (would need the PR list)". Appendix B (DECISION-231) gains the two residuals. Nothing else in Item 9 changes. The briefings marker procedure is unchanged; the guard test removes the need for a human to notice the paragraph.
+
+## Implementer
+
+**full-stack-developer**, in this worktree, branch `pipeline/retro-workflow-efficiency`, no push. Feasibility check done against the live tree: `git rev-list --first-parent origin/main` and `git --no-optional-locks status --porcelain` run by hand across all eight worktrees; `removalSuggestions` and `formatReport` have no callers other than `main()` and the test file; the changed signatures involve no SQL.
+
+### Exact QA re-run scope
+
+Run:
+
+1. `npm run typecheck`, `npm run lint`, `npm run check` (all eight tripwires), plain `npm test` in full.
+2. The four changed test files alone, verbose: `scripts/worktree-report.test.mjs`, `scripts/briefings-check.test.mjs`, `scripts/pre-push-gate.test.mjs`, `scripts/with-db-retry.test.mjs`; the count for each against the implementer's report.
+3. Failing-first, in a scratch copy: the new `worktree-report` tests against `scripts/worktree-report.mjs` from `d6da996` (the fresh-worktree test must fail, as the old label was "merged"); the new real-file briefings test against `docs/briefings.md` from `0f9f3ee` (must fail); the two residual pins are green on the current gate (they document behaviour).
+4. Live: `npm run worktrees:report` from this worktree. Expect `presby-cal`, `presby-inc3` and `presby-parish` to read `no commits of its own (new or unused)` and `uncommitted or untracked files` with no `git worktree remove` line for any worktree; `presby-2b`, `presby-gauth`, `presby-sess` and `presby-wf` to read `not merged`; the main checkout with no state. Before and after the run, `git worktree list --porcelain`, each worktree's `git status --porcelain` output, and the mtime of each worktree's index must be identical (read-only property); the main checkout's pre-push marker must be byte-unchanged.
+5. Scratch-repo reproduction of the incident: a fresh worktree holding only `.env.local` and `node_modules`: no removal line. A merged-by-merge-commit clean worktree: a `git worktree remove` line preceded by the ignored-files sentence; add an untracked file and the line disappears. Squash-merged and fast-forwarded: no removal line.
+6. Live: `node scripts/briefings-check.mjs`: the decision half must read `50 decisions not yet named (newest DECISION-229)` (not 45); the commit count must equal the current `git log --format=%s <marker commit>..HEAD` feat/fix count. Simulation as in run 1: with Appendix D's twelve entries, marker 224 and DECISION-231 recorded, the behind line is silent.
+7. Copy truthfulness re-check of amended C8 (every string above, the four checks, against the runs in 4 and 5) and of C4. Confirm N1 by reading the new header against QA's own probe of `0f1dda2^` (unique violation not retried by the old helper; timeout was), and N2 by reading the gate header against `decideHook` for the two strings.
+8. `git diff --stat 0f9f3ee..HEAD` must show only: `scripts/worktree-report.mjs`, `scripts/worktree-report.test.mjs`, `docs/testing.md`, `docs/briefings.md`, `scripts/briefings-check.test.mjs`, `scripts/pre-push-gate.mjs`, `scripts/pre-push-gate.test.mjs`, `scripts/with-db-retry.test.mjs` and the work-log.
+
+Not re-run, standing on QA run 1: the gate's behaviour apart from the two residual pins, the Playwright guard, the reset file, `stats:escape`, `AGENTS.md` under `next dev`, the full chromium e2e (411 of 412; N4 watch). **If the diff in step 8 shows any file under `e2e/`, `playwright.config.ts`, `src/` or `scripts/ci/`, the full `--project=chromium` run is required again** (qa Run Scope rule), after the flag reset.
+
+---
+
+# Phase 4 — loop-back 1 (full-stack-developer)
+
+**Implemented:** Phase 3 amendment 1, in this worktree, branch `pipeline/retro-workflow-efficiency`, no push. Base for the diff: `0f9f3ee`. The amendment section above was uncommitted at the start and is committed with this record.
+
+## Commits
+
+| # | SHA | Subject | Covers |
+|---|-----|---------|--------|
+| 1 | `df03301` | `fix(tooling): suggest removing only a merged, clean worktree and say when one has no commits of its own` | FAIL-1 |
+| 2 | `7ebc5d3` | `fix(briefings): keep the explanatory paragraph from naming a decision, and test the real file` | FAIL-2 |
+| 3 | `d3a9927` | `test(hooks): pin two accepted gate residuals and list them in the header` | N2 |
+| 4 | `d18b2cc` | `test(e2e): correct the withDbRetry test header` | N1 |
+| 5 | this commit | `docs(work-log): record the Phase 4 loop-back` | amendment text, corrections below |
+
+Trailers on 1 and 2: `Caught-By: agent-review`, `Discovered-In: Phase-5`. All five: `Work-Log: 2026-10-25-retro-workflow-efficiency`, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. No hook was bypassed. Nothing pushed.
+
+## FAIL-1 — worktree report
+
+- Implemented as specified: `worktreeState` (truth table), `resolveBase` (`refs/remotes/origin/main^{commit}`, no local-main fallback), `firstParentLine` (one `rev-list --first-parent` per report), `worktreeFacts`, `isDirty`, `buildModel`, the new `removalSuggestions` (`git worktree remove` iff `state === "merged" && dirty === false`; `rm -rf .next` iff `.next` exists; main and bare skipped), `formatReport` with the amended C8 strings, header comment and footer rewritten. `docs/testing.md` paragraph rewritten as specified.
+- **Small additions beyond the amendment text, all in the safe direction:** (a) `isDirty` passes `--untracked-files=normal`, so a user's `status.showUntrackedFiles=no` cannot turn an untracked file into "clean"; the amendment's source scan still holds (the call is `status` with `--no-optional-locks`). (b) All git spawning goes through one never-throwing helper, `gitRun`, so the source scan is "exactly one `execFileSync("git"`" plus an allow-list over every `gitRun([...])` call. (c) `buildModel` also returns `listFailed` so `main()` keeps the old "git worktree list failed; showing disk only" line.
+- **Failing-first.** The new test file was written first and run against the committed `d6da996` script: `38 failed | 16 passed (54)` (the 16 are the unchanged parse and quote tests); failures are `worktreeState` / `buildModel` / `worktreeFacts is not a function` and the old report strings. The incident itself was reproduced with the OLD script run as a CLI in a scratch repo (a fresh worktree holding only `.env.local` and `node_modules`): it printed `fresh  merged into main` and the line `git worktree remove '<path>'`. The same scratch scenario with the new script prints `fresh  no commits of its own (new or unused)` and no suggestion. After the implementation: `54 passed (54)`. Mutation check: forcing `worktreeState` to return `"merged"` for an ancestor made 5 tests fail (truth table, the incident, the dirty-fresh case, fast-forward, detached), restored afterward.
+- **Live run** (`npm run worktrees:report`, read-only; `git worktree list --porcelain`, every worktree's `git status --porcelain`, and every index mtime compared before and after: identical, apart from one untracked `e2e/zz-scratch.spec.ts` that appeared in `presby-inc3` during the run, created by another session working in that checkout, not by the report; the main checkout's `.claude/pre-push-ok.json` sha1 `69d24137...` is unchanged):
+  - `presby-cal` and `presby-parish`: `no commits of its own (new or unused)  uncommitted or untracked files`.
+  - `presby-2b`: `not merged  uncommitted or untracked files`; `presby-gauth`, `presby-sess`: `not merged`; `presby-wf`: `not merged  uncommitted or untracked files`; main checkout: no state.
+  - **`presby-inc3` reads `not merged  uncommitted or untracked files`, not `no commits of its own` as the amendment's hand classification and QA step 4 predict.** Checked by hand: its HEAD `14f3a4e` is not an ancestor of `origin/main`, so `not merged` is the correct output of the stated rules; the amendment's prediction for that one worktree was wrong, the script was not. QA should expect `presby-inc3` as `not merged`.
+  - No `git worktree remove` line anywhere; the suggestions are four `rm -rf '<path>/.next'` lines (gauth, inc3, sess, wf) under the regenerable-`.next` note only.
+- Not tested and stated: the "branch created from a merged feature tip" residual (the amendment marks it unverified).
+
+## FAIL-2 — briefings
+
+- `docs/briefings.md` preamble reworded to `DECISION-NNN to DECISION-MMM`; nothing else in the file touched (paragraph reflowed to 80 columns).
+- Guard test `real docs/briefings.md › the explanatory preamble names no decision` (reads the real file, preamble = text before the first `## YYYY-MM-DD` heading, asserts the heading exists and is not at index 0, and that the marker text is in the preamble). Failing-first: against the committed file it failed with `expected [ 215, 216, 217, 218, 219 ] to deeply equal []`. Self-check tests in the same file: the old paragraph fed through the same path names exactly 215-219; the replacement names none. `25 passed (25)`.
+- **Phase 4 record correction (supersedes the earlier line).** The Phase 4 Gates / Failing-First Record statement that the banner "went from '62 decisions' to '50 decisions not yet named'" was false at `0f9f3ee`: the live banner read **45** because the preamble named 215-219. After this fix `node scripts/briefings-check.mjs` reads **`50 decisions not yet named (newest DECISION-229)`**, with **69** feat/fix commits since the marker commit `2761de8` (the count shown equals `git log --format=%s 2761de8..HEAD | grep -cE '^(feat|fix)'` = 69, which includes the two `fix` commits of this loop-back).
+
+## N1 — withDbRetry header
+
+Header of `scripts/with-db-retry.test.mjs` replaced as specified; comment-only, `39 passed (39)`. **Phase 4 record correction:** commit `0f1dda2`'s body and Phase 3 Item 7b say "constraint errors" were retried by the old helper. They were not: the old helper tested only `message` and the `cause`'s message, and the Neon driver puts the class name in `name`, so a unique violation was never matched. Read the Failing-First line for that commit as: 32 failed because `isDbDrop` did not exist, and two behaviours were real fixes (statement timeout, bare "timeout"). History is not amended.
+
+## N2 — gate residuals
+
+Both reproduced against the live gate before anything was written: `decideHook` on `git push $(git commit -m x)` with a fresh marker returns `exit 0` (with no marker, `2`); `commandContainsGitPush` is `false` for `nice -n 5 git push`, `time -p git push` and `command -p git push`, and `decideHook` returns `exit 0` with no marker. Header: ACCEPTED RESIDUALS gained both, and the prefix sentence now says the prefixes are followed when they carry no flags of their own. **One precision beyond the amendment text:** `env` also skips bare flags (`env -i git push` is seen), and `env -u NAME` / `exec -a NAME` (flags with arguments) hide the push, so the header says "`env` also skips bare flags such as `-i`" and the residual lists those too. Tests: `commandContainsGitPush › accepted residuals` (the `$()` case, three flagged prefixes, and the unflagged-prefix control), each commented "remove this test only when the gate is changed to catch it". They pass on the unchanged gate by design; the reproduction above is the failing-first evidence. `80 passed (80)`.
+
+## Gates
+
+- `npm run typecheck`: clean. `npm run lint`: clean. `npm run check`: all eight tripwires pass.
+- `npm test` (full): `549 passed | 77 skipped` files, `8566 passed | 2442 skipped` tests, 0 failed.
+- The four changed files alone: `worktree-report` 54, `briefings-check` 25, `pre-push-gate` 80, `with-db-retry` 39 (198 total), all passing.
+- `git diff --stat 0f9f3ee..HEAD` (before this docs commit) touches only `docs/briefings.md`, `docs/testing.md`, `scripts/briefings-check.test.mjs`, `scripts/pre-push-gate.mjs`, `scripts/pre-push-gate.test.mjs`, `scripts/with-db-retry.test.mjs`, `scripts/worktree-report.mjs`, `scripts/worktree-report.test.mjs`: 8 files, 664 insertions, 106 deletions. Nothing under `e2e/`, `playwright.config.ts`, `src/` or `scripts/ci/`, so the full chromium run is not required again. No server was started in this loop-back (no port used).
+
+## Handoff
+
+Next: qa (Phase 5, run 2) per the "Exact QA re-run scope" above, with the `presby-inc3` expectation corrected to `not merged`. Orchestrator at integration: Item 9 additions (TODO lines, DECISION-231 residual list) as the amendment states; the second `Phase 4 deviation 7` is superseded.

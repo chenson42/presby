@@ -8168,3 +8168,14 @@ Existing tests this amendment alters (modify, not only add): `src/app/no-organiz
 ### Implementer and status
 
 **Implementer:** api-developer (B2's author owns the pure files; one small commit before Batch C). Batch C (ux-developer) consumes the strings from the modules. The Per-Phase Status row for this amendment: tech-lead, Complete, Copy amendment recorded, 2026-10-25; item 7 awaits the operator's confirmation only if the wider reading was intended.
+
+## Phase 4 — B2 copy follow-up
+
+**Date:** 2026-10-26 · **Author:** api-developer · **Commit:** 3423f81 (`fix(invitations): …`, `Caught-By: agent-review`, `Discovered-In: Phase-4`) · **Scope:** amendment 3 items 5, 6 and 7; items 1 to 4 and 8 stand and were not touched.
+
+- **Item 5.** `NO_ORG_COPY.checkFailed` = "We couldn't check just now. Try again." (`no-organization-copy.ts`); `checkAgainAction`'s `db_error` uses it (`actions.ts:108`). The now-unused `signInRefusalMessage` import was removed from `actions.ts`.
+- **Item 6.** `SignInMarker` gains `{ kind: "blocked" }`; `deriveSignInMarker` returns it for an unlinked `blocked` state (no `noEmail` suffix). `SESSION_ROW_STATES` gains `"blocked"`; `deriveSessionRowState` returns it before the address test; `sessionRowAction("blocked")` was already `"open"`. Both labels read "Invitation couldn't be completed" (`sign-in-copy.ts`). Doc comments updated.
+- **Item 7.** No code change (already the behaviour); the revoked-with-and-without-authority cases are now pinned in `sign-in-types.test.ts`.
+- **Tests.** Modified: `actions.test.ts` (the db_error sentence), `sign-in-types.test.ts` (blocked marker; six reachable Session states; blocked seat), `sign-in-copy.test.ts` (marker and row labels), `no-organization-copy.test.ts` (`checkFailed`). Added, failing first (8 failed before the code change): blocked marker with and without authority or address, connected-person-has-no-blocked-marker, revoked with and without authority, blocked Session row with and without an address, plus two cases through `org-invite.test.ts` (`getSignInMarkers`, `listSessionSignInRows`), named "regression for …". `org-invite.db.test.ts` needed no change.
+- **Gate.** typecheck, lint (`--max-warnings=0`) and `npm run check` clean; unit suite 9,360 -> 9,365 passed (607 files, 93 skipped); DB-backed `src/lib/onboarding` + `src/app/no-organization` serial with `.env.local`: 33 files, 625 passed, none skipped.
+- **Handoff.** Batch C (ux-developer) consumes `signInMarkerLabel`/`sessionRowStateLabel` for the new `blocked` kind and state: the marker renders with an amber icon plus the word, and the Session row links to **Open**. `PURPOSE_LABEL.sign_in` constraint (item 8) stands.

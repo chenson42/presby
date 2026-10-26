@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete; Gaps 1–14; Open Questions 1–4 | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete; R1–R14, S1–S3; DECISION-279 proposed; no migration (0077 unused) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; Batch A (site-kit) ready now, Batch B (presby) gated on F289 Batch 2 | Design complete, implementers named | 2026-10-26 |
-| 4 — Implementation | full-stack-developer (Batch A, site-kit); api-developer (Batch B, presby) | Batch A complete (site-kit `2fffcc1`, 235 tests green, not pushed); Batch B pending | — | 2026-10-26 |
+| 4 — Implementation | full-stack-developer (Batch A, site-kit); api-developer (Batch B, presby) | Batch A complete (site-kit `ad109b1`, 235 tests green, not pushed); Batch B pending | — | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -986,7 +986,7 @@ Next: **full-stack-developer for Batch A** immediately. For the orchestrator, be
 
 ## Batch A — presby-site-kit client (full-stack-developer), 2026-10-25
 
-Worktree `/Users/cshenso/git/presby-platform/presby-site-kit-ingest`, branch `fix/staged-ingest` (the name the orchestrator gave; the design said `pipeline/site-ingest-size`), from site-kit `main` 8ca982a. One commit, **not pushed, not merged**: `2fffcc1` `feat: v4.1.0 -- staged ingest: a site over the 4.0 MB request limit now publishes, image by image` (the design names a `feat:` commit, so no `Caught-By`/`Discovered-In` trailers; `Work-Log:` and the attribution lines are present). The main site-kit checkout was not touched. Site-kit has no commit hooks and no CI (`.git/hooks` holds only samples); conventional prefixes are its only convention.
+Worktree `/Users/cshenso/git/presby-platform/presby-site-kit-ingest`, branch `fix/staged-ingest` (the name the orchestrator gave; the design said `pipeline/site-ingest-size`), from site-kit `main` 8ca982a. One commit, **not pushed, not merged**: `ad109b1` `feat: v4.1.0 -- staged ingest: a site over the 4.0 MB request limit now publishes, image by image` (the design names a `feat:` commit, so no `Caught-By`/`Discovered-In` trailers; `Work-Log:` and the attribution lines are present). The main site-kit checkout was not touched. Site-kit has no commit hooks and no CI (`.git/hooks` holds only samples); conventional prefixes are its only convention.
 
 ### Files Created (site-kit)
 

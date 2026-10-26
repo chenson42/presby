@@ -979,3 +979,158 @@ Implemented S1-S5 only (S6 stays held for Step Z). Files: `src/app/(admin)/devel
 **Red first.** Before the fix, the new/changed rows failed (5 failed, 6 passed): masthead `Tables: Generated`, exact S1 sentence, `NOT_LISTED` rendered with lead line, S3 exact text, S4 metadata. **Green after:** 11/11.
 
 **Gate.** `npm run typecheck`, `npm run lint`, `npm run check` clean; full unit suite 612 files passed, 9138 tests passed (81 files skipped, DB-backed). Real browser on a dev server at :3570 (stopped by PID): `e2e/developer-portal.spec.ts` 14 passed (includes the 360px no-sideways-scroll check on `/developer/data-model`); a throwaway spec (deleted, not committed) confirmed the lead line, both omitted-rule paragraphs and `Tables: Generated` and no horizontal overflow at 360px and 1280px, screenshot inspected at 360px.
+
+---
+
+## Phase 5: Test Verification, run 2 (qa, 2026-10-25)
+
+**Subject:** `pipeline/developer-portal` at 99705be (copy loop-back, on top of run 1's fa376ee). Neon branch `pipeline-developer-portal`. Worktree `/Users/cshenso/git/presby-platform/presby-devportal`.
+
+**Verdict: PASS.** Strings S1–S5 match the amendment exactly, and the claims they make are true of the code. All five rows of the new test fail on the pre-fix source, each for the right reason, and pass at HEAD. Every check in scope is green. The run 1 calendar gap is closed now that 0067 is applied.
+
+## Run scope
+
+- **What changed since run 1:** `git diff --stat fa376ee 99705be` (excluding docs) shows four files: `data-model/page.tsx`, `page.test.tsx`, `developer.css`, `src/lib/dev-docs.ts`. No route, action, proxy, auth, schema or fixture file changed.
+- **Run in full:** typecheck, lint, `npm run check` (all eight tripwires) and the unit suite.
+- **e2e run:**
+  - `e2e/developer-portal.spec.ts` (chromium).
+  - The calendar specs that failed in run 1: `member-calendar`, `public-calendar`, `hydration/public-events-calendar`, `hydration/event-types-form` (chromium) and `custom-domains/public-calendar` (custom-hosts).
+- **Not re-run, resting on run 1:**
+  - The full chromium suite, the rest of custom-hosts, the prod-build lane and `next build`.
+  - The auth-touching set (`developer-2fa-gate`, `totp-*`, `session-claim-integrity` and the rest). This diff touches none of the files those specs cover.
+- **Database-backed suites:** not run. There is no migration and no change to `authz.ts`, `src/lib/db/` or any shared fixture.
+- **Pre-checks:**
+  - Disk: `df -h /System/Volumes/Data` showed 562Gi free.
+  - 0067 is applied: `events.website_listed` exists (read-only catalog check).
+  - The worktree's `PLATFORM_DATABASE_URL` hash differs from the main checkout's, so it is not `development`. No value was printed.
+- **Flags:** reset to the CI baseline with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1` (10 rows, COMMIT) before any e2e run.
+- **Server:**
+  - Started on :3570 in the worktree, with `AUTH_URL` and `E2E_BASE_URL` set to `http://localhost:3570`, `RATE_LIMIT_DISABLED=true`, the `DOMAINS_*` fakes, `E2E_ALLOW_SHARED_DB=true`, and a throwaway random `CRON_SECRET` and `STRIPE_WEBHOOK_SECRET` shared with the Playwright process through a 0600 scratch file (deleted afterwards).
+  - No HMR reload loop this time.
+  - Stopped by PID (82201/82218/82219); a first start was stopped by PID too (79646/79719/79731) so it could be restarted with the shared secret. Never :3000.
+- **Cleanup:** 0 `e2e-devui-%` or `e2e-qa-%` users remain. The worktree is clean at 99705be.
+
+## Type Check
+
+- `npm run typecheck`: PASS.
+- `npm run lint` (max-warnings 0): PASS.
+- `npm run check`: all eight tripwires pass (audit, `sql<Date>`, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
+
+## Unit Tests
+
+Total: 11,642 | Passed: 9,138 | Failed: 0 | Skipped: 2,504 (the 81 database-backed files, which skip without env) | Duration: 31.4s. 612 files passed.
+
+This is run 1's 9,134 plus the 4 new tests, and matches the implementer's count. The two most relevant files, run alone: `page.test.tsx` plus `dev-docs.test.ts`, 26/26.
+
+## End-to-End Tests
+
+| Spec | Result |
+|---|---|
+| `developer-portal.spec.ts` (chromium) | 14/14, including the 360px no-sideways-scroll checks |
+| `member-calendar`, `public-calendar`, `hydration/public-events-calendar`, `hydration/event-types-form` (chromium) | 34 passed, 1 failed in run A; the failing file passed 1/1 on re-run |
+| `custom-domains/public-calendar` (custom-hosts) | 8/8 |
+
+**About the one failure in run A.** `hydration/event-types-form.spec.ts:64`'s test body passed; only its `afterAll` failed (`e2e/support/calendar-fixture.ts:242`: "teardown left 2 fixture rows behind").
+
+- The two rows were the `E2E` event types that run 1 leaked into the throwaway `e2e94001…` org.
+- The teardown deletes only inside `CAL_ORG`, but its check counts `name like 'E2E %'` across all orgs. So it cannot clean another fixture's leak.
+- The custom-hosts calendar spec, which ran next, swept that org. A read-only check then found 0 `E2E` event types.
+- Re-run of the single file: 1/1 passed.
+- This is fallout from run 1's missing-0067 leak, not this diff.
+
+The run 1 calendar gap (7 + 1 + 2 failures, all from the missing column) is now covered. All passed except that one teardown, which passed on re-run.
+
+## Regression Tests Added (failing-first reproduced independently)
+
+The five-row test is in `src/app/(admin)/developer/data-model/page.test.tsx`, starting at line 115 plus the changed `:115` assertion.
+
+**Reproduction.** I made a `git archive 99705be` copy at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-dp-r2-red`. In it I restored `data-model/page.tsx`, `src/lib/dev-docs.ts` and `developer.css` from `99705be^` (confirmed by diff), kept HEAD's tests, and symlinked `node_modules`. There was no `.env.local` and no stash. The copy has since been deleted.
+
+Result: **5 failed, 21 passed.** Each fails for the property it guards:
+
+1. **Masthead:** expected `Tables: Generated`, received `Generated`.
+2. **S1 sentence:** the received note still reads "every rule heading in CLAUDE.md has an entry here; the wording…".
+3. **NOT_LISTED rendered:** the lead line is absent from the page.
+4. **S3 text:** received "…; the portal obeys it and npm run check:secrets enforces the shapes it can."
+5. **S4 metadata:** received "Generated technical reference for the PresbyPortal schema."
+
+At HEAD all pass.
+
+**Property check.**
+- Row 2 renders `Object.entries(NOT_LISTED)` from the same constant that `dev-docs.test.ts:157` and `:174` read, so the page and the test cannot drift apart.
+- Its `toEqual(["No Real Data", "Verify in a Browser"])` pin forces a re-read of S6's "Two" if a third omission is ever added.
+- Row 1 pins the exact sentence and rejects the old one.
+
+## Coverage on Critical Modules
+
+Unchanged since run 1, which measured: `permissions.ts` 100%, `two-factor.ts` 91.3%, `flags.ts` 100%, `developer-portal/access.ts` 100%. This diff touches none of them.
+
+## Feature-Gate Audit
+
+No protected routes touched in this loop-back. The diff changes one page's markup, one constant's string, CSS and a test. The page's `requireDeveloper` gate is unchanged (read in the diff). Run 1's full table stands.
+
+## Schema/RLS Audit
+
+Not applicable: no schema change. The only database action was the flag reset and read-only checks.
+
+## Browser walk (Chromium, real server, `/developer/data-model`)
+
+I used a throwaway entitled user (`e2e-devui-qar2-…@example.invalid`), created and deleted within the walk.
+
+- **Layout:** `scrollWidth` equals `innerWidth` at 360px (light and dark) and at 1280px. Every `.reg__note` ends inside the viewport (right edge 344 at 360px, 1084 at 1280px).
+- **Masthead:** text content `Tables: Generated`; `display: flex`; 13px (0.8125rem). Its computed colour is `rgb(92,97,105)` in light and `rgb(154,160,168)` in dark, which is exactly `--iron` (`#5c6169` / `#9aa0a8`, `developer.css:19/:51`). Visually it is one line: "Tables:" then the cog badge.
+- **Rules note and omissions:** the S1 note renders, followed by the lead line with `src/lib/dev-docs.ts` in code, then **No Real Data.** and **Verify in a Browser.** paragraphs with their reasons. Both read cleanly at 360px.
+- **Page head:** `<meta name="description">` is the S4 string; the title is `Data model · Developer portal`.
+- **A dev-mode console warning, not a defect.** A hydration-mismatch warning (`caret-color: transparent` on `#reg-filter`) appeared only when Playwright took a screenshot during hydration. A walk with no screenshots and a 4s settle produced no console errors. `TableFilter` is not in this diff.
+- **Screenshots:** `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/shots-dp-r2/` (`m_top.png`, `m2_rules.png`, `md_top.png`, `d_top.png`, `d_rules.png`).
+
+**CSS.** `.reg__provenance` adds `display:flex; flex-wrap:wrap; align-items:center; gap:0.375rem; color:var(--iron); font-size:0.8125rem`. No literal colour was added, and `--iron` is an existing token in `developer.css`, so there is no new colour token.
+
+One non-blocking note: S5 called 0.8125rem "the counts-line text size". `.reg__counts` is actually 0.78rem, and 0.8125rem is `.reg__legend`'s size. The implementer followed the design's literal value, and it matches the legend directly beneath, so this is not a defect.
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the design's Copy table.** S1 at `data-model/page.tsx:175-181` (sentences 1–2 unchanged, 3–4 verbatim). S2 lead line and per-entry paragraphs at `:182-194`, rendered from the constant and only when non-empty. S3 at `src/lib/dev-docs.ts:624`. S4 at `page.tsx:21-22`. S5 at `:98`; the literal space in JSX on the same line equals `{" "}`, and the text content is `Tables: Generated`. S6 is held for Step Z, as ruled. There are no unlisted strings.
+- [x] **The code behind each claim was opened.**
+  - "A test checks that every heading under Key Invariants in CLAUDE.md…": `keyInvariantHeadings()` (`dev-docs.test.ts:64-71`) reads the `###` headings between `## Key Invariants` and the next `## `. True.
+  - "…has an entry here or a recorded reason for leaving it out": `:157` filters `!sources.has(h) && !Object.hasOwn(NOT_LISTED, h)`. True.
+  - "Left out of this list": `:174` asserts no `NOT_LISTED` key is also an INVARIANTS source. True.
+  - "recorded in `src/lib/dev-docs.ts`": `NOT_LISTED` is exported there. True.
+  - S3 "npm run check:secrets checks the shapes it can": partial by its documented scope, and worded as partial. The unverifiable "the portal obeys it" is gone.
+  - S4 "read from the code": `buildSchemaDocs` over the Drizzle exports. True; it no longer calls the hand-kept parts "Generated".
+- [x] **Instructions by role.** No instruction was added. The viewer is the entitled developer (`users.is_platform_admin`); a non-entitled viewer gets the forbidden state (run 1, unchanged gate).
+- [x] **Older strings made false.** A grep of `src`, `e2e`, `docs/release-notes` and `CLAUDE.md` for `every rule heading`, `has an entry here`, `obeys it`, `technical reference` and `matches the project's own list` finds only the new S1 text and its test. The `dev-docs.ts:617-620` comment and the `:157` failure message stay true.
+  - **Still open, and not this diff's to fix:** the integration items listed in the amendment. `CLAUDE.md:153`, `CLAUDE.md:465`, `docs/product/functionality-map.md:20` and `docs/TODO.md:359` still need editing at integration, and S6 must replace C11's rules sentence at Step Z.
+
+copy truthfulness: PASS.
+
+## Verdict
+
+**PASS.**
+- Run 1's single copy defect is fixed, using the amendment's exact wording. Its exact-text test was independently reproduced red on the pre-fix source and is green at HEAD.
+- Typecheck, lint, `npm run check`, the unit suite and `developer-portal.spec.ts` are green, and 360px was verified in a real browser.
+- The auth-touching gate stands on run 1's real-server MFA run. None of the files it covers changed.
+
+---
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Run 2 (scoped re-verification after the copy loop-back) complete. S1–S5 verified against amendment 1 and against `dev-docs.test.ts:157/:174` and `NOT_LISTED`. The five-row test reproduced red on the pre-fix source in a `git archive` copy (5 failed, each for its property) and green at HEAD. Typecheck, lint, `check` (8/8) and unit (9,138 passed) green. `developer-portal.spec.ts` 14/14 on a self-started :3570 server. Calendar specs from run 1 now pass (34+1 on re-run, custom-hosts 8/8), with 0067 applied. 360px walk clean; the CSS uses the existing `--iron` only. Flags reset to the CI baseline. | PASS | 2026-10-25 |
+
+## Handoff
+
+**Next agent: analyst (Phase 6, shipped vs intent).**
+
+- **Analyst:** run 1's carry-forward items still apply. The ERD tab title shows the slug, Platform shell has no Diagram link on the index, and `shell-boundaries.test.ts` has a relative-import blind spot. All are accepted as non-blocking.
+- **Orchestrator, at integration:**
+  - Edit `CLAUDE.md:153` and `CLAUDE.md:465`, `docs/product/functionality-map.md:20`, and close `docs/TODO.md:359` together with lines 72 and 216.
+  - Write the release note with S6's sentence, not C11's original.
+  - Confirm `docs/testing.md:184-186` and the `dev-docs.ts` header, as amendment 1 lists.
+- **Possible follow-up for the TODO list (not this pipeline's):** `removeCalendarFixture`'s leftover check (`e2e/support/calendar-fixture.ts:236-242`) counts `E2E %` event types across all orgs, but it deletes only inside `CAL_ORG`. Another fixture's leak therefore fails an unrelated spec's teardown, which is what happened in run 1's prod lane and in this run's first calendar pass.
+
+**Evidence** (scratchpad `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/`):
+- Logs: `logs/r2-tc.log`, `logs/r2-lint.log`, `logs/r2-check.log`, `logs/r2-unit.log`, `logs/r2-flags.log`, `logs/r2-e2e-devportal.log`, `logs/r2-e2e-cal.log`, `logs/r2-e2e-calhosts.log`, `logs/r2-e2e-etf.log`, `logs/r2-dev3570.log`
+- Screenshots: `shots-dp-r2/`
+- Walk scripts: `walk-dp-r2.cjs` through `walk-dp-r2d.cjs`

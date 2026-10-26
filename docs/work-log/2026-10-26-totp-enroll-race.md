@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | **Skipped** — fix is a conflict-safe conditional upsert plus re-select inside `getOrCreatePendingEnrollment` (Phase 3 chose the conditional upsert; the same conditions hold); no schema, dependency or invariant change (reopens if a migration, trigger or lock is proposed) | — | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (full-stack-developer) | 2026-10-26 |
-| 4 — Implementation | full-stack-developer | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Complete | Gate met: typecheck, lint, check, unit, DB-backed totp specs, running-server e2e (probe, login-path specs, 40/40) | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -379,35 +379,57 @@ decisions.md, DECISION-290 (implementation entry, newest first): "A pending two-
 
 # Phase 4 — Implementation
 
+Implementer: full-stack-developer. Two commits: the tests first (red), then the fix.
+
 ## Files Created
 
-- `path/to/file` — purpose
+- `src/lib/totp-pending.exhaustion.test.ts` — scripted-database spec (T8, T9, T9b); runs in plain `npm test`.
+- `e2e/totp-enrol-concurrency.spec.ts` — the concurrent-fetch probe (three fresh throwaway users; the third at 360px).
 
 ## Files Modified
 
-- `path/to/file` — what changed
+- `src/lib/totp-pending.ts` — find-then-upsert replaced by the bounded conditional-upsert loop (`MAX_ATTEMPTS = 3`); docstring corrected (sole caller is `/account/2fa`; contract stated).
+- `src/lib/totp-pending.test.ts` — replaced wholesale: the replica spec is deleted; now a DB-backed spec, T1-T7.
+- `src/app/(account)/account/2fa/page.tsx` — comment only ("the page shows what the database holds").
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+None. No migration (0080 unused), no grant, no constraint. `schema.ts` untouched.
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+None (minting a pending secret is not audited; `TOTP_ENROLLED` and the admin reset already are). No new env var, `FEATURES` entry or flag.
+
+## Phase 4 open items, resolved
+
+1. **`setWhere` SQL** (inspected with `.toSQL()`): `insert into "user_totp_pending_enrollments" ("user_id", "secret_ciphertext", "expires_at", "created_at") values ($1, $2, now() + make_interval(mins => $3), default) on conflict ("user_id") do update set "secret_ciphertext" = excluded.secret_ciphertext, "expires_at" = excluded.expires_at, "created_at" = now() where "user_totp_pending_enrollments"."expires_at" <= now() returning "secret_ciphertext"`; params `[userId, ciphertext, 10]`. Valid; the column is table-qualified, which is legal in `ON CONFLICT DO UPDATE ... WHERE`. T2 and T4 run it against Neon.
+2. **The secret is in the server-rendered HTML.** The probe parses the `<details> ... <pre>` of the raw `GET /account/2fa` response bodies (no hydration involved), so no alternative probe design was needed.
+
+## Red then green
+
+- Tests-first commit `264af63` was run against the unfixed helper: **6 of 10 failed** — T1 (16 distinct secrets from 16 parallel calls), T2 (16), T6 (7 and 8 distinct for the two users across runs), T8 (resolved instead of rejecting), T9 (returned its own minted secret `2BRAZGR2...`, not `WINNERSECRETWINNER`), T9b (1 insert, expected 2). T3, T4, T5, T7 passed on the old helper as the design predicted (pins). After the fix: 10 of 10, run 5 consecutive times, green every time.
+- The e2e probe against the unfixed helper (the old file restored in the working tree, dev server hot-reloaded): **3 of 3 failed**, "eight concurrent renders showed 3 different keys" (user c; a and b similar). After the fix: 3 of 3 pass, repeated in a second run.
+
+## Gates (own dev server :3630, own Neon branch `pipeline-totp-enroll-race`; stopped by PID 81478; prod lane :3631 stopped by Playwright)
+
+- `npm run typecheck`, `npm run lint`: clean. `npm run check`: exit 0 (brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports and the rest all passed).
+- `npm run test`: 610 files passed, 84 skipped (DB-backed); 9253 tests passed.
+- `npm run test:db` on `totp-pending.test.ts`, `totp-pending.exhaustion.test.ts` and `two-factor*`: 3 files, 40 tests passed.
+- Full serial `npm run test:db` (about 30 minutes, run twice). Run 1 as the worktree's `.env.local` stands: 689 of 694 files passed, 5 failed, all environment: this worktree's `.env.local` sets `NEXT_PUBLIC_APP_URL=http://localhost:3630` while `issue.db.test.ts`, `(member)/feedback/actions.test.ts` and `(org)/o/[slug]/tickets/actions.test.ts` assert an absolute link on `http://localhost:3000` (those 16 files that mention `localhost:3000` pass 338 of 338 with `NEXT_PUBLIC_APP_URL=http://localhost:3000`). Run 2 with that override: **693 of 694 files, 11860 of 11862 tests passed (1 skipped)**; the single failure is `src/proxy.test.ts > the platform-host set (R2) > treats loopback as the platform outside a production deployment`, which also fails when run alone with `.env.local` loaded and passes in the plain `npm run test` run (no `.env.local`; it is in the 610 passed files): the same worktree-env cause, in a file this change does not touch or import. No test touching `totp-pending` failed in either run.
+- Running-server e2e (`E2E_BASE_URL=http://localhost:3630`, `AUTH_URL` the same, `RATE_LIMIT_DISABLED`, `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`, `E2E_ALLOW_SHARED_DB`; nothing ran against :3000): `totp-enrol-concurrency` 3/3, `totp-full-login` (MFA-enrolled user), `totp-code-entry` (all 17), `totp-recovery-code` 2/2, `totp-callback-bypass` 7/7: **31 of 31 passed**.
+- `invitation-new-account --repeat-each=40 --workers=1` (no retries): **40 of 40 passed** (4.7 minutes).
+- Hydration lane on the production build, :3631 (`PW_PROD_BUILD=1 PW_PROD_PORT=3631`): `hydration/totp-challenge.spec.ts` 1/1. No hydration spec covers `/account/2fa` itself; none was added (markup unchanged).
+- 360px look: the probe's third user runs at 360x740 and asserts `scrollWidth - clientWidth <= 0`, the QR code and the manual key visible. Screenshot looked at: heading, steps, QR, key, six boxes and the confirm button all inside the viewport, no horizontal scroll (the circle at the left is the Next dev indicator). Saved at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/enrol-360.png`.
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+- Deviations from the design: none in behaviour. Two small points. (a) The scripted-database spec's mock also answers the pre-fix `db.query...findFirst`, so the same file can run red against the old helper for the right reason; harmless against the new one. (b) The probe signs in through the real form and then deletes the row the sign-in navigation created before firing the eight GETs, so the render is a true first render; the first user also enrols with a code computed from the shown key, which proves shown equals stored from the person's side.
+- The probe creates its own throwaway `e2e-enrol-<stamp>-<tag>@example.invalid` users (deleted in `afterAll`; stale ones swept by prefix and age at start), so it adds nothing to `e2e-baseline-flags.sql` and touches no roster user.
+- Concurrency evidence on the DB is the 16-way parallel calls on a pool of 10; the READ COMMITTED argument (loser re-evaluates the WHERE against the winner's committed row) is what T1/T2/T4 exercise, not a mock.
+- Rule 16 files not edited. Proposed TODO / DECISION-290 / TODO #12 amendment text is already in the Phase 3 "Proposed docs reconciliation" and stands unchanged; the orchestrator applies it at integration.
+- Residuals unchanged from Phase 3 (app clock vs DB clock at `completeEnrollment`; a live delete-between-statements race is covered only by the scripted T9b).
 
-Strings added or changed: [file:line each, or "none"]
-
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
-
----
+Strings added or changed: none.
 
 # Phase 5 — Verification (qa)
 

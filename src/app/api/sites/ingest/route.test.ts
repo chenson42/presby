@@ -60,14 +60,20 @@ vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, and } from "drizzle-orm";
-import { generateKeyPairSync, sign as cryptoSign, type KeyObject } from "node:crypto";
-import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
+import {
+  createIngestFixtures,
+  createTokenSigner,
+  enableSitesPublicRender,
+  OIDC_ISSUER,
+  type IngestFixtures,
+  type TokenSigner,
+} from "@/lib/testing/site-ingest-harness";
 
 const hasDb = Boolean(
   process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL,
 );
 
-const ISSUER = "https://token.actions.githubusercontent.com";
+const ISSUER = OIDC_ISSUER;
 const AUDIENCE = "https://presby.example.invalid/sites-ingest-route-test";
 const SITES_ORG = "presby-ingest-route-test-org";
 const KID = "ingest-route-test-key-1";
@@ -91,76 +97,27 @@ describe.skipIf(!hasDb)(
     let POST: typeof import("./route").POST;
     let db: typeof import("@/lib/db").db;
     let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
-    let organizations: typeof import("@/lib/db/domain/org").organizations;
     let organizationSites: typeof import("@/lib/db/domain/sites").organizationSites;
     let blobAssets: typeof import("@/lib/db/domain/assets").blobAssets;
     let auditEvents: typeof import("@/lib/db/schema").auditEvents;
-    let featureFlags: typeof import("@/lib/db/schema").featureFlags;
-    let users: typeof import("@/lib/db/schema").users;
-    let provisionSite: typeof import("@/lib/sites").provisionSite;
-    let setSiteStatus: typeof import("@/lib/sites").setSiteStatus;
     let getPublishedSite: typeof import("@/lib/sites").getPublishedSite;
     let _resetJwksCacheForTests: typeof import("@/lib/sites-ingest-auth")._resetJwksCacheForTests;
 
     let orgHappyId: string;
     let orgHappySlug: string;
     let orgSuspendedId: string;
-    let grantingUserId: string;
-    let originalPublicRenderEnabled: boolean;
-
-    let publicKey: KeyObject;
-    let privateKey: KeyObject;
-    let jwk: Record<string, unknown>;
+    let restorePublicRender: () => Promise<void>;
+    let fixtures: IngestFixtures;
+    let signer: TokenSigner;
 
     function base64url(input: Buffer | string): string {
       return Buffer.from(input).toString("base64url");
     }
 
-    /** Mirrors sites-ingest-auth.test.ts's signToken() exactly. */
-    function signToken(
-      payloadOverrides: Record<string, unknown> = {},
-      opts: { headerOverrides?: Record<string, unknown> } = {},
-    ): string {
-      const header = {
-        alg: "RS256",
-        typ: "JWT",
-        kid: KID,
-        ...opts.headerOverrides,
-      };
-      const now = Math.floor(Date.now() / 1000);
-      const payload = {
-        iss: ISSUER,
-        aud: AUDIENCE,
-        exp: now + 300,
-        iat: now,
-        repository_owner: SITES_ORG,
-        repository: orgHappyRepo,
-        ref: "refs/heads/main",
-        event_name: "push",
-        job_workflow_ref: `${SITES_ORG}/presby-site-kit/.github/workflows/ingest.yml@refs/tags/v1.0.0`,
-        sha: `sha-default-${stamp}`,
-        ...payloadOverrides,
-      };
-      const headerB64 = base64url(JSON.stringify(header));
-      const payloadB64 = base64url(JSON.stringify(payload));
-      const signingInput = `${headerB64}.${payloadB64}`;
-      const signature = cryptoSign(
-        "RSA-SHA256",
-        Buffer.from(signingInput),
-        privateKey,
-      );
-      return `${signingInput}.${base64url(signature)}`;
-    }
-
-    function stubJwksFetch(keys: Record<string, unknown>[] = [jwk]): void {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue({
-          ok: true,
-          json: () => Promise.resolve({ keys }),
-        }),
-      );
-    }
+    // The signing and JWKS-stub plumbing lives in the shared harness
+    // (src/lib/testing/site-ingest-harness.ts), used by all four ingest route tests.
+    const signToken: TokenSigner["signToken"] = (overrides, opts) => signer.signToken(overrides, opts);
+    const stubJwksFetch = (keys?: Record<string, unknown>[]) => signer.stubJwksFetch(keys);
 
     function ingestRequest(
       authHeader: string | null,
@@ -204,139 +161,47 @@ describe.skipIf(!hasDb)(
     beforeAll(async () => {
       ({ POST } = await import("./route"));
       ({ db, getPlatformDb } = await import("@/lib/db"));
-      ({ organizations } = await import("@/lib/db/domain/org"));
       ({ organizationSites } = await import("@/lib/db/domain/sites"));
       ({ blobAssets } = await import("@/lib/db/domain/assets"));
-      ({ auditEvents, featureFlags, users } = await import("@/lib/db/schema"));
-      ({ provisionSite, setSiteStatus, getPublishedSite } = await import(
-        "@/lib/sites"
-      ));
+      ({ auditEvents } = await import("@/lib/db/schema"));
+      ({ getPublishedSite } = await import("@/lib/sites"));
       ({ _resetJwksCacheForTests } = await import("@/lib/sites-ingest-auth"));
 
-      const pair = generateKeyPairSync("rsa", { modulusLength: 2048 });
-      publicKey = pair.publicKey;
-      privateKey = pair.privateKey;
-      const exported = publicKey.export({ format: "jwk" }) as Record<
-        string,
-        unknown
-      >;
-      jwk = { ...exported, kid: KID, alg: "RS256", use: "sig" };
-
-      const platform = getPlatformDb();
-
-      // --- sites.public_render: flip on for this suite, restore after -----
-      const existingFlag = await db.query.featureFlags.findFirst({
-        where: eq(featureFlags.key, "sites.public_render"),
+      signer = createTokenSigner({
+        audience: AUDIENCE,
+        sitesOrg: SITES_ORG,
+        kid: KID,
+        defaultRepo: orgHappyRepo,
+        defaultSha: `sha-default-${stamp}`,
       });
-      originalPublicRenderEnabled = existingFlag?.enabled ?? false;
-      // getPlatformDb(), not db: drizzle/0048 section 2 (B-H3) revokes INSERT on
-      // feature_flags from presby_app — a flag is CREATED by the seeder on the
-      // owner connection, never by a tenant request. The UPDATE half of this
-      // upsert would still be permitted; the INSERT half is not.
-      await getPlatformDb()
-        .insert(featureFlags)
-        .values({ key: "sites.public_render", enabled: true })
-        .onConflictDoUpdate({
-          target: featureFlags.key,
-          set: { enabled: true },
-        });
 
-      const [userRow] = await platform
-        .insert(users)
-        .values({
-          email: `sites-ingest-route-test-granter-${stamp}@example.invalid`,
-          name: "Sites Ingest Route Test Granter",
-        })
-        .returning({ id: users.id });
-      grantingUserId = userRow!.id;
+      // sites.public_render: on for this suite, restored after.
+      restorePublicRender = await enableSitesPublicRender();
+      fixtures = await createIngestFixtures("sites-ingest-route-test", stamp);
 
-      async function makeOrg(
-        label: string,
-      ): Promise<{ id: string; slug: string }> {
-        const slug = `sites-ingest-route-test-${label}-${stamp}`;
-        const [row] = await platform
-          .insert(organizations)
-          .values({
-            // Fixture teardown window — drizzle/0044's BEFORE DELETE guard.
-            deletableUntil: fixtureDeletableUntil(),
-            organizationType: "congregation",
-            name: `Fixture Congregation ${label} for sites/ingest route.test.ts`,
-            slug,
-            path: `sites_ingest_route_test_${label}_${stamp}`,
-            platformStatus: "unmanaged",
-          })
-          .returning({ id: organizations.id, slug: organizations.slug });
-        return { id: row!.id, slug: row!.slug };
-      }
-
-      const happy = await makeOrg("happy");
+      const happy = await fixtures.makeSite("happy", orgHappyRepo);
       orgHappyId = happy.id;
       orgHappySlug = happy.slug;
-      const happyProvision = await provisionSite(
-        orgHappyId,
-        orgHappyRepo,
-        grantingUserId,
-      );
-      expect(happyProvision).toEqual({ kind: "ok" });
 
-      const suspended = await makeOrg("suspended");
-      orgSuspendedId = suspended.id;
-      const suspendedProvision = await provisionSite(
-        orgSuspendedId,
-        orgSuspendedRepo,
-        grantingUserId,
-      );
-      expect(suspendedProvision).toEqual({ kind: "ok" });
-      // Suspended directly from 'provisioning', with NO prior ingest — the
+      // Suspended directly from 'provisioning', with NO prior ingest - the
       // route handler's own first-ever ingest for this org is what test 9
       // exercises below, confirming it does not resurrect the site.
-      const suspendResult = await setSiteStatus(
-        orgSuspendedId,
-        "suspended",
-        grantingUserId,
-      );
-      expect(suspendResult).toEqual({ kind: "ok" });
+      const suspended = await fixtures.makeSite("suspended", orgSuspendedRepo, { suspended: true });
+      orgSuspendedId = suspended.id;
 
       // neverProvisionedRepo: deliberately no organization_sites row at all,
-      // and no organization created for it either — the 404 case only needs
+      // and no organization created for it either - the 404 case only needs
       // a repository claim resolveOrganizationByRepo() cannot resolve, which
       // an org-less repo string already is.
     }, 30_000);
 
     afterAll(async () => {
-      const platform = getPlatformDb();
-
-      await db
-        .update(featureFlags)
-        .set({ enabled: originalPublicRenderEnabled })
-        .where(eq(featureFlags.key, "sites.public_render"));
-
-      // audit_events.resourceId is plain text, not FK-linked to
-      // organizations — deleting the fixture orgs does NOT cascade here, so
-      // clean it up explicitly before deleting the orgs themselves.
-      for (const orgId of [orgHappyId, orgSuspendedId]) {
-        if (!orgId) continue;
-        await platform
-          .delete(auditEvents)
-          .where(eq(auditEvents.resourceId, orgId));
-      }
-
-      // organizations ON DELETE CASCADEs down through organization_sites and
-      // blob_assets (both organizationId FKs declared cascade) — deleting
-      // the two fixture orgs is sufficient, mirroring sites.test.ts's own
-      // minimal afterAll.
-      for (const orgId of [orgHappyId, orgSuspendedId]) {
-        if (!orgId) continue;
-        await platform.delete(organizations).where(eq(organizations.id, orgId));
-      }
-      if (grantingUserId) {
-        await platform.delete(users).where(eq(users.id, grantingUserId));
-      }
+      await restorePublicRender?.();
+      await fixtures?.teardown();
     });
 
     beforeEach(() => {
-      vi.stubEnv("SITES_INGEST_OIDC_AUDIENCE", AUDIENCE);
-      vi.stubEnv("GITHUB_SITES_ORG", SITES_ORG);
+      signer.stubEnv();
       stubJwksFetch();
       mockRevalidatePath.mockClear();
     });
@@ -760,6 +625,7 @@ describe.skipIf(!hasDb)(
           commitSha: HAPPY_SHA,
           pageCount: 1,
           imageCount: 1,
+          transport: "legacy",
         });
 
         // revalidatePath — layout-level plus the one page path ("/" maps to
@@ -907,6 +773,199 @@ describe.skipIf(!hasDb)(
           `sites-ingest-route-test-suspended-${stamp}`,
         );
         expect(published).toEqual({ kind: "not_found" });
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // 10. site-ingest-size (DECISION-279): the 4,000,000-byte request limit, the
+    //     image-count bound, the `code` on every error, and byte-identical images
+    // -----------------------------------------------------------------------
+
+    describe("site-ingest-size - the request limit and the shared gate (LG-2..LG-8)", () => {
+      /** A JSON object body of EXACTLY `total` bytes: {"pad":"aaaa..."} (ASCII only). */
+      function paddedBody(total: number): string {
+        const frame = '{"pad":""}'.length;
+        return `{"pad":"${"a".repeat(total - frame)}"}`;
+      }
+
+      function rawRequest(authHeader: string | null, body: string, extra: Record<string, string> = {}): Request {
+        const headers = new Headers({ "content-type": "application/json", ...extra });
+        if (authHeader !== null) headers.set("authorization", authHeader);
+        return new Request("http://presby.example.invalid/api/sites/ingest", { method: "POST", headers, body });
+      }
+
+      it("LG-2: a body of 4,000,001 bytes with a valid token is 413 request_too_large (counted, no declared length)", async () => {
+        const token = signToken({ sha: `sha-lg2-${stamp}` });
+        const res = await POST(rawRequest(`Bearer ${token}`, paddedBody(4_000_001)));
+        expect(res.status).toBe(413);
+        expect(await res.json()).toEqual({
+          status: "error",
+          code: "request_too_large",
+          error: "Request body is larger than 4,000,000 bytes.",
+        });
+      });
+
+      it("LG-2: a declared Content-Length over the limit is refused the same way", async () => {
+        const token = signToken({ sha: `sha-lg2b-${stamp}` });
+        const res = await POST(rawRequest(`Bearer ${token}`, paddedBody(4_000_001), { "content-length": "4000001" }));
+        expect(res.status).toBe(413);
+        expect((await res.json()).code).toBe("request_too_large");
+      });
+
+      it("LG-3: the same oversize body with no token, or a bad one, is 401 - not 413", async () => {
+        const big = paddedBody(4_000_001);
+        const none = await POST(rawRequest(null, big, { "content-length": "4000001" }));
+        expect(none.status).toBe(401);
+        const bad = await POST(rawRequest("Bearer not.a.jwt.at.all", big));
+        expect(bad.status).toBe(401);
+      });
+
+      it("LG-4: a body of exactly 4,000,000 bytes passes the size gate (and fails validation, not size)", async () => {
+        const token = signToken({ sha: `sha-lg4-${stamp}` });
+        const body = paddedBody(4_000_000);
+        expect(Buffer.byteLength(body)).toBe(4_000_000);
+        const res = await POST(rawRequest(`Bearer ${token}`, body));
+        expect(res.status).toBe(422);
+        expect(await res.json()).toMatchObject({ code: "invalid_request", error: "Missing bundle." });
+      });
+
+      it("LG-5: 2,001 images are refused 422 invalid_request before anything is stored", async () => {
+        const platform = getPlatformDb();
+        const countBlobs = async () =>
+          (await platform.select({ id: blobAssets.id }).from(blobAssets).where(eq(blobAssets.organizationId, orgHappyId))).length;
+        const before = await countBlobs();
+
+        const images = (n: number) =>
+          Array.from({ length: n }, (_, i) => ({ manifestKey: `k${i}`, contentType: "image/png", bytesBase64: PNG_MAGIC_BYTES_BASE64 }));
+        const token = signToken({ sha: `sha-lg5-${stamp}` });
+        const res = await POST(ingestRequest(`Bearer ${token}`, validBundleBody({ images: images(2001) })));
+        expect(res.status).toBe(422);
+        expect(await res.json()).toEqual({
+          status: "error",
+          code: "invalid_request",
+          error: "bundle.images has more than 2000 entries.",
+        });
+        expect(await countBlobs()).toBe(before);
+        expect(mockRevalidatePath).not.toHaveBeenCalled();
+      });
+
+      it("LG-6: every error body carries { status, code, error } with the right code", async () => {
+        const cases: Array<[string, Request, number, string]> = [
+          ["unauthorized", ingestRequest(null, validBundleBody()), 401, "unauthorized"],
+          [
+            "site_not_provisioned",
+            ingestRequest(`Bearer ${signToken({ repository: neverProvisionedRepo, sha: `sha-lg6a-${stamp}` })}`, validBundleBody()),
+            404,
+            "site_not_provisioned",
+          ],
+          ["invalid_json", ingestRequest(`Bearer ${signToken({ sha: `sha-lg6b-${stamp}` })}`, "{nope"), 422, "invalid_json"],
+          [
+            "invalid_request",
+            ingestRequest(`Bearer ${signToken({ sha: `sha-lg6c-${stamp}` })}`, JSON.stringify({})),
+            422,
+            "invalid_request",
+          ],
+          [
+            "reserved_page",
+            ingestRequest(
+              `Bearer ${signToken({ sha: `sha-lg6d-${stamp}` })}`,
+              validBundleBody({ pages: [{ path: "/give", frontMatter: {}, mdxAst: {} }] }),
+            ),
+            422,
+            "reserved_page",
+          ],
+          [
+            "not_an_image",
+            ingestRequest(
+              `Bearer ${signToken({ sha: `sha-lg6e-${stamp}` })}`,
+              validBundleBody({
+                images: [{ manifestKey: "x", contentType: "image/png", bytesBase64: Buffer.from("not an image").toString("base64") }],
+              }),
+            ),
+            422,
+            "not_an_image",
+          ],
+        ];
+        for (const [name, request, status, code] of cases) {
+          const res = await POST(request);
+          expect(res.status, name).toBe(status);
+          const body = await res.json();
+          expect(Object.keys(body).sort(), name).toEqual(["code", "error", "status"]);
+          expect(body.status).toBe("error");
+          expect(body.code, name).toBe(code);
+          expect(typeof body.error).toBe("string");
+        }
+      });
+
+      it("LG-6: sites.public_render off is 503 ingest_disabled on the legacy route too", async () => {
+        const { setSitesPublicRender } = await import("@/lib/testing/site-ingest-harness");
+        await setSitesPublicRender(false);
+        try {
+          const res = await POST(ingestRequest(`Bearer ${signToken({ sha: `sha-lg6f-${stamp}` })}`, validBundleBody()));
+          expect(res.status).toBe(503);
+          expect(await res.json()).toEqual({ status: "error", code: "ingest_disabled", error: "Site ingest is currently disabled." });
+        } finally {
+          await setSitesPublicRender(true);
+        }
+      });
+
+      it("LG-7: two manifest keys with identical bytes make one image row and two imageKeys that share it", async () => {
+        const site = await fixtures.makeSite("lg7", `${SITES_ORG}/site-ingest-route-lg7-${stamp}`);
+        const bytes = Buffer.concat([PNG_MAGIC_BYTES, Buffer.from(`lg7 ${stamp}`)]);
+        const b64 = bytes.toString("base64");
+        const token = signToken({ repository: site.repo, sha: `sha-lg7-${stamp}` });
+        const res = await POST(
+          ingestRequest(
+            `Bearer ${token}`,
+            validBundleBody({
+              images: [
+                { manifestKey: "first", contentType: "image/png", bytesBase64: b64 },
+                { manifestKey: "second", contentType: "image/png", bytesBase64: b64 },
+              ],
+            }),
+          ),
+        );
+        expect(res.status).toBe(200);
+
+        const rows = await getPlatformDb()
+          .select({ id: blobAssets.id, contentType: blobAssets.contentType, audience: blobAssets.audience, bytes: blobAssets.bytes })
+          .from(blobAssets)
+          .where(eq(blobAssets.organizationId, site.id));
+        const images = rows.filter((r) => r.contentType === "image/png");
+        const json = rows.filter((r) => r.contentType === "application/json");
+        expect(images).toHaveLength(1);
+        expect(images[0]!.audience).toBe("public_site");
+        expect(json).toHaveLength(1);
+        const stored = JSON.parse(Buffer.from(json[0]!.bytes).toString("utf8")) as { imageKeys: Record<string, string> };
+        expect(stored.imageKeys).toEqual({ first: images[0]!.id, second: images[0]!.id });
+
+        const audit = await getPlatformDb()
+          .select({ metadata: auditEvents.metadata })
+          .from(auditEvents)
+          .where(and(eq(auditEvents.resourceId, site.id), eq(auditEvents.action, "site.content_ingested")));
+        expect(audit[0]?.metadata).toMatchObject({ imageCount: 2, transport: "legacy" });
+      });
+
+      it("LG-8: a manifest key of __proto__ is data, not a prototype assignment", async () => {
+        const site = await fixtures.makeSite("lg8", `${SITES_ORG}/site-ingest-route-lg8-${stamp}`);
+        const bytes = Buffer.concat([PNG_MAGIC_BYTES, Buffer.from(`lg8 ${stamp}`)]);
+        const token = signToken({ repository: site.repo, sha: `sha-lg8-${stamp}` });
+        const res = await POST(
+          ingestRequest(
+            `Bearer ${token}`,
+            validBundleBody({ images: [{ manifestKey: "__proto__", contentType: "image/png", bytesBase64: bytes.toString("base64") }] }),
+          ),
+        );
+        expect(res.status).toBe(200);
+        const rows = await getPlatformDb()
+          .select({ contentType: blobAssets.contentType, bytes: blobAssets.bytes })
+          .from(blobAssets)
+          .where(eq(blobAssets.organizationId, site.id));
+        const json = rows.find((r) => r.contentType === "application/json")!;
+        const text = Buffer.from(json.bytes).toString("utf8");
+        expect(text).toContain('"__proto__":"');
+        const parsed = JSON.parse(text) as { imageKeys: Record<string, string> };
+        expect(Object.prototype.hasOwnProperty.call(parsed.imageKeys, "__proto__")).toBe(true);
       });
     });
   },

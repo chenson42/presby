@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=451d186 -->
+<!-- covers: decision=224 commit=b10dd63 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,8 @@ is checked.*
 ---
 
 ## 2026-10-26
+
+- [ ] **`decision` · A church website with many photos can now be published, and the first real publish of the first customer's site is yours to trigger (0.46.3; DECISION-279).** The old publish sent the whole site in one 37.8 MB request and the host refuses anything over 4.5 MB, so every earlier attempt failed (F324). Photos now go one at a time and only the ones the platform lacks; a small final step flips the live site, so a stopped run leaves it unchanged and a re-run finishes it. **The order matters:** F289 promoted and 0072 applied first, then this release, then merge the site-kit change and tag `v4.1.0` on `ea9e78a`, then push the site's content. That push makes the whole migrated site public, and its events calendar shows "Our events calendar isn't available right now" until you switch on the calendar at `/o/fpcw/admin/features`, which you can do as its founding administrator. **Not proven anywhere yet:** the host accepting the new requests, and the photo upload on Vercel. **Residuals:** a photo over 4 MB cannot be published; unused uploaded photos are never removed; re-running an older failed run puts older content back; a publish whose confirmation is lost may lack its audit row. Steps: `docs/deployment.md`, "Site ingest: the staged transport".
 
 - [ ] **`defect` · First-time two-factor setup could show a key that was not the one saved, so a correct authenticator code was refused about 1 time in 20; fixed (0.46.2; DECISION-290).** The browser asks for the setup page twice at once on the redirect from `/totp`; each request made its own secret and the last write won, so the page could show the loser (F342). One database statement now writes a secret only if there is none or it has expired, and the page always shows what the database holds. Reloading and a second tab show the same key. **Accepted residuals:** the helper reads the database clock while the final check reads the app clock (sub-second against a 10-minute window); a delete of the row by an admin reset between the two statements is covered only by a scripted test; and the error shown if three attempts all lose has not been looked at in a browser. **Not fixed, still open:** F166 (the recovery codes vanish after the sixth digit on first setup; HIGH before the first non-operator invitee, and the next thing a new invitee hits), the missing rate limit on setup, and two tabs finishing at once can interleave recovery codes. **You must:** nothing to apply (no migration).
 

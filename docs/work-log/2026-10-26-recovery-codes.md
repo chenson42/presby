@@ -20,8 +20,8 @@
 | 1 — Functional refinement | analyst | Complete; mechanism confirmed; adjacent HIGH finding F344 (regenerate bypasses the second factor); three Phase 3 decisions | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete; R1–R6 binding; option A rebuilt as a client holder that survives the re-render; cookie removed; F344 refusal + audit key; grant allow-list test; DECISION-292 proposed | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete. R1–R6 and DECISION-292 carried; `completeEnrollment` per R1 plus a transaction; client holder at the root of every `/account/2fa` branch (layout fallback is a Phase 4 decision); cookie path removed; F344 refusal + audit key + page notice; set-equal grant allow-list; failing-first plan; eight smokes on 3650 and the handoff spec in the prod lane on 3651; Copy table C1–C12 with the four checks; no migration. Open for the operator: "Copy all" deferred | Design complete | 2026-10-26 |
-| 4 — Implementation | full-stack-developer | Complete. Two `fix:` commits (F344 `3fd43eb`, F166 `0b43c04`). All R1-R6 and Copy C1-C12 as designed; no layout fallback needed (smoke 1 shows no remount, probe recorded); `update()` returns the projected session, so `sessionVerified` is the strict form. Failing-first red recorded for every behaviour change; eight smokes green on :3650, the handoff spec green on :3651 with a negative control red. Gates: typecheck, lint, build, `npm run check` (8/8), unit suite 9546 pass, DB-backed tests pass | Ready for QA | 2026-10-26 |
-| 5 — Verification | qa | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Complete. Two `fix:` commits (F344 `3fd43eb`, F166 `9e48cf8`). All R1-R6 and Copy C1-C12 as designed; no layout fallback needed (smoke 1 shows no remount, probe recorded); `update()` returns the projected session, so `sessionVerified` is the strict form. Failing-first red recorded for every behaviour change; eight smokes green on :3650, the handoff spec green on :3651 with a negative control red. Gates: typecheck, lint, build, `npm run check` (8/8), unit suite 9546 pass, DB-backed tests pass | Ready for QA | 2026-10-26 |
+| 5 — Verification | qa | Run 1: all suites green (chromium 490/490, prod lane, invitation ×20); failing-first reproduced; FAIL on the R4 allow-list test (export * / alias gap) — test-only | FAIL | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -767,14 +767,14 @@ Also run F343's "administrators and treasurers still enrol on the way in" case a
 
 # Phase 4 — Implementation
 
-**Implementer:** full-stack-developer. **Commits (no push):** `3fd43eb` `fix(auth): regenerating recovery codes needs a verified session (F344)` (`Caught-By: agent-review`, `Discovered-In: Phase-1`); `0b43c04` `fix(auth): first enrolment keeps the recovery codes on screen and lands without a second challenge (F166)` (`Caught-By: agent-review`, `Discovered-In: Phase-6`, following the design; the orchestrator's note said `human-review` for F166, "follow the design if it says otherwise", and Phase 3 says otherwise: the 2b Phase 6 analyst found it). Both carry `Work-Log: 2026-10-26-recovery-codes` and the attribution lines. Merged `origin/main` first: already up to date (0.46.2).
+**Implementer:** full-stack-developer. **Commits (no push):** `3fd43eb` `fix(auth): regenerating recovery codes needs a verified session (F344)` (`Caught-By: agent-review`, `Discovered-In: Phase-1`); `9e48cf8` `fix(auth): first enrolment keeps the recovery codes on screen and lands without a second challenge (F166)` (`Caught-By: agent-review`, `Discovered-In: Phase-6`, following the design; the orchestrator's note said `human-review` for F166, "follow the design if it says otherwise", and Phase 3 says otherwise: the 2b Phase 6 analyst found it). Both carry `Work-Log: 2026-10-26-recovery-codes` and the attribution lines. Merged `origin/main` first: already up to date (0.46.2).
 
 ## Files Created
 
 - `src/app/(account)/account/2fa/enrolment-handoff.tsx` — the client holder (`EnrolmentHandoff`, `useRecoveryCodesHandoff`); h1 focused on mount; takes the sanitized `callbackUrl` as a prop and reads no query string.
 - `src/app/(account)/account/2fa/recovery-codes-panel.tsx` — presentational amber panel, shared by the holder and `RegenerateCodesForm`.
 - `src/app/(account)/account/2fa/continue-button.tsx` — `<Button asChild className="mt-6 min-h-11 w-full"><a>` (a plain `<a>` on purpose).
-- `src/app/(account)/account/2fa/confirm-its-you.tsx` — F344 notice and link (a file of its own so `page.tsx` has exactly three `return (`, which P4 pins). Created in `3fd43eb` inline in `page.tsx`, extracted in `0b43c04`.
+- `src/app/(account)/account/2fa/confirm-its-you.tsx` — F344 notice and link (a file of its own so `page.tsx` has exactly three `return (`, which P4 pins). Created in `3fd43eb` inline in `page.tsx`, extracted in `9e48cf8`.
 - Tests: `actions.db.test.ts`, `page.test.tsx`, `enrolment-handoff.test.tsx`, `regenerate-codes-form.test.tsx`, `src/lib/auth/two-factor-grant.boundaries.test.ts`.
 - e2e: `e2e/support/enrolment-fixture.ts` (a new file, per Rule 16; no existing support file edited), `e2e/totp-regenerate-gate.spec.ts`, `e2e/totp-first-enrolment.spec.ts`, `e2e/hydration/totp-enrol-handoff.spec.ts`.
 
@@ -813,7 +813,7 @@ None. No migration (0081 stays unused); nothing applied to any database. The DB-
 - F166, commit 2: `actions.test.ts` E1, E3, E4, E5, E6, E7, E9, E10, E11, S1 (x2), S1b and R3's no-cookie assertion red (13 of 22); `two-factor-grant.boundaries.test.ts` G1-G4 red (importer list, call sites, `clearFreshCodesCookieAction` still exported, no client holder); `actions.db.test.ts` D1 (old copy / race), D2 (`ok: true`: the secret was replaced) and D4 red. All six new e2e cases red against the unchanged server (panel never present, or the management view took its place: the `Recovery codes — save these now` heading disappeared in `expectPanelSurvives`). `enrolment-handoff`, `regenerate-codes-form` and the `page` P1-P4 / `totp-enroll-form` F1-F3 tests were written against components that did not exist or whose contract changed (module-not-found / panel-inside-form), then green.
 - **Negative control, production lane:** in a scratch copy, the enrolled branch of `page.tsx` was changed to a fragment (the holder not at that root): `hydration/totp-enrol-handoff.spec.ts` on :3651 went red (the panel never showed). The scratch copy was removed afterwards.
 
-**Gates (all on this worktree at HEAD `0b43c04`).**
+**Gates (all on this worktree at HEAD `9e48cf8`).**
 - `npm run typecheck` clean; `npm run lint` clean (`--max-warnings=0`); `npm run build` exit 0; `npm run check` 8/8 pass (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
 - `npm test`: 637 files passed, 89 skipped; 9546 tests passed, 2688 skipped (the skips are the DB-backed suites).
 - DB-backed, serial, against my own branch: `actions.db.test.ts` (D1, D2, D3, D3b, D4) + `totp-pending.test.ts` + `totp-pending.exhaustion.test.ts`: 15 passed.
@@ -852,55 +852,221 @@ Strings added or changed: `enrolment-handoff.tsx` (C1-C6), `confirm-its-you.tsx`
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-10-26
 **Verified by:** qa
+**Tree:** worktree `/Users/cshenso/git/presby-platform/presby-f166`, branch `pipeline/recovery-codes`, HEAD `3588b21` (fixes `3fd43eb` F344, `0b43c04` F166). Neon `pipeline-recovery-codes` (`ep-shy-sound`); all four `.env.local` DB vars checked by host and length, none echoed, none exported in the shell.
+**Flag state:** reset to the CI baseline before any e2e run (`scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, this worktree's `PLATFORM_DATABASE_URL` only). The same ten flags were enabled after all runs. No leftover fixture users.
+**Disk:** `/System/Volumes/Data` at 39%, 560 GiB free.
+**Servers:** all mine, started by hand on :3650 with `.next/dev` cleared, the fakes, `RATE_LIMIT_DISABLED`, `AUTH_URL`/`E2E_BASE_URL` :3650 and `E2E_ALLOW_SHARED_DB`. Production lane on :3651. Each server's working directory was confirmed with `lsof` and each was stopped by PID. Nothing is listening on 3650 or 3651, :3000 was never touched, and the worktree is clean.
+
+**Scope run.**
+- Typecheck, lint, `npm run check` and the unit suite, in full.
+- The touched DB-backed files, serially.
+- The new and changed e2e specs.
+- The full `--project=chromium` once. Required because the diff touches the auth path and `e2e/support/` (a new file).
+- `invitation-new-account` ×20.
+- The production lane for `hydration/totp-enrol-handoff` and `hydration/totp-challenge`.
+- Failing-first reproduced independently, in unit, DB and e2e.
+- Mutation probes on the F344 guard and on the R4 allow-list test.
+- A real-browser 360px walk.
+- Not re-run: the full DB-backed set, since the diff touches no migration, `authz.ts`, `src/lib/db/` or shared fixture. `test-rls.sql` was not run because there is no schema change.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS**. `npm run lint` (`--max-warnings=0`): **PASS**. `npm run check`: **PASS**, all eight tripwires. `npm run build`: **PASS**. It ran as the production lane's own `next build` in a `git archive HEAD` scratch copy outside `~/git/presby-platform/`, per testing.md; `src/` and `e2e/` were diffed identical to the worktree first.
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+- **Full suite:** 726 files (637 passed, 89 skipped); 12,234 tests (9,546 passed, 2,688 skipped); 32.4s. Failures: none.
+- **The skips are the DB-backed suites.** A verbose run of every touched unit file gave 80 passed and 5 skipped, and the only skipped file was `actions.db.test.ts`.
+- **DB-backed, serial, against the pipeline branch:** `actions.db.test.ts` (D1, D2, D3, D3b, D4), `totp-pending.test.ts` and `totp-pending.exhaustion.test.ts`: 15/15 passed.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+| Run | Server | Result |
+|---|---|---|
+| New and changed specs: `totp-regenerate-gate`, `totp-first-enrolment` (×5), `hydration/totp-enrol-handoff`, `totp-enrol-concurrency` (4 incl. two-tab), `invitation-new-account`, `invitation-existing-account` (4) | HEAD :3650 | 16/16, 1.7m |
+| Full `--project=chromium` | HEAD :3650 | **490/490**, 0 skipped, 0 flaky, 23.6m |
+| `invitation-new-account` `--repeat-each=20` | HEAD :3650 | 20/20, 3.7m |
+| Prod lane: `hydration/totp-enrol-handoff` + `hydration/totp-challenge` | `next build && next start` :3651 | 2/2, 44.5s |
+
+- **Auth gate met.** These passed in the full run:
+  - the MFA-enrolled seeded user's full path (password → `/totp` → landing): `totp-full-login.spec.ts:24`;
+  - `totp-code-entry` (18), `totp-recovery-code` (2), `totp-callback-bypass` (7), `session-claim-integrity`, `developer-2fa-gate` (5), `admin-login` (4).
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+**Failing-first, reproduced independently.** Scratch copies were the full tree at `6036b9c` (`3fd43eb^`) and at `3fd43eb` (`0b43c04^`), each with HEAD's test files overlaid. The old servers ran from those copies on :3650 and the specs ran from the worktree.
+
+**F344**
+- **D3 — `actions.db.test.ts:138`.** Red on the pre-fix source for the right reason: `refused.ok` was `true` against the real database.
+- **A1 — `audit.test.ts:68`.** Red for the right reason: 155 vs 156 entries, key missing.
+- **R1/R2 — `actions.test.ts:373`, `:392`.** With HEAD's test file on the pre-F344 tree these go red for a confounded reason: the old action throws on `FRESH_RECOVERY_CODES_COOKIE`, which HEAD's mock no longer supplies. Two cleaner checks:
+  - With the F344 commit's own test files, R1, R2, R6 and P5–P5d go red correctly (`expected { ok: true … } to deeply equal { ok: false … }`; no notice).
+  - Removing only the guard on a HEAD copy (`actions.ts:175` → `if (false as boolean)`) turns exactly R1, R2 and D3 red.
+- **e2e `totp-regenerate-gate.spec.ts:74`.** Red against the pre-F344 server (no notice); green on HEAD.
+
+**F166**
+- **D2 — `actions.db.test.ts:190`.** Red for the right reason: `ok: true`, secret replaced.
+- **E1/E3/E4 — `actions.test.ts:197`, `:217`, `:231`.** Red: the old code called `onConflictDoUpdate`.
+- **Other unit pins.** E5, E7, E10, S1/S1b, G1–G4, D4 and the H/P/F/RG pins were all red on the old tree.
+- **D1 — `:168`.** On the old code it went red **only on the loser's copy** ("No pending enrollment found…"); that run never exercised the both-pass-the-check interleaving. A scratch probe on HEAD (10 races) reached the `ON CONFLICT DO NOTHING` arbitration 10 of 10 times, with the loser getting C9 and the secret unchanged. So D1 does exercise atomicity on the fixed code. D2 and E4 are the discriminating regressions for the silent replacement.
+- **e2e, against the pre-F166 server, all red:**
+  - all five `totp-first-enrolment` cases;
+  - `hydration/totp-enrol-handoff`;
+  - the two-tab case `totp-enrol-concurrency.spec.ts:143`.
+
+  The panel heading never stayed up, and the failure screenshot is the management view with no codes and no Continue. All green on HEAD.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.1% statements (100% branches)
+- `src/lib/flags.ts`: 100%
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
-
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| `completeEnrollment` (server action, `actions.ts`) | yes | no, by design (auth-only route, Phase 1/3) | n/a |
+| `regenerateRecoveryCodes` (server action) | yes, plus `session.user.twoFactorVerified` (`actions.ts:175`) | no, by design | n/a |
+| `GET /account/2fa` (page) | yes | n/a | n/a |
+| `clearFreshCodesCookieAction` | removed (public endpoint deleted; G3/S1b pin it) | — | — |
+
+No route handler was added or changed, and no `(admin)` route was touched. The `/admin/2fa` twin is now a policy page and mints no codes. The only writers of `user_totp`/recovery codes are the two actions above.
+
+## Schema/RLS Audit
+
+No schema touched. There is no migration (0081 unused), and no grant, policy or trigger changed. The three TOTP tables are platform-axis and carry no RLS, which is unchanged.
+
+## Security review
+
+- **R4 set-equal allow-list (`two-factor-grant.boundaries.test.ts`): does not meet R4's stated property. This is the FAIL below.**
+  - Probed on a HEAD copy, one mutation at a time, each restored. It goes **red**, correctly, on:
+    - a new importer file;
+    - a second shaped call in `2fa/actions.ts`;
+    - an extra export there;
+    - a `'use server'` named re-export;
+    - a `'use client'` file under `2fa/` importing `@/auth`.
+  - It stays **green (4/4)** on four variants:
+    - (d) `export * from "@/lib/auth/two-factor-grant"` in a new file. The G1 regex (`:50`) has no `export *` form.
+    - (e) that barrel plus a new file doing `import { withTwoFactorGrant as w } from "@/lib/auth/qa-barrel"; w(id, "totp", …)`. This is a whole new grant call site taking a caller-supplied user id.
+    - (g) `const g = withTwoFactorGrant; g(id, …)` inside an allowed file.
+    - (h) `withTwoFactorGrant.call(null, id, …)`. G2 counts only `withTwoFactorGrant\s*\(`.
+  - R4 says "Adding a call site fails the test until the list is edited". Case (e) adds one and the test stays green.
+- **`completeEnrollment`'s already-enrolled guard is atomic.**
+  - The code reads: `INSERT … ON CONFLICT DO NOTHING RETURNING` inside `db.transaction` (`actions.ts:110`), with the grant only after commit (`:127`).
+  - D2 (deterministic, real DB) and E4 pin it.
+  - The HEAD race probe (10/10 conflict path, secret unchanged) and the e2e two-tab case confirm it. In that case the winner's recovery code then signs in at `/totp`.
+- **Grant only after the possession proof.** E3 checks the order (`verifyToken` < insert < codes < `unstable_update`). E1 calls the real `takeTwoFactorGrant(USER_ID)` inside the update mock, so it proves a live grant for the session user.
+- **No plaintext codes outside client memory.**
+  - No `next/headers` or `cookies(` in `page.tsx`/`actions.ts`; the only hit is a comment.
+  - No storage, clipboard or `document.cookie` in the route.
+  - The old cookie name appears nowhere in `src`.
+  - Cookie names seen across the whole walk: `authjs.callback-url`, `authjs.csrf-token`, `authjs.session-token`.
+  - Back after Continue shows `/account/2fa` with 0 codes in the DOM (no bfcache restore), and a reload shows 0 codes.
+- **`callbackUrl` is only ever the sanitized value.**
+  - `page.tsx` computes `sanitizeCallbackUrl(sp.callbackUrl)`, which is array- and control-character-safe, and passes it as a prop to the holder, `ContinueButton` and `ConfirmItsYou`.
+  - The holder reads no query string.
+  - The hostile cases (`//evil.example`, `/\evil.example`, `/.//evil.example`) give `/launch` in both Continues.
+- **No secret in logs or audit.**
+  - The one new log line is fixed text, and it never fired.
+  - Ten enrolment codes, ten regenerated codes and the TOTP secret: zero occurrences in the HEAD server log (3,104 lines across all runs) and zero in any `audit_events.metadata` from the last hour.
+- **F344 refusal.**
+  - Audit rows for the walk user: `totp.enrolled {"sessionVerified": true}`, `totp.recovery_codes.regenerated {}`, `totp.verify_succeeded {}`, `totp.recovery_codes.regenerate_refused {"twoFactorRequired": true}`.
+  - The hashes were byte-identical across the refusal and across the password-only visit.
+
+## 360px walk (real Chromium, 360×740, HEAD :3650)
+
+| Step | Result |
+|---|---|
+| Sign-in | `/signin?callbackUrl=/launch` → `/totp` → `/account/2fa?callbackUrl=%2Flaunch` |
+| Enrol | Ten codes in two columns; h1 "Two-factor authentication enabled" focused; still up after network idle plus 3s, with "You enrolled on" count 0 |
+| Codes panel Continue | `/launch`, 44×296px, fully visible in the first screen; no horizontal scroll; C5 absent; `/api/auth/session` `twoFactorVerified: true` |
+| After Continue | `/no-organization` with no `/totp` hop |
+| Reload with `callbackUrl` | Management view; full-width 44px Continue directly under "You enrolled on" |
+| Regenerate (verified session) | Panel survives the `revalidatePath` re-render: one panel, count text refreshed to 10, C12 footnote shown |
+| Password-only second browser | C7 notice; link `/totp?callbackUrl=%2Faccount%2F2fa` (44px); no Regenerate button. With `?callbackUrl=/admin` the link is `…%3FcallbackUrl%3D%252Fadmin`, and after `/totp` it returns to `/account/2fa?callbackUrl=%2Fadmin` with Regenerate enabled |
+| Stale tab | C8 toast, hashes unchanged, refusal row written |
+
+**One pre-existing nit:** "Regenerate recovery codes" is `size="sm"`, so 32px tall, below the 44px target. That line is unchanged by this diff.
 
 ## Copy Truthfulness
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
+- [x] **Every added or changed string is in the design's Copy table.**
+  - The added strings are exactly C1–C12, in `enrolment-handoff.tsx` (C1–C6), `confirm-its-you.tsx` (C7), `actions.ts` (C8–C10), `totp-enroll-form.tsx` (C11) and `regenerate-codes-form.tsx` (C12).
+  - A whitespace-insensitive word diff of `page.tsx` shows no wording change; the other `+` lines there are re-indentation under the holder.
+- [x] **The query behind each claim was opened, and what it does not read was named.**
+  - C2 "now linked" holds only after the insert returned a row.
+  - "We cannot show them again" holds because the cookie is gone. Back and reload were checked in the browser, and neither restores the codes.
+  - C5 depends on `sessionVerified`, which is true only if the returned session carries the claim; it says "may".
+  - C7 and C8 read `session.user.twoFactorVerified` from `auth()` and not the database, and neither claims a locked or expired state.
+  - C9 is the conflict insert returning no row. It hedges which tab caused it.
+  - C10 means no pending row for `session.user.id`.
+  - C11 states no state.
+- [x] **Each instruction was traced to the role that sees it.**
+  - C7 and C8 are seen by an enrolled, unverified session. `/totp` (`(auth)/totp/page.tsx`) redirects only the unenrolled and accepts a TOTP or recovery code. The walk proved the round trip.
+  - "Reload this page" (C8, C9, C10, C11) is available to anyone.
+  - C6 is the person's own sanitized destination.
+- [x] **Older strings about the same subject were grepped, and none is made false.** Checked: `2fa-status.tsx`, `(invite)/invite/accepted/page.tsx:24`, `totp-challenge-form.tsx:40`, `invitation-email.ts:63`, and `regenerate-codes-form.tsx`'s "shown once" line.
 
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
+**copy truthfulness: PASS**
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL — named gap: the R4 grant allow-list test does not fail on an added grant call site reached through an `export *` re-export or an alias.**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+Everything else checked in this phase is green:
+- typecheck, lint, build, check (8/8), unit 9,546;
+- DB-backed 15/15;
+- full chromium 490/490 with no skips;
+- invitation ×20;
+- production lane 2/2;
+- failing-first confirmed independently for both fixes;
+- the atomic guard, no cookie, sanitized `callbackUrl`, no secret in logs or audit, the F344 refusal with its audit row and unchanged hashes;
+- the 360px walk;
+- copy C1–C12.
+
+The production code is correct. The FAIL is the binding R4 guard, which protects DECISION-230/292, the most sensitive invariant this change touches.
+
+**Hand back to the implementer (full-stack-developer). Test-only; no production change needed.**
+
+**1. The gap in `src/lib/auth/two-factor-grant.boundaries.test.ts`.**
+- G1 (`:46`, regex `:50`) misses `export * from "…two-factor-grant"`.
+- G2 (`:67`) counts only `withTwoFactorGrant\s*\(`, so an alias (`const g = withTwoFactorGrant`), `.call`/`.apply`, or an aliased import from a barrel adds a call site that is never counted.
+
+Reproduce on a HEAD copy:
+- `src/lib/auth/qa-barrel.ts`: `export * from "@/lib/auth/two-factor-grant";`
+- `src/lib/auth/qa-consumer.ts`: `import { withTwoFactorGrant as w } from "@/lib/auth/qa-barrel"; export async function z(id: string) { return w(id, "totp", async () => 1); }`
+
+The test passes 4/4.
+
+**2. One way to close it.** Close the property, not the four shapes:
+- G1 also catches `export *` and `export * as`.
+- G2 counts every `\bwithTwoFactorGrant\b` token per non-test `src` file. In the two allowed files the count must equal 1 (the import) plus the number of shaped calls; everywhere else, outside the grant module, it must be 0. That catches the alias, `.call`, and barrel-consumer forms, which still name the identifier.
+
+**3. Watch it fail first.** Write the new assertions, then confirm probes d, e, g and h each turn red and the existing a, b, c, f and i stay red, with HEAD green.
+
+**Re-verification scope after the fix.** If only that test file changes: the boundaries file, the unit suite, typecheck, lint, `npm run check` and the mutation probes. The e2e results above stand, because production code is unchanged.
+
+**Not blocking, for the record.**
+- **Commit trailers.** F166 `0b43c04`: `Caught-By: agent-review` is right. No CI check would have caught the bug, the existing spec worked around it, and no human found it first, so the orchestrator's `human-review` suggestion is not supported. `Discovered-In: Phase-6` is inaccurate, though. F166 was first found on 2026-10-21 in the invitations pipeline's Batch 4, which is Phase 4 (`docs/work-log/2026-10-21-invitations.md:1167`), by the implementer's probe while writing e2e; the 2b Phase 6 walk saw it again later. Precedent: `31f142b` (F342), found in a later pipeline's Phase 4, carries `Discovered-In: Phase-4`. The commits are unpushed, so a reword to `Discovered-In: Phase-4` is possible; the orchestrator decides. F344 `3fd43eb` (`agent-review`, `Phase-1`) is correct.
+- **Failing-first record.** The Phase 4 note "D1 (old copy / race)" is accurate only for the copy half; D2 and E4 carry the regression.
+- **P4 (`page.test.tsx:214`)** counts only `return (`, so a parenless `return <X/>` branch would not be checked against the holder rule. The e2e covers the behaviour.
+- **TODO candidate:** the Regenerate button is 32px at 360px (pre-existing).
+- **Stale docs for integration**, already flagged by Phase 4: `docs/product/functionality-map.md:153`, `docs/starter-contributions/README.md` B4.
+
+---
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. Flags reset to the CI baseline. Typecheck, lint, build and check (8/8) pass; unit 9,546 pass; DB-backed 15/15; full chromium 490/490 (0 skipped) on its own :3650; invitation-new-account ×20; production lane 2/2 on :3651. Failing-first reproduced for F344 and F166 (unit, DB, e2e against old-source servers). Atomic guard, no cookie, sanitized `callbackUrl`, no secret in logs or audit, refusal audit and unchanged hashes verified; 360px walk passed; copy C1–C12 truthful. **Gap:** the R4 allow-list test stays green when a grant call site is added through an `export *` re-export or an alias (4 mutations). F166 trailer should read `Discovered-In: Phase-4` (non-blocking). | **FAIL** | 2026-10-26 |
+
+**Handoff.** Next agent: **full-stack-developer (Phase 4)**, for a test-only fix to `src/lib/auth/two-factor-grant.boundaries.test.ts:46-84` (G1 `export *`; G2 token count), red-first against the four mutations above. Then back to qa for the narrow re-verification scope. Orchestrator: rule on rewording `0b43c04`'s `Discovered-In` before push. No design flaw was found, so there is no escalation to tech-lead.
+
+Evidence is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-f166/`: run logs under `logs/`, the 360px screenshots under `walk/`, and the old-server failure artifacts under `pw-pre344/` and `pw-pre166/`. The scratch source copies (with their `.env.local`) were deleted by literal path. No repository file was edited and `git stash` was not used.
 
 ---
 
@@ -948,3 +1114,5 @@ Failures: [...]
 - **Codes: "Shown once"** — option A: the client panel is the one display; `completeEnrollment` stops setting the fresh-codes cookie on the enrol path and stops re-rendering the page away from the panel (prove on a running server that no re-render still fires); the management view gains a full-width Continue to the sanitized `callbackUrl` for reload/back/second tab. Reload loses the codes; Regenerate (after the F344 fix) is the recovery.
 - **Second prompt: "Remove it"** — option C: `completeEnrollment` marks the session verified through `withTwoFactorGrant` (DECISION-230 pattern), under all five conditions in Phase 1's adversarial pass, incl. refusing when a `user_totp` row already exists. Needs a short Phase 2.
 - **F344** fixed here (see the orchestrator ruling above).
+
+**Orchestrator (2026-10-26):** F166 fix commit reworded to `Discovered-In: Phase-4` (now `9e48cf8`; was `0b43c04`), per QA's trailer note.

@@ -134,7 +134,7 @@ export function PublicListingToggle({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingValue
-                ? `This makes ${personName}'s name, role, and photo (if one is on file) visible to anyone visiting the public website — including search engines and archival crawlers.`
+                ? `This makes ${personName}'s name, role, and photo (if one is on file and they haven't hidden it) visible to anyone visiting the public website — including search engines and archival crawlers.`
                 : `This stops serving ${personName}'s listing going forward. It does not retract anything already cached or indexed elsewhere (search engines, web archives) — turning this off is not a full retraction.`}
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -93,7 +93,7 @@ describe("uploadTicketAttachmentAction — success and store() failure", () => {
     const result = await uploadTicketAttachmentAction("org-1", fileFormData("bytes"));
 
     expect(mockStore).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: "org-1", contentType: "image/png" }),
+      expect.objectContaining({ organizationId: "org-1", contentType: "image/png", audience: "private" }),
     );
     expect(result).toEqual({ ok: true, data: { key: "blob-1" } });
   });

@@ -3,16 +3,35 @@ import { createHash } from "node:crypto";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { blobAssets } from "@/lib/db/domain/assets";
+import { parseBlobKey } from "./blob-key";
 
 /**
  * The generic blob storage adapter (DECISION-030, DECISION-055, DECISION-058).
  *
  * `blob_assets` is never queried directly outside this file (DECISION-030's
  * own rule: "a direct query against the blob table from a page or action is a
- * review failure"). Every caller goes through `store()`/`resolve()`.
+ * review failure"). Every caller goes through `store()`/`resolve()`/
+ * `resolveMeta()`, and the anonymous public asset route goes through
+ * `resolvePublic()`, which reaches the table only through one narrow
+ * `SECURITY DEFINER` function (`presby_public_site_asset()`, drizzle/0072) -
+ * a stricter form of the same rule: the route holds no query of its own and
+ * the database, not TypeScript, decides what is public.
+ *
+ * AUDIENCE (F289, DECISION-277). Every row is `public_site` (an image a
+ * public page references: a brand mark, a site image) or `private` (a ticket
+ * attachment, a statement PDF, the content bundle, a person's photo...).
+ * `store()`, `resolve()` and `resolveMeta()` all take `audience` as a REQUIRED
+ * argument with no default, and `resolve()`/`resolveMeta()` match ONLY the
+ * audience the caller names: a `private` caller can never read a
+ * `public_site` row it did not store, and the reverse holds. The column itself
+ * is immutable (a trigger), `public_site` implies an image type (a CHECK), and
+ * the private consumers' foreign keys pin `'private'`, so the split is a
+ * database property, not a convention here. The audience must be a string
+ * LITERAL at every call site; `audience-callsites.test.ts` reads each one.
  *
  * The logo is the first real consumer (DECISION-055). `people.photo_key`
- * stays untouched — no photo migration happens here.
+ * stays untouched here: a person's photo is served by `resolvePublic()` only
+ * while a roster function lists it, and is stored `private`.
  *
  * WHY THIS DOES NOT CALL `withOrgContext()` FROM `@/lib/authz`:
  *
@@ -74,22 +93,39 @@ type AllowedContentType = (typeof ALLOWED_CONTENT_TYPES)[number];
 /** The 10MB cap (DECISION-073). Mirrors the DB CHECK. */
 const MAX_BYTE_SIZE = 10_485_760;
 
+/** Who a stored blob is for (F289, DECISION-277). Closed vocabulary; mirrors blob_assets_audience_allowed. */
+export type BlobAudience = "public_site" | "private";
+
+/** The only content types a `public_site` row, or a public response, may carry. */
+export type PublicImageType = "image/png" | "image/jpeg" | "image/webp";
+
+const PUBLIC_IMAGE_TYPES: readonly PublicImageType[] = ["image/png", "image/jpeg", "image/webp"];
+
+function isPublicImageType(value: unknown): value is PublicImageType {
+  return typeof value === "string" && (PUBLIC_IMAGE_TYPES as readonly string[]).includes(value);
+}
+
 export interface BlobRef {
   /** The row's own uuid — NOT the content hash. See `store()`'s doc comment. */
   key: string;
   contentType: AllowedContentType;
   byteSize: number;
+  audience: BlobAudience;
 }
 
 export interface StoreInput {
   organizationId: string;
   bytes: Buffer;
   contentType: string;
+  /** Required, no default (DECISION-277): a string literal at the call site. */
+  audience: BlobAudience;
 }
 
 export interface ResolveInput {
   organizationId: string;
   key: string;
+  /** Required: only a row of THIS audience matches. A string literal at the call site. */
+  audience: BlobAudience;
 }
 
 export interface ResolvedBlob {
@@ -100,6 +136,18 @@ export interface ResolvedBlob {
 export interface ResolvedBlobMeta {
   contentType: string;
   byteSize: number;
+}
+
+/** What the anonymous public route may serve, and how long a cache may keep it. */
+export interface PublicAsset {
+  bytes: Buffer;
+  contentType: PublicImageType;
+  /**
+   * `site`: a published page image or the brand mark (immutable, year-long).
+   * `roster`: the photo of a person a public roster currently lists (a day,
+   * private cache: un-listing must take effect).
+   */
+  cacheClass: "site" | "roster";
 }
 
 export interface BlobStore {
@@ -115,6 +163,15 @@ export interface BlobStore {
    * `resolve()`: `blob_assets` is still queried nowhere but this file.
    */
   resolveMeta(input: ResolveInput): Promise<ResolvedBlobMeta | null>;
+  /**
+   * The anonymous public asset door (F289). NO audience parameter: its
+   * contract is `presby_public_site_asset(org, key)`, which serves a
+   * `public_site` image, or the photo of a person a roster function currently
+   * lists, and nothing else, as an image type only. Returns `null` for every
+   * miss, and for a key that is not a uuid WITHOUT querying. Like `resolve()`
+   * it does not catch a database error: the route owns that catch.
+   */
+  resolvePublic(input: { organizationId: string; key: string }): Promise<PublicAsset | null>;
 }
 
 /** Thrown by `store()` for anything the DB CHECK constraints would also reject. */
@@ -149,10 +206,17 @@ function withTrustedOrgContext<T>(
 }
 
 class PostgresBlobStore implements BlobStore {
-  async store({ organizationId, bytes, contentType }: StoreInput): Promise<BlobRef> {
+  async store({ organizationId, bytes, contentType, audience }: StoreInput): Promise<BlobRef> {
     if (!isAllowedContentType(contentType)) {
       throw new BlobValidationError(
         `blob-store: content type "${contentType}" is not one of ${ALLOWED_CONTENT_TYPES.join(", ")}`,
+      );
+    }
+    // Before the database CHECK (blob_assets_public_site_is_image) would: a
+    // public_site row is always an image (png, jpeg or webp).
+    if (audience === "public_site" && !isPublicImageType(contentType)) {
+      throw new BlobValidationError(
+        `blob-store: audience "public_site" requires an image content type (png, jpeg or webp); got "${contentType}"`,
       );
     }
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_BYTE_SIZE) {
@@ -165,10 +229,13 @@ class PostgresBlobStore implements BlobStore {
 
     return withTrustedOrgContext(organizationId, async (tx) => {
       // Dedup (E-c6): check for an existing row at (organizationId,
-      // contentHash) BEFORE inserting. The unique constraint on
-      // (organization_id, content_hash) backs this up at the database level
-      // regardless, but checking first avoids surfacing a constraint-
-      // violation error on the ordinary "uploaded the same logo twice" path.
+      // audience, contentHash) BEFORE inserting. The unique constraint on
+      // (organization_id, audience, content_hash) backs this up at the
+      // database level regardless, but checking first avoids surfacing a
+      // constraint-violation error on the ordinary "uploaded the same logo
+      // twice" path. Dedup is PER AUDIENCE (F298): identical bytes stored as
+      // `private` and as `public_site` are two rows, so a private upload can
+      // never silently resolve to a row the public route serves.
       const existing = await tx
         .select({
           id: blobAssets.id,
@@ -179,6 +246,7 @@ class PostgresBlobStore implements BlobStore {
         .where(
           and(
             eq(blobAssets.organizationId, organizationId),
+            eq(blobAssets.audience, audience),
             eq(blobAssets.contentHash, contentHash),
           ),
         )
@@ -189,6 +257,7 @@ class PostgresBlobStore implements BlobStore {
           key: existing[0].id,
           contentType: existing[0].contentType as AllowedContentType,
           byteSize: existing[0].byteSize,
+          audience,
         };
       }
 
@@ -200,6 +269,7 @@ class PostgresBlobStore implements BlobStore {
           contentType,
           byteSize: bytes.byteLength,
           bytes,
+          audience,
         })
         .returning({
           id: blobAssets.id,
@@ -221,11 +291,12 @@ class PostgresBlobStore implements BlobStore {
         key: inserted.id,
         contentType: inserted.contentType as AllowedContentType,
         byteSize: inserted.byteSize,
+        audience,
       };
     });
   }
 
-  async resolve({ organizationId, key }: ResolveInput): Promise<ResolvedBlob | null> {
+  async resolve({ organizationId, key, audience }: ResolveInput): Promise<ResolvedBlob | null> {
     return withTrustedOrgContext(organizationId, async (tx) => {
       const rows = await tx
         .select({
@@ -234,7 +305,11 @@ class PostgresBlobStore implements BlobStore {
         })
         .from(blobAssets)
         .where(
-          and(eq(blobAssets.id, key), eq(blobAssets.organizationId, organizationId)),
+          and(
+            eq(blobAssets.id, key),
+            eq(blobAssets.organizationId, organizationId),
+            eq(blobAssets.audience, audience),
+          ),
         )
         .limit(1);
 
@@ -249,6 +324,7 @@ class PostgresBlobStore implements BlobStore {
   async resolveMeta({
     organizationId,
     key,
+    audience,
   }: ResolveInput): Promise<ResolvedBlobMeta | null> {
     return withTrustedOrgContext(organizationId, async (tx) => {
       const rows = await tx
@@ -258,12 +334,58 @@ class PostgresBlobStore implements BlobStore {
         })
         .from(blobAssets)
         .where(
-          and(eq(blobAssets.id, key), eq(blobAssets.organizationId, organizationId)),
+          and(
+            eq(blobAssets.id, key),
+            eq(blobAssets.organizationId, organizationId),
+            eq(blobAssets.audience, audience),
+          ),
         )
         .limit(1);
 
       return rows[0] ?? null;
     });
+  }
+
+  async resolvePublic({
+    organizationId,
+    key,
+  }: {
+    organizationId: string;
+    key: string;
+  }): Promise<PublicAsset | null> {
+    // A key that is not a uuid never reaches Postgres (a cast error would be
+    // a free log-noise lever for a prober); a case variant collapses onto the
+    // canonical lowercase form.
+    const canonical = parseBlobKey(key);
+    if (canonical === null) return null;
+
+    // The anonymous public-read shape, exactly like getPublishedSite(): the
+    // plain `db` connection (presby_app) with NO org GUC. The definer derives
+    // everything from the organization id the site resolver returned, checks
+    // the org is active and its site live, and returns zero rows for every
+    // miss: a private blob, a foreign org's blob and a nonexistent uuid take
+    // the same path. Bytes are read for the one row returned only.
+    const result = await db.execute(
+      sql`select content_type, bytes, cache_class from presby_public_site_asset(${organizationId}::uuid, ${canonical}::uuid)`,
+    );
+    const row = (
+      result as unknown as {
+        rows?: Array<{ content_type: unknown; bytes: unknown; cache_class: unknown }>;
+      }
+    ).rows?.[0];
+    if (!row) return null;
+
+    // A second, independent check in TypeScript (belt and braces): the
+    // definer and the CHECK already guarantee an image type and a known class.
+    if (!isPublicImageType(row.content_type)) return null;
+    if (row.cache_class !== "site" && row.cache_class !== "roster") return null;
+    if (!(row.bytes instanceof Uint8Array)) return null;
+
+    return {
+      bytes: Buffer.from(row.bytes),
+      contentType: row.content_type,
+      cacheClass: row.cache_class,
+    };
   }
 }
 

@@ -53,6 +53,7 @@ export async function uploadTicketAttachmentAction(
       organizationId,
       bytes,
       contentType: sniffed,
+      audience: "private",
     });
     return { ok: true, data: { key: ref.key } };
   } catch (err) {

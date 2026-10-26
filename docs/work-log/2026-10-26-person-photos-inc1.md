@@ -23,6 +23,7 @@
 | 5 — Verification | qa | Complete (run 1): all gates green; copy truthfulness (a)(b)(c) failed | FAIL | 2026-10-26 |
 | 3 — amendment (Phase 5 run 1 copy rulings) | tech-lead | Complete: rulings R-a (withheld-aware consequences; snapshot carries `minor`, `directoryWithheld`, `websiteWithheld`), R-b (new "Clear for website" control and dialog variant), R-c (count distinct photos); tests T1-T11 named; implementer full-stack-developer; no schema, route, flag or permission change. See the amendment at the end of this log | Design complete; back to Phase 4 | 2026-10-26 |
 | 4 — Phase 5 run 1 fix (copy) | full-stack-developer | Complete: snapshot carries `minor`/`directoryWithheld`/`websiteWithheld`; every R-a/R-b/R-c string verbatim; "Clear for website" control and `clear` dialog variant; `countChosenPhotos` (distinct); T1-T11 failing-first; gates green; back to Phase 5 (scoped re-run) | Ready for QA | 2026-10-26 |
+| 3 — ruling on fix-pass deviation | tech-lead | Complete: `websiteIsWithheld` helper (adds `directoryWithheld`) confirmed, no reachable-data change; under-18 checkbox accepted with a TODO candidate; no code change. See the last section of this log | Confirmed; back to Phase 5 (scoped re-run) | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1423,3 +1424,41 @@ Totals for the red run of the unit files: 7 files failed, 61 tests failed, 172 p
 - Observed, not changed: under 18, the directory dialog still shows the permission checkbox above the blocked sentence (the confirm is disabled, so nothing can be recorded).
 - `docs/TODO.md`, `docs/decisions.md` and the other Rule 16 files were not touched; the amendment's proposed decision text and the double-submit TODO candidate remain for the orchestrator.
 - Handoff: qa, scoped Phase 5 re-run (copy, consequences, photos page specs, the 360 walk).
+
+---
+
+## Phase 3 — ruling on fix-pass deviation
+
+**Author:** tech-lead, 2026-10-26. **Trigger:** the implementer's "Deviation to confirm" and "Notes for QA" in the Phase 4 fix pass (commit 72f32c1). Read against the live tree (consequences.ts, reader.ts:265-266, `drizzle/0078_presby_person_photos.sql:381-404`, `designate-dialog.tsx:76-134`). No string, schema, route, flag or permission is touched by either ruling.
+
+### Ruling 1: `directoryWithheld === null` added to the website-withheld predicate. CONFIRMED.
+
+R-a2 omitted it; the omission was mine, and T2 (every withheld combination, `directoryWithheld` included) is the correct requirement. The implementer's `websiteIsWithheld(state)` helper (`minor || websiteWithheld !== null || directoryWithheld !== null`) is now the single predicate behind `directoryPhotoServesWebsite`, the `websiteFallsBack` branch of `undesignate_website`, and the `removeIsWebsiteWithheld` branch of `remove`. Verified:
+
+- **Why it is right, not only harmless.** `hide_photo` is person-level. The website core (`presby_person_public_photo`, 0078:403) joins `person_privacy` on `person_id` alone; the directory function scopes it to the organization. So any `hide_photo` the directory answer reports is also one the website core would report, and the website is withheld too. The helper says so in its comment.
+- **Reachable data is unchanged, as the implementer says.** The core returns a row (with `withheld`) whenever a candidate exists: a website designation or an attested directory designation (0078:386-396). Every place the helper matters (attested directory, no website photo; or a website photo present) has such a candidate, so `websiteWithheld` would already be `hide_photo`. The extra term only matters in the product T2 enumerates, and there it is the right answer (fail closed). It also covers a stale read where the two SQL calls straddle a `hide_photo` change.
+- **The three consumers read correctly.** `undesignate_website` falls back only when `directory.attested && !websiteIsWithheld`, otherwise "will show no photo", which is true. `remove` uses `removeIsWebsiteWithheld` whenever the website is withheld for any reason, which is true. No sentence is added or removed; R-a3's strings and R-a4's table are otherwise followed.
+- **Amendment text superseded.** R-a2 and the `undesignate_website` and `remove` lines of R-a4 read, from here on, "... `!minor && websiteWithheld === null && directoryWithheld === null`" (the `websiteIsWithheld` helper). The implementation is the spec; no code change.
+
+T8: agreed that the existing `store.db.test.ts` case covers it; no new test owed.
+
+### Ruling 2: the under-18 directory dialog still shows the permission checkbox above the blocked sentence. ACCEPTED, as a tracked follow-up, not a change to this pass.
+
+Reasons: (a) nothing can be recorded: the confirm is disabled by `state.minor` (`designate-dialog.tsx:134`), and the store refuses a minor, so no false record or consent can result; (b) the blocked sentence ("... appears to be under 18, so a photo of {first} can't be chosen for the directory or the website yet.") is in the dialog and says why, so no string is untrue (copy check 1 holds: no residual is denied); (c) the checkbox text is a statement of a permission the user would be giving, which is not false for an under-18 subject; it is only pointless; (d) QA's scoped re-run is next on this tree, and a source change now would invalidate the verification already prepared for one cosmetic improvement.
+
+The honest improvement is to not render the checkbox (and the disabled confirm's affordance) when `state.minor`, so a tick box never invites a step that cannot work. It adds no string and is about three lines plus one test in `designate-dialog.test.tsx`. **Carry-forward, tracked:** TODO candidate for the orchestrator to land at integration (Rule 10): "Photos designate dialogs: hide the permission checkbox when the person appears to be under 18 (the blocked sentence stays; confirm is already disabled). `designate-dialog.tsx`. Raised by tech-lead 2026-10-26, accepted by tech-lead; operator to confirm priority." If QA's re-run or the operator treats the dead-end tick box as a defect rather than polish, it returns to the implementer as a three-line change with no Phase 3 re-entry.
+
+### Carry-forward (this ruling)
+
+| Item | Where addressed |
+|---|---|
+| Implementer deviation: `directoryWithheld` in the website-withheld predicate | Confirmed (Ruling 1) |
+| Under-18 dialog shows checkbox above the blocked sentence | Accepted by tech-lead; TODO candidate above; operator to confirm priority |
+| Withdraw-clearance control | Closed out of scope by the operator, 2026-10-26 (recorded in the Phase 4 fix section) |
+| Double-submit TODO candidate (Phase 4 fix section) | Unchanged; orchestrator at integration |
+
+### Per-Phase Status row (recorded in the table at the top)
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 3 — ruling on fix-pass deviation | tech-lead | Complete: `websiteIsWithheld` helper confirmed (covers `directoryWithheld`; no reachable-data change; T2 satisfied); under-18 checkbox accepted with a TODO candidate; no code change | Confirmed; back to Phase 5 (scoped re-run) | 2026-10-26 |

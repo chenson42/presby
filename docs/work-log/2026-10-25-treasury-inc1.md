@@ -2779,4 +2779,7 @@ Files: `/Users/cshenso/git/presby-platform/presby-treasury/docs/work-log/2026-10
 ## Operator rulings after Phase 6 (2026-10-26)
 
 - **Residual 14 (owner `TRUNCATE` / `DISABLE TRIGGER` on the six tables): accepted** by the operator ("Accept it"), as a recorded known limit, the same posture as giving (0055/0056). Closes "Needs a confirmation" item 10.
-- Residual 12 (item 9), the R15 reminders deferral and the "similar request" warning deferral are still awaiting the operator.
+- **Residual 12 (item 9): accepted** by the operator ("accept all", 2026-10-26). A team-page revoke of the treasurer grant can leave the other module's manage key unheld; recovery is through the platform operator.
+- **R15 reminders deferral: accepted** (same ruling). No nudge email in Increment 1.
+- **"Similar amount and date" form warning deferral: accepted** (same ruling).
+- Every "Needs a confirmation" item for Increment 1 is now closed.

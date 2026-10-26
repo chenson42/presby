@@ -108,6 +108,13 @@ export const withdrawRequestSchema = z.object({
 });
 export type WithdrawRequestInput = z.input<typeof withdrawRequestSchema>;
 
+/** `detachReceiptAction(slug, input)`: the request and the attachment, both ids the page rendered. */
+export const detachReceiptSchema = z.object({
+  requestId: z.guid({ error: COPY.detail.unavailable }),
+  attachmentId: z.guid({ error: COPY.receipts.unavailable }),
+});
+export type DetachReceiptInput = z.input<typeof detachReceiptSchema>;
+
 /** `searchBeneficiariesAction(slug, input)`: names only, at most eight, never an id the caller typed. */
 export const searchBeneficiariesSchema = z.object({
   query: z

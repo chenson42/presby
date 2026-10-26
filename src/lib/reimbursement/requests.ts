@@ -29,7 +29,7 @@ import type { OutcomeOf, SubmitMissing, SubmitRoute } from "./outcomes";
  * same path.
  *
  * NOT AUDITED, by design (the events table is the record): save, submit,
- * resubmit, withdraw. Receipts (attach, detach) belong to Batch 2b.
+ * resubmit, withdraw. Receipts (attach, detach) are `receipts.ts`.
  *
  * SUBMIT TELLS THE PEOPLE WHO MUST ACT (Batch 3, `notify.ts`): the eligible
  * approvers when the route is `seat`, every effective `pay` holder who is not the
@@ -57,7 +57,7 @@ const text = (value: string | null | undefined) => sql`${value ?? null}::text`;
 const uuid = (value: string | null | undefined) => sql`${value ?? null}::uuid`;
 
 /** The member-level detail of one request inside an open transaction (null: missing or not visible). */
-async function memberDetailInTx(tx: OrgTx, requestId: string, userId: string): Promise<MemberDetail | null> {
+export async function memberDetailInTx(tx: OrgTx, requestId: string, userId: string): Promise<MemberDetail | null> {
   const rows = rowsOf(
     await tx.execute(sql`select presby_reimbursement_detail(${requestId}::uuid, ${userId}::uuid, 'member') as detail`),
   );

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   approveRequest: vi.fn(),
   returnRequest: vi.fn(),
   searchBeneficiaries: vi.fn(),
+  detachReceipt: vi.fn(),
   revalidatePath: vi.fn(),
 }));
 
@@ -34,9 +35,11 @@ vi.mock("@/lib/reimbursement/decisions", () => ({
   returnRequest: mocks.returnRequest,
 }));
 vi.mock("@/lib/reimbursement/pickers", () => ({ searchBeneficiaries: mocks.searchBeneficiaries }));
+vi.mock("@/lib/reimbursement/receipts", () => ({ detachReceipt: mocks.detachReceipt }));
 
 import {
   approveRequestAction,
+  detachReceiptAction,
   returnRequestAction,
   saveRequestAction,
   searchBeneficiariesAction,
@@ -57,6 +60,7 @@ const IDENTITY = {
 };
 const GROUP = "11111111-1111-4111-8111-111111111111";
 const REQ = "22222222-2222-4222-8222-222222222222";
+const ATT = "55555555-5555-4555-8555-555555555555";
 const save = { clientKey: "k3y-abcdefgh", kind: "vendor", groupId: GROUP, vendorName: "Hardware Co", amountCents: 4150, expenseDate: "2026-10-20", purpose: "Paint" };
 
 beforeEach(() => {
@@ -72,12 +76,13 @@ describe("every action gates first and short-circuits on a refusal", () => {
     ["submitRequestAction", () => submitRequestAction("alder", { requestId: REQ, expectedRevision: 1 })],
     ["withdrawRequestAction", () => withdrawRequestAction("alder", { requestId: REQ })],
     ["searchBeneficiariesAction", () => searchBeneficiariesAction("alder", { query: "Quill" })],
+    ["detachReceiptAction", () => detachReceiptAction("alder", { requestId: REQ, attachmentId: ATT })],
     ["approveRequestAction", () => approveRequestAction("alder", { requestId: REQ, expectedRevision: 1 })],
     ["returnRequestAction", () => returnRequestAction("alder", { requestId: REQ, expectedRevision: 1, kind: "needs_info", reason: "Why" })],
   ])("%s returns the gate's failure untouched and calls nothing else", async (_name, run) => {
     mocks.gate.mockResolvedValue(refusal);
     expect(await run()).toEqual(refusal);
-    for (const fn of [mocks.saveRequest, mocks.submitRequest, mocks.withdrawRequest, mocks.approveRequest, mocks.returnRequest, mocks.searchBeneficiaries, mocks.revalidatePath]) {
+    for (const fn of [mocks.saveRequest, mocks.submitRequest, mocks.withdrawRequest, mocks.approveRequest, mocks.returnRequest, mocks.searchBeneficiaries, mocks.detachReceipt, mocks.revalidatePath]) {
       expect(fn).not.toHaveBeenCalled();
     }
   });
@@ -214,6 +219,41 @@ describe("withdrawRequestAction", () => {
   it("a request that is not the caller's is the neutral not-found", async () => {
     mocks.withdrawRequest.mockResolvedValue({ kind: "refused", outcome: "not_found" });
     expect(await withdrawRequestAction("alder", { requestId: REQ })).toMatchObject({ kind: "not_found" });
+  });
+});
+
+describe("detachReceiptAction", () => {
+  const ask = { requestId: REQ, attachmentId: ATT };
+
+  it("detaches, returns the request's new revision and refreshes the request", async () => {
+    mocks.detachReceipt.mockResolvedValue({ kind: "ok", revision: 7 });
+    expect(await detachReceiptAction("alder", ask)).toEqual({ ok: true, data: { revision: 7 } });
+    expect(mocks.detachReceipt.mock.calls[0]![1]).toEqual(ask);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/o/alder/reimbursements/${REQ}`);
+  });
+
+  it("gates the SLUG, and takes no organization or person from the client", async () => {
+    mocks.detachReceipt.mockResolvedValue({ kind: "ok", revision: 2 });
+    await detachReceiptAction("alder", { ...ask, organizationId: "org-evil", personId: "evil" });
+    expect(mocks.gate.mock.calls[0]![0]).toBe("alder");
+    expect(mocks.detachReceipt.mock.calls[0]![0]).toBe(IDENTITY);
+    expect(mocks.detachReceipt.mock.calls[0]![1]).toEqual(ask);
+  });
+
+  it("a request no longer editable says so; a receipt that is not there is the neutral Copy string", async () => {
+    mocks.detachReceipt.mockResolvedValue({ kind: "refused", outcome: "not_editable" });
+    expect(await detachReceiptAction("alder", ask)).toEqual({ ok: false, error: "Receipts can't be changed on this request now." });
+    mocks.detachReceipt.mockResolvedValue({ kind: "refused", outcome: "not_found" });
+    expect(await detachReceiptAction("alder", ask)).toEqual({ ok: false, error: "Receipt not available.", kind: "not_found" });
+    mocks.detachReceipt.mockResolvedValue({ kind: "denied" });
+    expect(await detachReceiptAction("alder", ask)).toEqual({ ok: false, error: "You don't have permission to do that." });
+  });
+
+  it("a malformed id never reaches the library", async () => {
+    expect(await detachReceiptAction("alder", { requestId: "x", attachmentId: ATT })).toMatchObject({ ok: false });
+    expect(await detachReceiptAction("alder", { requestId: REQ, attachmentId: "x" })).toMatchObject({ ok: false });
+    expect(await detachReceiptAction("alder", {})).toMatchObject({ ok: false });
+    expect(mocks.detachReceipt).not.toHaveBeenCalled();
   });
 });
 

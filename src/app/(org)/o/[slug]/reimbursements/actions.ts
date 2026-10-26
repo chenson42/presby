@@ -6,6 +6,7 @@ import { approveRequest, returnRequest } from "@/lib/reimbursement/decisions";
 import { gateReimbursementAction } from "@/lib/reimbursement/gate";
 import {
   approveRequestSchema,
+  detachReceiptSchema,
   returnRequestSchema,
   searchBeneficiariesSchema,
   saveRequestSchema,
@@ -22,6 +23,7 @@ import {
   submitRefusal,
 } from "@/lib/reimbursement/messages";
 import { searchBeneficiaries, type BeneficiaryCandidate } from "@/lib/reimbursement/pickers";
+import { detachReceipt } from "@/lib/reimbursement/receipts";
 import { saveRequest, submitRequest, withdrawRequest } from "@/lib/reimbursement/requests";
 import {
   zodFieldErrors,
@@ -35,7 +37,9 @@ import type { SubmitRoute } from "@/lib/reimbursement/outcomes";
  * Server Actions for the member reimbursement pages `/o/<slug>/reimbursements/**`
  * - docs/work-log/2026-10-25-treasury-inc1.md, Phase 3 API Contract Layer 3
  * (Batch 2a: the actions that need no receipt; Batch 3: approve and send back;
- * the receipt upload and detach are Batch 2b, the treasurer tree Batch 4).
+ * Batch 2b: detach a receipt - the upload itself is a route handler, `[id]/receipts/
+ * route.ts`, because an action's body is bounded by the framework; the treasurer
+ * tree is Batch 4).
  *
  * Every action takes the URL SLUG (never an organization id, never a person id),
  * begins with `gateReimbursementAction` (sign-in, the Node-side 2FA check, the
@@ -150,6 +154,36 @@ export async function withdrawRequestAction(
   }
   revalidate(slug, parsed.data.requestId);
   return { ok: true, data: undefined };
+}
+
+/**
+ * `detachReceiptAction(slug, input)` - the creator takes a receipt off their own draft
+ * or sent-back request. Soft: the row and the blob stay (nothing that is referenced is
+ * ever deleted). Returns the request's new revision, which the form's next save carries.
+ * Not audited: `reimbursement_events` is the record (Phase 3 "Not audited").
+ */
+export async function detachReceiptAction(
+  slug: string,
+  input: unknown,
+): Promise<ReimbursementActionResult<{ revision: number }>> {
+  const gate = await gateReimbursementAction(slug);
+  if (!gate.ok) return gate;
+  const parsed = detachReceiptSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+
+  const result = await detachReceipt(gate, parsed.data);
+  switch (result.kind) {
+    case "denied":
+      return { ok: false, error: COPY.gate.notPermitted };
+    case "refused":
+      return result.outcome === "not_editable"
+        ? { ok: false, error: COPY.receipts.notEditable }
+        : { ok: false, error: COPY.receipts.unavailable, kind: "not_found" };
+    case "ok":
+      break;
+  }
+  revalidate(slug, parsed.data.requestId);
+  return { ok: true, data: { revision: result.revision } };
 }
 
 /**

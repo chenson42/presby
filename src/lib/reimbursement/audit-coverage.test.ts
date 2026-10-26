@@ -143,8 +143,23 @@ describe("audit coverage of src/lib/reimbursement (EC43)", () => {
     expect(fn.body.indexOf("exceedsCsvCap")).toBeLessThan(fn.body.indexOf("auditReimbursement("));
   });
 
+  it("a receipt VIEW by anyone but the uploader audits itself in the lookup's own transaction, with ids only (Batch 2b)", () => {
+    const fn = FUNCTIONS.find((f) => f.name === "lookupReceipt")!;
+    expect(fn.file).toBe("receipts.ts");
+    expect(fn.body).toMatch(/presby_reimbursement_attachment_lookup\s*\(/);
+    expect(fn.body).toMatch(/auditReimbursement\(\s*tx\b/);
+    expect(fn.body).toContain("AUDIT_ACTIONS.REIMBURSEMENT_RECEIPT_VIEWED");
+    // only a viewer who is not the creator is recorded
+    const guard = fn.body.indexOf("viewer_is_creator");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(fn.body.indexOf("auditReimbursement("));
+    expect(fn.body).toMatch(/viewer_is_creator\s*!==\s*true/);
+    // ids only
+    expect(fn.body).toMatch(/metadata:\s*\{\s*requestId:\s*input\.requestId,\s*attachmentId:\s*input\.attachmentId\s*\}/);
+  });
+
   it("the unaudited doors write no audit row: a note and the member verbs leave only their history event", () => {
-    for (const name of ["addNote", "saveRequest", "submitRequest", "withdrawRequest"]) {
+    for (const name of ["addNote", "saveRequest", "submitRequest", "withdrawRequest", "preflightReceipt", "storeAndAttachReceipt", "detachReceipt"]) {
       const fn = FUNCTIONS.find((f) => f.name === name)!;
       expect(fn.body, name).not.toMatch(/auditReimbursement\(/);
     }

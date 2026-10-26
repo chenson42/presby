@@ -4,7 +4,8 @@
  * and the Batch 2a amendment T3). Pins the promise in Copy - "Your entries are
  * still here" - for every way a save can fail, the one-request-per-form
  * idempotency, Enter never sending, the HydrationGate root, the receipt slot
- * being absent until Batch 2b, and what Send posts.
+ * being present (Batch 2b: its own behaviour is in `receipt-slot.test.tsx`), and what
+ * Send posts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -16,10 +17,12 @@ const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 const saveRequestAction = vi.hoisted(() => vi.fn());
 const submitRequestAction = vi.hoisted(() => vi.fn());
+const detachReceiptAction = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
   saveRequestAction: (...a: unknown[]) => saveRequestAction(...a),
   submitRequestAction: (...a: unknown[]) => submitRequestAction(...a),
   searchBeneficiariesAction: vi.fn().mockResolvedValue({ ok: true, data: { candidates: [] } }),
+  detachReceiptAction: (...a: unknown[]) => detachReceiptAction(...a),
 }));
 
 import { COPY } from "@/lib/reimbursement/copy";
@@ -64,8 +67,12 @@ beforeEach(() => {
   toast.error.mockReset();
   saveRequestAction.mockReset();
   submitRequestAction.mockReset();
+  detachReceiptAction.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("RequestForm - structure", () => {
   it("is rooted in a HydrationGate", () => {
@@ -97,19 +104,28 @@ describe("RequestForm - structure", () => {
     expect(screen.queryByLabelText("Category")).toBeNull();
   });
 
-  it("has the receipts label and the box, but no picker until Batch 2b", () => {
+  it("has the receipts label, the picker with its hint, and the box with its hint", () => {
     render(<RequestForm {...props()} />);
     expect(screen.getByText(COPY.form.receiptsLabel)).toBeTruthy();
+    expect(screen.getByText(COPY.form.addReceipt)).toBeTruthy();
+    expect(screen.getByText(COPY.form.receiptsHint)).toBeTruthy();
     expect(screen.getByLabelText(COPY.form.noReceiptLabel)).toBeTruthy();
     expect(screen.getByText(COPY.form.noReceiptHint)).toBeTruthy();
+  });
+
+  it("can be rendered without the picker (receiptsAvailable=false hides the picker and its hint, not the box)", () => {
+    render(<RequestForm {...props({ receiptsAvailable: false })} />);
     expect(screen.queryByText(COPY.form.addReceipt)).toBeNull();
     expect(screen.queryByText(COPY.form.receiptsHint)).toBeNull();
+    expect(screen.getByLabelText(COPY.form.noReceiptLabel)).toBeTruthy();
   });
 
   it("has no submit button: Enter in a text box can never send a request", () => {
     const { container } = render(<RequestForm {...props()} />);
     expect(container.querySelector('button[type="submit"]')).toBeNull();
-    expect(container.querySelector('input[capture], input[type="file"]')).toBeNull();
+    // the one file input has no `capture` (T3): the phone offers camera, library and files
+    expect(container.querySelector("input[capture]")).toBeNull();
+    expect(container.querySelectorAll('input[type="file"]')).toHaveLength(1);
     fireEvent.submit(screen.getByTestId("request-form"));
     expect(saveRequestAction).not.toHaveBeenCalled();
   });
@@ -271,5 +287,133 @@ describe("RequestForm - editing a sent-back request", () => {
     fireEvent.click(send());
     await waitFor(() => expect(push).toHaveBeenCalled());
     expect(saveRequestAction.mock.calls[0]![1]).toMatchObject({ requestId: REQ, expectedRevision: 4, groupId: G1, kind: "reimburse" });
+  });
+});
+
+describe("RequestForm - receipts (Batch 2b)", () => {
+  const ATT = "55555555-5555-4555-8555-555555555555";
+  const fetchMock = vi.fn();
+  const pickFile = (name = "Hardware store.png") =>
+    fireEvent.change(screen.getByTestId("receipt-input"), {
+      target: { files: [new File([new Uint8Array(10)], name, { type: "image/png" })] },
+    });
+  const attached = (revision: number, displayName = "Hardware store.jpg") =>
+    new Response(JSON.stringify({ attachmentId: ATT, displayName, byteSize: 321, contentType: "image/jpeg", revision }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("choosing a receipt before a group is chosen names the group and sends nothing (the draft cannot be saved yet)", async () => {
+    render(<RequestForm {...props()} />);
+    pickFile();
+    await waitFor(() => expect(screen.getByText(COPY.fieldErrors.group)).toBeTruthy());
+    expect(saveRequestAction).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("receipt-row")).toBeNull();
+  });
+
+  it("saves the draft, uploads to ITS request, lists the receipt, and the next save carries the revision the upload answered (regression for 'a receipt makes the next Save look stale')", async () => {
+    saveRequestAction.mockResolvedValue({ ok: true, data: { requestId: REQ, revision: 1 } });
+    fetchMock.mockResolvedValue(attached(2));
+    render(<RequestForm {...props()} />);
+    fireEvent.change(field("Charge to"), { target: { value: G1 } });
+    pickFile();
+    await waitFor(() => expect(screen.getByTestId("receipt-row")).toBeTruthy());
+    expect(saveRequestAction).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe(`/o/alder/reimbursements/${REQ}/receipts`);
+    expect(screen.getByRole("link", { name: "Hardware store.jpg" }).getAttribute("href")).toBe(`/o/alder/reimbursements/${REQ}/receipts/${ATT}`);
+
+    saveRequestAction.mockResolvedValue({ ok: true, data: { requestId: REQ, revision: 3 } });
+    fireEvent.change(field("What was it for?"), { target: { value: "Folding tables" } });
+    fireEvent.click(draft());
+    await waitFor(() => expect(saveRequestAction).toHaveBeenCalledTimes(2));
+    // revision 2 is what the upload answered; revision 1 would be answered "changed in another window"
+    expect(saveRequestAction.mock.calls[1]![1]).toMatchObject({ requestId: REQ, expectedRevision: 2 });
+  });
+
+  it("with a receipt on the form, Send needs no 'I can't attach a receipt' tick, and submits the revision the save returned", async () => {
+    saveRequestAction.mockResolvedValue({ ok: true, data: { requestId: REQ, revision: 1 } });
+    fetchMock.mockResolvedValue(attached(2));
+    submitRequestAction.mockResolvedValue({ ok: true, data: { route: "seat", groupName: "Property Committee", message: "Sent.", revision: 5 } });
+    render(<RequestForm {...props()} />);
+    fireEvent.change(field("Charge to"), { target: { value: G1 } });
+    pickFile();
+    await waitFor(() => expect(screen.getByTestId("receipt-row")).toBeTruthy());
+
+    fireEvent.change(field("Category"), { target: { value: C1 } });
+    fireEvent.change(field("Amount"), { target: { value: "4250" } });
+    fireEvent.change(field("Date of the expense"), { target: { value: "2026-10-20" } });
+    fireEvent.change(field("What was it for?"), { target: { value: "Folding tables" } });
+    saveRequestAction.mockResolvedValue({ ok: true, data: { requestId: REQ, revision: 3 } });
+    fireEvent.click(send());
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    expect(screen.queryByText(COPY.fieldErrors.receipt)).toBeNull();
+    expect(saveRequestAction.mock.calls.at(-1)![1]).toMatchObject({ expectedRevision: 2, noReceiptClaimed: false });
+    expect(submitRequestAction).toHaveBeenCalledWith("alder", { requestId: REQ, expectedRevision: 3 });
+  });
+
+  it("Save and Send are disabled while an upload is under way, and available again after", async () => {
+    saveRequestAction.mockResolvedValue({ ok: true, data: { requestId: REQ, revision: 1 } });
+    let release!: (r: Response) => void;
+    fetchMock.mockReturnValue(new Promise<Response>((resolve) => (release = resolve)));
+    render(<RequestForm {...props()} />);
+    fireEvent.change(field("Charge to"), { target: { value: G1 } });
+    pickFile();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(send().disabled).toBe(true);
+    expect(draft().disabled).toBe(true);
+    release(attached(2));
+    await waitFor(() => expect(draft().disabled).toBe(false));
+    expect(send().disabled).toBe(false);
+  });
+
+  it("a draft the picker created moves to the edit address on the first Save draft (so a reload keeps the receipts), once", async () => {
+    saveRequestAction.mockResolvedValue({ ok: true, data: { requestId: REQ, revision: 1 } });
+    fetchMock.mockResolvedValue(attached(2));
+    render(<RequestForm {...props()} />);
+    fireEvent.change(field("Charge to"), { target: { value: G1 } });
+    pickFile();
+    await waitFor(() => expect(screen.getByTestId("receipt-row")).toBeTruthy());
+    expect(replace).not.toHaveBeenCalled(); // never mid-upload
+    saveRequestAction.mockResolvedValue({ ok: true, data: { requestId: REQ, revision: 3 } });
+    fireEvent.change(field("What was it for?"), { target: { value: "Folding tables" } });
+    fireEvent.click(draft());
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(`/o/alder/reimbursements/${REQ}/edit`));
+    fireEvent.change(field("What was it for?"), { target: { value: "Folding tables and chairs" } });
+    fireEvent.click(draft());
+    await waitFor(() => expect(saveRequestAction).toHaveBeenCalledTimes(3));
+    expect(replace).toHaveBeenCalledTimes(1);
+  });
+
+  it("an edit page shows the receipts already on the request, and Remove updates the list and the revision the next save carries", async () => {
+    detachReceiptAction.mockResolvedValue({ ok: true, data: { revision: 8 } });
+    saveRequestAction.mockResolvedValue({ ok: true, data: { requestId: REQ, revision: 9 } });
+    render(
+      <RequestForm
+        {...props({
+          initialValues: { ...emptyFormValues(), groupId: G1 },
+          existing: {
+            requestId: REQ,
+            revision: 7,
+            frozen: false,
+            groupName: null,
+            payeeLabel: null,
+            receipts: [{ id: ATT, displayName: "Invoice.pdf", contentType: "application/pdf", byteSize: 99 }],
+          },
+        })}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "Invoice.pdf" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Invoice.pdf" }));
+    await waitFor(() => expect(screen.queryByTestId("receipt-row")).toBeNull());
+    expect(detachReceiptAction).toHaveBeenCalledWith("alder", { requestId: REQ, attachmentId: ATT });
+    fireEvent.click(draft());
+    await waitFor(() => expect(saveRequestAction).toHaveBeenCalled());
+    expect(saveRequestAction.mock.calls[0]![1]).toMatchObject({ requestId: REQ, expectedRevision: 8 });
   });
 });

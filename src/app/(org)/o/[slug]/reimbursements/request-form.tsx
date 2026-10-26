@@ -59,8 +59,10 @@ import { RECEIPTS_AVAILABLE, ReceiptSlot, type ReceiptItem } from "./receipt-slo
  * Kind, group and payee FREEZE at the first submission (the database enforces it),
  * so an edit of a sent-back request shows them as text, not controls.
  *
- * Receipts: the label, the "I can't attach a receipt" box and its hint are live;
- * the picker is `receipt-slot.tsx`, hidden until Batch 2b (`receiptsAvailable`).
+ * Receipts: the label, the "I can't attach a receipt" box and its hint, and the picker
+ * (`receipt-slot.tsx`, Batch 2b). An upload or a removal moves the request's revision by
+ * one and answers the new one; the slot reports it and this form carries it into the next
+ * save. Save and Send are disabled while one is under way.
  */
 
 export interface RequestFormExisting {
@@ -84,7 +86,7 @@ export interface RequestFormProps {
   initialValues: RequestFormValues;
   /** Present on the edit page. */
   existing?: RequestFormExisting;
-  /** False until Batch 2b fills `receipt-slot.tsx`. */
+  /** Tests turn the picker off; the page never passes it. */
   receiptsAvailable?: boolean;
 }
 
@@ -120,11 +122,14 @@ export function RequestForm({
   const guard = useUnsavedChangesGuard(isDirty);
 
   const [pending, setPending] = useState<"save" | "send" | null>(null);
+  // True while the receipt slot is uploading or removing: Save and Send wait (an attach moves the revision).
+  const [receiptBusy, setReceiptBusy] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<ReceiptItem[]>(existing?.receipts ?? []);
   // A mirror of `saved.current.requestId` for rendering (a ref may not be read during render).
   const [requestId, setRequestId] = useState<string | null>(existing?.requestId ?? null);
   const busy = useRef(false);
+  const movedToEdit = useRef(false);
   const saved = useRef<{ requestId: string; revision: number } | null>(
     existing ? { requestId: existing.requestId, revision: existing.revision } : null,
   );
@@ -197,13 +202,17 @@ export function RequestForm({
       const values = getValues();
       const invalid = validateForDraft(values);
       if (Object.keys(invalid).length > 0) return showErrors(invalid);
-      const wasNew = saved.current === null;
       if (!(await persist(values))) return;
       reset(values);
       toast.success(COPY.form.draftSaved);
       // A brand-new draft moves to its own address, so a reload edits it
-      // instead of starting a second request.
-      if (wasNew && saved.current) router.replace(`/o/${slug}/reimbursements/${saved.current.requestId}/edit`);
+      // instead of starting a second request. The draft may already exist because a
+      // receipt was added first (the picker saves it), so this is "not moved yet", not
+      // "just created". The move waits for a Save so it never interrupts an upload.
+      if (!editing && saved.current && !movedToEdit.current) {
+        movedToEdit.current = true;
+        router.replace(`/o/${slug}/reimbursements/${saved.current.requestId}/edit`);
+      }
     });
   }
 
@@ -232,7 +241,7 @@ export function RequestForm({
     });
   }
 
-  /** For the receipt slot (Batch 2b): save if needed, hand back the request's id and revision. */
+  /** For the receipt slot: save if needed, hand back the request's id and revision. */
   async function ensureDraft(): Promise<{ requestId: string; revision: number } | null> {
     if (busy.current) return null;
     busy.current = true;
@@ -257,7 +266,7 @@ export function RequestForm({
   }
 
   const id = (name: string) => `rf-${name}`;
-  const disabled = pending !== null;
+  const disabled = pending !== null || receiptBusy;
   // No chargeable group (and a request still open to a choice): the select is replaced by a sentence
   // and Send waits for the treasurer to set a group up. Save draft stays available.
   const noChargeableGroup = !frozen && groups.length === 0;
@@ -461,6 +470,7 @@ export function RequestForm({
                   disabled={disabled}
                   error={receiptsError}
                   ensureDraft={ensureDraft}
+                  onBusyChange={setReceiptBusy}
                   onChange={(next) => {
                     setReceipts(next.receipts);
                     if (saved.current) saved.current = { requestId: saved.current.requestId, revision: next.revision };

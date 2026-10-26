@@ -40,6 +40,9 @@ describe("gate coverage of both reimbursement route trees (EC25)", () => {
     expect(found).toContain(path.join("admin", "reimbursements", "team", "actions.ts"));
     expect(found).toContain(path.join("admin", "reimbursements", "export", "route.ts"));
     expect(found).toContain(path.join("reimbursements", "[id]", "print", "route.ts"));
+    // Batch 2b: the receipt upload and the receipt download
+    expect(found).toContain(path.join("reimbursements", "[id]", "receipts", "route.ts"));
+    expect(found).toContain(path.join("reimbursements", "[id]", "receipts", "[attachmentId]", "route.ts"));
   });
 
   it("every treasurer-tree action and route names the key it needs - a bare gate call (member surface) is a defect there", () => {

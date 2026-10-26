@@ -113,7 +113,7 @@ describe("DescriptionEditor - T21", () => {
     render(<Harness initial="Before  after" />);
     select(7);
     paste("<h2>Duties</h2><ul><li>One</li><li>Two</li></ul>");
-    expect(textarea().value).toBe("Before \n\n## Duties\n\n- One\n- Two after");
+    expect(textarea().value).toBe("Before \n\n## Duties\n\n- One\n- Two\n\nafter");
   });
 
   it("a converted paste at the end of a line gets a blank-line boundary - regression for the glued heading", () => {
@@ -121,6 +121,21 @@ describe("DescriptionEditor - T21", () => {
     select(10);
     paste("<h2>Duties</h2>");
     expect(textarea().value).toBe("Intro line\n\n## Duties");
+  });
+
+  it("a heading pasted into the middle of a line does not glue the following text to it - regression for the glued trailing text", () => {
+    render(<Harness initial="Before after" />);
+    select(7);
+    paste("<h2>Duties</h2>");
+    expect(textarea().value).toBe("Before \n\n## Duties\n\nafter");
+    expect(textarea().selectionStart).toBe("Before \n\n## Duties".length);
+  });
+
+  it("no trailing boundary when the caret is at the end of a line or the rest of the line is blank", () => {
+    render(<Harness initial={"Intro\nNext line"} />);
+    select(5);
+    paste("<h2>Duties</h2>");
+    expect(textarea().value).toBe("Intro\n\n## Duties\nNext line");
   });
 
   it("a converted paste after a single newline adds just the missing newline; after a blank line or at the start adds none", () => {

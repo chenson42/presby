@@ -98,8 +98,13 @@ export function DescriptionEditor({
     // Mid-line, the converted block would glue onto the previous text: open it with a blank line.
     const before = value.slice(0, start);
     const boundary = before === "" || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+    // Likewise when text follows the caret on the same line: close the block with a blank line (the
+    // spaces that separated it from that text are now the boundary, so they go).
+    const after = value.slice(end);
+    const restOfLine = after.split("\n", 1)[0] ?? "";
+    const glued = /\S/.test(restOfLine);
     const inserted = boundary + converted.markdown;
-    const next = before + inserted + value.slice(end);
+    const next = before + inserted + (glued ? "\n\n" + after.replace(/^[ \t]+/, "") : after);
     const caret = start + inserted.length;
     commit({ value: next, start: caret, end: caret });
   }

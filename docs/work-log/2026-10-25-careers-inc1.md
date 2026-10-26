@@ -1883,3 +1883,9 @@ The re-check after that is a short one: the test red with `?? "hour"`, green on 
 - **Finding 1:** add the edit-path test (posting with all-null pay → unit `""`, typing an amount and saving shows S6, update not called; red with `posting-form.tsx:61` reverted to `?? "hour"`).
 - **N1:** ruled in now — the paste gets a trailing block boundary too when text follows the caret on the same line, so a pasted heading is not glued to the following text. Update `description-editor.test.tsx:116` accordingly.
 - **N2 (aria-invalid/aria-describedby on the pay fields) and N3 (shared `Input` 36px):** TODO lines at integration.
+
+## Phase 4 — run-3 follow-up (2026-10-26)
+
+- **Finding 1 (commit `test(careers)`):** `posting-form.test.tsx` gains the edit-path test: a posting with null pay loads with unit `""`; typing an amount and saving shows "Choose per hour or per year." and `updatePostingAction` is not called. Red with `posting-form.tsx:61` reverted to `?? "hour"` (`expected 'hour' to be ''`); green restored.
+- **N1 (commit `fix(careers)`):** `handlePaste` now closes a converted block with a blank line when non-whitespace text follows the caret on the same line, dropping the spaces that separated them. The caret stays at the end of the pasted block. The `:116` expectation became `…- Two\n\nafter`; a new red-first test pastes a heading into "Before after". `e2e/careers.spec.ts` pastes into an empty textarea, so it is unaffected.
+- **Gate:** typecheck, lint, `npm run check`, full unit suite (622 files passed, 9520 tests) all green.

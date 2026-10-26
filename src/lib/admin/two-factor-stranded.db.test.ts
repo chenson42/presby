@@ -105,6 +105,7 @@ describe.skipIf(!hasDb)("two-factor stranded (Postgres-backed, platform connecti
     // Label order (R3b): own setting beats congregation beats role.
     await user("own-and-role", { orgId: optional, required: true, directKeys: ["roles.manage"] });
     await user("congregation-and-role", { orgId: requiring, directKeys: ["roles.manage"] });
+    await user("own-and-congregation", { orgId: requiring, required: true });
   }, 120_000);
 
   afterAll(async () => {
@@ -126,6 +127,7 @@ describe.skipIf(!hasDb)("two-factor stranded (Postgres-backed, platform connecti
       [email("by-giving-key")]: "role",
       [email("own-and-role")]: "this user",
       [email("congregation-and-role")]: "congregation",
+      [email("own-and-congregation")]: "this user",
     });
   });
 
@@ -143,7 +145,7 @@ describe.skipIf(!hasDb)("two-factor stranded (Postgres-backed, platform connecti
       .sort();
     const { rows } = await mod.listStranded(1000);
     expect(mine(rows).map((r) => r.email).sort()).toEqual(expected);
-    expect(expected.length).toBeGreaterThanOrEqual(7);
+    expect(expected.length).toBeGreaterThanOrEqual(8);
   });
 
   it("the card's count and the page's total are the same number (one predicate)", async () => {

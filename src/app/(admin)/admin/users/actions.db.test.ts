@@ -114,6 +114,19 @@ describe.skipIf(!hasDb)("assignRoleAction (Postgres-backed)", () => {
     expect(await changed(target)).toHaveLength(1);
   });
 
+  it("an audit failure inside the action rolls back the grant and the column together (R2b, E7) - regression for the grant and column write sharing one transaction", async () => {
+    // A ghost actor: audit_events.actor_user_id references users.id, so the
+    // helper's audit insert fails AFTER the grant and the column write. If the
+    // grant had committed on its own connection it would survive.
+    const ghostId = "00000000-0000-4000-8000-00000000dead";
+    const target = await makeUser("atomic");
+    mocks.auth.mockResolvedValue(session(ghostId, ["admin"]));
+    await expect(actions.assignRoleAction(form(target, role.admin!))).rejects.toThrow();
+    expect(await holds(target, role.admin!)).toBe(false);
+    expect(await column(target)).toBe(false);
+    expect(await changed(target)).toHaveLength(0);
+  });
+
   it("a non-admin session throws Forbidden and writes nothing", async () => {
     const target = await makeUser("forbidden");
     mocks.auth.mockResolvedValue(session(nonAdminId, ["member"]));

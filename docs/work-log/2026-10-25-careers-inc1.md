@@ -1706,3 +1706,180 @@ Everything else in Phase 6 is a tracked follow-up at integration.
 **360px look:** the pay row stacks to one column and fits. Note for follow-up, not changed here: the shared `Input` and the form's selects are 36px tall (only toolbar and status buttons are 44px), a pre-existing site-wide choice.
 
 **New copy:** "Choose…" (select placeholder). **Handoff:** scoped QA re-check.
+
+---
+
+# Phase 5 — Verification, run 3 (qa)
+
+**Date:** 2026-10-26
+**Verified by:** qa
+**Tree:** `pipeline/careers` at `a3b8a16`, in worktree `/Users/cshenso/git/presby-platform/presby-careers`, on Neon branch `pipeline-careers`. I checked that both connection strings contain `crimson-tooth` by substring match and printed no value. The worktree was clean before and after, HEAD did not move, `git stash` was not used, and I edited no files.
+
+**Scope run (scoped re-check of Phase 6 findings 5–7):**
+- **In full:** typecheck, lint, `npm run check`, and the full unit suite.
+- **e2e:** `e2e/careers.spec.ts` and `e2e/hydration/careers-posting-form.spec.ts` on my own dev server at :3580. I cleared `.next/dev`, started the server with `npm run dev -- -p 3580`, and set the fakes in its environment: `RATE_LIMIT_DISABLED`, `DOMAINS_*`, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET` and `E2E_ALLOW_SHARED_DB`. I stopped it by PID 30481. I also ran the hydration spec on the prod lane at :3581.
+- **Browser walk:** at 1280px and 360px against the persisted rows.
+- **Failing-first and single mutations:** run in a `git archive` scratch copy.
+- **Not re-run:** the DB-backed suites, `test-rls*.sql`, `custom-hosts`, and the rest of `chromium`. The diff touches no migration, no `src/lib/db/`, no `authz.ts`, no layout, no shared component and no fixture. Run 1's full results and the PR's CI stand for those surfaces. :3000 was never touched.
+
+**Flag state:** before the e2e runs I reset the global flags to the CI baseline with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, on `PLATFORM_DATABASE_URL` only. Afterwards 10 flags were on, the same set as run 2. After all runs the flags still match that baseline and no `e2e-careers-*` organization remains.
+
+**Disk:** 561 GiB free.
+
+## Type Check
+
+- `npm run typecheck`: PASS.
+- `npm run lint`: PASS (0 warnings).
+- `npm run check`: all eight tripwires passed.
+
+## Unit Tests
+
+- 622 files passed, 85 skipped (the DB-gated files).
+- 9,517 tests passed, 0 failed, 2,597 skipped. That is run 2's 9,512 plus the 5 new tests.
+
+## End-to-End Tests
+
+| Lane | Result |
+|---|---|
+| `chromium`, dev :3580 | `careers.spec.ts` + `hydration/careers-posting-form.spec.ts`: **24/24 passed**, 0 skipped, 0 flaky (1.2 min) |
+| `prod-build`, own fresh `next build` on :3581 | `hydration/careers-posting-form.spec.ts`: **3/3** |
+
+The prod lane ran in a scratch copy outside `~/git/presby-platform/` with a hardlinked `node_modules`, per `docs/testing.md`. The lane tore its server down, and nothing listens on :3580 or :3581.
+
+## Regression Tests Added (failing-first, reproduced independently)
+
+**Pre-fix sources.** The five touched source files were restored from `a3b8a16^` and the new tests kept. **7 tests failed:**
+- 3 robots tests: the list's open-state test, the new empty-list test, and the posting's open-state test.
+- 1 pay test: `posting-form.test.tsx:126`. It failed on `unit.value` being `'hour'`.
+- 3 paste tests: the updated mid-line test, end-of-line, and single-newline/blank-line/start.
+
+This matches the implementer's count.
+
+**Single mutations on HEAD sources** (the copy was restored and green, 495/495, after each):
+
+| Mutation | Result |
+|---|---|
+| M1: drop the client S6 refine | red: `:126` |
+| M2: unit required even with no amount | red: the no-amount test, plus one more |
+| **M3: edit default back to `posting.payUnit ?? "hour"` (`posting-form.tsx:61`)** | **survives, all green** |
+| M4: closed posting `index: true` | red |
+| M5: failed list `index: true` | red |
+| M6: boundary added at the start of an empty value | red |
+| M7: no special case after a single newline | red |
+
+M3 is the original defect's line on the edit path. Reverting it brings finding 6 back for the most likely path: a draft saved without pay, with an amount added later. The implementer's change table claims this path ("and edit of a posting with no pay") and the code does it, but no unit or e2e test guards it. See Finding 1.
+
+## Coverage on Critical Modules
+
+Not re-measured. The diff does not touch `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+## Feature-Gate Audit
+
+**No protected routes touched.**
+- The diff changes `generateMetadata` on two anonymous public pages, plus the client form, its schema and the editor.
+- No `route.ts`, no `"use server"` action, no `proxy.ts` change, no schema change.
+- The server's `postingInputSchema` still refuses an amount with no unit (`src/lib/careers/input.ts:128`), and the database CHECK stands behind it.
+
+## Live verification (real browser, :3580)
+
+**Robots**, read from the rendered `<meta name="robots">` and from the raw HTML (one tag each):
+
+| Page | Robots |
+|---|---|
+| `/careers` (open list) | `index, follow` |
+| `/careers/qa-open` (open posting) | `index, follow` |
+| `/careers/qa-closed` (closed posting) | `noindex` |
+| `/employment` and `/` (bundle pages, for comparison) | `index, follow` |
+
+The failed state is pinned by M5. The unavailable state is a 404.
+
+**Pay**, checked against the persisted `pay_min_cents/pay_max_cents/pay_unit`:
+
+| Path | Result |
+|---|---|
+| Create: 52,000–60000 with no unit | Options are `["Choose…","per hour","per year"]` and the select starts on `""`. S6 "Choose per hour or per year." shows under the select and focus moves to it. No row is written (4 → 4). |
+| Then choose per year | `{5200000, 6000000, "year"}` |
+| Create with no amount | `{null, null, null}` |
+| Edit a no-pay draft | Starts on `""`. Typing 52,000 is refused with S6 and the row is unchanged. |
+| Edit an hourly draft | Loads `"hour"`. Clearing the amount saves `{null, null, null}`. |
+
+A published posting with no pay, and the list, contain neither "per hour" nor "per year". `formatPay` returns `null` without a unit (`contract.ts:124`), so "per hour" appears only when stored, and it is stored only when chosen.
+
+**Paste:** "bad link", caret at end, pasting `<h2>How we work</h2>` gives `"bad link\n\n## How we work"`. The preview renders the h2.
+
+**360px:**
+- Lowest and Highest: `x=24 w=312 h=36`.
+- Unit select: `x=24 w=312 h=42`.
+- `scrollWidth=360`.
+- The S6 error wraps under the select. I read the screenshots by eye; they are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-r3/walk/shots/`.
+
+## Copy Truthfulness
+
+- [x] **Copy table:** "Choose…" is the only new string, accepted by the orchestrator's ruling. "Choose per hour or per year." is the existing Copy S6 field error (work-log line 603), now reachable.
+- [x] **Query behind each claim:** "Choose…" claims nothing. The public pay line's unit comes only from the stored `pay_unit`, which comes only from an explicit choice. I verified that against the rows.
+- [x] **Instruction to role:** S6 is shown to a `careers.manage` holder past the page gate, who can pick either unit (walked live).
+- [x] **Older strings:** no string or comment in code still says the unit defaults to "per hour". "Leave blank if you don't want to show pay." stays true. Work-log lines 1056 and 1480 describe the old default as history, which is fine.
+- **copy truthfulness: PASS**
+
+## Judgments requested
+
+- **"Choose…" as the starting option whenever there is no unit: accepted. This departs from the ruling's wording; the orchestrator should record it.**
+  - The ruling said to keep the old default when no amount is entered. Following that literally means either a select that shows "per hour" on an empty pay row and switches value as the user types, or a default that silently applies again.
+  - With no amount, `""` is never sent (`toPostingInput` gives `null`) and is not required (M2 proves both). So the placeholder costs nothing and is the standard pattern.
+  - A posting that already has pay keeps its stored unit (walked).
+- **36px pay inputs: a follow-up, not a blocker for this pipeline.**
+  - The shared `Input` is `h-9` and is used in 76 `src/app` files, against `docs/ui-standards.md:671/706` (44px for primary controls).
+  - Fixing it in `src/components/ui/input.tsx` widens the blast radius to the full e2e suite, so it belongs in its own pass.
+  - Visible side effect: at 1280px the select (42px) sits about 6px lower at the bottom than the two inputs beside it.
+  - The 360px e2e's `toBeGreaterThanOrEqual(36)` checks the current height, not the standard.
+
+## Findings
+
+**1. FAIL: no regression test for the edit path of the pay-unit fix.**
+- Reverting `posting-form.tsx:61` to `posting.payUnit ?? "hour"` leaves every unit and e2e test green (mutation M3).
+- That reinstates finding 6 for "draft saved without pay, amount added later".
+- **Needed:** a test in `posting-form.test.tsx` that renders the edit form for a posting with `payMinCents/payMaxCents/payUnit` all `null`, and asserts:
+  - the unit is `""`;
+  - typing an amount and saving shows "Choose per hour or per year.";
+  - the update action is not called.
+- It must go red with line 61 reverted, which I will check on re-run.
+
+**N1 (non-blocking, needs a ruling): the paste boundary is leading-only.**
+- In a true mid-line paste, the text after the caret still glues onto the pasted block's last line. `description-editor.test.tsx:116` pins this as expected: `"...- Two after"`.
+- Pasting a heading into the middle of "Before after" gives `## Duties after`. That is the same heading-swallow class, on the trailing side.
+- The orchestrator's ruling named only the leading boundary and the implementer followed it. I recommend adding it to the dropped-link follow-up, or doing it now alongside Finding 1.
+
+**N2 (a11y polish, follow-up):** the unit select gets no `aria-invalid` when S6 shows, unlike Lowest and Highest. None of the three uses `aria-describedby` for its error. Focus does move to the select.
+
+**N3 (36px inputs):** see Judgments above. Track it as a site-wide `Input` height follow-up.
+
+## Verdict
+
+**FAIL.** The three fixes work:
+- Robots are `index, follow` on the open pages and `noindex` on the closed page, live and in raw HTML.
+- An amount with no unit is refused with S6 on both create and edit, and "per hour" appears only when chosen.
+- The paste boundary works for the reported case.
+
+The gate is green: typecheck, lint, the eight tripwires, unit 9,517, careers e2e 24/24, and prod-lane hydration 3/3.
+
+It fails on one named coverage gap. The edit-path half of the pay-unit fix has no test, and reverting it (M3) leaves the suite green. This is not auth-touching.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 3, scoped: Phase 6 findings 5–7) | qa | Complete; 7 red pre-fix reproduced; 7 single mutations, M3 (edit-path unit default) survives; live robots, pay and paste verified at 1280 and 360; flags reset to baseline | FAIL (one coverage gap) | 2026-10-26 |
+
+**Handoff:** back to **ux-developer (Phase 4)** for one test:
+- File: `src/app/(org)/o/[slug]/admin/careers/posting-form.test.tsx`, next to `:177`.
+- It should guard `src/app/(org)/o/[slug]/admin/careers/posting-form.tsx:61`.
+- Optionally it can cover N1's trailing boundary if the orchestrator rules it in.
+
+The re-check after that is a short one: the test red with `?? "hour"`, green on HEAD, and the unit suite. Nothing else needs re-running unless the source changes. N2 and N3 go to `docs/TODO.md` at integration.
+
+## Orchestrator rulings on QA run 3 (2026-10-26)
+
+- **"Choose…" whenever there is no unit:** accepted (departs from the earlier ruling's wording; nothing is sent or required without an amount).
+- **Finding 1:** add the edit-path test (posting with all-null pay → unit `""`, typing an amount and saving shows S6, update not called; red with `posting-form.tsx:61` reverted to `?? "hour"`).
+- **N1:** ruled in now — the paste gets a trailing block boundary too when text follows the caret on the same line, so a pasted heading is not glued to the following text. Update `description-editor.test.tsx:116` accordingly.
+- **N2 (aria-invalid/aria-describedby on the pay fields) and N3 (shared `Input` 36px):** TODO lines at integration.

@@ -114,7 +114,9 @@ export default async function AccountTwoFactorPage({
 
   // Not enrolled — reuse the pending row if it's still valid, otherwise mint
   // a new one.  Reusing the row keeps the QR code stable across page reloads
-  // within the TTL window so the user's authenticator app stays in sync.
+  // within the TTL window so the user's authenticator app stays in sync. The
+  // page shows what the database holds (F342): the helper never returns a secret
+  // it did not see stored.
   const enrollData = await getOrCreatePendingEnrollment(
     session.user.id,
     session.user.email ?? "user@example.com",

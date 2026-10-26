@@ -20,7 +20,7 @@
 | 2 — Architectural review | architect | See parent (shared) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; designed against the F289 0072 **draft** (`presby-assets` worktree, unmerged); three Phase 2 rulings corrected (R3 invoker to definer, R2 Drizzle declaration, R5 dead join); F333–F337 raised; open rulings O1–O4 | Design complete | 2026-10-26 |
 | 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied); F338 ruled by the orchestrator (the barrel line and the dev-docs entry are committed on the branch). Batch 2 (api-developer) complete: sharp 0.35.5 installed, image pipeline, store, reader, consequences, copy, four server actions, `resolveMany`, directory swap to `photoThumbKey`, catalog toggle, audit keys and the off-warning; 644 unit files / 9718 tests, 63 DB-backed files / 1351 tests, RLS 78 = 82 and RLS 72 = 24, `npm run check` 8/8, build and typecheck and lint clean. Batch 3 (ux-developer) complete: photos page, upload island with client downscale, designate and remove dialogs, edit-page link, three listing-dialog rewrites, UI copy, unit, e2e and hydration specs, browser walk at 360 and 1280 px; QA next | Batch 3 done | 2026-10-26 |
-| 5 — Verification | qa | Run 1 FAIL (a)(b)(c); run 2 FAIL: (a)(b)(c) fixed, new (d) remove dialog "will leave the public website" for an unlisted person | FAIL (run 2) | 2026-10-26 |
+| 5 — Verification | qa | Run 1 FAIL (a)(b)(c); run 2 FAIL: (a)(b)(c) fixed, new (d) remove dialog "will leave the public website" for an unlisted person | FAIL (run 3: (e)(f) same-photo state) | 2026-10-26 |
 | 3 — amendment (Phase 5 run 1 copy rulings) | tech-lead | Complete: rulings R-a (withheld-aware consequences; snapshot carries `minor`, `directoryWithheld`, `websiteWithheld`), R-b (new "Clear for website" control and dialog variant), R-c (count distinct photos); tests T1-T11 named; implementer full-stack-developer; no schema, route, flag or permission change. See the amendment at the end of this log | Design complete; back to Phase 4 | 2026-10-26 |
 | 4 — Phase 5 run 1 fix (copy) | full-stack-developer | Complete: snapshot carries `minor`/`directoryWithheld`/`websiteWithheld`; every R-a/R-b/R-c string verbatim; "Clear for website" control and `clear` dialog variant; `countChosenPhotos` (distinct); T1-T11 failing-first; gates green; back to Phase 5 (scoped re-run) | Ready for QA | 2026-10-26 |
 | 3 — ruling on fix-pass deviation | tech-lead | Complete: `websiteIsWithheld` helper (adds `directoryWithheld`) confirmed, no reachable-data change; under-18 checkbox accepted with a TODO candidate; no code change. See the last section of this log | Confirmed; back to Phase 5 (scoped re-run) | 2026-10-26 |
@@ -1867,3 +1867,177 @@ Total on the red run of the photo unit files: 5 files failed, 22 tests failed, 2
 - The R-d6 status-line change makes `websiteLine`'s fourth parameter default `false`, so any caller that omits it keeps today's behaviour; the only caller is `statusLines`.
 - `docs/TODO.md`, `docs/decisions.md` and the other Rule 16 files were not touched; the amendment's proposed decision text, finding, and the touch-target TODO candidate remain for the orchestrator.
 - Handoff: qa, scoped Phase 5 re-run 3 (the consequence unit files, `confirm-dialogs`, `designate-dialog`, and the remove-dialog walk for an unlisted person and the hidden-photo clear dialog at 360 and 1280).
+
+---
+
+## Phase 5 — Verification (qa), run 3
+
+**Verdict: FAIL — copy truthfulness, two sentences in the same state.** When one photo is both the website photo and the cleared directory photo, two dialog sentences are false at HEAD:
+- **(e)** "Stop using on website" says "The website will no longer use this photo." I confirmed it and the public roster kept serving that photo.
+- **(f)** "Use in directory" on the website photo says it "will be used on the website only if … has no website photo", but it is the website photo.
+
+Everything run 2 asked for is fixed: (d), R-d1 to R-d6, three strings verbatim, T12 to T19 red on c225091 and green on HEAD. Every gate, suite and e2e lane I ran is green. Both failures predate this fix pass. I passed both sentences in runs 1 and 2. In run 2 I built this exact state and never opened "Stop using on website" in it.
+
+**Date:** 2026-10-26
+**Verified by:** qa
+**Tree:** `pipeline/person-photos` @ 93905a6, worktree `/Users/cshenso/git/presby-platform/presby-photos`, Neon `pipeline-person-photos`. The worktree is clean before and after.
+
+**Scope (`git diff 0684ace..HEAD --stat`):** 9 files:
+- `copy.ts`, `consequences.ts`, `status-lines.ts`
+- their tests (`consequences`, `copy`, `reader-derive`, `confirm-dialogs`, `designate-dialog`)
+- the work-log
+
+No migration, `authz.ts`, `src/lib/db/`, `proxy.ts`, `auth.ts`, layout, `e2e/support/`, shared component, route or server action is touched. No full DB or e2e suite was owed.
+
+**Ran:**
+- typecheck, lint, check, and build after `rm -rf .next`
+- the unit suite, and the person-photos DB tests serially
+- failing-first against c225091
+- the dev e2e lane on my own :3620, with flags reset first
+- the prod lane on :3621
+- a walk at 360 and 1280
+- a full pass of `consequencesFor` over every state, from a scratch script (1,968 cases)
+
+**Not re-run (runs 1 and 2 stand):**
+- the full `test:db`, RLS 78/72 and the full `test-rls.sql`
+- the full chromium, custom-hosts and prod suites
+- the live-catalog probe, and the DB and TS mutation sets
+
+**Open, not blocking:** the real-iPhone HEIC check (operator) and the Vercel linux `sharp` trace (PR preview).
+
+## Type Check
+
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS, 0 warnings
+- `npm run check`: 8 of 8 tripwires pass
+- `rm -rf .next && npm run build`: PASS
+
+## Unit Tests
+
+- **Unit suite:** 9,954 passed, 0 failed, 34.5 s. 652 files ran. The 96 skipped files are the env-gated DB set, as in runs 1 and 2.
+- **Person-photos DB tests**, serial (`dotenv -e .env.local -- vitest run --no-file-parallelism` over `src/lib/person-photos`, `person-photos.db.test.ts`, `public-roster-photo.db.test.ts` and `src/lib/org-feature-warnings*`): 12 files, 267 passed, 0 failed, 0 skipped.
+
+## End-to-End Tests
+
+Global flags were reset to the CI baseline first (`scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`: COMMIT, 10 keys).
+
+| Lane | Specs | Result |
+|---|---|---|
+| Dev, my own server on :3620 (`AUTH_URL` and `E2E_BASE_URL` on :3620, plus the domains fakes), `--project=chromium` | `e2e/person-photos.spec.ts` (360, desktop, E4, toggle-off) and `e2e/hydration/person-photos-upload.spec.ts` | 5/5, 1.3 min. E4 document 237,844 bytes |
+| Dev, `--project=custom-hosts` | `e2e/custom-domains/person-photos-roster.spec.ts` | 2/2, 11.9 s |
+| Prod (`PW_PROD_BUILD=1`, `PW_PROD_PORT=3621`), `--project=prod-build` | `e2e/hydration/person-photos-upload.spec.ts` | 1/1, 30.7 s |
+
+There were no skips and no retries. I stopped the dev server by PID: 37246, 37248, 37249 and 37386. The listener, 37249, needed a second TERM. :3620 and :3621 are both free.
+
+**Walk at 360 and 1280.** It used its own fixture org, with a live site and the custom host `qa-photos-r3.invalid`. Images were synthetic. Both widths showed the same text. There was no horizontal overflow and no native dialog, every dialog fit the viewport, and the dialog buttons were 44 px. The fixture was torn down (leftover 0/0/0) and flags were restored.
+
+| State | What the page and dialogs said |
+|---|---|
+| Unlisted person, website photo | **Remove:** "…which the website isn't showing at the moment." (d is fixed.) **Stop using:** `websiteStops` + `websiteShowsNone` + caches. |
+| Listed person, website photo | **Remove:** "…so the public website can no longer show it." (R-d2) |
+| Hidden photo, listed, unattested directory photo (`hide_photo`) | **Status line:** "Website: not shown, because Hidunat has hidden their photo." (R-d6) **Clear, unticked:** `directoryHidden`. **Clear, ticked:** `directoryHidden` + `websiteHidden`, and no "can also appear". |
+| Hidden photo, listed, website photo | **Website dialog:** `websiteHidden` + `websiteReplaces`. **Directory dialog, ticked:** `websiteHidden`. **Remove:** the withheld sentence. **Stop using:** `websiteShowsNone`. |
+| Minor, age 9 (directory, website and spare photo) | **Status lines:** both are the under-18 lines. **Directory tile:** no "Clear for website". **Both designate dialogs:** only `minorBlocked`, and the confirm stays disabled when ticked. **Remove website:** the withheld sentence. |
+| Merged (`merged_into_id` set; feasible) | **Status line:** "Website: not shown, because this record was merged into another." **Dialogs:** `websiteMerged`. **Remove:** the withheld sentence. |
+| Same photo is both the website photo and the cleared directory photo, listed | Defects (e) and (f) below. |
+
+Evidence is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-r3/walk/`: `results.json`, plus screenshots such as `360-S-E1-stop-website-dialog.png`, `360-S-roster-after-stop.png` and `360-L-E2-directory-on-website-photo.png`.
+
+## Regression Tests Added
+
+I ran HEAD's five changed test files against c225091's source, in a `git archive` scratch copy (since deleted):
+- **On c225091:** 5 of 5 files failed; 22 tests failed and 145 passed. That matches the implementer's 22.
+- **Every T12 to T19 test is among the failures**, including:
+  - T15 (i), (ii) and (iii)
+  - T16 "the old strings are gone"
+  - T17 "UNLISTED person … (regression for the unlisted remove sentence)"
+  - both T18 dialog cases and T19
+- **On HEAD:** 167 of 167 pass.
+
+**Gap, tied to the FAIL below:**
+- **No row covers the same-photo states.** Every fallback row uses website A with directory B (`consequences.test.ts:136-140`).
+- **T15 enumerates the state but checks only part of it.** Its product contains website `{A}` with directory `{A, attested}` (`consequences.test.ts:457-458`), but its properties check only `remove` and `designate_*`, never `undesignate_website`.
+
+## Coverage on Critical Modules
+
+Not measured. The diff touches none of `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+## Feature-Gate Audit
+
+No protected routes or actions were touched. `actions.ts` and every `route.ts` are absent from `git diff 0684ace..HEAD`. The R-d6 status line removes an instruction and adds none.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none added or changed | n/a (run 1's audit stands) | n/a, tenant axis (`people.manage`, toggle, membership) | n/a |
+
+## Copy Truthfulness
+
+- [x] **Every changed string is in the design's Copy table.** `removeIsWebsite`, `websiteNotListed` and `removeIsFallback` match R-d2, R-d4 and R-d5 verbatim, checked programmatically against the amendment text. `websiteStops` is unchanged per R-d3. The old wording is gone from `src`, `e2e` and `docs/release-notes`. `.tsx` files carry no inline sentences.
+- [x] **The query behind each claim was opened, and what it does not read was named:**
+  - `presby_person_public_photo` (0078:380-404) picks the website designation, else an attested directory designation. It does not read listing or publication. It reads `hide_photo` person-wide.
+  - `presby_person_directory_photo` (0078:430-452) scopes `hide_photo` to the org and has no `merged` reason.
+  - The rosters add `public_listed`, `ends_on`, `o.status = 'active'` and `s.status = 'live'`. `listingsOf` (`reader.ts:97`) matches the roster predicates.
+  - The directory renders the thumbnail or initials (`person-avatar.tsx`), and `directory.ts` excludes `directory_hidden` and merged rows. That makes "members who can see {first} in the directory … see initials" true.
+- [x] **Each instruction is performable by the role that sees it.** Unchanged since run 2. R-d6 withdraws the remedy where it cannot help.
+- [ ] **No string is false in a reachable state.** Two are; see (e) and (f).
+
+**copy truthfulness: FAIL**
+
+**(e) Stop using on website, when the website photo is also the cleared directory photo.**
+- **Viewer:** a `people.manage` holder on `/o/<slug>/admin/community/<id>/edit/photos`.
+- **Where:** `consequences.ts:136-143` always pushes `copy.ts:172` ("The website will no longer use this photo."). It then adds `websiteFallsBack` because `directory.attested && !websiteIsWithheld`. It never checks whether `directory.photoId === website.photoId`.
+- **Reproduced at 360 and 1280:**
+  - The dialog reads "The website will no longer use this photo. If Samewalk is listed, the website will use their directory photo instead…"
+  - I pressed Stop using. One designation row remained (directory, attested).
+  - The page then read "Website: the directory photo, because it was cleared for the website."
+  - The anonymous custom-host roster still served that same image: an `img` whose src carries its image key, with naturalWidth 240.
+- **Why it matters:** the sentence is false under both of the amendment's readings. As selection, the core still picks the photo. As effect, a listed person on a live site still shows it. It understates exposure: an admin who wants a photo off the public website is told it is off, and it is not.
+- **Design source:** R-d3 (work-log :1725-1727) rules `websiteStops` "true in every state … the SQL core cannot pick it". That ruling is wrong for this state, so this goes to Phase 3.
+- **Reach:** run 2's walk created this state through ordinary use: "Clear for website", then "Use on website" on the same photo.
+
+**(f) Use in directory, ticked, opened on the photo that is already the website photo.**
+- **Viewer:** the same.
+- **Where:** `consequences.ts:107-114`. If `listed && website !== null` and nothing is withheld, the dialog shows `copy.ts:153-154`: "This photo will be used on the website only if Lisqa is listed and has no website photo."
+- **Reachable:** every website tile carries "Use in directory" (`tile-controls.tsx:65-67`).
+- **Why it is false:** Lisqa is listed, and this photo is the website photo (the tile's chip reads "Website"). It is used on the website now.
+- **Design source:** the amendment's sweep row (:1683) marked this sentence "true everywhere".
+
+**Related, needs a ruling, not cited as failing.** Take an unlisted person with no website photo and tick the directory dialog. It shows the same `directoryWebsiteConditional` ("only if … listed"). After confirming, the page reads "Website: the directory photo, because it was cleared for the website." Under the amendment's convention that "use" is a selection verb, that contradicts "only if listed". Under an effect reading it is true. Tech-lead should say which reading "will be used" has here.
+
+**Notes (not failures):**
+1. **"Instead of their initials" when a photo already shows.** The directory dialog body reads "…will see this photo instead of their initials". When another directory photo is current, members currently see that photo, not initials (`copy.ts:236-237`). Imprecise, not exposure-changing.
+2. **The directory "unless hidden" clause over-hedges.** In the directory, "unless {first} has hidden their photo" is org-scoped (0078:451). A hide set at another organization does not withhold the directory photo here. It over-hedges; it never promises exposure.
+3. **The minor notice sits beside visible thumbnails.** `PAGE_COPY.minorNotice` ("any existing photos are not shown") sits above tiles that display those photos to the admin. In context it means public surfaces. Low priority.
+4. **The dialog close icon is still about 16 px.** Run 2 already noted it; it is a shared primitive and pre-existing.
+
+## Verdict
+
+**FAIL — copy truthfulness (e) and (f).** Both are design text (R-d3 and the sweep table), so they go to tech-lead first, then to the implementer.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification, run 3 (scoped) | qa | Complete:<br>• typecheck, lint, build, check 8/8<br>• unit 9,954/9,954; person-photos DB 267/267 serial<br>• e2e dev 5/5 chromium + 2/2 custom-hosts on :3620, prod 1/1 on :3621; flags reset to the CI baseline first<br>• T12–T19: 22 red on c225091, 167/167 green on HEAD<br>• R-d2/R-d4/R-d5 verbatim; (d) and R-d6 verified in the walk at 360/1280, including minor and merged<br>FAILED on copy truthfulness, same-photo state:<br>(e) `websiteStops` "will no longer use this photo" while the cleared directory designation of the same photo keeps it on the public roster (`consequences.ts:136-143`, `copy.ts:172`; reproduced, roster still serves the image)<br>(f) `directoryWebsiteConditional` on the website photo itself (`consequences.ts:107-114`, `copy.ts:153-154`)<br>Still open: real-iPhone HEIC (operator), Vercel linux `sharp` trace (PR preview) | FAIL | 2026-10-26 |
+
+**Handoff:**
+1. **tech-lead (Phase 3, brief):**
+   - **Re-rule R-d3 for the state where `directory.photoId === website.photoId`, directory attested, nothing withheld.** Two options:
+     - a sentence saying the website keeps showing it as the cleared directory photo, with the way to take it off;
+     - a behaviour change: stopping the website use also withdraws the attestation. That is a design change.
+   - **Rule (f)** when the intent's photo is the website photo: omit the line, or "already their website photo".
+   - **Rule the "related" reading** of `directoryWebsiteConditional` for an unlisted person.
+   - **Re-sweep with one more dimension:** website photo = directory photo.
+2. **full-stack-developer (Phase 4):**
+   - `consequences.test.ts` rows for (e), listed and unlisted, and for (f).
+   - A T15 property over the existing product (which already contains the same-photo state): no `undesignate_website` line may claim the website stops using a photo that the attested directory designation still selects.
+   - `confirm-dialogs.test.tsx` and `designate-dialog.test.tsx` render cases.
+   - All written red first against 93905a6.
+3. **qa (run 4):** the scoped unit files, plus a same-photo walk at 360 and 1280 that includes the roster check after confirming.
+
+Everything is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-r3/`:
+- **Logs:** `gates.txt`, `unit.log`, `db.log`, `red.log`, `green.log`, `e2e-*.txt`, `flags-reset.log`
+- **Grid output:** `grid.jsonl`
+- **Walk:** `tools/walk-r3.mts`, and `walk/results.json` with screenshots
+
+The c225091 scratch copy has been deleted. No repo file was edited.

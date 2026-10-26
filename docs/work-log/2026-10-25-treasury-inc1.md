@@ -1816,3 +1816,11 @@ Unchanged by this batch, and not stubbed: `sharp@0.35.5` exact; `src/lib/storage
 1. Finding 1 above needs a ruling (C1 or the shared component).
 2. `docs/TODO.md` (orchestrator): a line for the 413 spec's cost and, once 2b lands, "T5: assert the sharp file exists"; Release note C13 line 7 (the CSV covers every group) is unchanged.
 3. Rule 16: the integration patch gained CLAUDE.md; the four older hunks need regenerating against the integrated tree.
+
+## Orchestrator rulings on Batch 7 (2026-10-26)
+
+- **C1 off-dialog title:** accept what ships — the shared Features page titles every off-dialog `Turn off {name}?` and shows the description; C1's separate title is withdrawn (giving has the same shape). The toggle spec pins what ships.
+- **`next.config.ts` trace key:** confirmed (the design lists it; one key).
+- **T5 "at most one" until Batch 2b:** accepted; Batch 2b tightens it to "exactly one".
+- **Print above Approve on an approver's phone:** accepted.
+- **F289 is on main (0.46.1, 2026-10-26, 0072 applied to production and development).** Batch 1b (receipt FK into `blob_assets` pinned `private`) and Batch 2b (receipts) are unblocked.

@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (parent log) | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log) | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete for Increment 1 | Design complete; implementers named | 2026-10-25 |
-| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete, `dcbb94a`; Batches 2 and 3 pending | — | 2026-10-25 |
+| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete, `dcbb94a`; Batch 2 (api-developer) complete, `755cc8b`..`d69b6b2`; Batch 3 (ux-developer) pending | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -853,7 +853,7 @@ Each implementer's section follows the `docs/work-log/_template.md` Phase 4 form
 - `src/lib/onboarding/founding-administrator.test.ts`: the base list grows from 9 to 11 keys, and the presbytery list to 12. The "never carries" title is corrected, because the bundle now carries one tier-3 key. New careers describe block (each key once, the order after `domains.manage`, no office binding).
 - `src/lib/onboarding/designation-parity.golden.json`: regenerated with `WRITE_DESIGNATION_GOLDEN=1` under operator ruling Q4 and DECISION-265. Before regeneration, the old golden failed all 8 founding scenarios as expected. The diff is +16 lines, only `careers.applicants` and `careers.manage` in the 8 `founding_administrator` permission lists. Treasurer entries are unchanged.
 - `src/app/(admin)/admin/organizations/[id]/founding-administrator-section.tsx` and `.test.tsx`: the Copy D1 labels, a check for the sentence, and a drift guard against raw keys. Proven failing-first: without the labels, the test "names the actual permission list" fails.
-- `docs/work-log/2026-10-25-careers.md:281`: a same-line `<!-- leak-ok -->` on the analyst's `a@b.co` example (a bypass payload, not an address). `check:secrets` flagged it, and the visible text is unchanged.
+- `docs/work-log/2026-10-25-careers.md:281`: a same-line `<!-- leak-ok -->` on the analyst's short-address bypass-payload example (not an address). `check:secrets` flagged it, and the visible text is unchanged.
 
 ### Schema Changes
 
@@ -938,6 +938,100 @@ Strings added or changed:
 - The three pre-existing test-rls failures above.
 
 **Next:** api-developer (Batch 2).
+
+## Phase 4 — Batch 2 (api-developer)
+
+**Date:** 2026-10-25. **Commits:** `4fd8726` (merge of `origin/main` at 0.44.0, PR #56: clean, no conflicts), `755cc8b` (pure libs), `ecc5c67` (catalog, audit keys, `SiteUrls`, reserved path, ingest message, tile), `cd68a58` (public reader, staff lib, sweep and cron step, placement reader, actions, boundaries), `d69b6b2` (the shared S8 strings), and the commit that records this section. **Neon branch:** `pipeline-careers` (development and production untouched). Port 3580 was used for one real-request smoke and stopped by PID.
+
+**Feasibility re-run after the merge.** The design's list holds, with this drift:
+- **Main added migration 0067 (public events calendar) and the branch's Neon database did not have it.** `events.website_listed` was missing, so every main suite that reads events (and Batch 3's e2e) would fail against this branch for a reason that is not careers. I applied `drizzle/0067_presby_public_events_calendar.sql` to `pipeline-careers` as the owner (`-1`, one transaction, as its header says); `public-calendar.db.test.ts` is 14/14 afterwards. The orchestrator applies it on development at integration as usual.
+- `audit.ts`, `site-urls.ts`, `org-features.ts` and `render-site-page.tsx` changed on main (the calendar's two event keys, `portalCalendar`, the `public_calendar` catalog entry, the `eventsCalendar` slot). They merged without conflict and the careers additions sit beside them. `presby_founding_administrator_permission_keys()` is untouched by 0067 (grep: 0 mentions).
+- The cron test's "exactly one platform execute" assertion (`route.test.ts:129-134`) still holds because the sweep module is mocked there; its own transaction is covered in `sweep.test.ts` and `sweep.db.test.ts`.
+- `[[...path]]/page.test.tsx` asserts the `staffDirectory` and `committeeDirectory` slot closures individually, not the whole slot-key set, so adding `careers` in Batch 3 needs a new closure test (T18) and no change to the existing ones.
+
+### Files Created
+
+`src/lib/careers/`, each with a test beside it:
+- Pure: `text.ts`, `contract.ts`, `dates.ts`, `slug.ts`, `description.ts`, `toolbar.ts`, `input.ts`, `html-to-markdown.ts`, `placement.ts`, `messages.ts`.
+- Server: `public.ts`, `placement-read.ts`, `postings.ts`, `sweep.ts`.
+- Tests that are not beside one file: `boundaries.test.ts`, `postings.db.test.ts`, `public.db.test.ts`, `sweep.db.test.ts`.
+- `src/app/(org)/o/[slug]/admin/careers/actions.ts` and `actions.test.ts`.
+
+### Files Modified
+
+- `src/lib/org-features.ts` (the `org_portal.careers` entry), `src/lib/audit.ts` (three keys), `src/lib/site-urls.ts` (`careers()`, `careersPosting()`), `src/lib/sites-reserved-paths.ts` (`RESERVED_SITE_DESCENDANTS`), `src/app/api/sites/ingest/route.ts` (Copy I1), `src/lib/org-portal/tiles.ts` and `src/components/org-portal/tile-icons.tsx` (the tile and `Briefcase`), `src/app/api/cron/maintenance/route.ts` (the sweep step).
+- Tests updated for the additions: `org-feature-catalog.test.ts`, `audit.test.ts`, `site-urls.test.ts`, `sites-reserved-paths.test.ts`, `api/sites/ingest/route.test.ts` (real route, real Postgres), `org-portal/tiles.test.ts` (23 tiles), `org-portal/visible-tiles.test.ts` (**not in the design's blast-radius list**: its two toggle-read lists gain `org_portal.careers`), `api/cron/maintenance/route.test.ts`.
+- `docs/work-log/2026-10-25-careers-inc1.md:856`: Batch 1's note quoted the analyst's short-address payload literally, so `check:secrets` flagged the committed work-log; reworded (no address in the text).
+
+### Schema Changes
+
+None. (Applied 0067 to the Neon branch only, above.)
+
+### Audit Events
+
+- `CAREERS_POSTING_PUBLISHED`, `CAREERS_POSTING_CLOSED`, `CAREERS_POSTING_REOPENED` (`careers.posting.*`), written with `insertAuditRow(tx, ...)` in the **same transaction** as the change: from `postings.ts` (`via: "staff"`, actor the staff member) and from `sweep.ts` (`via: "closing_date"`, actor null). Metadata is `{ organizationId, postingId, via }` and nothing else; `resource_type` `job_posting`, `resource_id` the posting id. None for create, edit, reorder or discarding a draft. A failed audit insert fails the change (proved both ways in `postings.db.test.ts`; for the sweep in `sweep.db.test.ts`).
+- `check:audit` has nothing to flag in `actions.ts` (it holds no `db.*` call); the three actions that write no row carry `// audit-exempt:` comments and `boundaries.test.ts` pins that the one status writer in the lib is followed by `insertAuditRow`.
+
+### Deviations from the design (each restated, and checked against the intent)
+
+1. **The INSERT is raw `sql`, not `db.insert(jobPostings).values(...)`.** Batch 1's note said Drizzle must leave the trigger-owned columns out of `.values()`; it cannot. Drizzle emits every column of the table with `default` for the omitted ones, and Postgres checks a column privilege against the statement's target list, so `presby_app` is refused (`permission denied for table job_postings`, reproduced as `presby_app` on the branch). `createPosting` uses a column-limited `insert ... returning id` in a `sql` template; `.update(...).set(...)` is fine because Drizzle sets only the keys given. `boundaries.test.ts` bans `.insert(jobPostings)`, bans naming a trigger-owned column in any `.set({...})`, and checks the raw column list.
+2. **`closing_date_passed` carries `reopening: boolean`.** The design's result is a bare kind, but Copy S8 has two different sentences (publish versus reopen) and the action cannot tell which edge ran. Additive.
+3. **Reopening a closed posting that was never published (a discarded draft) is allowed, and is audited as `PUBLISHED`, not `REOPENED`.** The design lists `closed -> published` as an edge and the trigger allows it; nothing said what to do with a discarded draft. It is a first publication, so it takes the same completeness checks and the PUBLISHED audit row. Batch 3: the Reopen dialog's body ("It returns to your website right away") is slightly off for a "Never published" row; decide whether to show Reopen there at all.
+4. **The description validator's error codes are `heading_single`, `heading_level`, `link_scheme`, `link_unfinished`, `too_long`, `empty`.** The design names one `heading_level` but Copy S6 has two distinct messages, so the single-`#` case is its own code. The `empty` message, "Add a description before publishing.", is the S8 "Add a {fields} before publishing" template with one field; it is not a verbatim Copy line, flagged here for the orchestrator.
+5. **The validator keeps leading spaces on the first line of the stored value** (only leading blank lines and trailing whitespace are trimmed). Trimming `"  # x"` would turn text the renderer reads as a paragraph into a heading after validation, breaking idempotence. Pinned in `description.test.ts`.
+6. **The link scan is looser than the renderer's pattern on purpose:** any `[label](...)` is checked, including an empty or whitespace-containing address, which the renderer would leave as plain text. The cost is that prose like `[note](see below)` is refused as an unusable link. The design (T8) asks for whitespace-in-URL to fail with the right code.
+7. **Only Copy leaves the building.** zod's own messages ("Invalid input: expected object, received null") would otherwise reach a person for a request that bypassed the form; `firstIssue()` passes a message through only if it is a Copy S6 field error and otherwise says the generic S8 line. New file `messages.ts` holds the S8 strings, shared with the client because a `"use server"` file can export only async functions (see the contract: the form recognises a stale save by comparing the action's `error` with `STALE_MESSAGE`).
+8. **No session, an unresolvable slug and an ended membership all return the S8 "forbidden" line.** The Copy set has no "sign in" string and `/o/*` is already behind the proxy.
+9. **Closing-date rule on update (design wording ambiguous):** a published posting's save is refused with "The closing date can't be in the past." only when the save **changes** the date to a passed one. A posting whose stored date has already passed (awaiting the sweep) can still have other fields saved with the date untouched. Drafts and closed postings may carry any date; publishing and reopening refuse it.
+10. **A published posting cannot be saved with an empty summary, location or description:** the lib returns `incomplete` naming them (the design is silent; the database CHECK would have raised an unmapped 23514).
+11. **`describePlacement` returns data (five states, including `unknown`), not strings.** The Copy S5 sentences need the site's URLs, so the page composes them.
+12. **`sweepClosedPostings(tx)` is exported beside `runCareersSweep()`** as the test seam: the sweep is cross-organization, so a committed test run would close every other due posting on the branch.
+13. **A posting key over 200 characters is `not_found` without a query** in `readPublicPosting` (it cannot be a slug); shorter malformed keys still go to the definer so the read count does not depend on shape.
+14. **Attribution trailer.** The commits carry `Co-Authored-By: Claude Sonnet 5.5` (the harness's attribution for this session), not the `Opus 5.5` line Batch 1 used. Mechanically irrelevant to the hooks; mentioned so the pipeline's history is not read as an error.
+
+### Tests and failing-first proofs
+
+- **Unit tests (no database): 373 across these files** (the cron route's file holds 11, 4 of them new; counts per file: text 10, contract 12, dates 8, slug 11, description 50, toolbar 28, input 56, html-to-markdown 40, placement 16, placement-read 4, public 66, sweep 9, messages 3, boundaries 21, actions 28, cron route 11), plus the updated existing files.
+- **DB-backed (real Postgres, serial, as `presby_app` through `withOrgContext` or the anonymous `db`):** `postings.db.test.ts` 47 (T15), `public.db.test.ts` 6 (T6 over all 27 combinations plus the driver's real jsonb and date shapes), `sweep.db.test.ts` 3 (T23, run inside a rolled-back transaction), the ingest route's careers cases (4 refused with the exact I1 message, 2 bare-`/careers` accepted).
+- **Failing-first:** `postings.db.test.ts` was written before `postings.ts` and run red (module missing); then green on the first full run. I mutation-checked the gate (made the toggle check a no-op): the two toggle-off tests failed. The sweep's audit rollback test commits the due posting first, so the assertion that it is still `published` after a failed audit insert is about the sweep's transaction and not a vanished fixture. Each pure file's tests were written with it; the description validator's renderer-agreement tests render every accepted href through the real `<Prose>`.
+- **Real-request smoke:** `next dev -p 3580`, a throwaway congregation with a due posting, `GET /api/cron/maintenance` with the bearer: 200, `careersPostingsClosed: 1`, the posting `closed`, one audit row (`careers.posting.closed`, actor null, metadata `{organizationId, postingId, via: "closing_date"}`, user agent `vercel-cron/1.0`, ip null), an unauthenticated call 401. The server was stopped by PID and the port confirmed free.
+- **Held-out checks:** `scripts/careers/test-rls-71.sql` as `presby_app`: 84 pass, none fail, unchanged.
+
+### Gates
+
+- `npm run typecheck`: pass. `npm run lint`: pass (0 warnings). `npm run check`: all eight pass.
+- Plain `npm test` (no database variables, as CI): 606 files passed, 85 skipped; 9364 tests passed, 2597 skipped (Batch 1: 584/81 and 8841/2489).
+- Serial DB run of every file this batch touches, plus the bundle suites: 42 files, 824 tests, all pass (`src/lib/careers`, `src/lib/db/domain/careers.db.test.ts`, the ingest route, the cron route, `org-features.test.ts`, `src/lib/onboarding`, `src/lib/invitations`). `public-calendar.db.test.ts` 14/14 after applying 0067.
+- `npm run build` was not run (nothing in this batch adds a route or changes a page; the dev server compiled the cron route and its imports).
+- No e2e is assigned to Batch 2 by the design (T25-T27 are Batch 3's).
+
+### Implementer Notes
+
+Strings added or changed (all from Copy):
+- `src/lib/careers/description.ts:135,142,158,159,172` (S6 description errors; `:180` is the flagged `empty` message, deviation 4).
+- `src/lib/careers/input.ts:102,129,142,146,152` (S6 field errors); `src/lib/careers/messages.ts` (S8 errors, whole file); `src/lib/careers/postings.ts:120-121` (the slug-fixed sentence from S6 and the passed-date sentence from S6).
+- `src/lib/careers/contract.ts` `formatPay` and `employmentTypeLabel` (P9, P4).
+- `src/lib/org-features.ts:160,162` (F1, F2); `src/lib/org-portal/tiles.ts:315-316` (T1); `src/app/api/sites/ingest/route.ts:120` (I1).
+
+**The contract Batch 3 consumes** (exact signatures are in the files; this is the map):
+
+*Staff lib, `@/lib/careers/postings`* (all `import "server-only"`; call from `(org)` pages, never from `(admin)`):
+`listPostings(viewerPersonId, organizationId)`, `getPosting(viewerPersonId, organizationId, postingId)`, and the four writers called through the actions. Results are `CareersResult<T>`: `ok | feature_off{canManageFeatures} | forbidden | not_found | stale | slug_taken | invalid_input{field,message} | incomplete{missing[]} | closing_date_passed{reopening} | publish_limit | invalid_transition`. `PostingRow` is as designed; the page derives: "Never published" = `status === "closed" && firstPublishedAt === null`; "Closing date passed" = `status === "published" && !visibleToPublic`; stale hint = `isStale(postedOn, closingDate, orgToday)` (`dates.ts`, status published); the slug field is read-only when `firstPublishedAt !== null`; the Reopen note uses `closingDatePassed(closingDate, orgToday)`. Rows come back grouped published (display order), then drafts (newest edit first), then closed (most recently closed first). `getPosting` and `listPostings` return `orgToday`.
+
+*Server actions, `admin/careers/actions.ts`* (all `ActionResult`, organization from the slug and the session, never the input):
+`createPostingAction(slug, PostingInput) -> {id}`, `updatePostingAction(slug, PostingUpdateInput) -> {version}`, `setPostingStatusAction(slug, {id, version, to}) -> {status, version}`, `movePostingAction(slug, {id, direction}) -> {moved}`. `PostingInput`/`PostingUpdateInput` are in `@/lib/careers/input` (`descriptionMd` is the raw text; `slug` optional; `payMinCents`/`payMaxCents` in cents; `closingDate` `YYYY-MM-DD` or null; `employmentType` `full_time|part_time|intern`; `payUnit` `hour|year`). The toast must report the **returned** `status`. **The form recognises a stale save by `result.error === STALE_MESSAGE`** (import from `@/lib/careers/messages`, which also exports the other S8 strings): show the Reload button and keep the typed text. Every `error` string is Copy.
+
+*Pure helpers the editor and form use:* `validateDescription(raw, {requireNonEmpty}) -> {ok, value} | {ok:false, errors[{line, snippet, code, message}]}` (run it live; it is the same function the server runs), `applyToolbar({value,start,end}, action) -> {value,start,end}`, `htmlToMarkdown(html, parse?) -> {markdown, droppedLinks} | null` (null: let the browser paste plain text; it needs a `DOMParser`), `parseDollarsToCents(text) -> number | null`, `slugFromTitle`, `isValidSlug`, `charCount` (code points; use for "{n} of 20,000 characters"), `formatPay`, `employmentTypeLabel`, `isStale`, `closingDatePassed`, and the constants in `contract.ts` (`DESCRIPTION_MAX`, `SUMMARY_MAX`, `TITLE_MAX`, `LOCATION_MAX`, `SLUG_MAX`, `PAY_CENTS_MAX`, `CAREERS_SLOT`). `posting-schema.ts` (the string-valued form schema) and its golden test are Batch 3's.
+
+*Public reads, `@/lib/careers/public`:* `readPublicCareers(slug) -> PublicCareers` and `readPublicPosting(slug, posting) -> PublicPostingRead`; pass the **database-returned** slug (`resolveSiteOrganization(...).slug`), never the request key. States: `unavailable` (404 on the pages, the notice in the slot), `failed` (the noindex notice on the pages, the same notice in the slot), `available | open | closed | not_found`. A mapped posting has no id; hrefs come from `SiteUrls.careers()` / `careersPosting(slug)`.
+
+*Placement, `@/lib/careers/placement` and `placement-read`:* `readPlacement(orgSlug) -> PlacementInput` (`known{pages}` or `unknown`), `describePlacement(input) -> slot_and_list | slot_only | list_only | own_page_no_slot | unknown` (the page writes the S5 sentences with the `/careers` address from `SiteUrls`), `careersBackTarget(input, urls)` for the posting page's "All job openings" link.
+
+*Wiring Batch 3 still owes* (design step 8): the `careers` entry in `render-site-page.tsx`'s `liveSlots` closing over the database slug and `urls` only, the public routes, `PublicCareersSlot`, the staff pages, `disabled`-until-hydrated controls, and the e2e/hydration specs. The seed fixture note: Batch 1's own sweep tests already closed the seed's past-due posting (`office-assistant` is `closed` on this branch), so any spec that needs a derived-closed row should create its own and set the date by owner SQL (publish with no date or today, then update `closing_date`), as `postings.db.test.ts` does.
+
+**Open for the orchestrator.** No integration patch is needed for this batch (no Rule 16 file was edited; `scripts/careers/*.integration.patch` are Batch 1's). Apply 0067 to development as the calendar pipeline's own integration step requires. The cron's careers audit rows carry the cron request's user agent (`vercel-cron/1.0`) because `insertAuditRow` reads request headers; no ip, actor null.
+
+**Next:** ux-developer (Batch 3).
 
 ---
 

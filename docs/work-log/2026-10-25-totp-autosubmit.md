@@ -19,7 +19,7 @@
 | 3 — Technical design | tech-lead | Complete; implementer named (full-stack-developer); F282 registered | Design complete | 2026-10-25 |
 | 4 — Implementation | full-stack-developer | Complete; all Phase 4 gates green (dev lane :3560, prod-build lane :3561) | Ready for QA | 2026-10-25 |
 | 5 — Verification | qa | Complete; failing-first reproduced; auth e2e 58/58, full 523/523, prod lane 13/13, 0 skipped; probes 9/9; 360px checked | PASS | 2026-10-25 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete; walked /totp at 360px as the MFA-enrolled user; O-4/O-5/O-9 tracked; DECISION-257 widened; release 0.44.1 | SHIP WITH NOTES | 2026-10-25 |
 
 ---
 
@@ -652,45 +652,167 @@ Failures: [...]
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Date:** 2026-10-25
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-otp`, `pipeline/totp-autosubmit` at `22d46b1`. It sits 9 commits ahead of merge-base `b903154`. `main` is now `21beebc`, version 0.44.0.
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> Typing, pasting or autofilling the sixth digit now checks the code with no button press. A wrong code clears the boxes and refocuses box 1, the Verify button stays as the fallback, and the 0.42.3 grant still opens only inside the unchanged action. The notes are one low-severity residual, one silent-failure gap on enrolment, one unverified-on-a-real-device item, and integration housekeeping, most of which must land before merge.
+
+## How I verified (evidence)
+
+I walked it myself. I did not rely on QA's output alone.
+
+**Setup.** I started my own dev server from the worktree on :3560 with `AUTH_URL` and the e2e fakes. I drove it with a throwaway Playwright script in the scratchpad, using Pixel 7 emulation at 360x740. The user was the MFA-enrolled seeded user, `admin-2fa-enrolled@presby.invalid`. I stopped the server by PID (82632 and its parent 82615), and :3560 is free. I edited no repository files and never ran `git stash`.
+
+| Step | Observed |
+|---|---|
+| Password sign-in with `callbackUrl=/admin` | Redirected to `/totp?callbackUrl=%2Fadmin`. Box 1 was focused after hydration. |
+| Typed `000000` with no button press | One POST, then `/totp?callbackUrl=%2Fadmin&error=invalid`. Alert: "That code didn't match. Try again, or use a recovery code." All six boxes empty, box 1 focused, 0 px horizontal overflow. Verify shown disabled (screenshot read). |
+| Typed 5 digits after the failure | 0 POSTs. Verify disabled. |
+| Reloaded, typed the real current code | Landed on `/admin` ("Good evening, E2E MFA Enrolled Admin."), 0 px overflow. |
+
+**Not walked by me.**
+- `/account/2fa` enrolment. Its only seeded user is the un-enrolled `mfa-admin`, and enrolling would change state the role-boundary specs depend on.
+- The over-long and overflow paste.
+- A real iOS or Android autofill.
+- A screen reader.
+
+For those I used QA's evidence:
+- QA's probes and 360px screenshots, run 1 and run 2.
+- `invitation-new-account`, which enrols by typing alone. It was red on the old source and green now.
+- E-8b, N-3b and F-5b.
+
+**The "person this path creates" walk.** The Phase 6 rule applies to features that change how an account connects to an organization, how a role is granted, or what a new account can reach. This feature does none of those. It changes only when an existing form posts. The newly invited person's enrolment path is the nearest case and it is covered by `invitation-new-account` as above. F166 (recovery codes vanishing after first enrolment) is pre-existing, is not worsened by auto-submit, and stays open in `docs/TODO.md:167`.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The operator's request is delivered exactly.** The sixth digit submits. It works through typing and through whole-code paste or autofill, which the e2e emulates with `fill()` and a clipboard paste.
+- **Failure is recoverable.**
+  - Boxes clear and box 1 is focused. That is the old behaviour, now independent of whether Next remounts on a redirect to the identical URL (F282, E-6).
+  - The alert copy is unchanged and still true.
+  - A second code auto-submits again.
+- **The 0.42.3 invariant holds.**
+  - The client calls only `requestSubmit()` on the unchanged `<form action={verifyTotpAction}>`.
+  - Both `actions.ts` files, `page.tsx`, `src/auth.ts` and `src/proxy.ts` are byte-identical to `origin/main`.
+  - S-1 scans for it.
+  - The four guard specs changed only by a deleted click.
+  - The rate limit (10/min) and the audit rows are the same action's, so there is nothing new to audit.
+- **Double-submit guards were probed adversarially.** QA ran a Verify click at 0, 16, 50 and 200 ms, a double Enter, and duplicate iOS-pattern input events. Each gave one POST.
+- **Hydration is honoured.** Nothing posts before hydration (both lanes, no pre-hydration `verify_failed` row). The prod-build hydration lane was 13/13 in run 1 and was not re-run in run 2 (see Intent-vs-Shipped Diff).
+- **The O-1 loop-back was a real catch.** A short paste that overflowed the remaining boxes was submitting with a digit silently dropped. It is fixed with failing-first tests. I agree with the implementer's C-4b deviation: a six-digit paste into a later box drops nothing, restarts at box 1, and is an exact whole code. The brief's literal formula would have blocked whole-code autofill landing in a later box, which is the case Decision 2 exists to cover.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Phase 1 Decision 1 (scope).** Phase 1 said both digit-mode `/totp` and `/account/2fa` enrolment, with no recovery-code auto-submit. Shipped as described. **Matches.**
+- **Decision 3 (over-long paste fills but waits).**
+  - Phase 1 said an over-long paste fills the boxes and waits.
+  - Shipped: this holds for any input that drops a digit, wider than the original wording. A 3-typed + 4-digit paste into box 4 waits, and a 6-digit paste into a later box submits.
+  - **Acceptable drift, and an improvement.** The documentation wording has to catch up (rulings below).
+- **Decision 6 (clear and refocus after a failure).** Phase 1 asked for that. Shipped, and I saw it. **Matches.**
+- **Decision 10 (screen readers).** Phase 1 asked for a visually hidden `role="status"` region ("Verifying your code."), no focus move, and the toggle disabled while pending. Shipped.
+  - The DOM assertions pass.
+  - Actual announcement is unverified (O-5).
+  - **Matches.**
+- **Flag, permission and audit.** Phase 1 said none. Shipped none. **Matches.**
+- **Gap 2 (about 20 e2e call sites).** All were updated at the helper level with one new helper, `waitForTotpVerified`.
+  - I compared the `enterTotpCode`, `verifiedContext` and `submitTotp` caller sets on this branch against `main` after its two merges: identical, and the new calendar fixture has no TOTP caller.
+  - **Matches.** There is no hidden unpatched Verify click on `main`.
+- **Gap 4 (doc and comment drift).**
+  - Phase 1 asked for the "no auto-submit" statements to be corrected.
+  - Shipped in `docs/ui-standards.md:407`, `docs/product/functionality-map.md:54`, `docs/testing.md:65`, and the component, form and e2e comments.
+  - `docs/decisions.md:336` (DECISION-193(a)) is still false by Rule 16 design and is for integration.
+  - **Matches, with the integration step still pending.**
+- **Gap 5 (audit noise from fast typos).** Carried in the release-note draft. **Matches.**
+- **Gap 6 (`completeEnrollment` has no rate limit).** Deferred by orchestrator ruling. The TODO line is not yet in `docs/TODO.md`. **Pending at integration.**
+- **Gap 7 (release notes, what's-new).** Not yet written. Ruled on below.
+- **Scope of the final re-test.** Run 2 did not re-run the full suite or the prod lane. That is acceptable. The diff since run 1 is one expression plus comments and tests, `spread()` is not on the keyboard-typing path the hydration spec uses, and the consumer set was 162/162.
+
+## Rulings requested
+
+**O-9: a 2-character non-paste change event into a filled, selected box drops a digit and still submits.** TODO, do not hold.
+- Reaching it needs a non-paste insertion of exactly two characters into a filled box of a complete code. That means a keyboard-suggestion chip or a drag-and-drop. Real paste events, and change events of three or more characters, are handled.
+- The cost is one of ten attempts a minute and one `verify_failed` row, the same as the already-accepted mistyped-last-digit residual. The Verify button is still there.
+- It is not a hold because the fix is not trivial: an ordinary overtype (box holds `6`, caret after, type `7`, browser reports `67`) is the same two-character shape. A fix must distinguish "the old digit plus one new one" from "two unrelated digits". It deserves its own failing-first test and is not a rush edit to a component that is in the sign-in path.
+- **It must be named in DECISION-257's accepted-residual list.** The Rule 14/Phase 6 housekeeping lesson from the 0.25.2 note applies. A decision that says "a paste that drops a digit waits" while the technical record knows of a two-character input that does not is the denial the schema-review rule warns about. Record it as `exact`'s one known hole.
+
+**O-4: a thrown `completeEnrollment` fails silently.** SHIP WITH NOTES, tracked follow-up.
+- The Phase 1 brief asked for human failure microcopy. Today a rejected call re-enables the boxes and releases the guard with no message, so a user whose server action threw sees nothing happen. The Confirm button works as the fallback, so it is recoverable.
+- It is strictly better than before (a stuck "Verifying…" and an unhandled rejection). Auto-submit makes it slightly more conspicuous because the user pressed nothing.
+- It is not a regression and not a ship-stopper. The fix needs a design-approved toast string, which Phase 3 did not provide and the implementer correctly did not invent.
+
+**O-5: not verified on a real device (iOS and Android one-time-code autofill, a screen reader, bfcache back-navigation).**
+- Accept it. Autofill is emulated by `fill()` and a clipboard paste, which are the same DOM events at the component boundary, and QA probed the iOS duplicate-event pattern.
+- It becomes a tracked manual check on a real phone after release, in the production test checklist, because the design says "Verified in a browser" and a phone is the surface this exists for.
+
+**O-10: duplicate "C-4" test names and missing suffixes.** Optional, not a ship condition. Fold it into the O-9 fix, which touches the same test file. It is test-name-only, so do it there instead of opening a commit for it.
+
+**DECISION-257 wording.** Widen it, and fix the version.
+- Replace "an over-long paste or autofill fills the boxes and waits for the button" with: `exact` is true only when no delivered digit is dropped. A paste or autofill that drops a digit fills the boxes and waits for the button. That covers an over-long run and a short run that overflows the remaining boxes. A six-digit run into a later box restarts at box 1, drops nothing, and submits.
+- Add O-9 as the single known exception, under accepted residuals.
+- The draft says `v0.42.6`. `main` is 0.44.0, so the release is **0.44.1** and the note goes in `docs/release-notes/v0.44.md`. The two stale mentions are in the draft (work-log line 371) and the Implementation Order step 7 proposal.
+
+**DECISION-193(a) pointer.** At `docs/decisions.md:336`, append "(amended by DECISION-257)" to the sentence "there is no auto-submit, and completing the code moves focus to Verify", and keep DECISION-192 (rule H3) untouched. It is still false until then. This is integration-only under Rule 16.
+
+**Stale lines.**
+- `docs/product/functionality-map.md:54` says "an over-long paste fills the boxes and waits". Widen it to "a paste that doesn't fit fills the boxes and waits". Optionally add "(v0.44.1)" to the "sixth digit submits" clause.
+- `docs/testing.md:65` says "Recovery mode and an over-long paste still need the button". Widen it the same way.
+- `docs/ui-standards.md:407` is already right ("a paste that drops a digit, such as an over-long one") and the O-3 typo is fixed.
+- The release-note draft line "If you paste something longer than six digits…" becomes: "If what you paste doesn't fit in the six boxes, the boxes fill and wait for you to press Verify." Keep the typo-cost line as written.
+
+**Rule 13 (what's-new).** Yes, publish a one-line entry. This is member-visible sign-in behaviour that changes a habit, and the typo cost is a real consequence.
+- Publish it when it is live, not at merge. Admin action at `/admin/whats-new`, which the operator does.
+- Suggested text: "Your two-factor code is now checked as soon as you type the sixth digit. The Verify button is still there if you need it." The attempt-cost line belongs in the release note, where it already is, not in this entry.
+- The what's-new surface is `/home`, so it reaches people who sign in as a member. A user who only ever signs in as an admin and never loads `/home` will not see it. That is acceptable for a one-liner.
+
+**Rule 14 (functionality map).** Covered above for line 54. The Index lines at 32 and 35 describe no TOTP entry detail, so they do not change. **Rule 15:** `docs/architecture.md` does not change. This is not a new subsystem, data flow or deployment shape.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- **Empty state:** not applicable. The surface is the code entry itself, with boxes empty on arrival and focused after hydration.
+- **Failure microcopy:** **pass on `/totp`**, with the alert copy unchanged and shared between authenticator and recovery failures, so no enumeration difference. **Enrolment: partial (O-4).** A wrong code gets the unchanged toast, but a thrown action has no message.
+- **Permission gate:** pass. Nothing changed. Both pages stay auth-only, neither is `FEATURES.*`-gated, and the session grant is opened only by `verifyTotpAction`. No flag was added (operator rule: no new platform flags pre-live).
+- **Audit event:** pass. The same action writes `totp.verify_succeeded`, `totp.verify_failed` and `totp.enrolled`. E-1, E-5 and E-6 count rows against the database clock. Expect more `verify_failed` rows from fast typos, which the release note says.
+- **Mobile (360px):** pass. I measured 0 px horizontal overflow at rest, after a failure and after landing. QA measured the pending state, the over-long paste and `/account/2fa` the same way. The disabled recovery toggle shows no visible dimming while pending (O-6). It is cosmetic, and `disabled` is asserted.
+- **Adversarial pass (redirect, state shortcuts, enumeration, self-targeting):**
+  - Redirect: the `callbackUrl` hidden field is re-sanitised server-side as before, and `totp-callback-bypass` (5 sites) is green.
+  - Double-submit: closed (QA's 9 probes).
+  - Mode switch while pending: closed (toggle disabled, F-11).
+  - Pre-hydration: closed.
+  - One residual stays: the mistyped-last-digit cost and O-9.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+TODO-ready lines for `docs/TODO.md` (Rule 10). The orchestrator adds them at integration, in the same commit as the work.
 
-## Red Flags (if NEEDS REWORK)
+- [ ] **`OneTimeCodeInput` O-9: a two-character non-paste change event into a filled, selected box drops a digit and is still `exact`.** A keyboard-suggestion chip or a drag-and-drop of two digits onto box 6 of a complete code gives `123457` with `exact: true` and auto-submits. This is the one remaining hole in "a paste that drops a digit waits". Fix in the overtype path (`one-time-code-input.tsx` around `:177`) without breaking the ordinary overtype, which reports the same two-character shape. Failing-first test; rename C-4/C-4b to C-5/C-5b with the `regression for O-1` suffix (O-10) in the same commit. One cost: an attempt. — `docs/work-log/2026-10-25-totp-autosubmit.md` QA run 2 O-9/O-10, Phase 6
+- [ ] **`/account/2fa` enrolment: a thrown `completeEnrollment` shows no message** (boxes re-enable, Confirm works). Add a design-approved toast string for "something went wrong, try again", and a unit test for the thrown path asserting the toast. Pre-existing; auto-submit makes it more visible. — `docs/work-log/2026-10-25-totp-autosubmit.md` Phase 4 deviation, QA O-4, Phase 6
+- [ ] **Manual real-phone check after 0.44.1 is live:** iOS one-time-code autofill on `/totp` and `/account/2fa`, an Android keyboard suggestion, a screen reader announcing "Verifying your code.", and back-navigation (bfcache) to `/totp` after sign-in (it must not auto-submit). Add it to the production test checklist and record the outcome. — `docs/work-log/2026-10-25-totp-autosubmit.md` QA O-5, Phase 6
+- [ ] **`completeEnrollment` has no rate limit** (the challenge has 10/min; enrolment has none). Pre-existing and not worsened (the pending secret is single-session). Add `checkRateLimit` to the action when the enrolment surface is next touched. — `docs/work-log/2026-10-25-totp-autosubmit.md` Phase 1 Gap 6
+- [ ] **Disabled recovery toggle looks enabled while pending** (cosmetic: `variant="link"` shows no disabled style). — QA O-6, Phase 4
 
-- [Specific. What has to change before this ships.]
+## Integration checklist (orchestrator, not follow-ups; before or at merge)
 
-## Operator request (2026-10-25, verbatim)
+1. `docs/decisions.md`: land DECISION-257 with the widened wording and the O-9 residual, and the DECISION-193(a) pointer at `:336`. Fix `v0.42.6` to `0.44.1`.
+2. `docs/functionality-map.md` line 54 and `docs/testing.md:65`: widen "over-long paste" to "a paste that drops a digit".
+3. `/release-notes`: 0.44.1 (Polish), in `docs/release-notes/v0.44.md`, with the widened paste line and the typo-cost line.
+4. Bump `package.json` to 0.44.1.
+5. `docs/TODO.md`: the five lines above, and mark the originating item done if it has a row.
+6. Merge `main` into the branch, since the shared-file pipeline has moved (0.43 to 0.44, the admin-shell and public-calendar merges). Then re-run typecheck, `npm run check`, the three unit files, and `totp-code-entry` plus `totp-full-login` on a dev port with the MFA-enrolled user.
+7. The feedback row (Rule 12): the work-log's Source block records no feedback row UUID. The request came from the operator directly, so there is nothing to mark `done`.
+8. Process note from QA's O-7: the stash entry `stash@{0}: On pipeline/signin-invites: a1-e33-lane` is gone. Check with the signin-invites pipeline that nothing was lost.
 
-> for the 2fa code you can go ahead and verify after typing the last digit versus having to press the button
+## Per-Phase Status row
 
-## Orchestrator rulings (2026-10-25)
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. I walked `/totp` myself on :3560 at 360px as the MFA-enrolled user: a typed wrong code (one POST, alert, boxes cleared, box 1 focused), 5 digits (no POST), the real code (lands on `/admin`), 0 px overflow, server stopped by PID. `/account/2fa` enrolment and the paste cases rest on QA's probes and `invitation-new-account`. Gaps 1-5 and 7 carried; Gap 6 and O-4, O-5, O-9 become tracked follow-ups; DECISION-257 wording and the 0.44.1 version ruled | SHIP WITH NOTES | 2026-10-25 |
 
-Open questions 1–4 proceed on the analyst's defaults (enrolment clears and refocuses; over-long paste fills but does not submit; optional one-line what's-new; one helper-level e2e change). Port 3560.
+**Handoff:** to the orchestrator, for the integration checklist above and the TODO lines. After that the entry is closed. Run `/pre-push` between commit and push, as Rule 5 requires. No further agent phase is open.
 
 ---
 

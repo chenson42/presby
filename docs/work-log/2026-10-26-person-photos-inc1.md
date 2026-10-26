@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | See parent (shared) | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | See parent (shared) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; designed against the F289 0072 **draft** (`presby-assets` worktree, unmerged); three Phase 2 rulings corrected (R3 invoker to definer, R2 Drizzle declaration, R5 dead join); F333–F337 raised; open rulings O1–O4 | Design complete | 2026-10-26 |
-| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied). Batch 2 (api-developer) next | Batch 1 done | 2026-10-26 |
+| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied); F338 ruled by the orchestrator (the barrel line and the dev-docs entry are committed on the branch). Batch 2 (api-developer) complete: sharp 0.35.5 installed, image pipeline, store, reader, consequences, copy, four server actions, `resolveMany`, directory swap to `photoThumbKey`, catalog toggle, audit keys and the off-warning; 644 unit files / 9718 tests, 63 DB-backed files / 1351 tests, RLS 78 = 82 and RLS 72 = 24, `npm run check` 8/8, build and typecheck and lint clean. Batch 3 (ux-developer) next | Batch 2 done | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -811,6 +811,97 @@ FORCE, the core's definer bit and the `search_path` pin change nothing for `pres
 - Apply locally: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0078_presby_person_photos.sql` (pipeline branch only). No seed change.
 
 Strings added or changed: none user-facing (SQL error messages and comments only).
+
+## Batch 2 — api-developer (2026-10-26)
+
+Branch `pipeline/person-photos`; `origin/main` merged at c1cc35a (0.46.2) before any edit; Neon `pipeline-person-photos` (`ep-sweet-scene`, 0078 applied); no `git stash`; every commit staged by explicit path.
+
+### Commits
+
+| Commit | What |
+|---|---|
+| `e2605a5` | `build(deps)`: `sharp` 0.35.5 as an explicit dependency |
+| `98060a6` | `chore(schema)`: the barrel line, the two dev-docs lines, `docs:erd` (F338 ruling); the integration patch loses those hunks |
+| `17ec613` | `feat(storage)`: `BlobStore.resolveMany` and its unit test (U5) |
+| `712b7a8` | `feat(directory)`: the `directory.ts` swap to `photoThumbKey`, the `person-avatar` move and `resolvePhotoSrcs`, the directory tests (D3) |
+| `ccae2cb` | `feat(photos)`: `src/lib/person-photos/*`, the four audit keys, the catalog entry, the off-warning |
+| `949c2ce` | `feat(photos)`: the four server actions and their test (U8) |
+
+### sharp (the install check, done by me)
+
+`npm install sharp@0.35.5 --save-exact` leaves **one** copy: `node_modules/sharp` at 0.35.5 in the lockfile, the version Next 16.4.2 already resolved as its optional image dependency. `package.json` carries `"sharp": "0.35.5"`, byte-identical to the treasury worktree's uncommitted line, so the two branches merge without a conflict. The install flipped four lockfile entries from `optional` to required (`sharp`, `@img/colour`, `detect-libc`, `semver`): the expected consequence of making it a direct dependency, and the only lockfile change beyond the one `dependencies` line. **Unverified:** that the linux binaries are traced into a Vercel function. No page or route imports `store.ts` yet (Batch 3 imports the actions), so `next build` cannot trace `sharp` today; the check belongs after Batch 3 on a preview deploy (deployment-engineer gate, edge case 26).
+
+### What was built
+
+- **`image.ts`** (the only `sharp` importer; `scan.test.ts` fails on any other). Order is the security property: size (`empty`, `too_large` over 1,000,000 bytes), our own magic-byte sniff (JPEG, PNG, WebP; a PDF, SVG, HEIC or text is `unsupported_type`), an APNG `acTL` chunk scan, then the header via `metadata()` (format must agree with the sniff, an animated WebP is `animated`, over 16 MP or any side over 6000 px is `too_many_pixels`), all before a pixel is decoded. Then auto-orient, sRGB with no profile retained, flatten on white, no metadata block (EXIF including GPS, XMP, IPTC, ICC), always re-encoded (a polyglot's trailing payload does not survive). Master: JPEG, long edge at most 1200, never enlarged, no forced crop, at most 400,000 bytes (quality 85 down to 46, then edge 1000, 800, 640). Thumbnail: 160 x 160 WebP, `position: "top"`. Pure bytes in, bytes out.
+- **`store.ts`** (the only writer of both tables and the only `getBlobStore().store(` caller; both calls pass the literal `audience: "private"`). Check order on every mutation: toggle, `people.manage`, membership of this org (and the photo, for designate and remove), adult (add and designate only), cap of ten (add only). `addPhoto` authorizes and checks the target in a short transaction **before** `processPhoto`; stores the two private blobs; then one final transaction under `pg_advisory_xact_lock(hashtextextended('person_photos:'||org||':'||person, 0))` repeats every check, inserts, auto-designates the directory slot only when empty (never the website), and writes the audit rows in the same transaction. `designatePhoto` ends the old row then inserts; `removePhoto` ends every active designation (one `undesignated via remove` each), then sets `removed_at`/`removed_by` together, then writes `removed`.
+- **`reader.ts`** (with `store.ts` the only importer of the two tables): `readPhotoSet(ctx, personId, { viewPhotoId })`, `personPhotosEnabled(ctx)`, `countPhotoDesignations(tx)`. Visibility is asked of SQL only: `presby_person_directory_photo()` and the `presby_person_public_photo_status()` wrapper (named nowhere else in `src/`). One `resolveMany` call for every thumbnail plus the one `?view=` master.
+- **`consequences.ts`**, **`copy.ts`**, **`status-lines.ts`**, **`limits.ts`**, **`types.ts`**: pure.
+- **`directory.ts`**: the row query left-joins `presby_person_directory_photo(m.organization_id, m.person_id)` laterally and selects `dph.thumb_key::text as photo_thumb_key`; its own `hide_photo` CASE is gone (the function owns it, scoped to the viewing org, as the directory always scoped it). The lateral join is a new optional argument of `directoryFromWhereSql`, so the count and find-person queries do not carry it. `DirectoryEntry.photoKey` is now `photoThumbKey`.
+- **`person-avatar`** moved to `src/components/org-portal/` (a third caller). `resolvePhotoSrcs(org, keys)`: one `resolveMany` per 100 distinct keys, output aligned with `keys`, a read failure logs `[person-photos] thumbnail read failed; showing initials` and returns all nulls.
+- **Catalog toggle** `org_portal.person_photos` (people, flag null, provisioned off, self-service, unscoped), its Features-page off-warning (`org-feature-warnings.ts`: a registry entry calling `countPhotoDesignations`; zero designations, no warning; count unreadable, the generic fallback), four audit keys.
+- **Comments made false by 0078**, rewritten: `sites.ts` (roster entry), `initials.ts`, `blob-store.ts` header, `directory.ts` header and field, `person-avatar` header. `people.ts` and `assets.ts` were Batch 1's.
+
+### Server-action signatures (`src/app/(org)/o/[slug]/admin/community/[id]/edit/photos/actions.ts`)
+
+```ts
+addPersonPhotoAction(slug: string, personId: string, formData: FormData):
+  Promise<ActionResult<{ photoId: string; usedForDirectory: boolean }>>     // field "photo"
+designatePersonPhotoAction(slug: string, personId: string,
+  input: { photoId: string; purpose: "directory" | "website"; attested: boolean }): Promise<ActionResult>
+undesignatePersonPhotoAction(slug: string, personId: string, purpose: "directory" | "website"): Promise<ActionResult>
+removePersonPhotoAction(slug: string, personId: string, photoId: string): Promise<ActionResult>
+```
+
+Gate on all four: `auth()` then `resolveOrgContext()` (signed out: "You must be signed in to do that."; no org access: "You don't have access to that organization."), then everything in `store.ts` (toggle, `people.manage`, ...). Failure is `{ ok: false, error }` with one fixed string per `PhotoRefusal` kind; success revalidates `/o/<slug>/admin/community/<id>/edit/photos`, `.../edit` and `/o/<slug>/directory`. No redirect anywhere, no `db.` call in the file (both pinned by `actions.test.ts` and `scan.test.ts`).
+
+### Contract Batch 3 (ux-developer) consumes
+
+- **Page data:** `readPhotoSet({ organizationId, actorPersonId }, personId, { viewPhotoId })` returns `{ kind: "ok", set } | { kind: "feature_off" } | { kind: "forbidden" } | { kind: "not_found" }`. Map `forbidden` to `MembersForbidden heading="Photos"`, `not_found` to `notFound()`, a thrown error to `MembersLoadError heading="Photos"`, `feature_off` to `PhotosOff`. `personPhotosEnabled(ctx)` is the toggle on its own (for the edit-page link, and for the page's own off state before `readPhotoSet` when it wants it). Pass `searchParams.view` straight through as `viewPhotoId` (junk, another person's id or a removed photo's id is ignored by the reader).
+- **`PhotoSetView`** (`types.ts`): `personId`, `displayName`, `firstName`, `organizationName`, `photos[]` (`id`, `thumbSrc` data URI or null, `width`, `height`, `createdAt`, `isDirectory`, `isWebsite`, `directoryAttested`), `count`, `isMinor` (disable the add control and show the under-18 notice), `directory`, `website`, `listings`, **`lines`** (`directory`, `website`, `listing`: the three "Where photos show" sentences, already chosen from the SQL answers; `directory` and `website` are `null` only when the toggle is off, which the page never reaches), **`state`** (the `PhotoStateSnapshot` the dialogs need), `viewed` (`{ photoId, src }` master as a data URI or null).
+- **Dialog sentences:** `consequencesFor(set.state, intent)` from `consequences.ts` (pure, importable by a client component; `copy.ts` imports only types) returns the ordered consequence sentences for `{ kind: "designate_directory", photoId, attested }`, `"designate_website"`, `"undesignate_directory"`, `"undesignate_website"`, `"remove"`. The checkbox in the directory dialog should recompute with its current `attested` value on each tick. Titles, confirm and cancel labels, the two checkbox labels, headings, chips, counter, the under-18 notice, the empty state, the upload helper and progress strings are Batch 3's (Copy C2, C3, C4, C5, C7, C8); `copy.ts` already holds C1, C6, the three status-line groups, and the consequence sentences.
+- **Client constants:** `limits.ts` (`CLIENT_TARGET_BYTES` 900,000, `CLIENT_MAX_EDGE` 1600, `MASTER_MAX_EDGE`, `UPLOAD_MAX_BYTES`, `PHOTO_CAP_PER_PERSON`). A client-side rejection (the framework's 413, a dropped connection) maps to `UPLOAD_REJECTED_COPY` in `copy.ts`.
+- **Directory components** already take `photoThumbKey`; `DeaconCard`, `PersonCard`, the grid and both detail pages import `@/components/org-portal/person-avatar`.
+- **Catalog key** `org_portal.person_photos`; its name, description and the off-warning copy are already in `org-features.ts` and `copy.ts`.
+- **Test support:** `src/lib/testing/person-photo-fixture.ts` (Batch 1; owner path, DB tests). The e2e fixture is a new file and must remove designations, photos and their blobs, by id, before any shared teardown (F337).
+
+### Deviations from the design (each with its reason)
+
+1. **`sharp` is pinned exact (`0.35.5`), not `^0.35.5`.** The design said `sharp@0.35.5`; treasury added that exact spec, and an exact pin cannot split the two lockfiles.
+2. **`status-lines.ts` is an added pure file.** The design names `reader-derive.test.ts` (U11) but no file for the derivation; putting it in `reader.ts` would have made the test need a database.
+3. **A refusal carries an optional `first`** (`Refused.first`, set only for `minor`, `cap_reached` and `duplicate`). Copy C6 puts `{first}` in those three strings and the action must not make a second read to fetch the name; they all arise after the membership is found, so it is always there. If it were missing the action falls back to the `save_failed` string, never a blank name.
+4. **`{staff, officer or committee member}` in the listing line** is rendered as `staff`, `officer`, `committee member`, in that fixed order, joined with commas and "and" (`staff and committee member`). The design gives a placeholder, not a rule; **flag for the Phase 5 copy-truthfulness check.**
+5. **An invalid `purpose` posted to an action returns the `save_failed` string**, and a missing or non-file `photo` field returns the `empty` string. Both are forged-request paths the design does not word; both strings are the design's.
+6. **Re-designating exactly what is already active** (same photo, same attestation) succeeds and writes nothing and no audit row. The design is silent; the same-photo-changed-attestation path is end-then-insert as designed.
+7. **`store()` race handled, found by D1.** Two simultaneous adds of the same bytes both missed `blob-store.ts`'s check-then-insert dedup and one hit `23505` on `blob_assets`'s content-hash unique, which surfaced as `save_failed` (a double-clicked upload). `store.ts` retries each `store()` once on `23505`; the second attempt finds the winner's row. `blob-store.ts` itself is unchanged, so the logo and ticket paths have the same latent race for a simultaneous double submit; **a follow-up for the orchestrator** (it is the adapter's, not this feature's).
+8. **Audit rows written in one transaction share `created_at`** (the column default is `now()`), so their relative order in `audit_events` is not observable. The design's "one `undesignated` row per ended designation, then `removed`" is therefore kept as a *set* (tests are order-insensitive), and `removed.endedPurposes` still carries the same facts. Not worth a change to `audit-tx.ts` (a shared file); noted for the Phase 5 audit read.
+9. **`resolvePhotoSrcs` chunks at 100** (`RESOLVE_CHUNK`, a local literal pinned to `RESOLVE_MANY_MAX` by `blob-store-many.test.ts`) instead of making one call: an unpaged read of more than 100 photos must not silently show no photo at all (`resolveMany` throws over 100). Normal pages are one call.
+10. **`readPhotoSet` also returns `feature_off`**, so the page does not have to check the toggle in a separate transaction first.
+11. **Not done, by design:** `docs/deployment.md` runbook and the Rule 16 and 14 edits (Batch 4); no UI, no e2e, no `e2e/support/*` change (Batch 3).
+
+### Failing-first evidence
+
+- `image.test.ts` was written before `image.ts` (module not found), then mutated: removing the flatten, the orientation, the header caps, the top bias, the metadata strip, the animated-WebP check and the APNG check each fails a named test. **Not catchable:** the sniff-versus-sharp format agreement check is defence in depth; libvips chooses its loader from the same magic bytes, so the two agree by construction (the test accepts `unsupported_type` or `unreadable` for a lying file).
+- `store.db.test.ts`: dropping the final-transaction repeat of the gate fails the toggle-revoked and permission-revoked tests; dropping the adult check from designate fails the corrected-DOB test; dropping the `removed` audit row fails the remove test. The concurrency test first failed for real (deviation 7).
+- `scan.test.ts`: a temp file importing `sharp`, naming the table, writing it, and naming the wrapper each fail their test; the temp files were removed.
+- The `.next` cache was stale and the first `next build` failed resolving a Google font module; `rm -rf .next` and a rebuild passed. A cache problem, not code.
+
+### Gates
+
+- `typecheck` 0 errors; `lint` clean; `npm run build` passes (after the cache clear above); `npm run check` 8/8 passed (re-run after commit, since `check:secrets` scans tracked files); `check:schema-parity` 87 tables, 9 differences, 9 allowlisted, 0 failing, with the barrel committed.
+- **Unit suite (no database):** 644 files and 9,718 tests passed, 91 files and 2,759 tests skipped (DB-backed). This is **without** the integration patch.
+- **DB-backed, serial:** 63 files, 1,351 tests passed: `store.db` 26, `public-photo.db` 23, `directory.test` 105 (8 of them new), the Batch 1 files (`person-photos.db`, `public-roster-photo.db`, `public-asset.db`, `route.db`, `blob-audience.db`) and the existing blob-store, org-features, sites, staff, officers, groups, people, children, community and contact-methods suites. New unit files: `image` 22, `consequences` 32, `reader-derive` 19, `copy` plus `person-photos-toggle` 35, `scan` 16, `actions` 46, `blob-store-many` 10, `org-feature-warnings.photos` 7.
+- `scripts/person-photos/test-rls-78.sql` 82 passes and `scripts/assets/test-rls-72.sql` 24 passes, both as `presby_app`.
+- `git apply --check docs/work-log/person-photos-inc1.integration.patch` is clean (journal and `test-rls.sql` hunks only).
+
+### Findings and observations
+
+- No new F-number allocated (F339 stays unused). Deviations 7 and 8 above are the two items for the orchestrator.
+- The HEIC, 48 MP and 413 behaviour of the real client are Batch 3's and Phase 5's manual device check (unverified in CI).
+
+### Handoff
+
+Next: **ux-developer, Batch 3** (the photos page and its components, the edit-page link, the three listing dialogs, `copy.ts` UI sections, component tests, `e2e/support/person-photos-fixture.ts`, `e2e/person-photos.spec.ts`, `e2e/hydration/person-photos-upload.spec.ts`; port 3620). The server side needs no further change unless Batch 3 finds a gap.
 
 ---
 

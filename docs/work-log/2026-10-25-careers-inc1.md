@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (parent log) | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log) | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete for Increment 1 | Design complete; implementers named | 2026-10-25 |
-| 4 — Implementation | database-admin, then api-developer, then ux-developer | Pending | — | — |
+| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete, `dcbb94a`; Batches 2 and 3 pending | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -827,7 +827,117 @@ Any row is a live bundle page the new route would shadow.
 
 # Phase 4 — Implementation
 
-*Pending.* Each implementer's section follows the `docs/work-log/_template.md` Phase 4 format (files, schema changes, audit events, deviations from this design, gates with counts, strings added or changed with file:line). Judgment output is recorded verbatim.
+Each implementer's section follows the `docs/work-log/_template.md` Phase 4 format (files, schema changes, audit events, deviations from this design, gates with counts, strings added or changed with file:line). Judgment output is recorded verbatim.
+
+## Phase 4 — Batch 1 (database-admin)
+
+**Date:** 2026-10-25. **Commits:** `aa4d4da` (work-logs, after `git merge main`: a fast-forward to `2a25584`, no conflicts), `dcbb94a` (this batch). **Neon branch:** `pipeline-careers` (`ep-crimson-tooth-axmvfam4`); development and production untouched.
+
+**Feasibility re-run after the merge:** holds. Main adds no migration past 0064 and does not touch `presby_founding_administrator_permission_keys()`. Its live body on the branch was 0059's. `organization_settings.time_zone` is `not null default 'America/New_York'`. `organizations.status` has no CHECK. `org_portal.feature_categories` is off on the branch. No founding_administrator role exists on development, so the backfill matches 0 rows there. The template count is still 6 before 0071, at `scripts/test-rls.sql:7911-7912`. The neondb_owner role has BYPASSRLS, which the sweep definer relies on.
+
+### Files Created
+
+- `drizzle/0071_presby_careers.sql`: the migration (sections 1-8 as designed).
+- `src/lib/db/domain/careers.ts`: the Drizzle mirror (`jobPostings`). It has no `$onUpdate` on `updatedAt`, because presby_app holds no UPDATE on it.
+- `src/lib/db/domain/careers.db.test.ts`: owner-path tests (20).
+- `scripts/careers/test-rls-71.sql`: the presby_app suite (84 assertions, sections a-f = T1-T5).
+- `scripts/careers/seed-dev-careers.sql`: the owner fixture.
+- `scripts/careers/test-rls.sql.integration.patch`: the `\ir` line and the template count change from 6 to 7.
+- `scripts/careers/seed-dev.sql.integration.patch`: the `\ir`. Not optional: test-rls-71 needs the fixture's two live sites.
+- `scripts/careers/_journal.json.integration.patch`: `{ idx: 71, tag: "0071_presby_careers" }`.
+- `scripts/careers/domain-index.ts.integration.patch`: `export * from "./careers";`.
+
+### Files Modified
+
+- `src/lib/onboarding/founding-administrator.ts`: `careers.manage` and `careers.applicants` after `domains.manage` (F292 comment).
+- `src/lib/onboarding/founding-administrator.test.ts`: the base list grows from 9 to 11 keys, and the presbytery list to 12. The "never carries" title is corrected, because the bundle now carries one tier-3 key. New careers describe block (each key once, the order after `domains.manage`, no office binding).
+- `src/lib/onboarding/designation-parity.golden.json`: regenerated with `WRITE_DESIGNATION_GOLDEN=1` under operator ruling Q4 and DECISION-265. Before regeneration, the old golden failed all 8 founding scenarios as expected. The diff is +16 lines, only `careers.applicants` and `careers.manage` in the 8 `founding_administrator` permission lists. Treasurer entries are unchanged.
+- `src/app/(admin)/admin/organizations/[id]/founding-administrator-section.tsx` and `.test.tsx`: the Copy D1 labels, a check for the sentence, and a drift guard against raw keys. Proven failing-first: without the labels, the test "names the actual permission list" fails.
+- `docs/work-log/2026-10-25-careers.md:281`: a same-line `<!-- leak-ok -->` on the analyst's `a@b.co` example (a bypass payload, not an address). `check:secrets` flagged it, and the visible text is unchanged.
+
+### Schema Changes
+
+- New: `job_postings` (22 columns, 15 CHECKs, `job_postings_id_org_key`, `job_postings_org_slug_key`, two indexes, three guards, FORCE RLS + `tenant_isolation`). New functions: `presby_careers_org_today(uuid)`, `presby_public_careers(text, text)`, `presby_careers_sweep(integer)`. Re-created: `presby_founding_administrator_permission_keys(text)`. Catalog rows: `careers.manage`, `careers.applicants`. Template: `hiring_committee` with both keys.
+- Applied via: **hand-written** migration, `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0071_presby_careers.sql` (owner, direct endpoint). The whole file was applied twice: both runs exited 0, with identical counts (2 catalog rows, 1 template, 2 template bindings, 3 triggers, constraints unchanged). Each failing-first restore below re-applied the whole file once more (about 20 runs, all exit 0). Re-applying also corrects a hand-added grant, which proves the revoke-then-grant against drift. The journal entry is staged as a patch, as is house practice since `db:migrate` stopped tracking past idx 9.
+- Catalog re-read on the branch (not from the DDL text). `proacl`: the sweep, the guards and the bundle function are `{neondb_owner=X}` only. `presby_public_careers` and `presby_careers_org_today` are owner + presby_app. All seven functions have `proconfig = {search_path=public, pg_temp}`. `prosecdef` is true for the four definers and false for the three guards. `relforcerowsecurity = t`. The one policy has both clauses. Triggers are enabled `O`. presby_app's column privileges are exactly the design's 13 INSERT and 13 UPDATE columns, plus table-level SELECT. presby_platform and PUBLIC have nothing.
+- Local apply for the next implementer: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0071_presby_careers.sql`, then `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/careers/seed-dev-careers.sql` (both already applied on `pipeline-careers`).
+
+### Audit Events
+
+- None in this batch (a migration is provisioning). `CAREERS_POSTING_PUBLISHED/CLOSED/REOPENED` and the sweep's rows are Batch 2's.
+
+### Deviations from the design (each restated, and the restatement checked against the intent)
+
+1. **`job_postings_complete_when_live` is `status <> 'published' or (summary, location, description non-blank)`, not `status = 'draft' or …`.** The design's form refused the draft → closed "discard" edge for an incomplete draft, which is exactly the draft somebody wants to throw away. The lib would have got an unmapped 23514 on discard. In English, the constraint is: "a posting the public can read in full is complete." Only a published row exposes those fields, because a closed row projects slug and title only. Reopening a blanked closed posting is still refused, by the CHECK and by the lib's `incomplete` check first. Pinned by 71d "an incomplete draft can be discarded".
+2. **`created_by` and `updated_by` reference `users(id)` with NO ACTION, not `ON DELETE SET NULL`.** A set-null cascade is an UPDATE, which the guard refuses for the immutable `created_by`, so a user delete would have failed on that path anyway. There is no orphan-recovery surface (database-admin `onDelete` rule). Every comparable provenance column (`events.created_by`, `giving_gifts.recorded_by`, `organization_domains.created_by_user_id`) is NO ACTION.
+3. **The fixture organizations are Fernwood and Marrowbone, not Bramblewood and Fernwood.** A full integrated run showed that a Bramblewood site row breaks `giving/test-rls-46.sql` 46l (Bramblewood's giving config must be byte-identical `absent`) and `domains/test-rls-47.sql` 47m (Bramblewood reads NULL site status). Neither assertion mentions careers. Fernwood is now the main fixture and Marrowbone the cross-org one. No suite asserts that either has no site.
+4. **The owner-path halves of T3, T4 and T5 live in `src/lib/db/domain/careers.db.test.ts`, not `test-rls-71.sql`.** presby_app cannot act as the owner, so the domains (47) precedent applies. The DB test covers the guards on the owner path, the teardown cascade, two concurrent publishes for the 100th place, the 100-row list limit (guards disabled inside a rolled-back transaction, and re-asserted enabled after), an inactive organization, the sweep's behaviour, and the backfill re-run from the migration's own text against a real founding_administrator role. That last item is needed because the 71b backfill check is vacuous on development, which has 0 roles.
+5. **`presby_careers_sweep(null)` means 200 (`coalesce`), not 1.** The design's `least(greatest(p_limit, 1), 1000)` maps null to 1. A null limit from a caller bug should behave like the default. 0 and negatives clamp to 1, and the 1000 ceiling is unchanged.
+6. **presby_app cannot INSERT `id`** (it is not in the grant, as designed), so the suite captures ids into transaction-local GUCs rather than using fixed ids. Note for Batch 2: `createPosting` must use `returning id`.
+7. **The inactive-organization case of T4's six `unavailable` causes is in the DB test.** presby_app cannot change `organizations.status`. test-rls-71 captures the other causes, plus a null slug and a toggle-off posting read, all byte-identical (7 rows).
+8. T6 (`src/lib/careers/public.db.test.ts`, the differential toggle test) is **Batch 2's**. It compares the definer against `orgFeatureEnabledInTx` and the catalog entry, which Batch 2 adds.
+
+### Tests and failing-first proofs
+
+- `scripts/careers/test-rls-71.sql` as presby_app: **84/84**, exit 0. Failing-first, each mutation applied as the owner, the suite re-run, and the first failure cited:
+  - FORCE removed: 71a FORCE.
+  - Policy dropped: 71a `tenant_isolation`.
+  - Update guard or insert guard disabled: 71a "three guards ENABLED" (3 → 2).
+  - Update guard body made permissive: 71d "slug changes … bumps version".
+  - Insert guard body made permissive: 71d "a new posting is a draft, version 1…".
+  - DELETE granted: 71c "exactly one TABLE-level privilege".
+  - UPDATE (version) granted: 71c "UPDATEs exactly the 13 editable columns".
+  - Sweep EXECUTE to presby_app: 71f "executable by its OWNER ALONE".
+  - Public definer EXECUTE to PUBLIC: 71e ACL.
+  - Hiring-committee binding removed: 71b "exactly two keys".
+  - Bundle function reverted to 0059: 71b "carries careers.manage, careers.applicants after domains.manage".
+  - Closed posting leaks its description: 71e "CLOSED … slug and title only".
+  - Category axis ignored: 71e "byte-identical for every cause" (1 → 2).
+  - Posting read ignores the closing date: 71e "CLOSED to the public at read time".
+
+  Each was restored by a whole-file re-apply, and the suite was green again.
+- `src/lib/db/domain/careers.db.test.ts`: **20/20**. Failing-first:
+  - Advisory lock removed: the race test fails, because both publishes succeed.
+  - Delete guard made permissive: "DELETE is refused for the owner" fails.
+  - Sweep using `current_date` instead of the organization's zone: the zone test fails.
+- Integrated `scripts/test-rls.sql` (the patches applied, run as presby_app from a scratch copy without stop-on-error): 1324 passes, 84 of them section 71, including the template count of 7. Three failures predate careers and are **pre-existing development-lineage drift**:
+  - line 217 "presbytery: sees only its own members" (3 vs 2): the untracked membership that the file's own comment documents.
+  - line 516 "2fa policy: definer function sees the requirement": no organization on the branch has `require_two_factor = true`, though the seed sets it on Alder Creek.
+  - line 7927 "exactly ONE org-owned role holds statistics.publish": the 2026-10-14 `demo_everything` roles.
+
+  With `ON_ERROR_STOP` on, the run aborts at line 217 before reaching section 71, so the orchestrator's post-merge run on development will need the same treatment, or a decision on that drift.
+- Bundle suites (serial, `.env.local`): `invitations.db.test.ts` (the SQL array equals the TypeScript array, in order, for every organization_type), `designation-parity.db.test.ts` (12/12 on the regenerated golden), `founding-administrator.test.ts`, `accept.db.test.ts` and `issue.db.test.ts`: **219/219**.
+
+### Gates
+
+- `npm run typecheck`: pass.
+- `npm run lint`: pass.
+- `npm run check`: all eight pass. `check:secrets` passed after the annotation above.
+- Plain `npm test`: 584 files passed, 81 skipped; 8841 tests passed, 2489 skipped.
+- `npm run check:schema-parity` (with the domain export added locally, then reverted): 86 tables, 0 failing. It reports 85 tables without the export, so `job_postings` is compared.
+- `npm run docs:erd`: no change. Post-L domain modules are unmapped in `dev-docs.ts` by existing convention.
+- Production pre-deploy reserved-path query (Integration items): run read-only on the branch. Syntax is valid, with a positive control (it reads 4 + 14 bundle pages) and 0 rows.
+
+### Implementer Notes
+
+Strings added or changed:
+- `drizzle/0071_presby_careers.sql:82` and `:84` (Copy R1).
+- `:147` (Copy R2, "Hiring Committee").
+- `src/app/(admin)/admin/organizations/[id]/founding-administrator-section.tsx:44-45` (Copy D1).
+
+**For Batch 2 (api-developer).** The signatures are as in the API Contract, with these facts:
+- presby_app may not name `id`, `version`, `status` or `sort_order` in an INSERT, or `version`, the stamps, `created_*` or `updated_at` in an UPDATE. Drizzle `.insert().values()` must leave them out, and no `$onUpdate` may be added.
+- Trigger refusals are 23514, with the message prefixes `job_postings: a posting is created as a draft`, `job_postings: % -> % is not a legal status change`, `job_postings: the slug is fixed once a posting has been published`, `job_postings: cap - at most 100 published postings per organization` and `job_postings: the closing date % has passed`. The CHECK `job_postings_complete_when_live` is also 23514. A slug collision is 23505 on `job_postings_org_slug_key`. DELETE is 42501.
+- `MAX_PUBLISHED_PER_ORG` must equal the `c_published_cap` literal in 5b. `PUBLIC_POSTINGS_CAP` must equal `c_cap` in 7b.
+- The sweep returns `(kind, organization_id, posting_id, application_id)`, ordered by organization then posting.
+- The seed gives Fernwood (`/site/fernwood`) one posting in every state and Marrowbone one same-slug open posting, for the browser walk.
+
+**For the orchestrator (integration).**
+- Apply the four `scripts/careers/*.integration.patch` files (`git apply`, all check clean against `dcbb94a`).
+- Re-read the live `presby_founding_administrator_permission_keys()` body at merge, if another pipeline re-creates it.
+- The three pre-existing test-rls failures above.
+
+**Next:** api-developer (Batch 2).
 
 ---
 

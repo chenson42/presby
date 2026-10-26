@@ -4,6 +4,44 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-245 — District assignment is overwritten and audited, not kept as dated history; concurrency, lock order and audit keys.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)
+
+- **Rule.** Care routing is not a constitutional fact, so history lives in `audit_events` (six keys, written in the same transaction, no household or person name), and no history view is promised. Every writer locks `org_units` rows first (`FOR SHARE`, by id) and then `households` rows (`FOR UPDATE`, by id). A single move is `UPDATE ... WHERE org_unit_id IS NOT DISTINCT FROM expected`; zero rows is a conflict unless the household is already at the target. Undo is the same call. A bulk move is `{source, target, expectedCount}` with no household ids; the source must be archived, the target active, the cap is 100, and the response carries counts only. The row picker commits on an explicit button, never on selection (F261).
+- **Revisit if** a moderator hits the 100 cap, or if congregations need to read the history (the audit viewer is platform-only).
+
+---
+
+**DECISION-244 — Parish placement, one household count, name masking.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)
+
+- **Rule.** Everything under `directory/parishes/*` and `src/lib/parishes.ts`, which alone writes `org_units` and `households.org_unit_id` and also owns the roster read (moved from `directory.ts` to avoid an import cycle). "Households in a district" is every `households` row with that `org_unit_id`; the roster, district page, archive dialog, bulk dialog and `expectedCount` all use one helper. Masking is server-side, using the exported `directory_hidden` expression; `people.manage` and `directory.view_hidden` see hidden names, others see "Private". No contact, birthday, photo or address on these surfaces. No user-controlled return parameter.
+- **Consequence.** The roster count changes for existing viewers (release note 0.45.0). `deriveDeaconsByOrgUnit` now counts a deacon whose term has a future end date and ignores a term that has not started (F265).
+
+---
+
+**DECISION-243 — District lifecycle and archive enforcement are database properties; moves are conditional updates under RLS, not a definer function.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)
+
+- **Rule.** `org_units.archived_at`, a validated `unit_type` CHECK (F259) and name-shape CHECK, a unique active-name index, a household index (F263), and a guard trigger on `households` and open `officer_terms` that refuses a newly set archived, campus or missing district with `FOR SHARE` (the composite FK takes only `FOR KEY SHARE`, which an archive does not conflict with). `DELETE` on `org_units` is revoked from `presby_app` and `presby_platform` (F258) and guarded on the owner path. No `SECURITY DEFINER` move function: everything stays inside one organization, RLS enforces tenancy, and authorization is checked in the application inside the same transaction.
+- **Consequence.** `households.org_unit_id` now means "deacon district" only; a campus dimension needs its own column.
+
+---
+
+**DECISION-242 — The Board of Deacons Moderator is a dated seat recorded in `officer_terms`, and its authority flows through the resolver.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)
+
+- **Rule.** The office `deacons_moderator` fills a derived `roster` group of the same key. A protected baseline role `deacons_moderator` carrying only `parishes.assign` is bound to that group. `parishes.assign` is **seat-only on every grant arm**: `presby_seat_key_group` and triggers on `app_role_permissions`, `role_grants`, `administrative_commissions` and `org_delegations` refuse a person grant, a commission or delegation, a binding to any other role or group, and a re-pointed or re-shaped seat role. **The seat group's roster is protected by the derived-row guard that lands in migration 0066 (F240/F245, DECISION-236); until then a direct `presby_app` write of a self-labelled derived row into any derived group, this one included, or a re-labelling of that group's own `membership_source` or `derived_from` (F245), is not refused by the database. That is shared with the Session group, no application path reaches it, and it is `paper`.** Administrators move households with `people.manage` and define districts with `officers.manage`; the founding-administrator key set is unchanged. `moderator` is unchanged (DECISION-079). Self-recording is permitted, stamped `selfRecorded` and `paper`.
+- **Consequence.** The sync function that materializes the roster (`presby_sync_derived_group`) is `SECURITY DEFINER` with a pinned `search_path` from 0068, so 0066's owner-only guard can apply in either order. 0066 must also widen its `derived_from` kind list to five values including `deacons_moderator` (`docs/TODO.md`).
+- **Rejected.** Reusing `moderator` (existing rows would gain authority from data alone); a person grant (the request rules it out); a `group_role` on the diaconate (trigger-owned, always `member`); a dedicated `officer_terms` predicate (a second evaluator of dated authority).
+- **Revisit if** a second seat-derived permission is added: extend `presby_seat_key_group` (and close F260 for `roll.approve`).
+
+---
+
 **DECISION-257 — The two-factor code is submitted when its last digit lands; `OneTimeCodeInput` says whether the completion was exactly code-length; the session grant stays inside `verifyTotpAction`. Amends DECISION-193(a) and the "nothing auto-submits" sentence of `docs/ui-standards.md` (DECISION-192/193).**
 
 **Status:** Resolved (operator request 2026-10-25; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-totp-autosubmit` (no migration; v0.44.1)

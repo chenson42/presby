@@ -535,6 +535,7 @@ detected by audit (`org.*.revoked`, then `invitation.created` with
 A founding administrator who records themselves as a ruling elder, installed
 pastor, co-pastor or associate pastor becomes a Session approver (DECISION-205).
 This is permitted, stamped `selfRecorded` and `selfApproved`, and `paper`.
+Recording the Board of Deacons Moderator seat (`officer_terms.office = 'deacons_moderator'`) confers `parishes.assign` through the derived `deacons_moderator` group and nothing else; the key is seat-only, refused on a person grant, a commission or a delegation by trigger (DECISION-242). A founding administrator may record themselves in it; that is permitted, stamped `selfRecorded`, and `paper`.
 
 ### The Roll Is the System of Record
 

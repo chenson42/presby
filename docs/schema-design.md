@@ -442,6 +442,15 @@ erDiagram
   users |o--o{ tickets : "assignee_user_id"
 ```
 
+### T. Careers
+
+```mermaid
+erDiagram
+  organizations ||--o{ job_postings : "organization_id"
+  users |o--o{ job_postings : "created_by"
+  users |o--o{ job_postings : "updated_by"
+```
+
 <!-- END GENERATED ERD -->
 
 ---

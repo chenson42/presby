@@ -678,7 +678,7 @@ reserved and unbuilt, so the gap in the numbering is expected. Confirm first:
 Added at integration (v0.41.0). Migrations `0062` and `0063`. Design:
 `docs/work-log/2026-10-22-founding-admin-directory.md` (Increment 2);
 DECISION-202–206. Production is at `0061`; `0064` went to person emails (below) and Increment 2b
-moves to `0065`.
+took `0065` (below, "Sign-in invitations and connect at sign-in (0065)").
 Confirm first: `select to_regclass('roll_actions')` is non-null and
 `select count(*) from information_schema.columns where table_name = 'roll_actions'
 and column_name = 'decided_by'` is 0.
@@ -822,7 +822,7 @@ F250-F256 (`docs/schema-design-2.md` §2ab). Confirm first, on production:
 `select count(*) from information_schema.columns where table_name = 'events'
 and column_name = 'website_listed'` is 0. The migration is independent of
 `0065` and `0066` (Community 2b and 3a): apply it in whatever order the
-branches merge. The journal skips idx 65 and 66 on purpose; do not renumber.
+branches merge. The journal skips idx 66 on purpose (idx 65 is Community 2b's); do not renumber.
 
 ### Pre-deploy runbook: 0067, then the code
 
@@ -1202,6 +1202,146 @@ customer's site is a new content file in its private repository, not part of
 this release and not to be added until the toggle is on and a posting is
 published (otherwise the menu page shows the unavailable notice). The steps are
 the "Post-ship steps" in the Increment 1 work-log; the posting import is Track K.
+
+---
+
+## Sign-in invitations and connect at sign-in (0065)
+
+Added at integration (v0.48.0). Migration `0065`. Design and rulings:
+`docs/work-log/2026-10-22-founding-admin-directory.md` (Increment 2b, Phase 3
+amendment 2 and Phase 6); DECISION-207, 208 (amended) and 225 to 228; findings
+F186, F187, F192 to F198 and F230 to F233 (`docs/schema-design-2.md` section
+2ai). The journal entry is idx 65 (the number is the migration's own, as for
+0072); idx 66 is reserved for Increment 3a. **Operator ruling 2026-10-26: the
+release ships, but real sign-in invitations are held until F166 (recovery codes
+and landing on first enrolment) ships.** Deploying 0065 and the code sends
+nothing by itself; an invitation goes out only when a person with `people.manage`
+presses Send, so the hold is a promise to keep, not a switch. The one thing the
+code does on its own is connect at sign-in (point 4, `org_portal.sign_in_connect`).
+
+### Confirm first (read-only, on production)
+
+- `select to_regprocedure('presby_person_email(uuid,text)')` is non-null (0064
+  applied).
+- `select to_regprocedure('presby_connect_signed_in_account(uuid,boolean)')` is
+  null (0065 not yet applied).
+- `select to_regclass('public.user_totp')` is non-null (the file's own
+  precondition, and the second-factor rule reads it).
+- The shipped code is at least v0.42.3 and v0.42.4 (DECISION-230 and 246: the
+  session-claim fix and the unverified-Google-email refusal). Main already has
+  both. Do not apply 0065 under older code.
+
+### Pre-deploy runbook: snapshot, 0065, then merge and deploy
+
+1. **Order: snapshot `production`, apply `0065`, then merge and deploy.** Every
+   merge to `main` auto-deploys production. The new code calls functions that do
+   not exist before `0065`, so code first is the wrong order. **Old code against
+   the new schema keeps working** (the file's header and design section 4):
+   verify-email's `update users set email` is allowed and the new trigger clears
+   the unread stamp; the NextAuth adapter's insert carries a null
+   `email_verified`, which is allowed; founding-administrator and treasurer
+   acceptance is byte-identical; no old code writes `people.user_id`. So the
+   window between the apply and the deploy is safe.
+2. **Pre-reads, counts only (never a value, never an address), re-run just before
+   the apply** (read-only session, `default_transaction_read_only = on`). The
+   queries are Phase 3's section 3.2 (P1 to P8); expected values are from
+   production on 2026-10-25.
+   - **P1, case-duplicate `lower(users.email)` groups. Expect 0.** The file stops
+     on any (`users_email_lower_uq` could not be built). Repair the data, never
+     edit the migration.
+   - **P2, stamped users with a `user.email_changed` audit row. Expect 0.** The
+     file clears those stamps and prints a count. If non-zero, those people lose
+     address proof until they sign in with Google (a stamp at password reset,
+     S11, was declined), so they cannot connect or accept in place and use the
+     emailed link; tell the operator before deploy.
+   - **P6, open invitations of any purpose. Expect 0.** The file drops and
+     re-adds the `account_invitations` CHECKs and re-predicates
+     `account_invitations_open_address_uq`; any open row is unaffected in
+     content but you want to know the number.
+   - **P8, the deploy-day wave: proven, active, unlinked users with exactly one
+     eligible candidate person. Expect 0.** If both "will connect" columns are 0
+     the release note says nothing about a wave (it does not). If either is
+     non-zero, the note must say people "may be connected the next time they sign
+     in" before the release goes out, and the operator should read the count.
+   - The count of `organizations` and of `organization_feature_toggles` rows
+     (11 toggle rows over 2 organizations on 2026-10-25). Section 8 seeds one
+     `org_portal.sign_in_connect` row per existing organization.
+   - The Google-account count: `select count(*) from accounts where provider =
+     'google'` (0 on 2026-10-25). It decides how much the one-time Google check
+     in point 7 matters.
+   - `select count(*) from audit_events` (661 on 2026-10-25). The new partial
+     index `audit_events_sign_in_connected_ix` builds under a brief write lock;
+     at this size it is instant.
+3. **Apply `0065` WITH `-1`, as the owner, on the direct endpoint:**
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0065_presby_sign_in_and_connect.sql`.
+   `db:migrate` stopped tracking past idx 9, so the journal entry is a record,
+   not an applier. The file is idempotent (count-only stop-blocks, an update
+   whose predicate stops matching, drop-then-add constraints, `create or
+   replace` functions, drop-then-create triggers, `on conflict do nothing` for
+   the seed, revoke-then-grant); a second run changes nothing. It shares no
+   object with 0067, 0068, 0071 or 0072, so those may be applied in either order
+   relative to it. Then **merge and deploy the code.**
+4. **What deploy turns on by itself.** `org_portal.sign_in_connect` ("Connect
+   people when they sign in") is seeded **on** for every existing organization
+   and written on for every new one. From the first request after deploy, an
+   account whose proven address sits on exactly one eligible record at a managed
+   congregation is connected at its next sign-in (a record that holds a role or a
+   seat only after a confirmed two-factor sign-in). The wave is P8's number. To
+   hold even that, turn the toggle off per organization at
+   `/o/<slug>/admin/features` (it stops new connections only, and disconnects
+   nobody). There is no global flag, by the operator's standing rule.
+5. **Verify against the catalog, not the DDL, and diff against `development`.**
+   - Both guard triggers are present and enabled: `users_guard_email_proof` on
+     `users` and `people_guard_user_link` on `people`.
+   - Indexes present: `users_email_lower_uq`,
+     `account_invitations_open_sign_in_person_uq`, the re-predicated
+     `account_invitations_open_address_uq` (it excludes the `sign_in` purpose),
+     and `audit_events_sign_in_connected_ix`.
+   - `presby_app` has no privilege on `account_invitations` (`aclexplode`).
+   - `presby_app` holds EXECUTE on exactly the 15 callables and on none of the
+     five internals (`presby__accept_invitation_core`, `presby__actor_person`,
+     `presby__bind_person_account`, `presby__person_sign_in_standing`,
+     `presby_sign_in__check`); `presby_platform` holds none; PUBLIC holds none.
+   - Every definer is owned by the owner role and has `search_path = public,
+     pg_temp`.
+   - `org_portal.sign_in_connect` toggle rows equal the organization count, all
+     enabled.
+   - Row counts are unchanged from point 2, apart from the section-2 clean-up
+     (P2) and the toggle seed.
+6. **On `development`, after merge:** apply `0065`, then
+   `scripts/sign-in-invitations/seed-dev-sign-in.sql` (reached through
+   `scripts/seed-dev.sql`, last) and the full `scripts/test-rls.sql` as
+   `presby_app`. Section 65 is `scripts/sign-in-invitations/test-rls-65.sql`.
+   Section 44's `presby_app` link writes were converted in the same integration
+   (F186). The e2e suite needs the owner connection to seed its users since this
+   migration (`e2e/support/global-setup.ts`, patched at integration): CI's seed
+   step must run as the owner. **Do not run the seed or either test file on
+   production** (test helpers and fixture people).
+7. **After deploy: the operator walks the real path, and does the one-time
+   Google check.**
+   - On a congregation made for testing, with plus-addresses (3 invitations per
+     address per day): send an invitation from a person's edit page, accept it as
+     a new account, and enrol two-factor. **Until F166 ships, do this only as the
+     operator**; a new-account invitee is left on the enrolment page with no
+     recovery codes shown and no Continue link.
+   - **The Google check.** The Google proof path is the one path no automated test
+     exercises (it needs a real Google ID token). Sign in with Google on an address
+     that sits on exactly one eligible record, then confirm the connection and the
+     `user.email_proof_recorded` audit row (metadata `source: google`).
+8. **Down-path.** There is no rollback file. A code rollback is safe: old code
+   works against the new schema (point 1). The widened vocabulary CHECKs on
+   `account_invitations` cannot be narrowed once a `sign_in` row exists (rows are
+   never deleted), and production has none before this file, so the only
+   forward-only edge appears after the first invitation is sent. Do not drop the
+   guards, the triggers or the toggle rows.
+9. **Never run** `scripts/sign-in-invitations/seed-dev-sign-in.sql` or
+   `scripts/sign-in-invitations/test-rls-65.sql` on production.
+
+**What to tell the operator after merging.** Real sign-in invitations wait for
+F166. The what's-new entry is published after F166, not at this release
+(`docs/TODO.md`). F232 (a `people.manage` holder can address an authority-bearing
+record to a mailbox they control; detected by audit, not prevented) is an
+accepted open residual and is named in the release note.
 
 ---
 

@@ -38,9 +38,10 @@ test.describe("Admin sign-in", () => {
     // so the stable hook is the testid plus the fixture's own display name.
     await expect(page.getByTestId("greeting-band")).toContainText(ADMIN.name);
 
-    // Each admin section appears twice on the dashboard — once in the
-    // sidebar nav and once as a card. `.first()` keeps the assertion strict
-    // about visibility without caring which instance we're checking.
+    // Each admin section is a link in the sidebar nav (visible at this
+    // desktop viewport), and some also have a dashboard card. `.first()` keeps
+    // the assertion strict about visibility without caring which instance
+    // we're checking.
     for (const linkName of [/users & roles/i, /feature flags/i, /release notes/i, /2fa policy/i]) {
       await expect(page.getByRole("link", { name: linkName }).first()).toBeVisible();
     }

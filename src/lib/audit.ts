@@ -524,6 +524,21 @@ export const AUDIT_ACTIONS = {
   ORG_FOUNDING_ADMINISTRATOR_REVOKED: "org.founding_administrator.revoked",
   ORG_TREASURER_REVOKED: "org.treasurer.revoked",
   // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/public-events-calendar, 2026-10-25 (DECISION-240).
+  // An event going onto, or coming off, the congregation's PUBLIC website is a
+  // disclosure change, so `events.website_listed` changing writes one row, on
+  // every path that can change it (the narrow amendment to DECISION-113 ruling 5;
+  // create/edit/cancel stay unaudited otherwise). Written by src/lib/events.ts
+  // with insertAuditRow(tx, ...) in the SAME transaction as the change.
+  // `check:audit` scans only actions.ts, which delegate to those lib functions.
+  // resourceType 'event'; resourceId = the event (or the series root) id.
+  // Metadata (ids, counts, a method tag; never a title or description):
+  // { organizationId, via: 'create' | 'update' | 'extend' | 'series', changed,
+  //   rootEventId?, anchorEventId?, scope?, skippedCancelled?,
+  //   skippedMembersOnly?, clearedBecauseMembersOnly? }.
+  EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
+  EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  // ---------------------------------------------------------------------------
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

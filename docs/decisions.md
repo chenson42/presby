@@ -4,6 +4,103 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-241 — Public events calendar: the implementation shape.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (events Increment 4, v0.44.0, migration 0067)
+
+- **Names.** The column is `events.website_listed` (matching `public_listed` elsewhere, DECISION-131), the CHECK `events_website_requires_public`, the definer `presby_public_events_calendar(p_slug)`, the toggle `org_portal.public_calendar` (worship category, `orgTypes: null`, self-service), the slot `eventsCalendar`, the audit keys `event.listed_on_website` and `event.unlisted_from_website`.
+- **The window and cap live in the function and are mirrored by named constants.** Previous month through 12 months ahead (14 months), 400 rows; on truncation the window shrinks to the last complete month, and a truncation that leaves none returns `unavailable`. A test pins the SQL literals to the TypeScript constants and to the catalog, so the SQL composition of the toggle, category axis and default zone cannot drift from `orgFeatureEnabledInTx` and `DEFAULT_ORG_TIME_ZONE`. A differential DB test compares the two over the whole axis × category × toggle matrix.
+- **One DOM per month.** The panels are server-rendered once and laid out by CSS (a seven-column grid from `md`, a day list below, or the list everywhere by the visitor's choice); event details are native `<details>`. The client island holds only the active month index, the layout and the "earlier days" state, and receives panels, not event data. A `location.hash` mirror (Phase 2's optional suggestion) is declined: a deep link to a month is not needed to replace the old embed and adds a client-only effect to test; revisit if a church asks to link to a month.
+- **Pure rules shared by the count and the write.** `deriveListed`, `planSeriesListing` and `inheritedListing` live in `src/lib/events/website-listing.ts`. A series is published or unpublished "this and all later" through `setSeriesWebsiteListing`, which locks the series rows; changing one event goes through the edit form. This replaces Phase 1 Flow 3's scope choice inside one form with two surfaces of equal capability, avoiding a dual-mode form value (DECISION-133). New occurrences inherit from the latest non-cancelled occurrence AND the parent's `is_public`.
+- **Audit in the same transaction.** `insertAuditRow` (not `recordAudit`) on all four writers, one row per column-changing write, none for a no-op or a cancel. The lib functions take an `EventActor { userId, email }` so the row carries who did it.
+- **Declined Phase 2 suggestions, with reasons.** `website_listed_by/_at`: the audit row is authoritative and nothing reads the columns; adding them later is additive. A partial index: the window is a bounded range scan on `events_org_starts_idx` and the table is small per organization; revisit if an `EXPLAIN` on a several-thousand-row organization says otherwise.
+- **No off-warning and no on-confirmation for the toggle.** Rollback should be one click; the on-direction exposure is bounded by the per-event mark (F255 tracks the residual).
+- **G9 (where-the-calendar-appears status line) is deferred**, with the reasons in the work-log's Carry-forward (`docs/TODO.md`).
+- **Revisit if** a church needs a month deep link, the payload for a busy organization is measured large (about 0.75 MB of uncompressed HTML for 2 events and 4.1 MB at the 400-event maximum, accepted; `docs/TODO.md`), or a fifth writer of `website_listed` appears (it must audit).
+
+---
+
+**DECISION-240 — Event writes stay unaudited except when the website column changes; narrowly amends DECISION-113 ruling 5.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar`
+
+- Event create, edit, extend and cancel remain unaudited **except** when `events.website_listed` changes. Any write path that flips it in either direction writes **one** in-transaction audit row via `insertAuditRow` (`src/lib/audit-tx.ts`, so the change and the audit commit together).
+- That covers `createEvent` (including a series), `updateEvent` (including the derived clear when `is_public` goes false), `extendSeriesPattern` (new occurrences inherited as listed), and the series-scope mutation `setSeriesWebsiteListing`. The row carries the new `AUDIT_ACTIONS` keys (listed/unlisted), the scope, the root event id, and the changed and skipped counts.
+- The org toggle flip is already audited by `toggleOrgFeature()`. Cancelling an event is not audited; it narrows exposure and the read filters it out (F254).
+- **Accepted residual (`paper`).** A future writer that sets the column directly would escape the audit; the only code writers are the four above, and the TypeScript field is written nowhere else.
+
+---
+
+**DECISION-239 — A navigable public live slot affirms DECISION-132's redline: month navigation is a pre-rendered bounded window switched by a client island.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar`
+
+- DECISION-132's live-slot redline is affirmed **without amendment** for a navigable slot. The island receives only server-rendered panels and an index. Request-derived parameters (`?month=`) and a JSON endpoint are rejected. A client-only `location.hash` mirror is permitted because it never reaches the server (DECISION-241 declines to build it).
+- Public calendar components are built in `(public)/site/[slug]` (flat or `_`-private folder). They reuse only the pure `src/lib/calendar` / `src/lib/events` layer and never import `(org)` route files.
+
+---
+
+**DECISION-238 — Public events calendar publication: a per-event column off by default, tied to `is_public` by a CHECK and re-filtered at read time; one `SECURITY DEFINER` read that always returns one row.**
+
+**Status:** Resolved (architect, Phase 2; operator rulings Q1 and Q3, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (migration 0067)
+
+- Publication is a new per-event column, `events.website_listed`, **off by default**, tied to `is_public` by the table CHECK `events_website_requires_public` and re-filtered on `is_public` at read time (it holds even with the CHECK dropped).
+- The anonymous read is one `SECURITY DEFINER` function, `presby_public_events_calendar(p_slug)`, that **always returns one row**. Inside it, it checks: org active, site live, and the toggle composed exactly as `orgFeatureEnabledInTx` composes it, **including the category axis read from `feature_flags` inside the function**. It returns a `jsonb_build_object` allow-list with no ids.
+- The window and row cap are fixed inside the function, and every non-serving reason and every read failure collapses to `unavailable` (DECISION-154). The reader lives in `src/lib/public-calendar.ts`, not the pure `src/lib/calendar/`.
+- The toggle is self-service (`operatorEnabled: false`, operator ruling Q3). The new function does not repeat `presby_public_giving_config`'s omission of the category axis (F250, tracked in `docs/TODO.md`).
+- **Accepted residuals.** A cancelled event keeps the flag true and the read filters it (F254, `paper`); the table has no length CHECK, so the definer clips (F256, `paper`); a published event's free text is public and may be archived, which the form and release note say.
+
+---
+
+**DECISION-255 — Status treatment is staged: existing tokens with an icon and text in Increments 1–3; the reserved semantic slice lands in Increment 4.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (stage one shipped in v0.43.0; no migration)
+
+- **Stage one.** Failure is `text-destructive` with `CircleAlert` and a label; needs attention is `text-foreground` on `border-foreground` with `TriangleAlert` and the words "Needs attention"; all-clear is `text-muted-foreground` with `CircleCheck`. No palette literal in any new file, no new token. Status is never carried by colour alone.
+- **Stage two (Increment 4, short Phase 2 addendum).** Declare `--success`, `--warning`, `--info` (and foregrounds) for both schemes, drop `reserved`, add contrast proofs, add `Badge` variants with a header-commented divergence, convert the 43 existing palette literals.
+- **Revisit if** the contrast proofs for the three families cannot be met in both schemes.
+
+---
+
+**DECISION-253 — `src/components/admin-portal/` is the home for admin-only composition; the nav registry replaces the tile registry; the admin shell mounts `AvatarMenu`; one copy-only change to frozen `permissions.ts`.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0; no migration)
+
+- **Placement.** Admin-only composition (`AdminNav`, `AdminNavLinks`, `AdminMobileMenu`, `AdminHeader`, `AdminForbidden`) lives in `src/components/admin-portal/`, parallel to `org-portal/`. Generic pieces (`LoadError`, `EmptyState`, `CountCard`) live in `shared/`. The forbidden state stays admin-only so it cannot become the byte-identical `(org)` miss response of DECISION-040.
+- **Registry.** `src/lib/admin-portal/nav.ts` replaces `ADMIN_TILES` (`tiles.ts`, `visible-tiles.ts` and `tile-icons.ts` are deleted) under DECISION-123's constraints: pure synchronous data, filtering in a co-located helper. `DomainTileSections` and `TileGrid` remain for `(org)`.
+- **Shell.** The header mounts `AvatarMenu`, not `GlobalNav` (whose `OrgSwitcher` would put `/o/` links and a tenant read in admin chrome). The inline sign-out is removed; there is one sign-out path.
+- **Frozen file.** The `name` and `description` of `FEATURES.ADMIN_ORGANIZATIONS` may be corrected as copy; keys, map and order are untouched, pinned by a test. Deployed `features` rows keep the old text and nothing displays it.
+- **Layout.** `<main>` is `p-4 sm:p-8` with `min-w-0`, noted in `docs/ui-standards.md`.
+- **Revisit if** a second consumer appears for a collapsing-nav primitive (then promote it to `shared/`).
+
+---
+
+**DECISION-252 — The platform tier shows only platform-axis data; dashboard readers are held to an allow-list of tables by a source-scan test; the 2FA predicate is the one recorded exception.**
+
+**Status:** Resolved (architect, Phase 2; operator ruling Q8; tech-lead, Phase 3; scan scope ruled by the orchestrator after QA runs 1–5) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0; no migration)
+
+- **Rule.** The dashboard may show counts, ages and links for organizations, accounts, invitations, queue rows, tickets and feedback (as counts), domains, sites, flags and audit rows. It never shows a count or content derived from people, the roll, gifts, events or attendance. No names beyond the public `organizations.name`, no amounts, no ticket or feedback text.
+- **Enforcement.** Readers live in `src/lib/admin-portal/dashboard/`. `boundaries.test.ts` reads the source of every non-test file in that directory and allows only listed tables (by import, and as a closed set of table names in any string or template literal), listed modules and one `presby_*` function. It reports a tenant table written as an import or as a name until someone edits the list on purpose, in review. It covers only files in that directory. The audit reader never selects `metadata` whole.
+- **The exception.** "Required but not enrolled" resolves through `people` and `memberships`. It lives in `src/lib/admin/two-factor-stranded.ts`, outside the scanned directory on purpose, and returns accounts or a count. `/admin/2fa`'s per-organization `member_count` stays page-local and is never extracted. If the card is read as extending the exception, drop the card.
+- **Sub-panels** in the Increment 2 workspace check their own keys inside a page gated by `ADMIN_ORGANIZATIONS`.
+- **Accepted residual (`paper`).** The boundaries scan guards against a careless reader written in this directory's idioms, not a deliberately evasive one: it reads source text and cannot see (1) a computed property access (`db[key]`); (2) a table name assembled at runtime rather than written in a literal, whether in JavaScript (concatenation into a variable that reaches `execute`) or in SQL (`format()`, `||` on string pieces, a `U&"…"` escape); (3) a helper module outside the directory, including any allow-listed `@/lib/*` module, that itself reads a tenant table; or (4) a reader written to evade a source-text scan, such as an escape trick the decoder does not model, a shadowed helper, or an expression that misleads the scanner's own tokenizer. These are `paper`; review and the retrospective are the control for all four, as for readers outside the directory.
+- **Revisit if** the operator wants a members-per-organization figure on the platform tier (a Two Hierarchies decision, not a card).
+
+---
+
+**DECISION-251 — The platform console is two tiers in the existing `(admin)/admin` tree; every section page gates before it parses; no `loading.tsx` exists under `(admin)/admin`.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0 carries the shell; Increment 2 the workspace; no migration)
+
+- **Tiers.** Tier 1 is `/admin` and the cross-organization lists under one persistent platform nav. Tier 2 is the organization workspace, real section routes under `/admin/organizations/[id]/**`, under the same nav.
+- **Order.** Every workspace page calls `requireWorkspaceOrg(params)` first: permission, then UUID, then one `cache()`d organization read. There is no data-reading `[id]` layout, because a layout renders concurrently with its page and cannot stop the page's reads.
+- **No `loading.tsx` under `(admin)/admin`, including at `/admin` itself.** A `loading.tsx` wraps every descendant route in Suspense, so the four `notFound()` routes (`organizations/[id]`, `users/[id]`, `tickets/[id]`, `whats-new/[id]`) would answer their 404s with HTTP 200 (the (org) contract's 2026-08-18 measurement). Loading feedback is per-card `Suspense`. A source-scan test (`shell-boundaries.test.ts`) pins the absence.
+- **Error boundary.** `(admin)/admin/error.tsx` renders calm copy and never `error.message`. It does not catch its own layout, so the layout wraps the live `isPlatformAdmin` read in a `catch`.
+- **No proxy rule and no link into `/o/<slug>`.** Pages own per-feature checks; nothing under the console links into a tenant route, pinned by a scan.
+- **Revisit if** a console route needs a streaming skeleton badly enough to justify a route group whose descendants never call `notFound()`.
+
+---
+
 **DECISION-246 — A non-credentials sign-in must carry `email_verified === true`; the gate refuses before any user lookup. Amends DECISION-015 point 2; fulfils the `evaluateSignIn()` clause of DECISION-187.**
 
 **Status:** Resolved (operator-visible finding F231, architect ruling in the 2b addendum 2, R38) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-google-email-verified` (v0.42.4; no migration)

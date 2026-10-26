@@ -145,6 +145,32 @@ const ATTENTION_CLASSES = [
 ];
 
 /**
+ * The one definition of "needs attention": a non-terminal host with a platform
+ * hold, a lapse, a release in flight, or whose last check ended in a provider or
+ * lookup problem. The "attention" filter of `listDomainsAcrossOrgs` and the
+ * dashboard's Domains card (`countDomainsNeedingAttention`) both use it, so the
+ * card and its destination list cannot disagree.
+ */
+function attentionCondition() {
+  return and(
+    notInArray(organizationDomains.state, TERMINAL),
+    sql`(${organizationDomains.platformHold} is not null
+         or ${organizationDomains.state} in ('lapsed','parked','release_pending')
+         or ${organizationDomains.lastCheckClass} in (${sql.join(ATTENTION_CLASSES.map((c) => sql`${c}`), sql`, `)}))`,
+  );
+}
+
+/** How many hostnames need attention (not organizations): one statement, no rows leave it. */
+export async function countDomainsNeedingAttention(): Promise<number> {
+  const [row] = await getPlatformDb()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(organizationDomains)
+    .innerJoin(organizations, eq(organizations.id, organizationDomains.organizationId))
+    .where(attentionCondition());
+  return Number(row?.n ?? 0);
+}
+
+/**
  * Every non-terminal host across organizations (web, and mail once 2c writes
  * mail rows), oldest state first within a filter, capped. "Attention" means a
  * hold, a lapse, a release in flight, or the last check ended in a provider or
@@ -158,12 +184,7 @@ export async function listDomainsAcrossOrgs(
   const live = notInArray(organizationDomains.state, TERMINAL);
   const conditions = {
     all: live,
-    attention: and(
-      live,
-      sql`(${organizationDomains.platformHold} is not null
-           or ${organizationDomains.state} in ('lapsed','parked','release_pending')
-           or ${organizationDomains.lastCheckClass} in (${sql.join(ATTENTION_CLASSES.map((c) => sql`${c}`), sql`, `)}))`,
-    ),
+    attention: attentionCondition(),
     held: and(live, sql`${organizationDomains.platformHold} is not null`),
     pending: and(live, inArray(organizationDomains.state, ["pending", "verified", "attach_pending", "attached"])),
     live: and(live, eq(organizationDomains.state, "live")),

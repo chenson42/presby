@@ -7,8 +7,11 @@
  * seven-domain taxonomy, and an `AdminTile`-shaped array with a
  * plain-string `getHref` and the new three-domain taxonomy. Neither this
  * file nor the component under test imports `@/lib/org-portal/tiles` or
- * `@/lib/admin-portal/tiles` — domain order/labels are passed as props by
- * the caller, which is the whole point of the genericization.
+ * the admin tile registry (retired in the platform admin redesign, replaced
+ * by `@/lib/admin-portal/nav`) — domain order/labels are passed as props by
+ * the caller, which is the whole point of the genericization. The admin-shaped
+ * cases below use local fixtures only, so the generic bound stays proven
+ * without a live admin consumer.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";

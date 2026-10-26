@@ -1960,3 +1960,9 @@ commit;
 -- and staff position); contact rows only, idempotent.
 -- scripts/person-emails/test-rls-64.sql needs it.
 \ir person-emails/seed-dev-person-emails.sql
+
+-- Public events calendar fixture (drizzle/0067). Its own file and
+-- transaction: Fernwood gets a LIVE site, the org_portal.public_calendar toggle
+-- (Fernwood and Alder Creek) and six demo events dated from the day it runs;
+-- idempotent. scripts/public-calendar/test-rls-67.sql needs it.
+\ir public-calendar/seed-dev-public-calendar.sql

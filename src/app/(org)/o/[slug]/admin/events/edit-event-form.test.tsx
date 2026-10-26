@@ -51,6 +51,7 @@ function makeEvent(overrides: Partial<EventDetail> = {}): EventDetail {
     startsAt: "2027-03-01T19:00:00",
     endsAt: "2027-03-01T20:00:00",
     isPublic: true,
+    websiteListed: false,
     allowsCheckin: false,
     cancelledAt: null,
     isRecurringSeries: false,
@@ -60,6 +61,7 @@ function makeEvent(overrides: Partial<EventDetail> = {}): EventDetail {
     recurrenceCount: null,
     eventType: null,
     seriesOccurrences: [],
+    seriesWebsite: null,
     ...overrides,
   };
 }
@@ -205,8 +207,100 @@ describe("EditEventForm — the event type picker", () => {
     expect(screen.queryByText("Changes this occurrence only.")).toBeNull();
   });
 
-  it("explains that an unchecked public box still shows to members", () => {
+  it("says what 'Open to everyone' means when unchecked, and the old wording is gone", () => {
     render(<EditEventForm slug="alder-creek" event={makeEvent()} typePicker={NO_TYPES} orgName="Alder Creek" />);
-    expect(screen.getByText(/still shows on the member calendar for everyone in Alder Creek/i)).toBeTruthy();
+    expect(screen.getByLabelText("Open to everyone, not only members")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "If unchecked, the event shows only on the member calendar, for members of Alder Creek who have calendar access. It also stays out of Copy month and cannot be shown on the website.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/visible on the public calendar/i)).toBeNull();
+    expect(screen.queryByText(/just stays off the public website/i)).toBeNull();
+  });
+});
+
+describe("EditEventForm - the website switch (DECISION-238)", () => {
+  const WEBSITE = "Show on our website's public calendar";
+  const SERIES_NOTE =
+    "This changes this event only. To change this event and the ones after it, use Website listing on the event's page.";
+
+  it("starts from the stored value: ticked for a listed event, unticked otherwise", () => {
+    const { unmount } = render(
+      <EditEventForm slug="alder-creek" event={makeEvent({ websiteListed: true })} typePicker={NO_TYPES} orgName="Alder Creek" />,
+    );
+    expect((screen.getByLabelText(WEBSITE) as HTMLInputElement).checked).toBe(true);
+    unmount();
+    render(<EditEventForm slug="alder-creek" event={makeEvent()} typePicker={NO_TYPES} orgName="Alder Creek" />);
+    expect((screen.getByLabelText(WEBSITE) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("a members-only event shows the box disabled and unticked with the members-only hint", () => {
+    render(
+      <EditEventForm slug="alder-creek" event={makeEvent({ isPublic: false })} typePicker={NO_TYPES} orgName="Alder Creek" />,
+    );
+    const box = screen.getByLabelText(WEBSITE) as HTMLInputElement;
+    expect(box.disabled).toBe(true);
+    expect(box.checked).toBe(false);
+    expect(screen.getByText("Only events open to everyone can be shown on the website.")).toBeTruthy();
+  });
+
+  it("a round trip of an untouched listed event posts websiteListed true (an edit never flips it silently)", async () => {
+    mockUpdateEventAction.mockResolvedValueOnce({ ok: true, data: { eventId: "event-1" } });
+    render(
+      <EditEventForm slug="alder-creek" event={makeEvent({ websiteListed: true })} typePicker={NO_TYPES} orgName="Alder Creek" />,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+    expect(mockUpdateEventAction).toHaveBeenCalledWith(
+      "alder-creek",
+      expect.objectContaining({ isPublic: true, websiteListed: true }),
+    );
+  });
+
+  it("an untouched unlisted event posts websiteListed false", async () => {
+    mockUpdateEventAction.mockResolvedValueOnce({ ok: true, data: { eventId: "event-1" } });
+    render(<EditEventForm slug="alder-creek" event={makeEvent()} typePicker={NO_TYPES} orgName="Alder Creek" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+    expect(mockUpdateEventAction).toHaveBeenCalledWith(
+      "alder-creek",
+      expect.objectContaining({ websiteListed: false }),
+    );
+  });
+
+  it("unticking 'Open to everyone' on a listed event clears and disables the website box; the save posts both false (F251)", async () => {
+    mockUpdateEventAction.mockResolvedValueOnce({ ok: true, data: { eventId: "event-1" } });
+    render(
+      <EditEventForm slug="alder-creek" event={makeEvent({ websiteListed: true })} typePicker={NO_TYPES} orgName="Alder Creek" />,
+    );
+    fireEvent.click(screen.getByLabelText("Open to everyone, not only members"));
+    const box = screen.getByLabelText(WEBSITE) as HTMLInputElement;
+    expect(box.disabled).toBe(true);
+    expect(box.checked).toBe(false);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+    expect(mockUpdateEventAction).toHaveBeenCalledWith(
+      "alder-creek",
+      expect.objectContaining({ isPublic: false, websiteListed: false }),
+    );
+  });
+
+  it("says the switch changes this event only, for a series occurrence, and not otherwise", () => {
+    const { unmount } = render(
+      <EditEventForm
+        slug="alder-creek"
+        event={makeEvent({ isSeriesOccurrence: true, parentEventId: "parent-1" })}
+        typePicker={NO_TYPES}
+        orgName="Alder Creek"
+      />,
+    );
+    expect(screen.getByText(SERIES_NOTE)).toBeTruthy();
+    unmount();
+    render(<EditEventForm slug="alder-creek" event={makeEvent()} typePicker={NO_TYPES} orgName="Alder Creek" />);
+    expect(screen.queryByText(SERIES_NOTE)).toBeNull();
   });
 });

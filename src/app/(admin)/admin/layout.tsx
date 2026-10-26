@@ -1,8 +1,35 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { signOut } from "@/auth";
 import { cachedAuth } from "@/lib/auth/cached-auth";
+import { cachedIsPlatformAdmin } from "@/lib/nav-data";
+import { AdminHeader } from "@/components/admin-portal/admin-header";
+import { AdminNav } from "@/components/admin-portal/admin-nav";
+import { visibleAdminNav } from "./visible-nav";
 
+/**
+ * The platform console shell: header (skip link, back link, Menu button on a
+ * phone, avatar menu), a grouped permission-filtered sidebar from `md` up, and
+ * the page.
+ *
+ * THE TWO REDIRECTS BELOW ARE UNCHANGED, in order and in body (R9): no session
+ * goes to sign-in, a required-but-unverified second factor goes to /totp. The
+ * layout test pins both.
+ *
+ * `isPlatformAdmin` is a LIVE read (it is deliberately not a session claim, so
+ * a revocation lands now). It is wrapped in a catch because `error.tsx` cannot
+ * catch an error thrown by its own layout (R1d): a blip degrades to "no
+ * Developer item in the avatar menu", never a crashed shell.
+ *
+ * `<main>` is `min-w-0` because a grid item defaults to `min-width: auto`, so
+ * one wide table would widen the whole column and push the page sideways at
+ * 360px. Its padding is `p-4 sm:p-8`: 16px on a phone (a 328px content width),
+ * 32px from `sm` (docs/ui-standards.md, DECISION-253). `tabIndex={-1}` makes it
+ * the skip link's focus target.
+ *
+ * There is NO `loading.tsx` anywhere under this segment (R1c, DECISION-251),
+ * and `shell-boundaries.test.ts` pins that. A `loading.tsx` wraps every
+ * descendant route in Suspense, which would send the `notFound()` routes out
+ * as HTTP 200. Loading feedback is per-card `Suspense` on the dashboard.
+ */
 export default async function AdminLayout({
   children,
 }: {
@@ -14,57 +41,25 @@ export default async function AdminLayout({
     redirect("/totp?callbackUrl=/admin");
   }
 
-  const nav = [
-    { href: "/admin", label: "Dashboard" },
-    { href: "/admin/design-system", label: "Design system" },
-    { href: "/admin/organizations", label: "Organizations" },
-    { href: "/admin/giving", label: "Giving health" },
-    { href: "/admin/sites", label: "Sites" },
-    { href: "/admin/users", label: "Users" },
-    { href: "/admin/flags", label: "Feature flags" },
-    { href: "/admin/tickets", label: "Tickets" },
-    { href: "/admin/docs", label: "Release notes" },
-    { href: "/admin/audit", label: "Audit Log" },
-    { href: "/admin/email-queue", label: "Email queue" },
-    { href: "/admin/whats-new", label: "What's new" },
-    { href: "/admin/2fa", label: "2FA policy" },
-  ];
+  const isPlatformAdmin = await cachedIsPlatformAdmin(session.user.id).catch(
+    () => false,
+  );
+  const groups = visibleAdminNav(session.user.features);
 
   return (
-    <div className="grid min-h-screen grid-cols-1 md:grid-cols-[220px_1fr]">
-      <aside className="border-b border-border bg-muted/40 p-4 md:border-b-0 md:border-r">
-        <div className="mb-6">
-          <Link href="/home" className="text-sm font-semibold">
-            ← PresbyPortal
-          </Link>
-        </div>
-        <nav className="space-y-1">
-          {nav.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="block rounded-md px-3 py-2 text-sm hover:bg-muted"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        <form
-          action={async () => {
-            "use server";
-            await signOut({ redirectTo: "/" });
-          }}
-          className="mt-8"
-        >
-          <button
-            type="submit"
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            Sign out ({session.user.email})
-          </button>
-        </form>
-      </aside>
-      <main className="p-8">{children}</main>
+    <div className="min-h-screen">
+      <AdminHeader
+        groups={groups}
+        name={session.user.name}
+        email={session.user.email}
+        isPlatformAdmin={isPlatformAdmin}
+      />
+      <div className="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)]">
+        <AdminNav groups={groups} />
+        <main id="admin-main" tabIndex={-1} className="min-w-0 p-4 outline-none sm:p-8">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

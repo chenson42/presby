@@ -1,3 +1,4 @@
+import { AdminForbidden } from "@/components/admin-portal/admin-forbidden";
 import Link from "next/link";
 import { inArray } from "drizzle-orm";
 import { auth } from "@/auth";
@@ -31,14 +32,7 @@ import {
 export default async function NewOrganizationPage() {
   const session = await auth();
   if (!hasFeature(session?.user?.features, FEATURES.ADMIN_ORGANIZATIONS)) {
-    return (
-      <div>
-        <h1 className="text-2xl font-semibold">New organization</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
-          You don&apos;t have permission to manage organization branding.
-        </p>
-      </div>
-    );
+    return <AdminForbidden title="New organization" area="managing organizations" />;
   }
 
   let eligibleParents: EligibleParentsByType = null;

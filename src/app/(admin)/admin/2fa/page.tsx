@@ -2,6 +2,7 @@ import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getPlatformDb } from "@/lib/db";
+import { listStranded } from "@/lib/admin/two-factor-stranded";
 import { FEATURES, hasFeature } from "@/lib/permissions";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -36,12 +37,7 @@ type OrgRow = {
   member_count: number;
 };
 
-type StrandedRow = {
-  id: string;
-  email: string;
-  name: string | null;
-  source: string;
-};
+const STRANDED_LIMIT = 50;
 
 export default async function TwoFactorPolicyPage() {
   const session = await auth();
@@ -75,32 +71,13 @@ export default async function TwoFactorPolicyPage() {
   // and cannot answer it — the stranded-member case, which is the whole reason
   // an administrator opens this page. `source` says WHY they are required, so
   // it is obvious whether to flip a congregation's policy or the user's own row.
-  const stranded = await platformDb.execute(sql`
-    SELECT u.id,
-           u.email,
-           u.name,
-           CASE WHEN u.two_factor_required THEN 'this user' ELSE 'congregation' END AS source
-      FROM users u
-     WHERE u.is_active
-       AND NOT EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = u.id)
-       AND (
-             u.two_factor_required
-             OR EXISTS (
-               SELECT 1
-                 FROM people p
-                 JOIN memberships m           ON m.person_id = p.id AND m.ended_on IS NULL
-                 JOIN organization_settings s ON s.organization_id = m.organization_id
-                WHERE p.user_id = u.id
-                  AND p.merged_into_id IS NULL
-                  AND s.require_two_factor
-             )
-           )
-     ORDER BY u.email
-     LIMIT 50
-  `);
+  // The predicate is shared with the dashboard's Two-factor card
+  // (src/lib/admin/two-factor-stranded.ts), so the card and this list cannot
+  // disagree. The per-organization `member_count` above stays in this file.
+  const stranded = await listStranded(STRANDED_LIMIT);
 
   const orgRows = orgs.rows as unknown as OrgRow[];
-  const strandedRows = stranded.rows as unknown as StrandedRow[];
+  const strandedRows = stranded.rows;
 
   return (
     <div>
@@ -180,6 +157,11 @@ export default async function TwoFactorPolicyPage() {
         exempt them from their user page before they are locked out of admin
         routes.
       </p>
+      {stranded.total > strandedRows.length ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          Showing the first {strandedRows.length} of {stranded.total} accounts.
+        </p>
+      ) : null}
       <Table className="mt-2">
         <TableHeader>
           <TableRow>

@@ -12,6 +12,7 @@ import {
   formatDayHeading,
   formatLongDate,
   formatShortDate,
+  groupByDay,
   isDayKey,
   isSameMonth,
   monthKey,
@@ -190,6 +191,20 @@ describe.each(TEST_TIME_ZONES)("calendar/month under process TZ=%s", (zone) => {
       expect(formatLongDate("2026-11-01")).toBe("Sunday, November 1, 2026");
       expect(formatLongDate("2026-03-08")).toBe("Sunday, March 8, 2026");
       expect(formatShortDate("2026-10-31")).toBe("Sat, Oct 31");
+    });
+  });
+  describe("groupByDay", () => {
+    it("groups by dayKey, keeping arrival order within a day and first-seen order across days", () => {
+      const items = [
+        { dayKey: "2026-10-05", n: 1 },
+        { dayKey: "2026-10-04", n: 2 },
+        { dayKey: "2026-10-05", n: 3 },
+      ];
+      const grouped = groupByDay(items);
+      expect([...grouped.keys()]).toEqual(["2026-10-05", "2026-10-04"]);
+      expect(grouped.get("2026-10-05")!.map((i) => i.n)).toEqual([1, 3]);
+      expect(grouped.get("2026-10-04")!.map((i) => i.n)).toEqual([2]);
+      expect(groupByDay([]).size).toBe(0);
     });
   });
 });

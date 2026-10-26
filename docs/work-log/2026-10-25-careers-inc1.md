@@ -1889,3 +1889,114 @@ The re-check after that is a short one: the test red with `?? "hour"`, green on 
 - **Finding 1 (commit `test(careers)`):** `posting-form.test.tsx` gains the edit-path test: a posting with null pay loads with unit `""`; typing an amount and saving shows "Choose per hour or per year." and `updatePostingAction` is not called. Red with `posting-form.tsx:61` reverted to `?? "hour"` (`expected 'hour' to be ''`); green restored.
 - **N1 (commit `fix(careers)`):** `handlePaste` now closes a converted block with a blank line when non-whitespace text follows the caret on the same line, dropping the spaces that separated them. The caret stays at the end of the pasted block. The `:116` expectation became `…- Two\n\nafter`; a new red-first test pastes a heading into "Before after". `e2e/careers.spec.ts` pastes into an empty textarea, so it is unaffected.
 - **Gate:** typecheck, lint, `npm run check`, full unit suite (622 files passed, 9520 tests) all green.
+
+---
+
+# Phase 5: Verification, run 4 (qa)
+
+**Date:** 2026-10-26
+**Verified by:** qa
+**Tree:** `pipeline/careers` at `197d235` (`b5d461d` test, `197d235` fix), in worktree `/Users/cshenso/git/presby-platform/presby-careers`. The worktree was clean before and after, HEAD did not move, the stash list is empty (`git stash` was not used), and I edited no files.
+
+**Scope run (scoped re-check of run-3 Finding 1 and the N1 ruling):**
+- **Mutations:** run in a `git archive 197d235` scratch copy at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-r4/tree`, using a symlinked `node_modules`. After each mutation I checked the four touched files were byte-identical to HEAD (`cmp` against `git show 197d235:`), then deleted the copy by its literal path.
+- **In full, on the worktree:** typecheck, lint, `npm run check`, and the full unit suite.
+- **e2e: not run.** I grepped `e2e/` for paste assertions and found one, which the change cannot affect (see End-to-End Tests).
+- **Not re-run:** the DB-backed suites, `test-rls*.sql`, the e2e lanes and the browser walk. The diff touches only `description-editor.tsx` and two unit test files. No migration, `src/lib/db/`, `authz.ts`, layout, shared component, fixture, route or action is touched. Run 3's results (careers e2e 24/24, prod-lane hydration 3/3, the live walk) stand for everything else. No dev server was started, so I did not touch flags.
+
+**Disk:** 560 GiB free.
+
+## Type Check
+
+- `npm run typecheck`: PASS.
+- `npm run lint`: PASS (`--max-warnings=0`).
+- `npm run check`: all eight tripwires passed.
+
+## Unit Tests
+
+- 622 files passed, 85 skipped. The skipped files are the DB-gated set, the same count as run 3.
+- 9,520 tests passed, 0 failed, 2,597 skipped. That is run 3's 9,517 plus the 3 new tests.
+
+## End-to-End Tests
+
+Not run, by scope. The grep for `paste|clipboard|text/html` in `e2e/` found one assertion on paste output: `e2e/careers.spec.ts:217`.
+- It runs `description.fill("")` and then pastes, so the textarea is empty.
+- That makes `before` and `after` both `""`, so neither the leading nor the trailing boundary applies, and the expected value cannot change.
+- The other hits are not paste-into-editor assertions: the TOTP code-entry specs, a calendar clipboard read, and content-type checks in `e2e/support/custom-hosts.ts`.
+
+## Regression Tests Added (failing-first, reproduced independently)
+
+**Finding 1: the edit path of the pay-unit fix.** The test is at `src/app/(org)/o/[slug]/admin/careers/posting-form.test.tsx:221`.
+
+| Run | Result |
+|---|---|
+| HEAD | green (`posting-form` + `description-editor`: 41/41) |
+| M3: `posting-form.tsx:61` reverted to `posting.payUnit ?? "hour"` | **red**: `expected 'hour' to be ''` (1 failed, 23 passed) |
+| M3 with the `unit.value` assertion (`:224`) also removed from the scratch test | **still red**: "Choose per hour or per year." is never shown |
+
+The second M3 row matters. The test does not just echo the literal on line 61; it also fails on the behaviour the fix guarantees (an amount with no chosen unit is refused). Run 3's M3 survivor is now caught.
+
+**N1: the trailing paste boundary.** The tests are in `src/app/(org)/o/[slug]/admin/careers/description-editor.test.tsx`.
+
+| Run | Result |
+|---|---|
+| `description-editor.tsx` from `197d235^`, HEAD tests | **red, 2 tests:** the updated `:116` mid-line test (`…- Two after`) and the new heading test (got `'Before \n\n## Dutiesafter'`) |
+| HEAD | green, 17/17 |
+
+The new "no trailing boundary at end of line or blank rest of line" test passes on the old source too. That is expected: it guards against the fix over-applying, and M9 below shows it does that job.
+
+**Single mutations on the HEAD fix** (each restored and confirmed green afterwards):
+
+| Mutation | Result |
+|---|---|
+| M8: drop the leading-whitespace strip on `after` | red: `:116` |
+| M9: `glued` tests the whole remainder instead of the rest of the line | red: the "end of a line / blank rest" test |
+| M10: caret placed after the trailing boundary | red: the heading test's `selectionStart` |
+
+## Coverage on Critical Modules
+
+Not re-measured. `permissions.ts`, `two-factor.ts` and `flags.ts` are untouched.
+
+## Feature-Gate Audit
+
+**No protected routes touched.** The diff is a client paste handler and two unit test files. There is no `route.ts`, no `"use server"` action, no `proxy.ts` change and no schema change.
+
+## Copy Truthfulness
+
+- [x] **No user-facing string added or changed.** The added lines are test fixtures, a code comment and one expression in `handlePaste`.
+- **copy truthfulness: PASS (none added)**
+
+## Findings
+
+**None blocking.** Finding 1 is closed: the edit-path test goes red under M3, including on its behavioural assertion alone. N1 is implemented as ruled and pinned by tests that fail on the old source and under three single mutations.
+
+**N4 (non-blocking, follow-up candidate): a pasted paragraph at the end of a line merges with the next line.**
+- When the caret is at the end of a line and the next line has text, the trailing side adds no boundary. This case is pinned as intended: `"Intro\n\n## Duties\nNext line"`.
+- I ran the cases through site-kit's `parseBlocks` (`node_modules/presby-site-kit/dist/markdown.js:69`).
+- A pasted heading or list closes on its own: `<h2>Duties</h2><p>Next line</p>` and `<ul>…</ul><p>Next line</p>`. So the heading-swallow class N1 was about is closed.
+- A pasted `<p>` does merge with the line after it: `<p>Pasted para Next line</p>`. The leading side already handles the mirror case (it adds `\n` after a single newline, which run 3's M7 guards); the trailing side does not.
+- This is minor and visible in the live preview. It can join the paste follow-up line at integration.
+
+N2 (aria-invalid/aria-describedby on the pay fields) and N3 (the shared `Input` is 36px) stand as TODO lines at integration, per the orchestrator's run-3 rulings.
+
+## Verdict
+
+**PASS.**
+- Finding 1's regression test fails with `posting-form.tsx:61` reverted and passes on HEAD.
+- The N1 trailing-boundary tests fail against `197d235^` and pass on HEAD.
+- Typecheck, lint, the eight tripwires and the unit suite (9,520 passed, 0 failed) are green.
+- No e2e assertion depends on the changed paste path.
+
+This is not auth-touching. The e2e, DB-backed and browser results rest on run 3 and the PR's CI, as scoped above.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 4, scoped: run-3 Finding 1 + N1) | qa | Complete. M3 now red, including on behaviour alone. N1 red on `197d235^` (2 tests), green on HEAD. 3 further mutations killed. Typecheck, lint, check and unit 9,520 green. e2e paste assertion unaffected, so not run. | PASS | 2026-10-26 |
+
+**Handoff:** **analyst (Phase 6)** for a short re-close covering the edit-path test and the N1 trailing boundary. At integration, the orchestrator adds N2, N3 and N4 to `docs/TODO.md`.
+
+## Orchestrator close-out (2026-10-26)
+
+Phase 6's SHIP WITH NOTES (2026-10-26) stands. The fixes after it (findings 5–7, the edit-path test, N1) are exactly what Phase 6 and QA asked for, verified by QA runs 3–4 (PASS); no second analyst pass is run (explicit notation, not a silent skip). Ready for integration as **0.47.0** after parish 0.45.0, developer portal 0.46.0, F289 0.46.1 and site ingest 0.46.2. TODO lines at integration: N2 (pay-field aria), N3 (shared `Input` 36px), N4 (pasted paragraph merges with the next line), plus Phase 6's follow-up list.

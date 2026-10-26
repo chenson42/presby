@@ -18,7 +18,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete (parent log): R1–R15, Q1–Q14 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
-| 3 — Technical design | tech-lead | Complete; implementer named per batch; eight items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note) | Design complete | 2026-10-25 |
+| 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12 | Design complete | 2026-10-25 |
 | 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). Batches 1b, 2b (waits on F289), 3–7 pending | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
@@ -466,6 +466,7 @@ Every claim names the test that pins it, or says **unverified**. File names are 
 9. The toggle is enforced in TypeScript only.
 10. Staff reimbursement under an accountable plan, vendor 1099 thresholds and vendor aggregation are not handled (R14); no string claims compliance.
 11. Free text is plain text, cleaned of control characters; it is not scanned for sensitive content.
+12. Ending a seven-key `treasurer` grant on one team page checks only that page's own manage key, so it can leave the other module's manage key with no holder when a different role keeps the first. Possible, audited (`tenant.role.revoked`), recoverable only through the platform operator, not prevented (Phase 3 amendment, ruling 4; confirmation item 9).
 
 ## Copy
 
@@ -763,6 +764,7 @@ Footnote on all: `Sign in to see the details. This message doesn't include any.`
 6. **Production counts (Phase 2 asked):** designation-minted `treasurer` copies (the 0074 backfill count), baseline `member` grants, and blob referrers; read-only.
 7. **Operator Q6 follow-up:** does the congregation have a second person who can hold the payment role? Not blocking; the software says plainly when it is missing.
 8. **Rule 16, orchestrator:** the `e2e96` fixture prefixes (P3-24); F-numbers for F3a–F3c; a migration number for Increment 2; merge of F289's call-site rows into the shared source-scan test; the `.integration.patch` files for `seed-dev.sql` and `test-rls.sql`.
+9. **Residual 12, operator:** a team-page revoke of the seven-key `treasurer` grant can leave the other module's manage key unheld; accepted by the tech-lead as a documented residual rather than blocked (Phase 3 amendment, ruling 4). *Default taken:* accepted.
 
 ## Proposed decision entries (for `docs/decisions.md` at integration, newest first)
 
@@ -1040,3 +1042,104 @@ Save semantics for the form: generate `clientKey` once per mounted form. No `req
 4. **Date filter:** the treasurer list and CSV filter on the org-local date the request was submitted — accepted; Copy must say "submitted".
 5. **Detail shape:** `presby_reimbursement_detail`'s fields are frozen as built; Batch 2a pins them.
 6. **Environmental:** the five `test:db` failures expecting `localhost:3000` are caused by the worktree's `NEXT_PUBLIC_APP_URL` port (seen in F289 too); not a treasury defect. Tracked as a test-environment TODO at integration.
+
+---
+
+## Phase 3 — amendment (Copy gaps from Batch 2a)
+
+**Date:** 2026-10-26 · **Author:** tech-lead · **Class:** Copy amendment inside the Treasury Inc 1 Feature plus one residual ruling; no schema, route, permission, flag or audit change · **Inputs:** Batch 2a's "Copy gaps" 1 to 3 and loop-back note 2 (this log), the live tree at `0f35f10` on `pipeline/treasury` (`src/lib/org-portal/tiles.ts`, `src/lib/reimbursement/{copy,gate,messages,pickers}.ts`, `src/app/(org)/o/[slug]/reimbursements/actions.ts`, `src/lib/giving/action-gate.ts`, `src/lib/treasury/team.ts`, `drizzle/0059` and `0060`). Nothing outside this work-log was edited. The Copy section's rule stands: an implementer who needs a string not in it stops for a ruling; this amendment is those rulings.
+
+### Rulings at a glance
+
+| # | Gap | Ruling |
+|---|---|---|
+| 1a | Member tile description | **Stands** as the implementer proposed |
+| 1b | Treasurer tile description | **Changes**: it names its audience, because every member sees the tile |
+| 2 | Gate boilerplate reused from giving | **Stands**; the five strings are now ruled Copy |
+| 3a | Withdraw success | New: `Request withdrawn.` |
+| 3b | Beneficiary search | No success string. Behaviour below 2 characters, the screen-reader count, the failure sentence and the chosen-person control are ruled |
+| 3c | Withdraw reason | **No field in Increment 1**; no string; the action's optional `reason` stays and the UI never sends it |
+| 3d | `invalid_shape` / `kind_invalid` | **Stands** (the save-failed sentence), with one UI condition |
+| 4 | Orphaned manage key (loop-back note 2) | **Accepted as documented residual 12**; no stricter rule; no new sentence |
+
+### What changes in code (small; batch owners named)
+
+1. **Batch 3 (api-developer), `src/lib/org-portal/tiles.ts`:** replace the `reimbursements-admin` description with the string below; delete the `COPY GAP` comment block (`:431-433`); in `tiles.test.ts` add an exact-text assertion for both reimbursement descriptions (byte-pinned, as `copy.test.ts` pins the rest).
+2. **Batch 3 (api-developer), `src/lib/reimbursement/copy.ts`:** add `decision.withdrawn`, `form.searchFound(n)`, `form.searchFailed`, `form.changeBeneficiary` and `form.changeBeneficiaryLabel` with the strings below, pinned in `copy.test.ts`. Batch 5 imports them and types none of them.
+3. **Batch 4 (api-developer), `treasury/team.db.test.ts`:** one characterization case for residual 12 (below). No change to `team.ts`.
+4. **Batch 5 (ux-developer):** the withdraw dialog has no reason field and calls `withdrawRequestAction(slug, { requestId })`; the request form keeps every entry when a save returns `ok: false` (pinned by a `request-form` test).
+
+### The strings, exact, with the four checks (one paragraph per group)
+
+**Group T1: the two portal tile descriptions (gap 1).**
+
+| Tile | Label (Copy C2/C7 headings) | Description |
+|---|---|---|
+| `reimbursements` (`operate`) | Reimbursements | Ask to be paid back for something you bought for the church, or to pay a vendor. |
+| `reimbursements-admin` (`administer`) | Reimbursement requests | For the people who handle reimbursements. See every request, record payments, and choose which groups can receive requests. |
+
+**R.** Neither string says money is sent ("Ask to be paid back" is a request; C1 says the feature "doesn't send money") or that anyone may file (residual 4: an organization cannot narrow who may file). **S.** Neither asserts a state of a person, account, date or request; each describes its destination page (C2's lead, and the C7 queue plus C9 settings). **A.** Tiles are permission-blind (DECISION-162, `docs/decisions.md:340`: "Everyone who can see the portal sees Administration when it is shown"; `visible-tiles.ts` reads no permission), so the audience of both strings is every member of a congregation with the toggle on, including regular attenders who may not file and members who hold no treasury key. The member string mirrors C2's lead, which is also shown to everyone, and the page itself explains `cannotFile`. The treasurer string as proposed ("See every request, record payments...") promised a member what C7's forbidden page then denies; the ruled string says who the page is for, in C7's own phrase ("the people who handle reimbursements"), and promises nothing to the viewer. **N.** Grepped `src` for "paid back", "pay you back" and "reimburs": the only live strings outside the module are `tiles.ts`, `org-features.ts` (C1) and `org-feature-warnings.ts` (C1); none is stale. The `giving-admin` tile (`tiles.ts:414`, "Connect Stripe, record gifts, manage funds and donors, and issue year-end statements.") has the same permission-blind shape; out of scope, left unchanged.
+
+**Group T2: the gate boilerplate (gap 2).** Ruled as Copy, `COPY.gate` (`copy.ts:422-428`):
+
+| Key | String | Returned when |
+|---|---|---|
+| `signedOut` | You must be signed in to do that. | no session (`gate.ts:195`) |
+| `noOrgAccess` | You don't have access to that organization. | `resolveOrgContext` is not `ok`, or `OrgAccessError` (`gate.ts:210`, `:221`, route `:305`, `:315`) |
+| `notPermitted` | You don't have permission to do that. | no key held (`gate.ts:234`), or the definer's `denied` (`actions.ts:68`, `:91`, `:124`) |
+| `accessCheckFailed` | We couldn't check your access just now. Try again in a moment. | any other error reading the gate (`gate.ts:222`, route 503) |
+| `twoFactorRequired` | Please confirm your two-factor code to continue. | stale or missing 2FA claim (C4, already ruled) |
+
+The toggle-off and not-applicable refusals in actions already reuse C2's `Reimbursements aren't turned on for {org}.` and `Reimbursements aren't available for this kind of organization.` (`gate.ts:226-229`); those are in Copy and stand.
+
+**R.** Nothing here denies a residual or a Phase 2 ruling. **S.** Each string is returned for exactly the check beside it; `accessCheckFailed` is a read failure and a database blip is never reported as "not allowed" (the gate's own contract). `notPermitted` after a `denied` is true: the database refused the caller's identity (no live person here, or `may_file` false). `noOrgAccess` is one string for a missing slug, a forbidden organization and an ended membership, so an action cannot reveal which slugs are tenants (DECISION-040); the pages that name and date an ended membership are a different surface. **A.** Read by the member whose session lapsed, whose membership ended or who may not file; none instructs anything they cannot do; "Try again in a moment" appears only on the read failure. **N.** The same literals are the house gate strings in more than thirty `actions.ts` files (for example `giving/action-gate.ts:82-123`, `tickets/actions.ts:62-67`, `admin/features/actions.ts:29-34`); `copy.test.ts` asserts each appears in giving's file, so a rewording there fails this test and forces a deliberate choice. None is made stale.
+
+**Group T3: withdraw, beneficiary search, the chosen person, shape failures (gap 3).**
+
+| Where | String |
+|---|---|
+| Withdraw succeeded (toast; the dialog closes) `COPY.decision.withdrawn` | Request withdrawn. |
+| Beneficiary search, fewer than 2 characters after cleaning | Nothing is shown and no request is made (the server already returns an empty list, `pickers.ts:43`). `No match.` is **never** shown for a query too short to search |
+| Search ran, nothing came back (C3, unchanged) | No match. (with the standing hint "Only people who appear in the directory can be chosen."); `role="status"` |
+| Search returned people | the list (at most 8), and a visually hidden polite status `COPY.form.searchFound(n)`: `1 person found.` / `{n} people found.` |
+| Search failed: a gate refusal | the action's own `error` text (T2), shown under the box |
+| Search failed: the call threw or the network dropped `COPY.form.searchFailed` | We couldn't search just now. Try again. |
+| After a person is picked: the name replaces the search box, with a button `COPY.form.changeBeneficiary` (accessible name `COPY.form.changeBeneficiaryLabel`) | Change (accessible name: Change who we are paying back) |
+| Withdraw reason | No field, no label, no string. The UI sends no `reason`; the action keeps accepting an optional one up to 300 characters, and its `reason_too_long` refusal is unreachable from the UI |
+| `invalid_shape`, `kind_invalid` (save refusals, `messages.ts:32-33`) | We couldn't save that. Your entries are still here. Try again. (C3, unchanged) |
+
+**R.** "Request withdrawn." claims a status only and does not say "deleted" (nothing is deleted, EC34; C5's banner and history say the same); "No match." with its hint states residual 6 (a hidden member cannot be named). Nothing claims the search is exhaustive or private. **S.** Withdrawn: the toast follows `{ ok: true }` from the withdraw definer (status moved to `withdrawn`, event written, same transaction); an already-withdrawn or already-moved request is `not_withdrawable` and answers the neutral "This request isn't available.", never the success toast (`actions.ts:125-130`, at `0f35f10`), so the toast is never shown for a no-op. "No match." is shown only for a search that ran (length at least `BENEFICIARY_QUERY_MIN`); an empty list also results from a caller without `request_for_others` or the directory view, but such a caller never sees the box (C3 shows "Pay someone else back" only to holders), and the hint explains the rest. The count is `candidates.length`. "Your entries are still here" is a UI guarantee, not a database fact: the request form must not reset on `ok: false`, pinned in Batch 5's `request-form` test. `invalid_shape` and `kind_invalid` arise only from a tampered post or a disagreement between the TypeScript schema and the definer (a defect); the sentence claims only that the save failed and that entries were kept, and "Try again" may not help in the defect case, which is accepted. **A.** The requester or beneficiary (withdraw), the member holding `request_for_others` (search, picked person). Every instruction (try again, retype, change) is within their power; "Let the church office know" is not used here. **N.** Toast precedent, deliberately plainer: `admin/filings/withdraw-dialog.tsx:74` ("{year} filing withdrawn.") and `admin/community/pending/decision-copy.ts:94` ("Proposal withdrawn. {name} is no longer waiting for the Session."); C6's other results are bare ("Approved.", "Sent back."), so no name or amount goes in a toast. C3's `We couldn't save that...` is for saving only and is not reused for search. No existing string is made stale.
+
+### Ruling 4: the orphaned manage key (residual 12; operator confirmation requested)
+
+**The case, restated.** `revokeTreasuryRole` blocks ending the last holder of **its own surface's** manage key (EC31, `team.ts:401-426`). A seven-key `treasurer` grant carries both modules' manage keys. If another role keeps one module's manage key (for example a custom role that holds `giving.manage`), ending the sole `treasurer` grant on that module's team page is allowed, and the other module's manage key (`reimbursement.manage`) is left with no holder; the reverse holds on the Reimbursements page. Nobody remaining can open that module's settings or team page.
+
+**Ruling: accept as a documented residual, `paper`, and add no stricter rule.** Reasons:
+
+1. **The stricter rule fails the audience check.** To block the case, the Giving page would have to say `That would leave no one able to manage reimbursements. Give the role to someone else first.` (C9's existing sentence, so no new Copy would be needed; the implementer's "one new sentence" is half right, because both modules' sentences already exist: the reverse is `That would leave no one able to manage giving. Give the role to someone else first.`, `giving/team/actions.ts:101`). But the person ending the grant is a `giving.manage` holder who, in exactly this case, does not hold the seven keys, so the subset rule (you can only hand out keys you hold) means they cannot follow the instruction. A sentence that tells the blocked viewer to do what they cannot is a Phase 3 defect.
+2. **It fails toward keeping access.** A departed treasurer's money keys would stay live until a platform operator intervened, because the team page could not end them. Permitting the revoke fails toward removing access, which is the safer direction; the loss is configuration reach, which is recoverable.
+3. **It couples two modules' guards** for a case that needs a custom role the congregation built on purpose; no member of the treasury team is stranded in the ordinary single-treasurer or two-treasurer setup.
+
+**Residual 12 (added to the Accepted residuals list above):** the orphan state is possible, detectable and recoverable but not prevented. **Detection:** `tenant.role.revoked` is audited with the grant id on both team pages (`giving/team/actions.ts:108`). **Recovery (read, not run):** a platform operator ends the remaining `giving.manage` holders on `/admin/organizations/<id>` (DECISION-194: reason required, audited, never a grant held through a derived group), which empties the treasurer slot (`presby_giving_manage_holder_count` gates `has_holders`, `drizzle/0059:712`, `:1072`; `0060:148-215`), and then re-designates a treasurer, whose acceptance mints a fresh seven-key role (0074). If the remaining holder holds the key through a derived group, the platform path cannot end it and an engineer is needed. The founding administrator cannot repair it (F138). The end-to-end recovery is **unverified** (no test runs it).
+
+**Pinned, so the residual is deliberate rather than accidental:** Batch 4 adds `treasury/team.db.test.ts › ending the sole treasurer grant on one surface leaves the other module's manage key unheld (residual 12)`, asserting the revoke succeeds and the key has zero holders; a future decision to add the stricter rule changes this test on purpose. **Copy guard:** the two last-manager sentences stay scoped to their own module and no release note or help text may say the treasury team can never be left without a manager. C13 line 5 and the rest are unaffected. **Not accepted by the operator yet:** listed as item 9 in "Needs a confirmation". **Rule 10 (orchestrator, shared file):** one line in `docs/TODO.md` at integration ("residual 12: a team-page revoke can orphan the other module's manage key; recover via platform"). **Draft decision (number pre-assigned by the orchestrator at integration):** *Ending a treasury grant is checked against its own module's manage key only; the cross-module orphan is accepted as residual 12 (fail toward removing access; the stricter sentence cannot be followed by the viewer it blocks).*
+
+### Blast radius
+
+Existing assertions this amendment alters: `src/lib/org-portal/tiles.test.ts` (descriptions are non-empty only, `:164-168`; add the exact-text pins); `copy.test.ts` (new keys). Nothing else asserts the old treasurer tile text. Existing e2e specs: none assert either tile description (the four reimbursement specs are Batch 7). Flags each affected spec depends on: the per-org toggle `org_portal.reimbursement` only, which Batch 7's specs set through `e2e/support/flags.ts` or the fixture's `setToggle`; nothing is added to `scripts/ci/e2e-baseline-flags.sql`.
+
+### Carry-forward
+
+| Item | Addressed or deferred |
+|---|---|
+| Copy gaps 1 to 3 (Batch 2a) | Groups T1 to T3 above; each closed |
+| Loop-back note 2 (orphaned manage key) | Ruling 4: accepted as residual 12, **proposed, not yet accepted by the operator** (item 9) |
+| Loop-back note 3 (giving team strings still say "outside Giving") | Unchanged: Batch 6 per C12 |
+| Loop-back note 4 (`treasurer-designation-section.tsx`, `designation-holder-copy.ts`) | Unchanged: Batch 6 per C12 |
+| DECISION-162 (tiles are permission-blind) | T1's treasurer string is written for that audience |
+| DECISION-040 (neutral miss) | T2's `noOrgAccess` is one string for every non-ok resolve |
+| Residuals 4, 6, 8 and 9 | Not denied by any string here (T1, T3) |
+| F138 (founding administrator cannot repair treasury keys) | Stated in residual 12; unchanged |
+| Anything deferred | Nothing new, except the operator's confirmation of residual 12 |
+
+**Implementer:** per the table above, api-developer for Batches 3 and 4 and ux-developer for Batch 5. Status: Phase 3 amendment complete, 2026-10-26; one new item on the confirmation list.

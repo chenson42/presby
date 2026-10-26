@@ -25,6 +25,7 @@
 | 4 — Phase 5 run 1 fix (copy) | full-stack-developer | Complete: snapshot carries `minor`/`directoryWithheld`/`websiteWithheld`; every R-a/R-b/R-c string verbatim; "Clear for website" control and `clear` dialog variant; `countChosenPhotos` (distinct); T1-T11 failing-first; gates green; back to Phase 5 (scoped re-run) | Ready for QA | 2026-10-26 |
 | 3 — ruling on fix-pass deviation | tech-lead | Complete: `websiteIsWithheld` helper (adds `directoryWithheld`) confirmed, no reachable-data change; under-18 checkbox accepted with a TODO candidate; no code change. See the last section of this log | Confirmed; back to Phase 5 (scoped re-run) | 2026-10-26 |
 | 3 — amendment (Phase 5 run 2) | tech-lead | Complete: (d) ruled (`remove` for an unlisted person reuses `removeIsWebsiteWithheld`; `removeIsWebsite` hedged to "can no longer show it"); `websiteStops` kept; QA note 1 routed through the website-withheld answer; effect-verb sweep also changed `removeIsFallback`, `websiteNotListed` and one status line; tests T12-T19; implementer full-stack-developer; no schema, route, flag, permission or e2e change. See the last section of this log | Design complete; back to Phase 4 | 2026-10-26 |
+| 4 — Phase 5 run 2 fix (copy) | full-stack-developer | Complete: `websiteNotShowing` (unlisted or withheld) drives the remove sentence; `removeIsWebsite`, `removeIsFallback`, `websiteNotListed` verbatim from R-d2/R-d5/R-d4; hidden photo known through the directory answer routes both designate dialogs to `websiteHidden`/`websiteMerged`; `websiteLine` 4th `directoryHidden` parameter; T12-T19 red first (22 failing on c225091), green after; gates, unit 9,954, DB 267, e2e 5/5 and the 360 walk clean; no schema, route, action, flag, permission or e2e change | Complete; to qa for the scoped re-run | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1814,3 +1815,55 @@ Reading site publication or the `sites.*` flags into the snapshot (the hedges ma
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 3 — amendment (Phase 5 run 2) | tech-lead | Complete: (d) ruled (`remove` for an unlisted person reuses `removeIsWebsiteWithheld`; `removeIsWebsite` hedged to "can no longer show it"); `websiteStops` kept; QA note 1 routed through the website-withheld answer; effect-verb sweep changed two further strings (`removeIsFallback`, `websiteNotListed`) and one status line; tests T12-T19; implementer full-stack-developer; no schema, route, flag, permission or e2e change | Design complete; back to Phase 4 | 2026-10-26 |
+
+---
+
+## Phase 4 — Phase 5 run 2 fix (copy)
+
+**Author:** full-stack-developer, 2026-10-26. **Trigger:** Phase 5 run 2 FAIL on copy truthfulness (d); spec is "Phase 3 — amendment (Phase 5 run 2)" above (R-d1 to R-d6, T12-T19). **Tree:** `pipeline/person-photos`, worktree `presby-photos`, Neon `pipeline-person-photos`. Code commit `36ddf2c`. No schema, route, action signature, flag, permission, audit or e2e change; no Rule 16 shared file touched.
+
+### Changes
+
+- `src/lib/person-photos/copy.ts`: `removeIsWebsite`, `removeIsFallback` and `websiteNotListed` replaced verbatim from R-d2, R-d5 and R-d4. `websiteStops` unchanged (R-d3).
+- `src/lib/person-photos/consequences.ts`: new `websiteNotShowing(state)` = `websiteIsWithheld(state) || !state.listed`, with the comment that listing is a roster-function gate the SQL core does not apply and publication is not read. The `remove` row chooses `removeIsWebsiteWithheld` when it holds, else `removeIsWebsite`. Both designate branches (attested directory, website) take the withheld line when `websiteWithheld !== null || directoryWithheld !== null`; `websiteWithheldLine` gives `websiteMerged` for merged, else `websiteHidden`. Output for a listed person with a hidden photo known through the directory row: `[directoryHidden, websiteHidden]` (attested directory) and `[websiteHidden]` (website); merged plus directory hide gives `[directoryHidden, websiteMerged]`.
+- `src/lib/person-photos/status-lines.ts`: `websiteLine(first, status, minor = false, directoryHidden = false)`; in the unattested-remedy branch the order is minor, then `directoryHidden` giving `WEBSITE_LINES.hide(first)`, then `WEBSITE_LINES.unattested`. `statusLines` passes `input.directory.withheld === "hide_photo"`. No component source changed: the dialogs read their sentences from `consequencesFor`.
+
+### Tests and failing-first evidence
+
+Tests were written and run against c225091's source before any source edit. Output: `scratchpad/photos-fix2/red-all.txt`.
+
+| Test | File | Red on c225091 |
+|---|---|---|
+| T12 (unlisted remove, two rows) | `consequences.test.ts` | 2 failed (returned `removeIsWebsite`) |
+| T13 (literal R-d2 and R-d5 text) | `consequences.test.ts` | 2 failed (new strings absent) |
+| T14 (hidden photo known through the directory answer, three rows) | `consequences.test.ts` | 2 failed, plus the earlier row that expected `[directoryHidden, directoryAlsoOnWebsite]`, now `[directoryHidden, websiteHidden]` |
+| T15 (i) (ii) (iii), full product | `consequences.test.ts` | 3 failed |
+| Existing rows moved to the literal new strings (`websiteNotListed` x2, remove x3) | `consequences.test.ts` | 5 failed |
+| T16 (exact new text, old text absent, `websiteStops` pinned) | `copy.test.ts` | 2 failed |
+| T17 (unlisted and listed remove dialogs) | `confirm-dialogs.test.tsx` | 2 failed |
+| T18 (website dialog and ticked clear dialog, hidden photo known) | `designate-dialog.test.tsx` | 2 failed |
+| T19 (`directoryHidden` parameter, minor precedence, remedy unchanged without it) | `reader-derive.test.ts` | 1 failed |
+
+Total on the red run of the photo unit files: 5 files failed, 22 tests failed, 286 passed (the 51 skipped are the DB-backed files, which skip without env). All green after the fix: 13 files, 308 passed.
+
+### Commands and results (all in the worktree)
+
+- `npm run typecheck`, `npm run lint` (0 warnings), `npm run check` (8 of 8 tripwires): pass.
+- `rm -rf .next && npm run build`: pass.
+- `npm test`: 652 files passed, 96 skipped; 9,954 tests passed (9,936 before, plus the 18 new).
+- DB-backed, serial (`src/lib/person-photos`, `person-photos.db.test.ts`, `public-roster-photo.db.test.ts`, `src/lib/org-feature-warnings`): 12 files, 267 passed, 0 failed.
+- Flags reset to the CI baseline first (`scripts/ci/e2e-reset-flags.sql`, `-v pipeline_branch=1`; COMMIT, 10 keys).
+- Own dev server on :3620 (listener PID 27267, parent npx 27214; `AUTH_URL` and `E2E_BASE_URL` on :3620, `RATE_LIMIT_DISABLED=true`, `E2E_ALLOW_SHARED_DB=true`, the domains fakes and `CRON_SECRET`), `--project=chromium`: `e2e/person-photos.spec.ts` (360 and desktop, E4, toggle-off) and `e2e/hydration/person-photos-upload.spec.ts`: 5 passed, 1.4 min. E4 document 236,122 bytes. Server stopped by PID; :3620 confirmed free. The prod lane and custom-hosts roster spec were not re-run: no e2e, route or hydration source changed (QA's scoped list).
+- Walk at 360 and 1280 px (scratch script `scratchpad/photos-fix2/tools/walk3.mts`, adapted from QA's, never committed; its own fixture org with a live custom host, synthetic images; fixture torn down, leftover 0/0/0; flags restored). Screenshots and `results.json` in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/photos-fix2/walk/`:
+  - **Unlisted person, website photo, Remove** (`360-N-remove-dialog.png`, `1280-N-remove-dialog.png`): "It is also their website photo, which the website isn't showing at the moment." No "will leave" and no "can no longer show". The page reads "Website: the photo marked "Website" below." beside the not-listed line. Stop using reads "The website will no longer use this photo. The website will show no photo for Unlisted." followed by the caches sentence.
+  - **Listed person, website photo, Remove** (`360-L-remove-dialog.png`): "It is also their website photo, so the public website can no longer show it."
+  - **Hidden photo, listed, unattested directory photo** (`360-HU-clear-dialog.png`, `1280-HU-clear-dialog.png`): the status page now reads "Website: not shown, because Hidunat has hidden their photo." (it showed the "Clear for website" remedy before R-d6). The ticked clear dialog shows `directoryHidden` and `websiteHidden` and not the hedged "can also appear"; the confirm is enabled once ticked and fits the viewport.
+  - **Hidden photo, listed, website photo**: the website dialog shows `websiteHidden`, the ticked directory dialog shows `websiteHidden`, Remove shows the withheld sentence.
+  - No horizontal overflow, no native dialogs, every dialog inside the viewport at both widths. Dialog buttons read 42 px in the first frame of the zoom-in animation and settle at 44 px or more (the same observation as run 2's notes); the screenshots are taken after the animation.
+
+### Notes for QA
+
+- The T15 (ii) test also asserts that `removeIsFallback` never appears for an unlisted or withheld person; true by construction (`directoryPhotoServesWebsite`), so it is a regression guard rather than a new rule.
+- The R-d6 status-line change makes `websiteLine`'s fourth parameter default `false`, so any caller that omits it keeps today's behaviour; the only caller is `statusLines`.
+- `docs/TODO.md`, `docs/decisions.md` and the other Rule 16 files were not touched; the amendment's proposed decision text, finding, and the touch-target TODO candidate remain for the orchestrator.
+- Handoff: qa, scoped Phase 5 re-run 3 (the consequence unit files, `confirm-dialogs`, `designate-dialog`, and the remove-dialog walk for an unlisted person and the hidden-photo clear dialog at 360 and 1280).

@@ -46,7 +46,6 @@ import {
   createSecondPayer,
   makeChargeable,
   noHorizontalScroll,
-  personIdForUser,
   pid,
   REIMB_NAMES as NAMES,
   rosterUserId,
@@ -96,7 +95,11 @@ test.describe("Reimbursements: the role bundle, from a real treasurer invitation
     who.treasurerUser = await rosterUserId(sql, "mfa-enrolled");
     who.requesterUser = await rosterUserId(sql, "member");
     who.chairUser = await rosterUserId(sql, "presbytery-nogrant");
-    who.chairPerson = await personIdForUser(sql, who.chairUser);
+    // The chair is a throwaway person of this spec's own (`pid(4)`, stamped at insert, in the fixed-id set the
+    // sweep and teardown delete), linked to the seeded chair ACCOUNT. The seeded permanent person is never
+    // put in the invitation org: that fixture's teardown stamps every member `deletable_until`, and a person
+    // who keeps a seeded membership is then left stamped (F-QA-1, fixture-deletable.test.ts).
+    who.chairPerson = pid(4);
     const wren = await createSecondPayer(sql, { signsIn: true });
     who.wrenUser = wren.id;
     who.wrenPerson = pid(41);
@@ -108,7 +111,8 @@ test.describe("Reimbursements: the role bundle, from a real treasurer invitation
     await sql`
       insert into people (id, user_id, first_name, last_name, deletable_until)
       values (${who.requesterPerson}::uuid, ${who.requesterUser}::uuid, 'Tamsin', 'Brightwater', now() + interval '3 hours'),
-             (${who.wrenPerson}::uuid, ${who.wrenUser}::uuid, 'Wren', 'Podmore', now() + interval '3 hours')`;
+             (${who.wrenPerson}::uuid, ${who.wrenUser}::uuid, 'Wren', 'Podmore', now() + interval '3 hours'),
+             (${who.chairPerson}::uuid, ${who.chairUser}::uuid, 'Marlowe', 'Fenwick', now() + interval '3 hours')`;
     for (const person of [who.requesterPerson, who.wrenPerson, who.chairPerson]) await addMembership(sql, org.orgId, person, "regular", "active");
     await createGroup(sql, org.orgId, { id: ids.property, name: NAMES.property, chairPersonId: who.chairPerson });
     await createGroup(sql, org.orgId, { id: ids.worship, name: NAMES.worship });

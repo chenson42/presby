@@ -191,7 +191,7 @@ function groupSeedPlan(
 ): Array<{
   groupTypeKey: "court" | "roster";
   name: string;
-  derivedFrom: "session" | "diaconate" | "active_membership";
+  derivedFrom: "session" | "diaconate" | "deacons_moderator" | "active_membership";
 }> {
   const activeMembership = {
     groupTypeKey: "roster" as const,
@@ -211,6 +211,15 @@ function groupSeedPlan(
       groupTypeKey: "court",
       name: "Board of Deacons",
       derivedFrom: "diaconate",
+    },
+    // The Moderator of the Board of Deacons seat (drizzle/0068, DECISION-242):
+    // a `roster` group, not a `court` - it is a seat, not a deliberative body.
+    // Filled only by `officer_terms` (`deacons_moderator`); the baseline role
+    // below is bound to it.
+    {
+      groupTypeKey: "roster",
+      name: "Board of Deacons Moderator",
+      derivedFrom: "deacons_moderator",
     },
     activeMembership,
   ];
@@ -266,7 +275,7 @@ export function baselineRoleSeedPlan(
   key: string;
   name: string;
   permissionKeys: readonly string[];
-  boundToDerivedFrom: "active_membership" | "session";
+  boundToDerivedFrom: "active_membership" | "session" | "deacons_moderator";
 }> {
   const member = {
     key: "member",
@@ -284,6 +293,16 @@ export function baselineRoleSeedPlan(
       name: "Session member",
       permissionKeys: ["roll.approve"],
       boundToDerivedFrom: "session" as const,
+    },
+    // The seat role (drizzle/0068, DECISION-242): `parishes.assign` ONLY, held
+    // through the Moderator of the Board of Deacons seat. The key is seat-only:
+    // the database refuses it on any other role and the role on any grant
+    // except this group arm.
+    {
+      key: "deacons_moderator",
+      name: "Moderator of the Board of Deacons",
+      permissionKeys: ["parishes.assign"],
+      boundToDerivedFrom: "deacons_moderator" as const,
     },
   ];
 }
@@ -435,7 +454,7 @@ export async function createOrganization(
 
       // Baseline role seed (DECISION-100). The bound group is found by
       // `derivedFrom`, never by array position — a congregation's plan has
-      // three groups, a non-congregation's plan has one, at different
+      // four groups, a non-congregation's plan has one, at different
       // positions.
       const rolePlan = baselineRoleSeedPlan(input.organizationType);
       for (const r of rolePlan) {

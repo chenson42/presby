@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/domain/authz";
 import { groups } from "@/lib/db/domain/groups";
 import { memberships, people } from "@/lib/db/domain/people";
+import { isSeatOnlyPermissionKey } from "@/lib/parishes-pure";
 
 /**
  * Tenant role administration — P9 (`docs/work-log/2026-08-19-tenant-
@@ -371,7 +372,11 @@ export type GrantResult =
   | { kind: "forbidden" }
   | { kind: "escalation_denied"; missingPermissions: string[] }
   | { kind: "invalid_role" }
-  | { kind: "invalid_target" };
+  | { kind: "invalid_target" }
+  /** The role carries a seat-only permission (`parishes.assign`): it is held
+   * through a recorded officer seat, never granted by hand (DECISION-242,
+   * F260). Whatever the grantee. */
+  | { kind: "seat_only_role" };
 
 /**
  * Grants `input.roleId` to `input.target` at `organizationId`.
@@ -443,6 +448,26 @@ export async function grantRole(
       return { kind: "invalid_role" };
     }
 
+    // The role's own keys, read once: a role carrying a seat-only key is
+    // refused for every grantee. The one legitimate grant (the seat group) is
+    // made by provisioning and the migration backfill, never by this function.
+    // The drizzle/0068 grant guard is the backstop.
+    const targetPermsResult = await tx.execute(sql`
+      select permission_key
+        from app_role_permissions
+       where role_id = ${input.roleId}::uuid
+    `);
+    const targetPermKeys = (
+      (
+        targetPermsResult as unknown as {
+          rows?: Array<{ permission_key: string }>;
+        }
+      ).rows ?? []
+    ).map((r) => r.permission_key);
+    if (targetPermKeys.some(isSeatOnlyPermissionKey)) {
+      return { kind: "seat_only_role" };
+    }
+
     if (input.target.kind === "person") {
       const [membership] = await tx
         .select({ id: memberships.id })
@@ -473,19 +498,6 @@ export async function grantRole(
         return { kind: "invalid_target" };
       }
     }
-
-    const targetPermsResult = await tx.execute(sql`
-      select permission_key
-        from app_role_permissions
-       where role_id = ${input.roleId}::uuid
-    `);
-    const targetPermKeys = (
-      (
-        targetPermsResult as unknown as {
-          rows?: Array<{ permission_key: string }>;
-        }
-      ).rows ?? []
-    ).map((r) => r.permission_key);
 
     // DECISION-106 ruling 1: the subset check itself was extracted into
     // src/lib/authz.ts's assertPermissionSubset() so role-definitions.ts's

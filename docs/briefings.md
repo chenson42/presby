@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=49c4013 -->
+<!-- covers: decision=224 commit=790a931 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,8 @@ is checked.*
 ---
 
 ## 2026-10-25
+
+- [ ] **`decision` · Congregations can now set up deacon districts and put each household in one; it is off everywhere until a congregation turns it on (0.45.0; DECISION-242 to DECISION-245).** The Board of Deacons Moderator is a dated seat recorded under Officers, and that seat alone, or the people-management permission, can move households; no named person, commission or delegation can be given it. **A gap you accepted:** until Community 3a's migration 0066 lands, code with direct database write access could add a name to the seat's roster, or relabel the group, without a term (the Session roster is the same; no screen does it). **You must:** snapshot production, read the pre-ship counts and apply 0068 before merging; the runbook is in the work-log. **The Parishes tab count now includes every household in a district**, so numbers may rise. No what's-new post until the first congregation turns it on. Open: first-day discoverability, 44px targets and the empty-state wording (N1 to N3 in `docs/TODO.md`).
 
 - [ ] **`decision` · The two-factor code is now sent the moment the sixth digit lands, on sign-in and on the account setup screen (0.44.1; DECISION-257).** Typing, pasting or autofilling six digits checks the code with no button press; a wrong code empties the boxes and refocuses the first, and Verify stays as the fallback. A paste that drops a digit waits for the button. **What it costs:** a mistyped last digit is sent at once and spends one of the ten tries a minute, so expect more failed-attempt rows in the audit log. **One known hole:** a two-digit keyboard suggestion or drag into an already-filled box can still send a code with a wrong digit (same cost, tracked). **Owed to you:** publish the one-line what's-new post once live, and check on a real iPhone and Android phone and a screen reader; neither was possible in automated tests.
 

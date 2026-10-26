@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { blobAssets } from "@/lib/db/domain/assets";
 import { parseBlobKey } from "./blob-key";
@@ -11,7 +11,7 @@ import { parseBlobKey } from "./blob-key";
  * `blob_assets` is never queried directly outside this file (DECISION-030's
  * own rule: "a direct query against the blob table from a page or action is a
  * review failure"). Every caller goes through `store()`/`resolve()`/
- * `resolveMeta()`, and the anonymous public asset route goes through
+ * `resolveMany()`/`resolveMeta()`, and the anonymous public asset route goes through
  * `resolvePublic()`, which reaches the table only through one narrow
  * `SECURITY DEFINER` function (`presby_public_site_asset()`, drizzle/0072) -
  * a stricter form of the same rule: the route holds no query of its own and
@@ -29,9 +29,11 @@ import { parseBlobKey } from "./blob-key";
  * database property, not a convention here. The audience must be a string
  * LITERAL at every call site; `audience-callsites.test.ts` reads each one.
  *
- * The logo is the first real consumer (DECISION-055). `people.photo_key`
- * stays untouched here: a person's photo is served by `resolvePublic()` only
- * while a roster function lists it, and is stored `private`.
+ * The logo is the first real consumer (DECISION-055). A person's photo is
+ * stored `private` (the `person_photos` table, DECISION-285, whose foreign keys
+ * pin it), shown in the member directory through `resolveMany()`, and served to
+ * the open web by `resolvePublic()` only while a roster function lists it.
+ * `people.photo_key` is retired (0078).
  *
  * WHY THIS DOES NOT CALL `withOrgContext()` FROM `@/lib/authz`:
  *
@@ -92,6 +94,9 @@ type AllowedContentType = (typeof ALLOWED_CONTENT_TYPES)[number];
 
 /** The 10MB cap (DECISION-073). Mirrors the DB CHECK. */
 const MAX_BYTE_SIZE = 10_485_760;
+
+/** The most distinct keys one `resolveMany()` call accepts (F332). */
+export const RESOLVE_MANY_MAX = 100;
 
 /** Who a stored blob is for (F289, DECISION-277). Closed vocabulary; mirrors blob_assets_audience_allowed. */
 export type BlobAudience = "public_site" | "private";
@@ -163,6 +168,22 @@ export interface BlobStore {
    * `resolve()`: `blob_assets` is still queried nowhere but this file.
    */
   resolveMeta(input: ResolveInput): Promise<ResolvedBlobMeta | null>;
+  /**
+   * Many keys of ONE audience in ONE transaction and ONE statement (F332;
+   * docs/work-log/2026-10-26-person-photos-inc1.md). The directory renders up to
+   * dozens of 160 px thumbnails per page, and `resolve()` is a transaction per
+   * key. Same rules as `resolve()`: `organizationId` trusted, only rows of the
+   * named `audience` in that organization match (a key of another organization
+   * or audience is simply absent), the audience is a string literal at the call
+   * site (`audience-callsites.test.ts`).
+   *
+   * Keys are validated with `parseBlobKey` (a malformed one is absent, and
+   * never reaches Postgres), de-duplicated, and capped at `RESOLVE_MANY_MAX`
+   * after de-duplication (more throws `BlobValidationError`). A missing key is
+   * absent from the map. A driver error propagates: the caller decides whether
+   * a read failure is fatal.
+   */
+  resolveMany(input: { organizationId: string; keys: string[]; audience: BlobAudience }): Promise<Map<string, ResolvedBlob>>;
   /**
    * The anonymous public asset door (F289). NO audience parameter: its
    * contract is `presby_public_site_asset(org, key)`, which serves a
@@ -318,6 +339,46 @@ class PostgresBlobStore implements BlobStore {
       // in a hand-built URL) is an ordinary "nothing here" for every caller,
       // not an exceptional one.
       return rows[0] ?? null;
+    });
+  }
+
+  async resolveMany({
+    organizationId,
+    keys,
+    audience,
+  }: {
+    organizationId: string;
+    keys: string[];
+    audience: BlobAudience;
+  }): Promise<Map<string, ResolvedBlob>> {
+    const canonical = [
+      ...new Set(keys.map((k) => parseBlobKey(k)).filter((k): k is string => k !== null)),
+    ];
+    if (canonical.length > RESOLVE_MANY_MAX) {
+      throw new BlobValidationError(
+        `blob-store: ${canonical.length} keys is over the resolveMany limit of ${RESOLVE_MANY_MAX}`,
+      );
+    }
+    const out = new Map<string, ResolvedBlob>();
+    if (canonical.length === 0) return out;
+
+    return withTrustedOrgContext(organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          id: blobAssets.id,
+          bytes: blobAssets.bytes,
+          contentType: blobAssets.contentType,
+        })
+        .from(blobAssets)
+        .where(
+          and(
+            inArray(blobAssets.id, canonical),
+            eq(blobAssets.organizationId, organizationId),
+            eq(blobAssets.audience, audience),
+          ),
+        );
+      for (const row of rows) out.set(row.id, { bytes: row.bytes, contentType: row.contentType });
+      return out;
     });
   }
 

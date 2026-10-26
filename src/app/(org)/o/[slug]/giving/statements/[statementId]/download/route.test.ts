@@ -173,7 +173,7 @@ describe("a served statement", () => {
     expect(res.headers.get("content-length")).toBe(String(PDF.byteLength));
     expect(Buffer.from(await res.arrayBuffer()).equals(PDF)).toBe(true);
     // read through the storage adapter, scoped to this organization
-    expect(resolveBlob).toHaveBeenCalledWith({ organizationId: "org-1", key: "blob-1" });
+    expect(resolveBlob).toHaveBeenCalledWith({ organizationId: "org-1", key: "blob-1", audience: "private" });
   });
 
   it("is audited once inside the handler: ids and the year only, marked self - never a name, address or amount", async () => {

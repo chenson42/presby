@@ -272,7 +272,7 @@ describe("fileTicketAction", () => {
     await fileTicketAction("alder-creek", fd);
 
     expect(mockStore).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: "org-1", contentType: "image/png" }),
+      expect.objectContaining({ organizationId: "org-1", contentType: "image/png", audience: "private" }),
     );
     expect(mockFileTicket).toHaveBeenCalledWith(
       "person-1",

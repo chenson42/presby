@@ -402,11 +402,20 @@ describe("PublicSitePage — the ok path", () => {
     expect(call.imageUrl("hero")).toBe(
       "/site/alder-creek/assets/blob-key-1",
     );
-    // An unmapped manifestKey falls back to itself rather than throwing —
-    // the asset route then fails to resolve it as a blob id (a broken
-    // image, never a crash).
+    // An unmapped manifestKey must NEVER reach the asset route as an
+    // author-chosen key (F289, U5): it becomes the nil uuid, which never
+    // exists, so the route answers its neutral 404 (a broken image, never a
+    // crash, never an author-named blob). The allowlist, not the renderer,
+    // is the control; this just keeps the URL space closed.
     expect(call.imageUrl("missing")).toBe(
-      "/site/alder-creek/assets/missing",
+      "/site/alder-creek/assets/00000000-0000-0000-0000-000000000000",
+    );
+    expect(call.imageUrl("missing")).not.toContain("missing");
+    // A manifest key that is itself a real-looking blob uuid is still unmapped:
+    // it gets the nil uuid too, never itself.
+    const named = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    expect(call.imageUrl(named)).toBe(
+      "/site/alder-creek/assets/00000000-0000-0000-0000-000000000000",
     );
   });
 

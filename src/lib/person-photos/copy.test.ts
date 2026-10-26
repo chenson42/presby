@@ -19,14 +19,20 @@ import { ORG_FEATURE_CATALOG } from "@/lib/org-features";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
+  CONFIRM_COPY,
   CONSEQUENCE_COPY,
+  DESIGNATE_COPY,
   DIRECTORY_LINES,
+  EDIT_LINK_COPY,
+  PAGE_COPY,
+  UPLOAD_COPY,
   OFF_WARNING_FALLBACK,
   REFUSAL_COPY,
   REFUSALS_NAMING_PERSON,
   REUSED_COPY,
   UPLOAD_REJECTED_COPY,
   WEBSITE_LINES,
+  listingConsentCopy,
   listingLine,
   offWarningCopy,
   refusalMessage,
@@ -53,6 +59,11 @@ function allStrings(): string[] {
   add(WEBSITE_LINES);
   add(CONSEQUENCE_COPY);
   add(OFF_WARNING_FALLBACK);
+  add(PAGE_COPY);
+  add(UPLOAD_COPY);
+  add(DESIGNATE_COPY);
+  add(CONFIRM_COPY);
+  out.push(EDIT_LINK_COPY, listingConsentCopy("Ada"));
   out.push(UPLOAD_REJECTED_COPY, offWarningCopy(1).description, offWarningCopy(3).description, offWarningCopy(1).title);
   out.push(listingLine("Ada", []), listingLine("Ada", ["staff", "committee"]));
   return out;
@@ -158,5 +169,34 @@ describe("what the copy does not claim", () => {
 
   it("the duplicate refusal speaks only of the same person's own photos (no oracle on another person's)", () => {
     expect(REFUSAL_COPY.duplicate("Ada")).toBe("That picture is already in Ada's photos.");
+  });
+});
+
+describe("the UI copy (Batch 3: C2, C3, C4, C5, C7, C8)", () => {
+  it("the website dialog states the standing residual: search engines and archives may keep copies that cannot be recalled", () => {
+    expect(DESIGNATE_COPY.website.body).toContain("Search engines and web archives may keep copies");
+    expect(DESIGNATE_COPY.website.body).toContain("can't recall them");
+  });
+
+  it("the upload helper says location information is not stored, and does not claim the original file is changed", () => {
+    expect(UPLOAD_COPY.helper).toContain("stored without location information");
+    expect(UPLOAD_COPY.helper).not.toMatch(/original/i);
+  });
+
+  it("the under-18 notice says 'appears to be under 18'", () => {
+    expect(PAGE_COPY.minorNotice("Ada")).toContain("appears to be under 18");
+  });
+
+  it("the three listing dialogs' consent copy says a photo MAY be shown, names no permission, and gives no instruction", () => {
+    const text = listingConsentCopy("Ada Lovelace");
+    expect(text).toContain("Ada Lovelace's name and role");
+    expect(text).toContain("A photo may be shown too");
+    expect(text).toContain("including search engines and archival crawlers");
+    expect(text).not.toMatch(/people\.manage|ask |go to |under Photos/i);
+    expect(text).not.toMatch(/if one is on file/);
+  });
+
+  it("the page and the counter agree with the cap", () => {
+    expect(PAGE_COPY.counter(3)).toBe("3 of 10 photos");
   });
 });

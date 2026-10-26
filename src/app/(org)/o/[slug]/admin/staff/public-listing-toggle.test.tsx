@@ -109,12 +109,12 @@ describe("PublicListingToggle — clicking the switch stages, never flips, immed
     expect(screen.getByText(/search engines/i)).toBeTruthy();
   });
 
-  it("says the photo is shown only if one is on file AND the person has not hidden it (F289: hide_photo wins)", () => {
+  it("says a photo MAY be shown, only if a website photo (or a cleared directory photo) was chosen and the person has not hidden theirs, and gives no instruction — regression for the F289 listing dialogs promising a photo from a column nothing writes", () => {
     renderToggle(false);
     fireEvent.click(screen.getByRole("switch"));
     expect(
       screen.getByText(
-        "This makes Marisol Windham's name, role, and photo (if one is on file and they haven't hidden it) visible to anyone visiting the public website — including search engines and archival crawlers.",
+        "This makes Marisol Windham's name and role visible to anyone visiting the public website, including search engines and archival crawlers. A photo may be shown too, if a website photo has been chosen for them (or a directory photo cleared for the website) and they haven't hidden their photo.",
       ),
     ).toBeTruthy();
   });

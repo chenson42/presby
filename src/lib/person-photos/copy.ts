@@ -23,6 +23,7 @@
  *     read by `reader.ts`; never "showing now" (site status and the platform
  *     `sites.*` flags are not read).
  */
+import { PHOTO_CAP_PER_PERSON } from "./limits";
 import type { ListingKind, PhotoRefusal } from "./types";
 
 /** Existing generic strings, reused verbatim (Copy C6). */
@@ -167,3 +168,88 @@ export const CONSEQUENCE_COPY = {
   removeIsFallback: "It is also being used on the public website because it was cleared for it.",
   removeCaches: "Browsers that already saved it can keep showing it for up to a day.",
 } as const;
+
+// ---------------------------------------------------------------------------
+// The UI strings (Copy C2, C3, C4, C5, C7, C8). Added by Batch 3; the design's
+// text verbatim. `{first}` is the person's preferred or first name, `{name}`
+// the display name, `{org}` the organization name.
+
+/** C2: the photos page. */
+export const PAGE_COPY = {
+  heading: "Photos",
+  backToEdit: "Back to edit person",
+  off: (org: string) =>
+    `Photos of people aren't turned on for ${org}. Someone who manages your organization's features can turn them on.`,
+  whereHeading: "Where photos show",
+  counter: (count: number) => `${count} of ${PHOTO_CAP_PER_PERSON} photos`,
+  emptyTitle: "No photos yet",
+  emptyBody: "Add the first photo below.",
+  minorNotice: (first: string) =>
+    `${first} appears to be under 18. Photos of children can't be added yet, and any existing photos are not shown.`,
+  subheading: (name: string, org: string) => `${name} · ${org}`,
+  tileAlt: (name: string, n: number) => `${name}, photo ${n}`,
+  chipDirectory: "Directory",
+  chipWebsite: "Website",
+  chipDirectoryCleared: "Directory, cleared for website",
+  useInDirectory: "Use in directory",
+  stopInDirectory: "Stop using in directory",
+  useOnWebsite: "Use on website",
+  stopOnWebsite: "Stop using on website",
+  remove: "Remove",
+  viewLarger: "View larger",
+  backToAll: "Back to all photos",
+} as const;
+
+/** C3: the upload island. */
+export const UPLOAD_COPY = {
+  label: "Add a photo",
+  button: "Choose a photo",
+  helper:
+    "Pick a picture or take one with your camera. JPEG, PNG or WebP. It is resized here and stored without location information.",
+  preparing: "Getting the picture ready…",
+  uploading: "Uploading…",
+  added: "Photo added.",
+  addedDirectory: (first: string) => `Photo added. It's now ${first}'s directory photo.`,
+} as const;
+
+/** C4: the designate dialogs. */
+export const DESIGNATE_COPY = {
+  directory: {
+    title: "Use this photo in the directory?",
+    body: (name: string) =>
+      `Members who can see ${name} in the directory will see this photo instead of their initials.`,
+    checkbox: (first: string) =>
+      `I have ${first}'s permission to also use this photo on the public website if they are listed there and no website photo is chosen.`,
+    confirm: "Use in directory",
+  },
+  website: {
+    title: "Use this photo on the public website?",
+    body: "Anyone on the internet can see a photo on the public website. Search engines and web archives may keep copies, and removing the photo later can't recall them.",
+    checkbox: (first: string) => `I have ${first}'s permission to show this photo on the public website.`,
+    confirm: "Use on website",
+  },
+  cancel: "Cancel",
+} as const;
+
+/** C5: the un-designate and remove dialogs. */
+export const CONFIRM_COPY = {
+  stopDirectory: { title: "Stop using this photo in the directory?", confirm: "Stop using" },
+  stopWebsite: { title: "Stop using this photo on the public website?", confirm: "Stop using" },
+  remove: { title: "Remove this photo?", confirm: "Remove photo" },
+  cancel: "Cancel",
+} as const;
+
+/** C7: the link on the edit-person page. */
+export const EDIT_LINK_COPY = "Photos";
+
+/**
+ * C8: the "on" branch of the three public-listing dialogs (staff, officers,
+ * groups). Gives NO instruction: its reader holds staff, officers or groups
+ * management and may not hold `people.manage`.
+ */
+export function listingConsentCopy(personName: string): string {
+  return (
+    `This makes ${personName}'s name and role visible to anyone visiting the public website, including search engines and archival crawlers. ` +
+    "A photo may be shown too, if a website photo has been chosen for them (or a directory photo cleared for the website) and they haven't hidden their photo."
+  );
+}

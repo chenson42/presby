@@ -221,4 +221,51 @@ select '65000000-0000-4000-8000-000000000001', 'sign_in', 'org', v.address, v.pe
  where not exists (select 1 from account_invitations i
                     where i.token_hash = encode(sha256(convert_to(v.token, 'UTF8')), 'hex'));
 
+
+-- The Board of Deacons Moderator seat (drizzle/0068 sections 8c and 9, in
+-- groupSeedPlan()/baselineRoleSeedPlan() shape) for this file's congregations.
+-- They are created after 0068 ran, and src/lib/org-provisioning.ts is what
+-- gives a real congregation the seat, so without this a 0068 replay would
+-- backfill them and parishes.db.test.ts's idempotency check would see it.
+insert into groups (organization_id, group_type_id, name, membership_source,
+                    derived_from, is_protected)
+select o.id, gt.id, 'Board of Deacons Moderator', 'derived', 'deacons_moderator', true
+  from organizations o
+  join group_types gt on gt.key = 'roster'
+ where o.id in ('65000000-0000-4000-8000-000000000001', '65000000-0000-4000-8000-000000000002')
+   and o.organization_type = 'congregation'
+on conflict (organization_id, derived_from) do nothing;
+
+do $$
+declare
+  v_org     record;
+  v_role_id uuid;
+begin
+  for v_org in
+    select o.id as organization_id, g.id as group_id
+      from organizations o
+      join groups g on g.organization_id = o.id
+                   and g.derived_from = 'deacons_moderator'
+                   and g.membership_source = 'derived'
+     where o.id in ('65000000-0000-4000-8000-000000000001', '65000000-0000-4000-8000-000000000002')
+       and o.organization_type = 'congregation'
+       and not exists (select 1 from app_roles r
+                        where r.organization_id = o.id and r.key = 'deacons_moderator')
+     order by o.id
+  loop
+    insert into app_roles (organization_id, key, name, role_kind, is_protected)
+    values (v_org.organization_id, 'deacons_moderator',
+            'Moderator of the Board of Deacons', 'constitutional', true)
+    returning id into v_role_id;
+
+    insert into app_role_permissions (role_id, permission_key)
+    values (v_role_id, 'parishes.assign');
+
+    insert into role_grants (organization_id, role_id, group_id, starts_on,
+                             granted_by, grant_reason)
+    values (v_org.organization_id, v_role_id, v_org.group_id, current_date, null,
+            'Baseline Moderator of the Board of Deacons role: parishes.assign for the recorded seat (drizzle/0068, DECISION-242)');
+  end loop;
+end $$;
+
 commit;

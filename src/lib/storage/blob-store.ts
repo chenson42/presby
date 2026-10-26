@@ -11,7 +11,8 @@ import { parseBlobKey } from "./blob-key";
  * `blob_assets` is never queried directly outside this file (DECISION-030's
  * own rule: "a direct query against the blob table from a page or action is a
  * review failure"). Every caller goes through `store()`/`resolve()`/
- * `resolveMany()`/`resolveMeta()`, and the anonymous public asset route goes through
+ * `resolveMany()`/`resolveMeta()`/`findByContentHashes()` (the site ingest's "which hashes do
+ * we already hold" lookup, DECISION-279), and the anonymous public asset route goes through
  * `resolvePublic()`, which reaches the table only through one narrow
  * `SECURITY DEFINER` function (`presby_public_site_asset()`, drizzle/0072) -
  * a stricter form of the same rule: the route holds no query of its own and
@@ -193,7 +194,33 @@ export interface BlobStore {
    * it does not catch a database error: the route owns that catch.
    */
   resolvePublic(input: { organizationId: string; key: string }): Promise<PublicAsset | null>;
+  /**
+   * Which of these content hashes does this organization already hold, as
+   * rows of THIS audience (site-ingest-size, DECISION-279). Added so the
+   * staged site ingest can ask "what is the platform missing?" without
+   * receiving the bytes first: the answer is a `Map` keyed by the lowercase
+   * hex hash, and a hash that is absent is not held. A hash held only as
+   * another audience, or only by another organization, is ABSENT - the same
+   * per-audience dedup key `store()` uses (F298), so a plan can never report
+   * "held" for an image a public bundle could not serve.
+   *
+   * Metadata only: no `bytes` column in the SELECT. `audience` is required, no
+   * default, and a string literal at the call site (audience-callsites.test.ts).
+   * The list must be 1..2,000 DISTINCT lowercase 64-character hex digests;
+   * anything else throws `BlobValidationError` before a query is issued (the
+   * route validates the same things first - this is the second guard).
+   */
+  findByContentHashes(input: {
+    organizationId: string;
+    audience: BlobAudience;
+    contentHashes: readonly string[];
+  }): Promise<Map<string, BlobRef>>;
 }
+
+/** The most hashes one `findByContentHashes()` call accepts (the ingest manifest cap). */
+export const MAX_FIND_HASHES = 2000;
+
+const CONTENT_HASH_RE = /^[0-9a-f]{64}$/;
 
 /** Thrown by `store()` for anything the DB CHECK constraints would also reject. */
 export class BlobValidationError extends Error {
@@ -404,6 +431,62 @@ class PostgresBlobStore implements BlobStore {
         .limit(1);
 
       return rows[0] ?? null;
+    });
+  }
+
+  async findByContentHashes({
+    organizationId,
+    audience,
+    contentHashes,
+  }: {
+    organizationId: string;
+    audience: BlobAudience;
+    contentHashes: readonly string[];
+  }): Promise<Map<string, BlobRef>> {
+    if (contentHashes.length === 0 || contentHashes.length > MAX_FIND_HASHES) {
+      throw new BlobValidationError(
+        `blob-store: ${contentHashes.length} content hashes is outside the allowed range (1..${MAX_FIND_HASHES})`,
+      );
+    }
+    const seen = new Set<string>();
+    for (const hash of contentHashes) {
+      if (typeof hash !== "string" || !CONTENT_HASH_RE.test(hash)) {
+        throw new BlobValidationError("blob-store: a content hash must be 64 lowercase hex characters");
+      }
+      if (seen.has(hash)) {
+        throw new BlobValidationError("blob-store: the content hash list must not repeat a hash");
+      }
+      seen.add(hash);
+    }
+
+    return withTrustedOrgContext(organizationId, async (tx) => {
+      // No `bytes` in the projection: this answers "held or not", never the payload.
+      const rows = await tx
+        .select({
+          id: blobAssets.id,
+          contentHash: blobAssets.contentHash,
+          contentType: blobAssets.contentType,
+          byteSize: blobAssets.byteSize,
+        })
+        .from(blobAssets)
+        .where(
+          and(
+            eq(blobAssets.organizationId, organizationId),
+            eq(blobAssets.audience, audience),
+            inArray(blobAssets.contentHash, [...contentHashes]),
+          ),
+        );
+
+      const held = new Map<string, BlobRef>();
+      for (const row of rows) {
+        held.set(row.contentHash, {
+          key: row.id,
+          contentType: row.contentType as AllowedContentType,
+          byteSize: row.byteSize,
+          audience,
+        });
+      }
+      return held;
     });
   }
 

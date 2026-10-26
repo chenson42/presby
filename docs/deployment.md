@@ -990,14 +990,92 @@ hides their photo in the directory is withheld from every public roster.
 
 ---
 
+## Site ingest: the staged transport (DECISION-279, F324)
+
+A content repo's CI publishes through presby-site-kit's `ingest.yml`. Vercel refuses
+any function request body over 4.5 MB before route code runs (a plain-text 413), so
+the ingest has two transports and the client chooses:
+
+- **Legacy, one request:** `POST /api/sites/ingest` with the whole bundle (pages and
+  base64 images). Used when the exact serialized body is at most **4,000,000 bytes**.
+  Unchanged apart from the limit and an added `code` on errors.
+- **Staged:** `POST /api/sites/ingest/plan` (which image sha256 digests the platform
+  still lacks), `/images` (one image's raw bytes per request) and `/commit` (the pages
+  plus `{ manifestKey, sha256 }` per image). Every request carries its own fresh GitHub
+  OIDC token and the header `x-presby-ingest-protocol: 1`. The server derives every blob
+  key itself, and the site changes only at the commit.
+
+The app enforces the 4,000,000-byte per-request limit itself on all four routes (413
+`request_too_large`, after authentication), so a local server behaves like production.
+There are no new environment variables, flags or migrations. The routes need
+`sites.public_render` on and 0072 applied, like the legacy one.
+
+**Rollout order is fixed: the server before the client.**
+
+1. Apply 0072 and promote F289 (see "Public asset audience (0072)"), then promote the
+   release carrying this change. Verify with an unauthenticated `POST` to each of
+   `/api/sites/ingest/plan`, `/images` and `/commit` on the production platform host:
+   each answers **401 with the JSON body** (`{"status":"error","code":"unauthorized",...}`).
+   A 404 means the route did not deploy.
+2. Read-only prediction for `fpcw` (counts only): after 0072, count its `blob_assets`
+   rows with `audience = 'public_site'` and compare the distinct hashes of
+   `site-fpcw/images/`. A hash held only as `private` is reported missing, so the first
+   publish uploads exactly the ones not held as site images; do not promise it uploads
+   nothing. Also confirm in `/admin` that `sites.public_render` is on in production and
+   that `fpcw`'s site is not `suspended` (a suspended site is ingested but never shown).
+3. Merge presby-site-kit's `fix/staged-ingest` (v4.1.0) to its `main` and tag `v4.1.0`
+   on the branch tip `ea9e78a` (not `ad109b1`: that commit still prints "Published commit").
+   This takes effect for every site's next push (the workflow file comes from `@main`;
+   the scripts come from `site_kit_ref`). A site that pins `site_kit_ref` to a tag older
+   than v4.1.0 is unsupported by the new workflow and fails with a readable line.
+4. Not a gate (Phase 6 ruling: FPCW's own run proves the same in the same sitting, and this
+   site has no images; it costs two publishes of a live customer's site). Only if a real
+   need appears, and the operator's call, on a live customer repository: add `transport: staged`
+   to `site-pasturechurch`'s calling workflow for one push and read the log (Built,
+   "Staged ingest was requested", "This site has no images to send.", Publishing,
+   "Sent commit ...; the platform has ingested it."), then remove it. It proves OIDC, the three routes and Vercel's real
+   behavior; it does **not** prove an upload (that site has no images).
+5. The first real `site-fpcw` ingest (see "Deferred by operator decision"). Trigger it with a
+   push to `site-fpcw` `main`; do not re-run the old failed run 40251133138 (a re-run may
+   resolve the old workflow reference; unverified). Expected log
+   shape: `Built 14 page(s) and 81 image(s): 80 distinct, 28.3 MB.` · `The site is 37.8 MB
+   as one request, over the 4.0 MB limit, so images are sent one at a time.` ·
+   `Checking which of the 80 distinct image(s) the platform still needs.` ·
+   `<R> already on the platform; <M> to upload.` (or `All 80 image(s) are already on the
+   platform; nothing to upload.`) · one `Uploaded i of M` line per image · `Publishing ...`
+   · `Sent commit <sha7> to "<slug>" (<n> page(s)); the platform has ingested it.` · `Sent <M> new image(s); <R> already on the
+   platform.` A previously masked failure is possible (the 413 hid everything after it):
+   the client prints a named cause and hint for each (401 variable mismatch, 404
+   unprovisioned repository, 503 flag off or unreadable); fix it and re-run, every step is
+   safe to repeat and a repeat of an ingested sha says so.
+
+**Rollback.** Client: revert the v4.1.0 change on presby-site-kit `main` (both commits, or
+the merge commit with `git revert -m 1`; large sites then fail as before; small ones are
+unaffected). Server: revert the presby release; a staged
+client then gets a non-JSON 404 on `/plan` and prints "the platform does not support
+staged ingest yet". Neither needs a database action.
+
+**Unverified until production.** The plan and commit on Vercel's real stack; whether
+`getIDToken` tolerates about 80 calls in a run; the timing of one upload on a cold
+function; the actual `exp` of a GitHub OIDC token (irrelevant by design, every request
+mints a new one). The first `site-fpcw` run is the evidence; the in-process bridge run
+(real client, real handlers) is the pre-production proxy.
+
+**Accepted residuals.** Images uploaded by a run that never published remain as
+`public_site` rows no bundle uses (fetchable only by uuid, which no ingest response
+discloses; no takedown until F289 Tier 2). Re-running an older failed run after a newer
+one succeeded republishes the older content: re-run only the latest.
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.
 
 - **Google OAuth** — presby will support it, but it is not a priority. Until
   `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are set, and with the credentials-login
-  bypass deliberately unseeded, **nobody can sign in to production, including the
-  operator.** Accepted for now; production serves public pages only. Redirect URI
+  bypass deliberately unseeded, Google sign-in is unavailable. Accepted for now.
+  *(Corrected 2026-10-26: this used to say nobody can sign in to production, including
+  the operator. The operator does sign in, with an MFA-enrolled account (the 0.42.3 smoke
+  passed 2026-10-25), and is `fpcw`'s founding administrator.)* Redirect URI
   when it happens: `https://<canonical host>/api/auth/callback/google`.
 - **First real `site-fpcw` ingest** — `organization_sites.last_ingested_commit_sha`
   for `fpcw` is still a scratch placeholder. The two Production OIDC variables

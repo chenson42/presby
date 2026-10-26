@@ -22,6 +22,7 @@
 | 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied); F338 ruled by the orchestrator (the barrel line and the dev-docs entry are committed on the branch). Batch 2 (api-developer) complete: sharp 0.35.5 installed, image pipeline, store, reader, consequences, copy, four server actions, `resolveMany`, directory swap to `photoThumbKey`, catalog toggle, audit keys and the off-warning; 644 unit files / 9718 tests, 63 DB-backed files / 1351 tests, RLS 78 = 82 and RLS 72 = 24, `npm run check` 8/8, build and typecheck and lint clean. Batch 3 (ux-developer) complete: photos page, upload island with client downscale, designate and remove dialogs, edit-page link, three listing-dialog rewrites, UI copy, unit, e2e and hydration specs, browser walk at 360 and 1280 px; QA next | Batch 3 done | 2026-10-26 |
 | 5 — Verification | qa | Complete (run 1): all gates green; copy truthfulness (a)(b)(c) failed | FAIL | 2026-10-26 |
 | 3 — amendment (Phase 5 run 1 copy rulings) | tech-lead | Complete: rulings R-a (withheld-aware consequences; snapshot carries `minor`, `directoryWithheld`, `websiteWithheld`), R-b (new "Clear for website" control and dialog variant), R-c (count distinct photos); tests T1-T11 named; implementer full-stack-developer; no schema, route, flag or permission change. See the amendment at the end of this log | Design complete; back to Phase 4 | 2026-10-26 |
+| 4 — Phase 5 run 1 fix (copy) | full-stack-developer | Complete: snapshot carries `minor`/`directoryWithheld`/`websiteWithheld`; every R-a/R-b/R-c string verbatim; "Clear for website" control and `clear` dialog variant; `countChosenPhotos` (distinct); T1-T11 failing-first; gates green; back to Phase 5 (scoped re-run) | Ready for QA | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1364,3 +1365,61 @@ A control to **withdraw** a website clearance without stopping the directory pho
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 3 — amendment (Phase 5 run 1 copy rulings) | tech-lead | Complete: rulings R-a (withheld-aware consequences, snapshot carries `minor`, `directoryWithheld`, `websiteWithheld`), R-b (new "Clear for website" control and dialog variant), R-c (count distinct photos); 11 tests T1-T11 named; implementer full-stack-developer; no schema, route, flag or permission change | Design complete; back to Phase 4 | 2026-10-26 |
+
+---
+
+## Phase 4 — Phase 5 run 1 fix (copy)
+
+**Author:** full-stack-developer, 2026-10-26. **Trigger:** Phase 5 run 1 FAIL on copy truthfulness (a), (b), (c) and the `copy.ts:98` note; spec is the Phase 3 amendment above. **Tree:** `pipeline/person-photos`, worktree `presby-photos`, Neon `pipeline-person-photos`. No schema, route, action signature, flag, permission or audit change.
+
+### Operator ruling recorded
+
+The amendment's deferred carry-forward item "a control to **withdraw** a website clearance without losing the directory photo" (marked "accepted by: none yet, operator to confirm Out of scope") is **closed as out of scope**. Operator, 2026-10-26: "no. we don't need to worry about that right now." Not built; consent withdrawal remains stop-then-choose-unticked, which the dialogs describe at each step. No TODO line is owed for it.
+
+### Changes
+
+- `src/lib/person-photos/consequences.ts`: `PhotoStateSnapshot` gains `minor`, `directoryWithheld`, `websiteWithheld`. `consequencesFor` follows R-a4 exactly (minor returns `[minorBlocked]` for both designate intents; `directoryHidden`, `websiteHidden`/`websiteMerged`; `removeIsWebsiteWithheld`; `websiteFallsBack` only when nothing withholds). `directoryPhotoServesWebsite` gains the withheld conditions.
+- `src/lib/person-photos/copy.ts`: every replacement string of R-a3, R-a5, R-a6, R-a7, R-b2, R-b3 verbatim; `DIRECTORY_LINES.shown/none` are now functions of `first`; `DESIGNATE_COPY.directory.body(name, first)`; `DESIGNATE_COPY.clear`; `PAGE_COPY.clearForWebsite`. Header comment records the "can ... unless something withholds it" rule.
+- `src/lib/person-photos/status-lines.ts`: `websiteLine`/`statusLines` take `minor`; the unattested remedy becomes the under-18 line for a minor (R-b4).
+- `src/lib/person-photos/reader.ts`: fills the three snapshot fields from answers already read (no new query); `countPhotoDesignations` renamed `countChosenPhotos`, now `count(distinct photo_id)`. `src/lib/org-feature-warnings.ts` updated; strings unchanged.
+- `tile-controls.tsx`: "Clear for website" button (current directory photo, not attested, not minor), above "Use on website". `designate-dialog.tsx`: third variant via a `clear` prop (purpose stays `"directory"`, confirm needs the box); every variant's confirm is disabled when `state.minor` (R-a8). `photo-grid.tsx` passes `directoryAttested`.
+
+### Deviation to confirm (no string involved)
+
+R-a2 gives `directoryPhotoServesWebsite` as `attested && website === null && listed && !minor && websiteWithheld === null`. T2 requires it to be false for **every** withheld combination, including `directoryWithheld`. `hide_photo` is person-level, so a directory `hide_photo` withholds the website photo too. I added `directoryWithheld === null` to that predicate, to the `websiteFallsBack` condition and to the `removeIsWebsiteWithheld` condition (via one helper, `websiteIsWithheld`). In reachable data it changes nothing (a website designation or attested directory photo would also have returned `websiteWithheld`); it only makes T2 true over the full product.
+
+Also: T8 needed no new test. `store.db.test.ts` ("the same photo with a changed attestation takes the same path (end, insert)") already asserts the old row ends, a new attested row is the only active one and the audit row carries `attested: true`; it passes.
+
+### Failing-first evidence
+
+Tests were written and run against the unchanged source first. Output kept in the scratchpad `photos-fix/` (`red-all.txt`, `red-db.txt`).
+
+| Test | Red against old code |
+|---|---|
+| T1, T2 `consequences.test.ts` | 34 failed (new snapshot fields absent; old "will also appear" text; T2 product found `will appear`) |
+| T3 `copy.test.ts` | 8 failed (old strings present, new keys absent) |
+| T4 `reader-derive.test.ts` | suite failed to load (`DIRECTORY_LINES.shown` not a function) |
+| T6 `designate-dialog.test.tsx`, `confirm-dialogs.test.tsx` | 10 + 2 failed |
+| T7 `photo-grid.test.tsx` | 3 failed (no "Clear for website" button) |
+| T9 unit `org-feature-warnings.photos.test.ts` | 4 failed (mock renamed to `countChosenPhotos`) |
+| T5, T9 DB `public-photo.db.test.ts` | by mutation of `reader.ts` (count back to `count()`, withheld fields forced null): 3 failed (T5 snapshot case; both count cases). `reader.ts` restored from a copy; no `git stash` used |
+| T10, T11 e2e | inherently red on the old tree: the "Clear for website" button and the new strings did not exist. Not run against the old tree |
+
+Totals for the red run of the unit files: 7 files failed, 61 tests failed, 172 passed. All green after the fix.
+
+### Commands and results (all in the worktree)
+
+- `npm run typecheck`: pass. `npm run lint`: pass (0 warnings). `npm run check`: all eight tripwires pass.
+- `rm -rf .next && npm run build`: pass.
+- `npm test`: 652 files passed, 96 skipped; 9,936 tests passed.
+- DB-backed, serial (`npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/person-photos src/lib/db/domain/person-photos.db.test.ts src/lib/db/domain/public-roster-photo.db.test.ts "src/app/(org)/o/[slug]/admin/community" src/lib/org-feature src/lib/storage"`): 62 files, 1,135 tests passed. `public-photo.db.test.ts` and `store.db.test.ts` alone: 51 passed.
+- Own dev server on :3620 (`AUTH_URL`/`E2E_BASE_URL` :3620, `RATE_LIMIT_DISABLED=true`, `E2E_ALLOW_SHARED_DB=true`, `CRON_SECRET` and the domains fakes for global setup), chromium project: `e2e/person-photos.spec.ts` (360 px and 1280 px upload flow with the new step 4b, E4, toggle-off) and `e2e/hydration/person-photos-upload.spec.ts`: 5 passed.
+- Prod lane, `PW_PROD_BUILD=1 PW_PROD_PORT=3621`, `--project=prod-build e2e/hydration/person-photos-upload.spec.ts`: 1 passed (the hydration spec gained the fourth control).
+- Servers stopped by PID; :3620 and :3621 confirmed free. The full e2e suite and the custom-hosts roster spec were not re-run (unchanged files, QA's scoped re-run).
+- 360 px walk (scratch spec, deleted, never committed; screenshots in `scratchpad/photos-fix/`): `hidden-page-360.png`, `hidden-dialog-360.png` (website dialog says the website won't show it, no "can appear"), `minor-page-360.png`, `minor-dialog-360.png` (blocked sentence, confirm disabled), `clear-page-360.png` (remedy line names the button; four buttons), `clear-dialog-360.png` (fits the viewport, confirm above cancel, 44 px). No horizontal overflow in any state.
+
+### Notes for QA
+
+- Observed, not changed: under 18, the directory dialog still shows the permission checkbox above the blocked sentence (the confirm is disabled, so nothing can be recorded).
+- `docs/TODO.md`, `docs/decisions.md` and the other Rule 16 files were not touched; the amendment's proposed decision text and the double-submit TODO candidate remain for the orchestrator.
+- Handoff: qa, scoped Phase 5 re-run (copy, consequences, photos page specs, the 360 walk).

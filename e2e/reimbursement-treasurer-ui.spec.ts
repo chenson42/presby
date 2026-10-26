@@ -8,8 +8,9 @@
  * /totp is `reimbursement-treasurer.spec.ts`, the role-bundle test (a treasurer made by
  * the real invitation accept) `reimbursement-role-bundle.spec.ts`, the CSV export's
  * bytes `reimbursement-csv.spec.ts`, the Features-page toggle
- * `reimbursement-toggle.spec.ts`; any receipt waits for Batch 2b. The member side is
- * `reimbursement-member.spec.ts`.
+ * `reimbursement-toggle.spec.ts`. The member side, and the receipt upload itself, is
+ * `reimbursement-member.spec.ts`; the one test here that involves a receipt (Batch 2b) is
+ * the treasurer's view of one that is already attached.
  *
  * Everything lives in a THROWAWAY congregation (`e2e-reimbt-<stamp>`) removed in
  * afterAll by deleting that organization (the cascade takes every reimbursement
@@ -33,6 +34,9 @@
 import { test, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { platformSql, withDbRetry, type Sql } from "./support/db";
 import {
+  attachmentRows,
+  auditRows,
+  minimalPdf,
   noHorizontalScroll,
   orgToday as orgTodayOn,
   REIMB_NAMES as NAMES,
@@ -555,6 +559,75 @@ test.describe("Reimbursements, treasurer side", () => {
     expect(junk!.status()).toBe(404);
     await missing.close();
     await ctx.close();
+  });
+
+  test("a request WITH a receipt: the treasurer reads it as a link, pays without waiving anything, the PDF downloads as an attachment and each open is audited, and it stays on the paid request", async ({ browser }) => {
+    const key = "tui-rcpt-000001";
+    const requestId = await seedRequest({
+      key, group: fx.groupProperty, cents: 8800, purpose: "Sound cable and adapters", upTo: "approved",
+      receipt: { name: "Sound shop invoice.pdf", contentType: "application/pdf" },
+    });
+    const [attachment] = await attachmentRows(sql, requestId);
+    expect(attachment).toMatchObject({ display_name: "Sound shop invoice.pdf", content_type: "application/pdf", audience: "private", detached_at: null });
+    const receiptPath = `/o/${fx.slug}/reimbursements/${requestId}/receipts/${attachment!.id}`;
+    const viewed = async () =>
+      (await auditRows(sql, "tenant.reimbursement.receipt_viewed", fx.orgId)).filter((r) => r.metadata.requestId === requestId);
+
+    const page = await treasurerPage(360, 740);
+    await page.goto(`${base()}/${requestId}`);
+    await expect(page.getByRole("heading", { level: 1, name: "$88.00" })).toBeVisible();
+    // The receipt is a link to the download route; neither "no receipt" sentence is there, and nothing asks for a waiver.
+    const receipts = page.getByTestId("request-receipts");
+    await expect(receipts.getByRole("link", { name: "Sound shop invoice.pdf" })).toHaveAttribute("href", receiptPath);
+    await expect(receipts).not.toContainText("No receipt attached.");
+    await expect(receipts).not.toContainText("can't attach a receipt");
+    await expect(page.getByTestId("payment-block")).toHaveCount(0);
+    await expect(page.getByTestId("payment-form")).toBeVisible();
+    await expect(page.getByTestId("waive-open")).toHaveCount(0);
+    await noHorizontalScroll(page);
+    await shot(page, "360", "detail-with-receipt");
+
+    // Opening it: a PDF is always a download, named by the server, and the treasury's view is audited with ids only.
+    expect(await viewed()).toHaveLength(0);
+    const [download] = await Promise.all([page.waitForEvent("download"), receipts.getByRole("link", { name: "Sound shop invoice.pdf" }).click()]);
+    expect(download.suggestedFilename()).toBe(`receipt-${attachment!.id.slice(0, 8)}.pdf`);
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync(await download.path()).equals(minimalPdf(key))).toBe(true);
+    const direct = await treasurerContext.request.get(receiptPath);
+    expect(direct.status()).toBe(200);
+    expect(direct.headers()["content-type"]).toBe("application/pdf");
+    expect(direct.headers()["content-disposition"]).toBe(`attachment; filename="receipt-${attachment!.id.slice(0, 8)}.pdf"`);
+    expect(direct.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(direct.headers()["content-security-policy"]).toBe("sandbox; default-src 'none'");
+    expect(direct.headers()["cache-control"]).toBe("private, no-store");
+    const opens = await viewed();
+    expect(opens).toHaveLength(2);
+    for (const row of opens) {
+      expect(row.metadata).toEqual({ organizationId: fx.orgId, requestId, attachmentId: attachment!.id });
+      expect(row.actor_user_id).toBe(fx.treasurerUser);
+    }
+
+    // Pay it: no waiver was needed, and the receipt is still on the paid request.
+    await waitHydrated(page);
+    const form = page.getByTestId("payment-form");
+    await form.getByLabel("Check number").fill("3107");
+    await page.getByTestId("payment-submit").click();
+    await expect(page.getByText("Payment recorded.").first()).toBeVisible();
+    expect(await statusOf(requestId)).toBe("paid");
+    await expect(page.getByTestId("request-receipts").getByRole("link", { name: "Sound shop invoice.pdf" })).toBeVisible();
+    await expect(page.getByTestId("request-receipts")).not.toContainText("Receipt waived.");
+    await noHorizontalScroll(page);
+    await shot(page, "360", "detail-with-receipt-paid");
+    await page.close();
+
+    // The requester sees the same receipt on their own page, and their own open is not audited.
+    const mine = await contextFor(browser, "member");
+    const own = await mine.newPage();
+    await own.goto(`/o/${fx.slug}/reimbursements/${requestId}`);
+    await expect(own.getByTestId("request-receipts").getByRole("link", { name: "Sound shop invoice.pdf" })).toHaveAttribute("href", receiptPath);
+    expect((await mine.request.get(receiptPath)).status()).toBe(200);
+    expect(await viewed()).toHaveLength(2);
+    await mine.close();
   });
 
   test("with no chargeable group the member form says so in place of the Charge to select and Send stays disabled", async ({ browser }) => {

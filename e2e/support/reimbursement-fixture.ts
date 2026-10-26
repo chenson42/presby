@@ -35,6 +35,8 @@
  * WebSocket pool at import time). Everything is synthetic: `.invalid` addresses,
  * invented names (No Real Data).
  */
+import { createHash } from "node:crypto";
+import { deflateSync } from "node:zlib";
 import bcrypt from "bcryptjs";
 import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { withDbRetry, type Sql } from "./db";
@@ -364,6 +366,20 @@ export interface SeedSpec {
   upTo: "submitted" | "approved" | "waived" | "paid";
   /** A payment reference for `paid`. */
   reference?: string;
+  /**
+   * A receipt attached while the request is still a draft (the definers allow it only then), instead of the
+   * "I can't attach a receipt" claim: stored as a private blob by SQL and attached by `attach_receipt`, the
+   * same two steps the app takes.
+   */
+  receipt?: SeedReceipt;
+}
+
+export interface SeedReceipt {
+  /** The display name (default `Hardware store.jpg`). */
+  name?: string;
+  contentType?: "image/jpeg" | "application/pdf";
+  /** The stored bytes (default: a small JPEG for the type). Unique per request: the bytes are salted with `key`. */
+  bytes?: Buffer;
 }
 
 /** The actors a seed needs; a fixture satisfies this, and so can a hand-built cast. */
@@ -390,7 +406,8 @@ export async function seedRequest(sql: Sql, actors: SeedActors, spec: SeedSpec):
     `select s.request_id, s.revision into v_rid, v_rev from presby_reimbursement_save_draft(
        ${lit(spec.key)}, ${lit(kind)}, ${uuidLit(spec.group)}, null, ${spec.vendor ? lit(spec.vendor) : "null"}, ${spec.cents},
        ((now() at time zone 'America/New_York')::date - ${days}), ${lit(spec.purpose)},
-       ${category}, null, true, ${requester}) s;`,
+       ${category}, null, ${spec.receipt ? "false" : "true"}, ${requester}) s;`,
+    ...(spec.receipt ? [receiptSteps(actors.orgId, actors.requesterUser, spec.key, spec.receipt)] : []),
     `select s.revision into v_rev from presby_reimbursement_submit(v_rid, v_rev, ${requester}) s;`,
   ];
   if (spec.upTo !== "submitted") {
@@ -409,7 +426,7 @@ export async function seedRequest(sql: Sql, actors: SeedActors, spec: SeedSpec):
   await withDbRetry(`seed request ${spec.key}`, () =>
     sql.query(`
       do $do$
-      declare v_rid uuid; v_rev integer;
+      declare v_rid uuid; v_rev integer; v_blob uuid; v_out text;
       begin
         perform set_config('app.current_org_id', ${lit(actors.orgId)}, true);
         ${steps.join("\n        ")}
@@ -526,6 +543,172 @@ export async function seedImportedPaid(sql: Sql, input: { orgId: string; groupId
       select (select count(*) from p)::int as n`),
   );
   return found[0]!.n;
+}
+
+// ---------------------------------------------------------------------------
+// receipts (Treasury Increment 1, Batch 2b)
+// ---------------------------------------------------------------------------
+
+/** A tiny, valid PDF (one empty page): enough for the sniff and the download route. */
+export function minimalPdf(label = "receipt"): Buffer {
+  return Buffer.from(
+    `%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n` +
+      `3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n% ${label}\ntrailer<</Root 1 0 R>>\n%%EOF\n`,
+    "latin1",
+  );
+}
+
+/** A few bytes that stand for a JPEG when only the bytes matter (never decoded). */
+export function stubJpeg(label = "stub"): Buffer {
+  return Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(`e2e-${label}`, "latin1"), Buffer.from([0xff, 0xd9])]);
+}
+
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of buf) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, crc]);
+}
+
+/**
+ * A synthetic RGB PNG, built here with no image library: a smooth gradient (small file) or, with `noise`,
+ * seeded pseudo-random pixels (incompressible, so a 1200 x 1200 one is over 4 MB, the size a phone photo
+ * reaches). Invented pixels only.
+ */
+export function syntheticPng(width = 320, height = 240, options: { noise?: boolean } = {}): Buffer {
+  const rowBytes = width * 3;
+  const raw = Buffer.alloc((rowBytes + 1) * height);
+  let seed = 20261026;
+  for (let y = 0; y < height; y++) {
+    const row = y * (rowBytes + 1);
+    raw[row] = 0; // filter: none
+    for (let x = 0; x < width; x++) {
+      const at = row + 1 + x * 3;
+      if (options.noise) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        raw[at] = seed >> 16;
+        raw[at + 1] = seed >> 8;
+        raw[at + 2] = seed;
+      } else {
+        raw[at] = Math.floor((x * 255) / Math.max(1, width - 1));
+        raw[at + 1] = Math.floor((y * 255) / Math.max(1, height - 1));
+        raw[at + 2] = 128;
+      }
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // colour type: RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(raw, { level: 6 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** The pixel size a JPEG declares (its first SOFn marker), or null for bytes that are not one. */
+export function jpegSize(bytes: Buffer): { width: number; height: number } | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let at = 2;
+  while (at + 9 < bytes.length) {
+    if (bytes[at] !== 0xff) return null;
+    const marker = bytes[at + 1]!;
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { height: bytes.readUInt16BE(at + 5), width: bytes.readUInt16BE(at + 7) };
+    }
+    at += 2 + bytes.readUInt16BE(at + 2);
+  }
+  return null;
+}
+
+/** A JPEG with an extra EXIF (APP1) segment carrying `text` right after the start-of-image marker. */
+export function withExifSegment(jpeg: Buffer, text: string): Buffer {
+  const payload = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), Buffer.from(text, "latin1")]);
+  const segment = Buffer.alloc(4);
+  segment[0] = 0xff;
+  segment[1] = 0xe1;
+  segment.writeUInt16BE(payload.length + 2, 2);
+  return Buffer.concat([jpeg.subarray(0, 2), segment, payload, jpeg.subarray(2)]);
+}
+
+/** The PL/pgSQL that stores a private blob and attaches it to `v_rid` as the requester (the app's own two steps). */
+function receiptSteps(orgId: string, requesterUser: string, salt: string, receipt: SeedReceipt): string {
+  const contentType = receipt.contentType ?? "image/jpeg";
+  const bytes = receipt.bytes ?? (contentType === "application/pdf" ? minimalPdf(salt) : stubJpeg(salt));
+  const sha = createHash("sha256").update(bytes).update(salt).digest("hex");
+  const name = receipt.name ?? (contentType === "application/pdf" ? "Invoice.pdf" : "Hardware store.jpg");
+  return `begin
+          insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes)
+          values (${uuidLit(orgId)}, ${lit(`e2e-${sha}`)}, ${lit(contentType)}, ${bytes.length}, decode(${lit(bytes.toString("hex"))}, 'hex'))
+          returning id into v_blob;
+          select a.outcome into v_out from presby_reimbursement_attach_receipt(v_rid, v_blob, ${lit(sha)}, ${lit(contentType)}, ${bytes.length},
+                                                             ${lit(name)}, ${uuidLit(requesterUser)}) a;
+          -- a refusal is a row, not an error: an unchecked one would leave a request with no receipt and the spec asserting on one
+          if v_out <> 'ok' then raise exception 'seed receipt refused: %', v_out; end if;
+          -- an attach moves the revision by one (P3-8): the next step must carry the new one
+          select r.revision into v_rev from reimbursement_requests r where r.id = v_rid;
+        end;`;
+}
+
+/**
+ * Stores a PRIVATE blob and attaches it to an existing DRAFT or sent-back request as its creator, by the
+ * definer, and returns the attachment id. The two steps are the app's own (`store()` then `attach_receipt`);
+ * an insert that omits `audience` lands `private`, which is what the receipt foreign key requires.
+ */
+export async function seedReceipt(
+  sql: Sql,
+  input: { orgId: string; requestId: string; requesterUser: string; salt?: string } & SeedReceipt,
+): Promise<string> {
+  const salt = input.salt ?? input.requestId;
+  const before = await attachmentIds(sql, input.requestId);
+  await withDbRetry(`seed receipt on ${input.requestId}`, () =>
+    sql.query(`
+      do $do$
+      declare v_rid uuid := ${uuidLit(input.requestId)}; v_blob uuid; v_out text; v_rev integer;
+      begin
+        perform set_config('app.current_org_id', ${lit(input.orgId)}, true);
+        ${receiptSteps(input.orgId, input.requesterUser, salt, input)}
+      end $do$`),
+  );
+  const after = await attachmentIds(sql, input.requestId);
+  const added = after.filter((id) => !before.includes(id));
+  if (added.length !== 1) throw new Error(`[reimbursement-fixture] seedReceipt expected one new attachment, found ${added.length}`);
+  return added[0]!;
+}
+
+async function attachmentIds(sql: Sql, requestId: string): Promise<string[]> {
+  return (await rows<{ id: string }>(sql`select id from reimbursement_attachments where request_id = ${requestId}::uuid order by created_at, id`)).map((r) => r.id);
+}
+
+/** Every attachment of a request, live and detached, with the blob's audience (a receipt's must be `private`). */
+export async function attachmentRows(sql: Sql, requestId: string) {
+  return rows<{
+    id: string;
+    display_name: string;
+    content_type: string;
+    byte_size: number;
+    content_sha256: string;
+    detached_at: string | null;
+    audience: string;
+    blob_key: string;
+  }>(sql`
+    select a.id, a.display_name, a.content_type, a.byte_size, a.content_sha256, a.detached_at, b.audience, a.blob_key
+      from reimbursement_attachments a join blob_assets b on b.id = a.blob_key
+     where a.request_id = ${requestId}::uuid order by a.created_at, a.id`);
 }
 
 // ---------------------------------------------------------------------------

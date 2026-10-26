@@ -30,6 +30,7 @@
 import { test, expect, type BrowserContext } from "@playwright/test";
 import { platformSql, withDbRetry, type Sql } from "./support/db";
 import {
+  attachmentRows,
   auditRows,
   orgToday,
   REIMB_NAMES as NAMES,
@@ -47,6 +48,7 @@ const EXPORTED = "tenant.reimbursement.exported";
 
 const VENDOR_FORMULA = `=HYPERLINK("http://example.invalid","click")`;
 const PURPOSE_QUOTES = `Chairs, "folding" and tables`;
+const RECEIPT_NAME = "Lumber yard invoice 88231.pdf";
 
 let sql: Sql;
 let fx: ReimbursementFixture;
@@ -122,7 +124,11 @@ test.describe("Reimbursements: the CSV export's bytes", () => {
       key: "csv-paid-000001", group: fx.groupProperty, cents: 12550, purpose: PURPOSE_QUOTES, kind: "vendor", vendor: VENDOR_FORMULA,
       upTo: "paid", reference: "1042",
     });
-    ids.approved = await seedRequest(sql, actors, { key: "csv-appr-000001", group: fx.groupProperty, cents: 4100, purpose: "+SUM(1,2) of tape", upTo: "waived" });
+    // The approved one carries a real receipt (a stored private blob, attached by the definer) instead of a waiver.
+    ids.approved = await seedRequest(sql, actors, {
+      key: "csv-appr-000001", group: fx.groupProperty, cents: 4100, purpose: "+SUM(1,2) of tape", upTo: "approved",
+      receipt: { name: RECEIPT_NAME, contentType: "application/pdf" },
+    });
     ids.submitted = await seedRequest(sql, actors, { key: "csv-subm-000001", group: fx.groupProperty, cents: 1500, purpose: "-5 off the sale", upTo: "submitted" });
     // A DIFFERENT group from the one the screen will be filtered to.
     ids.worship = await seedRequest(sql, actors, { key: "csv-wors-000001", group: fx.groupWorship, cents: 700, purpose: "@cmd line", upTo: "submitted" });
@@ -186,6 +192,18 @@ test.describe("Reimbursements: the CSV export's bytes", () => {
     for (const name of ["approved_on", "approval_path", "paid_on", "payment_method", "payment_reference", "approved_by", "paid_by"]) {
       expect(submitted[column(name)], name).toBe("");
     }
+    // A request with a receipt is a row like any other, and the receipt is no part of the file: not its name, its type, its
+    // size, its hash or its blob (the file is read by someone who may see money and may not see the receipt itself).
+    const withReceipt = byId.get(ids.approved)!;
+    expect(withReceipt[column("status")]).toBe("approved");
+    expect(withReceipt[column("amount")]).toBe("41.00");
+    expect(body).not.toContain(RECEIPT_NAME);
+    expect(body.toLowerCase()).not.toMatch(/receipt|\.pdf|application\/pdf|sha256|blob/);
+    const [attached] = await attachmentRows(sql, ids.approved);
+    expect(attached).toBeDefined();
+    expect(body).not.toContain(attached!.id);
+    expect(body).not.toContain(attached!.blob_key);
+    expect(body).not.toContain(attached!.content_sha256);
     // No email address, phone number or bank detail is a column of this file.
     expect(body).not.toMatch(/[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.invalid/);
     expect(body.toLowerCase()).not.toMatch(/routing|account number|iban/);

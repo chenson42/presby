@@ -4,9 +4,12 @@
  * treasury-inc1.md, Phase 3 "New e2e specs" 1 and 2, Copy C2, C3, C5, C6).
  *
  * This is the member-UI slice of the two specs the design names
- * `reimbursement-member` and `reimbursement-approval`. What waits for other
- * batches is named where it would go: the receipt (Batch 2b: F289's adapter),
- * printing the form (Batch 7), the MFA-enrolled treasurer deep link (Batch 7).
+ * `reimbursement-member` and `reimbursement-approval`. Receipts (Batch 2b, on
+ * F289's private audience) are the last tests in the file: a synthetic PNG added
+ * on a brand-new form at 360 px, refused uploads in words, Remove, the double tap
+ * on Send, the download route's headers and who may open it, the printed form with
+ * a receipt, and the upload route called directly. Printing the form (Batch 7) and
+ * the MFA-enrolled treasurer deep link (Batch 7) are in their own specs.
  *
  * Everything lives in a THROWAWAY congregation (`e2e-reimb-<stamp>`) removed in
  * afterAll by deleting that organization (the cascade takes every reimbursement
@@ -31,6 +34,7 @@ import { platformSql, withDbRetry, type Sql } from "./support/db";
 import { E2E_USERS, storageStatePath } from "./support/users";
 import { signInOnPage } from "./support/invitation-ui";
 import { extractPdfText } from "../src/lib/testing/pdf-text";
+import { attachmentRows, auditRows, jpegSize, minimalPdf, syntheticPng, withExifSegment } from "./support/reimbursement-fixture";
 
 const TOGGLE = "org_portal.reimbursement";
 const P = "e2e96000-0000-4000-8000-";
@@ -236,14 +240,20 @@ async function noHorizontalScroll(page: Page) {
   expect(overflow, "the page must not scroll sideways").toBeLessThanOrEqual(0);
 }
 
-/** Fills the form's required fields for the Property Committee and ticks "I can't attach a receipt" (receipts are Batch 2b). */
-async function fillRequest(page: Page, opts: { amount?: string; purpose?: string; date?: string; group?: string; category?: string } = {}) {
+/**
+ * Fills the form's required fields for the Property Committee and, unless `claim` is false, ticks
+ * "I can't attach a receipt" (the receipt tests add a real one instead).
+ */
+async function fillRequest(
+  page: Page,
+  opts: { amount?: string; purpose?: string; date?: string; group?: string; category?: string; claim?: boolean } = {},
+) {
   await page.getByLabel("Charge to").selectOption({ label: opts.group ?? NAMES.property });
   await page.getByLabel("Category").selectOption({ label: opts.category ?? NAMES.supplies });
   await page.getByLabel("Amount").fill(opts.amount ?? "4250");
   await page.getByLabel("Date of the expense").fill(opts.date ?? (await orgToday()));
   await page.getByLabel("What was it for?").fill(opts.purpose ?? "Folding tables for the fellowship hall");
-  await page.getByLabel("I can't attach a receipt").check();
+  if (opts.claim !== false) await page.getByLabel("I can't attach a receipt").check();
 }
 
 async function orgToday(): Promise<string> {
@@ -302,8 +312,10 @@ test.describe("Reimbursements, member side", () => {
     expect(await requests()).toHaveLength(0);
     await noHorizontalScroll(page);
     await page.screenshot({ path: "test-results/reimbursement-360/form-errors.png", fullPage: true });
-    // The one receipt control that exists until Batch 2b is the box; the picker is not offered.
-    await expect(page.getByRole("button", { name: "Add a receipt or invoice" })).toHaveCount(0);
+    // Both receipt controls are offered: the picker and the box. A blank Send creates nothing, receipts included.
+    await expect(page.getByRole("button", { name: "Add a receipt or invoice" })).toBeVisible();
+    await expect(page.getByText("Photos and PDFs. Each file can be up to 4 MB, and you can add up to 5.")).toBeVisible();
+    await expect(page.getByLabel("I can't attach a receipt")).toBeVisible();
     await ctx.close();
   });
 
@@ -842,5 +854,337 @@ test.describe("Reimbursements, member side", () => {
     await expect(page.getByTestId("approve-open")).toBeVisible();
     await ctx.close();
   });
+
+  // =========================================================================
+  // Receipts (Batch 2b). These run last: each makes its own requests, and the
+  // earlier tests count and pick requests by order.
+  // =========================================================================
+
+  /** A request the receipt tests built: shared by the tests that follow the one that made it. */
+  const made: { requestId?: string; photoAttachment?: string; photoJpeg?: Buffer; pdfAttachment?: string } = {};
+
+  const origin = () => new URL(process.env.E2E_BASE_URL ?? "http://localhost:3000").origin;
+  const receiptsUrl = (requestId: string) => `${base()}/${requestId}/receipts`;
+  const pick = (page: Page, name: string, mimeType: string, buffer: Buffer) =>
+    page.getByTestId("receipt-input").setInputFiles({ name, mimeType, buffer });
+
+  test("a receipt is added to a brand-new form at 360 px: a synthetic PNG becomes a JPEG, refusals are in words, Remove detaches, and a double tap on Send makes ONE request", async ({ browser }) => {
+    const before = (await requests()).length;
+    const ctx = await contextFor(browser, "member", 360, 740);
+    const page = await ctx.newPage();
+    await page.goto(`${base()}/new`);
+    await waitHydrated(page);
+
+    // The picker is a phone-sized button, and the hint states the limits Copy promises.
+    const add = page.getByTestId("receipt-add");
+    await expect(add).toHaveText("Add a receipt or invoice");
+    await expect(page.getByText("Photos and PDFs. Each file can be up to 4 MB, and you can add up to 5.")).toBeVisible();
+    expect((await add.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    // The file input offers photos and PDFs and has no `capture`: the phone chooses camera, library or files.
+    const input = page.getByTestId("receipt-input");
+    await expect(input).toHaveAttribute("accept", "image/png,image/jpeg,image/webp,application/pdf");
+    await expect(input).not.toHaveAttribute("capture", /.*/);
+
+    // A receipt belongs to a request, so the form saves a draft first; with no group chosen it says so and sends nothing.
+    await pick(page, "Hardware store.png", "image/png", syntheticPng(320, 240));
+    await expect(page.getByText("Choose a group to charge this to.")).toBeVisible();
+    expect((await requests()).length).toBe(before);
+    await expect(page.getByTestId("receipt-row")).toHaveCount(0);
+
+    // Fill everything but the claim box, then add the receipt: a draft is made and the PNG is stored as a JPEG.
+    await fillRequest(page, { amount: "6350", purpose: "Hymn board numbers and a ladder", claim: false });
+    await pick(page, "Hardware store.png", "image/png", syntheticPng(320, 240));
+    await expect(page.getByTestId("receipt-row")).toHaveCount(1);
+    await expect(page.getByRole("link", { name: "Hardware store.jpg" })).toBeVisible();
+    const drafts = (await requests()).filter((r) => r.status === "draft" && r.purpose.startsWith("Hymn board"));
+    expect(drafts).toHaveLength(1);
+    const requestId = drafts[0]!.id;
+    made.requestId = requestId;
+    let stored = await attachmentRows(sql, requestId);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ display_name: "Hardware store.jpg", content_type: "image/jpeg", audience: "private", detached_at: null });
+    expect(stored[0]!.byte_size).toBeGreaterThan(0);
+    expect(stored[0]!.byte_size).toBeLessThanOrEqual(4_000_000);
+    await noHorizontalScroll(page);
+    for (const testId of ["receipt-add", "receipt-remove"]) {
+      const box = (await page.getByTestId(testId).boundingBox())!;
+      expect(box.height, testId).toBeGreaterThanOrEqual(44);
+      expect(box.x + box.width, testId).toBeLessThanOrEqual(360);
+    }
+    await page.screenshot({ path: "test-results/reimbursement-360/receipt-added.png", fullPage: true });
+
+    // The upload moved the revision; the next Save carries it (it is not "changed in another window").
+    await page.getByLabel("What was it for?").fill("Hymn board numbers, a ladder and bolts");
+    await page.getByTestId("request-save-draft").click();
+    await expect(page.getByText("Draft saved.")).toBeVisible();
+    await expect(page.getByText("This request changed in another window. Reload to see the latest.")).toHaveCount(0);
+    await expect.poll(async () => (await requests()).find((r) => r.id === requestId)?.purpose).toBe("Hymn board numbers, a ladder and bolts");
+    // A draft that got its receipt first still moves to its own address on that Save, so a reload keeps the receipt.
+    await expect(page).toHaveURL(new RegExp(`${base()}/${requestId}/edit$`));
+    await page.reload();
+    await waitHydrated(page);
+    await expect(page.getByRole("link", { name: "Hardware store.jpg" })).toBeVisible();
+
+    // Refusals say so in words, naming the person's own file, and add nothing.
+    await pick(page, "notes.png", "image/png", Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'));
+    await expect(page.getByTestId("receipt-error")).toHaveText("notes.png isn't a photo or PDF we can use.");
+    await pick(page, "Big bill.pdf", "application/pdf", Buffer.concat([minimalPdf("big"), Buffer.alloc(4_100_000)]));
+    await expect(page.getByTestId("receipt-error")).toHaveText("Big bill.pdf is larger than 4 MB. Try a photo of it, or a smaller scan.");
+    await expect(page.getByTestId("receipt-row")).toHaveCount(1);
+    await page.screenshot({ path: "test-results/reimbursement-360/receipt-refused.png", fullPage: true });
+
+    // A PDF is added as it is; the same one again is "already on this request".
+    const pdf = minimalPdf("invoice");
+    await pick(page, "Invoice 4471.pdf", "application/pdf", pdf);
+    await expect(page.getByTestId("receipt-row")).toHaveCount(2);
+    await pick(page, "Invoice 4471 copy.pdf", "application/pdf", pdf);
+    await expect(page.getByTestId("receipt-error")).toHaveText("That receipt is already on this request.");
+    await expect(page.getByTestId("receipt-row")).toHaveCount(2);
+    stored = await attachmentRows(sql, requestId);
+    expect(stored.map((r) => r.display_name)).toEqual(["Hardware store.jpg", "Invoice 4471.pdf"]);
+    expect(stored[1]).toMatchObject({ content_type: "application/pdf", audience: "private" });
+    made.pdfAttachment = stored[1]!.id;
+
+    // Remove detaches (soft): the row and its blob stay, the list shrinks, and the next Save still goes through.
+    await page.getByRole("button", { name: "Remove Invoice 4471.pdf" }).click();
+    await expect(page.getByTestId("receipt-row")).toHaveCount(1);
+    stored = await attachmentRows(sql, requestId);
+    expect(stored).toHaveLength(2);
+    expect(stored[1]!.detached_at).not.toBeNull();
+    await page.getByTestId("request-save-draft").click();
+    await expect(page.getByText("Draft saved.").first()).toBeVisible();
+
+    // A big photo (a 2400 x 1600 PNG here) is shrunk in the browser to the long edge Copy implies, and a noisy one that
+    // is over the 4 MB limit as a file gets through only because it is re-encoded first.
+    await pick(page, "Parish hall wide.png", "image/png", syntheticPng(2400, 1600));
+    await expect(page.getByTestId("receipt-row")).toHaveCount(2);
+    await pick(page, "Phone photo.png", "image/png", syntheticPng(1200, 1200, { noise: true }));
+    await expect(page.getByTestId("receipt-row")).toHaveCount(3);
+    stored = (await attachmentRows(sql, requestId)).filter((r) => !r.detached_at);
+    expect(stored.map((r) => r.display_name)).toEqual(["Hardware store.jpg", "Parish hall wide.jpg", "Phone photo.jpg"]);
+    for (const row of stored) expect(row.byte_size, row.display_name).toBeLessThanOrEqual(4_000_000);
+    made.photoAttachment = stored[1]!.id;
+
+    // Send with a double tap: the claim box is not needed, and ONE request goes (the draft is the request).
+    await page.getByTestId("request-send").dblclick();
+    await expect(page.getByText(`Sent to ${NAMES.property} for approval.`)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`${base()}/${requestId}$`));
+    const all = await requests();
+    expect(all.filter((r) => r.purpose.startsWith("Hymn board"))).toHaveLength(1);
+    expect(all.find((r) => r.id === requestId)).toMatchObject({ status: "submitted", amount_cents: 6350, no_receipt_claimed: false });
+    // The request page links every live receipt, and no longer offers to change them.
+    await expect(page.getByTestId("request-receipts").getByRole("link")).toHaveCount(3);
+    await expect(page.getByTestId("request-receipts")).not.toContainText("No receipt attached.");
+    await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0);
+    await noHorizontalScroll(page);
+    await page.screenshot({ path: "test-results/reimbursement-360/detail-with-receipts.png", fullPage: true });
+    await ctx.close();
+  });
+
+  test("a receipt downloads as an image the browser may not sniff, for the requester and the approver (audited), and anyone else gets the one 404", async ({ browser }) => {
+    const requestId = made.requestId!;
+    const photo = made.photoAttachment!;
+    const url = `${receiptsUrl(requestId)}/${photo}`;
+
+    const mine = await contextFor(browser, "member", 360, 740);
+    const res = await mine.request.get(url);
+    expect(res.status()).toBe(200);
+    const headers = res.headers();
+    expect(headers["content-type"]).toBe("image/jpeg");
+    expect(headers["content-disposition"]).toBe(`inline; filename="receipt-${photo.slice(0, 8)}.jpg"`);
+    expect(headers["cache-control"]).toBe("private, no-store");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+    expect(headers["content-security-policy"]).toBe("sandbox; default-src 'none'");
+    const bytes = await res.body();
+    // the 2400 x 1600 PNG arrived as a JPEG whose long edge is the cap (1800 x 1200)
+    expect(jpegSize(bytes)).toEqual({ width: 1800, height: 1200 });
+    made.photoJpeg = bytes;
+    // the uploader's own view writes nothing
+    const viewed = () => auditRows(sql, "tenant.reimbursement.receipt_viewed", fx.orgId);
+    expect(await viewed()).toHaveLength(0);
+
+    // The requester opens it in the browser: the image shows under the sandbox CSP (it is a picture, not a download).
+    const page = await mine.newPage();
+    await page.goto(url);
+    await expect(page.locator("img")).toBeVisible();
+    expect(await page.evaluate(() => (document.querySelector("img") as HTMLImageElement).naturalWidth)).toBe(1800);
+    await page.screenshot({ path: "test-results/reimbursement-360/receipt-opened.png" });
+    await mine.close();
+
+    // The chair (an eligible approver) may read it, and that view is audited with ids only.
+    const chair = await contextFor(browser, "presbytery-nogrant");
+    const seen = await chair.request.get(url);
+    expect(seen.status()).toBe(200);
+    expect((await seen.body()).equals(bytes)).toBe(true);
+    const rows = await viewed();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.metadata).toEqual({ organizationId: fx.orgId, requestId, attachmentId: photo });
+    expect(rows[0]!.actor_user_id).toBe(fx.chairUser);
+    // The approver's page shows the receipts as links; the requester-only claim line is not there.
+    const chairPage = await chair.newPage();
+    await chairPage.goto(`${base()}/${requestId}`);
+    await expect(chairPage.getByTestId("request-receipts").getByRole("link")).toHaveCount(3);
+    await expect(chairPage.getByTestId("flag-duplicate-receipt")).toHaveCount(0);
+    await chair.close();
+
+    // Anyone else, a missing id, a malformed id and a detached receipt are ONE 404 (same status, body and headers).
+    const stranger = await contextFor(browser, "org-unmanaged");
+    const hidden = await stranger.request.get(url);
+    const body = await hidden.text();
+    expect([hidden.status(), body]).toEqual([404, "Not found"]);
+    const detached = made.pdfAttachment!;
+    const mineAgain = await contextFor(browser, "member");
+    const misses = [
+      await stranger.request.get(`${receiptsUrl("11111111-1111-4111-8111-111111111111")}/${photo}`),
+      await stranger.request.get(`${receiptsUrl(requestId)}/11111111-1111-4111-8111-111111111111`),
+      await stranger.request.get(`${receiptsUrl(requestId)}/not-a-uuid`),
+      await stranger.request.get(`${receiptsUrl("not-a-uuid")}/${photo}`),
+      await mineAgain.request.get(`${receiptsUrl(requestId)}/${detached}`),
+      await mineAgain.request.get(`${receiptsUrl(requestId)}/11111111-1111-4111-8111-111111111111`),
+    ];
+    for (const miss of misses) {
+      expect([miss.status(), await miss.text()]).toEqual([404, body]);
+      expect(miss.headers()["cache-control"]).toBe("no-store");
+    }
+    await stranger.close();
+    await mineAgain.close();
+    // no view by a stranger left a row: still just the chair's
+    expect(await viewed()).toHaveLength(1);
+
+    // Signed out: sent to sign in, with the receipt's own address as the way back.
+    const anonymous = await browser.newContext();
+    const redirect = await anonymous.request.get(url, { maxRedirects: 0 });
+    expect(redirect.status()).toBe(307);
+    const location = new URL(redirect.headers()["location"]!, "http://localhost");
+    expect(location.pathname).toBe("/signin");
+    expect(location.searchParams.get("callbackUrl")).toBe(url);
+    await anonymous.close();
+  });
+
+  test("the printed form of a request with receipts lists the live ones by name, never the detached one and never the bytes", async ({ browser }) => {
+    const requestId = made.requestId!;
+    const ctx = await contextFor(browser, "member", 360, 740);
+    const page = await ctx.newPage();
+    await page.goto(`${base()}/${requestId}`);
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByTestId("request-print").click()]);
+    const { readFileSync } = await import("node:fs");
+    const bytes = readFileSync(await download.path());
+    expect(bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    const text = extractPdfText(bytes).replace(/\s+/g, " ");
+    // the live receipts by name; the detached one is not there; the empty-state sentence is not there either
+    for (const name of ["Hardware store.jpg", "Parish hall wide.jpg", "Phone photo.jpg"]) expect(text, name).toContain(name);
+    expect(text).not.toContain("Invoice 4471.pdf");
+    expect(text).not.toContain("No receipt attached.");
+    expect(text).toContain("Hymn board numbers, a ladder and bolts");
+    // the bytes themselves are never on the sheet
+    expect(bytes.includes(made.photoJpeg!.subarray(0, 64))).toBe(false);
+    await ctx.close();
+  });
+
+  test("the upload route called directly: Origin is required, EXIF is stripped by the server, the cap and the type are held, and only the creator of an editable request may add", async ({ browser }) => {
+    const draft = (await requests()).find((r) => r.status === "draft" && r.purpose.startsWith("Candles"))!;
+    const post = (
+      ctx: { request: import("@playwright/test").APIRequestContext },
+      requestId: string,
+      file: { name: string; mimeType: string; buffer: Buffer } | null,
+      headers: Record<string, string> = { origin: origin() },
+    ) => ctx.request.post(receiptsUrl(requestId), { headers, multipart: file ? { file } : {} });
+    const mine = await contextFor(browser, "member");
+
+    // Origin: missing and foreign are refused before anything is read.
+    const pdf = minimalPdf("route");
+    const refusedOrigins: Array<Record<string, string>> = [{}, { origin: "https://evil.example.invalid" }];
+    for (const headers of refusedOrigins) {
+      const res = await post(mine, draft.id, { name: "a.pdf", mimeType: "application/pdf", buffer: pdf }, headers);
+      expect(res.status()).toBe(403);
+      expect(await res.json()).toEqual({ kind: "refused", error: "You don't have permission to do that." });
+    }
+    expect(await attachmentRows(sql, draft.id)).toHaveLength(0);
+
+    // Signed out: the proxy sends it to sign in before the route runs (the form does not follow that redirect: it goes to the
+    // request's own page instead, which keeps the way back). Nothing is stored.
+    const anonymous = await browser.newContext();
+    const signedOut = await anonymous.request.post(receiptsUrl(draft.id), {
+      headers: { origin: origin() },
+      multipart: { file: { name: "a.pdf", mimeType: "application/pdf", buffer: pdf } },
+      maxRedirects: 0,
+    });
+    expect(signedOut.status()).toBe(307);
+    expect(new URL(signedOut.headers()["location"]!, "http://localhost").pathname).toBe("/signin");
+    await anonymous.close();
+    expect(await attachmentRows(sql, draft.id)).toHaveLength(0);
+
+    // The server strips EXIF itself: a JPEG carrying a camera name and a copyright line comes back without them.
+    const exifJpeg = withExifSegment(made.photoJpeg!, "Invented Camera Co / Alder Creek Fixture");
+    expect(exifJpeg.includes("Invented Camera Co")).toBe(true);
+    const ok = await post(mine, draft.id, { name: "From a camera.jpg", mimeType: "image/jpeg", buffer: exifJpeg });
+    expect(ok.status()).toBe(200);
+    const added = (await ok.json()) as Record<string, unknown>;
+    expect(added).toMatchObject({ displayName: "From a camera.jpg", contentType: "image/jpeg" });
+    expect(Object.keys(added).sort()).toEqual(["attachmentId", "byteSize", "contentType", "displayName", "revision"]);
+    expect(typeof added.revision).toBe("number");
+    const back = await mine.request.get(`${receiptsUrl(draft.id)}/${added.attachmentId}`);
+    const clean = await back.body();
+    expect(clean.includes("Invented Camera Co")).toBe(false);
+    expect(clean.includes("Alder Creek Fixture")).toBe(false);
+    expect(clean.includes("Exif")).toBe(false);
+    expect(jpegSize(clean)).toEqual({ width: 1800, height: 1200 });
+    expect(clean.equals(exifJpeg)).toBe(false);
+
+    // The wrong thing, named plainly: an SVG called a photo (415), a body over the cap (413), a second file part (400).
+    const svg = await post(mine, draft.id, { name: "photo.png", mimeType: "image/png", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') });
+    expect([svg.status(), await svg.json()]).toEqual([415, { kind: "not_allowed" }]);
+    const huge = await post(mine, draft.id, { name: "huge.pdf", mimeType: "application/pdf", buffer: Buffer.concat([pdf, Buffer.alloc(4_300_000)]) });
+    expect([huge.status(), await huge.json()]).toEqual([413, { kind: "too_large" }]);
+    const two = await mine.request.post(receiptsUrl(draft.id), {
+      headers: { origin: origin() },
+      multipart: { file: { name: "a.pdf", mimeType: "application/pdf", buffer: pdf }, note: "hello" },
+    });
+    expect([two.status(), await two.json()]).toEqual([400, { kind: "not_allowed" }]);
+    expect(await attachmentRows(sql, draft.id)).toHaveLength(1);
+
+    // Another member, a missing id and a malformed id: not found (and nothing is stored for the wrong request).
+    const chair = await contextFor(browser, "presbytery-nogrant");
+    const theirs = await post(chair, draft.id, { name: "a.pdf", mimeType: "application/pdf", buffer: pdf });
+    expect([theirs.status(), await theirs.json()]).toEqual([404, { kind: "not_found" }]);
+    const missing = await post(mine, "11111111-1111-4111-8111-111111111111", { name: "a.pdf", mimeType: "application/pdf", buffer: pdf });
+    expect([missing.status(), await missing.json()]).toEqual([404, { kind: "not_found" }]);
+    const malformed = await post(mine, "not-a-uuid", { name: "a.pdf", mimeType: "application/pdf", buffer: pdf });
+    expect(malformed.status()).toBe(404);
+    await chair.close();
+
+    // The fifth is the last: four more PDFs fill the five places, and the sixth is "the most allowed".
+    for (let i = 1; i <= 4; i += 1) {
+      const res = await post(mine, draft.id, { name: `Bill ${i}.pdf`, mimeType: "application/pdf", buffer: minimalPdf(`bill-${i}`) });
+      expect(res.status(), `bill ${i}`).toBe(200);
+    }
+    const sixth = await post(mine, draft.id, { name: "Bill 6.pdf", mimeType: "application/pdf", buffer: minimalPdf("bill-6") });
+    expect([sixth.status(), await sixth.json()]).toEqual([409, { kind: "too_many" }]);
+    expect((await attachmentRows(sql, draft.id)).filter((r) => !r.detached_at)).toHaveLength(5);
+
+    // A request that has been sent is not editable, so a receipt cannot be added to it.
+    const sent = await post(mine, made.requestId!, { name: "Late.pdf", mimeType: "application/pdf", buffer: minimalPdf("late") });
+    expect([sent.status(), await sent.json()]).toEqual([409, { kind: "not_editable" }]);
+    await mine.close();
+  });
+
+  test("the edit page of a draft with five receipts shows them and the 'most allowed' sentence in place of the picker, at 360 px", async ({ browser }) => {
+    const draft = (await requests()).find((r) => r.status === "draft" && r.purpose.startsWith("Candles"))!;
+    const ctx = await contextFor(browser, "member", 360, 740);
+    const page = await ctx.newPage();
+    await page.goto(`${base()}/${draft.id}/edit`);
+    await waitHydrated(page);
+    await expect(page.getByTestId("receipt-row")).toHaveCount(5);
+    await expect(page.getByTestId("receipt-add")).toHaveCount(0);
+    await expect(page.getByTestId("receipt-cap")).toHaveText("You've added the most receipts allowed (5).");
+    await noHorizontalScroll(page);
+    await page.screenshot({ path: "test-results/reimbursement-360/receipts-five.png", fullPage: true });
+    // Removing one brings the picker back.
+    await page.getByRole("button", { name: "Remove Bill 4.pdf" }).click();
+    await expect(page.getByTestId("receipt-row")).toHaveCount(4);
+    await expect(page.getByTestId("receipt-add")).toBeVisible();
+    await ctx.close();
+  });
+
 });
 

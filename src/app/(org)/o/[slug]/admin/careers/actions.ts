@@ -13,7 +13,18 @@ import {
   type PostingStatus,
 } from "@/lib/careers/postings";
 import {
-  GENERIC_SAVE_ERROR,
+  FEATURE_OFF_MESSAGE,
+  FORBIDDEN_MESSAGE,
+  GENERIC_MESSAGE,
+  INVALID_TRANSITION_MESSAGE,
+  NOT_FOUND_MESSAGE,
+  PUBLISH_LIMIT_MESSAGE,
+  SLUG_TAKEN_MESSAGE,
+  STALE_MESSAGE,
+  closingDatePassedMessage,
+  incompleteMessage,
+} from "@/lib/careers/messages";
+import {
   firstIssue,
   postingInputSchema,
   postingMoveSchema,
@@ -59,17 +70,15 @@ import type { ActionResult } from "@/types/actions";
  * in this tree follows.
  */
 
-const FORBIDDEN = "You don't have permission to manage job openings.";
-
 async function resolveActingIdentity(slug: string): Promise<
   | { ok: true; personId: string; organizationId: string; slug: string; actor: CareersActor }
   | { ok: false; error: string }
 > {
   const session = await auth();
-  if (!session?.user) return { ok: false, error: FORBIDDEN };
+  if (!session?.user) return { ok: false, error: FORBIDDEN_MESSAGE };
 
   const resolved = await resolveOrgContext(session.user.id, slug);
-  if (resolved.kind !== "ok") return { ok: false, error: FORBIDDEN };
+  if (resolved.kind !== "ok") return { ok: false, error: FORBIDDEN_MESSAGE };
 
   return {
     ok: true,
@@ -80,46 +89,27 @@ async function resolveActingIdentity(slug: string): Promise<
   };
 }
 
-/** "summary" / "summary and location" / "summary, location and description". */
-function joinMissing(missing: readonly string[]): string {
-  if (missing.length <= 1) return missing.join("");
-  return `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}`;
-}
-
-/** Copy S8, for every non-ok result the lib can return. */
+/** Copy S8, for every non-ok result the lib can return (the strings live in `messages.ts`). */
 function mapFailure(result: Exclude<CareersResult<unknown>, { kind: "ok" }>): { ok: false; error: string } {
   switch (result.kind) {
     case "forbidden":
-      return { ok: false, error: FORBIDDEN };
+      return { ok: false, error: FORBIDDEN_MESSAGE };
     case "not_found":
-      return { ok: false, error: "That job opening no longer exists." };
+      return { ok: false, error: NOT_FOUND_MESSAGE };
     case "feature_off":
-      return { ok: false, error: "Job openings aren't turned on." };
+      return { ok: false, error: FEATURE_OFF_MESSAGE };
     case "stale":
-      return {
-        ok: false,
-        error:
-          "This opening was changed by someone else after you opened it, so your changes were not saved. Reload the page to see what changed.",
-      };
+      return { ok: false, error: STALE_MESSAGE };
     case "slug_taken":
-      return { ok: false, error: "Another opening already uses that web address. Choose a different one." };
+      return { ok: false, error: SLUG_TAKEN_MESSAGE };
     case "incomplete":
-      return { ok: false, error: `Add a ${joinMissing(result.missing)} before publishing.` };
+      return { ok: false, error: incompleteMessage(result.missing) };
     case "closing_date_passed":
-      return {
-        ok: false,
-        error: result.reopening
-          ? "The closing date has already passed. Change it, save, then reopen."
-          : "The closing date has already passed. Change it before publishing.",
-      };
+      return { ok: false, error: closingDatePassedMessage(result.reopening) };
     case "publish_limit":
-      return {
-        ok: false,
-        error:
-          "You already have 100 job openings published, which is the most we can show. Close one before publishing another.",
-      };
+      return { ok: false, error: PUBLISH_LIMIT_MESSAGE };
     case "invalid_transition":
-      return { ok: false, error: "That can't be done to this opening right now. Reload the page and try again." };
+      return { ok: false, error: INVALID_TRANSITION_MESSAGE };
     case "invalid_input":
       return { ok: false, error: result.message };
   }
@@ -205,7 +195,7 @@ export async function setPostingStatusAction(
   if (!identity.ok) return { ok: false, error: identity.error };
 
   const parsed = postingStatusSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: GENERIC_SAVE_ERROR };
+  if (!parsed.success) return { ok: false, error: GENERIC_MESSAGE };
 
   const result = await guarded(() =>
     setPostingStatus(identity.personId, identity.organizationId, identity.actor, parsed.data),
@@ -229,7 +219,7 @@ export async function movePostingAction(
   if (!identity.ok) return { ok: false, error: identity.error };
 
   const parsed = postingMoveSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: GENERIC_SAVE_ERROR };
+  if (!parsed.success) return { ok: false, error: GENERIC_MESSAGE };
 
   // audit-exempt: ordering the published list is presentation, not a disclosure change
   const result = await guarded(() =>

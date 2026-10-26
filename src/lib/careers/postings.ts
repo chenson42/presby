@@ -250,8 +250,11 @@ function compareForList(a: Row, b: Row): number {
   if (a.status !== b.status) return STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
   if (a.status === "published") {
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-    if (a.postedOn !== b.postedOn) return (b.postedOn ?? "").localeCompare(a.postedOn ?? "");
-    return a.id.localeCompare(b.id);
+    // ISO day keys and uuids compare correctly as plain strings; no locale is involved.
+    const aPosted = a.postedOn ?? "";
+    const bPosted = b.postedOn ?? "";
+    if (aPosted !== bPosted) return aPosted < bPosted ? 1 : -1; // newest first
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   }
   const at = (r: Row) => (a.status === "closed" ? r.closedAt ?? r.updatedAt : r.updatedAt).getTime();
   return at(b) - at(a);

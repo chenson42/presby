@@ -32,10 +32,11 @@ import {
 } from "./contract";
 import { isValidClosingDate } from "./dates";
 import { SLUG_RE } from "./slug";
+import { GENERIC_MESSAGE } from "./messages";
 import { charCount, cleanText } from "./text";
 
-/** Copy S8 "generic". */
-export const GENERIC_SAVE_ERROR = "We couldn't save that. Try again.";
+/** Copy S8 "generic" (one string, shared with the action messages). */
+export const GENERIC_SAVE_ERROR = GENERIC_MESSAGE;
 
 /** The raw description is only length-capped here (a request-size guard); the validator owns the rest. */
 const DESCRIPTION_RAW_MAX = 100_000;

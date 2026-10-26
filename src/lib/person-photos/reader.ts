@@ -5,15 +5,9 @@ import { personPhotoDesignations, personPhotos } from "@/lib/db/domain/person-ph
 import { getBlobStore } from "@/lib/storage/blob-store";
 import { parseBlobKey } from "@/lib/storage/blob-key";
 import type { PhotoStateSnapshot } from "./consequences";
+import { buildSnapshot, statusesOf, type PhotoAnswers } from "./snapshot";
 import { statusLines } from "./status-lines";
-import type {
-  DirectoryStatus,
-  ListingKind,
-  PhotoSetView,
-  PhotoTileView,
-  WebsiteStatus,
-  Withheld,
-} from "./types";
+import type { ListingKind, PhotoSetView, PhotoTileView } from "./types";
 
 /**
  * THE READ SIDE of person photos: the admin photo set with its effective-state
@@ -52,8 +46,6 @@ export interface ReadCtx {
 type Rows = Array<Record<string, unknown>>;
 const rowsOf = (result: unknown): Rows =>
   Array.isArray(result) ? (result as Rows) : ((result as { rows?: Rows }).rows ?? []);
-
-const asNullableString = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
 /** The per-organization toggle, from the one SQL definition every surface uses. */
 export async function personPhotosEnabled(ctx: ReadCtx): Promise<boolean> {
@@ -116,6 +108,40 @@ async function listingsOf(tx: OrgTx, organizationId: string, personId: string): 
   return out;
 }
 
+/**
+ * Every SQL answer about one person's photo STATE (designations, the directory and website answers,
+ * the minor predicate, the listings), in the caller's transaction. Extracted so the parity test
+ * (`outcome-parity.db.test.ts`) runs exactly the reads the page runs; `snapshot.ts` turns them into
+ * the page's snapshot.
+ */
+export async function loadAnswers(tx: OrgTx, organizationId: string, personId: string): Promise<PhotoAnswers> {
+  const designations = await tx
+    .select({
+      photoId: personPhotoDesignations.photoId,
+      purpose: personPhotoDesignations.purpose,
+      attested: personPhotoDesignations.publicAttestedAt,
+    })
+    .from(personPhotoDesignations)
+    .where(
+      and(
+        eq(personPhotoDesignations.organizationId, organizationId),
+        eq(personPhotoDesignations.personId, personId),
+        isNull(personPhotoDesignations.endedAt),
+      ),
+    );
+  const [dirRow] = rowsOf(
+    await tx.execute(sql`select photo_id, thumb_key, withheld from presby_person_directory_photo(${organizationId}::uuid, ${personId}::uuid)`),
+  );
+  const [webRow] = rowsOf(
+    await tx.execute(sql`select image_key, source, withheld from presby_person_public_photo_status(${personId}::uuid)`),
+  );
+  const [minorRow] = rowsOf(
+    await tx.execute(sql`select presby_photo_subject_is_minor(${organizationId}::uuid, ${personId}::uuid) as minor`),
+  );
+  const listings = await listingsOf(tx, organizationId, personId);
+  return { designations, dirRow, webRow, isMinor: minorRow?.minor === true, listings };
+}
+
 const dataUri = (blob: { bytes: Buffer; contentType: string } | undefined): string | null =>
   blob ? `data:${blob.contentType};base64,${blob.bytes.toString("base64")}` : null;
 
@@ -173,61 +199,21 @@ export async function readPhotoSet(
       )
       .orderBy(asc(personPhotos.createdAt), asc(personPhotos.id));
 
-    const designations = await tx
-      .select({
-        photoId: personPhotoDesignations.photoId,
-        purpose: personPhotoDesignations.purpose,
-        attested: personPhotoDesignations.publicAttestedAt,
-      })
-      .from(personPhotoDesignations)
-      .where(
-        and(
-          eq(personPhotoDesignations.organizationId, ctx.organizationId),
-          eq(personPhotoDesignations.personId, personId),
-          isNull(personPhotoDesignations.endedAt),
-        ),
-      );
-
-    const [dirRow] = rowsOf(
-      await tx.execute(sql`select photo_id, thumb_key, withheld from presby_person_directory_photo(${ctx.organizationId}::uuid, ${personId}::uuid)`),
-    );
-    const [webRow] = rowsOf(
-      await tx.execute(sql`select image_key, source, withheld from presby_person_public_photo_status(${personId}::uuid)`),
-    );
-    const [minorRow] = rowsOf(
-      await tx.execute(sql`select presby_photo_subject_is_minor(${ctx.organizationId}::uuid, ${personId}::uuid) as minor`),
-    );
-    const listings = await listingsOf(tx, ctx.organizationId, personId);
+    const answers = await loadAnswers(tx, ctx.organizationId, personId);
 
     return {
       kind: "ok",
       person,
       photos,
-      designations,
-      dirRow,
-      webRow,
-      isMinor: minorRow?.minor === true,
-      listings,
+      answers,
     } as const;
   });
 
   if (loaded.kind !== "ok") return loaded;
-  const { person, photos, designations, dirRow, webRow, isMinor, listings } = loaded;
+  const { person, photos, answers } = loaded;
+  const { listings, isMinor } = answers;
 
-  const directoryActive = designations.find((d) => d.purpose === "directory") ?? null;
-  const websiteActive = designations.find((d) => d.purpose === "website") ?? null;
-
-  const directory: DirectoryStatus = {
-    photoId: asNullableString(dirRow?.photo_id),
-    thumbKey: asNullableString(dirRow?.thumb_key),
-    withheld: (asNullableString(dirRow?.withheld) as DirectoryStatus["withheld"]) ?? null,
-  };
-  const website: WebsiteStatus = {
-    imageKey: asNullableString(webRow?.image_key),
-    source: (asNullableString(webRow?.source) as WebsiteStatus["source"]) ?? null,
-    withheld: (asNullableString(webRow?.withheld) as Withheld | null) ?? null,
-    unattestedDirectoryOnly: websiteActive === null && directoryActive !== null && directoryActive.attested === null,
-  };
+  const { directoryActive, websiteActive, directory, website } = statusesOf(answers);
 
   const first = String(person.first_name);
 
@@ -254,17 +240,7 @@ export async function readPhotoSet(
     directoryAttested: directoryActive?.photoId === p.id && directoryActive.attested !== null,
   }));
 
-  const state: PhotoStateSnapshot = {
-    first,
-    listed: listings.length > 0,
-    website: websiteActive ? { photoId: websiteActive.photoId } : null,
-    directory: directoryActive ? { photoId: directoryActive.photoId, attested: directoryActive.attested !== null } : null,
-    // What SQL withholds, for the dialogs' sentences. The two answers exist only while a designation does
-    // (the functions start from it), so null here means "none reported", never "none applies".
-    minor: isMinor,
-    directoryWithheld: directory.withheld === "hide_photo" ? "hide_photo" : null,
-    websiteWithheld: website.withheld === "hide_photo" || website.withheld === "merged" ? website.withheld : null,
-  };
+  const state: PhotoStateSnapshot = buildSnapshot(first, answers);
 
   const viewedSrc = viewed ? dataUri(blobs.get(viewed.imageKey)) : null;
 

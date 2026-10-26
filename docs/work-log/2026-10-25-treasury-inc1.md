@@ -19,7 +19,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 | 1 — Functional refinement | analyst | Complete (parent log): R1–R15, Q1–Q14 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12 | Design complete | 2026-10-25 |
-| 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). **Batch 3 complete (api-developer)**: `decisions.ts` (approve on the seat and override paths, send back / not approved), `notices.ts` + `notify.ts` (the four `person:role` notices; submit now tells approvers or pay holders), `approveRequestAction` / `returnRequestAction`, the Phase 3 amendment's Copy (tiles, `copy.ts`), ~115 new tests, decisions/notify/role-bundle DB suites; see the Batch 3 section. Batches 1b, 2b (waits on F289), 4–7 pending | — | 2026-10-26 |
+| 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). **Batch 3 complete (api-developer)**: `decisions.ts` (approve on the seat and override paths, send back / not approved), `notices.ts` + `notify.ts` (the four `person:role` notices; submit now tells approvers or pay holders), `approveRequestAction` / `returnRequestAction`, the Phase 3 amendment's Copy (tiles, `copy.ts`), ~115 new tests, decisions/notify/role-bundle DB suites; see the Batch 3 section. **Batch 4 complete (api-developer)**: `payments.ts` (record, reverse, waive, void, note; the `paid` and `closed` notices), `treasurer_list` reader, `csv-export.ts` + the export route (V4), the ten treasurer-tree actions and three team actions, residual-12 characterization, role-bundle payment half, 177 new tests, 168-file DB subset green; Copy gaps and one UI data gap reported (see the Batch 4 section). Batches 1b, 2b (waits on F289), 5–7 pending | — | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1080,6 +1080,115 @@ Failures: `{ ok: false, error, kind?, fieldErrors? }`. `kind: "already_decided"`
 1. **Scope reading of "waive"** (see Deviations): confirm it is Batch 4's.
 2. **W1**: a pay holder who is also the requester gets `ready_to_pay`. Harmless (they can pay only as the sole holder), but if undesirable the fix is in the approve definer's list, a Batch 1 edit.
 3. **Test-environment note.** `decisions.db.test.ts` and `notify.db.test.ts` mock `@/lib/audit` (its `@/auth` import does not resolve under Vitest, as in `config.db.test.ts`) and `attemptQueuedSend`; the queue insert, `getPersonEmail` and the audit insert are real.
+
+## Batch 4 — api-developer (2026-10-26)
+
+Built on the pipeline branch (`git merge origin/main` said "Already up to date": origin/main is 0.44.1, `8602994`, already merged). Receipts are NOT in this batch (Batch 2b, waits on F289's `store({audience})`); nothing here touches the blob store, `blob_assets` or `sharp`, and the receipt requirement is enforced where Batch 1a put it, in the definers. No schema, migration, permission, flag, proxy or auth change; the Rule 16 shared files are untouched (the Batch 1a integration patch is unchanged and still the orchestrator's). No e2e is assigned to Batch 4 (the four specs and the hydration entry are Batch 7).
+
+### Files Created
+
+- `src/lib/reimbursement/payments.ts`: `recordPayment`, `reversePayment`, `waiveReceipt`, `voidRequest`, `addNote`. Each is ONE `withOrgContext`: the definer, then (on `ok`) the audit row through `auditReimbursement`, then the requester notice through `queueNotices`; the inline send runs after the commit and never throws. WHO MAY and the order of the definer's checks are untouched (who may pay, `payer_is_approver` and `needs_another_payer`, comes before `receipt_missing`).
+- `src/lib/reimbursement/csv-export.ts`: `exportRequests(actor, filters)`: the `export_rows` read and its `REIMBURSEMENT_EXPORTED` audit in ONE transaction; `too_many` past the cap before anything is audited.
+- Pure: `csv-shape.ts` (header, row, `buildRequestsCsv`, `exceedsCsvCap`), `queue-query.ts` (`parseQueueQuery`, `parseExportFilters`, `TREASURER_TABS`, `QUEUE_PAGE_SIZE`), `treasury-input.ts` (the ten treasurer-tree zod schemas), `treasury-messages.ts` (definer outcome to Copy, per verb).
+- `src/app/(org)/o/[slug]/admin/reimbursements/actions.ts` (ten actions), `…/team/actions.ts` (three), `…/export/route.ts` (the CSV GET).
+- Tests: `treasury-input.test.ts`, `treasury-messages.test.ts`, `csv-shape.test.ts`, `queue-query.test.ts` (pure, written and run RED first, then the modules); `payments.db.test.ts` (27), `treasurer-reads.db.test.ts` (12), `csv-export.db.test.ts` (9), `csv-export.cap.db.test.ts` (1); `admin/reimbursements/actions.test.ts` (41), `…/team/actions.test.ts` (21), `…/export/route.test.ts` (10).
+
+### Files Modified
+
+- `reads.ts`: `listTreasurerRequests(identity, {tab, groupId, from, to, page})` (the `treasurer_list` reader) and `getPayHolderCount(identity)` (over `counts.payHolderCount`).
+- `action-result.ts`: one optional field, `suggestTeam?: true`, on the failure (see Contract).
+- `copy.ts` / `copy.test.ts`: five answers the team actions need that C9 names no sentence for, REUSED verbatim from giving's team actions (`COPY.team.invalidRole`, `assignmentEnded`, `endFromRoles`, `templateUnavailable`, `ensureEscalation`); the test asserts each appears in `giving/team/actions.ts`. See Copy gaps.
+- `keys.ts`: `TEAM_TEMPLATE_KEYS` (pure), pinned to `TEAM_SURFACES.reimbursement.templateKeys` by `team.db.test.ts`.
+- Extended: `audit-coverage.test.ts` (the export, the "every audited definer has a caller" ratchet, the unaudited doors), `gate-coverage.test.ts` (the treasurer tree's three surfaces are found; every treasurer-tree gate call names its key), `role-bundle.db.test.ts` (+3), `treasury/team.db.test.ts` (+4: residual 12 and the template pin).
+
+### Audit events
+
+All twelve keys already existed. Written in Batch 4, in the same transaction as the change (a failing audit insert rolls the act back; tested for record, reverse, void and export):
+
+| Act | Key | Metadata (ids and tags only) |
+|---|---|---|
+| record payment | `REIMBURSEMENT_PAYMENT_RECORDED` | `requestId`, `method`, `selfPaid` |
+| reverse | `REIMBURSEMENT_PAYMENT_REVERSED` | `requestId`, `paymentId` |
+| waive | `REIMBURSEMENT_RECEIPT_WAIVED` | `requestId` |
+| void | `REIMBURSEMENT_VOIDED` | `requestId` |
+| CSV export | `REIMBURSEMENT_EXPORTED` | `rowCount`, `from`, `to`, `status` (resource is the organization) |
+| override approve, treasurer send back | `…_OVERRIDE_APPROVED`, `…_RETURNED` | Batch 3's `decisions.ts`, unchanged; the treasurer actions call it |
+
+Every row also carries `organizationId`. No reference, reason, note, name, amount or purpose in any row (asserted against the stored rows). A refused export (413, denied) writes no row. Add-note writes none (the events table is its record; `audit-coverage.test.ts` classifies it). The team actions audit after the commit with `recordAudit()` and `path: "reimbursement_team"`, the giving team's shape, so `check:audit` finds them: `TENANT_ROLE_GRANTED`, `TENANT_ROLE_REVOKED`, `ROLE_DEFINITION_ADOPTED_FROM_TEMPLATE`.
+
+### Notices (Batch 3's `queueNotices` / `sendQueuedNotices`)
+
+`recordPayment` queues `requester_update` / `paid`; `voidRequest` queues `requester_update` / `closed`. Recipient: the creator (the definer's `notify_requester_person_id`). The `paid` and `closed` text and the no-leak assertions are Batch 3's `notices.test.ts`; `payments.db.test.ts` re-asserts on the stored row that no amount, reference, name, group or date is in the paid mail and no reason in the closed mail. Nothing is sent for a reversal (C10 has no such notice).
+
+### Deviations from the Phase 3 text
+
+- **X1** No notice to the creator when the creator is the person acting. A sole pay holder paying (or voiding) their own request is not emailed about their own click. C10 says "the creator"; this is a narrowing, tested (`payments.db.test.ts`). Batch 3's approve path does not need it (an approver cannot be the creator).
+- **X2** The treasurer's send back is always "needs changes": `treasuryReturnSchema` has no `kind` field, so a posted `kind: "not_approved"` is dropped (C8: "Send back: as C6 with kind fixed to Needs changes"). Mutation-tested.
+- **X3** `suggestTeam?: true` on the action failure. C8 says the override refusal `needs_second_payer` carries ` Add one under Treasury team.` as a link only for a viewer who holds `manage`. A server action returns text, not a link, so it returns the sentence without that suffix and `suggestTeam: true` for a manager; the UI appends `COPY.treasury.override.addOneUnderTeam` as a link. A `pay`-only viewer gets neither.
+- **X4** The group name in `seat_holder_exists` ("Someone in {group} can approve this...") is read with the member-level detail after the refusal (one extra read, refusal path only). A `pay` holder with no `view` cannot read the request, so the sentence says "the group", as the member form does.
+- **X5** The treasurer actions share one gate call per verb with the key it needs (`anyOf: ["pay" | "view" | "manage"]`), so the first refusal is the gate's `You don't have permission to do that.`, not the definer's; the definers still re-check (a `denied` result maps to the same string). The 2FA bounce target for an `anyOf` gate is `/admin/reimbursements` (2a's gate).
+- **X6** `listTreasurerRequests` past the last page returns `{ items: [], total: 0 }` (the definer's `count(*) over ()` has no row to carry the count). The UI should not show "page 2 of 0"; it can clamp from page 1's `total`.
+- **X7** Invalid query values are dropped, not errors (`parseQueueQuery`, `parseExportFilters`; the giving shape), and `status=draft` is dropped from the export. A malformed `from` therefore widens a CSV rather than failing it, and the audit row records the filter that was applied (null), so the record stays true. No Copy sentence exists for a rejected filter.
+- **Scope reading.** Waive, void and add-note are in `payments.ts` as the brief and the file plan say. The treasurer-tree `overrideApproveAction` and `treasuryReturnAction` are thin over Batch 3's `approveRequest(path: "override")` and `returnRequest(kind: "needs_info")`; `decisions.ts` is not edited.
+
+### Copy gaps (strings not in the Copy section or the amendment; rule: stop and report)
+
+Nothing in Batch 4 was blocked, but these are reported for a ruling. Where a sentence was needed, the closest existing Copy string was used and is named.
+
+1. **`note_required`** (an empty treasury note). No sentence. Used `COPY.form.saveFailed` ("We couldn't save that. Your entries are still here. Try again.") next to the note field. Suggest: `Write a note.`
+2. **A payment dated before the expense date.** The definer's `date_out_of_range` covers both "in the future" and "before the expense". C8 has only `Choose a date that isn't in the future.`, which is untrue for the second case. Used it for both. Suggest: `Choose a date between the day of the expense and today.`
+3. **A category that vanished** (`not_found` on rename or retire, a stale settings page). Used `COPY.form.saveFailed`.
+4. **Tampered shape** (`method_invalid`, a bad group or category id): `COPY.form.saveFailed`, as the member schemas do.
+5. **Team actions, five answers**: reused giving's module-neutral sentences verbatim (see Files Modified). **One is a real gap**: `ensureTreasuryRole` answering `not_treasury_only` (the org's role of that key already carries a key outside the treasury modules) uses `COPY.team.notTreasuryOnly` ("...Grant it from Roles instead."), which is slightly off for a set-up action; giving's equivalent is "That role already exists with permissions outside Giving. An administrator can fix it under Roles." and names a module, so it was not copied.
+6. **Settings success messages**: C9 has none; the three settings actions return data only (`changed`, `categoryId`/`created`) and the UI needs no toast text unless Copy supplies one.
+7. **`not_waivable`, `receipt_present`, `not_voidable`, `not_reversible`** are the neutral `This request isn't available.` (a deliberate EC16 reading), but a treasurer who hand-posts a stale request sees that for "you already waived it". The pages hide a verb the request cannot take, so this is reachable only from a stale tab.
+
+### Contract for Batch 5 and 6 (UI)
+
+**Treasurer-tree server actions** (`src/app/(org)/o/[slug]/admin/reimbursements/actions.ts`, POST, first argument the **slug**; each runs `gateReimbursementAction(slug, { anyOf: [key] })` first: sign-in, Node-side 2FA, four-way org miss, applicability, the toggle, the key read live). Result: `ReimbursementActionResult<T>` = `{ ok: true, data } | { ok: false, error, kind?, fieldErrors?, redirectTo?, decidedOn?, status?, suggestTeam? }`. `kind` is `two_factor_required` (with `redirectTo`), `changed_since_viewed`, `already_decided` (with `decidedOn` YYYY-MM-DD and `status`), or `not_found` (the neutral `This request isn't available.`). A database failure THROWS.
+
+| Action | Key | Input | `data` on success |
+|---|---|---|---|
+| `recordPaymentAction` | pay | `{ requestId, method: "check"\|"ach"\|"cash"\|"other", reference?, paidOn: "YYYY-MM-DD", note? }` (a check needs `reference`; the payer is the signed-in user; never a person, payer or self-paid input) | `{ message: "Payment recorded.", selfPaid }` |
+| `reversePaymentAction` | pay | `{ requestId, reason }` (required, <=300) | `{ message: "Payment reversed." }` |
+| `waiveReceiptAction` | pay | `{ requestId, note? }` (<=300) | `{ message: "Receipt waived." }` |
+| `treasuryReturnAction` | pay | `{ requestId, expectedRevision, reason }` (kind fixed to needs changes) | `{ message: "Sent back." }` |
+| `voidAction` | pay | `{ requestId, reason }` | `{ message: "Request voided." }` |
+| `overrideApproveAction` | pay | `{ requestId, expectedRevision }` (path fixed to override) | `{ message: "Approved." }` |
+| `addNoteAction` | view | `{ requestId, note }` (required, <=500) | `{ message: "Note added." }` |
+| `setChargeableAction` | manage | `{ groupId, chargeable: boolean }` | `{ changed }` |
+| `saveCategoryAction` | manage | `{ categoryId?: null for create, name (1-60), sortOrder?: int\|null }` | `{ categoryId, created }` |
+| `endCategoryAction` | manage | `{ categoryId }` | none |
+
+Field errors are keyed by input name: `reference`, `paidOn`, `note`, `reason`, `name`, `groupId`. The pre-form blocks of C8 come back as `{ ok: false, error }` with no field (`payer_is_approver`, `needs_another_payer`, `receipt_missing`, `not_payable`, `already_paid`); the UI should ALSO decide which block to show BEFORE rendering the form, from the treasury detail's `treasuryViewer` (`isApprover`, `isRequesterSide`, `anotherPayerExists`) and `status` / `receiptWaived` / `receipts`, so the action's answer is the backstop. The override refusals: `error` is the C8 sentence; when `suggestTeam` is true append `COPY.treasury.override.addOneUnderTeam` as a link to `/o/<slug>/admin/reimbursements/team`.
+
+**Team actions** (`…/admin/reimbursements/team/actions.ts`, key manage): `grantTreasuryRoleAction(slug, { roleId, personId })` -> `{ grantId }`; `revokeTreasuryRoleAction(slug, { grantId })`; `ensureTreasuryRoleAction(slug, { templateKey: "treasurer" | "reimbursement_clerk" })` -> `{ roleId, skippedKeys }`. Errors are Copy C9 (`COPY.team.*`). The page reads `listTreasuryTeam("reimbursement", personId, organizationId)` from `@/lib/treasury/team` (exists since 2a) and renders `COPY.team.setUpTreasurer` / `setUpClerk` for `missingTemplates`.
+
+**Readers** (`reads.ts`, take the gate's `identity`): `listTreasurerRequests(identity, query)` with `query = parseQueueQuery(searchParams)` -> `{ kind: "ok", items: TreasurerListItem[], total } | { kind: "denied" }` (`denied` = no `view`; the page's gate already redirected/forbade, so it is a backstop). 50 per page (`QUEUE_PAGE_SIZE`); page past the end: empty, total 0 (X6). `getCounts` (2a) gives the tab counts for a `view` holder (`needsTreasurer`, `waitingForPayment`, `inProgress`; `paid` and `all` have no count). `getPayHolderCount(identity)` -> number for the "No one can record payments yet" banner. `getRequestDetail(identity, id, "treasury")` is the treasury detail (2a). `getSettings(identity)` is the settings page's read (2a).
+
+**The CSV** (`GET /o/<slug>/admin/reimbursements/export?from&to&status`, key view): `Export CSV` is a plain link to this route with the queue's `from`/`to` (and `status` only for the paid/etc. tabs if the UI wants it). 413 body is `COPY.queue.exportTooLarge`, text/plain; show nothing special, the browser downloads or shows the text. The dates filter on the org-local date the request was last SUBMITTED, so the filter labels must say "submitted".
+
+**Known UI gap for Batch 6 (not a defect here):** the queue's "Charged to" filter needs the list of groups, and no reader gives a `view`-only holder one. `getFormOptions` lists the chargeable groups only when the viewer may FILE; `getSettings` needs `manage`. Options: derive the filter from the distinct `groupId`/`groupName` of the unfiltered `all` tab, or add a read definer (a Batch 1 schema change, not mine). Needs a ruling before Batch 6 builds the filter.
+
+### Gates
+
+- `npm run typecheck` exit 0; `npm run lint` exit 0 (`--max-warnings=0`); `npm run check` all eight tripwires passed (including `check:audit`, `check:secrets` over the new fixtures, `check:hydration-gate`: no form was added); `npm run build` exit 0 (run with `NEXT_PUBLIC_APP_URL=https://app.example.invalid NEXT_PUBLIC_PLATFORM_HOSTS=app.example.invalid` because this worktree's `.env.local` is http on :3590); `/o/[slug]/admin/reimbursements/export` is in the route table.
+- Unit suite without `DATABASE_URL` (CI shape): 619 files passed, 9,392 tests passed, 2,770 skipped (DB-gated). Batch 3 left it at 612 / 9,271 / 2,714: +7 files, +121 tests, +56 DB-gated.
+- New or changed tests: **177** (121 pure: 16 `treasury-input`, 12 `treasury-messages`, 10 `csv-shape`, 6 `queue-query`, 41 treasurer `actions`, 21 `team/actions`, 10 export `route`, +1 `copy`, +3 `audit-coverage`, +1 `gate-coverage`; 56 DB-backed: 27 `payments.db`, 12 `treasurer-reads.db`, 9 `csv-export.db`, 1 `csv-export.cap.db`, +3 `role-bundle.db`, +4 `treasury/team.db`).
+- DB-backed subset I touch, serial (`--no-file-parallelism`, `.env.local`): `src/lib/{reimbursement,treasury,giving,org-feature*,org-portal,contact-methods,audit*}`, `src/lib/db/domain/reimbursement*`, `designation-parity`, both admin trees' tests and the member actions test: **168 files, 2,813 tests passed, 1 skipped (pre-existing), 0 failed**, 756 s.
+- `scripts/treasury/test-rls-73.sql` as presby_app: **52 passes, exit 0** (unchanged; no schema in this batch).
+- Failing-first and mutation evidence (each restored, files byte-identical afterwards): the four pure modules and their tests were written test-first and run RED (`Cannot find module`) before the modules existed, then green. Mutations: removing the `auditReimbursement` call from `recordPayment` fails `audit-coverage.test.ts › every function that calls an audited write definer calls auditReimbursement`; deleting the cap test from `exportRequests` fails `audit-coverage.test.ts › the CSV export …` AND `csv-export.cap.db.test.ts` (`expected ok to equal too_many`); letting `treasuryReturnAction` read a posted `kind` fails `actions.test.ts › sends back for CHANGES only`. The DB suites pin: audit and notice rolled back with the payment, void and export when the audit insert fails; the approver told `payer_is_approver` BEFORE `receipt_missing`; the sole pay holder paying their own request (`self_paid`, audited, not emailed) versus `needs_another_payer` with a second holder; an approved request staying payable after the requester's membership ends; reversal as its own row and a second payment after it; the date filters on two organizations 25 hours apart.
+- Residual 12 is pinned by `treasury/team.db.test.ts › residual 12`: ending the sole `treasurer` grant on the giving page leaves `reimbursement.manage` unheld (and the reverse), the grant ended and not deleted, `listTreasuryTeam("reimbursement")` forbidden for everyone left; and the within-surface guard still blocks the last holder. A future stricter rule changes these tests on purpose.
+- Backfill and bundle: the 0074 backfill (EC29) is Batch 1a's `reimbursement-permissions.db.test.ts` (7, unchanged and green); the role bundle (EC31) is extended here with the payment half: the designation-minted treasurer cannot pay what they approved, the second payer they named does and the filer is told, and that treasurer, holding only that role, runs note, reverse, send back from approved, void, chargeable groups, categories and the export; the founding administrator can do none of it.
+- No e2e is assigned to Batch 4.
+
+### Loop-back candidates and notes
+
+1. **Copy gaps 1, 2 and 5 above** (a note sentence; the paid-before-expense date sentence; the set-up-role `not_treasury_only` sentence) want a ruling before Batch 6 ships the forms; the rest are reuse of existing strings.
+2. **The queue's group filter has no data source for a `view`-only holder** (Contract, "Known UI gap"). Needs a ruling: derive from the `all` tab, or a new read definer (Batch 1 schema work).
+3. `treasurer_list`'s `total_count` is 0 for a page past the end (X6); not a defect, a UI note.
+4. The five `test:db` failures expecting `localhost:3000` (the Batch 1a environmental note) were not part of this subset; unchanged.
+5. `docs/work-log/treasury-inc1.integration.patch` is unchanged; nothing in this batch needs a shared-file edit. `docs/TODO.md`: the residual-12 line and the stale giving-team strings (C12, Batch 6) are still the orchestrator's / Batch 6's.
 
 ---
 

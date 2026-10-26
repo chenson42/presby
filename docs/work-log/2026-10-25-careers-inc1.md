@@ -1308,3 +1308,154 @@ Note: `playwright.config.ts` starts `npm run dev` on port 3000 when it finds no 
 `73af2b6` (patches), then the fixes commit and a final commit for the 44px dialog buttons and the e2e test.
 
 **Next:** qa (Phase 5, run 2, scoped).
+
+---
+
+# Phase 5 — Verification, run 2 (qa)
+
+**Date:** 2026-10-26
+**Verified by:** qa
+**Tree:** `pipeline/careers` at `c9a5738` (fix commits `73af2b6`, `a4bb658`, `c9a5738`), worktree `/Users/cshenso/git/presby-platform/presby-careers`, Neon branch `pipeline-careers`. The three connection strings point at `ep-crimson-tooth`; I checked by substring match and printed no value. The worktree was clean before and after, HEAD did not change, and `git stash` was not used.
+
+**Scope run (scoped re-run, per run 1's hand-back):**
+- **Ran in full:** typecheck, lint, `npm run check`, and the full unit suite.
+- **e2e:** `e2e/careers.spec.ts` and `e2e/hydration/careers-posting-form.spec.ts` on my own dev server at :3580, plus the hydration spec on the prod lane at :3581.
+- **Browser walk:** the edit page's four status dialogs at 360px and 1280px, the failed-save paths, and the malformed-id gate under all four combinations of toggle and permission.
+- **Failing-first:** reproduced for findings 1–3, plus four single mutations, in a `git archive` scratch copy.
+- **Not re-run:** the DB-backed suites, `test-rls-71`/`test-rls.sql`, `custom-hosts`, and the rest of `chromium`. The fix pass touches no migration, no `src/lib/db/`, no `authz.ts`, no shared fixture, no layout and no `src/components/` file, so run 1's full-suite results at `27a997e` still stand for those surfaces, and the PR's CI covers the rest.
+
+**Flag state:** Before the e2e runs I reset the global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, using `PLATFORM_DATABASE_URL` only; exit 0, 10 flags on). After all runs the flags still matched that baseline, and no `e2e-careers-*` organization remained.
+
+## Type Check
+
+- `npm run typecheck`: PASS.
+- `npm run lint`: PASS (0 warnings).
+- `npm run check`: all eight tripwires ran and passed (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
+
+## Unit Tests
+
+- `npm test` (no database): 622 files passed, 85 skipped; 9,512 tests passed, 2,597 skipped. That is run 1's 9,505 plus the 7 new tests. The skips are the DB-gated files, as in run 1.
+- The careers staff directory alone (`src/app/(org)/o/[slug]/admin/careers/`): 128/128.
+
+## End-to-End Tests
+
+| Lane | Result |
+|---|---|
+| `chromium`, dev server :3580 (started by hand, `.next/dev` cleared, fakes in its environment, `E2E_BASE_URL`/`AUTH_URL` :3580) | `careers.spec.ts` + `hydration/careers-posting-form.spec.ts`: **24/24 passed, 0 skipped, 0 flaky** (1.2 min), including the new 360px dialog test |
+| `prod-build`, own build on :3581 (scratch copy outside `~/git/presby-platform/` with hardlinked `node_modules`, per `docs/testing.md`) | `hydration/careers-posting-form.spec.ts`: **3/3** (the lane tore its server down) |
+
+My first dev-server start is void. Every request returned 500 with `Can't resolve '@vercel/turbopack-next/internal/font/google/font'`, the known Turbopack font-root flake (`docs/testing.md`). I stopped the server by PID, cleared `.next/dev` and restarted; the second start served 200 with no errors. The dev server was stopped by PID afterwards. :3000 was never touched.
+
+Other AlertDialog specs were not run: the 44px change does not touch a shared primitive (see below).
+
+## Regression Tests Added (failing-first, reproduced independently)
+
+**Setup:** a scratch copy at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-r2-ff`, made from `git archive HEAD`, with `posting-form.tsx`, `status-controls.tsx` and `[postingId]/page.tsx` restored from `27a997e` and the new tests kept. The copy, including its `.env.local`, is deleted.
+
+**Pre-fix sources:** 6 failed and 122 passed.
+- Both "names the title being typed" tests failed (finding 1).
+- Both Close save-first tests failed (finding 2).
+- The `status-controls` save-first test failed (finding 2).
+- The malformed-id gate test failed (finding 3).
+
+The implementer reported 5 failures plus the `status-controls` one, which is consistent with this.
+
+**Single mutations on HEAD sources** (restored and green, 128/128, after each):
+
+| Mutation | Went red |
+|---|---|
+| A: `title={posting.title}` (finding 1 reverted alone) | Publish and Reopen live-title tests (2) |
+| B: `savesFirst = copy.to === "published"` (Close stops saving) | both Close tests and the `status-controls` test (3) |
+| C: `savesFirst = true` (Discard starts saving) | "Discard does not save", and the `status-controls` test (2) |
+| D: raw `postingId` passed to `getPosting` (no nil-GUID swap) | "a malformed id … the database never sees it" (1) |
+
+The tests guard the property (the dialog names the title that gets saved; Close saves and Discard does not, in both directions), not just the literal fix. The 44px e2e red (34.8px) rests on the implementer's run. The cause holds: the shadcn button's `h-9` is under the floor.
+
+## Coverage on Critical Modules
+
+Not re-measured. The diff does not touch `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+## Feature-Gate Audit
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct key? |
+|---|---|---|---|
+| GET `/o/[slug]/admin/careers/[postingId]` (changed) | yes, `resolveCareersAccess` → `cachedAuth()` and the `(org)` four-way miss | n/a (tenant axis) | yes: `getPosting` now runs for every id, and `run()` applies the toggle and then `careers.manage` (`postings.ts:149-166, 193-197`) before `loadRow` |
+| All four server actions | unchanged since run 1 | n/a | unchanged |
+
+No API route, no `src/proxy.ts` change, and no schema change. Run 1's Schema/RLS live-catalog probe stands.
+
+The gate was checked live at 360px with `not-a-guid` and with the nil GUID:
+
+| Toggle | Role | Shows |
+|---|---|---|
+| off | with `org_features.manage` | S1 with the Features link |
+| off | no permission | S1, "Ask someone who manages…" |
+| on | no permission | S2 |
+| on | manager | S4, not found |
+
+The toggle is checked before the permission, as designed.
+
+## Copy Truthfulness
+
+- [x] **Copy table:** the fix pass adds no new string. The dialog titles still use the Copy table's `Publish/Close/Reopen "{title}"?`, now filled with the form's live title.
+- [x] **Query behind each claim:** the walk compared each dialog's title against the row that was persisted afterwards, at both widths:
+
+  | Dialog | Showed | Persisted row |
+  |---|---|---|
+  | Publish | `Publish "QA Draft 360 Typed"?` | `{title: "QA Draft 360 Typed", status: published}` |
+  | Close | `Close "QA Open 360 Typed"?` | title and typed summary saved, `status: closed`; the form afterwards showed the typed values |
+  | Reopen | `Reopen "QA Closed 360 Typed"?` | `{title: "QA Closed 360 Typed", status: published}` |
+  | Discard | `Discard this draft?` | stored title kept (typed edit dropped, per the ruling), `status: closed` |
+  | Keep as draft | (cancel) | nothing written |
+
+- [x] **Failed-save paths leave the posting open:**
+  - With a blank title, Close showed the toast "We couldn't save that. Try again." and the row stayed `published`.
+  - With a stale version, Close showed the S8 stale panel with Reload, kept the typed title, and the row stayed `published`.
+- [x] **Viewer:** a `careers.manage` holder. The controls render only past the gate.
+- [x] **Neighbouring strings:** the `status-controls.tsx` and `posting-form.tsx` doc comments were corrected. The comment the run-1 finding 3 called false is replaced by a true one.
+- **copy truthfulness: PASS**, with one degenerate edge (note N1).
+
+## 44px dialog buttons
+
+- **Local to careers.** `min-h-11` is passed as `className` on `AlertDialogCancel` and `AlertDialogAction` in `status-controls.tsx:176,184`.
+- **No shared primitive edited.** `git diff origin/main...HEAD -- src/components/` shows only `src/components/careers/*` and `org-portal/tile-icons.tsx` (both from Batch 1); `src/components/ui/alert-dialog.tsx` is untouched. No divergence header is needed and other dialogs are unaffected.
+- **Matches the repo's pattern.** Eight other consumers (community, the admin revoke dialog, email-addresses editor) already pass `min-h-11` the same way.
+- **Measured live** at 360px for all four dialogs and the 150-character-title Close dialog: every button 44.0px, dialog `x=16 w=328`, `scrollWidth=360`. At 1280px: 44.0px, `w=512`. The long title wraps inside the dialog (`[overflow-wrap:anywhere]`).
+- **Screenshots** read by eye, in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-r2/shots/`: the four 360px dialogs, the long-title one, the blank-title one, and the after-states.
+
+## Finding 4: integration patches
+
+All four `scripts/careers/*.integration.patch` files pass `git apply --check` at HEAD (`_journal.json`, `domain-index.ts`, `seed-dev.sql`, `test-rls.sql`). `origin/main` (`8602994`) has not touched any of the four target files since the merge-base, so they apply there too.
+
+## Findings
+
+Findings 1–4 of run 1 are closed. The notes below do not block:
+
+- **N1. Copy edge: blank title.** With the title field cleared, the dialog reads `Close ""?` (and `Publish ""?` / `Reopen ""?` the same way). Confirming changes nothing: the save fails validation, the toast says "We couldn't save that. Try again." and the inline title error appears.
+  - Nothing false is claimed, but the dialog names nothing, and "Try again" will fail until the title is fixed.
+  - A fallback to the stored title when the typed one is blank, or validating before opening the dialog, would close it.
+  - Viewer: a `careers.manage` holder.
+  - For ux-developer or tech-lead as a follow-up.
+- **N2. Remount race (pre-existing since Batch 3, not introduced here).** After any save or status change, the form remounts on the new `id-version` key after the toast has already shown. Measured on the dev server, the remount lands this long after the toast:
+  - a refused Publish: 130–256 ms
+  - a successful Close: 550–818 ms
+  - a plain Save: 523–543 ms
+
+  Text typed in that window is dropped. In the walk, a summary typed immediately after a refused Publish was gone 4 s later. The fields also stay editable through the ~1.1 s pending interval. For Phase 6 or tech-lead.
+- **N3. Consequence of the ruling.** Close on a published posting saves unsaved edits first, so for about 1 s those edits are live on the public page before it closes. If the save succeeds and the close then fails, the edits stay live and the posting stays open. Phase 6 should confirm this matches intent.
+- **N4. Weak assertion.** `page.test.tsx`'s malformed-id/toggle-off case asserts that `careers-not-found` is absent, but not that `careers-feature-off` is present. The live walk covers it.
+- **N5. Process.** The Turbopack font flake hit the first dev start from the worktree. That start is void; a restart cleared it.
+
+## Verdict
+
+**PASS.** Findings 1–3 are fixed, each guarded by tests I watched fail on the pre-fix sources and on single mutations, and each confirmed in a real browser at 360px and 1280px against the persisted row. Finding 4's patches apply. The 44px change is local and measured. Typecheck, lint, all eight tripwires, the unit suite (9,512), the careers e2e (24/24) and the prod-lane hydration spec (3/3) are green. This is not auth-touching.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 2, scoped) | qa | Complete; findings 1–4 closed; failing-first reproduced (6 red pre-fix, 4 single mutations); notes N1–N5 non-blocking | PASS | 2026-10-26 |
+
+**Next:** analyst (Phase 6). Carry N1–N3 into the shipped-vs-intent review; N1 and N2 are candidate follow-ups for `docs/TODO.md`.
+
+Logs, walk output and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-r2/`.

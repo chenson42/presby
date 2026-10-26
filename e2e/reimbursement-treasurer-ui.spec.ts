@@ -413,12 +413,19 @@ test.describe("Reimbursements, treasurer side", () => {
     await noHorizontalScroll(page);
     await shot(page, "360", "settings");
 
-    // Un-list Worship, see it persisted, then list it again.
+    // Un-list Worship, see it persisted, then list it again. The change is the database's, so the spec waits for IT: a
+    // reload straight after the click can beat the server action (the one flake this test had, Batch 6 and Batch 7 runs).
+    const worshipListed = async () =>
+      Number((await rows<{ n: number }>(sql`
+        select count(*)::int as n from reimbursement_chargeable_groups
+         where organization_id = ${fx.orgId}::uuid and group_id = ${fx.groupWorship}::uuid and ended_at is null`))[0]!.n);
     await worship.getByRole("switch").click();
+    await expect.poll(worshipListed, { timeout: 15_000 }).toBe(0);
     await page.reload();
     await waitHydrated(page);
     await expect(page.getByTestId("chargeable-row").filter({ hasText: NAMES.worship }).getByRole("switch")).toHaveAttribute("aria-checked", "false");
     await page.getByTestId("chargeable-row").filter({ hasText: NAMES.worship }).getByRole("switch").click();
+    await expect.poll(worshipListed, { timeout: 15_000 }).toBe(1);
     await page.reload();
     await waitHydrated(page);
     await expect(page.getByTestId("chargeable-row").filter({ hasText: NAMES.worship }).getByRole("switch")).toHaveAttribute("aria-checked", "true");
@@ -449,6 +456,37 @@ test.describe("Reimbursements, treasurer side", () => {
     await shot(page, "360", "retire-dialog", false);
     await page.getByTestId("retire-confirm").click();
     await expect(page.getByTestId("category-row")).toHaveCount(1);
+    await page.close();
+  });
+
+  test("a 60-character category name with no space wraps in the Retire dialog and the page: nothing leaves a 360 px screen", async () => {
+    const longName = "Q".repeat(60);
+    const page = await treasurerPage(360, 740);
+    await page.goto(`${base()}/settings`);
+    await waitHydrated(page);
+    await page.getByLabel("Name", { exact: true }).fill(longName);
+    await page.getByTestId("add-category-submit").click();
+    const row = page.getByTestId("category-row").filter({ hasText: longName });
+    await expect(row).toHaveCount(1);
+    await noHorizontalScroll(page);
+    await row.getByTestId("retire").click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText(`Retire ${longName}?`);
+    await page.waitForTimeout(400); // let the dialog finish fading in
+    const box = (await dialog.boundingBox())!;
+    expect(box.x, "the dialog starts on the screen").toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, "the dialog ends on the screen").toBeLessThanOrEqual(360);
+    const overflow = await dialog.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow, "the long title wraps inside the dialog").toBeLessThanOrEqual(0);
+    for (const testId of ["retire-confirm"]) await tallEnough(page, testId, 360);
+    await shot(page, "360", "retire-dialog-long-name", false);
+    await dialog.getByRole("button", { name: "Keep the category" }).click();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0); // gone, overlay included, before it is opened again
+    await expect(page.getByTestId("category-row").filter({ hasText: longName })).toHaveCount(1);
+    // Tidy: retire it for real so the settings list is as the next test expects it.
+    await row.getByTestId("retire").click();
+    await page.getByTestId("retire-confirm").click();
+    await expect(page.getByTestId("category-row").filter({ hasText: longName })).toHaveCount(0);
     await page.close();
   });
 

@@ -1,0 +1,18 @@
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index 0baf163..789cef1 100644
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -449,6 +449,13 @@
+       "when": 1787446373186,
+       "tag": "0064_presby_person_emails",
+       "breakpoints": true
++    },
++    {
++      "idx": 71,
++      "version": "7",
++      "when": 1788051173186,
++      "tag": "0071_presby_careers",
++      "breakpoints": true
+     }
+   ]
+ }

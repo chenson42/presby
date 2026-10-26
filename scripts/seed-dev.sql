@@ -1973,3 +1973,8 @@ commit;
 -- congregation, so a database built from empty matches development.
 -- scripts/parishes/test-rls-68.sql needs it.
 \ir parishes/seed-dev-parishes.sql
+
+-- Careers fixture (drizzle/0071). Its own file and transaction, run AFTER the
+-- person-emails and public-calendar includes; owner-only rows (two live sites, the careers toggle,
+-- one posting in each state). scripts/careers/test-rls-71.sql needs it.
+\ir careers/seed-dev-careers.sql

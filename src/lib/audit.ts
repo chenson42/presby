@@ -562,6 +562,22 @@ export const AUDIT_ACTIONS = {
   EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
   EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
   // ---------------------------------------------------------------------------
+  // Careers, Increment 1 (docs/work-log/2026-10-25-careers-inc1.md, Phase 3
+  // "Audit"; DECISION-264/265). One row per status change that changes what the
+  // PUBLIC can read: publish, close, reopen, and the cron's close of a posting
+  // past its closing date. Written with `insertAuditRow(tx, ...)` in the SAME
+  // transaction as the change (src/lib/careers/postings.ts and sweep.ts), so a
+  // failed audit insert fails the change. NOT written for create, edit, reorder
+  // or discarding a draft (nothing was ever public). `check:audit` scans only
+  // actions.ts, which delegate to those lib functions.
+  // resourceType 'job_posting'; resourceId = the posting id. Metadata is ids
+  // and an enum only - never a title, a slug or any text:
+  // { organizationId, postingId, via: 'staff' | 'closing_date' }; the cron's
+  // rows have a null actor.
+  CAREERS_POSTING_PUBLISHED: "careers.posting.published",
+  CAREERS_POSTING_CLOSED: "careers.posting.closed",
+  CAREERS_POSTING_REOPENED: "careers.posting.reopened",
+  // ---------------------------------------------------------------------------
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

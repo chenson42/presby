@@ -62,10 +62,11 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar, org_portal.giving, org_portal.parishes, org_portal.public_calendar and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
+  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.public_calendar and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
+      "org_portal.careers",
       "org_portal.domains",
       "org_portal.giving",
       "org_portal.mail_domain",
@@ -158,6 +159,20 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(entry!.operatorEnabled).toBe(false);
     expect(entry!.orgTypes).toBeNull();
     expect(entry!.category).toBe("worship");
+  });
+
+  it("org_portal.careers is toggle-only, provisioned OFF, SELF-SERVICE, people category, unscoped by organization type (the SQL definer repeats exactly these)", () => {
+    const entry = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.careers");
+    expect(entry).toBeDefined();
+    expect(entry!.name).toBe("Job openings");
+    expect(entry!.description).toBe(
+      "Lets your congregation post job openings on its public website. People are asked to contact the church to apply. Whoever maintains your website can also place the openings on a page.",
+    );
+    expect(entry!.flag).toBeNull();
+    expect(entry!.provisionedOn).toBe(false);
+    expect(entry!.operatorEnabled).toBe(false);
+    expect(entry!.orgTypes).toBeNull();
+    expect(entry!.category).toBe("people");
   });
 
   it("orgTypeAdmitted is an ALLOW-LIST: null admits everything, a list admits only its members, an unknown organization is never admitted by a list", () => {

@@ -1,6 +1,7 @@
 import {
   BarChart3,
   BookOpen,
+  Briefcase,
   CalendarCog,
   CalendarDays,
   FileBarChart,
@@ -58,6 +59,8 @@ export const TILE_ICONS: Record<string, LucideIcon> = {
   // Worship & Events. Before this, "events" fell through to `LayoutGrid`.
   calendar: CalendarDays,
   events: CalendarCog,
+  // docs/work-log/2026-10-25-careers-inc1.md (Copy T1): job openings.
+  careers: Briefcase,
 };
 
 /**

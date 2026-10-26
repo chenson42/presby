@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | See parent (shared) | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | See parent (shared) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; designed against the F289 0072 **draft** (`presby-assets` worktree, unmerged); three Phase 2 rulings corrected (R3 invoker to definer, R2 Drizzle declaration, R5 dead join); F333–F337 raised; open rulings O1–O4 | Design complete | 2026-10-26 |
-| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied); F338 ruled by the orchestrator (the barrel line and the dev-docs entry are committed on the branch). Batch 2 (api-developer) complete: sharp 0.35.5 installed, image pipeline, store, reader, consequences, copy, four server actions, `resolveMany`, directory swap to `photoThumbKey`, catalog toggle, audit keys and the off-warning; 644 unit files / 9718 tests, 63 DB-backed files / 1351 tests, RLS 78 = 82 and RLS 72 = 24, `npm run check` 8/8, build and typecheck and lint clean. Batch 3 (ux-developer) next | Batch 2 done | 2026-10-26 |
+| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied); F338 ruled by the orchestrator (the barrel line and the dev-docs entry are committed on the branch). Batch 2 (api-developer) complete: sharp 0.35.5 installed, image pipeline, store, reader, consequences, copy, four server actions, `resolveMany`, directory swap to `photoThumbKey`, catalog toggle, audit keys and the off-warning; 644 unit files / 9718 tests, 63 DB-backed files / 1351 tests, RLS 78 = 82 and RLS 72 = 24, `npm run check` 8/8, build and typecheck and lint clean. Batch 3 (ux-developer) complete: photos page, upload island with client downscale, designate and remove dialogs, edit-page link, three listing-dialog rewrites, UI copy, unit, e2e and hydration specs, browser walk at 360 and 1280 px; QA next | Batch 3 done | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -902,6 +902,57 @@ Gate on all four: `auth()` then `resolveOrgContext()` (signed out: "You must be 
 ### Handoff
 
 Next: **ux-developer, Batch 3** (the photos page and its components, the edit-page link, the three listing dialogs, `copy.ts` UI sections, component tests, `e2e/support/person-photos-fixture.ts`, `e2e/person-photos.spec.ts`, `e2e/hydration/person-photos-upload.spec.ts`; port 3620). The server side needs no further change unless Batch 3 finds a gap.
+
+## Batch 3 — ux-developer (2026-10-26)
+
+Branch `pipeline/person-photos`; `origin/main` (0.46.3) merged first (two conflicts, both mine to resolve: the `blob-store.ts` header sentence and the `audience-callsites.test.ts` table, where the ingest pipeline's `sites-ingest.ts` row and the photo rows now both stand). No `git stash`; every commit staged by explicit path.
+
+### Commits
+
+| Commit | What |
+|---|---|
+| `b68cab6` | merge of `origin/main` |
+| `6c662dd` | `feat(photos)`: the page, island, dialogs, edit link, listing dialogs, UI copy and their unit tests |
+| (next) | `test(photos)`: fixture, E1/E2/E3/E4 specs |
+| (next) | this section |
+
+### What was built (`src/app/(org)/o/[slug]/admin/community/[id]/edit/photos/`)
+
+`page.tsx` (one `readPhotoSet` call carries the gate; off, forbidden, error, not-found and data states; `?view=` passes straight through; no `loading.tsx`, pinned by a test), `photo-states.tsx` (`PhotosOff`), `where-photos-show.tsx`, `photo-grid.tsx` (server tiles), `tile-controls.tsx` (client buttons inside a `HydrationGate`, group labelled with the tile's alt text), `designate-dialog.tsx` (`Dialog`, native checkbox, directory box unticked and recomputing the consequence line, website confirm disabled until ticked), `confirm-dialogs.tsx` (`AlertDialog` for stop-using and remove, body from `consequencesFor`), `upload-island.tsx` (`HydrationGate`, no `capture`, any rejection mapped to the fixed string) and `downscale.ts` (`createImageBitmap`, canvas, white flatten, quality then edge stepping to at most 900 KB, fixed name `photo.jpg`, no `blob:`/`createObjectURL`, source-scanned). The edit page gains the "Photos" link when the toggle is on (read after `getPersonForEdit` says `ok`; a failed read hides the link). `copy.ts` gains `PAGE_COPY`, `UPLOAD_COPY`, `DESIGNATE_COPY`, `CONFIRM_COPY`, `EDIT_LINK_COPY` and `listingConsentCopy` (C8, used by all three listing dialogs).
+
+### Deviations from the design (each with its reason)
+
+1. **No success toast for designate, un-designate or remove.** Copy has no string for them; the page re-renders with the new chips and status lines, and refusals toast the server string. Not invented. **For Phase 5/6:** add strings if a toast is wanted.
+2. **No `loading.tsx`, and no separate "Photos" section heading.** The h1 is "Photos"; only the counter row sits above the tiles (the design lists no section heading beyond "Where photos show").
+3. **Downscale decodes files up to 1.5 MB unscaled and larger ones with `resizeWidth: 1600`.** `resizeWidth` alone would enlarge a small picture; a file under 1.5 MB cannot be a camera original. Unverified on a real 48 MP iPhone HEIC (manual Phase 5 item, as designed).
+4. **The public-roster spec lives in `e2e/custom-domains/person-photos-roster.spec.ts`**, not `e2e/person-photos.spec.ts`: a custom host needs the `custom-hosts` project's `*.invalid` resolver. It is in the dev lane only (the prod `prod-custom-hosts` match list is unchanged; the hydration spec is in the prod lane).
+5. **E4's measured baseline** (25 inlined thumbnails of about 3 KB each): the document is 254,996 bytes. Real portrait thumbnails are about 8 KB, which projects to roughly 420 KB, still under 500 KB but close to the DECISION-289 revisit trigger.
+6. **Directory empty states untouched**: Copy C10 found them photo-free and true.
+7. Listing-line wording deviation from Batch 2 (`staff and committee member` joined by commas and "and") is unchanged; still flagged for the Phase 5 copy check.
+
+### Failing-first evidence
+
+The three listing-dialog tests were rewritten to the new C8 sentence first and failed against the old text before `listingConsentCopy` replaced it (the old wording promised a photo "if one is on file"). The component and page tests were written with the components; mutation checks were not run on them.
+
+### Gates
+
+- `typecheck` 0 errors; `lint` clean; `npm run build` passes (cleared `.next` first); `npm run check` 8/8 (re-run after commit for `check:secrets`).
+- Unit (no database): 652 files / 9,886 tests passed, 96 skipped. DB-backed (`dotenv -e .env.local`, serial) over `src/lib/storage`, `src/lib/person-photos`, `directory.test.ts` and the admin tree: 2,766 passed.
+- Dev server on :3620: `person-photos.spec.ts` (2 admin viewports, toggle-off, E4) and `person-photos-roster.spec.ts` (platform host, custom host) pass; the existing community, community-approval, public-sites, person-emails, portal-footer-sitemap and portal-home-cards specs plus three hydration specs: 65 passed. Prod lane on :3621: `person-photos-upload` and `person-emails-editor` hydration specs pass.
+
+### The browser walk (Chromium, 360 x 800 and 1280 x 900, synthetic noise images)
+
+Uploaded a 5 MB JPEG with EXIF orientation 6, a copyright and a GPS block, and a 9.5 MB PNG: both posted under 1 MB; the stored masters have no EXIF, no orientation tag, no ICC, no "Exif" bytes, are at most 1200 px and the rotated source is stored upright (portrait). Designated one for the website through the attestation dialog (confirm disabled until ticked) and the other for the directory with the attestation (chip "Directory, cleared for website"); the member directory shows that photo's thumbnail (src equals the stored thumbnail bytes); removing it returns the directory to initials and ends its designations. A synthetic listed staff member's website photo loads (natural width above zero) at 360 px on `/site/<slug>` and on a custom host, is served `image/jpeg` with the public door's headers, and after removal a fresh request is the neutral 404 and the page has no image. No horizontal scroll, every control at least 44 px, dialogs inside the viewport, no native dialog.
+
+### Findings and observations
+
+- The Next dev overlay showed "1 Issue" on the edit page: a hydration mismatch inside `EditMemberPage`'s existing cards (an `<h2>` card), not in the photos link or page; pre-existing and not investigated. Suggest a TODO.
+- The synthetic person is listed nowhere, so the walk's listing line read "isn't listed"; the listed path is covered by the roster spec and unit tests.
+- `image/heic` is in the `accept` list as designed; whether a given browser can decode it is the manual device check.
+
+### Handoff
+
+Next: **qa, Phase 5.** Review: the Phase 5 copy-truthfulness check (Copy C2 to C5, C8, the listing-line deviation), the real-device HEIC and 48 MP check, and the missing success toasts (deviation 1).
 
 ---
 

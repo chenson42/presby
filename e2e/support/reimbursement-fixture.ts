@@ -419,6 +419,23 @@ export async function seedRequest(sql: Sql, actors: SeedActors, spec: SeedSpec):
 }
 
 /**
+ * Moves an existing request through the payment definer as `payerUser`, behind a spec's back: how a
+ * spec makes a page it already has open STALE (the request is paid while the page still offers Void),
+ * so the refusal sentence it asserts is reached by a real POST from a real stale page.
+ */
+export async function recordPaymentViaDefiner(sql: Sql, input: { orgId: string; requestId: string; payerUser: string; reference?: string }): Promise<void> {
+  await withDbRetry(`pay request ${input.requestId}`, () =>
+    sql.query(`
+      do $do$
+      begin
+        perform set_config('app.current_org_id', ${lit(input.orgId)}, true);
+        perform * from presby_reimbursement_record_payment(${uuidLit(input.requestId)}, 'check', ${lit(input.reference ?? "9001")},
+          (now() at time zone 'America/New_York')::date, null, ${uuidLit(input.payerUser)});
+      end $do$`),
+  );
+}
+
+/**
  * Bulk `import`-origin PAID requests, each with its payment and its `imported` event, in ONE
  * statement (the deferred status/payment/event consistency checks fire at the statement's commit and
  * see all three). The migration-import door of EC36, used only to cross the CSV row cap (20,000) in

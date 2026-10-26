@@ -20,7 +20,7 @@
 | 2 — Architectural review | architect | **Skipped** — fix is a conflict-safe conditional upsert plus re-select inside `getOrCreatePendingEnrollment` (Phase 3 chose the conditional upsert; the same conditions hold); no schema, dependency or invariant change (reopens if a migration, trigger or lock is proposed) | — | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (full-stack-developer) | 2026-10-26 |
 | 4 — Implementation | full-stack-developer | Complete | Gate met: typecheck, lint, check, unit, DB-backed totp specs, running-server e2e (probe, login-path specs, 40/40) | 2026-10-26 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete; failing-first reproduced (6 specs red ×3, probe red 3/3); HEAD 40/40 DB ×5, auth e2e 31/31 ×2, invitation-new-account 40/40, full chromium 463/463, prod hydration 1/1 | PASS | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -433,55 +433,175 @@ Strings added or changed: none.
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-10-26
 **Verified by:** qa
+
+I ran everything myself on worktree `/Users/cshenso/git/presby-platform/presby-enroll` at HEAD `d35630c`, Neon branch `pipeline-totp-enroll-race` (`ep-broad-smoke`, confirmed by host before any write). Servers ran on my own :3630 (dev) and :3631 (prod lane), and nothing touched :3000. Both dev servers were started by hand with `.next/dev` cleared, and each was stopped by PID. The old-helper server was PIDs 41670/41701/41721/41741, serving from the scratch copy (cwd confirmed with `lsof`). The HEAD server was PIDs 42352/42368/42369/42370/42446, serving from the worktree. Playwright started and stopped the prod-lane server itself. Both ports are free and `git status` is clean.
+
+**Flag state:** before any e2e run I reset global flags to the CI baseline with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`. It ran against this worktree's `PLATFORM_DATABASE_URL` only, after a guard that refused unless the host was `ep-broad-smoke`. It committed, and I listed the flag states afterwards.
+
+**Disk:** 560 GiB free, so ENOSPC was not a factor.
+
+**Scope run:**
+- **In full:** typecheck, lint, `npm run check`, the unit suite, and the full `--project=chromium` e2e suite (at the orchestrator's request).
+- **DB-backed:** only `totp-pending.test.ts`, `totp-pending.exhaustion.test.ts` and `two-factor*`. I did not re-run the full serial `npm run test:db`. That result rests on the implementer's run (693 of 694 files with the `NEXT_PUBLIC_APP_URL` override; the one failure is diagnosed below).
+- **Prod lane:** only `e2e/hydration/totp-challenge.spec.ts`.
+- **Not run:** the `custom-hosts` and `prod-custom-hosts` projects (the diff touches nothing on host routing). The PR's CI covers them.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS** (exit 0). `npm run lint`: **PASS** (exit 0, `--max-warnings=0`). `npm run check`: **PASS**, exit 0, all eight tripwires passed (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+Total: 11862 | Passed: 9253 | Failed: 0 | Skipped: 2609 | Duration: 32.8s
+- Files: 610 passed, 84 skipped. The 84 are the DB-backed files, which `describe.skipIf(!hasDb)` skips when `.env.local` is not loaded. The skip is by design, not a finding. I ran the files that matter to this change under `test:db` below.
+
+**DB-backed, serial (`npm run test:db`):** `totp-pending.test.ts`, `totp-pending.exhaustion.test.ts`, `two-factor*`: **40 of 40, five consecutive runs, green every time.**
+
+**Failing first, reproduced independently.** I built a `git archive HEAD` copy under the scratchpad (since deleted by literal path) and restored `src/lib/totp-pending.ts` from `264af63^`. The spec files were byte-identical to HEAD. I ran it three times, and all three gave the same result: **6 failed, 4 passed.**
+
+| Spec | Result on the old helper (runs 1/2/3) |
+|---|---|
+| T1 | 16 distinct secrets from 16 parallel calls (16/16/16) |
+| T2 | 16/16/15 distinct |
+| T6 | 8 distinct for one user |
+| T8 | resolved instead of rejecting |
+| T9 | returned its own minted secret, not `WINNERSECRETWINNER` |
+| T9b | 1 insert, expected 2 |
+| T3, T4, T5, T7 | passed on the old helper, as the design predicted (they pin preserved behaviour) |
+
+This confirms the red-then-green claim for T1, T2, T6, T8, T9 and T9b.
+
+**Is it the property or the fix's logic?** T1, T2 and T6 assert the property: every caller gets the one stored secret, and it decrypts from the stored row. Any find-then-write variant in the same class would fail them, not just the literal old code. T8's `insertCalls === 3` encodes the design's `MAX_ATTEMPTS` constant. That is acceptable, because the bound is itself a design requirement.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+All runs used my own servers at `E2E_BASE_URL`/`AUTH_URL` = `http://localhost:3630`, with `RATE_LIMIT_DISABLED=true`, the `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET` and `E2E_ALLOW_SHARED_DB=true`. `--retries=0` was used where it applies.
+
+| Run | Server | Result |
+|---|---|---|
+| `totp-enrol-concurrency.spec.ts` | old helper (scratch copy) | **3 of 3 failed**: "eight concurrent renders showed 2 / 5 / 3 different keys" (users a/b/c) |
+| `totp-enrol-concurrency` + `totp-full-login` + `totp-code-entry` + `totp-recovery-code` + `totp-callback-bypass` | HEAD | **31 of 31 passed**, run twice (41.2s, 37.6s) |
+| `invitation-new-account --repeat-each=40 --workers=1` | HEAD | **40 of 40 passed** (4.4m) |
+| full `--project=chromium` | HEAD | **463 passed, 0 failed, 0 skipped** (16.0m) |
+| `totp-enrol-concurrency` (for the 360px screenshot) | HEAD | 3 of 3 passed |
+| `hydration/totp-challenge.spec.ts`, prod build | :3631 (`PW_PROD_BUILD=1 PW_PROD_PORT=3631`) | **1 of 1 passed** |
+
+- `totp-full-login` uses `E2E_USERS["mfa-enrolled"]` and walks password → `/totp` (a wrong code is refused, then the real code is accepted) → the post-login landing. That meets the auth-touching gate.
+- The 40 repeat runs are meaningful: this branch's `invitation-new-account.spec.ts` has no `enrolOnPage` reload-and-retry workaround. Its only `reload` calls are in the invitation preview step, lines 80-83.
+- **360px:** I looked at the screenshot myself, saved at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-enroll-pw-360/totp-enrol-concurrency-con-14322-hows-it-again-fresh-user-c--chromium/enrol-360.png`. The heading, steps, QR code, manual key, six boxes and Confirm button all sit inside the 360px viewport. The spec also asserts `scrollWidth - clientWidth <= 0`.
+
+**`src/proxy.test.ts` loopback case: environmental, pre-existing, not this pipeline.**
+- **Where:** `src/proxy.test.ts:429-440` ("treats loopback as the platform outside a production deployment…") fails at line 435: `expected undefined to be '/site/localhost/signin'`.
+- **Cause:** the platform-host set includes the host of `NEXT_PUBLIC_APP_URL` (`src/lib/domains/host.ts:131`). The test pins only `NEXT_PUBLIC_PLATFORM_HOSTS` (line 42) and never stubs `NEXT_PUBLIC_APP_URL`. So any loopback `NEXT_PUBLIC_APP_URL` puts `localhost` into the set, and the `VERCEL_ENV=production` half of the test sees loopback as the platform.
+- **Evidence:**
+  - With `.env.local` loaded, it fails with `NEXT_PUBLIC_APP_URL` at `localhost:3630` and also at `localhost:3000`.
+  - With `NEXT_PUBLIC_APP_URL=https://portal.example.invalid` over `.env.local`, all 41 pass.
+  - Without `.env.local` at all, all 41 pass.
+- **CI is unaffected:** neither `db.yml` nor `ci.yml` sets `NEXT_PUBLIC_APP_URL`.
+- **Not caused by this diff:** it touches nothing in `src/proxy*` or `src/lib/domains/`.
+- **Correction to Phase 4:** the cause is any loopback app URL, not port 3630 specifically.
+- **Suggested follow-up (test hermeticity):** stub `NEXT_PUBLIC_APP_URL` in that `describe`.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+- `T1 concurrent first render: every caller gets the one stored secret — regression for F342 enrolment secret race` — `src/lib/totp-pending.test.ts:97`. Guards against concurrent first renders returning secrets the database does not hold. Red on the old helper (confirmed above).
+- `T2 expiry race: concurrent callers replace an expired row with one new secret — regression for F342 enrolment secret race` — `src/lib/totp-pending.test.ts:113`. Guards against the same race when an expired row is replaced. Red on the old helper.
+- `T6 two users interleaved…` — `src/lib/totp-pending.test.ts:177`. Guards one secret per user and cross-user separation. Red on the old helper.
+- `T8 exhaustion…` / `T9 the loser returns the winner's stored secret…` / `T9b a row deleted between the statements…` — `src/lib/totp-pending.exhaustion.test.ts:85`, `:112`, `:124`. These guard the bounded attempts, the absence of any leak, and that a losing caller returns the winner's stored secret. All red on the old helper.
+- T3, T4, T5 and T7 (`totp-pending.test.ts:136`, `:148`, `:163`, `:197`) pin preserved behaviour: no rewrite of a fresh row, survival of a fresh row under a burst, a new secret after a reset, and no re-mint over an undecryptable row.
+- `e2e/totp-enrol-concurrency.spec.ts:91` runs end to end: 8 concurrent GETs show one key, a reload shows it again, there is one pending row, a code computed from the shown key enrols (user a), and the page is checked at 360px (user c). Red on the old helper (confirmed above).
+
+None of the six red tests carries the `— regression for …` name suffix except T1 and T2. That is minor, not a FAIL: the suffix rule names the primary regression test, and those two carry it.
+
+**Helper review (`src/lib/totp-pending.ts`):**
+- **No leaks:** there is no `console.*`, logger or `cause` in the file. The single thrown message is the constant `"Pending two-factor enrolment could not be established"` (line 111), with no user id, secret, ciphertext or URI. T8 pins the message, the stack and every console channel.
+- **Database clock:** the freshness read uses `gt(expiresAt, sql\`now()\`)`, and the TTL is `now() + make_interval(mins => $3)`. There is no `new Date()` in the helper.
+- **`setWhere` SQL, checked independently.** I ran the real HEAD helper against a capturing `drizzle-orm/pg-proxy` driver in the scratch copy, exhausting all attempts. It emitted 6 statements (3 × select + upsert):
+  ```
+  select "secret_ciphertext" from "user_totp_pending_enrollments" where ("user_totp_pending_enrollments"."user_id" = $1 and "user_totp_pending_enrollments"."expires_at" > now()) limit $2
+  insert into "user_totp_pending_enrollments" (...) values ($1, $2, now() + make_interval(mins => $3), default) on conflict ("user_id") do update set "secret_ciphertext" = excluded.secret_ciphertext, "expires_at" = excluded.expires_at, "created_at" = now() where "user_totp_pending_enrollments"."expires_at" <= now() returning "secret_ciphertext"
+  ```
+  The params are `[userId, <ciphertext>, 10]`, so the TTL is bound as a parameter, not built into the string. The live behaviour of this SQL is exercised by T2 and T4 against Neon.
+- **Bounded attempts:** exactly 3 passes and then the throw, confirmed both by the capture above and by T8.
+- **Cross-user isolation:** `getOrCreatePendingEnrollment` has one caller, `src/app/(account)/account/2fa/page.tsx:120`, which passes `session.user.id`. Both statements key on `user_id = $1`, and the conflict target is `user_id`.
+  - **Live catalog, probed as `presby_app`** (`rolbypassrls = f`) on the app connection:
+    - `user_totp_pending_enrollments` has `relrowsecurity = f` and `relforcerowsecurity = f`, with no policies and no triggers.
+    - `aclexplode(relacl)` gives `presby_app` SELECT/INSERT/UPDATE/DELETE. That is sufficient for `ON CONFLICT DO UPDATE … RETURNING`.
+    - The PK is `(user_id)` and the FK to `users(id)` is `ON DELETE CASCADE`.
+    - `transaction_isolation` is `read committed`, which the design's argument depends on.
+  - So isolation on this platform table rests on the query keys, not RLS. That posture predates this change, which alters no schema. T6 demonstrates it on the live database.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+Measured with `vitest --coverage` (v8) under `test:db` over the totp-pending, two-factor, permissions and flags specs:
+- `src/lib/permissions.ts`: 100% statements / 100% branches (target 100%, met)
+- `src/lib/two-factor.ts`: 91.3% statements / 100% branches (target 90%+, met)
+- `src/lib/flags.ts`: 100% / 100% (target 100%, met)
+- `src/lib/totp-pending.ts` (changed module): 100% statements / 100% branches / 100% functions
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+**No protected routes touched.** The diff adds or changes no `route.ts` and no `"use server"` action. `src/app/(account)/account/2fa/page.tsx` changes by a comment only (lines 117-119). Its existing `auth()` check and redirect (lines 30-31) and `sanitizeCallbackUrl` (line 34) are unchanged. `/account/2fa` is auth-only by design, with no `FEATURES` gate.
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
 |-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+| `/account/2fa` page (comment-only change) | yes (unchanged, `page.tsx:30`) | n/a (auth-only by design) | n/a |
 
 ## Copy Truthfulness
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
+**No strings changed.** `git diff -U0 origin/main...HEAD` over `.tsx`, `*-copy.ts`, email templates and release notes adds only the three-line code comment in `page.tsx`, which is not rendered. The one future user-facing string is the release-note line drafted in Phase 3. It is not in this diff and gets its four checks at `/release-notes` time.
 
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
+- [x] Every added or changed string is in the design's Copy table (none added)
+- [x] The query behind each claim was opened (n/a: no claims)
+- [x] Each instruction was traced to its role (n/a: no instructions)
+- [x] Older strings about the same subject were grepped, and none is made false. `actions.ts`'s "No pending enrollment found…", "Enrollment session expired…" and "That code did not match…" all stay true.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**PASS**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+This is treated as auth-touching under the Phase 1/3 ruling. I ran the e2e myself against a real dev server with the MFA-enrolled seeded user (`totp-full-login`: password → TOTP → landing). Every spec I ran passed with none skipped:
+- the probe and login-path specs, 31 of 31, twice
+- `invitation-new-account`, 40 of 40
+- the full chromium project, 463 of 463
+- the prod-lane `totp-challenge`, 1 of 1
+
+The failing-first property is independently confirmed on two levels:
+- **Unit and DB specs:** T1, T2, T6, T8, T9 and T9b were red on the old helper in 3 of 3 runs and green on HEAD in 5 of 5.
+- **e2e:** the concurrency probe was 3 of 3 red on an old-helper server and green on HEAD.
+
+Residuals I did not verify, all already named in Phase 3:
+- the app clock (`completeEnrollment`, `actions.ts:88`) versus the database clock
+- a live delete-between-statements race, which only the scripted T9b covers
+- the exhaustion error reaching Next's default error page, not looked at in a browser
+
+Non-blocking follow-up for the orchestrator's TODO: `src/proxy.test.ts:429` should stub `NEXT_PUBLIC_APP_URL` so that a loopback app URL in a worktree's `.env.local` cannot fail it.
+
+---
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete | PASS | 2026-10-26 |
+
+## Handoff
+
+Next: **analyst (Phase 6, shipped vs intent).**
+
+Evidence logs are all in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/`:
+- `qa-enroll-unit.log`
+- `qa-enroll-inv40.log`
+- `qa-enroll-full.log`
+- `qa-enroll-prod.log`
+- `qa-enroll-sql.txt`
+- `qa-enroll-dev-old.log`
+- `qa-enroll-dev-head.log`
+- `qa-typecheck.log`
+- `qa-lint.log`
+- `qa-check.log`
 
 ---
 

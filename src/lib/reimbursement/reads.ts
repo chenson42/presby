@@ -1,6 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
+import { payHolderCount } from "./counts";
 import { isNotPermitted, rowsOf } from "./db-util";
 import {
   formOptionsSchema,
@@ -12,6 +13,7 @@ import {
   type RequestDetail,
 } from "./detail-shape";
 import { MY_REQUESTS_PAGE_SIZE } from "./limits";
+import { QUEUE_PAGE_SIZE, type TreasurerTab } from "./queue-query";
 import type { RequestStatus } from "./states";
 
 /**
@@ -31,7 +33,9 @@ import type { RequestStatus } from "./states";
  * STRICT zod schemas in `detail-shape.ts`: a key the definer adds that no
  * schema names fails loudly here instead of reaching a template.
  *
- * Treasurer reads (`treasurer_list`, `export_rows`) are Batch 4's.
+ * The treasurer's reads (`treasurer_list` here, `export_rows` in `csv-export.ts`,
+ * which audits what it reads) need `reimbursement.view`: a caller without it is
+ * `denied` (the definer's identity refusal).
  */
 
 export interface ReadIdentity {
@@ -280,4 +284,108 @@ export async function getSettings(identity: ReadIdentity): Promise<SettingsResul
     if (isNotPermitted(err)) return { kind: "denied" };
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The treasurer queue (reimbursement.view)
+// ---------------------------------------------------------------------------
+
+/** One row of the treasurer queue. Names are the treasury level's; a merged person reads as the person they merged into. */
+export interface TreasurerListItem {
+  id: string;
+  status: RequestStatus;
+  kind: "reimburse" | "vendor";
+  /** The vendor's name, or the beneficiary's display name. */
+  payeeLabel: string | null;
+  amountCents: number | null;
+  /** `YYYY-MM-DD`. */
+  expenseDate: string | null;
+  groupId: string;
+  groupName: string;
+  categoryName: string | null;
+  /** The first 80 characters of the purpose. */
+  purposeExcerpt: string | null;
+  creatorName: string | null;
+  approverName: string | null;
+  /** Entered by someone other than the payee: the "Entered on someone's behalf" badge. */
+  enteredOnBehalf: boolean;
+  approvalPath: "seat" | "override" | null;
+  /** ISO-8601, UTC. */
+  submittedAt: string | null;
+  approvedAt: string | null;
+  /** `YYYY-MM-DD` of the live payment. */
+  paidOn: string | null;
+  revision: number;
+}
+
+export type TreasurerListResult =
+  | { kind: "ok"; items: TreasurerListItem[]; total: number }
+  | { kind: "denied" };
+
+/**
+ * One page of the queue behind a tab (Copy C7): `pay` approved and waiting for
+ * payment (oldest approved first), `override` submitted with no eligible approver
+ * (computed LIVE), `progress` submitted with an approver or returned, `paid`, or
+ * `all` (every non-draft). `from`/`to` filter on the organization-local date the
+ * request was last SUBMITTED (the ruling on Batch 1a), so a late-night
+ * submission lands on the day the treasurer remembers. `total` is the full
+ * filtered count for paging.
+ */
+export async function listTreasurerRequests(
+  identity: ReadIdentity,
+  query: { tab: TreasurerTab; groupId: string | null; from: string | null; to: string | null; page: number },
+): Promise<TreasurerListResult> {
+  const offset = (Math.max(query.page, 1) - 1) * QUEUE_PAGE_SIZE;
+  try {
+    const rows = await withOrgContext(identity.personId, identity.organizationId, async (tx) =>
+      rowsOf(
+        await tx.execute(sql`
+          select id, status, kind, payee_label, amount_cents, expense_date::text as expense_date,
+                 group_id, group_name, category_name, purpose_excerpt, creator_name, approver_name,
+                 entered_on_behalf, approval_path,
+                 to_char(submitted_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as submitted_at,
+                 to_char(approved_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as approved_at,
+                 paid_on::text as paid_on, revision, total_count::integer as total_count
+            from presby_reimbursement_treasurer_list(
+              ${identity.userId}::uuid, ${query.tab}::text, ${query.groupId}::uuid,
+              ${query.from}::date, ${query.to}::date, ${QUEUE_PAGE_SIZE}::integer, ${offset}::integer)`),
+      ),
+    );
+    return {
+      kind: "ok",
+      total: rows.length === 0 ? 0 : Number(rows[0]!.total_count),
+      items: rows.map((r) => ({
+        id: String(r.id),
+        status: r.status as RequestStatus,
+        kind: r.kind as "reimburse" | "vendor",
+        payeeLabel: (r.payee_label as string | null) ?? null,
+        amountCents: r.amount_cents === null ? null : Number(r.amount_cents),
+        expenseDate: (r.expense_date as string | null) ?? null,
+        groupId: String(r.group_id),
+        groupName: String(r.group_name),
+        categoryName: (r.category_name as string | null) ?? null,
+        purposeExcerpt: (r.purpose_excerpt as string | null) ?? null,
+        creatorName: (r.creator_name as string | null) ?? null,
+        approverName: (r.approver_name as string | null) ?? null,
+        enteredOnBehalf: r.entered_on_behalf === true,
+        approvalPath: (r.approval_path as "seat" | "override" | null) ?? null,
+        submittedAt: (r.submitted_at as string | null) ?? null,
+        approvedAt: (r.approved_at as string | null) ?? null,
+        paidOn: (r.paid_on as string | null) ?? null,
+        revision: Number(r.revision),
+      })),
+    };
+  } catch (err) {
+    if (isNotPermitted(err)) return { kind: "denied" };
+    throw err;
+  }
+}
+
+/**
+ * Effective holders of `reimbursement.pay` (the queue's "No one can record
+ * payments yet" banner when it is zero). A bare count of the organization: it
+ * reveals a number and nothing else, so any gated viewer may ask.
+ */
+export async function getPayHolderCount(identity: ReadIdentity): Promise<number> {
+  return withOrgContext(identity.personId, identity.organizationId, async (tx) => payHolderCount(tx));
 }

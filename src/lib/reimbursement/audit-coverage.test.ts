@@ -12,9 +12,11 @@
  *   - nothing here uses `recordAudit()` (it opens its own connection and swallows
  *     failures, so a transition could commit with no audit row).
  *
- * Grows with each batch: Batch 3 added approve/return (decisions.ts), Batch 4 adds
- * payments, Batch 2b receipts. A definer called by NO function yet is fine; a definer called by a
- * function that does not audit it, when it is on the audited list, fails.
+ * Grows with each batch: Batch 3 added approve/return (decisions.ts), Batch 4 added
+ * payments, waive, void (payments.ts) and the CSV export (csv-export.ts), Batch 2b adds
+ * receipts. Every definer on the audited list below is now called by exactly the
+ * functions that audit it (the "no audited definer is unused" test keeps it so); a
+ * definer called by a function that does not audit it fails.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -75,7 +77,11 @@ const DEFINER_CALL = /presby_reimbursement_[a-z_]+(?=\s*\()/g;
 
 describe("audit coverage of src/lib/reimbursement (EC43)", () => {
   it("finds the module's functions (the scan is not vacuous)", () => {
-    expect(FUNCTIONS.map((f) => f.name)).toEqual(expect.arrayContaining(["saveRequest", "submitRequest", "withdrawRequest", "approveRequest", "returnRequest", "setChargeable", "saveCategory", "endCategory"]));
+    expect(FUNCTIONS.map((f) => f.name)).toEqual(expect.arrayContaining([
+      "saveRequest", "submitRequest", "withdrawRequest", "approveRequest", "returnRequest",
+      "recordPayment", "reversePayment", "waiveReceipt", "voidRequest", "addNote", "exportRequests",
+      "setChargeable", "saveCategory", "endCategory",
+    ]));
   });
 
   it("every write definer the module calls is classified as audited or deliberately unaudited", () => {
@@ -115,7 +121,33 @@ describe("audit coverage of src/lib/reimbursement (EC43)", () => {
         ).toBe(true);
       }
     }
-    expect(checked).toBeGreaterThanOrEqual(5); // approve, return, set_chargeable, save_category, end_category today
+    // approve, return, void, waive_receipt, record_payment, reverse_payment, set_chargeable, save_category, end_category
+    expect(checked).toBeGreaterThanOrEqual(9);
+  });
+
+  it("every audited write definer is called by at least one function (a new door cannot hide behind the list)", () => {
+    for (const definer of Object.keys(AUDITED)) {
+      const callers = FUNCTIONS.filter((fn) => new RegExp(`${definer}\\s*\\(`).test(fn.body));
+      expect(callers.length, `${definer} has no caller in src/lib/reimbursement`).toBeGreaterThan(0);
+    }
+  });
+
+  it("the CSV export (a bulk tier-2 read) audits itself in the read's own transaction with REIMBURSEMENT_EXPORTED", () => {
+    const fn = FUNCTIONS.find((f) => f.name === "exportRequests")!;
+    expect(fn.file).toBe("csv-export.ts");
+    expect(fn.body).toMatch(/presby_reimbursement_export_rows\s*\(/);
+    expect(fn.body).toMatch(/auditReimbursement\(\s*tx\b/);
+    expect(fn.body).toContain("AUDIT_ACTIONS.REIMBURSEMENT_EXPORTED");
+    // the audit comes AFTER the cap test: a refused (413) export left nothing the database should record
+    expect(fn.body.indexOf("exceedsCsvCap")).toBeGreaterThan(-1);
+    expect(fn.body.indexOf("exceedsCsvCap")).toBeLessThan(fn.body.indexOf("auditReimbursement("));
+  });
+
+  it("the unaudited doors write no audit row: a note and the member verbs leave only their history event", () => {
+    for (const name of ["addNote", "saveRequest", "submitRequest", "withdrawRequest"]) {
+      const fn = FUNCTIONS.find((f) => f.name === name)!;
+      expect(fn.body, name).not.toMatch(/auditReimbursement\(/);
+    }
   });
 
   it("the audit call passes the same transaction (never a second connection) and no free-text metadata", () => {

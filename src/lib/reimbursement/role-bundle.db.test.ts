@@ -24,6 +24,13 @@ vi.mock("@/lib/audit", () => ({
     REIMBURSEMENT_OVERRIDE_APPROVED: "tenant.reimbursement.override_approved",
     REIMBURSEMENT_RETURNED: "tenant.reimbursement.returned",
     REIMBURSEMENT_NOT_APPROVED: "tenant.reimbursement.not_approved",
+    REIMBURSEMENT_VOIDED: "tenant.reimbursement.voided",
+    REIMBURSEMENT_PAYMENT_RECORDED: "tenant.reimbursement.payment_recorded",
+    REIMBURSEMENT_PAYMENT_REVERSED: "tenant.reimbursement.payment_reversed",
+    REIMBURSEMENT_RECEIPT_WAIVED: "tenant.reimbursement.receipt_waived",
+    REIMBURSEMENT_EXPORTED: "tenant.reimbursement.exported",
+    REIMBURSEMENT_CHARGEABLE_CHANGED: "tenant.reimbursement.chargeable_changed",
+    REIMBURSEMENT_CATEGORY_CHANGED: "tenant.reimbursement.category_changed",
   },
   recordAudit: vi.fn(),
 }));
@@ -43,6 +50,9 @@ const REIMBURSEMENT_KEYS = SEVEN.filter((k) => k.startsWith("reimbursement."));
 describe.skipIf(!hasDb)("the designated treasurer's bundle (Postgres-backed)", () => {
   let fx: ReimbursementFixture;
   let decisions: typeof import("./decisions");
+  let payments: typeof import("./payments");
+  let config: typeof import("./config");
+  let exporter: typeof import("./csv-export");
   let requests: typeof import("./requests");
   let team: typeof import("@/lib/treasury/team");
   let input: typeof import("./input");
@@ -55,6 +65,7 @@ describe.skipIf(!hasDb)("the designated treasurer's bundle (Postgres-backed)", (
   let designated: RequestActor;
   let admin: RequestActor;
   let filer: RequestActor;
+  let successor: RequestActor;
   let treasurerRoleId: string;
   let clerkRoleId: string;
   const mail: Record<string, string> = {};
@@ -81,6 +92,9 @@ describe.skipIf(!hasDb)("the designated treasurer's bundle (Postgres-backed)", (
     const mod = await import("@/lib/testing/reimbursement-fixture");
     fx = await mod.createReimbursementFixture("bundle");
     decisions = await import("./decisions");
+    payments = await import("./payments");
+    config = await import("./config");
+    exporter = await import("./csv-export");
     requests = await import("./requests");
     team = await import("@/lib/treasury/team");
     input = await import("./input");
@@ -137,6 +151,7 @@ describe.skipIf(!hasDb)("the designated treasurer's bundle (Postgres-backed)", (
     const clerkRole = await team.ensureTreasuryRole("reimbursement", designated.personId, A, { templateKey: "reimbursement_clerk" });
     expect(clerkRole).toMatchObject({ kind: "ok", roleKey: "reimbursement_clerk", created: true, addedKeys: ["reimbursement.request_for_others"] });
     const second = await fx.member(A, "Successor");
+    successor = actor(A, second);
     mail.second = await fx.email(second.personId, "second", { subtype: "work" });
     const granted = await team.grantTreasuryRole("reimbursement", designated.personId, A, designated.userId, {
       roleId: treasurerRoleId, personId: second.personId,
@@ -172,5 +187,65 @@ describe.skipIf(!hasDb)("the designated treasurer's bundle (Postgres-backed)", (
     expect(await decisions.approveRequest(clerkActor, { ...req, path: "override" })).toEqual({ kind: "denied" });
     expect(await decisions.approveRequest(designated, { ...req, path: "override" })).toMatchObject({ kind: "ok" });
     expect(await decisions.approveRequest(designated, { ...req, path: "override" })).toMatchObject({ kind: "already_decided" });
+  });
+
+  it("EC8/EC31: the second payer records the payment on the request the treasurer approved by override; the approver cannot; the filer is told it was paid", async () => {
+    const req = await submitIn(filer);
+    expect(await decisions.approveRequest(designated, { ...req, path: "override" })).toMatchObject({ kind: "ok", path: "override" });
+    // The treasurer approved it, so the treasurer may not pay it - and is told so before being asked for a receipt.
+    expect(await payments.recordPayment(designated, { requestId: req.requestId, method: "ach", reference: null, paidOn: today, note: null }))
+      .toEqual({ kind: "refused", outcome: "payer_is_approver" });
+    // The filer claimed no receipt: the approver may waive (the waiver is not a payment); the successor then pays.
+    expect(await payments.waiveReceipt(designated, { requestId: req.requestId, note: "Cables were bought at the market" })).toEqual({ kind: "ok" });
+    sent.spy.mockClear();
+    expect(await payments.recordPayment(successor, { requestId: req.requestId, method: "check", reference: "2001", paidOn: today, note: null }))
+      .toMatchObject({ kind: "ok", selfPaid: false });
+    const [row] = await fx.q(sql`select status from reimbursement_requests where id = ${req.requestId}`);
+    expect(row!.status).toBe("paid");
+    const [pay] = await fx.q(sql`select paid_by_user, self_paid from reimbursement_payments where request_id = ${req.requestId} and kind = 'payment'`);
+    expect(pay).toMatchObject({ paid_by_user: successor.userId, self_paid: false });
+    const told = (await fx.queued(Object.values(mail))).filter((r) => String(r.text_body).includes(req.requestId) && r.subject === "Your reimbursement request was paid");
+    expect(told.map((r) => r.to_email)).toEqual([mail.filer]);
+  });
+
+  it("the designated treasurer, holding only that one role, completes every other treasurer verb: note, reverse, send back from approved, void, chargeable groups, categories, export", async () => {
+    // reverse: pay then reverse (a second payer pays - the treasurer approved it)
+    const a = await submitIn(filer);
+    await decisions.approveRequest(designated, { ...a, path: "override" });
+    await payments.waiveReceipt(designated, { requestId: a.requestId, note: null });
+    expect(await payments.recordPayment(successor, { requestId: a.requestId, method: "cash", reference: null, paidOn: today, note: null })).toMatchObject({ kind: "ok" });
+    expect(await payments.addNote(designated, { requestId: a.requestId, note: "Cash handed over after service" })).toEqual({ kind: "ok" });
+    expect(await payments.reversePayment(designated, { requestId: a.requestId, reason: "Wrong amount handed over" })).toMatchObject({ kind: "ok" });
+    // send back from approved (needs_info only)
+    const fresh = (await reads.getRequestDetail(
+      { userId: designated.userId, personId: designated.personId, organizationId: A }, a.requestId, "treasury"));
+    if (fresh.kind !== "ok") throw new Error("detail");
+    expect(await decisions.returnRequest(designated, { requestId: a.requestId, expectedRevision: fresh.detail.revision, kind: "needs_info", reason: "Please attach the receipt" }))
+      .toMatchObject({ kind: "ok", returnedKind: "needs_info" });
+    // void another
+    const b = await submitIn(filer);
+    expect(await payments.voidRequest(designated, { requestId: b.requestId, reason: "Duplicate of the sound board request" })).toEqual({ kind: "ok" });
+    // settings
+    const newGroup = await fx.makeGroup(A, "Youth Ministry");
+    expect(await config.setChargeable(designated, { groupId: newGroup, chargeable: true })).toEqual({ kind: "ok", changed: true });
+    expect(await config.setChargeable(designated, { groupId: newGroup, chargeable: false })).toEqual({ kind: "ok", changed: true });
+    const cat = await config.saveCategory(designated, { categoryId: null, name: "Curriculum", sortOrder: null });
+    expect(cat).toMatchObject({ kind: "ok", created: true });
+    if (cat.kind === "ok") expect(await config.endCategory(designated, { categoryId: cat.categoryId })).toEqual({ kind: "ok" });
+    // export
+    const exported = await exporter.exportRequests(designated, {});
+    expect(exported.kind).toBe("ok");
+    if (exported.kind === "ok") expect(exported.rows.map((r) => r.id)).toContain(a.requestId);
+  });
+
+  it("the founding administrator, holding no money key, can do none of it (DECISION-078)", async () => {
+    const req = await submitIn(filer);
+    expect(await payments.recordPayment(admin, { requestId: req.requestId, method: "cash", reference: null, paidOn: today, note: null })).toEqual({ kind: "denied" });
+    expect(await payments.voidRequest(admin, { requestId: req.requestId, reason: "No" })).toEqual({ kind: "denied" });
+    expect(await payments.waiveReceipt(admin, { requestId: req.requestId, note: null })).toEqual({ kind: "denied" });
+    expect(await payments.addNote(admin, { requestId: req.requestId, note: "No" })).toEqual({ kind: "denied" });
+    expect(await exporter.exportRequests(admin, {})).toEqual({ kind: "denied" });
+    expect(await config.setChargeable(admin, { groupId: session, chargeable: false })).toEqual({ kind: "denied" });
+    expect(await decisions.approveRequest(admin, { ...req, path: "override" })).toEqual({ kind: "denied" });
   });
 });

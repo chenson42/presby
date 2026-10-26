@@ -342,6 +342,24 @@ describe("C7 to C9 treasurer queue, detail, settings and team", () => {
   });
 });
 
+describe("the REUSED team answers", () => {
+  it("appear in the giving team actions, the place they are borrowed from", () => {
+    const giving = readFileSync(
+      path.resolve(__dirname, "../../app/(org)/o/[slug]/admin/giving/team/actions.ts"),
+      "utf8",
+    );
+    for (const text of [
+      COPY.team.invalidRole,
+      COPY.team.assignmentEnded,
+      COPY.team.endFromRoles,
+      COPY.team.templateUnavailable,
+      COPY.team.ensureEscalation("${result.missingPermissions.join(\", \")}"),
+    ]) {
+      expect(giving, text).toContain(text);
+    }
+  });
+});
+
 describe("the REUSED gate boilerplate", () => {
   it("appears in src/lib/giving/action-gate.ts, the place it is borrowed from", () => {
     const giving = readFileSync(path.resolve(__dirname, "../giving/action-gate.ts"), "utf8");

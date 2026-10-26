@@ -410,6 +410,15 @@ export const COPY = {
     alreadyGranted: "That person already has this role.",
     notAMember: "That person doesn't have a current membership here.",
     forbidden: "You don't have permission to manage the treasury team.",
+    // The five answers of the team actions that Copy C9 names no sentence for. REUSED
+    // verbatim from src/app/(org)/o/[slug]/admin/giving/team/actions.ts (none names a
+    // module, so each is true on this page too); `copy.test.ts` asserts each appears there.
+    invalidRole: "That role isn't available at this organization.", // REUSED
+    assignmentEnded: "That role assignment has already ended.", // REUSED
+    endFromRoles: "That assignment can only be ended from Roles.", // REUSED
+    templateUnavailable: "That role isn't available to set up. Contact support.", // REUSED
+    ensureEscalation: (keys: string) =>
+      `You can't set up a role with permissions you don't hold yourself: ${keys}.`, // REUSED
   },
 
   /** Permission descriptions as migration 0074 writes them (C9); `copy.test.ts` parses 0074 against these. */

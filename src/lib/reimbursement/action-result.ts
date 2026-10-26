@@ -36,6 +36,12 @@ export interface ReimbursementActionFailure {
   /** For `already_decided`: the status the request is in now. */
   status?: string;
   fieldErrors?: FieldErrors;
+  /**
+   * For the override refusal `needs_second_payer`: the viewer holds
+   * `reimbursement.manage`, so the UI appends `COPY.treasury.override.addOneUnderTeam`
+   * (a link to the Treasury team page) after `error`. Absent for anyone else.
+   */
+  suggestTeam?: true;
 }
 
 export type ReimbursementActionResult<T = void> = { ok: true; data: T } | ReimbursementActionFailure;

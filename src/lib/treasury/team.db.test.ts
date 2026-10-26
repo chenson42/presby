@@ -290,6 +290,77 @@ describe.skipIf(!hasDb)("treasury/team.ts, reimbursement surface (Postgres-backe
     });
   });
 
+  describe("residual 12 (Phase 3 amendment, ruling 4): the last-manager guard is per surface, so one surface's revoke can orphan the other module's manage key", () => {
+    // CHARACTERIZATION. This pins a documented, accepted residual (paper, audited as
+    // tenant.role.revoked, recoverable only through the platform operator, NOT
+    // prevented). A future decision to add the stricter rule changes these tests on
+    // purpose; until then they fail if the behaviour changes by accident.
+    async function holders(orgId: string, key: string, people: string[]): Promise<string[]> {
+      const out: string[] = [];
+      for (const p of people) if (await holds(p, orgId, key)) out.push(p);
+      return out;
+    }
+
+    it("ending the sole treasurer grant on the GIVING surface (another giving.manage holder remains) leaves reimbursement.manage with NO holder", async () => {
+      const o = await fx.makeOrg("orphan-a");
+      const sevenRole = await fx.makeRole(o, "treasurer", SEVEN);
+      const givingManagerRole = await fx.makeRole(o, "giving_manager", ["giving.manage"]);
+      const t = await newMember("Orphant", o);
+      const g = await newMember("Givingmanager", o);
+      const treasurerGrant = await fx.grant(o, sevenRole, t.personId);
+      await fx.grant(o, givingManagerRole, g.personId);
+      const everyone = [t.personId, g.personId];
+      expect(await holders(o, "reimbursement.manage", everyone)).toEqual([t.personId]);
+
+      // The giving surface only asks for ITS manage key: g still holds giving.manage after the revoke.
+      const result = await team.revokeTreasuryRole("giving", g.personId, o, { grantId: treasurerGrant });
+      expect(result).toMatchObject({ kind: "ok", roleKey: expect.stringContaining("treasurer"), personId: t.personId });
+
+      expect(await holders(o, "reimbursement.manage", everyone)).toEqual([]);
+      expect(await holders(o, "reimbursement.pay", everyone)).toEqual([]);
+      expect(await holders(o, "giving.manage", everyone)).toEqual([g.personId]);
+      // Nobody left can open the Treasury team page: the founder cannot repair it (F138).
+      expect(await team.listTreasuryTeam("reimbursement", g.personId, o)).toEqual({ kind: "forbidden" });
+      expect(await team.listTreasuryTeam("reimbursement", t.personId, o)).toEqual({ kind: "forbidden" });
+      // The grant was ENDED, never deleted.
+      const [row] = await fx.q(sql`select ends_on is not null as ended from role_grants where id = ${treasurerGrant}`);
+      expect(row!.ended).toBe(true);
+    });
+
+    it("and the reverse: ending the sole treasurer grant on the REIMBURSEMENT surface (another reimbursement.manage holder remains) leaves giving.manage with NO holder", async () => {
+      const o = await fx.makeOrg("orphan-b");
+      const sevenRole = await fx.makeRole(o, "treasurer", SEVEN);
+      const reimbManagerRole = await fx.makeRole(o, "reimb_manager", ["reimbursement.manage"]);
+      const t = await newMember("Orphantwo", o);
+      const m = await newMember("Reimbmanager", o);
+      const treasurerGrant = await fx.grant(o, sevenRole, t.personId);
+      await fx.grant(o, reimbManagerRole, m.personId);
+      const everyone = [t.personId, m.personId];
+
+      expect(await team.revokeTreasuryRole("reimbursement", m.personId, o, { grantId: treasurerGrant })).toMatchObject({ kind: "ok" });
+
+      expect(await holders(o, "giving.manage", everyone)).toEqual([]);
+      expect(await holders(o, "reimbursement.manage", everyone)).toEqual([m.personId]);
+    });
+
+    it("the guard still holds WITHIN a surface: with no other holder of the surface's own manage key the revoke is blocked", async () => {
+      const o = await fx.makeOrg("orphan-c");
+      const sevenRole = await fx.makeRole(o, "treasurer", SEVEN);
+      const t = await newMember("Soleholder", o);
+      const treasurerGrant = await fx.grant(o, sevenRole, t.personId);
+      expect(await team.revokeTreasuryRole("giving", t.personId, o, { grantId: treasurerGrant })).toEqual({ kind: "last_manager_blocked" });
+      expect(await team.revokeTreasuryRole("reimbursement", t.personId, o, { grantId: treasurerGrant })).toEqual({ kind: "last_manager_blocked" });
+      expect(await holders(o, "reimbursement.manage", [t.personId])).toEqual([t.personId]);
+    });
+  });
+
+  describe("the actions' template list is the library's", () => {
+    it("TEAM_TEMPLATE_KEYS (pure, used by the Treasury team actions) equals TEAM_SURFACES.reimbursement.templateKeys", async () => {
+      const { TEAM_TEMPLATE_KEYS } = await import("@/lib/reimbursement/keys");
+      expect([...TEAM_TEMPLATE_KEYS]).toEqual([...team.TEAM_SURFACES.reimbursement.templateKeys]);
+    });
+  });
+
   describe("TREASURY_MODULES is pinned to the modules that have F301 downward guards (EC30)", () => {
     it("every module in the set has a presby_<module>_guard_downward_role function naming it, and no guarded module is missing", async () => {
       const { TREASURY_MODULES } = await import("./modules");

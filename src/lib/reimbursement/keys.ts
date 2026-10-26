@@ -40,3 +40,12 @@ export type ReimbursementNeed = keyof ReimbursementHas;
 
 /** The treasury keys: holding any of these makes the "Treasurer view" link appear. */
 export const TREASURY_NEEDS: readonly ReimbursementNeed[] = ["view", "pay", "manage"];
+
+/**
+ * The role templates the Treasury team page may set up (`ensureTreasuryRoleAction`'s
+ * closed list): the Treasurer, and the Reimbursement Clerk that carries
+ * `request_for_others` alone (P3-2). `team.db.test.ts` pins it equal to
+ * `TEAM_SURFACES.reimbursement.templateKeys`, which is what the library reads.
+ */
+export const TEAM_TEMPLATE_KEYS = ["treasurer", "reimbursement_clerk"] as const;
+export type TeamTemplateKey = (typeof TEAM_TEMPLATE_KEYS)[number];

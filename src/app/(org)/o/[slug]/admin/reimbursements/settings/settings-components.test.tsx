@@ -135,15 +135,28 @@ describe("CategoriesPanel", () => {
     expect(screen.getByText(COPY.settings.categoriesHint)).toBeTruthy();
   });
 
-  it("Retire posts the category and re-reads; a category already gone toasts Copy's sentence", async () => {
+  it("Retire asks first: cancel posts nothing; confirm posts and re-reads; a category already gone toasts Copy's sentence", async () => {
+    actions.endCategoryAction.mockClear();
     actions.endCategoryAction.mockResolvedValueOnce({ ok: true, data: undefined });
     render(<CategoriesPanel slug="alder" categories={categories} />);
     fireEvent.click(screen.getByTestId("retire"));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(COPY.settings.retireDialog.title("Supplies"))).toBeTruthy();
+    expect(dialog.textContent).toContain(COPY.settings.retireDialog.body);
+    expect(actions.endCategoryAction).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: COPY.settings.retireDialog.keep }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(actions.endCategoryAction).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("retire"));
+    fireEvent.click(screen.getByTestId("retire-confirm"));
     await waitFor(() => expect(actions.endCategoryAction).toHaveBeenCalledWith("alder", { categoryId: C1 }));
+    expect(actions.endCategoryAction).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(toast.error).not.toHaveBeenCalled();
     actions.endCategoryAction.mockResolvedValueOnce({ ok: false, error: COPY.settings.categoryGone });
+    await waitFor(() => expect((screen.getByTestId("retire") as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId("retire"));
+    fireEvent.click(screen.getByTestId("retire-confirm"));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(COPY.settings.categoryGone));
   });
 

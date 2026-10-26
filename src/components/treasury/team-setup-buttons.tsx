@@ -7,13 +7,14 @@ import { Button } from "@/components/ui/button";
 import { useHydrated } from "@/components/shared/use-hydrated";
 import type { ReimbursementActionResult } from "@/lib/reimbursement/action-result";
 import { COPY } from "@/lib/reimbursement/copy";
+import { keyLabelsFor } from "@/lib/reimbursement/key-labels";
 
 /**
  * `Set up the Treasurer role` / `Set up the Reimbursement Clerk role` (Copy C9):
  * restores (or creates) the church's own copy of a role from its template so the
  * team page never strands. Shown only for a template with no assignable role. The
  * clerk's one-line description sits under its button. A role set up without some
- * keys (the viewer does not hold them) says which. Disabled until hydration.
+ * keys (the viewer does not hold them) says which, by label (`COPY.team.keyLabels`), never raw keys. Disabled until hydration.
  */
 
 export interface SetupItem {
@@ -42,7 +43,7 @@ export function TeamSetupButtons({
     try {
       const result = await ensure({ templateKey });
       if (result.ok) {
-        const skipped = result.data.skippedKeys;
+        const skipped = keyLabelsFor(result.data.skippedKeys);
         toast.success(
           skipped.length > 0
             ? COPY.team.panel.roleSetUpWithout(skipped.join(", "), skipped.length > 1)

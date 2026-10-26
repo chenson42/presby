@@ -13,19 +13,21 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { useHydrated } from "@/components/shared/use-hydrated";
 import type { ReimbursementActionResult } from "@/lib/reimbursement/action-result";
 import { COPY } from "@/lib/reimbursement/copy";
+import { keyLabelsFor } from "@/lib/reimbursement/key-labels";
 import type { TreasuryTeamGrant } from "@/lib/treasury/team";
 
 /**
  * Who holds a treasury role now, with an `AlertDialog`-confirmed `End this role`
  * on the grants this page may end (a person-arm grant of a role made only of
  * treasury keys; anything else is ended under Roles and says so). docs/work-log/
- * 2026-10-25-treasury-inc1.md, Copy C9 and F296. Names only: no email, no key
- * list. The last holder of `reimbursement.manage` cannot be ended here and the
+ * 2026-10-25-treasury-inc1.md, Copy C9 and F296. Names only: no email. Each row carries the role's reimbursement keys as short
+ * badges (`COPY.team.keyLabels`; a key with no label is not shown, never shown raw). The last holder of `reimbursement.manage` cannot be ended here and the
  * action says so (`That would leave no one able to manage reimbursements...`).
  * The trigger is disabled until hydration (it opens a dialog and calls an action).
  * The chrome strings are `COPY.team.panel`.
@@ -70,6 +72,7 @@ export function TeamGrantList({
     <ul className="space-y-3" data-testid="team-list">
       {grants.map((grant) => {
         const who = grant.grantee.kind === "person" ? grant.grantee.displayName : `${grant.grantee.groupName} ${panel.groupSuffix}`;
+        const labels = keyLabelsFor(grant.ownKeys);
         return (
           <li key={grant.grantId} className="rounded-lg border border-border bg-card p-4 text-card-foreground" data-testid="team-row">
             <p className="text-base font-medium [overflow-wrap:anywhere]">{who}</p>
@@ -77,6 +80,15 @@ export function TeamGrantList({
               <span className="[overflow-wrap:anywhere]">{grant.roleName}</span> &middot; {panel.since}{" "}
               <FormattedDate value={grant.startsOn} mode="date" />
             </p>
+            {labels.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2" data-testid="team-keys">
+                {labels.map((label) => (
+                  <Badge key={label} variant="secondary">
+                    {label}
+                  </Badge>
+                ))}
+              </div>
+            )}
             <div className="mt-3">
               {grant.endableHere ? (
                 <AlertDialog>

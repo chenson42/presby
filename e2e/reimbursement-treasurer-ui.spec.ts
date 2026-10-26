@@ -403,6 +403,7 @@ test.describe("Reimbursements, treasurer side", () => {
     await expect(page).toHaveURL(new RegExp(`tab=all&group=${fx.groupWorship}`));
     await expect(page.getByTestId("queue-row")).toHaveCount(1);
     await expect(page.getByTestId("queue-row")).toContainText(`Charged to ${NAMES.worship}`);
+    await expect(page.getByTestId("export-note")).toHaveText("The file covers every group, not only the one chosen under Charged to.");
     // The group options are the groups that appear on requests (Property, Worship), by name.
     const options = await page.getByLabel("Charged to").locator("option").allTextContents();
     expect(options).toEqual(["All groups", NAMES.property, NAMES.worship]);
@@ -676,6 +677,10 @@ test.describe("Reimbursements, treasurer side", () => {
     await dialog.getByTestId("rename-confirm").click();
     await expect(page.getByTestId("category-row").filter({ hasText: "Hospitality and meals" })).toHaveCount(1);
     await page.getByTestId("category-row").filter({ hasText: "Hospitality and meals" }).getByTestId("retire").click();
+    await expect(page.getByRole("alertdialog")).toContainText("Retire Hospitality and meals?");
+    await page.waitForTimeout(400); // let the dialog finish fading in before the screenshot
+    await shot(page, "360", "retire-dialog", false);
+    await page.getByTestId("retire-confirm").click();
     await expect(page.getByTestId("category-row")).toHaveCount(1);
     await page.close();
   });
@@ -689,6 +694,7 @@ test.describe("Reimbursements, treasurer side", () => {
     await expect(page.getByRole("heading", { level: 2, name: "Roles to set up" })).toBeVisible();
     await expect(page.getByText("Can enter requests on behalf of members who don't use the portal.")).toBeVisible();
     await noHorizontalScroll(page);
+    await expect(page.getByTestId("team-row").filter({ hasText: "E2E Treasurer" }).getByTestId("team-keys").getByText("Manage reimbursements")).toBeVisible();
     await shot(page, "360", "team");
 
     await page.getByRole("button", { name: "Set up the Reimbursement Clerk role" }).click();

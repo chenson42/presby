@@ -3,6 +3,7 @@ import { COPY } from "@/lib/reimbursement/copy";
 import type { QueueQuery } from "@/lib/reimbursement/queue-query";
 import {
   emptyMessage,
+  exportNotes,
   exportHref,
   groupSelectOptions,
   isFiltered,
@@ -114,5 +115,19 @@ describe("tabCount", () => {
     expect(tabCount("progress", counts)).toBe(2);
     expect(tabCount("paid", counts)).toBeNull();
     expect(tabCount("all", counts)).toBeNull();
+  });
+});
+
+describe("exportNotes (T4)", () => {
+  it("is empty on pay, paid and all with no group", () => {
+    for (const tab of ["pay", "paid", "all"] as const) expect(exportNotes(q({ tab }))).toEqual([]);
+  });
+  it("names the requests on override and progress", () => {
+    for (const tab of ["override", "progress"] as const) expect(exportNotes(q({ tab }))).toEqual([COPY.queue.exportNote.requests]);
+  });
+  it("names the group on every tab once one is chosen, group first", () => {
+    for (const tab of ["pay", "paid", "all"] as const) expect(exportNotes(q({ tab, groupId: G1 }))).toEqual([COPY.queue.exportNote.group]);
+    for (const tab of ["override", "progress"] as const)
+      expect(exportNotes(q({ tab, groupId: G1 }))).toEqual([COPY.queue.exportNote.group, COPY.queue.exportNote.requests]);
   });
 });

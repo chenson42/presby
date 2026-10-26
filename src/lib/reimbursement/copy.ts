@@ -313,6 +313,11 @@ export const COPY = {
       "No one can record payments yet. Your church office can ask PresbyPortal support to set up a treasurer.",
     exportCsv: "Export CSV",
     exportTooLarge: "Narrow the date range: that export is more than 20,000 requests.",
+    /** Shown beside Export CSV only when the file differs from the screen (T4 of the Batch 6 amendment). */
+    exportNote: {
+      group: "The file covers every group, not only the one chosen under Charged to.",
+      requests: "The file covers every request that has been sent in, not only this tab's.",
+    },
     forbidden: (org: string) =>
       `This page is for the people who handle reimbursements at ${org}. If you think you should be one of them, ask your treasurer or another administrator there.`,
     loadError: "We couldn't load the requests. Try again in a moment.",
@@ -431,6 +436,13 @@ export const COPY = {
     rename: "Rename",
     retire: "Retire",
     categoriesHint: "Retired categories stay on old requests.",
+    /** Retire asks first (T3 of the Batch 6 amendment): adding the name again makes a new category. */
+    retireDialog: {
+      title: (name: string) => `Retire ${name}?`,
+      body: "People can no longer choose it on a request, and a draft that uses it will need another category. Requests already sent in keep it. You can add a category with the same name again later.",
+      keep: "Keep the category",
+      confirm: "Retire category",
+    },
     categoryNameInvalid: `Use 1 to ${MAX_LENGTH.category} characters.`,
     categoryNameTaken: "You already have a category with that name.",
     categoryGone: "That category isn't in the list any more. Reload the page to see the current list.",
@@ -471,6 +483,20 @@ export const COPY = {
      * (`admin/giving/team/{page,team-list,grant-form,setup-role-button}.tsx`), none of which names
      * a module. ADAPTED = the giving sentence with its module-specific words replaced.
      */
+    /**
+     * Short labels for the reimbursement keys a role carries, shown as badges on team rows and
+     * named in the set-up toast (T2). Order is the rendering order. The giving three are the
+     * words giving's own page uses; they appear only so the toast can name a skipped giving key.
+     */
+    keyLabels: {
+      "reimbursement.request_for_others": "Enter requests for others",
+      "reimbursement.view": "View all requests",
+      "reimbursement.pay": "Record payments",
+      "reimbursement.manage": "Manage reimbursements",
+      "giving.view": "View giving",
+      "giving.record": "Record gifts",
+      "giving.manage": "Manage giving",
+    } as Record<string, string>,
     panel: {
       since: "since", // REUSED
       groupSuffix: "(group)", // REUSED
@@ -489,8 +515,9 @@ export const COPY = {
       setupIntroMany: "These roles aren't set up for your church yet, so they can't be given to anyone.",
       settingUp: "Setting up…", // REUSED
       roleSetUp: "Role set up.", // REUSED
-      roleSetUpWithout: (keys: string, many: boolean) =>
-        `Role set up, without ${keys} (you don't hold ${many ? "them" : "it"} yourself).`, // REUSED
+      // `labels` are COPY.team.keyLabels joined with ", ", never raw permission keys.
+      roleSetUpWithout: (labels: string, many: boolean) =>
+        `Role set up, without ${labels} (you don't hold ${many ? "them" : "it"} yourself).`, // REUSED
       giveHeading: "Give a role", // REUSED
       roleLabel: "Role", // REUSED
       personLabel: "Person", // REUSED

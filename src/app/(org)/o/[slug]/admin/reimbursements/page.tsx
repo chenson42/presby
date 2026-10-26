@@ -9,7 +9,7 @@ import { gateReimbursementPage } from "@/lib/reimbursement/gate";
 import { parseQueueQuery } from "@/lib/reimbursement/queue-query";
 import { getCounts, getPayHolderCount, listTreasurerGroups, listTreasurerRequests } from "@/lib/reimbursement/reads";
 import { ReimbursementLoadError, ReimbursementStatePage } from "../../reimbursements/reimbursement-states";
-import { emptyMessage, exportHref, needsClampToFirstPage, queueHref, totalPages } from "./queue-model";
+import { emptyMessage, exportHref, exportNotes, needsClampToFirstPage, queueHref, totalPages } from "./queue-model";
 import { QueueFilters } from "./queue-filters";
 import { QueueList } from "./queue-list";
 import { QueueTabs } from "./queue-tabs";
@@ -105,12 +105,19 @@ export default async function ReimbursementQueuePage({
             </p>
           )}
         </div>
-        <Button asChild variant="outline" className="min-h-11">
-          <a href={exportHref(slug, query)} download data-testid="export-csv">
-            <Download className="size-4" aria-hidden />
-            {COPY.queue.exportCsv}
-          </a>
-        </Button>
+        <div className="flex flex-col gap-2 sm:items-end">
+          <Button asChild variant="outline" className="min-h-11">
+            <a href={exportHref(slug, query)} download data-testid="export-csv">
+              <Download className="size-4" aria-hidden />
+              {COPY.queue.exportCsv}
+            </a>
+          </Button>
+          {exportNotes(query).length > 0 && (
+            <p className="text-sm text-muted-foreground sm:max-w-xs sm:text-right" data-testid="export-note">
+              {exportNotes(query).join(" ")}
+            </p>
+          )}
+        </div>
       </div>
 
       {payHolders === 0 && (

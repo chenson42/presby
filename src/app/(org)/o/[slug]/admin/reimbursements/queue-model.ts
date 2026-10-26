@@ -31,7 +31,8 @@ export function queueHref(slug: string, query: QueueQuery, override: Partial<Que
  * `Export CSV`: the export route with the queue's date range (the dates mean
  * "last submitted", the same as the filter). The export has no group filter, so
  * the group is never carried. `status` narrows only on the two tabs that are one
- * status (the others span several), so the file matches what the tab shows.
+ * status (the others span several), so on Needs treasurer approval and In progress
+ * the file is wider than the tab. `exportNotes` says so on the page.
  */
 export function exportHref(slug: string, query: QueueQuery): string {
   const params = new URLSearchParams();
@@ -41,6 +42,14 @@ export function exportHref(slug: string, query: QueueQuery): string {
   if (query.tab === "paid") params.set("status", "paid");
   const text = params.toString();
   return `${BASE(slug)}/export${text ? `?${text}` : ""}`;
+}
+
+/** What the CSV covers beyond the screen (T4): the group when one is chosen, every sent-in request on the two multi-status tabs. */
+export function exportNotes(query: QueueQuery): string[] {
+  const notes: string[] = [];
+  if (query.groupId !== null) notes.push(COPY.queue.exportNote.group);
+  if (query.tab === "override" || query.tab === "progress") notes.push(COPY.queue.exportNote.requests);
+  return notes;
 }
 
 export function totalPages(total: number): number {

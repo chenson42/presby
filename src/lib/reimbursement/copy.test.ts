@@ -386,6 +386,35 @@ describe("C7 to C9 treasurer queue, detail, settings and team", () => {
   });
 });
 
+describe("Batch 6 follow-up strings (T2 key labels, T3 retire dialog, T4 export notes), byte for byte", () => {
+  it("key labels, in rendering order", () => {
+    expect(Object.entries(COPY.team.keyLabels)).toEqual([
+      ["reimbursement.request_for_others", "Enter requests for others"],
+      ["reimbursement.view", "View all requests"],
+      ["reimbursement.pay", "Record payments"],
+      ["reimbursement.manage", "Manage reimbursements"],
+      ["giving.view", "View giving"],
+      ["giving.record", "Record gifts"],
+      ["giving.manage", "Manage giving"],
+    ]);
+  });
+
+  it("the Retire dialog", () => {
+    const d = COPY.settings.retireDialog;
+    expect(d.title("Supplies")).toBe("Retire Supplies?");
+    expect(d.body).toBe(
+      "People can no longer choose it on a request, and a draft that uses it will need another category. Requests already sent in keep it. You can add a category with the same name again later.",
+    );
+    expect(d.keep).toBe("Keep the category");
+    expect(d.confirm).toBe("Retire category");
+  });
+
+  it("the export notes", () => {
+    expect(COPY.queue.exportNote.group).toBe("The file covers every group, not only the one chosen under Charged to.");
+    expect(COPY.queue.exportNote.requests).toBe("The file covers every request that has been sent in, not only this tab's.");
+  });
+});
+
 describe("the team page chrome (Batch 6 Copy gaps: REUSED from the giving team page, two ADAPTED)", () => {
   it("is pinned byte for byte", () => {
     const p = COPY.team.panel;
@@ -406,7 +435,7 @@ describe("the team page chrome (Batch 6 Copy gaps: REUSED from the giving team p
     expect(p.setupIntroMany).toBe("These roles aren't set up for your church yet, so they can't be given to anyone.");
     expect(p.settingUp).toBe("Setting up…");
     expect(p.roleSetUp).toBe("Role set up.");
-    expect(p.roleSetUpWithout("reimbursement.pay", false)).toBe("Role set up, without reimbursement.pay (you don't hold it yourself).");
+    expect(p.roleSetUpWithout("Record payments", false)).toBe("Role set up, without Record payments (you don't hold it yourself).");
     expect(p.roleSetUpWithout("a, b", true)).toBe("Role set up, without a, b (you don't hold them yourself).");
     expect(p.giveHeading).toBe("Give a role");
     expect(p.roleLabel).toBe("Role");

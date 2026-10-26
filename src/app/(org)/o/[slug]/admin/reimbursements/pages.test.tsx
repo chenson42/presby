@@ -175,6 +175,15 @@ describe("the queue", () => {
     expect([...select.options].map((o) => o.textContent)).toEqual(["All groups", "Property Committee", "Worship"]);
   });
 
+  it("the export note shows only when the file differs from the screen", async () => {
+    arrange();
+    render(<>{(await call(() => QueuePage({ params, searchParams: search({ tab: "all" }) }))).node}</>);
+    expect(screen.queryByTestId("export-note")).toBeNull();
+    cleanup();
+    render(<>{(await call(() => QueuePage({ params, searchParams: search({ tab: "progress", group: G1 }) }))).node}</>);
+    expect(screen.getByTestId("export-note").textContent).toBe(`${COPY.queue.exportNote.group} ${COPY.queue.exportNote.requests}`);
+  });
+
   it("the 2,000-request hint shows only when the group list is cut off", async () => {
     arrange();
     render(<>{(await call(() => QueuePage({ params, searchParams: search() }))).node}</>);

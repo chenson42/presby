@@ -104,7 +104,48 @@ describe("TeamPanel - who holds a role", () => {
   });
 });
 
+describe("TeamPanel - key badges", () => {
+  it("renders labels in canonical order, drops an unlabeled key, never shows a raw key", () => {
+    const base = team();
+    render(
+      panel(
+        team({
+          grants: [
+            { ...base.grants[0]!, ownKeys: ["reimbursement.manage", "mystery.key", "reimbursement.view", "reimbursement.request_for_others"] },
+          ],
+        }),
+      ),
+    );
+    const badges = within(screen.getByTestId("team-keys")).getAllByText(/./).map((b) => b.textContent);
+    expect(badges).toEqual(["Enter requests for others", "View all requests", "Manage reimbursements"]);
+    expect(screen.queryByText(/mystery|reimbursement\./)).toBeNull();
+  });
+
+  it("a row with only unlabeled keys has no badge row", () => {
+    const base = team();
+    render(panel(team({ grants: [{ ...base.grants[0]!, ownKeys: ["mystery.key"] }] })));
+    expect(screen.queryByTestId("team-keys")).toBeNull();
+  });
+});
+
 describe("TeamPanel - roles to set up", () => {
+  it("an empty role list shows both set-up buttons with the no-role sentence", () => {
+    render(panel(team({ assignableRoles: [], missingTemplates: ["treasurer", "reimbursement_clerk"] })));
+    expect(screen.getByRole("button", { name: COPY.team.setUpTreasurer })).toBeTruthy();
+    expect(screen.getByRole("button", { name: COPY.team.setUpClerk })).toBeTruthy();
+    expect(screen.getByText(COPY.team.panel.setupIntroMany)).toBeTruthy();
+    expect(screen.getByText(COPY.team.panel.noRoleToGive)).toBeTruthy();
+  });
+
+  it("skipped keys are printed as labels, joined with a comma", async () => {
+    ensure.mockResolvedValue({ ok: true, data: { roleId: R1, skippedKeys: ["reimbursement.pay", "giving.record", "bogus.key"] } });
+    render(panel(team({ missingTemplates: ["treasurer"] })));
+    fireEvent.click(screen.getByRole("button", { name: COPY.team.setUpTreasurer }));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Role set up, without Record payments, Record gifts (you don't hold them yourself)."),
+    );
+  });
+
   it("appears only when a template is missing, with Copy's button names and the clerk's description", () => {
     render(panel(team()));
     expect(screen.queryByRole("heading", { name: COPY.team.sectionSetup })).toBeNull();
@@ -123,7 +164,7 @@ describe("TeamPanel - roles to set up", () => {
     fireEvent.click(screen.getByRole("button", { name: COPY.team.setUpTreasurer }));
     await waitFor(() => expect(ensure).toHaveBeenCalledWith({ templateKey: "treasurer" }));
     await waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith("Role set up, without reimbursement.pay (you don't hold it yourself)."),
+      expect(toast.success).toHaveBeenCalledWith("Role set up, without Record payments (you don't hold it yourself)."),
     );
     expect(refresh).toHaveBeenCalled();
   });

@@ -1733,3 +1733,16 @@ Existing assertions altered: item 5 above. Existing e2e specs asserting these st
 **New items for the confirmation list:** (i) no group filter on the CSV in Increment 1, with the page notes instead; (ii) a confirmation dialog on Retire a category.
 
 **Implementer:** Batch 6 follow-up, ux-developer; Batch 7, full-stack-developer. Status: Phase 3 amendment complete, 2026-10-26.
+
+## Phase 4 — Batch 6 follow-up
+
+**Date:** 2026-10-26 · **Author:** ux-developer · One commit, as the Phase 3 amendment (Copy gaps from Batch 6) lists. No schema, route, permission, flag or audit change. Giving's `setup-role-button.tsx` untouched (deferred to TODO).
+
+- `copy.ts`: `team.keyLabels` (seven keys), `settings.retireDialog.{title,body,keep,confirm}`, `queue.exportNote.{group,requests}`; byte-pinned in `copy.test.ts`. `roleSetUpWithout` now takes labels.
+- New pure `src/lib/reimbursement/key-labels.ts` (`keyLabelsFor`: label order, unlabeled keys dropped). `team-grant-list.tsx` renders secondary badges (`data-testid="team-keys"`, wraps at 360 px); `team-setup-buttons.tsx` maps skipped keys to labels.
+- `queue-model.ts`: pure `exportNotes(query)`; stale `exportHref` comment fixed; `page.tsx` renders the notes under `Export CSV` (`data-testid="export-note"`).
+- `categories-panel.tsx`: Retire is an `AlertDialog` (`retire-confirm` is the action); file comment updated.
+- Tests: `copy.test.ts`, `team-panel.test.tsx` (badge order, unlabeled dropped, empty-roles case, toast labels), `queue-model.test.ts` (`exportNotes`), `pages.test.tsx` (note only when it applies), `settings-components.test.tsx` (cancel posts nothing, confirm posts once), `e2e/reimbursement-treasurer-ui.spec.ts` (confirm step, group note, badge assertion, two 360 px screenshots).
+- Gates: typecheck, lint, `npm run check`, full unit suite green; `reimbursement-treasurer-ui` + `reimbursement-member` 32/32 on :3590 (one first-run flake at the Worship switch click-then-reload, line 653, passed on re-run; not touched by this change). 360 px looked at: team row with badges and the Retire dialog, no sideways scroll.
+- Honest notes: the new tests were written with the code, not watched failing first. The 60-character category name wrap in the Retire dialog is **unverified** in a browser (title carries `[overflow-wrap:anywhere]`).
+- Next: Batch 7 (full-stack-developer).

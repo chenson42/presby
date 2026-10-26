@@ -3,6 +3,17 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useHydrated } from "@/components/shared/use-hydrated";
 import { COPY } from "@/lib/reimbursement/copy";
@@ -14,9 +25,10 @@ import { RenameCategoryDialog } from "./rename-category-dialog";
 /**
  * `Categories` (Copy C9): the active categories with `Rename` and `Retire`, the
  * `Add a category` form, and the hint `Retired categories stay on old requests.`
- * Retire is one tap with no confirmation dialog: Copy gives none, a retired
- * category stays on every request that carries it, and the same name can be added
- * again. Its button reads "Retire <name>" to a screen reader through
+ * Retire asks first in an `AlertDialog` (`COPY.settings.retireDialog`; Batch 6
+ * amendment T3): it cannot be undone as the same row, because adding the name again
+ * makes a new category. A retired category stays on every request that carries it.
+ * Its trigger button reads "Retire <name>" to a screen reader through
  * `aria-labelledby`, with no string beyond Copy's. A category that is already
  * gone says so (`That category isn't in the list any more...`) and the page
  * re-reads. No success toast: the row leaves the list.
@@ -68,18 +80,33 @@ export function CategoriesPanel({ slug, categories }: { slug: string; categories
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <RenameCategoryDialog slug={slug} categoryId={category.id} currentName={category.name} describedBy={nameId} />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="min-h-11"
-                    id={retireId}
-                    aria-labelledby={`${retireId} ${nameId}`}
-                    disabled={!hydrated || pending !== null}
-                    onClick={() => void retire(category.id)}
-                    data-testid="retire"
-                  >
-                    {COPY.settings.retire}
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="min-h-11"
+                        id={retireId}
+                        aria-labelledby={`${retireId} ${nameId}`}
+                        disabled={!hydrated || pending !== null}
+                        data-testid="retire"
+                      >
+                        {COPY.settings.retire}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="[overflow-wrap:anywhere]">{COPY.settings.retireDialog.title(category.name)}</AlertDialogTitle>
+                        <AlertDialogDescription>{COPY.settings.retireDialog.body}</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="min-h-11">{COPY.settings.retireDialog.keep}</AlertDialogCancel>
+                        <AlertDialogAction className="min-h-11" onClick={() => void retire(category.id)} data-testid="retire-confirm">
+                          {COPY.settings.retireDialog.confirm}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </li>
             );

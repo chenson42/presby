@@ -1090,3 +1090,185 @@ Strings added, all from Copy: P1-P9 in `careers-notice.tsx`, `careers-list.tsx`,
 # Phase 6 — Shipped vs Intent (analyst)
 
 *Pending.* Must walk (Phase 1 and the parent's list, scoped to this increment): an anonymous visitor at 360px on a platform host and on a custom host; a `careers.manage` holder; the founding administrator who accepted an invitation, adopted "Hiring Committee" and turned the toggle on, at 360px, listing each page they land on; a member with no permission; an organization with the toggle off.
+
+---
+
+# Phase 5 — Verification (qa)
+
+**Date:** 2026-10-26
+**Verified by:** qa
+**Tree:** `pipeline/careers` at `27a997e`, worktree `/Users/cshenso/git/presby-platform/presby-careers`, Neon branch `pipeline-careers` (all five connection strings confirmed on `ep-crimson-tooth`; no value printed).
+
+**Scope run:** everything the brief asked for, in full. Typecheck, lint, all eight tripwires, build, the full unit suite, the full serial DB suite, `test-rls-71` and the integrated `test-rls.sql` as `presby_app`, the full `chromium` and `custom-hosts` projects on my own dev server at :3580, and the prod lane on :3581. Nothing rests on the implementer's runs.
+
+**Flag state:** I reset global flags to the CI baseline before e2e with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, run against this worktree's `PLATFORM_DATABASE_URL` only. The branch had 25 flags switched on that it inherited from `development`. After all runs, the flags still equal the baseline.
+
+## Type Check
+
+`npm run typecheck`: PASS. `npm run lint`: PASS (0 warnings). `npm run check`: all eight tripwires PASS. `npm run build` (inside the prod lane): PASS. TypeScript ran, and all five careers routes were emitted as dynamic (`ƒ`).
+
+## Unit Tests
+
+- **Plain `npm test`** (no database): 622 files passed, 85 skipped; 9,505 tests passed, 2,597 skipped. This matches Batch 3 exactly. The skips are the DB-gated files.
+- **Full serial DB suite:** 707/707 files; 12,101 passed, 0 failed, 1 skipped (`render-pdf.test.ts`'s opt-in sample writer, gated on `STATEMENT_SAMPLE_DIR`); 2,001 s.
+  - No `localhost:3000` failures, because `.env.local` sets no port.
+  - My first DB run is void. The presby-assets QA agent writes to the same shared-scratchpad log path, and its output landed in my log. I re-ran with a unique path and a JSON report; the counts above are from that re-run.
+- **`scripts/careers/test-rls-71.sql`** as `presby_app`: 84/84, exit 0. It also gave 84/84 again after every failing-first restore.
+- **Integrated `scripts/test-rls.sql`** as `presby_app` (scratch copy, stop-on-error off): 1,357 passes, 84 of them section 71, including the template count of 7.
+  - **Known drift, as expected:** lines 217, 516 and 7927.
+  - **Also failing, not careers:** 7 assertions in section 67 (public calendar, from main), starting with "Fernwood's `org_portal.public_calendar` toggle is on — got 0". The cause is branch state. Batch 2 applied 0067's migration to this branch but never its seed (`scripts/public-calendar/seed-dev-public-calendar.sql`). A read-only check shows Fernwood has only `org_portal.calendar` and `org_portal.careers` toggles.
+  - **No collision between the two seeds:** both insert Fernwood's site as `live` with no bundle, using `on conflict (organization_id) do nothing`, and the careers seed touches no calendar toggle.
+
+## End-to-End Tests
+
+| Lane | Result | Careers specs |
+|---|---|---|
+| `chromium`, full, dev server :3580 | 463/463 passed, 0 skipped, 0 flaky (15.9 min) | `careers.spec.ts` 20/20, `hydration/careers-posting-form.spec.ts` 3/3 |
+| `custom-hosts`, full, :3580 | 120/120 (3.7 min) | `custom-domains/careers.spec.ts` 9/9 |
+| prod lane (`prod-build` + `prod-custom-hosts`), own build on :3581 | 82/82 (2.3 min) | careers hydration 3/3 |
+
+The first `chromium` attempt is void. My first dev server got stuck in a Turbopack HMR loop (HMR version over 1,670, `reloadPage: HMR hash mismatch` on every connect), and every test timed out on the hydration-gated sign-in button. I stopped that run and the server by PID, confirmed no file in the worktree had changed, restarted the server, and checked that the loop was gone before the 463/463 run. Both servers were stopped by PID, :3000 was never touched, and no `e2e-careers-*` organization remains.
+
+## Regression Tests Added (failing-first, reproduced independently)
+
+Each SQL mutation was built from the live function body, applied as the owner, and then the original body was restored. The digest of all seven careers functions, their ACLs and `proconfig`, the triggers and FORCE RLS matched the baseline after every restore. The TypeScript mutations ran in a `git archive` copy at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-ff-27a997e` against the real database; that copy, including its `.env.local`, is now deleted. No `git stash` was used.
+
+| Mechanism | Mutation | Went red | Green after restore |
+|---|---|---|---|
+| Always-one-row collapse (SQL) | toggle-off branch returns zero rows | 71e "seven unavailable causes captured — expected 7, got 3"; `public.db.test.ts` 2 failed | yes |
+| Always-one-row collapse (reader) | `mapPublicCareersRow(undefined)` returns `unavailable` | `public.test.ts` "an absent row is FAILED, never an empty list" and "fails closed" | 66/66 |
+| Toggle gate (definer) | `v_on := v_cat_ok` | 71e "byte-identical for every cause — got 3"; T6 "agrees across all 27 combinations" | yes |
+| Toggle gate (staff lib) | `if (false && !on)` | `postings.db.test.ts` "toggle off: every call is feature_off…" and "toggle row explicitly false…" | 47/47 |
+| Auto-close sweep | `closing_date <= today` (off by one) | `careers.db.test.ts` "closes only published postings past their closing date in the ORGANIZATION's zone…" (71 cannot see the sweep; `presby_app` has no EXECUTE) | yes |
+| Sweep audit | `insertAuditRow` removed from `sweep.ts` | `sweep.db.test.ts` 3/3 failed | 3/3 |
+| Slug immutability trigger | slug check removed from the guard | 71d "a published posting's slug changed"; `careers.db.test.ts` "the slug is fixed after the first publish for the owner too, including after a reopen" (`postings.db.test.ts` stays green because the lib checks too) | yes |
+| Founding-administrator bundle (SQL) | both keys dropped from the function | 71b; `invitations.db.test.ts` "equals foundingAdministratorPlan() for EVERY organization_type"; designation parity 7 scenarios | yes |
+| Founding-administrator bundle (TypeScript) | both keys dropped from the plan | `founding-administrator.test.ts`, 8+ tests | 144/144 |
+
+**Gap noted:** the pure plan tests in `founding-administrator.test.ts` sit inside the file's DB-gated `describe.skipIf(!hasDb)`. Plain CI unit runs therefore never exercise them; only the DB lane does.
+
+## Coverage on Critical Modules
+
+Not re-measured. This diff does not touch `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+## Feature-Gate Audit
+
+Verified by reading the code. The careers surface uses the tenant resolver rather than `hasFeature()` and `FEATURES.*`: `careers.manage` is a tenant-catalog key checked through `presby_has_permission`, which is correct for `(org)`.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct key? |
+|---|---|---|---|
+| `createPostingAction` | yes (`actions.ts:77`), then `resolveOrgContext` | n/a (tenant axis) | gate in `postings.ts:149-166`: toggle, then `careers.manage` inside `withOrgContext` |
+| `updatePostingAction` | yes, same | n/a | same gate |
+| `setPostingStatusAction` | yes, same | n/a | same gate; audit in the same transaction (`postings.ts:529-537`) |
+| `movePostingAction` | yes, same | n/a | same gate |
+| GET `/o/[slug]/admin/careers`, `/new` | `cachedAuth()` in `careers-access.tsx:22`, then the `(org)` four-way miss, then `assertOrgAccess` | n/a | gate via `listPostings` |
+| GET `/o/[slug]/admin/careers/[postingId]` | yes, same | n/a | gate via `getPosting`, **except for a malformed id** (finding 3) |
+| GET `/site/[slug]/careers`, `/careers/[posting]`, the `careers` slot | anonymous by design | n/a | one definer that always returns one row; `unavailable` is the one neutral 404 |
+| GET `/api/cron/maintenance` (modified) | bearer `CRON_SECRET`, unchanged | n/a | the sweep is EXECUTE-revoked from `presby_app`, `presby_platform` and PUBLIC; owner only |
+
+`getPlatformDb()` under careers appears only in `sweep.ts:70`. No new `/api` route and no `src/proxy.ts` change.
+
+**Schema/RLS live-catalog probe** (`aclexplode`, `pg_policies`, `pg_trigger`, `relforcerowsecurity`):
+- `job_postings` has FORCE RLS and `tenant_isolation` on both USING and WITH CHECK.
+- `presby_app` has table SELECT, a 13-column INSERT and a 13-column UPDATE, exactly as designed, and no DELETE. `presby_platform` and PUBLIC have nothing.
+- The three guards are enabled `O`, and all seven functions pin `search_path`.
+- Catalog: `careers.manage` is tier 1, `careers.applicants` is tier 3, and neither requires 2FA. `hiring_committee` is a universal `custom` template with exactly the two keys; no other template carries `careers.applicants`.
+
+Which layer refuses each write:
+
+| Attempt | Connection | Refused by |
+|---|---|---|
+| DELETE | `presby_app` | grant (42501) |
+| UPDATE `version` | `presby_app` | grant (42501) |
+| INSERT with `status` | `presby_app` | grant (42501) |
+| slug change after publish | `presby_app` | trigger (23514, `job_postings: the slug is fixed`) |
+| published → draft | `presby_app` | trigger (23514) |
+| cross-org INSERT | `presby_app` | RLS WITH CHECK |
+| run the sweep | `presby_app` | EXECUTE revoked (42501) |
+| INSERT born `published` | owner | trigger |
+| slug change after publish, and after a reopen | owner | trigger |
+| DELETE | owner | trigger (42501) |
+
+On the owner connection, a supplied `version` and `first_published_at` are forced back to 1 and null. Read isolation holds: another org's context sees 0 rows, and no context sees 0 rows. The definer returns exactly one row for a known, an unknown and a malformed key.
+
+## Copy Truthfulness
+
+- [x] Every added or changed string is in the design's Copy table. Accepted derivations: the no-phone variant of P5, the plural placement line (deviation 6), the `failed` page's bare "Job openings" (deviation 7), the h1 "New job opening" (it reuses the S7 button text), and "Reload" (S8).
+- [x] The query behind each claim was opened. P2 needs a successful `available` read. P6 comes from the definer's `closed`. "Closing date passed" is `closing_date < orgToday` read in the same transaction. The placement line reads the published bundle only and says when it cannot check.
+- [x] Each instruction is traced to its viewer's role. S1's Features link renders only when the same transaction found `org_features.manage`, and the walk showed both variants. S2's instruction is followable by any member.
+- [x] Neighbouring strings: I grepped and found nothing that this diff makes false.
+- **copy truthfulness: FAIL.**
+  - **Where:** `src/app/(org)/o/[slug]/admin/careers/posting-form.tsx:371` passes the stored `posting.title` to `StatusControls`, which builds `Publish "{title}"?` and `Reopen "{title}"?` (`status-controls.tsx:59,77`). Since deviation 4 (save-first), Publish and Reopen save the form's unsaved edits before changing status.
+  - **Who sees it:** a `careers.manage` holder.
+  - **Reproduced in the browser at 1280px:** I renamed a draft to "Renamed Before Publish" without saving and clicked Publish. The dialog read `Publish "Draft Opening"?`; after "Yes, publish" the row in the database was `{"title":"Renamed Before Publish","status":"published"}`.
+  - The dialog names a title that will not be the one published. The fix needs an exact-text test that fails on the stored title.
+
+## Browser walk
+
+Real Chromium against :3580, at 360×800 (mobile, touch) and 1280×900, on a throwaway fixture with eight postings covering every state, plus a profile phone, a bundle with the slot on `/employment`, and a live custom host `qa-walk-careers.invalid`. 56 screenshots in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-71/walk/`; the custom-host pass re-ran into `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-71/walk2/`. I read the 360px public and staff screenshots and the publish dialog by eye.
+
+**Public, platform host**
+- List, rich posting, 150-character-title posting, closed posting and the slot inside the site chrome all render with no horizontal scroll at either width.
+- With the toggle off, `/careers` and a posting URL are 404, and **the slot page shows P1**. This is the capture the implementer left out, now done at 360px and 1280px.
+
+**Public, custom host**
+- The list, the posting and the slot page all name the church's host in their canonical URLs.
+- The slug URL answers 307 with `no-store` to the host.
+- A draft, a discarded draft, an unknown slug, `UPPER` and `walk-rich-x` are all the neutral 404, and no cookie is ever set.
+- With the toggle off, the slot shows P1 and `/careers` is a 404.
+
+**Staff**
+- List (Closed `<details>` opened, the "Closing date passed" row, move buttons on published rows only), new, and edit for published, past-date, draft, closed, closed-with-past-date and discarded postings.
+- Reopen is disabled with the S6 note, and a discarded draft offers no Reopen (orchestrator ruling).
+- Not found, S2, S1 with and without the Features link.
+
+**Not walked**
+- The `failed` read state; I could not induce a database failure safely (it is unit-tested).
+- Real iPhone or Android keyboards, and a real Word or Google Docs clipboard (the design marks these not automatable).
+
+## Batch 3 deviations judged
+
+1. **Fixture file location.** Accepted. The `e2e96000` and `e2e96001` id prefixes appear in no other worktree, and no existing support file changed.
+2. **Toolbar has no `role="toolbar"` or group name.** Accepted. Seven buttons, each with a visible text name, is not an accessibility failure.
+3. **Pay-unit select named by the legend.** Accepted. `aria-labelledby="posting-pay-legend"` is at `posting-form.tsx:263`.
+4. **Save-first on Publish and Reopen.** The behaviour is sound, but it introduced the copy defect above, and it does not cover finding 2.
+5. **Reopen disabled, not just noted.** Accepted; verified in the browser.
+6. **Several slot pages listed.** Accepted.
+7. **`failed` page without the organization's name.** Accepted; the name is unknown there.
+8. **150-character titles in the fixtures.** Accepted; that is the database limit.
+9. **No raw Server Action POST.** Accepted. The lib's refusal and the trigger are both proven (M4 above).
+10. **No `loading.tsx`.** Confirmed: none in either careers tree.
+
+## Findings
+
+1. **FAIL, copy truthfulness:** the stale dialog title described above (`posting-form.tsx:371`, shown by `status-controls.tsx:59,77`).
+2. **FAIL, unsaved edits dropped (save-first is incomplete).** Close and Discard never save, then `router.refresh()` (`status-controls.tsx:146`) bumps the version, and the form is keyed on `id-version` (`[postingId]/page.tsx:79`). The form remounts and drops typed edits without the unsaved-changes prompt.
+   - Walk: I typed "UNSAVED SUMMARY EDIT" and confirmed Close. The form then showed the stored summary, and the database summary was unchanged.
+   - Either warn, or treat these two edges the same way as Publish and Reopen.
+3. **Minor: gate skipped for a malformed posting id.** `[postingId]/page.tsx:38-41` returns `not_found` for a malformed id without running the gate, so a member with the toggle off and no permission sees S4 "That job opening couldn't be found." instead of S1. The walk captured this (`staff-off-malformed-id-*.png`). Nothing leaks, but the comment at `:38` ("the gate still runs on the list read below") is false: there is no list read.
+4. **Integration patches are stale.** `scripts/careers/test-rls.sql.integration.patch`, `seed-dev.sql.integration.patch` and `_journal.json.integration.patch` fail `git apply --check` at HEAD; only `domain-index.ts` applies. The main merge `4fd8726` brought in 0067's integration commit `5fa2e29`, which appended to all three files, so Batch 3's statement "The four from Batch 1 stand" is no longer true. The conflicts are trivial appends; I applied them by hand in a scratch copy for the integrated run.
+5. **For Phase 6 or tech-lead, not a Phase 4 defect:** open postings and the list are `noindex, nofollow` on both hosts, inherited from `src/app/layout.tsx:41` (`// pre-release; revisit before launch`). Bundle pages override this to `index, follow`. The design implies open postings are indexable but never pinned it.
+6. **Branch state:** apply `scripts/public-calendar/seed-dev-public-calendar.sql` to `pipeline-careers` if section 67 is to pass on this branch.
+7. **Process note:** I overlaid my first archive onto a leftover scratchpad directory `ff/` that belonged to an earlier agent (last modified 15:47). I removed my nested `node_modules` symlink and the `.env.local` I had written there, but that directory's tracked files are now this branch's.
+
+## Verdict
+
+**FAIL.** Every suite is green, and the mechanisms, gates and RLS posture all hold under failing-first and live-catalog probes. It fails on copy truthfulness (finding 1) and on the incomplete save-first behaviour (finding 2), both in Batch 3's deviation 4. This is not auth-touching. Finding 1 needs an exact-text test that fails on the stored title.
+
+**Hand back to ux-developer (Phase 4):**
+- `posting-form.tsx:371` and `status-controls.tsx:59,77`: use the form's live title in the Publish and Reopen dialogs, with an exact-text test that fails on the stored title (finding 1).
+- `status-controls.tsx:146` and `[postingId]/page.tsx:79`: stop Close and Discard from silently dropping unsaved edits, with a test (finding 2).
+- `[postingId]/page.tsx:38-41`: run the gate before the malformed-id `not_found`, or correct the comment (finding 3).
+- Regenerate the three stale integration patches against HEAD (finding 4).
+
+After the fix, a scoped re-run is enough: the staff unit tests, `careers.spec.ts`, the hydration spec on both lanes, and the 360px editor walk.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete; all suites green; failing-first reproduced for 9 mutations; findings 1–4 handed back | FAIL | 2026-10-26 |
+
+**Next:** ux-developer (Phase 4 fix pass) for findings 1–3; the integration-patch regeneration (finding 4) goes to the implementer or the orchestrator. Then qa again.
+
+Logs and artifacts are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-71/`.

@@ -340,6 +340,10 @@ describe("proxy - a custom host is rewritten to /site/<host><path> (R1)", () => 
       "/api/auth/callback/credentials",
       "/api/webhooks/stripe",
       "/api/sites/ingest",
+      // the staged ingest (DECISION-279): fixed paths, so they stay on this list
+      "/api/sites/ingest/plan",
+      "/api/sites/ingest/images",
+      "/api/sites/ingest/commit",
       "/api/cron/email-queue",
       "/signin",
       "/totp",
@@ -365,6 +369,16 @@ describe("proxy - a custom host is rewritten to /site/<host><path> (R1)", () => 
       expect(res.headers.get("location"), p).toBeNull();
     }
     expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("PX-2: the staged-ingest paths are matched by config.matcher - none ends in an excluded image extension (F151)", async () => {
+    const { config } = await import("./proxy");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+    for (const p of ["/api/sites/ingest", "/api/sites/ingest/plan", "/api/sites/ingest/images", "/api/sites/ingest/commit"]) {
+      expect(matcher.test(p), p).toBe(true);
+    }
+    // the reason the routes are FIXED paths: a dynamic segment ending in .jpg would bypass the proxy
+    expect(matcher.test("/api/sites/ingest/images/hero.jpg")).toBe(false);
   });
 
   it("is a lookup key, not an identity: forwarded headers change nothing (R3, A2)", async () => {

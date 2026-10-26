@@ -85,6 +85,9 @@ const PLATFORM_PATHS = [
   "/api/webhooks/stripe",
   "/api/webhooks/resend",
   "/api/sites/ingest",
+  "/api/sites/ingest/plan",
+  "/api/sites/ingest/images",
+  "/api/sites/ingest/commit",
   "/api/cron/email-queue",
   "/api/cron/domains",
   "/api/does-not-exist",
@@ -147,7 +150,16 @@ test.describe("platform routes on a church's own domain", () => {
   });
 
   test("a POST to a platform route is also nothing: credentials sign-in, webhooks, ingest", async ({ request, baseURL }) => {
-    for (const path of ["/api/auth/callback/credentials", "/api/auth/signout", "/api/webhooks/stripe", "/api/webhooks/resend", "/api/sites/ingest"]) {
+    for (const path of [
+      "/api/auth/callback/credentials",
+      "/api/auth/signout",
+      "/api/webhooks/stripe",
+      "/api/webhooks/resend",
+      "/api/sites/ingest",
+      "/api/sites/ingest/plan",
+      "/api/sites/ingest/images",
+      "/api/sites/ingest/commit",
+    ]) {
       const res = await rawPost(request, baseURL, HOSTS.oneCanonical, path, {
         headers: { "content-type": "application/x-www-form-urlencoded" },
         data: "email=a%40b.invalid&password=x",

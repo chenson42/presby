@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete; R1–R6 binding; option A rebuilt as a client holder that survives the re-render; cookie removed; F344 refusal + audit key; grant allow-list test; DECISION-292 proposed | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete. R1–R6 and DECISION-292 carried; `completeEnrollment` per R1 plus a transaction; client holder at the root of every `/account/2fa` branch (layout fallback is a Phase 4 decision); cookie path removed; F344 refusal + audit key + page notice; set-equal grant allow-list; failing-first plan; eight smokes on 3650 and the handoff spec in the prod lane on 3651; Copy table C1–C12 with the four checks; no migration. Open for the operator: "Copy all" deferred | Design complete | 2026-10-26 |
 | 4 — Implementation | full-stack-developer | Complete. Two `fix:` commits (F344 `3fd43eb`, F166 `9e48cf8`). All R1-R6 and Copy C1-C12 as designed; no layout fallback needed (smoke 1 shows no remount, probe recorded); `update()` returns the projected session, so `sessionVerified` is the strict form. Failing-first red recorded for every behaviour change; eight smokes green on :3650, the handoff spec green on :3651 with a negative control red. Gates: typecheck, lint, build, `npm run check` (8/8), unit suite 9546 pass, DB-backed tests pass | Ready for QA | 2026-10-26 |
-| 5 — Verification | qa | Run 1: all suites green (chromium 490/490, prod lane, invitation ×20); failing-first reproduced; FAIL on the R4 allow-list test (export * / alias gap) — test-only | FAIL | 2026-10-26 |
+| 5 — Verification | qa | Run 1 FAIL (R4 test gap, test-only); run 2: R4 closed (probes d/e/g/h red), production tree identical to run 1 (490/490 stands); n4 .js residual → TODO | PASS | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1144,3 +1144,127 @@ Mutation matrix (one mutation at a time on the worktree, each restored; the old 
 | k: extra `takeTwoFactorGrant` mention in `src/auth.ts` | green | red (G2b) |
 | l: `takeTwoFactorGrant` imported in a new file | red | red (G1, G2b) |
 | m: `require("./two-factor-grant")` | green | red (G1) |
+
+---
+
+## Phase 5 — Test Verification (qa), run 2
+
+**HEAD verified:** `37edfa7` on `pipeline/recovery-codes`, in worktree `/Users/cshenso/git/presby-platform/presby-f166`. The worktree was clean before and after.
+
+**Scope run** (narrow, per run 1's re-verification scope):
+- In full: typecheck, lint, `npm run check`, the unit suite.
+- `src/lib/auth/two-factor-grant.boundaries.test.ts`, verbose.
+- Mutation probes a–m, re-applied independently, plus seven new evasions (n1–n6, with n2b and n3b).
+- The tree identity and the commit-trailer checks.
+
+**Not re-run:** e2e (dev and prod lanes), DB-backed suites, the 360px walk, and failing-first for the production fixes. Those results rest on run 1. Production code is tree-identical to run 1's HEAD (see below), so they still apply. I did not reset flags because I ran no e2e.
+
+## Tree identity and commit trailers
+
+- **`src` excluding the boundaries test:** `git diff 3588b21 HEAD -- src ':!src/lib/auth/two-factor-grant.boundaries.test.ts'` is 0 bytes. Across the whole repo, `3588b21..HEAD` changes only `docs/work-log/2026-10-26-recovery-codes.md` and the boundaries test.
+- **The reword:** `0b43c04^{tree}` and `9e48cf8^{tree}` are both `b0e0b2a4…`, and both have parent `3fd43eb`. The only difference between the two commit messages is `Discovered-In: Phase-6` → `Discovered-In: Phase-4` (line 38). `Caught-By: agent-review` and `Work-Log: 2026-10-26-recovery-codes` are present.
+- **`37edfa7`:** a `test(auth):` commit touching only the test file and the work-log. It carries a `Work-Log:` trailer.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**
+- `npm run lint`: **PASS**
+- `npm run check`: **PASS**, all eight tripwires (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
+
+## Unit Tests
+
+- **Full suite:** 726 files (637 passed, 89 skipped); 12,235 tests (9,547 passed, 2,688 skipped); 31.4s; no failures.
+  - That is one more test than run 1 (9,546), which is G2b.
+  - The 89 skipped files are the DB-backed set, as in run 1. No pure-TS test is skipped.
+- **Boundaries file:** G1, G2, G2b, G3 and G4 all pass on HEAD (5/5).
+
+## Regression Tests Added (R4 allow-list, red-first verified independently)
+
+**Method.** I made a `git archive HEAD` copy per probe under the scratchpad, applying one mutation to a fresh copy each time. I ran both the new test and run 1's test (`git show 3588b21:` of the file) against each copy.
+
+| Probe | Run 1 test | New test (HEAD) | Failing assertion |
+|---|---|---|---|
+| HEAD, no mutation | green 4/4 | **green 5/5** | — |
+| a: new importer file calling the grant | red | red | G1, G2 |
+| b: second shaped call in `2fa/actions.ts` | red | red | G2 |
+| c: extra export in `2fa/actions.ts` | red | red | G3 |
+| **d**: `export * from` the grant module in a new file | green | **red** | G1 (`"qa-barrel.ts": ["*"]`) |
+| **e**: d plus an aliased import from the barrel, then a call | green | **red** | G1, G2 |
+| f: `export { withTwoFactorGrant }` in an allowed file | red | red | G2, G3 |
+| **g**: `const g = withTwoFactorGrant; g(id, …)` in an allowed file | green | **red** | G2 (count 3, expected 2, at `:91`) |
+| **h**: `withTwoFactorGrant.call(null, id, …)` | green | **red** | G2 |
+| i: `'use client'` file under `2fa/` importing `@/auth` | red | red | G4 |
+| j: `export * as ns from` the grant module | red | red | G1 |
+| k: extra `takeTwoFactorGrant` mention in `src/auth.ts` | green | red | G2b |
+| l: `takeTwoFactorGrant` imported in a new file | red | red | G1, G2b |
+| m: `require("./two-factor-grant")` plus a computed member | green | red | G1 (specifier catch-all) |
+
+All four probes from the run-1 FAIL (d, e, g, h) are red on the new test, and the old test was green on each of them. a, b, c, f, i, j and l stay red, and HEAD is green. I confirmed the failure reasons from the assertion diffs: d's red is the `*` entry, and g's red is the token count.
+
+**New evasions (QA run 2):**
+
+| Probe | New test | Ruling |
+|---|---|---|
+| n1: `await import("…/two-factor-grant")` plus a computed `["with"+"TwoFactorGrant"]` | **red** (G1) | caught |
+| n2: `` import(`…/two-factor-grant`) `` (template literal) then `m.withTwoFactorGrant(…)` | **red** (G2, name count) | caught |
+| n3: `import("@/lib/auth/" + "two-factor-grant")` plus a computed member | **red** (G1) | caught |
+| n2b: template-literal `import()` plus a computed member name | green | residual: deliberate obfuscation |
+| n3b: `import("@/lib/auth/two-factor-" + "grant")` plus a computed member | green | residual: deliberate obfuscation |
+| n5: `"/*"` … import and call … `"*/"` string literals in a new file | green | residual, already named by the implementer (regex comment stripping) |
+| n6: `with\u0054woFactorGrant(id, "totp", …)` in an allowed file (a Unicode escape of the same binding) | green; tsc and eslint both pass | residual: deliberate obfuscation |
+| n4: a new **`.js`** file under `src/lib/auth/` with a plain static import and call, imported by a `.ts` file | green; tsc and eslint both pass | **residual, follow-up (see below)** |
+
+**What the new test closes.** Anything that spells the identifier or quotes the module specifier as one string literal now goes red. Only deliberate obfuscation slips through: computed member names, a split specifier, Unicode escapes, or string-literal comment tricks. Each of those is conspicuous in review. Closing them would take a TypeScript-compiler symbol-reference check rather than regex, which is out of proportion here.
+
+**n4 is the one non-obfuscated miss, and I am not ruling it a FAIL.** The orchestrator may overrule; my reasons:
+1. `src/` holds zero `.js`, `.jsx`, `.mjs` or `.cjs` files (`git ls-files` returns 0).
+2. Every source-scan guard in the repo filters on `.ts`/`.tsx` (about 18, including `admin/shell-boundaries`, `parishes-boundaries`, `decide-boundaries`, `onboarding/boundaries` and `audience-callsites`). So this gap belongs to the repo's convention, not to this test, and widening only this walker would leave the other guards open.
+
+The proportionate fix is one repo-wide tripwire banning JS source under `src/` (`allowJs: true` is set). **TODO candidate:** "tripwire: no `.js/.jsx/.mjs/.cjs` under `src/` — every source-scan boundary test assumes TS." If the orchestrator would rather close it here, changing the boundaries test's `walk` regex (`:27`) to `\.(m|c)?(j|t)sx?$` is enough.
+
+## Coverage on Critical Modules
+
+Not re-measured, because no production code changed. Run 1's figures stand: `permissions.ts` 100%, `two-factor.ts` 91.1%, `flags.ts` 100%.
+
+## Feature-Gate Audit
+
+Unchanged from run 1. This diff touches no route or action, only a test file.
+
+## Schema/RLS Audit
+
+No schema touched.
+
+## Copy Truthfulness
+
+Not applicable to this diff: no user-facing string changed. Run 1's `copy truthfulness: PASS` stands.
+
+## Verdict
+
+**PASS.** The R4 allow-list test now has the property R4 states for every non-obfuscated TypeScript call-site shape. It counts the identifier and the module specifier, not the call syntax:
+- every run-1 probe (d, e, g, h) goes red;
+- every previously red probe stays red;
+- the implementer's j–m go red;
+- HEAD is green.
+
+Typecheck, lint, check (8/8) and unit (9,547) are green. Production code is tree-identical to run 1's HEAD, so the run-1 e2e, DB-backed, failing-first, security, 360px and copy results carry over unchanged. On the auth gate: the full login path for an MFA-enrolled user passed in run 1's full chromium run against this same production tree.
+
+**Residuals for the record (non-blocking):**
+- n4: JS source evades every source-scan guard. TODO candidate above.
+- Obfuscation-class evasions n2b, n3b, n5, n6.
+- Carried from run 1: P4 `page.test.tsx:214` counts only `return (`.
+- Carried from run 1: the 32px Regenerate button is a TODO candidate.
+- Carried from run 1: stale docs at `docs/product/functionality-map.md:153` and in `docs/starter-contributions/README.md` B4.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 2) | qa | Complete. Narrow re-verification of the R4 test fix at `37edfa7`: typecheck, lint, check (8/8) pass; unit 9,547 pass (89 DB-backed files skipped, as in run 1); boundaries 5/5. Mutation probes a–m re-applied independently in `git archive` copies: d, e, g, h, k, m are green on the run-1 test and red on the new one; a, b, c, f, i, j, l are red on both; HEAD is green. New evasions: n1, n2, n3 caught; n2b, n3b, n5, n6 are obfuscation-class residuals; n4 (a `.js` file under `src`) is a repo-wide residual and a TODO candidate. Production `src` is tree-identical to `3588b21`. `9e48cf8` has the same tree as `0b43c04`, and its only message change is `Discovered-In: Phase-4`. e2e not re-run (production code unchanged; run 1's 490/490 stands). Flags not reset (no e2e run). | **PASS** | 2026-10-26 |
+
+**Handoff.** The next agent is the **analyst (Phase 6)**. For the orchestrator:
+- record the n4 TODO candidate, or rule that it be closed in this pipeline;
+- the run-1 integration notes still apply (functionality map line 153, starter-contributions B4).
+
+Probe logs and the full matrix are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-f166-r2/logs/` (`matrix.txt`, plus a log for each probe and each test). I deleted every scratch source copy by its literal path. No repository file was edited, and I did not use `git stash`.
+
+**Orchestrator ruling (2026-10-26):** n4 (a `.js` file under `src/` evades every source-scan guard) is a repo-wide TODO at integration — "tripwire: no .js/.jsx/.mjs/.cjs under src/" — not closed in this pipeline.

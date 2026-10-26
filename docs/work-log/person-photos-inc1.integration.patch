@@ -1,0 +1,105 @@
+person-photos Increment 1 (DECISION-285, 286, 289; migration 0078) - Rule 16 integration patch, Batch 1
+Work-log: docs/work-log/2026-10-26-person-photos-inc1.md (Phase 4, Batch 1)
+
+Everything above the first `diff --git` line is prose; `git apply` skips it.
+The four diffs below are against the branch's own HEAD, which merged
+origin/main at 49ea633 (0.46.1; journal ends at idx 72). They are the
+UNCOMMITTED working-tree edits in the pipeline worktree, applied there for
+the Batch 1 gate runs (check:schema-parity, the unit suite) and reverted
+before each commit. At integration, if main has moved, `git apply --3way` and
+re-order by idx. The orchestrator owns these files (CLAUDE.md, Rule 16).
+
+1. drizzle/meta/_journal.json - design patch P2 VERBATIM: idx 78 (== the
+   migration's own number), version "7", when 1788655973186 (0072's when +
+   6 days, the journal's spacing), tag 0078_presby_person_photos,
+   breakpoints true. Entries are ordered by idx: 0073-0077, when they land,
+   go BEFORE this one. scripts/person-photos/test-0078-migration.sh step 8
+   runs drizzle-kit migrate with exactly this entry and proves the runner
+   applies 0072 then 0078 in its transaction and leaves the same catalog.
+
+2. scripts/test-rls.sql - design patch P3: one banner block and one
+   `\ir person-photos/test-rls-78.sql` line appended after section 72.
+   Section 78 needs scripts/install-test-helpers.sql, the seed-dev Northern
+   Reach and Alder Creek fixtures (no seed change), and the
+   org_portal.feature_categories feature_flags row scripts/seed.ts seeds
+   (78e asserts the row exists). Re-run the whole file as presby_app on the
+   merged development branch after the merge (Rule 16).
+
+3. src/lib/db/domain/index.ts - design patch P1: `export * from
+   "./person-photos";`. Without it check:schema-parity does not see the two
+   new tables (it walks the barrel); with it: 87 tables, 0 failing, the two
+   person_photos blob FKs allowlisted (architectural; committed in
+   scripts/check-schema-parity.ts, not a Rule 16 file).
+
+4. src/lib/dev-docs.ts - NOT a Rule 16 file, but coupled to diff 3: the
+   F283 test (src/lib/dev-docs.test.ts) classifies every table the barrel
+   exports AND fails on an entry for a table it does not export, so the two
+   MODULES lines (person_photos, person_photo_designations: "C. Person
+   extensions") can land only with the barrel line. After applying, run
+   `npm run docs:erd`, which regenerates the ER block of
+   docs/schema-design.md from the barrel.
+
+Not in this patch (already verbatim in the Phase 3 design, for the
+orchestrator and Batch 4): docs/TODO.md lines P4, docs/decisions.md
+DECISION-285..289 P5, CLAUDE.md Project Layout P6, functionality map P7.
+Batch 1 adds no seed change and no e2e/support change. Its findings and the
+TODO-line candidates are in the work-log's Batch 1 section.
+
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index f9b85ae..6e6f381 100644
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -470,6 +470,13 @@
+       "when": 1788137573186,
+       "tag": "0072_presby_blob_audience",
+       "breakpoints": true
++    },
++    {
++      "idx": 78,
++      "version": "7",
++      "when": 1788655973186,
++      "tag": "0078_presby_person_photos",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/scripts/test-rls.sql b/scripts/test-rls.sql
+index 97a7716..fde51d6 100644
+--- a/scripts/test-rls.sql
++++ b/scripts/test-rls.sql
+@@ -8707,3 +8707,13 @@ rollback;
+ --     fixture (no seed change), so it is never run against production.
+ -- ===========================================================================
+ \ir assets/test-rls-72.sql
++
++-- ===========================================================================
++-- APPENDED SECTION - pipeline/person-photos (integration).
++-- 78. Person photos (drizzle/0078_presby_person_photos.sql). Its own file, as
++--     46, 47 and 59-72 above; \ir resolves relative to this script. It needs
++--     the test helpers and scripts/seed-dev.sql's Northern Reach and Alder
++--     Creek fixtures (no seed change), plus the org_portal.feature_categories
++--     flag row scripts/seed.ts seeds, so it is never run against production.
++-- ===========================================================================
++\ir person-photos/test-rls-78.sql
+diff --git a/src/lib/db/domain/index.ts b/src/lib/db/domain/index.ts
+index 25dc4a3..a563e2d 100644
+--- a/src/lib/db/domain/index.ts
++++ b/src/lib/db/domain/index.ts
+@@ -33,3 +33,4 @@ export * from "./imports";
+ export * from "./giving";
+ export * from "./domains";
+ export * from "./invitations";
++export * from "./person-photos";
+diff --git a/src/lib/dev-docs.ts b/src/lib/dev-docs.ts
+index 603d5fd..4183099 100644
+--- a/src/lib/dev-docs.ts
++++ b/src/lib/dev-docs.ts
+@@ -141,6 +141,8 @@ export const MODULES: Record<string, string> = {
+   person_talents: "C. Person extensions",
+   background_checks: "C. Person extensions",
+   person_medical: "C. Person extensions",
++  person_photos: "C. Person extensions",
++  person_photo_designations: "C. Person extensions",
+   roll_actions: "D. Rolls",
+   transfer_certificates: "D. Rolls",
+   ordinations: "E. Officers",

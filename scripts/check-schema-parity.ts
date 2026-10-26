@@ -163,6 +163,29 @@ const ALLOWLIST: Array<{
       "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION both ways (drizzle/0056 section 1, re-keyed by drizzle/0072 section 8, giving_statements_blob_fk); giving.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
     since: "2026-10-25",
   },
+  // Person photos (drizzle/0078 section 1, DECISION-285): the master and the
+  // thumbnail are both private blobs, pinned by the constant asset_audience in
+  // a three-column FK each. person-photos.ts does not import assets.ts
+  // (DECISION-058; its header says so, and audience-callsites.test.ts fails an
+  // import of blobAssets outside blob-store.ts).
+  {
+    table: "person_photos",
+    kind: "extra_fk",
+    fk: "(asset_audience,image_asset_key,organization_id) -> blob_assets(audience,id,organization_id)",
+    category: "architectural",
+    reason:
+      "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION (drizzle/0078 section 1, person_photos_image_fk); person-photos.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
+    since: "2026-10-26",
+  },
+  {
+    table: "person_photos",
+    kind: "extra_fk",
+    fk: "(asset_audience,organization_id,thumb_asset_key) -> blob_assets(audience,organization_id,id)",
+    category: "architectural",
+    reason:
+      "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION (drizzle/0078 section 1, person_photos_thumb_fk); person-photos.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
+    since: "2026-10-26",
+  },
   // --- The submission-grant STAMP (1 row) ------------------------------------
   // src/lib/db/domain/returns.ts:364 says so in the column's own docstring:
   // "THE STAMP. Composite FK to `statistical_returns` is 0049-only."

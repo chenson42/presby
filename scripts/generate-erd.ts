@@ -6,7 +6,7 @@
  * never clobbered.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { buildSchemaDocs, buildErd } from "../src/lib/dev-docs";
+import { buildSchemaDocs, buildErd, PLATFORM_MODULE } from "../src/lib/dev-docs";
 
 const DOC = "docs/schema-design.md";
 const START = "<!-- BEGIN GENERATED ERD -->";
@@ -14,7 +14,7 @@ const END = "<!-- END GENERATED ERD -->";
 
 const tables = buildSchemaDocs();
 const modules = [...new Set(tables.map((t) => t.module))]
-  .filter((m) => m !== "platform (from starter)")
+  .filter((m) => m !== PLATFORM_MODULE)
   .sort();
 
 const body = modules

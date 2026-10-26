@@ -141,8 +141,18 @@ export async function proxy(req: NextRequest) {
   // and is deliberately outside this gate, and it must stay outside: it
   // renders no tenant data and it is the one page a user with a lost or
   // pending organization can reach.
+  //
+  // /developer is 2FA-gated here too (F284), by SEGMENT boundary: `/developer`
+  // and `/developer/…`, never `/developerx`. The check runs before the
+  // ADMIN_ROLE shortcut below, so an admin-role holder who is required and
+  // unverified is challenged as well. Like /o/*, it has NO PROTECTION_RULES
+  // entry: whether the viewer may read it is the page gate's live read of
+  // users.is_platform_admin (DECISION-044), which the Edge cannot make.
   const isTwoFactorGated =
-    pathname.startsWith("/admin") || pathname.startsWith("/o/");
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/o/") ||
+    pathname === "/developer" ||
+    pathname.startsWith("/developer/");
   if (
     isTwoFactorGated &&
     session.user.twoFactorRequired &&
@@ -180,7 +190,9 @@ export async function proxy(req: NextRequest) {
   //
   // Auth-only routes (no feature gate): /home, /account, /account/2fa,
   // /launch, /no-organization, /o/* (the last one additionally 2FA-gated
-  // above, and authorized per-organization in the RSC layer — never here).
+  // above, and authorized per-organization in the RSC layer — never here),
+  // and /developer (likewise 2FA-gated above, and authorized per request by
+  // the page gate's live read — never by the Edge).
   // /orgs no longer reaches here — it 308s to /home before edgeAuth() ever
   // runs (next.config.ts redirects(), DECISION-124).
   return NextResponse.next();

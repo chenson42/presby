@@ -105,8 +105,10 @@ export const officerTerms = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     personId: uuid("person_id").notNull(),
     // ruling_elder | installed_pastor | co_pastor | associate_pastor | deacon
-    // | clerk_of_session | moderator | treasurer | trustee. Enforced by the
-    // officer_terms_office_allowed CHECK below (drizzle/0062 section 8, F188).
+    // | deacons_moderator | clerk_of_session | moderator | treasurer |
+    // trustee. Enforced by the officer_terms_office_allowed CHECK below
+    // (drizzle/0062 section 8, F188; widened by drizzle/0068 section 8b,
+    // DECISION-242).
     office: text("office").notNull(),
     // Display label only, e.g. "class of 2028". Boards are divided into three
     // classes with one elected each year, and nominating committees plan by
@@ -192,19 +194,30 @@ export const officerTerms = pgTable(
       "officer_terms_org_unit_deacon_check",
       sql`${t.orgUnitId} is null or ${t.office} = 'deacon'`,
     ),
-    // drizzle/0062 section 8 (F188, DECISION-206): the office vocabulary.
+    // drizzle/0068 section 8b (DECISION-242), after 0062 section 8 (F188,
+    // DECISION-206): the office vocabulary.
     check(
       "officer_terms_office_allowed",
       sql`${t.office} in ('ruling_elder', 'installed_pastor', 'co_pastor',
-        'associate_pastor', 'deacon', 'clerk_of_session', 'moderator',
-        'treasurer', 'trustee')`,
+        'associate_pastor', 'deacon', 'deacons_moderator', 'clerk_of_session',
+        'moderator', 'treasurer', 'trustee')`,
     ),
     // NOT EXPRESSIBLE HERE (SQL-only):
     //   * trigger officer_terms_sync_derived, presby_sync_derived_group()
     //     (drizzle/0062 section 8a): ruling_elder, installed_pastor,
     //     co_pastor and associate_pastor materialise into the derived
     //     `session` group, deacon into `diaconate` (The Court Is Not a Group;
-    //     G-3.0201). moderator stays unmapped.
+    //     G-3.0201). moderator stays unmapped. drizzle/0068 section 8a adds
+    //     one arm: deacons_moderator materialises into the derived
+    //     `deacons_moderator` roster group, whose baseline role carries the
+    //     seat-only key parishes.assign (DECISION-242). Since 0068 the
+    //     function is SECURITY DEFINER, search_path = public, pg_temp, with
+    //     EXECUTE revoked from the application roles, matching 0066
+    //     (DECISION-236) so the two apply in either order.
+    //   * trigger officer_terms_org_unit_target_guard,
+    //     presby_guard_org_unit_target() (drizzle/0068 section 6): a new,
+    //     re-opened or re-pointed OPEN term cannot name an archived, campus
+    //     or missing district; ending or shortening one always passes.
     //   * trigger officer_terms_pastor_no_roll, presby_guard_pastor_no_roll()
     //     (drizzle/0062 section 8d, S1): an open pastor-office term cannot be
     //     recorded for a person on this organization's roll.

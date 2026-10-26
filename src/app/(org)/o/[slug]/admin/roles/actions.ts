@@ -106,6 +106,12 @@ export async function grantRoleAction(
         ok: false,
         error: `You can't grant permissions you don't hold yourself: ${result.missingPermissions.join(", ")}.`,
       };
+    case "seat_only_role":
+      return {
+        ok: false,
+        error:
+          "This role is held through the Moderator of the Board of Deacons seat, so it can't be granted here.",
+      };
     case "ok":
       break;
   }

@@ -550,7 +550,7 @@ describe("setOrganizationBrandAction — logo upload validation (E-c1)", () => {
     );
     expect(result).toEqual({ ok: true });
     expect(mockStore).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: VALID_ORG, contentType: "image/png" }),
+      expect.objectContaining({ organizationId: VALID_ORG, contentType: "image/png", audience: "public_site" }),
     );
     expect(mockBrandsValues).toHaveBeenCalledWith(
       expect.objectContaining({

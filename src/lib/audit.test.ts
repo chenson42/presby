@@ -263,6 +263,13 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   INVITATION_ACCEPTED: "invitation.accepted",
   INVITATION_ACCEPT_BLOCKED: "invitation.accept_blocked",
   USER_CREATED_VIA_INVITATION: "user.created_via_invitation",
+  // Parish management (2026-10-25, DECISION-245).
+  DISTRICT_CREATED: "tenant.district.created",
+  DISTRICT_RENAMED: "tenant.district.renamed",
+  DISTRICT_ARCHIVED: "tenant.district.archived",
+  DISTRICT_RESTORED: "tenant.district.restored",
+  HOUSEHOLD_DISTRICT_CHANGED: "tenant.household.district_changed",
+  HOUSEHOLD_DISTRICT_BULK_MOVED: "tenant.household.district_bulk_moved",
   EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
   EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
   // Reimbursements (docs/work-log/2026-10-25-treasury-inc1.md, Phase 3 "AUDIT_ACTIONS").

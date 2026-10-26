@@ -70,7 +70,7 @@ export async function GET(
   }
   if (found.kind === "not_found") return notFound();
 
-  const blob = await getBlobStore().resolve({ organizationId: org.organizationId, key: found.statement.blobAssetId });
+  const blob = await getBlobStore().resolve({ organizationId: org.organizationId, key: found.statement.blobAssetId, audience: "private" });
   if (!blob) return notFound();
 
   await recordAudit({

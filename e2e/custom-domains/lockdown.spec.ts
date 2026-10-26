@@ -105,6 +105,8 @@ const PLATFORM_PATHS = [
   "/admin",
   "/admin/organizations",
   "/developer",
+  "/developer/tables/roll_actions",
+  "/developer/schema.json",
   "/o/e2e-alpha",
   "/o/e2e-alpha/admin",
   // The Community route move (DECISION-201): the old path is redirected ONLY on a platform host (F151),

@@ -75,7 +75,7 @@ import {
  * `directoryEligibilityWhereSql()`/`queryDirectoryRows()` — a deacon is
  * shown BY OFFICE, the same way fpcw-directory (Phase 1's prior-art survey)
  * shows a parish's deacon regardless of that deacon's own directory privacy
- * settings. The Phase 3 design's own `getParishRoster()` code fence types
+ * settings. The Phase 3 design's own roster code fence (now `getParishesOverview()` in parishes.ts) types
  * this as a derivation off `officer_terms`/`people`, not off the
  * privacy-filtered directory read, which is the structural evidence for
  * this ruling — the design text has no separate prose sentence stating it,
@@ -254,6 +254,15 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * THE `directory_hidden` expression: a person with no `person_privacy` row is
+ * NOT hidden. Needs the `pp` alias (`person_privacy`, joined on the person and
+ * the organization) in scope. Exported so `src/lib/parishes.ts` masks names by
+ * the same test the directory filters rows by, never by a second hand-typed
+ * copy (DECISION-244; `parishes-boundaries.test.ts` forbids the literal there).
+ */
+export const DIRECTORY_HIDDEN_SQL = sql`coalesce(pp.directory_hidden, false)`;
+
+/**
  * THE shared privacy/eligibility predicate. `getDirectory()`'s own WHERE
  * clause, factored out unchanged so every increment-3 reader composes it
  * rather than re-typing it.
@@ -296,7 +305,7 @@ function directoryEligibilityWhereSql(
             sql`, `,
           )})`;
   return sql`
-    ${includeHidden ? sql`true` : sql`coalesce(pp.directory_hidden, false) = false`}
+    ${includeHidden ? sql`true` : sql`${DIRECTORY_HIDDEN_SQL} = false`}
     and p.merged_into_id is null
     and p.date_of_death is null
     and m.ended_on is null
@@ -686,11 +695,15 @@ interface DeaconRow {
 
 /**
  * The ONE deacon↔care-unit derivation — shared by `getHouseholds()`,
- * `getHouseholdDetail()`, and `getParishRoster()` so it can never drift into
+ * `getHouseholdDetail()`, and `getParishesOverview()` (parishes.ts) so it can never drift into
  * two hand-copied queries (Phase 3's own cross-cutting risk note, applied to
  * this increment).
  *
- * `office = 'deacon' and ends_on is null`, tie-broken `starts_on desc, id
+ * `office = 'deacon'` and OPEN today - `starts_on <= current_date and
+ * (ends_on is null or ends_on > current_date)`, the half-open rule the
+ * resolver, `presby_officer_roster()` and the district target guard all use
+ * (F265: this used to be `ends_on is null`, which dropped a deacon whose term
+ * has a future end date and counted one that had not started), tie-broken `starts_on desc, id
  * asc` PER org unit (`distinct on`) — the Phase 3 design's exact rule for
  * "two active deacon terms on one org unit is a data anomaly the CHECK
  * doesn't prevent; resolve it the same deterministic way everywhere," not by
@@ -706,7 +719,7 @@ interface DeaconRow {
  * than one query per household, and empty (not an error) for an empty
  * `orgUnitIds` input.
  */
-async function deriveDeaconsByOrgUnit(
+export async function deriveDeaconsByOrgUnit(
   tx: OrgTx,
   organizationId: string,
   orgUnitIds: string[],
@@ -725,7 +738,8 @@ async function deriveDeaconsByOrgUnit(
       join people p on p.id = ot.person_id
      where ot.organization_id = ${organizationId}::uuid
        and ot.office = 'deacon'
-       and ot.ends_on is null
+       and ot.starts_on <= current_date
+       and (ot.ends_on is null or ot.ends_on > current_date)
        and ot.org_unit_id in (${sql.join(
          uniqueIds.map((id) => sql`${id}::uuid`),
          sql`, `,
@@ -1110,117 +1124,5 @@ export async function getPersonDetail(
     }
 
     return { kind: "ok", entry: mapRowExtended(rows[0]!) };
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Phase 3, Increment 4 — the parishes / deacon-roster view.
-// ---------------------------------------------------------------------------
-
-export interface ParishRosterEntry {
-  orgUnitId: string;
-  orgUnitName: string;
-  /** `null` when the district's deacon term is vacant. */
-  deaconName: string | null;
-  /**
-   * Households assigned to this district that would themselves pass
-   * `getHouseholds()`'s eligibility (at least one visible member) — computed
-   * from the SAME `queryDirectoryRows()` call, never a second hand-checked
-   * count (Phase 3's edge-case note: the households view and this roster
-   * must never disagree).
-   */
-  householdCount: number;
-}
-
-export type GetParishRosterResult =
-  | { kind: "ok"; parishes: ParishRosterEntry[] }
-  | { kind: "forbidden" };
-
-interface OrgUnitRow {
-  org_unit_id: string;
-  name: string;
-}
-
-/**
- * The deacon-roster view, gated on `directory.view_hidden` alone (not
- * `directory.view` — the Phase 3 design's literal text: "requires
- * `directory.view_hidden`"). Every org unit in the organization is listed,
- * even one with no households assigned yet and even one that isn't a
- * district (a `parish`/`campus` unit simply shows no deacon, since only
- * `office = 'deacon'` terms ever carry `org_unit_id`).
- */
-export async function getParishRoster(
-  personId: string,
-  organizationId: string,
-): Promise<GetParishRosterResult> {
-  return withOrgContext(personId, organizationId, async (tx) => {
-    if (!(await checkViewHidden(tx, personId, organizationId))) {
-      return { kind: "forbidden" };
-    }
-
-    const unitsResult = await tx.execute(sql`
-      select id as org_unit_id, name as name
-        from org_units
-       where organization_id = ${organizationId}::uuid
-       order by name
-    `);
-    const units = (unitsResult as unknown as { rows?: OrgUnitRow[] }).rows ?? [];
-    if (units.length === 0) {
-      return { kind: "ok", parishes: [] };
-    }
-
-    const deaconsByUnit = await deriveDeaconsByOrgUnit(
-      tx,
-      organizationId,
-      units.map((u) => u.org_unit_id),
-    );
-
-    // Household counts share the EXACT SAME eligibility predicate
-    // getHouseholds() uses — includeHidden is always honored here, since
-    // reaching this function at all already required directory.view_hidden.
-    const memberRows = await queryDirectoryRows(tx, organizationId, {
-      includeHidden: true,
-    });
-    const countsByHousehold = new Map<string, number>();
-    for (const row of memberRows) {
-      if (!row.household_id) continue;
-      countsByHousehold.set(
-        row.household_id,
-        (countsByHousehold.get(row.household_id) ?? 0) + 1,
-      );
-    }
-    const eligibleHouseholdIds = [...countsByHousehold.keys()];
-
-    const householdCountByUnit = new Map<string, number>();
-    if (eligibleHouseholdIds.length > 0) {
-      const hhResult = await tx.execute(sql`
-        select org_unit_id from households
-         where organization_id = ${organizationId}::uuid
-           and org_unit_id is not null
-           and id in (${sql.join(
-             eligibleHouseholdIds.map((id) => sql`${id}::uuid`),
-             sql`, `,
-           )})
-      `);
-      const hhRows =
-        (hhResult as unknown as { rows?: Array<{ org_unit_id: string | null }> })
-          .rows ?? [];
-      for (const row of hhRows) {
-        if (!row.org_unit_id) continue;
-        householdCountByUnit.set(
-          row.org_unit_id,
-          (householdCountByUnit.get(row.org_unit_id) ?? 0) + 1,
-        );
-      }
-    }
-
-    const parishes: ParishRosterEntry[] = units.map((unit) => ({
-      orgUnitId: unit.org_unit_id,
-      orgUnitName: unit.name,
-      deaconName: deaconsByUnit.get(unit.org_unit_id) ?? null,
-      householdCount: householdCountByUnit.get(unit.org_unit_id) ?? 0,
-    }));
-
-    return { kind: "ok", parishes };
   });
 }

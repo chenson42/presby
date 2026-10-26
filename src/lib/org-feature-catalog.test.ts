@@ -62,13 +62,14 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar, org_portal.giving, org_portal.public_calendar, org_portal.reimbursement and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
+  it("makes org_portal.calendar, org_portal.giving, org_portal.parishes, org_portal.public_calendar, org_portal.reimbursement and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
       "org_portal.domains",
       "org_portal.giving",
       "org_portal.mail_domain",
+      "org_portal.parishes",
       "org_portal.public_calendar",
       "org_portal.reimbursement",
     ]);
@@ -113,7 +114,7 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(giving!.provisionedOn).toBe(false);
     expect(giving!.category).toBe("giving");
     for (const entry of ORG_FEATURE_CATALOG) {
-      if (entry.key === "org_portal.giving" || entry.key === "org_portal.reimbursement") continue;
+      if (entry.key === "org_portal.giving" || entry.key === "org_portal.parishes" || entry.key === "org_portal.reimbursement") continue;
       expect(entry.orgTypes, entry.key).toBeNull();
     }
   });
@@ -132,6 +133,17 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(entry!.description).toBe(
       "Lets members ask for reimbursement or a vendor payment, lets the chairs and leaders of a group approve it, and lets the treasurer record the payment. It doesn't send money. Turning this off hides every reimbursement page and deletes nothing.",
     );
+  });
+
+  it("scopes org_portal.parishes to congregations only, provisioned OFF, toggle-only (no new platform flag pre-live), operator-enabled false", () => {
+    const parishes = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.parishes");
+    expect(parishes).toBeDefined();
+    expect([...(parishes!.orgTypes ?? [])]).toEqual(["congregation"]);
+    expect(parishes!.flag).toBeNull();
+    expect(parishes!.provisionedOn).toBe(false);
+    expect(parishes!.operatorEnabled).toBe(false);
+    expect(parishes!.category).toBe("people");
+    expect(parishes!.name).toBe("Parish management");
   });
 
   it("operatorEnabled is a boolean on every entry and true for EXACTLY org_portal.domains and org_portal.mail_domain (Q1: platform admin only, for now)", () => {

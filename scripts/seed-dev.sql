@@ -1966,3 +1966,10 @@ commit;
 -- (Fernwood and Alder Creek) and six demo events dated from the day it runs;
 -- idempotent. scripts/public-calendar/test-rls-67.sql needs it.
 \ir public-calendar/seed-dev-public-calendar.sql
+
+-- Parish management fixture (drizzle/0068). Its own file and transaction, run
+-- AFTER the person-emails include (it needs Alder Creek's people, households
+-- and districts); idempotent. It replays 0068's seat provisioning for every
+-- congregation, so a database built from empty matches development.
+-- scripts/parishes/test-rls-68.sql needs it.
+\ir parishes/seed-dev-parishes.sql

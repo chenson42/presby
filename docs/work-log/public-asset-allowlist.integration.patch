@@ -1,0 +1,203 @@
+public-asset-allowlist (F289, DECISION-277, migration 0072) - Rule 16 integration patch, Batches 1 and 2
+Work-log: docs/work-log/2026-10-25-public-asset-allowlist.md (Phase 4, Batches 1 and 2)
+
+Everything above the first `diff --git` line is prose; `git apply` skips it.
+The four diffs below are against the branch's own HEAD, which already merged
+origin/main at 0.44.0 (so the journal context includes 0067). They are the
+UNCOMMITTED working-tree edits in the pipeline worktree. At integration, if
+main has moved, `git apply --3way` and re-order by idx.
+
+1. scripts/test-rls.sql - design patch P2, applied VERBATIM (one banner block
+   and one `\ir assets/test-rls-72.sql` line appended after the last section).
+   Re-run the full file as presby_app on the merged development branch after
+   the merge (Rule 16).
+
+2. drizzle/meta/_journal.json - design patch P3 with ONE CORRECTION: idx is 72,
+   not `<next>` (the journal's house rule is idx == the migration's own number;
+   0058 is absent so idx 58 is absent too). `when` is 1788137573186. The array
+   is ordered by idx: 0065, 0066 and 0068-0071 entries, when they land, go
+   BEFORE this one. Orchestrator ruling 2026-10-26: accepted.
+
+3. e2e/support/custom-hosts.ts - design patch P1, as built: `insertImage` now
+   stores `public_site`; new exports `BlobAudience`, `PNG_HERO`, `PNG_MARK`,
+   `insertBlob`, `restageBundleWithHero`, `setMark`. `insertBundle` is
+   UNCHANGED (the bundle stays the private column default). `World`/`buildWorld`
+   are untouched, so the other custom-domain specs see no new rows. The six
+   existing specs that fetch `world.oneImageId`/`twoImageId` (serving 230/235/
+   271/295, headers 70, lockdown 292) pass only because of this edit.
+   Without it, e2e/custom-domains/assets.spec.ts does not compile.
+
+4. e2e/support/public-calendar-fixture.ts - NEW IN BATCH 2, a one-line fix the
+   Phase 3 design could not see (the public-events-calendar pipeline merged to
+   main after the design's grep): `insertBundle` there used
+   `on conflict (organization_id, content_hash)`, the target of
+   blob_assets_org_hash_key, which 0072 drops. Without this edit
+   e2e/custom-domains/public-calendar.spec.ts fails in beforeAll with "there is
+   no unique or exclusion constraint matching the ON CONFLICT specification".
+   The target is now `(organization_id, audience, content_hash)`; the bundle
+   stays private (the column default). The sibling
+   scripts/public-calendar/seed-dev-bundle.sql had the same clause; it is NOT a
+   Rule 16 file and is fixed and committed in the branch.
+   F-number for the orchestrator to assign: a Phase 3 design miss (the grep
+   "no ON CONFLICT (organization_id, content_hash) anywhere" was true at
+   2a25584 and false at 0.44.0). Caught-By: automated-test
+   (e2e/custom-domains/public-calendar.spec.ts), Discovered-In: Phase-4.
+   Any pipeline that merges after 0072 and writes blob_assets with that
+   conflict target must use the three-column one.
+
+5. docs/decisions.md - DECISION-277: the final text is in the work-log
+   ("DECISION-277 (final text, for docs/decisions.md, newest first)"), amended
+   for three Phase 4 corrections (work-log Phase 4 Batch 1, "Design claims
+   found wrong", and the orchestrator rulings at the end of the log):
+   - people is GLOBAL (D1) and has no organization_id (F340). The door's photo
+     test, the pre-flip assertion and the index match a person's photo on the
+     globally unique key alone; the index is
+     `people_photo_key_lower_idx on people (lower(photo_key)) where photo_key is not null`
+     (not `people_org_photo_key_idx (organization_id, lower(photo_key))`).
+   - person_privacy's primary key is person_id alone. Both roster functions
+     join it on person_id alone, so a hidden photo is withheld on EVERY org's
+     public list (fail closed). RULED by the orchestrator 2026-10-26: accepted.
+   - presby_platform is NOLOGIN and the owner's membership has no SET option,
+     so "presby_platform cannot flip audience" is proven structurally, not by a
+     session acting as it.
+   Add to the Implementation bullet: an unmapped site image key renders as the
+   nil uuid (never an author-named key), and the roster class is cached
+   `private, max-age=86400`.
+
+6. docs/TODO.md - the Follow-ups block of the work-log's Phase 3 (six lines;
+   the Edge Case 19 line becomes a DEFERRED line: operator 2026-10-26 "nah. we
+   can test that in the future"), plus:
+   - [ ] drizzle/0053 line 833 cites `assets.ts:63-78`; 0072's audience
+     comments moved that block to `assets.ts:87-101`. 0053 has shipped and is
+     not edited; the live references were updated in Batch 1. Cosmetic.
+   - [ ] audience-callsites.test.ts FORWARD row for
+     `src/lib/reimbursement/receipts.ts` (treasury Increment 1): move it from
+     FORWARD to ACTIVE when that file merges.
+   - [ ] presby-site-kit: let `imageUrl` return `undefined` so an unmapped image
+     key renders no `<img>` (today the nil-uuid URL renders a broken image).
+   - [ ] The three public-listing toggles are `hidden sm:table-cell`, so on a
+     phone the dialog (with the new "if one is on file and they haven't hidden
+     it" sentence) is unreachable from the roster. Pre-existing design; noted
+     by the 360px check, not changed here.
+   - Done line at ship: `F289 closed; F297/F298 closed (migration 0072, v...)`.
+
+7. docs/product/functionality-map.md (Rule 14) - the public-site line gains:
+   "Site images are served only if published (`public_site`) and a listed
+   person's photo only while listed and not hidden; every other stored file
+   answers the same not-found." docs/architecture.md: no change (Rule 15).
+   scripts/seed-dev.sql: no change (it writes no blob_assets row).
+
+8. F-number for the orchestrator (Batch 1, already registered as F340):
+   people.organization_id does not exist.
+
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index fe17dcc..3f46b1c 100644
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -456,6 +456,13 @@
+       "when": 1787705573186,
+       "tag": "0067_presby_public_events_calendar",
+       "breakpoints": true
++    },
++    {
++      "idx": 72,
++      "version": "7",
++      "when": 1788137573186,
++      "tag": "0072_presby_blob_audience",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/e2e/support/custom-hosts.ts b/e2e/support/custom-hosts.ts
+index f7a2062..694146b 100644
+--- a/e2e/support/custom-hosts.ts
++++ b/e2e/support/custom-hosts.ts
+@@ -359,21 +359,48 @@ async function insertBundle(sql: Sql, orgId: string, bundle: { pages: unknown[]
+   return rows[0]!.id;
+ }
+ 
+-/** Stores a tiny PNG as a blob and returns its id (for the asset route). */
+-export async function insertImage(sql: Sql, orgId: string): Promise<string> {
+-  // A 1x1 transparent PNG.
+-  const png = Buffer.from(
+-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+-    "base64",
+-  );
+-  const hash = createHash("sha256").update(png).digest("hex");
++export type BlobAudience = "public_site" | "private";
++
++// 1x1 (the original fixture), 2x2 and 3x3 solid-colour PNGs: valid, CRC-checked, byte-distinct so dedup never merges them.
++const PNG_ONE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
++export const PNG_HERO = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGOokteuktdmgFAAFroDEeT5vQgAAAAASUVORK5CYII=", "base64");
++export const PNG_MARK = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAMAAAADCAIAAADZSiLoAAAAEElEQVR4nGOQj6qCIAYsLAB9EAiMe72hyQAAAABJRU5ErkJggg==", "base64");
++
++/** Inserts a blob of the given audience (F289: `audience` is explicit here; the column default is `private`) and returns its id. */
++export async function insertBlob(
++  sql: Sql,
++  orgId: string,
++  o: { contentType: "image/png" | "application/pdf" | "application/json"; bytes: Buffer; audience: BlobAudience },
++): Promise<string> {
++  const hash = createHash("sha256").update(o.bytes).digest("hex");
+   const rows = (await sql`
+-    insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes)
+-    values (${orgId}::uuid, ${hash}, 'image/png', ${png.byteLength}, decode(${png.toString("hex")}, 'hex'))
++    insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes, audience)
++    values (${orgId}::uuid, ${hash}, ${o.contentType}, ${o.bytes.byteLength}, decode(${o.bytes.toString("hex")}, 'hex'), ${o.audience})
+     returning id`) as { id: string }[];
+   return rows[0]!.id;
+ }
+ 
++/** The fixture image a published site references: `public_site`, which is what ingest and the logo actions store. */
++export async function insertImage(sql: Sql, orgId: string): Promise<string> {
++  return insertBlob(sql, orgId, { contentType: "image/png", bytes: PNG_ONE, audience: "public_site" });
++}
++
++/** A new private bundle blob whose imageKeys maps "hero-img" to imageId, with the home hero naming it; the site is pointed at it. */
++export async function restageBundleWithHero(sql: Sql, org: SiteOrg, bundle: { pages: unknown[] }, imageId: string): Promise<void> {
++  const pages = structuredClone(bundle.pages) as Array<{ path: string; mdxAst: { blocks: Array<{ type: string; props: Record<string, unknown> }> } }>;
++  const hero = pages.find((p) => p.path === "/")!.mdxAst.blocks.find((b) => b.type === "hero")!;
++  hero.props.image = "hero-img";
++  hero.props.imageAlt = "";
++  const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, pages, imageKeys: { "hero-img": imageId } }), "utf-8");
++  const blobId = await insertBlob(sql, org.orgId, { contentType: "application/json", bytes, audience: "private" });
++  await withDbRetry("restage bundle", () => sql`update organization_sites set content_bundle_key = ${blobId}::uuid where organization_id = ${org.orgId}::uuid`);
++}
++
++/** Points the org's brand mark at a blob (the brand row must exist: call setBrand first). */
++export async function setMark(sql: Sql, orgId: string, markId: string): Promise<void> {
++  await withDbRetry("set mark", () => sql`update organization_brands set mark_asset_key = ${markId}::uuid where organization_id = ${orgId}::uuid`);
++}
++
+ /** A throwaway congregation (`deletable_until`), a live site with a bundle, and the domains toggle ON. */
+ export async function createSiteOrg(
+   sql: Sql,
+diff --git a/e2e/support/public-calendar-fixture.ts b/e2e/support/public-calendar-fixture.ts
+index 8e0360d..5db7cbd 100644
+--- a/e2e/support/public-calendar-fixture.ts
++++ b/e2e/support/public-calendar-fixture.ts
+@@ -83,7 +83,7 @@ async function insertBundle(sql: Sql, orgId: string, bundle: { pages: unknown[]
+   const rows = (await sql`
+     insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes)
+     values (${orgId}::uuid, ${hash}, 'application/json', ${bytes.byteLength}, decode(${bytes.toString("hex")}, 'hex'))
+-    on conflict (organization_id, content_hash) do update set content_type = excluded.content_type
++    on conflict (organization_id, audience, content_hash) do update set content_type = excluded.content_type  -- 0072 (F289): dedup is per audience; the bundle is private (the column default)
+     returning id`) as { id: string }[];
+   return rows[0]!.id;
+ }
+diff --git a/scripts/test-rls.sql b/scripts/test-rls.sql
+index 668a30a..b87872d 100644
+--- a/scripts/test-rls.sql
++++ b/scripts/test-rls.sql
+@@ -8662,3 +8662,12 @@ rollback;
+ --     fixture (Fernwood's live site), so it is never run against production.
+ -- ===========================================================================
+ \ir public-calendar/test-rls-67.sql
++
++-- ===========================================================================
++-- APPENDED SECTION - pipeline/public-asset-allowlist (integration).
++-- 72. Public asset audience (drizzle/0072_presby_blob_audience.sql). Its own
++--     file, as 46, 47 and 59-64 above; \ir resolves relative to this script.
++--     It needs the test helpers and scripts/seed-dev.sql's Alder Creek
++--     fixture (no seed change), so it is never run against production.
++-- ===========================================================================
++\ir assets/test-rls-72.sql

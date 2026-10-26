@@ -33,7 +33,7 @@ ins as (
   select '55555555-5555-5555-5555-555555555555',
          encode(sha256(doc.bytes), 'hex'), 'application/json', length(doc.bytes), doc.bytes
     from doc
-  on conflict (organization_id, content_hash) do nothing
+  on conflict (organization_id, audience, content_hash) do nothing  -- 0072: dedup is per audience; the bundle is private (the default)
   returning id
 )
 update organization_sites

@@ -136,6 +136,10 @@ export const ticketMessages = pgTable(
     authorUserId: uuid("author_user_id").references(() => users.id),
     body: text("body").notNull(), // 1-5000 chars, app-validated
     attachmentAssetKey: uuid("attachment_asset_key"),
+    // Constant 'private' (drizzle/0072, DECISION-277): the third column of
+    // ticket_messages_attachment_fk, so an attachment can never be a
+    // public_site blob. Never written by the application.
+    assetAudience: text("asset_audience").notNull().default("private"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -168,10 +172,13 @@ export const ticketMessages = pgTable(
       foreignColumns: [tickets.id, tickets.organizationId],
       name: "ticket_messages_ticket_fk",
     }),
-    // Composite FK to blob_assets(id, organization_id) is enforced in the
-    // migration only — declaring it here as a Drizzle foreignKey() would
-    // require this file to import assets.ts AND assets.ts to import this
-    // file's tickets export back, the same circular-module-dependency
+    check("ticket_messages_asset_audience_private", sql`${t.assetAudience} = 'private'`),
+    // Composite FK ticket_messages_attachment_fk (attachment_asset_key,
+    // organization_id, asset_audience) -> blob_assets(id, organization_id,
+    // audience) is enforced in the migration only (drizzle/0019, re-keyed by
+    // drizzle/0072 section 8) — declaring it here as a Drizzle foreignKey()
+    // would require this file to import assets.ts AND assets.ts to import
+    // this file's tickets export back, the same circular-module-dependency
     // problem assets.ts's own header documents for organization_brands.
   ],
 );

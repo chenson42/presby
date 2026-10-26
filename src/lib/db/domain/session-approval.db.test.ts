@@ -188,7 +188,8 @@ describe.skipIf(!hasDb)("drizzle/0062 session approval (Postgres-backed)", () =>
       insert into groups (organization_id, group_type_id, name, membership_source, derived_from, is_protected)
       values (${id}, ${courtTypeId}, 'Session', 'derived', 'session', true),
              (${id}, ${courtTypeId}, 'Board of Deacons', 'derived', 'diaconate', true),
-             (${id}, ${rosterTypeId}, 'Active Membership', 'derived', 'active_membership', true)`);
+             (${id}, ${rosterTypeId}, 'Active Membership', 'derived', 'active_membership', true),
+             (${id}, ${rosterTypeId}, 'Board of Deacons Moderator', 'derived', 'deacons_moderator', true)`);
     const [role] = await q(sql`
       insert into app_roles (organization_id, key, name, role_kind, is_protected)
       values (${id}, 'session_member', 'Session member', 'constitutional', true) returning id`);
@@ -522,13 +523,17 @@ describe.skipIf(!hasDb)("drizzle/0062 session approval (Postgres-backed)", () =>
       expect(by.presby_roll__actor_holds).toMatchObject({ prosecdef: true, config: "search_path=public, pg_temp", app_exec: false, public_exec: false });
       expect(by.presby_deny_roll_decision).toMatchObject({ prosecdef: false, app_exec: true, public_exec: false });
       expect(by.presby_guard_pastor_no_roll).toMatchObject({ prosecdef: true, config: "search_path=public, pg_temp", app_exec: false, public_exec: false });
-      // The derived-group sync and the freeze stay invoker, as before.
-      const invokers = await q(sql`
-        select proname, prosecdef from pg_proc
+      // The freeze stays invoker, as before. The derived-group sync was
+      // invoker here in 0062; drizzle/0068 (parish management, Phase 3
+      // amendment 1, 1.3) re-creates it SECURITY DEFINER with a pinned
+      // search_path and EXECUTE revoked, matching 0066 (DECISION-236), so the
+      // two apply in either order. Pinned in full by parishes.db.test.ts.
+      const attrs = await q(sql`
+        select proname, prosecdef, array_to_string(proconfig, ',') as config from pg_proc
          where proname in ('presby_sync_derived_group', 'presby_freeze_approved_roll_action') order by proname`);
-      expect(invokers).toEqual([
-        { proname: "presby_freeze_approved_roll_action", prosecdef: false },
-        { proname: "presby_sync_derived_group", prosecdef: false },
+      expect(attrs).toEqual([
+        { proname: "presby_freeze_approved_roll_action", prosecdef: false, config: null },
+        { proname: "presby_sync_derived_group", prosecdef: true, config: "search_path=public, pg_temp" },
       ]);
     });
 
@@ -571,7 +576,7 @@ describe.skipIf(!hasDb)("drizzle/0062 session approval (Postgres-backed)", () =>
         "CREATE UNIQUE INDEX roll_actions_one_pending_per_person_idx ON public.roll_actions USING btree (organization_id, person_id) WHERE (approval_status = 'pending'::text)");
     });
 
-    it("F188: officer_terms_office_allowed is VALIDATED and lists exactly the nine offices; officer_terms_pastor_no_roll is a BEFORE INSERT OR UPDATE OF person_id, office, ends_on trigger", async () => {
+    it("F188: officer_terms_office_allowed is VALIDATED and lists exactly OFFICER_OFFICES (ten since drizzle/0068 added deacons_moderator); officer_terms_pastor_no_roll is a BEFORE INSERT OR UPDATE OF person_id, office, ends_on trigger", async () => {
       const [chk] = await q(sql`
         select convalidated, pg_get_constraintdef(oid) as def from pg_constraint
          where conrelid = 'officer_terms'::regclass and conname = 'officer_terms_office_allowed'`);
@@ -1239,11 +1244,13 @@ describe.skipIf(!hasDb)("drizzle/0062 session approval (Postgres-backed)", () =>
       return row ? String(row.derived_from) : null;
     }
 
-    it("the derived-group CASE: the four Session offices map to session, deacon to diaconate, moderator and the rest to nothing", async () => {
+    it("the derived-group CASE: the four Session offices map to session, deacon to diaconate, deacons_moderator to its own seat group (drizzle/0068), moderator and the rest to nothing", async () => {
       const expected: Record<string, string | null> = {
         ruling_elder: "session", installed_pastor: "session", co_pastor: "session", associate_pastor: "session",
-        deacon: "diaconate", moderator: null, clerk_of_session: null, treasurer: null, trustee: null,
+        deacon: "diaconate", deacons_moderator: "deacons_moderator",
+        moderator: null, clerk_of_session: null, treasurer: null, trustee: null,
       };
+      expect(Object.keys(expected).sort()).toEqual([...OFFICER_OFFICES].sort());
       for (const office of OFFICER_OFFICES) {
         const p = await subject({ engagement: "staff" });
         const id = await term(orgMain, p, office, "2021-01-01", "2022-01-01");
@@ -1399,10 +1406,15 @@ describe.skipIf(!hasDb)("drizzle/0062 session approval (Postgres-backed)", () =>
       expect(quotedList(functionBody(t62(), "presby_decide_roll_action"), "ot.office in (")).toEqual([...PASTOR_OFFICES]);
     });
 
-    it("the office vocabulary CHECK in the file equals OFFICER_OFFICES, as does the section 1 stop-block", () => {
+    it("the office vocabulary CHECK in the file equals the 0062-era OFFICER_OFFICES (all but deacons_moderator, which drizzle/0068 added), as does the section 1 stop-block", () => {
+      // 0062 is history: drizzle/0068_presby_parishes.sql re-creates the CHECK
+      // with deacons_moderator (DECISION-242), and officer-offices.test.ts pins
+      // OFFICER_OFFICES to that newest definition. Here 0062 must still equal
+      // the vocabulary as it stood, so a stray edit to a shipped file shows.
+      const at0062 = OFFICER_OFFICES.filter((o) => o !== "deacons_moderator").sort();
       const s8 = section(M62, 8);
-      expect(quotedList(s8, "check (office in (").sort()).toEqual([...OFFICER_OFFICES].sort());
-      expect(quotedList(section(M62, 1), "where office not in (").sort()).toEqual([...OFFICER_OFFICES].sort());
+      expect(quotedList(s8, "check (office in (").sort()).toEqual(at0062);
+      expect(quotedList(section(M62, 1), "where office not in (").sort()).toEqual(at0062);
     });
 
     it("neither decision function takes an organization parameter: the org is presby_current_org()", () => {

@@ -224,7 +224,11 @@ describe.skipIf(!hasDb)(
       // Session, so only a congregation gets the Session role.
       it("a CONGREGATION also gets session_member: roll.approve ONLY, bound to the derived Session group", () => {
         const plan = baselineRoleSeedPlan("congregation");
-        expect(plan.map((r) => r.key)).toEqual(["member", "session_member"]);
+        expect(plan.map((r) => r.key)).toEqual([
+          "member",
+          "session_member",
+          "deacons_moderator",
+        ]);
         const session = plan.find((r) => r.key === "session_member")!;
         expect(session).toEqual({
           key: "session_member",
@@ -232,6 +236,27 @@ describe.skipIf(!hasDb)(
           permissionKeys: ["roll.approve"],
           boundToDerivedFrom: "session",
         });
+      });
+
+      // DECISION-242 (parish management): the seat role carries parishes.assign
+      // ONLY and is bound to the derived deacons_moderator group.
+      it("a CONGREGATION also gets the deacons_moderator seat role: parishes.assign ONLY, bound to the derived deacons_moderator group", () => {
+        const seat = baselineRoleSeedPlan("congregation").find((r) => r.key === "deacons_moderator")!;
+        expect(seat).toEqual({
+          key: "deacons_moderator",
+          name: "Moderator of the Board of Deacons",
+          permissionKeys: ["parishes.assign"],
+          boundToDerivedFrom: "deacons_moderator",
+        });
+      });
+
+      it("no other organization type gets the seat role (only a congregation has a Board of Deacons)", () => {
+        for (const type of ["presbytery", "synod", "general_assembly", "new_worshiping_community"] as const) {
+          expect(
+            baselineRoleSeedPlan(type).some((r) => r.key === "deacons_moderator"),
+            type,
+          ).toBe(false);
+        }
       });
 
       it("every other organization type is unchanged: one member role, no Session role (F185: nobody could approve)", () => {
@@ -393,7 +418,7 @@ describe.skipIf(!hasDb)(
         });
       });
 
-      it("creates a congregation with Session, Board of Deacons, and Active Membership", async () => {
+      it("creates a congregation with Session, Board of Deacons, Board of Deacons Moderator, and Active Membership", async () => {
         const slug = `org-prov-test-cong-${stamp}`;
         const result = await createOrganization({
           name: "Fixture Congregation for org-provisioning.test.ts",
@@ -425,12 +450,15 @@ describe.skipIf(!hasDb)(
           .from(groups)
           .where(eq(groups.organizationId, result.organizationId));
 
-        expect(groupRows).toHaveLength(3);
+        expect(groupRows).toHaveLength(4);
         const byDerivedFrom = new Map(
           groupRows.map((g) => [g.derivedFrom, g]),
         );
         expect(byDerivedFrom.get("session")?.name).toBe("Session");
         expect(byDerivedFrom.get("diaconate")?.name).toBe("Board of Deacons");
+        expect(byDerivedFrom.get("deacons_moderator")?.name).toBe(
+          "Board of Deacons Moderator",
+        );
         expect(byDerivedFrom.get("active_membership")?.name).toBe(
           "Active Membership",
         );
@@ -455,11 +483,17 @@ describe.skipIf(!hasDb)(
           })
           .from(appRoles)
           .where(eq(appRoles.organizationId, result.organizationId));
-        expect(roleRows.map((r) => r.key).sort()).toEqual(["member", "session_member"]);
+        expect(roleRows.map((r) => r.key).sort()).toEqual([
+          "deacons_moderator",
+          "member",
+          "session_member",
+        ]);
         const memberRole = roleRows.find((r) => r.key === "member")!;
         const sessionRole = roleRows.find((r) => r.key === "session_member")!;
+        const seatRole = roleRows.find((r) => r.key === "deacons_moderator")!;
         expect(memberRole.name).toBe("Member");
         expect(sessionRole.name).toBe("Session member");
+        expect(seatRole.name).toBe("Moderator of the Board of Deacons");
         for (const role of roleRows) {
           expect(role.roleKind).toBe("constitutional");
           expect(role.isProtected).toBe(true);
@@ -485,6 +519,10 @@ describe.skipIf(!hasDb)(
         expect(
           permissionRows.filter((r) => r.roleId === sessionRole.id).map((r) => r.permissionKey),
         ).toEqual(["roll.approve"]);
+        // DECISION-242: the seat role carries parishes.assign and nothing else.
+        expect(
+          permissionRows.filter((r) => r.roleId === seatRole.id).map((r) => r.permissionKey),
+        ).toEqual(["parishes.assign"]);
 
         const activeMembershipGroupId = groupRows.find(
           (g) => g.derivedFrom === "active_membership",
@@ -502,12 +540,16 @@ describe.skipIf(!hasDb)(
           .from(roleGrants)
           .innerJoin(appRoles, eq(roleGrants.roleId, appRoles.id))
           .where(eq(appRoles.organizationId, result.organizationId));
-        expect(grantRows).toHaveLength(2);
+        expect(grantRows).toHaveLength(3);
         for (const grant of grantRows) expect(grant.personId).toBeNull();
         expect(grantRows.find((g) => g.roleId === memberRole.id)?.groupId).toBe(
           activeMembershipGroupId,
         );
         expect(grantRows.find((g) => g.roleId === sessionRole.id)?.groupId).toBe(sessionGroupId);
+        // The seat role is bound to the seat group, and to nothing else.
+        expect(grantRows.find((g) => g.roleId === seatRole.id)?.groupId).toBe(
+          byDerivedFrom.get("deacons_moderator")?.id,
+        );
       });
 
       it("creates a presbytery with only Active Membership (no Session, no Board of Deacons)", async () => {
@@ -593,9 +635,10 @@ describe.skipIf(!hasDb)(
           .select({ id: appRoles.id, organizationId: appRoles.organizationId })
           .from(appRoles)
           .where(eq(appRoles.organizationId, resultB.organizationId));
-        // A congregation's plan is two roles (member, session_member).
-        expect(rolesA).toHaveLength(2);
-        expect(rolesB).toHaveLength(2);
+        // A congregation's plan is three roles (member, session_member,
+        // deacons_moderator).
+        expect(rolesA).toHaveLength(3);
+        expect(rolesB).toHaveLength(3);
         const idsA = new Set(rolesA.map((r) => r.id));
         for (const r of rolesB) expect(idsA.has(r.id)).toBe(false);
         // Each org's own query returns exactly its own row — no cross-org id
@@ -615,8 +658,8 @@ describe.skipIf(!hasDb)(
           .select({ groupId: roleGrants.groupId, roleId: roleGrants.roleId })
           .from(roleGrants)
           .where(eq(roleGrants.organizationId, resultB.organizationId));
-        expect(grantsA).toHaveLength(2);
-        expect(grantsB).toHaveLength(2);
+        expect(grantsA).toHaveLength(3);
+        expect(grantsB).toHaveLength(3);
         // The two orgs' grants point at their OWN roles and their OWN
         // (org-scoped) groups — never the other org's id, which would
         // indicate a copy-paste of the wrong org's id.

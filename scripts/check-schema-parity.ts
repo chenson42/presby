@@ -98,8 +98,8 @@ const ALLOWLIST: Array<{
   reason: string;
   since: string; // YYYY-MM-DD
 }> = [
-  // --- The blob_assets composite FKs (3 rows) --------------------------------
-  // src/lib/db/domain/assets.ts:63-78 states the reason in full: declaring
+  // --- The blob_assets composite FKs (5 rows) --------------------------------
+  // src/lib/db/domain/assets.ts:87-101 states the reason in full: declaring
   // these on the referencing side would make org.ts / sites.ts / support.ts
   // import assets.ts, while assets.ts already imports `organizations` from
   // org.ts. That is the domain graph's first module cycle and it breaks at
@@ -112,7 +112,7 @@ const ALLOWLIST: Array<{
     fk: "(mark_asset_key,organization_id) -> blob_assets(id,organization_id)",
     category: "architectural",
     reason:
-      "DDL-only composite FK (drizzle/0016_presby_brand_storage.sql); declaring it in org.ts would create an org.ts <-> assets.ts module cycle — see assets.ts:63-78.",
+      "DDL-only composite FK (drizzle/0016_presby_brand_storage.sql); declaring it in org.ts would create an org.ts <-> assets.ts module cycle — see assets.ts:87-101.",
     since: "2026-09-26",
   },
   {
@@ -121,7 +121,7 @@ const ALLOWLIST: Array<{
     fk: "(organization_id,wordmark_asset_key) -> blob_assets(organization_id,id)",
     category: "architectural",
     reason:
-      "Same cycle-avoidance as mark_asset_key above (drizzle/0016); assets.ts:63-78.",
+      "Same cycle-avoidance as mark_asset_key above (drizzle/0016); assets.ts:87-101.",
     since: "2026-09-26",
   },
   {
@@ -130,17 +130,20 @@ const ALLOWLIST: Array<{
     fk: "(content_bundle_key,organization_id) -> blob_assets(id,organization_id)",
     category: "architectural",
     reason:
-      "DDL-only composite FK into blob_assets; same cycle-avoidance as organization_brands — assets.ts:63-78.",
+      "DDL-only composite FK into blob_assets; same cycle-avoidance as organization_brands — assets.ts:87-101.",
     since: "2026-09-26",
   },
   {
     table: "ticket_messages",
     kind: "extra_fk",
-    fk: "(attachment_asset_key,organization_id) -> blob_assets(id,organization_id)",
+    // Three columns since drizzle/0072 (F289, DECISION-277): asset_audience is
+    // the constant 'private', so an attachment can never be a public_site
+    // blob. The signature sorts by LOCAL column name, so it comes first.
+    fk: "(asset_audience,attachment_asset_key,organization_id) -> blob_assets(audience,id,organization_id)",
     category: "architectural",
     reason:
-      "DDL-only composite FK into blob_assets; same cycle-avoidance as organization_brands — assets.ts:63-78.",
-    since: "2026-09-26",
+      "DDL-only three-column composite FK into blob_assets pinned to audience 'private' (drizzle/0019, re-keyed by drizzle/0072 section 8, ticket_messages_attachment_fk); same cycle-avoidance as organization_brands — see assets.ts's header.",
+    since: "2026-10-25",
   },
   // The statement PDF (online giving, Batch 5a). giving.ts does not import
   // assets.ts: assets.ts is imported by the storage adapter alone
@@ -148,15 +151,17 @@ const ALLOWLIST: Array<{
   // constraint is composite and NO ACTION in the database, which is what keeps
   // an issued statement's PDF undeletable on every connection (F44).
   // Enforced at drizzle/0056_presby_giving_statements.sql section 1
-  // (giving_statements_blob_fk); giving.ts's statements block comment says so.
+  // (giving_statements_blob_fk), re-keyed three-column on the constant
+  // asset_audience = 'private' by drizzle/0072 section 8 (F289,
+  // DECISION-277); giving.ts's statements block comment says so.
   {
     table: "giving_statements",
     kind: "extra_fk",
-    fk: "(blob_asset_id,organization_id) -> blob_assets(id,organization_id)",
+    fk: "(asset_audience,blob_asset_id,organization_id) -> blob_assets(audience,id,organization_id)",
     category: "architectural",
     reason:
-      "DDL-only composite FK into blob_assets (drizzle/0056_presby_giving_statements.sql section 1, giving_statements_blob_fk); giving.ts does not import assets.ts (DECISION-058; assets.ts:63-78).",
-    since: "2026-10-16",
+      "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION both ways (drizzle/0056 section 1, re-keyed by drizzle/0072 section 8, giving_statements_blob_fk); giving.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
+    since: "2026-10-25",
   },
   // --- The submission-grant STAMP (1 row) ------------------------------------
   // src/lib/db/domain/returns.ts:364 says so in the column's own docstring:

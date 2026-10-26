@@ -292,3 +292,188 @@ describe("S4: designation-holders.ts is imported only from (admin) code (DECISIO
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Community Increment 2b, Batch B1 (docs/work-log/2026-10-22-founding-admin-
+// directory.md, Phase 3 amendment 2 section 7.4, T-11; E-4, E-24, E-30, E-39).
+// Address proof and auto-connect have a handful of call sites, and the
+// properties that make them safe are properties of WHERE they are called. These
+// are tripwires, not the control (the definers and the DB tests are): they catch
+// the next file that quietly breaks a rule. Every scan below proves it can fail
+// with a deliberately offending sample.
+// ---------------------------------------------------------------------------
+
+const AUTH_TS = path.join(SRC, "auth.ts");
+const ONBOARDING = path.join(SRC, "lib/onboarding");
+const CONNECT_TS = path.join(ONBOARDING, "connect.ts");
+const EMAIL_PROOF_TS = path.join(SRC, "lib/auth/email-proof.ts");
+const EMAIL_CHANGE_TS = path.join(SRC, "lib/auth/email-change.ts");
+const VERIFY_EMAIL_PAGE = path.join(SRC, "app/(email-verify)/account/verify-email/[token]/page.tsx");
+const NO_ORG_ACTIONS = path.join(SRC, "app/no-organization/actions.ts");
+const NO_ORG_DIR = path.join(SRC, "app/no-organization");
+
+/**
+ * The non-test, comment-stripped application files that contain `pattern`. Test
+ * support (`src/lib/testing/`) writes fixtures on the owner connection and calls
+ * the definers directly on purpose, so it is excluded, as in the other scans.
+ */
+function namers(pattern: RegExp): string[] {
+  const testing = path.join(SRC, "lib/testing") + path.sep;
+  return NON_TEST.filter((f) => !f.startsWith(testing) && pattern.test(read(f)));
+}
+
+describe("2b B1: connect has two call sites and one SQL door", () => {
+  it("connectSignedInAccount is referenced only by src/auth.ts, the Check-again action and its own module", () => {
+    const found = namers(/\bconnectSignedInAccount\b/);
+    const allowed = new Set([AUTH_TS, NO_ORG_ACTIONS, CONNECT_TS]);
+    expect(found.filter((f) => !allowed.has(f)).map(rel)).toEqual([]);
+    expect(found).toContain(AUTH_TS);
+    expect(found).toContain(CONNECT_TS);
+  });
+
+  it("presby_connect_signed_in_account is named in exactly connect.ts", () => {
+    expect(namers(/presby_connect_signed_in_account/).map(rel)).toEqual([rel(CONNECT_TS)]);
+  });
+
+  it("src/auth.ts calls it once, with via 'sign_in' and no second-factor flag", () => {
+    const code = read(AUTH_TS);
+    expect([...code.matchAll(/connectSignedInAccount\(/g)]).toHaveLength(1);
+    const call = /connectSignedInAccount\(\{([\s\S]*?)\}\)/.exec(code);
+    expect(call, "the call").not.toBeNull();
+    expect(call![1]).toMatch(/via:\s*"sign_in"/);
+    expect(call![1]).not.toMatch(/secondFactor/);
+    expect(call![1]).toMatch(/userId:\s*user\.id/);
+  });
+
+  it("the Check-again action, once it exists, takes the user id and the factor flag from the session only (E-30)", () => {
+    let source: string;
+    try {
+      source = read(NO_ORG_ACTIONS);
+    } catch {
+      return; // B2 adds the action; this scan engages when it lands
+    }
+    for (const m of source.matchAll(/connectSignedInAccount\(\{([\s\S]*?)\}\)/g)) {
+      expect(m[1]).toMatch(/userId:\s*session\.user\.id/);
+      expect(m[1]).toMatch(/secondFactorVerified:\s*session\.user\.twoFactorVerified\s*===\s*true/);
+      expect(m[1]).not.toMatch(/formData|searchParams|cookies|params/i);
+    }
+  });
+});
+
+describe("2b B1: address proof is recorded in one place, behind the Google test (E-4)", () => {
+  it("recordGoogleEmailProof is referenced only by src/auth.ts and its own module", () => {
+    const found = namers(/\brecordGoogleEmailProof\b/);
+    expect(found.filter((f) => f !== AUTH_TS && f !== EMAIL_PROOF_TS).map(rel)).toEqual([]);
+    expect(found).toContain(AUTH_TS);
+  });
+
+  it("the call in src/auth.ts sits in the same condition as the provider === 'google' test and the strict claim check", () => {
+    const code = read(AUTH_TS);
+    expect([...code.matchAll(/recordGoogleEmailProof\(/g)]).toHaveLength(1);
+    expect(proofCallIsGuarded(code)).toBe(true);
+  });
+
+  it("presby_record_google_email_proof is named only in email-proof.ts, and presby_complete_email_change only in email-change.ts", () => {
+    expect(namers(/presby_record_google_email_proof/).map(rel)).toEqual([rel(EMAIL_PROOF_TS)]);
+    expect(namers(/presby_complete_email_change/).map(rel)).toEqual([rel(EMAIL_CHANGE_TS)]);
+  });
+
+  it("completeEmailChange is referenced only by its module and the verify-email page", () => {
+    const found = namers(/\bcompleteEmailChange\b/);
+    expect(found.filter((f) => f !== EMAIL_CHANGE_TS && f !== VERIFY_EMAIL_PAGE).map(rel)).toEqual([]);
+    expect(found).toContain(VERIFY_EMAIL_PAGE);
+  });
+
+  it("the verify-email page no longer writes users itself (the definer stamps the new address)", () => {
+    const code = read(VERIFY_EMAIL_PAGE);
+    expect(code).not.toMatch(/\.update\(\s*users\s*\)|update\s+users\b|@\/lib\/db\b/);
+  });
+
+  it("the scan can fail: an unguarded call, a call guarded by another provider, and a call without the claim check are all refused", () => {
+    expect(proofCallIsGuarded('if (account?.provider === "google" && isEmailClaimVerified(profile?.email_verified)) { await recordGoogleEmailProof({}); }')).toBe(true);
+    expect(proofCallIsGuarded("await recordGoogleEmailProof({ userId, address });")).toBe(false);
+    expect(proofCallIsGuarded('if (account?.provider === "credentials" && isEmailClaimVerified(x)) { await recordGoogleEmailProof({}); }')).toBe(false);
+    expect(proofCallIsGuarded('if (account?.provider === "google") { await recordGoogleEmailProof({}); }')).toBe(false);
+    expect(proofCallIsGuarded('if (account?.provider === "google" && isEmailClaimVerified(x)) { y(); } await recordGoogleEmailProof({});')).toBe(false);
+  });
+});
+
+/**
+ * True when the (single) `recordGoogleEmailProof(` call is still INSIDE an
+ * `if (...) {` block whose condition names the Google provider and the strict
+ * claim predicate. (A guard whose block closed before the call does not count.)
+ */
+function proofCallIsGuarded(source: string): boolean {
+  const call = source.indexOf("recordGoogleEmailProof(");
+  if (call < 0) return false;
+  const window = source.slice(Math.max(0, call - 600), call);
+  const provider = window.lastIndexOf('provider === "google"');
+  if (provider < 0) return false;
+  const ifAt = window.lastIndexOf("if (", provider);
+  if (ifAt < 0) return false;
+  const fromGuard = window.slice(ifAt);
+  if (!/isEmailClaimVerified\(/.test(fromGuard)) return false;
+  const opens = (fromGuard.match(/\{/g) ?? []).length;
+  const closes = (fromGuard.match(/\}/g) ?? []).length;
+  return opens > closes;
+}
+
+describe("2b B1: nothing here reads an update payload or imports the verification grant (DECISION-230, E-39)", () => {
+  const TWO_FACTOR_SURFACE = /two-factor-grant|\bwithTwoFactorGrant\b|\btakeTwoFactorGrant\b/;
+  const PAYLOAD_READ = /trigger\s*===?\s*["']update["']|\bunstable_update\(\s*\{[^}]/;
+
+  function filesOfTheFeature(): string[] {
+    const files = [CONNECT_TS, EMAIL_PROOF_TS, EMAIL_CHANGE_TS, path.join(ONBOARDING, "in-place.ts")];
+    const out = files.filter((f) => {
+      try {
+        statSync(f);
+        return true;
+      } catch {
+        return false; // in-place.ts arrives in B2
+      }
+    });
+    return [...out, ...walk(NO_ORG_DIR).filter((f) => !isTest(f))];
+  }
+
+  it("no connect, proof, email-change, in-place or no-organization file imports two-factor-grant or passes data to unstable_update", () => {
+    const files = filesOfTheFeature();
+    expect(files.length).toBeGreaterThanOrEqual(4);
+    const offenders = files.filter((f) => TWO_FACTOR_SURFACE.test(read(f)) || PAYLOAD_READ.test(read(f)));
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it("the scan can fail: a grant import, a grant call and a non-empty update are all caught", () => {
+    for (const sample of [
+      'import { withTwoFactorGrant } from "@/lib/auth/two-factor-grant";',
+      "takeTwoFactorGrant(id)",
+      "await unstable_update({ user: { twoFactorVerified: true } });",
+      'if (trigger === "update") { token.x = session.y; }',
+    ]) {
+      expect(TWO_FACTOR_SURFACE.test(sample) || PAYLOAD_READ.test(sample), sample).toBe(true);
+    }
+    expect(PAYLOAD_READ.test("await unstable_update({});")).toBe(false);
+  });
+
+  it("src/auth.ts keeps the sign-in branch's proof and connect between ensureDefaultRole and the two-factor requirement (E-12)", () => {
+    const code = read(AUTH_TS);
+    const order = ["await ensureDefaultRole(", "recordGoogleEmailProof(", "connectSignedInAccount(", "computeEffectiveTwoFactor("].map((s) => code.indexOf(s));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+});
+
+describe("2b B1: scripts/seed.ts creates stamped users on the owner connection (orchestrator ruling 1 on Batch A1)", () => {
+  const SEED = path.join(ROOT, "scripts/seed.ts");
+  const INSERTERS = (source: string) => [...source.matchAll(/(\w+)\s*\.insert\(\s*schema\.users\s*\)/g)].map((m) => m[1]);
+
+  it("every users insert in seed.ts runs on platformDb, never on db (a non-owner role may not stamp email_verified, drizzle/0065 section 3)", () => {
+    const inserters = INSERTERS(readFileSync(SEED, "utf8"));
+    expect(inserters.length).toBeGreaterThanOrEqual(3);
+    expect(inserters.filter((i) => i !== "platformDb")).toEqual([]);
+  });
+
+  it("the scan can fail: an insert on the tenant connection is caught", () => {
+    expect(INSERTERS("await db\n      .insert(schema.users)\n      .values({})")).toEqual(["db"]);
+    expect(INSERTERS("await platformDb.insert(schema.users).values({})")).toEqual(["platformDb"]);
+  });
+});

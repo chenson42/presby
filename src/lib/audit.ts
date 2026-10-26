@@ -480,14 +480,18 @@ export const AUDIT_ACTIONS = {
   // audit row commit or roll back together. `check:audit` walks only
   // `src/app/**/actions.ts` and cannot see these writes; Rule 7 is proven by
   // the per-outcome DB tests instead.
-  //   - INVITATION_CREATED / _RESENT / _REVOKED: actor = the platform operator.
+  //   - INVITATION_CREATED / _RESENT / _REVOKED: actor = the platform operator,
+  //     or, for origin `org` (a congregation's sign-in invitation, Increment 2b),
+  //     the congregation's sender.
   //     created: { invitationId, organizationId, purpose, personId, expiresAt,
   //       selfAddressed, acknowledgedDoNotContact }.
   //     resent: { invitationId (new), supersededInvitationId, organizationId,
   //       purpose, resendCount }.
   //     revoked: { invitationId, organizationId, purpose, via:
   //       'single' | 'revoke_all' }.
-  //   - INVITATION_ACCEPTED: actor = the accepting user. { invitationId,
+  //   - INVITATION_ACCEPTED: actor = the accepting user (for an in-place
+  //     acceptance, 2b, the account itself, with `via` and `secondFactor` added).
+  //     { invitationId,
   //     organizationId, purpose, personId, mode: 'new_account' |
   //     'existing_account', invitedByUserId, inviterIsInvitee }.
   //   - INVITATION_ACCEPT_BLOCKED: actor = the account when known, else null.
@@ -538,6 +542,30 @@ export const AUDIT_ACTIONS = {
   //   skippedMembersOnly?, clearedBecauseMembersOnly? }.
   EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
   EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/signin-invites, 2026-10-25 (Community Increment 2b,
+  // DECISION-225/226). Address proof and auto-connect. Both are written with
+  // insertAuditRow(tx, ...) in the SAME transaction as the change they record,
+  // so a throw from the audit insert rolls the change back. A DECLINE writes
+  // nothing. Metadata is ids, enums and booleans only: never an address, a
+  // name or a token. The actor is the ACCOUNT ITSELF (the signed-in user),
+  // not a platform operator or a congregation's sender.
+  //   - TENANT_PERSON_SIGN_IN_CONNECTED: written by
+  //     src/lib/onboarding/connect.ts (called from src/auth.ts's sign-in branch
+  //     and the Check-again action) when presby_connect_signed_in_account
+  //     returns `connected`. resourceType 'person', resourceId = the person.
+  //     Metadata (a closed list, pinned by test): { organizationId, personId,
+  //     contactMethodId, contactMethodCreatedAt (ISO, so a reviewer can join to
+  //     the tenant.person_email.added row and its actor), via: 'sign_in' |
+  //     'check_again', proof: 'google' | 'account' | null, secondFactor,
+  //     authority: { sessionSeat, diaconateSeat, roleKeys, permissionKeys } }.
+  //     The R21 detection chain for F232 is tenant.person_email.added |
+  //     primary_changed, then this row, joined on personId.
+  //   - USER_EMAIL_PROOF_RECORDED: written by src/lib/auth/email-proof.ts when
+  //     presby_record_google_email_proof actually stamps. resourceType 'user',
+  //     resourceId = the user. Metadata: { source: 'google' }.
+  TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected",
+  USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded",
   // ---------------------------------------------------------------------------
 } as const;
 

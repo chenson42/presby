@@ -265,6 +265,9 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   USER_CREATED_VIA_INVITATION: "user.created_via_invitation",
   EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
   EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  // Community Increment 2b (DECISION-225/226): address proof and auto-connect.
+  TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected",
+  USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

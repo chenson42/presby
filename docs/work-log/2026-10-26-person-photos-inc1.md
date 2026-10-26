@@ -24,6 +24,7 @@
 | 3 — amendment (Phase 5 run 1 copy rulings) | tech-lead | Complete: rulings R-a (withheld-aware consequences; snapshot carries `minor`, `directoryWithheld`, `websiteWithheld`), R-b (new "Clear for website" control and dialog variant), R-c (count distinct photos); tests T1-T11 named; implementer full-stack-developer; no schema, route, flag or permission change. See the amendment at the end of this log | Design complete; back to Phase 4 | 2026-10-26 |
 | 4 — Phase 5 run 1 fix (copy) | full-stack-developer | Complete: snapshot carries `minor`/`directoryWithheld`/`websiteWithheld`; every R-a/R-b/R-c string verbatim; "Clear for website" control and `clear` dialog variant; `countChosenPhotos` (distinct); T1-T11 failing-first; gates green; back to Phase 5 (scoped re-run) | Ready for QA | 2026-10-26 |
 | 3 — ruling on fix-pass deviation | tech-lead | Complete: `websiteIsWithheld` helper (adds `directoryWithheld`) confirmed, no reachable-data change; under-18 checkbox accepted with a TODO candidate; no code change. See the last section of this log | Confirmed; back to Phase 5 (scoped re-run) | 2026-10-26 |
+| 3 — amendment (Phase 5 run 2) | tech-lead | Complete: (d) ruled (`remove` for an unlisted person reuses `removeIsWebsiteWithheld`; `removeIsWebsite` hedged to "can no longer show it"); `websiteStops` kept; QA note 1 routed through the website-withheld answer; effect-verb sweep also changed `removeIsFallback`, `websiteNotListed` and one status line; tests T12-T19; implementer full-stack-developer; no schema, route, flag, permission or e2e change. See the last section of this log | Design complete; back to Phase 4 | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1652,3 +1653,164 @@ No protected route or server action was added or changed. `actions.ts` and every
 3. **qa:** a scoped re-run covering the consequences unit files, `confirm-dialogs`, and the remove-dialog walk for an unlisted person at 360 and 1280. Nothing else needs re-running unless the fix widens.
 
 My evidence (logs, the walk script, `results.json` and screenshots) is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-r2/`. The scratch source copies there have been deleted, including the copied `.env.local`.
+
+---
+
+## Phase 3 — amendment (Phase 5 run 2)
+
+**Author:** tech-lead, 2026-10-26. **Trigger:** Phase 5 run 2, FAIL on copy truthfulness item (d) only, plus QA note 1 and the `websiteStops` question. **Class:** a Phase 3 copy defect; the failing sentence is the design's own R-a4 `remove` row, so the fix is a ruling here. **Phase 2 skip:** no dependency, table, route, action, flag, permission or schema change; no architect pass. **Implementer:** **full-stack-developer** (same reasons as the run 1 amendment: one snapshot type, pure copy and consequence files, one status-lines file, and tests on both sides; splitting adds a handoff). Read against the live tree at c225091 (`consequences.ts`, `copy.ts`, `status-lines.ts`, `reader.ts`, `0078_presby_person_photos.sql:381-470`).
+
+### Root cause
+
+R-a4 routed `remove` of the website photo to `removeIsWebsite` ("so it will leave the public website") whenever nothing in `websiteIsWithheld` applied. That predicate covers SQL's withheld answers. It does not cover the two gates the SQL core does not apply: **listing** (the core `presby_person_public_photo` returns the website designation whether or not the person is on a public list; listing is applied by the roster functions) and **publication** (never read). The snapshot carries `listed`, so the first was a defect of the design's own derivation; the second is the "will vs can" rule of run 1 applied to a sentence that run missed. My run 1 sweep grepped for "will appear" and "will see"; this one is by effect verb, below.
+
+### The convention that makes the sweep decidable
+
+Two kinds of verb, and the rule for each (applies to every string in this feature, retroactively):
+
+- **Selection verbs** (use, uses, using, chosen, marked, replaces): describe which photo the designation rows pick. True from the snapshot in every state, including unlisted and unpublished, and consistent with the page's own status lines ("Website: the photo marked "Website" below." is shown to an unlisted person too, beside the listing line). Allowed without a hedge.
+- **Effect verbs** (show, appear, leave, be seen, "on the public website" as a place): say what a visitor will see. Allowed only (i) as a negative ("won't show", "will show no photo"), which is true whether or not the site is published, listed or withheld; (ii) hedged with "can" and the unless-clause; or (iii) as "can no longer show", true in every state. A positive, unhedged effect claim is a defect.
+
+### Effect-verb sweep (every consequence, status, listing and dialog sentence; states: listed L / unlisted U, site published P / not N, withheld W (hide, merged, minor), plus a directory-hidden or ended member D)
+
+Grep: `will|leave|stop|show|appear|on the (public )?website|used on` over `copy.ts`, `status-lines.ts` and the five photo `.tsx` files (51 hits in `copy.ts`; the `.tsx` files carry no inline sentences, only the copy imports).
+
+| Sentence (`copy.ts` line, c225091) | Claim kind | Verdict across L/U x P/N x W x D | Disposition |
+|---|---|---|---|
+| `directoryAlsoOnWebsite` :149 | effect, hedged "can ... while published, unless something withholds it" | true everywhere | keep |
+| `directoryWebsiteWillStop` :151 | "is using" selection; "will show no photo" negative | true everywhere (reached only L, attested, no website photo, not W) | keep |
+| `directoryWebsiteConditional` :153 | "will be used ... only if" necessary condition | true everywhere | keep |
+| `websiteListed` :156 | effect, hedged | true everywhere | keep |
+| `websiteNotListed` :158 | "won't appear until they are": negative, but implies listing is sufficient (publication, `hide_photo` with no designation, unknown) | not false; the implicature is | **change (R-d4)** |
+| `websiteReplaces` :160 | selection | true | keep |
+| `minorBlocked`, `directoryHidden`, `websiteHidden`, `websiteMerged` | negative | true | keep |
+| `directoryInitials` :168 | "initials will show instead": true wherever the person appears (no photo after un-designating) | true, D included | keep |
+| `directoryAlsoOnWebsiteEnds` :169 | "is also using" selection; "will show no photo" negative | true everywhere | keep |
+| `websiteStops` :172 | selection ("will no longer use") | true in every state: the designation ends. It reads as the page's own "Website: the photo marked "Website" below." | **keep (ruling R-d3)** |
+| `websiteFallsBack` :173 | "If {first} is listed, ... will use": conditional on L, selection | true everywhere | keep |
+| `websiteShowsNone` :175 | negative | true everywhere | keep |
+| `websiteCaches` :176 | "can keep showing"; copies "can't be recalled" | hedged; residual preserved | keep |
+| `removeBase` :179 | "will no longer be used anywhere" selection | true | keep |
+| `removeIsDirectory` :180 | "wherever it appears in the directory it will show initials" | conditional on appearing, true incl. D | keep |
+| **`removeIsWebsite` :182** | **positive effect: "will leave the public website"** | **false for U, false for N, false for W (already routed away)** | **change (R-d1, R-d2)** |
+| `removeIsWebsiteWithheld` :183 | negative: "isn't showing at the moment" | true for U and for W | keep; now also used for U |
+| **`removeIsFallback` :184** | **"being used on the public website": a place; false for N** | untrue when the site is not published | **change (R-d5)** |
+| `removeCaches` :185 | "can keep showing" | hedged | keep |
+| `DIRECTORY_LINES.*`, `WEBSITE_LINES.*` | selection or negative; `unattested` is a remedy line | true (see R-d6 for one remedy state) | keep |
+| `listingLine` :136 | "Photos appear there only while listed and the website is published": necessary condition | true | keep |
+| `DESIGNATE_COPY.*` bodies | "Anyone on the internet can see a photo on the public website" is a general fact about the site; directory body carries the unless-clause | true | keep |
+| `offWarningCopy` :80 | "Turning this off hides it everywhere": hides what was shown, negative on the result | true | keep |
+| `listingConsentCopy` :276 | "A photo may be shown too" | hedged | keep |
+| `PAGE_COPY.minorNotice`, `UPLOAD_COPY.*` | not effect claims about visitors | true | keep |
+
+Sentences changed by this amendment: `removeIsWebsite`, `removeIsFallback`, `websiteNotListed`; one status line is re-routed (R-d6, no new string). **No other string changes.**
+
+### Rulings
+
+#### R-d1. The `remove` row of R-a4 for an unlisted person
+
+**Reuse `removeIsWebsiteWithheld`** ("It is also their website photo, which the website isn't showing at the moment.") when the person is not listed. It is true for U (the roster functions list only people on an open public list), true under W, and needs no new string. The predicate in `consequencesFor` `remove`: `isWebsite` chooses `removeIsWebsiteWithheld` when `websiteIsWithheld(state) || !state.listed`, else `removeIsWebsite`. (Implementer: name the combined predicate `websiteNotShowing(state)` beside `websiteIsWithheld`, with a comment that listing is a roster-function gate the SQL core does not apply and publication is not read.) The key name `removeIsWebsiteWithheld` is kept (renaming churns tests for no gain).
+
+R-a4's `remove` line now reads, in full: `removeBase`; `removeIsDirectory` if the directory photo; if the website photo, `removeIsWebsiteWithheld` when `websiteIsWithheld(state) || !state.listed`, else `removeIsWebsite`; `removeIsFallback` if the serving fallback; `removeCaches` if website photo or fallback.
+
+#### R-d2. `removeIsWebsite` is hedged for publication (verbatim)
+
+The listed, unwithheld case remains reachable with an unpublished site, which the snapshot does not read, so the positive "will leave" cannot stand. Replace `copy.ts:182`:
+
+`It is also their website photo, so the public website can no longer show it.`
+
+True in every state (published, unpublished, listed). It stays honest next to `removeCaches` ("Browsers that already saved it can keep showing it for up to a day.").
+
+#### R-d3. `websiteStops` (`copy.ts:172`): keep, unchanged
+
+"The website will no longer use this photo." is a selection claim: after the click the website designation is ended and the SQL core cannot pick it. It is true for an unlisted person, an unpublished site and a withheld person, and it is the same selection model the page already shows ("Website: the photo marked "Website" below." appears for an unlisted person too, with the listing line beside it). In the unlisted state the dialog reads "will no longer use this photo. The website will show no photo for {first}." followed by `websiteCaches`; each sentence is true. No change, no test row beyond the exact-string pin that already exists.
+
+#### R-d4. `websiteNotListed` (`copy.ts:158`): drop the promise (verbatim)
+
+Replace with:
+
+`{first} isn't listed on the public website, so this photo won't appear there while that is so.`
+
+Same "while that is so" pattern as `directoryHidden`: a negative with no implication that listing is sufficient (publication and a `hide_photo` with no designation are unknown to the page). Drops "yet", which implied a pending listing.
+
+#### R-d5. `removeIsFallback` (`copy.ts:184`): selection wording (verbatim)
+
+"Being used on the public website" names a place and is untrue for an unpublished site. Replace with:
+
+`It is also the photo the public website uses for them, because it was cleared for the website.`
+
+(Selection verb, true in every state in which `directoryPhotoServesWebsite` holds; `removeCaches` still follows.)
+
+#### R-d6. QA note 1: route the attested branch through the website-withheld answer; one related status line
+
+`hide_photo` is person-level (Ruling 1 of the fix-pass deviation): any `hide_photo` the directory answer reports is also one the website core would report. So a known `directoryWithheld` must say the website won't show it, instead of the hedged "can also appear ... such as hiding their photo", which is true but tells the operator less than the page knows.
+
+- `designate_directory`, attested branch: `if (state.websiteWithheld !== null || state.directoryWithheld !== null) lines.push(websiteWithheldLine(state))`, else the existing listed / conditional choice. Output for a listed person with a hidden photo and no website photo: `[directoryHidden, websiteHidden]`.
+- `designate_website` (same defect, same state): the withheld branch tests `state.websiteWithheld !== null || state.directoryWithheld !== null` the same way. Output for that state: `[websiteHidden]`.
+- `websiteWithheldLine(state)`: `websiteMerged` when `state.websiteWithheld === "merged"`, else `websiteHidden(first)` (the call sites above guarantee a hide reason is known). Priority matches SQL (merged before hide_photo): merged plus `directoryWithheld` gives `[directoryHidden, websiteMerged]` on the attested directory branch.
+- Status line (no new string): in the unattested-remedy state, `hide_photo` is known through the directory row though the website core returns no row (no candidate), so `WEBSITE_LINES.unattested` would be shown to a person who has hidden their photo. R-b4's premise ("not known to the page") does not hold there. `websiteLine(first, status, minor, directoryHidden = false)` gains a fourth parameter; in the `unattestedDirectoryOnly` branch the order is minor, then `directoryHidden` giving `WEBSITE_LINES.hide(first)`, then `WEBSITE_LINES.unattested`. `statusLines` passes `input.directory.withheld === "hide_photo"`. R-b4's last sentence is superseded for this state; it still applies to a person with no designation at all (there the page cannot know, and the remedy line is true).
+
+### Copy checks (one line per group)
+
+- *Residuals:* `removeCaches` and `websiteCaches` are untouched and still follow every website-photo removal or stop; the search-engine and archive residual sentence in the website and clear dialog bodies is unchanged; no changed string denies a residual or a Phase 2 ruling.
+- *Source of truth:* "isn't showing at the moment" (R-d1) for `!listed` rests on `state.listed` (`listingsOf`, open staff, officer and committee lists) and on the roster functions listing only those people; publication, `sites.*` and unwithheld-without-designation are not read, so no changed sentence claims a visible result: "can no longer show it" (R-d2), "won't appear there while that is so" (R-d4), "the photo the public website uses for them" (R-d5, a selection claim from `directoryPhotoServesWebsite`). `websiteHidden` in the attested and website branches rests on `directoryWithheld` from `presby_person_directory_photo` plus the person-level scope of `hide_photo` in the core (0078:403).
+- *Audience:* every string is shown to a `people.manage` holder on the photos page; none instructs (the R-d6 status line removes an instruction, the Clear-for-website remedy, for a state where it could not produce a photo).
+- *Neighbours:* grep `will leave|removeIsWebsite|removeIsFallback|websiteNotListed|used on the public|won't appear until|isn't listed on the public website yet` across `src`, `e2e` and `docs/release-notes`: modify targets are `copy.ts:158-159, 182, 184`, `consequences.ts:110, 136-137`, and the tests at `consequences.test.ts:41, 115, 127, 193, 199, 205, 300-309`, `copy.test.ts:228`, `confirm-dialogs.test.tsx:57, 64, 95`, `designate-dialog.test.tsx:153`. No hit in `e2e/` and none in the release-notes draft (C9 mentions no "will leave" or "will appear"). The `v0.18` hit is an unrelated Children roster line.
+
+### Tests (failing-first, against c225091)
+
+| # | File | Assertion | Red today because |
+|---|---|---|---|
+| T12 | `consequences.test.ts` | `remove` the website photo, `listed: false`, nothing withheld, no directory photo: `[removeBase, removeIsWebsiteWithheld, removeCaches]` (exact sentences, with the new literal for the withheld key kept as at `:41`). Also the directory-and-website photo, unlisted: `[removeBase, removeIsDirectory, removeIsWebsiteWithheld, removeCaches]`. | currently returns `removeIsWebsite` |
+| T13 | `consequences.test.ts` | `remove`, `listed: true`, nothing withheld: `[removeBase, removeIsWebsite, removeCaches]` where the sentence is the literal R-d2 text (not the constant); fallback row (`:205`) asserts the literal R-d5 text. | new strings absent |
+| T14 | `consequences.test.ts` | State with `directoryWithheld: "hide_photo"`, `websiteWithheld: null`, `listed: true`, no website photo, unattested directory photo: `designate_directory` attested gives `[directoryHidden, websiteHidden]`; `designate_website` gives `[websiteHidden]`; with `websiteWithheld: "merged"` as well, attested directory gives `[directoryHidden, websiteMerged]`. | currently returns `directoryAlsoOnWebsite` and `websiteListed` |
+| T15 | `consequences.test.ts` (extends T2's product) | Add three properties over the full product: (i) no `remove` result contains the old `removeIsWebsite` text "so it will leave the public website" anywhere; (ii) when `!listed` or any withheld field is set, no `remove` result contains `C.removeIsWebsite`; (iii) when `directoryWithheld !== null`, no `designate_*` result matches `/can (also )?appear/`. | (ii) and (iii) found by the product on today's code |
+| T16 | `copy.test.ts` | Exact equality of the three new strings (R-d2, R-d4, R-d5) and the **verbatim old strings asserted absent**: `It is also their website photo, so it will leave the public website.`, `It is also being used on the public website because it was cleared for it.`, `isn't listed on the public website yet, so this photo won't appear until they are.` Also pin `websiteStops` unchanged. | old strings present |
+| T17 | `confirm-dialogs.test.tsx` | Remove dialog for a website photo, `listed: false`: shows `removeIsWebsiteWithheld` and `queryByText(removeIsWebsite)` is null (the case QA named; fails on 0684ace). Remove dialog for a website photo, `listed: true`: shows the literal R-d2 sentence. | old sentence rendered |
+| T18 | `designate-dialog.test.tsx` | The clear variant, ticked, for a listed person whose snapshot has `directoryWithheld: "hide_photo"` and an unattested directory photo: the dialog shows `directoryHidden` and `websiteHidden` and does **not** show `directoryAlsoOnWebsite`. The website variant in the same state shows `websiteHidden` and not `websiteListed`. The existing case at `:153` keeps passing with the new `websiteNotListed` text. | old sentences rendered |
+| T19 | `reader-derive.test.ts` | `statusLines` with `unattestedDirectoryOnly: true`, `directory.withheld: "hide_photo"`, `website.withheld: null`, `minor: false` returns `WEBSITE_LINES.hide(first)`; with `minor: true` returns `WEBSITE_LINES.minor(first)`; with neither returns `WEBSITE_LINES.unattested` (unchanged). | currently returns `unattested` |
+
+**e2e blast radius:** none. No `e2e/` file asserts any changed string (grep above); `e2e/person-photos.spec.ts:282` pins `removeIsDirectory`, which is unchanged. No new or changed e2e spec, so no feature flag and nothing for `e2e/support/flags.ts` or `e2e-baseline-flags.sql`. QA's re-run is the scoped unit set plus the remove-dialog walk for an unlisted person and for a listed person with a hidden photo (clear dialog), at 360 and 1280 px.
+
+### Edge cases
+
+| Case | Handling | Pinned by |
+|---|---|---|
+| Unlisted person, website photo, remove | `removeIsWebsiteWithheld` (true) | T12, T17 |
+| Listed person, site unpublished, remove | "can no longer show it", true | T13 (the sentence is state-independent; publication is not read, so no test can pin "unpublished" and none is claimed) |
+| Listed, hidden photo, no designation, designate website | the page cannot know (no SQL row); hedged `websiteListed` stays, true | existing T1 row |
+| Listed, hidden photo known through an unattested directory photo, clear dialog | `[directoryHidden, websiteHidden]` | T14, T18 |
+| Hidden photo, unattested directory only, status line | `Website: not shown, because {first} has hidden their photo.` | T19 |
+| Under-18 and any of the above | `minor` precedence unchanged | existing T1 rows |
+| Label and dialog fit at 360 px | no layout change; strings are of similar length (R-d2 is shorter than the old one; R-d5 is two words longer) | QA walk; claim *unverified* until it runs |
+
+### Out of scope
+
+Reading site publication or the `sites.*` flags into the snapshot (the hedges make it unnecessary; still an accepted Out of scope from the run 1 amendment); a withheld-without-designation SQL read; the under-18 checkbox (Ruling 2 of the fix-pass deviation: stays a tracked polish item).
+
+### Carry-forward (this amendment)
+
+| Item | Addressed here, or *deferred* |
+|---|---|
+| QA (d): `removeIsWebsite` false for an unlisted person and for an unpublished site | R-d1, R-d2, T12, T13, T15, T17 |
+| QA: rule on `websiteStops` in the unlisted state | R-d3 (kept; the sweep table gives the reason) |
+| QA note 1: attested directory branch through the website-withheld answer | R-d6, T14, T18, T19 |
+| QA note 2: under-18 checkbox | *Deferred*; already accepted by tech-lead (fix-pass ruling 2) as a TODO candidate, operator to confirm priority |
+| QA note 3: pre-existing touch targets (Features page AlertDialog buttons, dialog close icon) | *Deferred*; not in this diff; **TODO candidate for the orchestrator** (Rule 10): "Features page AlertDialog buttons (`features-list.tsx`, about 36 px) and the shared dialog close icon (about 16 px) are under 44 px. Raised by QA 2026-10-26; owner tech-lead to place; operator to confirm." |
+| Run 1 amendment, fix-pass ruling and Phase 1/2 carry-forward | Unchanged; nothing here touches schema, flag, route, permission or audit |
+| Proposed decision text addition (orchestrator numbers it with the run 1 text) | "Consequence sentences use selection verbs (use, chosen, marked) freely and effect verbs (show, appear, leave) only as a negative, hedged with 'can ... unless something withholds it', or as 'can no longer show'. Listing and publication are not part of the SQL core's answer: a sentence that depends on them says so or does not claim it." |
+| Finding for the orchestrator to number | The run 1 amendment's C5 copy check passed `removeIsWebsite` on the SQL withheld answers alone; listing (a roster-function gate, `listed` already in the snapshot) and publication (unread) were never checked. The sweep was by phrase ("will appear"), not by effect verb against the state grid. This amendment re-swept by verb against listed/unlisted x published/unpublished x withheld x directory-hidden. |
+
+### Implementation order
+
+1. `copy.ts` (R-d2, R-d4, R-d5 verbatim): T16 red first.
+2. `consequences.ts` (`websiteNotShowing`, the `remove` predicate, the withheld routing in both designate branches, `websiteWithheldLine`): T12-T15 red first.
+3. `status-lines.ts` (R-d6 fourth parameter, `statusLines` call): T19.
+4. Component tests T17, T18 (no component source change expected; `designate-dialog.tsx` and `confirm-dialogs.tsx` read the sentences from `consequencesFor`).
+5. Gates: typecheck, lint, `npm run check`, the unit suite, the photo DB subset serially; no e2e source change, so e2e is QA's scoped walk only.
+
+### Per-Phase Status row (recorded in the table at the top)
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 3 — amendment (Phase 5 run 2) | tech-lead | Complete: (d) ruled (`remove` for an unlisted person reuses `removeIsWebsiteWithheld`; `removeIsWebsite` hedged to "can no longer show it"); `websiteStops` kept; QA note 1 routed through the website-withheld answer; effect-verb sweep changed two further strings (`removeIsFallback`, `websiteNotListed`) and one status line; tests T12-T19; implementer full-stack-developer; no schema, route, flag, permission or e2e change | Design complete; back to Phase 4 | 2026-10-26 |

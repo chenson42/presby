@@ -19,7 +19,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 | 1 — Functional refinement | analyst | Complete (parent log): R1–R15, Q1–Q14 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; implementer named per batch; eight items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note) | Design complete | 2026-10-25 |
-| 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests; 2 giving-team tests red pending a ruling (loop-back 1). Batches 1b–7 pending | — | 2026-10-25 |
+| 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). Batches 1b, 2b (waits on F289), 3–7 pending | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -921,6 +921,92 @@ Every public definer: `security definer`, `search_path = public, pg_temp`, EXECU
 3. **D8** (0074 closing assertion scope): confirm.
 4. **The date filter for `treasurer_list` and `export_rows`** (submitted date, org-local): confirm, or name another (expense date, paid date).
 5. **Design text vs SQL on `presby_reimbursement_detail`'s shape**: the design leaves the jsonb keys to "a zod schema and a golden test" in 2a. The keys are now fixed by 0073 section 8g; 2a should pin them rather than rename them.
+
+## Batch 2a — api-developer (2026-10-25)
+
+Built on the pipeline branch after `git merge origin/main` (0.44.0, `7085100`). Four commits: `ec5ebe9` (refactor: shared csv/session/keys and the team path), `cd945d2` (test: the ruling-1 fixture amendment), `26de2f2` (feat: `src/lib/reimbursement/`, the member actions, audit keys, `isDirectoryListedPerson`), `b6f5ddb` (feat: catalog entry, tiles, off-warning). No schema, migration or Rule 16 shared-file change; the Batch 1a integration patch is untouched and still the orchestrator's. Receipt upload/serving is not built (Batch 2b, waits on F289's `store({audience})`); nothing in this batch touches the blob store or `blob_assets`.
+
+### Files Created
+
+- `src/lib/csv.ts` (+ test): `csvTextCell`, `centsToDecimal`, `joinCsvLines`, extracted byte for byte; `giving/csv.ts` re-exports the first two.
+- `src/lib/treasury/`: `modules.ts` (`TREASURY_MODULES = ["giving","reimbursement"]`), `keys.ts` (`holdsPermissions`), `session.ts` (`assertTreasurySession`, `treasuryTotpRedirectUrl`), `db-util.ts`, `team.ts` (the surface-parameterized F138 path: `listTreasuryTeam`, `grantTreasuryRole`, `revokeTreasuryRole`, `ensureTreasuryRole`, `TEAM_SURFACES`), `session.test.ts`, `team.db.test.ts` (20).
+- `src/lib/reimbursement/` pure: `keys.ts`, `limits.ts`, `states.ts`, `outcomes.ts`, `amount-input.ts`, `text.ts`, `dates.ts`, `input.ts`, `copy.ts`, `messages.ts` (outcome to Copy string), `action-result.ts`, `detail-shape.ts` (strict zod for `detail`, `form_options`, `settings`), `detail-shape.golden.json`.
+- `src/lib/reimbursement/` server-only: `access.ts`, `gate.ts`, `requests.ts`, `reads.ts`, `config.ts`, `pickers.ts`, `counts.ts`, `audit.ts`, `db-util.ts`.
+- `src/app/(org)/o/[slug]/reimbursements/actions.ts` (+ test).
+- Tests beside the source: `amount-input`, `text`, `dates`, `states`, `outcomes`, `limits`, `keys`, `copy`, `input`, `messages`, `detail-shape`, `gate`, `audit-coverage`, `gate-coverage` (all pure); `requests.db`, `reads.db`, `config.db`, `text.db` (DB-backed); `src/lib/org-feature-warnings.reimbursement.test.ts`. `migration-text.ts` is test support (reads 0073/0074 text).
+
+### Files Modified
+
+- `src/lib/giving/{csv,access-pure,keys,team}.ts`: wrappers/aliases over the moved code; exported names and result kinds unchanged. `team.db.test.ts`: the two ruling-1 cases (see below).
+- `src/lib/org-features.ts` (catalog entry `org_portal.reimbursement`), `src/lib/org-portal/tiles.ts` (two tiles), `src/components/org-portal/tile-icons.tsx` (two icons; a UI file, two imports and two map entries), `src/lib/org-feature-warnings.ts` (registry entry), `src/lib/audit.ts` (12 keys), `src/lib/directory.ts` (one added export, `isDirectoryListedPerson`, EC17), `src/lib/testing/reimbursement-fixture.ts` (`makeOrg({toggle})`, `setToggle`).
+- Tests whose pinned lists grew: `audit.test.ts` (+2), `org-feature-catalog.test.ts`, `org-portal/tiles.test.ts` (24 tiles), `org-portal/visible-tiles.test.ts`, `tile-icons.test.tsx`.
+
+### Orchestrator ruling 1 applied (team.db.test.ts)
+
+`ensureGivingRole creates the treasurer role...` now gives the acting user all seven treasurer keys; `reactivates a deactivated role and reconciles ADDITIVELY` expects `skippedKeys` to include the four reimbursement keys (the actor holds none of them). Each case carries a note citing the ruling; the subset rule is unchanged. 24/24 pass. Before the fix the same two (and only those) failed against the wrapper.
+
+### Audit events
+
+Twelve `tenant.reimbursement.*` keys added to `AUDIT_ACTIONS` (`REIMBURSEMENT_APPROVED`, `_OVERRIDE_APPROVED`, `_RETURNED`, `_NOT_APPROVED`, `_VOIDED`, `_PAYMENT_RECORDED`, `_PAYMENT_REVERSED`, `_RECEIPT_WAIVED`, `_RECEIPT_VIEWED`, `_EXPORTED`, `_CHARGEABLE_CHANGED`, `_CATEGORY_CHANGED`). Written in this batch, in the same transaction as the change, by `config.ts` only: `CHARGEABLE_CHANGED { groupId, chargeable }` and `CATEGORY_CHANGED { categoryId, change: created|renamed|retired }`, both with `organizationId`, ids and tags only (never a category name). An unchanged answer writes no row; a failed audit insert rolls the change back (tested with an injected failure). Save, submit, withdraw write none (the events table is their record; `audit-coverage.test.ts` lists them as the classified unaudited set, and fails if a write definer is called that is in neither list).
+
+### Deviations from the Phase 3 text
+
+- **V1** Surface scoping in `treasury/team.ts` beyond the design: `grantTreasuryRole` answers `invalid_role` and `revokeTreasuryRole` answers `not_found` for a role carrying none of the surface's own-module keys. Without it a `reimbursement.manage` holder who also holds `giving.record` could hand out `giving_recorder` through the reimbursement gate, bypassing `giving.manage`. Tested by mutation (removing the check fails the test).
+- **V2** Result kind `not_treasury_only` in `treasury/team.ts`; the giving wrapper maps it back to `not_giving_only` so the giving actions' switches are unchanged. The generic list returns `ownKeys`; the wrapper maps it to `givingKeys`.
+- **V3** `treasury/db-util.ts` duplicates `rowsOf`/`errorChain` so the treasury layer does not import `giving/db-util` (`giving/team.ts` imports `treasury/team.ts`).
+- **V4** `reads.ts` omits `treasurer_list` and `export_rows` (Batch 4: "treasurer reads"). The `detail` shape is pinned at both levels now.
+- **V5** `searchBeneficiaries` does not search under two characters and returns an empty list (the design is silent on a minimum; `BENEFICIARY_QUERY_MIN` in `limits.ts`).
+- **V6** `submitRequest` returns `notifyPersonIds` and does not send anything (notices are Batch 3, which adds the call inside the same transaction). For `already_submitted` it reports `route` from the live detail when the request is still waiting and `null` once it has moved on; `sentMessage(null, …)` reads as the `seat` sentence.
+- **V7** `saveRequest` re-judges a posted beneficiary only when it differs from the stored one on an edit (the database applies its "as of now" checks to a changed value only), so a payee hidden after filing does not strand a returned request. The stored payee comes from the member-level `detail`.
+- **V8** The tiles and icons were added in 2a (the design lists tile data under 2a); the icon map lives in a UI file.
+
+### Copy gaps (strings not in the Copy section; rule: stop and report)
+
+1. **Tile descriptions (2).** Labels are Copy's own headings (`Reimbursements`, `Reimbursement requests`). The two descriptions are my proposals, marked `COPY GAP` in `tiles.ts`: member `Ask to be paid back for something you bought for the church, or to pay a vendor.`; treasurer `See every request, record payments, and choose which groups can receive requests.` Needs a ruling (tech-lead) before Batch 5/6 ship.
+2. **Gate boilerplate.** Copy names no wording for signed out, no organization access, not permitted, or an access-check failure. `COPY.gate` reuses giving's `action-gate.ts` strings verbatim (`copy.test.ts` asserts each appears there). Not new wording, but it is reimbursement UI text nobody ruled on.
+3. **No success string for withdraw**, none for the beneficiary search, and no UI string for a withdraw reason (the action accepts an optional reason, validated at 300 characters; the Copy section's dialog has no field). `invalid_shape` and `kind_invalid` (only a tampered post reaches them) read as `We couldn't save that. Your entries are still here. Try again.`
+
+### Strings added or changed
+
+All in `src/lib/reimbursement/copy.ts` (C2 to C9, pinned byte for byte by `copy.test.ts`; limits-derived numbers computed from `limits.ts`), the catalog entry (`org-features.ts`, C1), the off-warning (`org-feature-warnings.ts`, C1), and the two tile descriptions above. The C12 neighbour edits are Batch 6's by the batch table and are NOT made here, so these now read stale: `admin/giving/team/actions.ts:54,142` ("permissions outside Giving"), `team-list.tsx:107`, `actions.test.ts:140`. The giving team now delegates treasury-only roles, so that sentence is slightly wrong until Batch 6 edits it.
+
+### Contract for the next batches
+
+**Server actions** (`src/app/(org)/o/[slug]/reimbursements/actions.ts`, POST, take the **slug**; each runs `gateReimbursementAction(slug)` first: signed in, Node-side 2FA, four-way org miss, applicability, toggle; any member passes, who may file is the database's):
+
+| Action | Input | Result |
+|---|---|---|
+| `saveRequestAction(slug, input)` | `{ clientKey (8-64 [A-Za-z0-9_-]), requestId?, expectedRevision?, kind: "reimburse"\|"vendor", groupId, beneficiaryPersonId?, vendorName?, amountCents? (int 1..10,000,000), expenseDate? (YYYY-MM-DD), purpose?, categoryId?, preApprovedBy?, noReceiptClaimed? }` | `{ ok: true, data: { requestId, revision } }` or `{ ok: false, error, fieldErrors?, kind? }` |
+| `submitRequestAction(slug, input)` | `{ requestId, expectedRevision }` | `{ ok: true, data: { route: "seat"\|"treasurer"\|"nobody"\|null, groupName, message, revision } }` (`message` is the C3 sentence) |
+| `withdrawRequestAction(slug, input)` | `{ requestId, reason? }` | `{ ok: true, data: undefined }` |
+| `searchBeneficiariesAction(slug, input)` | `{ query }` (2-80 chars after cleaning) | `{ ok: true, data: { candidates: [{ personId, displayName }] } }` (at most 8; empty for a short query, no key, no directory, or a hidden member) |
+
+Save semantics for the form: generate `clientKey` once per mounted form. No `requestId`: create-or-find (a double tap returns the same row, `revision` unchanged). A second Save from the same form passes `expectedRevision` (the one the previous result returned) and is an edit; a stale one gives `kind: "changed_since_viewed"`. An edit page passes `requestId` + `expectedRevision`. `fieldErrors` keys are the input names plus `receipts` (the "add a receipt or tick the box" message at submit) and `_form`. Failure `kind`: `two_factor_required` (with `redirectTo`), `changed_since_viewed`, `not_found` (the neutral `This request isn't available.`, for missing, forbidden and no-longer-editable alike). A database failure throws; the form shows `COPY.form.saveFailed`, never "not allowed".
+
+**Page gate** (`gateReimbursementPage({ slug, path, anyOf? })` in `src/lib/reimbursement/gate.ts`): redirects signed-out to `/signin?callbackUrl=<path>` and a stale 2FA claim to `/totp?callbackUrl=<path>`, `notFound()` for an unknown slug; otherwise `{ ok: true, identity: { userId, personId, organizationId, organizationName, organizationType, slug, has: { requestForOthers, view, pay, manage } } }` or `{ ok: false, state }` with `state.kind` one of `org_forbidden{name,organizationType}`, `org_ended{name,endedOn}`, `not_applicable{name}`, `toggle_off{name,canManageFeatures}`, `forbidden{name}`, `load_error`. Omit `anyOf` for the member surface; pass `["view","pay","manage"]`-style lists for treasury pages. `gateReimbursementRoute({ request, slug, anyOf? })` is the route skin (307/403/404/503, never a 200 for a refusal).
+
+**Readers** (`src/lib/reimbursement/reads.ts`, each takes `{ userId, personId, organizationId }`, the gate's identity): `getFormOptions`, `getOrgToday`, `listMyRequests({limit?,offset?})`, `listWaitingForMe`, `getCounts`, `getRequestDetail(identity, id, "member"|"treasury")` (`not_found` is ONE answer for missing, malformed and forbidden), `getSettings` (`reimbursement.manage`). `denied` means the database refused the caller's identity (no live person here, or a missing key). Detail fields are frozen as built and exported as types from `detail-shape.ts` (`MemberDetail`, `TreasuryDetail`, `FormOptions`, `ReimbursementSettings`); `viewer.relation` is `creator|beneficiary|seat|treasury` (a `treasury`-only viewer on the member detail route is redirected to the admin route, P3-3) and `viewer.canEdit/canWithdraw/canDecide` say what to offer. Timestamps are ISO strings, dates `YYYY-MM-DD`; format with `<FormattedDate>`.
+
+**Library under the Batch 4 actions** (`config.ts`): `setChargeable(actor,{groupId,chargeable})`, `saveCategory(actor,{categoryId|null,name,sortOrder|null})`, `endCategory(actor,{categoryId})`, each audited in-transaction and returning `{kind:"ok"|"refused"|"denied"}`. **Team** (`treasury/team.ts`): the four functions take `surface: "reimbursement"`; Batch 4's `team/actions.ts` wraps them with `path: "reimbursement_team"`.
+
+**For Batch 3:** `submitRequest` already returns `route` and `notifyPersonIds`; add the notice inside `withOrgContext` there. Add `decisions.ts` and the `approve`/`return` audit calls through `auditReimbursement` (the audit-coverage scan already lists those definers as audited and will fail if the call is missing). `outcomes.ts` already holds the approve/return lists, pinned to 0073.
+
+### Gates
+
+- `npm run typecheck` exit 0; `npm run lint` exit 0 (`--max-warnings=0`); `npm run check` all eight tripwires passed; `npm run build` exit 0 (run with `NEXT_PUBLIC_APP_URL=https://app.example.invalid`, `NEXT_PUBLIC_PLATFORM_HOSTS=app.example.invalid` because this worktree's `.env.local` is http on :3590).
+- Unit suite without `DATABASE_URL` (CI shape): 611 files passed, 9,177 tests passed, 2,665 skipped (DB-gated).
+- New tests: **285** (280 in new files: 188 pure, 92 DB-backed; +5 in existing files). DB-backed subset I touch, serial: `src/lib/giving`, `src/lib/treasury`, `src/lib/reimbursement`, `src/lib/db/domain/reimbursement*`, `org-feature-warnings.db`, `org-feature-categories`, `org-features`, `org-feature-catalog`, `designation-parity.db`, `directory*`, `org-portal`, `audit`, `public-calendar.db`: 96 files, 1,865 tests passed (1,851 on the first run plus `public-calendar.db` 14/14 after the 0067 note below).
+- `scripts/treasury/test-rls-73.sql` as presby_app: 52 passes, exit 0.
+- Failing-first (mutation) evidence: removing the surface-scope check in `team.ts` fails `refuses a treasury role with none of this surface's keys`; removing the audit call in `endCategory` fails `audit-coverage.test.ts`; before the ruling-1 fixture change the same two `giving/team.db.test.ts` cases failed against the wrapper.
+- **0067 note:** `public-calendar.db.test.ts` failed on this Neon branch (`events.website_listed` missing) because `main` added `drizzle/0067_presby_public_events_calendar.sql` and the pipeline branch had not applied it. I applied it as the owner (`psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0067_…sql`) to the `pipeline-treasury` branch only; the suite then passed 14/14. Not applied anywhere else.
+- No e2e is assigned to Batch 2a (the four specs and the hydration entry are Batch 7).
+
+### Loop-back candidates and notes for the orchestrator / tech-lead
+
+1. **Copy gaps 1 to 3 above** need a ruling (the tile descriptions block Batch 5/6 copy sign-off).
+2. **Orphaned manage key (design residual, not a defect of this batch).** `revokeTreasuryRole` blocks ending the last holder of the SURFACE's own manage key, as designed (EC31). Ending a seven-key `treasurer` grant on the giving page can therefore leave `reimbursement.manage` with no holder if another `giving.manage` holder remains, and vice versa; the founding administrator cannot repair it (F138), only a platform re-designation. A stricter rule (block on any treasury manage key the role carries) needs one new sentence in Copy for the giving page. Left as designed; flagging for a ruling.
+3. `giving/team/actions.ts` and `team-list.tsx` still say "outside Giving" (Batch 6 per the table); correct then.
+4. The C12 string for `treasurer-designation-section.tsx` and `designation-holder-copy.ts` is likewise Batch 6.
 
 ---
 

@@ -27,7 +27,7 @@ remove the worktree and Neon branch. Platform admin redesign Increment 2 Phase 3
 **Next free numbers:** DECISION-**262**, F**289**, migration **0071** (these are the platform-admin handoff's figures and already count this
 pipeline's DECISION-238-241, F250-F256 and 0067). Findings subsection `2ab` is now taken (public events calendar); the next is `2ac`.
 Parish management (0068, DECISION-242-245, F258-F265) took `2ac`; the next findings subsection is `2ad`. Its numbers were pre-assigned, so the figures above are unchanged.
-Developer portal Increment 1 (v0.46.0, DECISION-258/261, F283-F285 and F288, no migration) took `2ad`; the next findings subsection is `2ae`. Its numbers were pre-assigned (DECISION-259/260, F286/F287 are Increments 2 and 3), so the figures above are unchanged.
+Developer portal Increment 1 (v0.46.0, DECISION-258/261, F283-F285 and F288, no migration) took `2ad`; the next findings subsection is `2ae`. The public asset allowlist (0072, DECISION-277, F289, F340, F341) took `2ae`; the next findings subsection is `2af`. Its numbers were pre-assigned, so the figures above are unchanged. Its numbers were pre-assigned (DECISION-259/260, F286/F287 are Increments 2 and 3), so the figures above are unchanged.
 
 ---
 
@@ -58,6 +58,7 @@ deferred R1a, R1b, R1e, R1f, R7c and R7d).
 | Community Increment 2b, sign-in invitations (`2026-10-22-founding-admin-directory`) | `presby-2b` | Phase 4, Batch A1 | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Batch A1 |
 | TOTP auto-submit (`2026-10-25-totp-autosubmit`) | `presby-otp` | Integrated on its branch as **0.44.1** (Phase 6 SHIP WITH NOTES) | no migration; DECISION-257; F282; port 3560 | `/pre-push`, `/merge-pr`, then remove the worktree and Neon branch |
 | Developer portal, Increment 1 (`2026-10-25-developer-portal-inc1`) | `presby-devportal` | Integrated on its branch as **0.46.0** (Phase 6 SHIP WITH NOTES; merged `main` 0.45.0) | no migration; DECISION-258, 261; F283-F285, F288 (`docs/schema-design-2.md` section 2ad); port 3570 | `/pre-push`, `/merge-pr`, then Increment 2's Phase 3 (the `developer` role; DECISION-259, F286, F287) |
+| Public asset allowlist (`2026-10-25-public-asset-allowlist`, F289) | `presby-assets` | Integrated on its branch as **0.46.1** (Phase 6 SHIP WITH NOTES; merged `main` 0.46.0) | migration 0072; DECISION-277; F289, F340, F341 (`docs/schema-design-2.md` section 2ae); port 3600 | **Apply 0072 to production BEFORE merging** (`docs/deployment.md` "Public asset audience (0072)"; rehearsed 2026-10-26), `/pre-push`, `/merge-pr`, then V1-V6 and remove the worktree and Neon branch |
 | Developer portal, Increments 2 to 4 (`-inc2`, `-inc3`, `-inc4`) | `presby-devportal` | Not started | DECISION-259, 260; F286, F287; migration 0071 only if needed | Increment 2 Phase 3 (give it the promoted `shared/console-*` paths; Increment 3 waits on nothing from the operator now: the API page is an internal inventory, ruled 2026-10-26) |
 | Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Waits on 2b | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | after 2b |
 

@@ -78,8 +78,10 @@ export async function setTwoFactorRequired(input: {
 // Known gap: the target user's twoFactorVerified JWT claim stays true until
 // their JWT expires (typically 30 days). There is no session DB to invalidate
 // the token, and the claim can only be set by the verification action's
-// server-side grant (DECISION-230), never cleared from here. The user will be
-// required to re-enroll on their next sign-in.
+// server-side grant (DECISION-230), never cleared from here. If something
+// requires two-factor of this user (their own setting, a role or a
+// congregation's policy), they are asked to enrol again at their next sign-in;
+// if nothing does, they are not.
 export async function forceResetTwoFactor(input: {
   userId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {

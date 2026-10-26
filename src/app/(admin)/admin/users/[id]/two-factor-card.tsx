@@ -53,7 +53,7 @@ export function TwoFactorCard({
       const result = await forceResetTwoFactor({ userId });
       if (result.ok) {
         toast.success(
-          "2FA enrollment wiped. The user will be required to re-enroll on their next sign-in.",
+          "2FA enrollment wiped. If something still requires two-factor of this user, they will be asked to set it up again at their next sign-in. If nothing does, they will not be asked.",
         );
       } else {
         toast.error(result.error);
@@ -163,8 +163,12 @@ export function TwoFactorCard({
                 </Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm text-muted-foreground">
                   This will permanently delete the user&apos;s TOTP secret,
-                  recovery codes, and any pending enrollment. The user will be
-                  required to re-enroll on their next sign-in.
+                  recovery codes, and any pending enrollment. While enforcement
+                  is on, if their own setting, a role or a
+                  congregation&apos;s policy requires two-factor, they will be
+                  asked to set it up again at their next sign-in. If nothing
+                  requires it, they will not be asked, and can set it up again
+                  themselves at Account &rarr; Two-factor.
                 </Dialog.Description>
                 <div className="mt-6 flex justify-end gap-3">
                   <Dialog.Close asChild>

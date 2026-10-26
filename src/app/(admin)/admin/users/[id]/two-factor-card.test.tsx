@@ -28,6 +28,7 @@ const base = {
 
 beforeEach(() => {
   setTwoFactorRequired.mockResolvedValue({ ok: true });
+  forceResetTwoFactor.mockResolvedValue({ ok: true });
 });
 afterEach(() => {
   cleanup();
@@ -86,5 +87,34 @@ describe("TwoFactorCard copy (F343)", () => {
     expect(container.textContent).toContain("They will be prompted on next sign-in.");
     rerender(<TwoFactorCard {...base} twoFactorRequired enrolled enrolledAt={new Date("2026-01-01T00:00:00Z")} />);
     expect(screen.getByText("Enrolled")).toBeTruthy();
+  });
+
+  // S9 and S10: Force-reset does not promise a re-enrolment. Whether the person is
+  // asked again depends on their own setting, a role or a congregation, none of
+  // which the card reads, so the copy is conditional on what the action does.
+  const S9 =
+    "2FA enrollment wiped. If something still requires two-factor of this user, they will be asked to set it up again at their next sign-in. If nothing does, they will not be asked.";
+  const S10 =
+    "This will permanently delete the user's TOTP secret, recovery codes, and any pending enrollment. While enforcement is on, if their own setting, a role or a congregation's policy requires two-factor, they will be asked to set it up again at their next sign-in. If nothing requires it, they will not be asked, and can set it up again themselves at Account \u2192 Two-factor.";
+
+  it.each([
+    ["own setting on", true],
+    ["own setting off", false],
+  ])("S9 and S10: the Force-reset dialog and toast do not promise re-enrolment (%s)", async (_label, own) => {
+    render(
+      <TwoFactorCard {...base} twoFactorRequired={own} enrolled enrolledAt={new Date("2026-01-01T00:00:00Z")} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Force-reset 2FA enrollment" }));
+    const dialog = await screen.findByRole("dialog");
+    const text = (dialog.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).toContain(S10);
+    expect(text).not.toMatch(/will be required to re-enroll/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Yes, reset enrollment" }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(S9));
+    expect(forceResetTwoFactor).toHaveBeenCalledWith({ userId: "u-1" });
+    for (const [arg] of toast.success.mock.calls) {
+      expect(String(arg)).not.toMatch(/required to re-enroll/);
+    }
   });
 });

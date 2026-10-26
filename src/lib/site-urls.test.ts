@@ -24,6 +24,7 @@ describe("slug mode: today's /site/<slug>/... shapes on the platform origin", ()
     expect(u.canonical("/about")).toBe(`${PLATFORM}/site/alder-creek/about`);
     expect(u.canonical("/")).toBe(`${PLATFORM}/site/alder-creek`);
     expect(u.portal()).toBe(`${PLATFORM}/o/alder-creek`);
+    expect(u.portalCalendar()).toBe(`${PLATFORM}/o/alder-creek/calendar`);
   });
 
   it("tolerates a trailing slash on the platform origin", () => {
@@ -53,6 +54,7 @@ describe("host mode: CLEAN paths on the canonical host (no /site/, no slug)", ()
   it("names the slug in exactly one place: the absolute portal link on the PLATFORM host (G5)", () => {
     const u = hostUrls();
     expect(u.portal()).toBe(`${PLATFORM}/o/alder-creek`);
+    expect(u.portalCalendar()).toBe(`${PLATFORM}/o/alder-creek/calendar`);
     const sameHost = [
       u.home(),
       u.page("/"),

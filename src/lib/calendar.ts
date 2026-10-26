@@ -58,8 +58,9 @@ import { todayInOrgZone } from "@/lib/shared/org-time";
  * injectable `now`, and it only ever reaches `todayInOrgZone`.
  *
  * VISIBILITY (operator ruling 4): cancelled rows are excluded; `is_public` is
- * NOT a member filter (it means "members only" vs. public-site visibility, and
- * every active member sees both). Nothing admin-only is ever selected:
+ * NOT a member filter (it means "open to everyone" vs. "members only", and
+ * every active member sees both; being on the PUBLIC website is the separate
+ * `website_listed`, read only by the anonymous presby_public_events_calendar()). Nothing admin-only is ever selected:
  * `allows_checkin`, `created_by`, `recurrence_count`, `recurrence_pattern`,
  * `parent_event_id` (as such), `created_at`, `updated_at`.
  *

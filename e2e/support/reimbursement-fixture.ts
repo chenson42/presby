@@ -513,10 +513,10 @@ export async function seedImportedPaid(sql: Sql, input: { orgId: string; groupId
                100 + (g % 900), date '2019-03-04' + (g % 300), 'Imported historical request ' || g,
                timestamptz '2019-03-10', 1, timestamptz '2019-03-05' + (g || ' seconds')::interval
           from generate_series(1, ${input.count}::int) g
-        returning id, amount_cents
+        returning id, amount_cents, expense_date
       ), p as (
         insert into reimbursement_payments (organization_id, request_id, kind, method, paid_on, amount_cents)
-        select ${input.orgId}::uuid, id, 'payment', 'cash', date '2019-03-20', amount_cents from r
+        select ${input.orgId}::uuid, id, 'payment', 'cash', expense_date, amount_cents from r
         returning 1
       ), e as (
         insert into reimbursement_events (organization_id, request_id, kind, to_status, request_revision)

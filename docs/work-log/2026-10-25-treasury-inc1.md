@@ -19,7 +19,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 | 1 — Functional refinement | analyst | Complete (parent log): R1–R15, Q1–Q14 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12 | Design complete | 2026-10-25 |
-| 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). Batches 1b, 2b (waits on F289), 3–7 pending | — | 2026-10-25 |
+| 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). **Batch 3 complete (api-developer)**: `decisions.ts` (approve on the seat and override paths, send back / not approved), `notices.ts` + `notify.ts` (the four `person:role` notices; submit now tells approvers or pay holders), `approveRequestAction` / `returnRequestAction`, the Phase 3 amendment's Copy (tiles, `copy.ts`), ~115 new tests, decisions/notify/role-bundle DB suites; see the Batch 3 section. Batches 1b, 2b (waits on F289), 4–7 pending | — | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1010,6 +1010,76 @@ Save semantics for the form: generate `clientKey` once per mounted form. No `req
 2. **Orphaned manage key (design residual, not a defect of this batch).** `revokeTreasuryRole` blocks ending the last holder of the SURFACE's own manage key, as designed (EC31). Ending a seven-key `treasurer` grant on the giving page can therefore leave `reimbursement.manage` with no holder if another `giving.manage` holder remains, and vice versa; the founding administrator cannot repair it (F138), only a platform re-designation. A stricter rule (block on any treasury manage key the role carries) needs one new sentence in Copy for the giving page. Left as designed; flagging for a ruling.
 3. `giving/team/actions.ts` and `team-list.tsx` still say "outside Giving" (Batch 6 per the table); correct then.
 4. The C12 string for `treasurer-designation-section.tsx` and `designation-holder-copy.ts` is likewise Batch 6.
+
+## Batch 3 — api-developer (2026-10-26)
+
+Built on the pipeline branch after `git merge origin/main` (0.44.1, `0f35f10`) and the Phase 3 amendment (`5ccf3ed`, re-read before this section was written). Two commits: `d9ff9d3` (the amendment's Copy: tiles and `copy.ts`) and `80f5c90` (decisions, notices, actions, tests). No schema, migration, permission, flag or proxy/auth change; the Rule 16 shared files are untouched (nothing was uncommitted in this worktree, and the Batch 1a integration patch is still the orchestrator's). No e2e is assigned to Batch 3 (the four specs are Batch 7).
+
+### Files Created
+
+- `src/lib/reimbursement/decisions.ts`: `approveRequest(actor, { requestId, expectedRevision, path: "seat" | "override" })` and `returnRequest(actor, { requestId, expectedRevision, kind: "needs_info" | "not_approved", reason })`. Each is ONE `withOrgContext`: the definer, then (on `ok`) the audit row through `auditReimbursement`, then the notices through `queueNotices`; the inline sends run after the commit and never throw.
+- `src/lib/reimbursement/notices.ts` (pure): `NOTICE_TEMPLATE_KEYS`, `NoticeSpec`, `buildNotice(spec, link)`, `noticeLink(origin, slug, requestId, surface)`, `noticeSurface(spec)`. All five requester variants (`approved`, `sent_back`, `not_approved`, `paid`, `closed`) are built now; Batch 4 only has to call `paid` and `closed`.
+- `src/lib/reimbursement/notify.ts` (server-only): `queueNotices(tx, { organizationId, requestId, batches })` and `sendQueuedNotices(ids)`.
+- Tests: `notices.test.ts` (33), `decisions.db.test.ts` (34), `notify.db.test.ts` (9), `role-bundle.db.test.ts` (6).
+
+### Files Modified
+
+- `requests.ts`: `submitRequest` queues `needs_approval` (route `seat`) or `needs_treasurer` (route `treasurer`) in the submit transaction and sends after commit; `already_submitted` and route `nobody` queue nothing. Result shape unchanged except `notifyPersonIds` is `[]` for `already_submitted`.
+- `input.ts` (`approveRequestSchema`, `returnRequestSchema`, `RETURN_KINDS`), `messages.ts` (`decisionRefusal`, `alreadyDecidedFailure`, `returnedMessage`), `dates.ts` (`formatCalendarDate`), `copy.ts` and `copy.test.ts` (amendment keys), `tiles.ts` and `tiles.test.ts` (amendment T1; the `COPY GAP` comment is gone).
+- `src/app/(org)/o/[slug]/reimbursements/actions.ts`: `approveRequestAction`, `returnRequestAction`.
+- `src/lib/contact-methods/email-audience.ts` (four `person:role` keys; the comment that said no sender uses `person:*` is updated) and `email-audience.test.ts`: the scan's `NAMED` map may now hold a LIST of keys for one call site (`built.templateKey` resolves to the four notice keys, so each is classified and each counts as used); the two pinned-classification tests now expect the four keys.
+- `src/lib/testing/reimbursement-fixture.ts`: `email(personId, tag, opts)`, `queued(addresses)`; `cleanup()` deletes the queue rows it caused.
+- `audit-coverage.test.ts`: expects `approveRequest` and `returnRequest` and five audited-definer functions.
+
+### Audit events
+
+`REIMBURSEMENT_APPROVED { requestId, path: "seat" }`, `REIMBURSEMENT_OVERRIDE_APPROVED { requestId, path: "override" }`, `REIMBURSEMENT_RETURNED { requestId, kind: "needs_info", byRole }`, `REIMBURSEMENT_NOT_APPROVED { requestId, kind: "not_approved", byRole }`, each with `organizationId`, in the decision's transaction (a failing audit insert rolls the decision, its history event and its notices back; tested). `byRole` is `seat` when the actor was an eligible approver of the group before the move, otherwise `treasurer` (read from the member detail's `viewer.canDecide` BEFORE the definer runs). No reason, name, amount or purpose in any row (asserted against the stored rows).
+
+### Deviations from the Phase 3 text
+
+- **W1** The `ready_to_pay` recipients are the approve definer's `notify_pay_person_ids` (every effective `pay` holder except the approver), as C10 says. That list does not exclude a pay holder who is also the requester or payee; such a person is told, and can pay only under the sole-holder exception (D6). Not changed: C10 names the recipients and the definer owns the list.
+- **W2** Notice links need the organization slug. It is read inside the transaction (`select slug from organizations`) rather than passed from the gate, so `submitRequest`'s signature did not change and the link can never disagree with the organization the transition ran in.
+- **W3** `queueNotices` dedupes by address inside one notice (two people sharing an inbox are told once per notice), which the design does not mention.
+- **W4** Where a message states a date (`This was already approved on {date}.`) the server formats it from the digits (`formatCalendarDate`, "October 25, 2026"; no `Date`, locale or server zone, and `toLocale*` is banned). The failure also carries `decidedOn` (`YYYY-MM-DD`) so the UI may re-render it with `<FormattedDate>`. The format is mine; Copy only says `{date}`. `returned` and `not_approved` both read as "already sent back" and `approved` and `paid` as "already approved" because Copy has exactly those two sentences.
+- **W5** `approveRequestAction` returns `{ ok: true, data: { message: "Approved." } }` rather than void, so the UI treats the three decisions alike (V9 wrapping).
+- **W6** The `!already` guard in `submitRequest` is redundant with the definer (it returns an empty recipient list for `already_submitted`), so the EC2 notice test passes with the guard removed; the guard is kept as a second line and the test pins the observable fact (no second row, no second send).
+- **Scope reading.** The brief said "approve, send back, waive/override paths". Built: approve on both paths and send back from both the seat and the treasurer (`pay`, including from `approved`), all in `decisions.ts`, tested at library level. NOT built, because the design puts them in Batch 4: the treasurer-tree actions (`overrideApproveAction`, `treasuryReturnAction`), the waive verb (`payments.ts`, `REIMBURSEMENT_RECEIPT_WAIVED`), void, payment and the `paid`/`closed` notices. If waive was meant for this batch, say so and it is a small addition to `payments.ts`.
+
+### Copy
+
+No string outside Copy and the amendment was needed. C6 results, C10 subjects, headings, bodies, button and footnote, and the amendment's T1 and T3 strings are used verbatim and pinned. Not used by this batch (UI's): `COPY.decision.withdrawn`, the search strings. The two override refusals (`seat_holder_exists`, `needs_second_payer`) take the neutral string in `decisionRefusal`; the treasurer tree maps them to C8 (they need the group name and whether the viewer holds `manage`).
+
+### Contract for the next batches
+
+**Server actions** (`src/app/(org)/o/[slug]/reimbursements/actions.ts`, POST; each runs `gateReimbursementAction(slug)` first; any member passes, the DEFINER decides who may):
+
+| Action | Input | Result |
+|---|---|---|
+| `approveRequestAction(slug, input)` | `{ requestId, expectedRevision }`. Always the SEAT path; a posted `path`, person or organization is ignored (tested). | `{ ok: true, data: { message: "Approved." } }` |
+| `returnRequestAction(slug, input)` | `{ requestId, expectedRevision, kind: "needs_info" \| "not_approved", reason }`. `reason` is required, cleaned, at most 300. | `{ ok: true, data: { message: "Sent back." \| "Marked not approved." } }` |
+
+Failures: `{ ok: false, error, kind?, fieldErrors? }`. `kind: "already_decided"` adds `decidedOn` (`YYYY-MM-DD`, org-local) and `status` and never names a person; `kind: "changed_since_viewed"` (reload and review); `kind: "not_found"` is the one neutral `This request isn't available.` for missing, forbidden, not-yours and no-longer-decidable; a missing reason is `fieldErrors.reason` = `Give a reason.`; `two_factor_required` as before. A database failure throws. Both revalidate the member list and detail and the treasurer queue and detail paths.
+
+**Library for Batch 4's treasurer tree** (`decisions.ts`): `approveRequest(actor, { requestId, expectedRevision, path: "override" })` returns `{ kind: "ok", path, decidedOn } | { kind: "already_decided", decidedOn, status } | { kind: "refused", outcome } | { kind: "denied" }` with `outcome` one of `not_found`, `not_approvable`, `changed_since_viewed`, `seat_holder_exists`, `needs_second_payer`; `returnRequest(actor, { …, kind: "needs_info", reason })` works for a `pay` holder from `submitted` (no eligible approver) and from `approved` (`needs_info` only; `not_approved` from approved is `kind_invalid`). `denied` is the identity refusal (override without `pay` is `denied`, tested). Batch 4's `payments.ts` should reuse `queueNotices` / `sendQueuedNotices` with `{ kind: "requester_update", variant: "paid" | "closed" }` and the same in-transaction pattern.
+
+**Notices** (`reimbursement.notice.*`, all `person:role`): `needs_approval` (approvers; submit, route `seat`), `needs_treasurer` (pay holders other than the requester and payee; submit, route `treasurer`), `ready_to_pay` (pay holders other than the approver; approve), `requester_update` (the creator; approve, send back, not approved). Member link `<platform origin>/o/<slug>/reimbursements/<id>` for approvers and the requester; `<platform origin>/o/<slug>/admin/reimbursements/<id>` for `needs_treasurer` and `ready_to_pay`. A recipient with no deliverable address (none, or do-not-contact) gets no row and no error; a null `platformOrigin()` writes none and the transition commits.
+
+**For Batch 5 (UI):** `viewer.canDecide` from the member detail says whether to render Approve and Send back; the dialogs call the two actions above; show `error` under the reason field when `fieldErrors.reason` is set; on `already_decided` show `error` (or render `decidedOn` with `<FormattedDate>` into the same Copy sentence). Withdraw has no reason field (amendment); use `COPY.decision.withdrawn` for its toast.
+
+### Gates
+
+- `npm run typecheck` exit 0; `npm run lint` exit 0 (`--max-warnings=0`); `npm run check` all eight tripwires passed.
+- Unit suite without `DATABASE_URL` (CI shape): 612 files passed, 9,271 tests passed, 2,714 skipped (DB-gated).
+- New or changed tests: about 115 (33 `notices`, 34 `decisions.db`, 9 `notify.db`, 6 `role-bundle.db`, +14 `actions`, +9 `messages`, +6 `input`, +2 `dates`, +1 `tiles`; `email-audience` and `copy` assertions extended, one `email-audience` case rewritten).
+- DB-backed subset I touch, serial: `src/lib/{reimbursement,treasury,giving,contact-methods,org-portal,org-feature*,audit*}`, `src/lib/db/domain/reimbursement*`, `designation-parity.db`, the member actions test: 111 files, 2,132 tests passed, 1 skipped, 0 failed.
+- `scripts/treasury/test-rls-73.sql` as presby_app: 52 passes, exit 0.
+- Mutation evidence (each restored): removing the audit call from `approveRequest` fails `audit-coverage.test.ts › every function that calls an audited write definer calls auditReimbursement`; mapping every notice to the member surface fails `notices.test.ts › approvers and the requester go to the member route; pay holders to the treasury route` and `notify.db.test.ts › route treasurer`; the decisions DB suite pins separation of duties, the stale revision, the seat that ends mid-queue, two concurrent approvers (one wins), the override with one and two pay holders, and the audit-failure rollback (decision, history event and notices all roll back). The failing-first order for the pure modules was test, red (missing module/exports), then code.
+
+### Loop-back candidates and notes
+
+1. **Scope reading of "waive"** (see Deviations): confirm it is Batch 4's.
+2. **W1**: a pay holder who is also the requester gets `ready_to_pay`. Harmless (they can pay only as the sole holder), but if undesirable the fix is in the approve definer's list, a Batch 1 edit.
+3. **Test-environment note.** `decisions.db.test.ts` and `notify.db.test.ts` mock `@/lib/audit` (its `@/auth` import does not resolve under Vitest, as in `config.db.test.ts`) and `attemptQueuedSend`; the queue insert, `getPersonEmail` and the audit insert are real.
 
 ---
 

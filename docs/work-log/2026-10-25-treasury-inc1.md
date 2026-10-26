@@ -2162,3 +2162,17 @@ There is no `loading.tsx` in either tree, no `capture` attribute and no native d
 - Close EC42 on the PR's Vercel preview build before merge.
 
 Phase 6 (analyst) starts only after a PASS.
+
+## Phase 4 — Phase 5 run 1 fix (F-QA-1)
+
+**Implementer:** full-stack-developer (Batch 7 owner). **Date:** 2026-10-26.
+
+**What changed.** One file, `e2e/reimbursement-role-bundle.spec.ts`. The chair is no longer the seeded permanent `presbytery-nogrant` person (`e2e00000-…-0000000000a6`). The spec now inserts its own person `pid(4)` (`e2e96000-…-000000000004`, inside the reimbursement fixture's range and already in `FIXED_PEOPLE`, so the sweep deletes it), stamped `deletable_until` at insert like the requester and the second payer, and links it to the seeded chair account. The group chair seat, `makeChargeable` and `createCategory` use that person and account as before. The shared `e2e/support/invitation-fixture.ts` is untouched, and the reimbursement fixture shape is unchanged (so the other reimbursement specs were not re-run). The unused `personIdForUser` import was dropped.
+
+**Commands and results** (own dev server on :3590 from a clean `.next`, `RATE_LIMIT_DISABLED`, `DOMAINS_*` fakes, `AUTH_URL` and `E2E_BASE_URL` on :3590; stopped by PID, port confirmed free):
+- `e2e/reimbursement-role-bundle.spec.ts` (`E2E_ALLOW_SHARED_DB=true`): 9/9 passed.
+- After it, on `pipeline-treasury`: `people` with `deletable_until is not null` = 0; no seeded `e2e00000-…` person stamped; no `e2e96000-…` person and no `e2e-invite-*` or `e2e-reimb*` organization left.
+- `npx vitest run src/lib/db/fixture-deletable.test.ts --no-file-parallelism`: 5/5 passed.
+- `npm run typecheck`, `npm run lint`, `npm run check`: all pass.
+
+**Handoff.** Phase 5 re-run (qa): the scope QA listed for this fix is met by the commands above; the remaining open item is EC42 (the `sharp` preview-build check), which is the orchestrator's.

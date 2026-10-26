@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | See parent (shared) | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | See parent (shared) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; designed against the F289 0072 **draft** (`presby-assets` worktree, unmerged); three Phase 2 rulings corrected (R3 invoker to definer, R2 Drizzle declaration, R5 dead join); F333–F337 raised; open rulings O1–O4 | Design complete | 2026-10-26 |
-| 4 — Implementation | database-admin, then api-developer, then ux-developer | **BLOCKED: Phase 4 may not start until F289 (`pipeline/public-asset-allowlist`, migration 0072) has merged to `main` and 0072 is applied on this pipeline's Neon branch.** On unblocking: merge `main` into this branch, re-run the feasibility check below against the merged text, then start Batch 1 | — | — |
+| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied). Batch 2 (api-developer) next | Batch 1 done | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -634,7 +634,183 @@ Three sequential batches, each ending in a green tree: **database-admin** (Batch
 
 # Phase 4 — Implementation
 
-*Pending. Blocked until F289 has merged and 0072 is on this pipeline's Neon branch.*
+## Batch 1 — database-admin (2026-10-26)
+
+Branch `pipeline/person-photos`, `origin/main` merged at 49ea633 (0.46.1, F289). Neon branch `pipeline-person-photos` (`ep-sweet-scene`) only. 0068 and 0072 were already on the branch; 0072 was re-applied whole (`psql -1`, exit 0, flipped 0) so the live bodies are main's text.
+
+### Step 0 — R12 catalog (owner, `ep-sweet-scene`, after 0072)
+
+| R12 question | Query | Result |
+|---|---|---|
+| `memberships_person_org_key` is a unique constraint | `pg_constraint where conname = …` | `contype u`, `UNIQUE (person_id, organization_id)` |
+| `blob_assets_id_org_audience_key` exists | same | `contype u`, `UNIQUE (id, organization_id, audience)` |
+| `presby_app` holds no UPDATE/DELETE on `people` beyond 0009 (F38) | `aclexplode(relacl)` + `pg_attribute.attacl` | `presby_app` SELECT, INSERT, UPDATE; no DELETE; no column ACLs. 0009 states exactly that (blanket grant at :128, `revoke delete on people from presby_app` at :376). `presby_platform` S/I/U/D is 0009:44's blanket grant. **No drift.** |
+| Roster functions' `proconfig` and ACL match 0072 | `pg_proc` | both rosters and the door: `prosecdef t`, `{"search_path=public, pg_temp"}`, `{neondb_owner=X, presby_app=X}`, owner `neondb_owner` |
+| The owner reads FORCE-RLS tables inside definers | `pg_roles`, `pg_class` | `neondb_owner` `rolbypassrls t` and owns every table read (people, person_privacy, memberships, staff_positions, officer_terms, group_memberships, organization_feature_toggles/categories, blob_assets, organization_sites: all FORCE RLS) |
+| 0 rows have `people.photo_key` | `count(*) filter …` | 0 `photo_key`, 0 `photo_updated_at`, of 688 people |
+
+Extra premises checked: no `pg_default_acl` for `neondb_owner` (new tables get no implicit grants); `presby_app` can SELECT every table the invoker helpers read, including `feature_flags`; `memberships.household_role` is unconstrained text; no application path deletes `memberships`.
+
+### Step 0 — re-diff against 0072 as merged
+
+The design was written against the 0072 draft. Merged 0072 (`1f61f62`) agrees with every assumption 0078 depends on: the roster signatures and result rows are unchanged; `person_privacy` is joined on `person_id` alone; the door's photo test is `lower(pe.photo_key) = p_key::text` on global `people` (F340: no `people.organization_id`); and the index is `people_photo_key_lower_idx`. 0078's design used no `people.organization_id`, so there is no F340-class defect. A mechanical diff of 0078's three bodies against merged 0072 shows **only** the designed changes:
+- staff roster: 8 lines (the photo column and the join, in both branches);
+- committee roster: 4 lines;
+- door: 3 lines (the `is_photo` subquery).
+
+The inner alias in the door is `pph`, because merged 0072 already uses `ph` for the lateral.
+
+### Files created
+
+- `drizzle/0078_presby_person_photos.sql` — sections 0–7 as designed.
+- `src/lib/db/domain/person-photos.ts` — `personPhotos`, `personPhotoDesignations`, `PERSON_PHOTO_PURPOSES`.
+- `src/lib/db/domain/person-photos.schema.test.ts` — 20 tests (names mirrored, purpose list, grants, function split, restated hardening, no `photo_key` reader, hide_photo scoping, toggle literals).
+- `src/lib/db/domain/person-photos.db.test.ts` — 14 tests on the owner path (guards bind the owner; the FK behind the guard; retirement CHECK; membership NO ACTION; org-delete cascade).
+- `scripts/person-photos/test-rls-78.sql` — sections 78a–g, 82 passes as `presby_app`.
+- `scripts/person-photos/test-0078-migration.sh` — D4 (8 steps).
+- `src/lib/testing/person-photo-fixture.ts` — `seedPersonPhoto`, `setPersonPhotosToggle`, `removeSeededPersonPhoto` (owner path; exempt from the blob scan as `src/lib/testing/`).
+- `docs/work-log/person-photos-inc1.integration.patch` — Rule 16 diffs (below).
+
+### Files modified
+
+- `src/lib/db/domain/people.ts` — the RETIRED comment on `photoKey`/`photoUpdatedAt` (F334).
+- `src/lib/db/domain/assets.ts` — the header no longer says `photo_key` "stays untouched"; it now names person photos as a private consumer.
+- `scripts/check-schema-parity.ts` — two `architectural` allowlist rows for the DDL-only blob FKs.
+- F331: `src/lib/db/domain/public-roster-photo.db.test.ts`, `src/lib/storage/public-asset.db.test.ts`, `src/app/(public)/site/[slug]/assets/[key]/route.db.test.ts` (below).
+
+### Schema changes
+
+- New tables: `person_photos` and `person_photo_designations`.
+- New CHECK: `people_photo_key_retired`.
+- Five functions: `presby_person_photos_enabled`, `presby_photo_subject_is_minor`, `presby_person_public_photo` (definer, owner-only), `presby_person_public_photo_status` (definer), `presby_person_directory_photo`.
+- Two guard trigger functions.
+- `presby_public_staff_roster`, `presby_public_committee_roster` and `presby_public_site_asset` are replaced, with the same signatures.
+- **Mode: hand-written** (`drizzle/0078_presby_person_photos.sql`), applied with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0078_presby_person_photos.sql` to `ep-sweet-scene` only.
+- **Idempotence, whole file applied twice:** both runs exit 0. Counts before / after apply 1 / after apply 2 (people, blobs, memberships): 688/111/50 each time. The new functions went 0 to 7, then stayed 7.
+- On the scratch database (D4 step 4), the second whole-file apply ran with photo rows present. The catalog fingerprint `fd85faf3…` was identical, the photo rows were byte-identical (md5), and counts were 1/2/2/19.
+- **Journal entry:** idx 78, `0078_presby_person_photos`, when `1788655973186`. It is in the integration patch, not committed (Rule 16). D4 step 8 ran drizzle-kit migrate with exactly that entry.
+
+### Deviations from the design (each with its reason)
+
+1. **The two blob FKs are DDL-only.** The design said `foreignKey()` for five composite FKs. DECISION-058 and F289's `audience-callsites.test.ts` fail any import of `blobAssets` outside `blob-store.ts`, so `person_photos_image_fk` and `_thumb_fk` follow the ticket and statement precedent: declared in SQL, allowlisted in parity, and noted in the file header. The other three composite FKs are in Drizzle.
+2. **Guard refusals use `check_violation`.** The design copied 0064, which used `insufficient_privilege`. The column-grant refusal is `insufficient_privilege`, so the RLS script can tell which mechanism fired.
+3. **The designation guard reads the photo `FOR SHARE`.** That lock conflicts with the removal UPDATE, so remove-versus-designate serializes at the database and not only under `store.ts`'s advisory lock. The design's residual (a designation left active on a removed photo) is still inert by the readers' double filter.
+4. **`presby_person_directory_photo` body.** The design gave it as prose; it is written to that prose. Keys are null when withheld. `photo_id` is kept, so the page can mark the chip.
+5. **The R78e roster/door matrix runs on a live site in a DB test.** As `presby_app`, Alder Creek's site is `provisioning` and `presby_app` cannot write `organization_sites` (F289 hit the same limit). So the SQL script asks the same definer core through the status wrapper. The live-site cases (thumbnail never served, the Q6 fallback, ended and removed, toggle off, a minor at read time) are a new describe block in `public-roster-photo.db.test.ts`. D2 (wrapper vs roster parity, toggle vs `orgFeatureEnabledInTx`) stays Batch 2's: the catalog entry does not exist yet.
+6. **`src/lib/dev-docs.ts` is coupled to the barrel line (F338, below).** Its two MODULES lines are in the integration patch as diff 4.
+
+### F331 rewrites
+
+Every test that wrote `people.photo_key` now seeds `person_photos` and a website designation, with the toggle on. Under 0078 all three files had failed in `beforeAll` with `23514 people_photo_key_retired`.
+
+Every original property still holds, except two 0072 cases that are now **unrepresentable**. Those are asserted as such, not dropped:
+- "photo stored `public_site`": the FK refuses it (`23503 person_photos_image_fk`);
+- "`photo_key` stored uppercase": the key columns are `uuid`, and the roster emits lowercase.
+
+Counts:
+- `public-roster-photo` 13 (8 kept plus 5 live-site 0078 cases);
+- `public-asset` 33 (32 kept or reshaped, plus a merged-tombstone case);
+- `route` 5.
+
+Photo content type in the fixtures is now `image/jpeg` (the master's real type).
+
+`scripts/assets/test-rls-72.sql` needed no change. It seeds no photo, and 72a's index check still holds until 0079. It passes 24 under 0078.
+
+### Failing-first evidence
+
+The `test-rls-78.sql` failure lines are below. Each mechanism was broken on the owner connection, the suite was run as `presby_app`, and then the mechanism was restored.
+
+**Catalog layer:**
+- `no force` → 78a :67 (2 → 1);
+- policy dropped → 78a :71;
+- table UPDATE or DELETE granted → 78a :89 (14 → 13);
+- either guard disabled → 78a :147;
+- website_attested dropped, or retirement CHECK dropped → 78a :119 (9 → 8);
+- active_idx dropped → 78a :127;
+- image_fk or person_fk dropped → 78a :140;
+- core granted to `presby_app` → 78g :179;
+- wrapper or core made invoker, or `search_path` reset → 78g :166.
+
+**Behaviour layer** (catalog blocks stripped):
+- policy dropped → 78b WITH CHECK;
+- table UPDATE → 78d (the guard message escapes the column-grant handler);
+- DELETE granted → "FAIL 78d - presby_app deleted a designation";
+- photo guard off → "FAIL 78d - a removed photo was restored";
+- designation guard off → 78b RLS;
+- website_attested → "FAIL 78c - an unattested website designation";
+- active_idx → "FAIL 78c - a second active directory designation";
+- image_fk → "FAIL 78c - …another org's blob";
+- person_fk → "FAIL 78c - …not a member of this org";
+- retirement CHECK → "FAIL 78d - people.photo_key was written";
+- core granted → "FAIL 78e - presby_app called the owner-only core directly";
+- wrapper invoker → `permission denied for function presby_person_public_photo`.
+
+**Function bodies:**
+- toggle forced true → 78e "toggle OFF … toggle_off";
+- minor forced false → 78e "a minor by date of birth";
+- hide_photo org-scoped in the core → 78e "hide_photo set at another org" (F333).
+
+**F335:** re-applying 0072 on top of 0078 fails 78g (3 bodies read `photo_key`). Re-applying 0078 makes it green.
+
+FORCE, the core's definer bit and the `search_path` pin change nothing for `presby_app`: their callers are definers and `neondb_owner` is BYPASSRLS. Their proof is the catalog assertion.
+
+**Owner suite:** with both guards disabled, 10 of 14 fail; with the retirement CHECK dropped, 1 fails. Everything was restored, then all green.
+
+**D4 PASS** (`scratch_0078` on `ep-sweet-scene`, dropped after):
+1. The refusal without 0072 rolled back whole.
+2. FP1 was stable across apply 2 with data present.
+3. Both RLS suites passed (82 and 24).
+4. The retirement CHECK refused the owner.
+5. 0072 then 0078 restored FP1.
+6. The drizzle-kit runner with the idx-78 entry left FP1.
+
+### Gates
+
+- `typecheck` 0 errors.
+- `lint` clean.
+- `npm run check` 8/8 passed.
+- `check:schema-parity` with the barrel line applied: 87 tables, 9 differences, 9 allowlisted, 0 failing.
+- **Unit suite** with the integration patch applied: 635 files and 9530 tests passed, 2696 skipped. **Without the patch, exactly one test fails:** `dev-docs.test.ts` "sees the same tables in the exports as are declared" (F338).
+- **DB-backed, serial**, 22 files and 647 tests passed: the 5 new or rewritten files, plus `blob-audience.db`, `serving.db`, `statements.db`, `giving-statements.db`, `directory`, `sites`, `staff`, `officers`, `groups`, `people`, `people-update`, `children`, `fixture-deletable`, `admin/staff/actions`, `blob-store`, `org-features` and `blob-audience.schema`.
+- `test-rls-78.sql` 82 passes and `test-rls-72.sql` 24 passes, both as `presby_app`.
+
+### Findings
+
+- **F338 (process/tooling, low).** F283's `dev-docs.test.ts` requires every declared `pgTable` to be re-exported from the barrel. Rule 16 keeps the barrel line off a pipeline branch until integration. So a pipeline that adds a domain table cannot have a green standalone branch.
+  - This pipeline is the first since F283 to add a table.
+  - Workaround here: the patch carries the barrel and `dev-docs.ts` together, and gates and QA run with it applied (the design's sanctioned mode).
+  - Recommend the orchestrator either (a) let a pipeline commit its own barrel line and MODULES entry (they are append-only one-liners), or (b) give `dev-docs.test.ts` a pending-integration list.
+  - **Until then, QA must apply `docs/work-log/person-photos-inc1.integration.patch` before the unit suite.**
+- F339 unused.
+
+### For the orchestrator (integration)
+
+- Apply `docs/work-log/person-photos-inc1.integration.patch` (journal, test-rls.sql include, barrel, dev-docs). Then run `npm run docs:erd`.
+- Section 78 needs the `org_portal.feature_categories` `feature_flags` row (`scripts/seed.ts`). It asserts the row exists rather than silently no-op'ing.
+- TODO-line candidate: F338 (above). P4's lines stand as designed.
+
+### Handoff to Batch 2 (api-developer)
+
+- **The SQL contract is live on `ep-sweet-scene`** exactly as the design's table:
+  - `presby_person_photos_enabled(org)`, `presby_photo_subject_is_minor(org, person)` and `presby_person_directory_photo(org, person)` are invokers, EXECUTE for `presby_app`. The directory function returns `(thumb_key, image_key, photo_id, withheld)`. Keys are null when withheld (`toggle_off` | `minor` | `hide_photo`), and there are zero rows when there is no active directory designation.
+  - `presby_person_public_photo_status(person)` is a definer, EXECUTE for `presby_app`, and the only door to the core. It returns `(image_key, source, withheld)`, with `source` one of `website` | `directory_attested`, and `withheld` one of `toggle_off` | `minor` | `merged` | `hide_photo`. It returns zero rows without an org context.
+  - The core `presby_person_public_photo` is owner-only: calling it from `presby_app` is `42501`.
+- **Refusal shapes `store.ts` must map:**
+  - both guards raise `23514` (`check_violation`) with fixed messages;
+  - a second active designation for a purpose is `23505 person_photo_designations_active_idx`;
+  - a duplicate active image for the person is `23505 person_photos_active_image_idx` (`duplicate`);
+  - designating a removed photo is `23514` "…is removed, or is not this person's photo in this organization" (`already_removed` or `not_found`);
+  - website without attestation is `23514 person_photo_designations_website_attested`.
+  - Order inside designate: **end the old row, then insert**, or the partial unique fires.
+  - Remove: end the designations, then set `removed_at` and `removed_by` **together** (removal_pair).
+- `created_at` and `designated_at` are stamped by the guards on `presby_app`: do not pass them.
+- Blobs: `store({ audience: "private" })` only. A `public_site` blob cannot be referenced (FK). The FK also requires both blobs to be in the same org.
+- Tests: `src/lib/testing/person-photo-fixture.ts` seeds photos on the owner path for DB tests (`seedPersonPhoto`, `setPersonPhotosToggle`, `removeSeededPersonPhoto`).
+- Comments in Batch 2's files that 0078 made false (Copy C10): `sites.ts:1645`, `initials.ts:4`, `blob-store.ts:14`, `directory.ts:22,112`, the `person-avatar.tsx` header. `people.ts` and `assets.ts` are done.
+- `sharp`: deployment-engineer confirms one copy, then `npm install sharp@0.35.5`, as designed.
+- Apply locally: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0078_presby_person_photos.sql` (pipeline branch only). No seed change.
+
+Strings added or changed: none user-facing (SQL error messages and comments only).
 
 ---
 

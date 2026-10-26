@@ -107,6 +107,89 @@ describe("proxy — /o/* (the org portal)", () => {
   });
 });
 
+describe("proxy - /developer (F284)", () => {
+  it("sends an unauthenticated visitor to /signin carrying the deep link", async () => {
+    auth.mockResolvedValueOnce(null as unknown as Awaited<
+      ReturnType<typeof edgeAuth>
+    >);
+
+    const res = await proxy(request("/developer/tables/roll_actions"));
+
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get("location") as string);
+    expect(location.pathname).toBe("/signin");
+    expect(location.searchParams.get("callbackUrl")).toBe(
+      "/developer/tables/roll_actions",
+    );
+  });
+
+  it.each([
+    "/developer",
+    "/developer/",
+    "/developer/tables/x",
+    "/developer/schema.json",
+  ])(
+    "challenges a required, unverified second factor on %s, returning to that path",
+    async (path) => {
+      signedIn({ twoFactorRequired: true, twoFactorVerified: false });
+
+      const res = await proxy(request(path));
+
+      expect(res.status).toBe(307);
+      const location = new URL(res.headers.get("location") as string);
+      expect(location.pathname).toBe("/totp");
+      expect(location.searchParams.get("callbackUrl")).toBe(path);
+    },
+  );
+
+  it("challenges an ADMIN_ROLE holder too: the 2FA check runs before the role shortcut", async () => {
+    signedIn({
+      roles: [ADMIN_ROLE],
+      twoFactorRequired: true,
+      twoFactorVerified: false,
+    });
+
+    const res = await proxy(request("/developer"));
+
+    const location = new URL(res.headers.get("location") as string);
+    expect(location.pathname).toBe("/totp");
+    expect(location.searchParams.get("callbackUrl")).toBe("/developer");
+  });
+
+  it("admits a verified user with no role or feature, with no /access-pending bounce", async () => {
+    // Authorization is the page gate's live read of users.is_platform_admin.
+    // A PROTECTION_RULES entry here would gate it with a session claim, which
+    // is the predicate DECISION-044 says never to route on.
+    signedIn({ roles: [], features: [], twoFactorRequired: true, twoFactorVerified: true });
+
+    const res = await proxy(request("/developer/tables/x"));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("admits a signed-in user with no 2FA requirement", async () => {
+    signedIn({ twoFactorRequired: false });
+
+    const res = await proxy(request("/developer"));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it.each(["/developerx", "/developer-x"])(
+    "does not gate %s: the boundary is a path segment, not a string prefix",
+    async (path) => {
+      signedIn({ twoFactorRequired: true, twoFactorVerified: false });
+
+      const res = await proxy(request(path));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("location")).toBeNull();
+    },
+  );
+});
+
 describe("proxy — the routes around it", () => {
   it("leaves /home outside the 2FA gate — it is not an org path", async () => {
     // /home carries the chooser-equivalent content (DECISION-124) and renders
@@ -357,6 +440,9 @@ describe("proxy - a custom host is rewritten to /site/<host><path> (R1)", () => 
       "/account/verify-email/abc",
       "/o/alder-creek",
       "/admin",
+      "/developer",
+      "/developer/tables/roll_actions",
+      "/developer/schema.json",
       "/account",
       "/site/alder-creek",
       `/site/${CUSTOM}`,

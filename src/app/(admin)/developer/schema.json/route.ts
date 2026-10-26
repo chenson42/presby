@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { readIsPlatformAdmin } from "@/lib/platform-admin";
+import { checkDeveloperApiRequest } from "../guard";
 import {
   buildSchemaDocs,
   buildPermissionDocs,
@@ -9,28 +8,42 @@ import {
 } from "@/lib/dev-docs";
 
 /**
- * Machine-readable twin of /developer.
+ * Machine-readable twin of /developer/data-model.
  *
- * This is the AI support worker's map of the system. Generated from the same
- * source as the HTML page, so the two cannot disagree — which is the point.
- * A worker that navigates the schema from a hand-written document will act on
- * a stale one eventually.
+ * Generated from the same source as the HTML page, so the two cannot disagree.
+ * Structure only, never data. Same gate as the page, answered as JSON because a
+ * route handler cannot redirect a program to a sign-in page.
  *
- * Structure only, never data. Same gate as the page.
+ * Statuses, checked in this order (DECISION-258). The first two are defense in
+ * depth: the proxy challenges a signed-out or unverified browser first, so only
+ * a caller that bypasses the Edge reaches them.
+ *   401 unauthorized          no session
+ *   403 two_factor_required   a second factor is required and not verified
+ *   503 unavailable           the access check or the schema read failed
+ *   403 forbidden             signed in, not entitled
+ *   200                       the payload
+ * Every response is `no-store`.
  */
+const NO_STORE = { "cache-control": "no-store" } as const;
+
+function fail(error: string, status: number) {
+  return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
+
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const verdict = await checkDeveloperApiRequest();
+  if (verdict === "signed_out") return fail("unauthorized", 401);
+  if (verdict === "two_factor_required") return fail("two_factor_required", 403);
+  if (verdict === "unavailable") return fail("unavailable", 503);
+  if (verdict === "forbidden") return fail("forbidden", 403);
 
-  if (!(await readIsPlatformAdmin(session.user.id))) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  let tables;
+  try {
+    // Same source as the HTML page, descriptions included.
+    tables = buildSchemaDocs(await loadDescriptions());
+  } catch {
+    return fail("unavailable", 503);
   }
-
-  // Same source as the HTML page, descriptions included, so the two cannot
-  // disagree about what the schema is.
-  const tables = buildSchemaDocs(await loadDescriptions());
 
   return NextResponse.json(
     {
@@ -44,6 +57,6 @@ export async function GET() {
       permissions: buildPermissionDocs(),
       tables,
     },
-    { headers: { "cache-control": "no-store" } },
+    { headers: NO_STORE },
   );
 }

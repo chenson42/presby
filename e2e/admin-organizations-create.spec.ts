@@ -109,6 +109,7 @@ test.describe("Admin — create organization (leaves no residue)", () => {
       expect(groupRows.map((r) => r.name).sort()).toEqual([
         "Active Membership",
         "Board of Deacons",
+        "Board of Deacons Moderator",
         "Session",
       ]);
     } finally {

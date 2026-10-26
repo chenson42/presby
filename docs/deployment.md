@@ -916,6 +916,10 @@ Apply `0072` and promote the code together, in this order, then verify.
    bundle image). The one designed failure is the pre-flip assertion
    (`0072: N blob(s) are both published ... and used by a private consumer`);
    it rolls back whole and names the count.
+   Rehearsed 2026-10-26 on a throwaway Neon branch created from `production`:
+   exit 0, `0072: flipped 81 blob(s) to public_site` (80 distinct bundle images
+   plus the mark), and V1 to V4 below all as expected. Re-run the rehearsal if
+   production changes before the apply.
 4. **Promote the code** (merge; Vercel builds). Old code and the new schema
    coexist briefly: an old `store()` insert omits `audience` and lands
    `private` (the column default is permanent and fails closed), so an image

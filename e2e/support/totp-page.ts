@@ -10,8 +10,11 @@
  * `domains-ui-fixture` and `giving-fixture`, which sign in on a cold server, so
  * the wait is generous.
  *
- * Neither helper presses Verify: a caller asserts on what follows it, and the
- * hydration spec needs the click as its own step.
+ * Typing the sixth digit SUBMITS the code (DECISION-257), so `enterTotpCode`
+ * is the whole act: it never presses Verify, and a caller must not either (the
+ * button reads "Verifying…" or is gone). A caller then waits for the outcome
+ * itself (`waitForTotpVerified`, or the URL it expects). The Verify button is
+ * only the fallback, for a wrong-length paste or recovery mode.
  */
 import { expect, type Locator, type Page } from "@playwright/test";
 
@@ -42,7 +45,8 @@ export function recoveryField(page: Page): Locator {
 
 /**
  * Types a six-digit code into the boxes, relying on auto-advance: focus box 1,
- * then send the digits through the keyboard so each lands where focus is.
+ * then send the digits through the keyboard so each lands where focus is. The
+ * sixth digit submits the code; this returns once the digits are typed.
  */
 export async function enterTotpCode(page: Page, code: string): Promise<void> {
   const first = totpBox(page, 1);
@@ -59,4 +63,17 @@ export async function enterRecoveryCode(page: Page, code: string): Promise<void>
   const field = recoveryField(page);
   await expect(field).toBeVisible();
   await field.fill(code);
+}
+
+/**
+ * Waits for a typed code to be accepted: by default, until the page has left
+ * /totp. Pass a regex or predicate for a specific destination. Replaces the
+ * old "click Verify, then wait" pair now that the sixth digit submits.
+ */
+export async function waitForTotpVerified(
+  page: Page,
+  destination: RegExp | ((url: URL) => boolean) = (url) => !url.pathname.startsWith("/totp"),
+  timeout = 15_000,
+): Promise<void> {
+  await page.waitForURL(destination, { timeout });
 }

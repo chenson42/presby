@@ -180,7 +180,7 @@ menu is P1.
 - `/account` — profile, email change with re-verification, password change
 - `/account/2fa` — TOTP enrolment, recovery codes
 - `/admin` — users and roles, feature flags, audit log, feedback triage,
-  what's-new, email queue, **2FA policy** (per-congregation, DECISION-033)
+  what's-new, email queue, **2FA policy** (per-congregation, DECISION-033; by role and per person, DECISION-291)
 - `/developer` — the developer portal (home, data model, documentation).
   Requires `users.is_platform_admin`, which **nothing currently seeds** — so it
   is unreachable by every fixture above until you set that column by hand.

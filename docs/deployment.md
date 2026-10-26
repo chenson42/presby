@@ -473,8 +473,9 @@ Added at integration (v0.34.0). Production is at `0053` as of 2026-10-07.
 - Upstash (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and Turnstile configured: the
   in-memory rate limiter is per-instance on Vercel, so the public give form's
   limits are only real with Upstash.
-- `auth.require_2fa` is on. (Holding any giving key already forces 2FA through
-  the permission, but the platform flag is the backstop for everyone else.)
+- `auth.require_2fa` is on. It is the master switch for every requirement (a
+  person's own setting, a role that carries a flagged key, a congregation's
+  policy); with it off, nobody is challenged (DECISION-291).
 - The enforced `Content-Security-Policy` header is verified **in a browser** on
   `/site/<slug>/give`, `/site/<slug>/give/return` and the member equivalents,
   with a clean console (Batch 4 ships it; `next.config.ts`, same string as the

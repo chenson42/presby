@@ -42,7 +42,11 @@ export async function isLocalLoginEnabled(): Promise<boolean> {
 }
 
 /**
- * Does any congregation this user belongs to require 2FA?
+ * Does a congregation this user belongs to, or a role they hold, require 2FA?
+ * (Both arms of presby_two_factor_required(): the congregation's
+ * `require_two_factor`, and any held key flagged `requires_two_factor` - the
+ * three giving keys plus roles.manage, role_grants.manage and domains.manage,
+ * DECISION-291.)
  *
  * Delegates to presby_two_factor_required(), which is SECURITY DEFINER for the
  * reason finding F26 records: this runs during sign-in, when no organization
@@ -69,9 +73,14 @@ async function organizationRequiresTwoFactor(userId: string): Promise<boolean> {
 /**
  * Compute the effective twoFactorRequired value for a jwt() callback.
  *
- * Two sources can require 2FA, and the more restrictive wins:
- *   - `users.two_factor_required` — this person, set by an admin
+ * Three sources can require 2FA, and the more restrictive wins:
+ *   - `users.two_factor_required` — this person's own setting. It defaults to
+ *     false (DECISION-291); an admin sets it, and the platform-role grant points
+ *     switch it on (src/lib/auth/platform-role-two-factor.ts)
  *   - any organization they hold an active membership in (per-church policy)
+ *   - a role they hold that carries a key flagged `requires_two_factor`
+ *     (giving, roles.manage, role_grants.manage, domains.manage)
+ * The last two are one definer call, presby_two_factor_required().
  *
  * Both are then subject to the `auth.require_2fa` master switch, which can turn
  * enforcement off for the whole installation:
@@ -93,8 +102,10 @@ export async function computeEffectiveTwoFactor(
   rawRequired: boolean,
   userId?: string,
 ): Promise<boolean> {
-  // The user's own column short-circuits the org lookup; there is nothing a
-  // congregation could add to an already-required user.
+  // The user's own column short-circuits the definer call; there is nothing a
+  // congregation or a role could add to an already-required user. Most NEW
+  // accounts have a false column (DECISION-291), so they pay the call (about
+  // 3 ms) on every authenticated request; that cost is accepted.
   const required =
     rawRequired ||
     (userId ? await organizationRequiresTwoFactor(userId) : false);

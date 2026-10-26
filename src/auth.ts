@@ -17,7 +17,7 @@ import {
 } from "@/lib/db/schema";
 import { authConfig } from "@/lib/auth/config";
 import { evaluateSignIn, isEmailClaimVerified } from "@/lib/auth/sign-in-gate";
-import { ADMIN_ROLE, FEATURES, MEMBER_ROLE } from "@/lib/permissions";
+import { ADMIN_ROLE, FEATURES } from "@/lib/permissions";
 import { getRequestIp } from "@/lib/request-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import {
@@ -32,6 +32,7 @@ import {
 } from "@/lib/auth/local-login";
 import { verifyTurnstile } from "@/lib/turnstile";
 import { takeTwoFactorGrant } from "@/lib/auth/two-factor-grant";
+import { ensureDefaultRole } from "@/lib/auth/default-role";
 
 const INITIAL_ADMIN_EMAILS = (process.env.INITIAL_ADMIN_EMAILS ?? "")
   .split(",")
@@ -39,41 +40,6 @@ const INITIAL_ADMIN_EMAILS = (process.env.INITIAL_ADMIN_EMAILS ?? "")
   .filter(Boolean);
 
 const FEATURE_KEYS = Object.values(FEATURES) as string[];
-
-/**
- * Bind a freshly-signed-in user to a default role if they have none.
- *
- * Two reasons we do this here rather than relying on `events.createUser`:
- *
- *   1. `events.createUser` is fire-and-forget — the JWT callback can run
- *      before its async role insert completes, leaving the user with an
- *      empty `roles` array on first request.
- *   2. Credentials users skip the adapter entirely, so `events.createUser`
- *      never fires for them at all (this is why the seed script binds the
- *      local admin's role directly).
- *
- * Idempotent: returns early if the user already holds at least one role.
- */
-async function ensureDefaultRole(
-  userId: string,
-  email: string | null,
-): Promise<void> {
-  const existing = await db.query.userRoles.findFirst({
-    where: eq(userRoles.userId, userId),
-  });
-  if (existing) return;
-  const desiredRoleName = email && INITIAL_ADMIN_EMAILS.includes(email.toLowerCase())
-    ? ADMIN_ROLE
-    : MEMBER_ROLE;
-  const role = await db.query.roles.findFirst({
-    where: eq(roles.name, desiredRoleName),
-  });
-  if (!role) return;
-  await db
-    .insert(userRoles)
-    .values({ userId, roleId: role.id })
-    .onConflictDoNothing();
-}
 
 export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ...authConfig,
@@ -266,9 +232,11 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         // event runs fire-and-forget for OAuth users (the JWT callback can
         // race ahead of it), and Credentials sign-ins never fire it at all,
         // so we ensure the default role assignment + role load happen here
-        // synchronously below.
+        // synchronously below. For an INITIAL_ADMIN_EMAILS address the same
+        // call also switches the person's own two-factor setting on (F343,
+        // DECISION-291), which is why it must stay ABOVE the `dbUser` read.
         token.roles = undefined;
-        await ensureDefaultRole(user.id, user.email ?? null);
+        await ensureDefaultRole(user.id, user.email ?? null, INITIAL_ADMIN_EMAILS);
         await db
           .update(users)
           .set({ lastLoginAt: new Date(), failedLoginAttempts: 0, lockedUntil: null })
@@ -311,12 +279,15 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
       if (trigger === "update" && takeTwoFactorGrant(userId)) {
         token.twoFactorVerified = true;
       }
-      // Effective twoFactorRequired: (this user's column OR any congregation
-      // they belong to requiring it) AND the auth.require_2fa master switch.
-      // The per-church arm goes through a SECURITY DEFINER function — no org
-      // GUC exists at sign-in, so a plain query would be filtered to zero rows
-      // for exactly the users it protects (F26). Falls back on DB error so a
-      // blip neither ungates nor strands anyone. See DECISION-026.
+      // Effective twoFactorRequired: (this user's own column OR a congregation
+      // they belong to requiring it OR a role they hold that carries a flagged
+      // key) AND the auth.require_2fa master switch. The last two arms go
+      // through one SECURITY DEFINER function, presby_two_factor_required() -
+      // no org GUC exists at sign-in, so a plain query would be filtered to
+      // zero rows for exactly the users it protects (F26). New accounts default
+      // to a false column (DECISION-291), so most of them now pay that call on
+      // every request. Falls back on DB error so a blip neither ungates nor
+      // strands anyone. See DECISION-026.
       token.twoFactorRequired = await computeEffectiveTwoFactor(
         dbUser.twoFactorRequired,
         userId,

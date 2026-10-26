@@ -141,6 +141,8 @@ export const MODULES: Record<string, string> = {
   person_talents: "C. Person extensions",
   background_checks: "C. Person extensions",
   person_medical: "C. Person extensions",
+  person_photos: "C. Person extensions",
+  person_photo_designations: "C. Person extensions",
   roll_actions: "D. Rolls",
   transfer_certificates: "D. Rolls",
   ordinations: "E. Officers",

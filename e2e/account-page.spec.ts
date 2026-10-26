@@ -108,7 +108,7 @@ test.describe("Account page (/account)", () => {
       await expect(page.getByLabel(new RegExp(`^digit ${n} of 6$`, "i"))).toBeVisible();
       await expect(page.getByLabel(new RegExp(`^digit ${n} of 6$`, "i"))).not.toBeFocused();
     }
-    // Typing still advances (the same component as /totp), without submitting.
+    // Typing still advances (the same component as /totp); three digits never submit.
     await first.click();
     await page.keyboard.type("123");
     await expect(page.getByLabel(/^digit 4 of 6$/i)).toBeFocused();

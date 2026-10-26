@@ -228,7 +228,7 @@ export const statisticalReturns = pgTable(
      * in `drizzle/0053_presby_name_history_import_staging.sql` — declaring it
      * here would create a second `returns.ts` <-> `imports.ts` module cycle
      * (`imports.ts` already imports this file for `statisticalReturns`; the
-     * `blobAssets` shape, `assets.ts:63-78`), so it carries an
+     * `blobAssets` shape, `assets.ts:87-101`), so it carries an
      * `architectural` row in `scripts/check-schema-parity.ts` instead.
      * Composite rather than plain because an imported return's
      * `organizationId` IS the presbytery and the import row's is too — the

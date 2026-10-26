@@ -1,59 +1,69 @@
 import { NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
-import { isFlagEnabled } from "@/lib/flags";
-import { verifyGithubActionsOidcToken } from "@/lib/sites-ingest-auth";
 import {
-  resolveOrganizationByRepo,
-  recordSiteIngest,
-  type PublishedSiteBundlePage,
-} from "@/lib/sites";
-import { getBlobStore, BlobValidationError } from "@/lib/storage/blob-store";
-import { sniffTicketAttachmentContentType } from "@/lib/storage/sniff";
-import { reservedSitePath } from "@/lib/sites-reserved-paths";
-import { slugSitePath } from "@/lib/site-urls";
-import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
+  MAX_MANIFEST_ENTRIES,
+  authorizeIngest,
+  errorResponse,
+  handleIngest,
+  publishSiteBundle,
+  readJsonBody,
+  storeSiteImage,
+  validatePages,
+} from "@/lib/sites-ingest";
+import type { PublishedSiteBundlePage } from "@/lib/sites";
 
 /**
- * `POST /api/sites/ingest` — the platform's own GitHub Actions CI POSTs a
- * normalized content bundle here on every push to `main` in a `site-<slug>`
- * repo. See docs/work-log/2026-08-20-public-sites.md Phase 3 "API Contract".
+ * `POST /api/sites/ingest` - the LEGACY single-request ingest: the platform's
+ * own GitHub Actions CI POSTs a normalized content bundle (pages plus every
+ * image, base64) here on a push to `main` in a `site-<slug>` repo. See
+ * docs/work-log/2026-08-20-public-sites.md Phase 3 "API Contract".
  *
- * NOT a Server Action, and deliberately NOT under `src/app/api/webhooks/` —
+ * Since site-ingest-size (DECISION-279) this is one of FOUR routes. A site whose
+ * whole bundle exceeds the 4,000,000-byte request limit cannot use this one and
+ * publishes through the staged, content-addressed routes instead:
+ *   POST /api/sites/ingest/plan     which image hashes the platform still needs
+ *   POST /api/sites/ingest/images   one image's raw bytes, hash-verified
+ *   POST /api/sites/ingest/commit   the pages plus { manifestKey, sha256 } per image
+ * This route is kept indefinitely (the client uses it whenever the bundle fits,
+ * so neither repository's deploy order can break a small site). It shares the
+ * gate (`authorizeIngest`), the bounded body read and `publishSiteBundle` with
+ * the staged routes through `src/lib/sites-ingest.ts`; every blob-store call and
+ * its `audience` literal lives there.
+ *
+ * NOT a Server Action, and deliberately NOT under `src/app/api/webhooks/` -
  * that tree (DECISION-028) is scoped to THIRD-PARTY inbound webhooks; this is
  * the platform's own CI, a different trust class (Phase 2's placement
  * ruling). Auth is GitHub Actions OIDC, verified per-request against token
- * claims (`src/lib/sites-ingest-auth.ts`) — never a session, never
+ * claims (`src/lib/sites-ingest-auth.ts`) - never a session, never
  * `hasFeature`/`hasPermission`. `src/proxy.ts`'s existing unconditional
- * `/api/*` bypass already lets this route through with no proxy change.
+ * `/api/*` bypass already lets these routes through with no proxy change.
  *
- * The `check:audit` tripwire scans only `src/app/**\/actions.ts` files — this
- * route's `SITE_CONTENT_INGESTED` write is intentionally outside that scope
+ * The `check:audit` tripwire scans only `src/app/**\/actions.ts` files - the
+ * `SITE_CONTENT_INGESTED` write is intentionally outside that scope
  * (DECISION-084), the fifth instance of the documented
  * RATE_LIMIT_BLOCKED/EMAIL_QUEUE_PERMANENT_FAILURE/ACCESS_DENIED/
  * USER_ACCOUNT_LOCKED precedent pattern in `src/lib/audit.ts`.
  *
+ * Request: `{ bundle: { schemaVersion: 1, pages, images: [{ manifestKey,
+ * contentType, bytesBase64 }] } }`, at most 4,000,000 bytes and 2,000 images.
+ *
  * Response contract (`SitesIngestResponse`):
  *   200 { status: "ingested", organizationSlug, commitSha, pageCount }
  *   200 { status: "already_current", organizationSlug, commitSha }
- *   401 { status: "error", error } — OIDC verification failed
- *   404 { status: "error", error } — token's `repository` claim resolves to
- *       no organization_sites row. Safe to be specific: the caller is
- *       GitHub's own trusted CI, not a public prober.
- *   422 { status: "error", error } — malformed bundle / bad image
- *   503 { status: "error", error } — sites.public_render is off. A disabled
- *       feature rejects ingest too, not just the read path (Phase 3
- *       Permissions & Flags) — an org's content should not silently go
- *       "live" behind a flag that then flips on with stale-vs-fresh
- *       ambiguity.
+ *   error { status: "error", code, error } - `code` is the closed set in
+ *       `INGEST_ERROR_CODES`:
+ *   401 unauthorized - OIDC verification failed
+ *   404 site_not_provisioned - the token's `repository` claim resolves to no
+ *       organization_sites row. Safe to be specific: the caller is GitHub's
+ *       own trusted CI, not a public prober.
+ *   413 request_too_large - the body is over 4,000,000 bytes (authenticated callers only)
+ *   422 invalid_json | invalid_request | reserved_page | not_an_image |
+ *       image_rejected - malformed bundle / bad image
+ *   503 ingest_disabled - sites.public_render is off. A disabled feature
+ *       rejects ingest too, not just the read path (Phase 3 Permissions &
+ *       Flags) - an org's content should not silently go "live" behind a flag
+ *       that then flips on with stale-vs-fresh ambiguity.
+ *   500 server_error - anything uncaught, with no detail
  */
-
-interface IngestBundlePageInput {
-  path: string;
-  frontMatter: Record<string, unknown>;
-  mdxAst: unknown;
-}
-
-const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 interface IngestBundleImageInput {
   manifestKey: string;
@@ -61,70 +71,38 @@ interface IngestBundleImageInput {
   bytesBase64: string;
 }
 
-interface SitesIngestRequestBundle {
-  schemaVersion: 1;
-  pages: IngestBundlePageInput[];
-  images: IngestBundleImageInput[];
-}
+const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
-function errorResponse(status: number, error: string): NextResponse {
-  return NextResponse.json({ status: "error", error }, { status });
-}
+type ValidatedBundle =
+  | { ok: true; pages: PublishedSiteBundlePage[]; images: IngestBundleImageInput[] }
+  | { ok: false; code: "invalid_request" | "reserved_page"; error: string };
 
-function validateBundle(
-  body: unknown,
-): { ok: true; bundle: SitesIngestRequestBundle } | { ok: false; error: string } {
+function validateBundle(body: unknown): ValidatedBundle {
   if (typeof body !== "object" || body === null) {
-    return { ok: false, error: "Malformed request body." };
+    return { ok: false, code: "invalid_request", error: "Malformed request body." };
   }
   const bundle = (body as Record<string, unknown>).bundle;
   if (typeof bundle !== "object" || bundle === null) {
-    return { ok: false, error: "Missing bundle." };
+    return { ok: false, code: "invalid_request", error: "Missing bundle." };
   }
   const b = bundle as Record<string, unknown>;
 
   if (b.schemaVersion !== 1) {
-    return { ok: false, error: "Unsupported bundle.schemaVersion." };
+    return { ok: false, code: "invalid_request", error: "Unsupported bundle.schemaVersion." };
   }
 
-  if (!Array.isArray(b.pages) || b.pages.length === 0) {
-    return { ok: false, error: "bundle.pages must be a non-empty array." };
-  }
-  for (const p of b.pages) {
-    if (
-      typeof p !== "object" ||
-      p === null ||
-      typeof (p as Record<string, unknown>).path !== "string" ||
-      ((p as Record<string, unknown>).path as string).length === 0 ||
-      typeof (p as Record<string, unknown>).frontMatter !== "object" ||
-      (p as Record<string, unknown>).frontMatter === null ||
-      !("mdxAst" in (p as Record<string, unknown>))
-    ) {
-      return { ok: false, error: "Malformed entry in bundle.pages." };
-    }
-    // PresbyPortal serves its own giving page at /give (and /give/return), the
-    // asset route, robots.txt and sitemap.xml (T15: a custom domain serves them at
-    // the root); a static route segment beats the catch-all that renders bundle
-    // pages, so a bundle page there would be stored and never shown. Refuse it, by name.
-    const pagePath = (p as Record<string, unknown>).path as string;
-    const reserved = reservedSitePath(pagePath);
-    if (reserved.reserved) {
-      return {
-        ok: false,
-        error:
-          reserved.segment === "give"
-            ? `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} page for online giving. Rename or remove it.`
-            : reserved.segment === "careers"
-              ? // Copy I1. Descendants only: the bare /careers is allowed, so this
-                // message must never say /careers ITSELF is reserved.
-                `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own pages for job openings under /careers/ (on a custom domain too). A page at /careers itself is fine. Rename or remove it.`
-              : `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} path (on a custom domain too). Rename or remove it.`,
-      };
-    }
-  }
+  const pages = validatePages(b.pages, "bundle.pages");
+  if (!pages.ok) return pages;
 
   if (!Array.isArray(b.images)) {
-    return { ok: false, error: "bundle.images must be an array." };
+    return { ok: false, code: "invalid_request", error: "bundle.images must be an array." };
+  }
+  if (b.images.length > MAX_MANIFEST_ENTRIES) {
+    return {
+      ok: false,
+      code: "invalid_request",
+      error: `bundle.images has more than ${MAX_MANIFEST_ENTRIES} entries.`,
+    };
   }
   for (const img of b.images) {
     if (
@@ -132,159 +110,64 @@ function validateBundle(
       img === null ||
       typeof (img as Record<string, unknown>).manifestKey !== "string" ||
       ((img as Record<string, unknown>).manifestKey as string).length === 0 ||
-      !ALLOWED_IMAGE_TYPES.has(
-        String((img as Record<string, unknown>).contentType),
-      ) ||
+      !ALLOWED_IMAGE_TYPES.has(String((img as Record<string, unknown>).contentType)) ||
       typeof (img as Record<string, unknown>).bytesBase64 !== "string" ||
       ((img as Record<string, unknown>).bytesBase64 as string).length === 0
     ) {
-      return { ok: false, error: "Malformed entry in bundle.images." };
+      return { ok: false, code: "invalid_request", error: "Malformed entry in bundle.images." };
     }
   }
 
-  return { ok: true, bundle: b as unknown as SitesIngestRequestBundle };
+  return { ok: true, pages: pages.pages, images: b.images as IngestBundleImageInput[] };
 }
 
-export async function POST(req: Request): Promise<NextResponse> {
-  const verified = await verifyGithubActionsOidcToken(
-    req.headers.get("authorization"),
-  );
-  if (!verified.ok) {
-    return errorResponse(verified.status, verified.error);
-  }
+export const POST = handleIngest(async (req: Request): Promise<NextResponse> => {
+  const gate = await authorizeIngest(req);
+  if (!gate.ok) return gate.response;
+  const { org, claims } = gate;
 
-  if (!(await isFlagEnabled("sites.public_render"))) {
-    return errorResponse(503, "Site ingest is currently disabled.");
-  }
+  const body = await readJsonBody(req);
+  if (!body.ok) return body.response;
 
-  const org = await resolveOrganizationByRepo(verified.claims.repository);
-  if (!org) {
-    return errorResponse(404, "No site is provisioned for this repository.");
-  }
-
-  // Idempotency (Phase 1 Gap 7): a repeat commit sha short-circuits before
-  // any write — blob storage, recordSiteIngest, revalidation, and the audit
-  // write are all skipped.
-  if (verified.claims.sha === org.lastIngestedCommitSha) {
-    return NextResponse.json({
-      status: "already_current",
-      organizationSlug: org.slug,
-      commitSha: verified.claims.sha,
-    });
-  }
-
-  let rawBody: unknown;
-  try {
-    rawBody = await req.json();
-  } catch {
-    return errorResponse(422, "Request body is not valid JSON.");
-  }
-
-  const validated = validateBundle(rawBody);
+  const validated = validateBundle(body.value);
   if (!validated.ok) {
-    return errorResponse(422, validated.error);
+    return errorResponse(422, validated.code, validated.error);
   }
-  const { bundle } = validated;
 
-  const imageKeys: Record<string, string> = {};
-  for (const image of bundle.images) {
+  const imageEntries: Array<[string, string]> = [];
+  for (const image of validated.images) {
     let bytes: Buffer;
     try {
       bytes = Buffer.from(image.bytesBase64, "base64");
     } catch {
-      return errorResponse(
-        422,
-        `Image "${image.manifestKey}" is not valid base64.`,
-      );
+      return errorResponse(422, "invalid_request", `Image "${image.manifestKey}" is not valid base64.`);
     }
     if (bytes.byteLength === 0) {
-      return errorResponse(
-        422,
-        `Image "${image.manifestKey}" decoded to 0 bytes.`,
-      );
+      return errorResponse(422, "invalid_request", `Image "${image.manifestKey}" decoded to 0 bytes.`);
     }
-    // Sniff magic bytes — never trust the bundle's declared contentType
+    // Sniff magic bytes - never trust the bundle's declared contentType
     // (same discipline as every other upload path in this codebase).
-    const sniffed = sniffTicketAttachmentContentType(bytes);
-    if (!sniffed || sniffed === "application/pdf") {
-      return errorResponse(
-        422,
-        `Image "${image.manifestKey}" is not a PNG, JPEG, or WEBP.`,
-      );
-    }
-    try {
-      const ref = await getBlobStore().store({
-        organizationId: org.organizationId,
-        bytes,
-        contentType: sniffed,
-      });
-      imageKeys[image.manifestKey] = ref.key;
-    } catch (err) {
-      if (err instanceof BlobValidationError) {
-        return errorResponse(422, `Image "${image.manifestKey}": ${err.message}`);
+    const stored = await storeSiteImage(org, bytes);
+    if (!stored.ok) {
+      if (stored.reason === "not_an_image") {
+        return errorResponse(422, "not_an_image", `Image "${image.manifestKey}" is not a PNG, JPEG, or WEBP.`);
       }
-      throw err;
+      if (stored.reason === "rejected") {
+        return errorResponse(422, "image_rejected", `Image "${image.manifestKey}": ${stored.message}`);
+      }
+      return errorResponse(422, "invalid_request", `Image "${image.manifestKey}" decoded to 0 bytes.`);
     }
+    imageEntries.push([image.manifestKey, stored.ref.key]);
   }
 
-  const pages: PublishedSiteBundlePage[] = bundle.pages.map((p) => ({
-    path: p.path,
-    frontMatter: p.frontMatter,
-    mdxAst: p.mdxAst,
-  }));
-
-  const bundleBytes = Buffer.from(
-    JSON.stringify({ schemaVersion: 1, pages, imageKeys }),
-    "utf-8",
-  );
-
-  let bundleRef;
-  try {
-    bundleRef = await getBlobStore().store({
-      organizationId: org.organizationId,
-      bytes: bundleBytes,
-      contentType: "application/json",
-    });
-  } catch (err) {
-    if (err instanceof BlobValidationError) {
-      return errorResponse(422, err.message);
-    }
-    throw err;
-  }
-
-  await recordSiteIngest(org.organizationId, {
-    commitSha: verified.claims.sha,
-    contentBundleKey: bundleRef.key,
+  // Object.fromEntries, not `imageKeys[key] = ...`: a manifest key of "__proto__"
+  // is data here, never a prototype assignment.
+  return publishSiteBundle({
+    org,
+    claims,
+    pages: validated.pages,
+    imageKeys: Object.fromEntries(imageEntries),
+    imageCount: validated.images.length,
+    transport: "legacy",
   });
-
-  await recordAudit({
-    action: AUDIT_ACTIONS.SITE_CONTENT_INGESTED,
-    actor: null,
-    resourceType: "organization",
-    resourceId: org.organizationId,
-    metadata: {
-      repo: verified.claims.repository,
-      commitSha: verified.claims.sha,
-      pageCount: pages.length,
-      imageCount: bundle.images.length,
-    },
-  });
-
-  // Both a layout-level revalidate and a per-page one — a layout-only
-  // revalidate does not guarantee every already-cached leaf segment is torn
-  // down under partial prerendering (Phase 3's own step 9 reasoning).
-  // slugSitePath() is the one builder of a slug URL (DECISION-181). Revalidation of the
-  // slug URL is what a platform-host render needs; every segment under /site/[slug] is
-  // force-dynamic (site-urls.test.ts pins that), so a custom host never serves a stale page.
-  revalidatePath(slugSitePath(org.slug), "layout");
-  for (const page of pages) {
-    revalidatePath(slugSitePath(org.slug, page.path));
-  }
-
-  return NextResponse.json({
-    status: "ingested",
-    organizationSlug: org.slug,
-    commitSha: verified.claims.sha,
-    pageCount: pages.length,
-  });
-}
+});

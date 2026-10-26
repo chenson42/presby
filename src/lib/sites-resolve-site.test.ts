@@ -340,7 +340,7 @@ describe("resolveSite - the full resolution", () => {
     expect(r.site.pages).toEqual(BUNDLE.pages);
     expect(r.site.imageKeys).toEqual(BUNDLE.imageKeys);
     expect(r.urls.mode).toBe("host");
-    expect(resolveBlob).toHaveBeenCalledWith({ organizationId: "org-1", key: "bundle-1" });
+    expect(resolveBlob).toHaveBeenCalledWith({ organizationId: "org-1", key: "bundle-1", audience: "private" });
   });
 
   it("a missing blob, a corrupt bundle and no content key are all the same absent miss", async () => {

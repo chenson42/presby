@@ -135,7 +135,11 @@ export interface GroupListEntry {
   memberCount: number;
 }
 
-export type DerivedFromKey = "session" | "diaconate" | "active_membership";
+export type DerivedFromKey =
+  | "session"
+  | "diaconate"
+  | "deacons_moderator"
+  | "active_membership";
 
 export interface DerivedGroupListEntry {
   groupId: string;

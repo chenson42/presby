@@ -638,7 +638,7 @@ async function issueGroup(
   // 5. Render once, hash the exact bytes, store them (its own connection, committed first).
   const bytes = await renderStatementPdf([snapshot]);
   const pdfSha256 = createHash("sha256").update(bytes).digest("hex");
-  const blob = await getBlobStore().store({ organizationId, bytes, contentType: "application/pdf" });
+  const blob = await getBlobStore().store({ organizationId, bytes, contentType: "application/pdf", audience: "private" });
 
   // 6. The header, then its lines. The consistency triggers are DEFERRED: they run at COMMIT.
   const header = rowsOf(

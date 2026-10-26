@@ -87,6 +87,9 @@ describe("T24 - job_postings has one writer module", () => {
     const named = appFiles("lib", "app", "components")
       .filter((f) => /\bjob_postings\b|\bjobPostings\b/.test(code(f)))
       .map(rel)
+      // dev-docs.ts only files the table under a /developer module heading
+      // (dev-docs.test.ts requires every table classified, F338); it reads no row.
+      .filter((f) => f !== "src/lib/dev-docs.ts")
       .sort();
     expect(named).toEqual(["src/lib/careers/postings.ts", "src/lib/db/domain/careers.ts"].sort());
   });

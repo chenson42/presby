@@ -16,7 +16,7 @@
  * with `dotenv -e .env.local -- vitest run src/lib/storage/blob-store.test.ts`.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
@@ -101,11 +101,13 @@ describe.skipIf(!hasDb)(
         organizationId: orgId,
         bytes,
         contentType: "image/png",
+        audience: "private",
       });
       const second = await store.store({
         organizationId: orgId,
         bytes,
         contentType: "image/png",
+        audience: "private",
       });
 
       expect(second.key).toBe(first.key);
@@ -123,6 +125,7 @@ describe.skipIf(!hasDb)(
       const result = await store.resolve({
         organizationId: orgId,
         key: randomUUID(),
+        audience: "private",
       });
       expect(result).toBeNull();
     });
@@ -133,11 +136,13 @@ describe.skipIf(!hasDb)(
         organizationId: orgId,
         bytes: Buffer.from("cross-org-isolation-fixture"),
         contentType: "image/png",
+        audience: "private",
       });
 
       const result = await store.resolve({
         organizationId: otherOrgId,
         key: ref.key,
+        audience: "private",
       });
       expect(result).toBeNull();
     });
@@ -151,6 +156,7 @@ describe.skipIf(!hasDb)(
           organizationId: orgId,
           bytes: tooBig,
           contentType: "image/png",
+          audience: "private",
         }),
       ).rejects.toThrow(BlobValidationError);
     });
@@ -163,6 +169,7 @@ describe.skipIf(!hasDb)(
           organizationId: orgId,
           bytes: Buffer.from("<svg></svg>"),
           contentType: "image/svg+xml",
+          audience: "private",
         }),
       ).rejects.toThrow(BlobValidationError);
     });
@@ -228,6 +235,107 @@ describe.skipIf(!hasDb)(
 
       expect(caught).toBeDefined();
       expect(pgConstraintOf(caught)).toBe("blob_assets_content_type_allowed");
+    });
+
+    // ---------------------------------------------------------------------
+    // D2, adapter half (F289, DECISION-277; docs/work-log/
+    // 2026-10-25-public-asset-allowlist.md Phase 3 "Test Plan" D2). The
+    // database half (constraints, immutability, FKs) is blob-audience.db.test.ts.
+    // ---------------------------------------------------------------------
+    describe("audience (F289)", () => {
+      const png = (seed: string) =>
+        Buffer.concat([
+          Buffer.from("89504e470d0a1a0a", "hex"),
+          Buffer.from(`f289 adapter ${seed} ${randomUUID()}`),
+        ]);
+
+      it("store() returns the audience it stored under", async () => {
+        const store = getBlobStore();
+        const pub = await store.store({ organizationId: orgId, bytes: png("ref-pub"), contentType: "image/png", audience: "public_site" });
+        const priv = await store.store({ organizationId: orgId, bytes: png("ref-priv"), contentType: "image/png", audience: "private" });
+        expect(pub.audience).toBe("public_site");
+        expect(priv.audience).toBe("private");
+      });
+
+      it("identical bytes under the two audiences are TWO rows and two keys (F298); the same pair dedups to one key", async () => {
+        const store = getBlobStore();
+        const bytes = png("twin");
+        const pub = await store.store({ organizationId: orgId, bytes, contentType: "image/png", audience: "public_site" });
+        const priv = await store.store({ organizationId: orgId, bytes, contentType: "image/png", audience: "private" });
+        expect(priv.key).not.toBe(pub.key);
+
+        const pubAgain = await store.store({ organizationId: orgId, bytes, contentType: "image/png", audience: "public_site" });
+        const privAgain = await store.store({ organizationId: orgId, bytes, contentType: "image/png", audience: "private" });
+        expect(pubAgain.key).toBe(pub.key);
+        expect(privAgain.key).toBe(priv.key);
+
+        const rows = await getPlatformDb()
+          .select({ id: blobAssets.id, audience: blobAssets.audience })
+          .from(blobAssets)
+          .where(sql`${blobAssets.organizationId} = ${orgId} and ${blobAssets.contentHash} = ${createHash("sha256").update(bytes).digest("hex")}`);
+        expect(rows.map((r) => r.audience).sort()).toEqual(["private", "public_site"]);
+      });
+
+      it("resolve() and resolveMeta() match ONLY the audience the caller names, in both directions", async () => {
+        const store = getBlobStore();
+        const pub = await store.store({ organizationId: orgId, bytes: png("res-pub"), contentType: "image/png", audience: "public_site" });
+        const priv = await store.store({ organizationId: orgId, bytes: png("res-priv"), contentType: "image/png", audience: "private" });
+
+        // Right audience: found.
+        expect((await store.resolve({ organizationId: orgId, key: pub.key, audience: "public_site" }))?.contentType).toBe("image/png");
+        expect((await store.resolve({ organizationId: orgId, key: priv.key, audience: "private" }))?.contentType).toBe("image/png");
+        expect((await store.resolveMeta({ organizationId: orgId, key: pub.key, audience: "public_site" }))?.contentType).toBe("image/png");
+        expect((await store.resolveMeta({ organizationId: orgId, key: priv.key, audience: "private" }))?.contentType).toBe("image/png");
+
+        // Wrong audience: null. A private caller never reads a public_site row, and the reverse.
+        expect(await store.resolve({ organizationId: orgId, key: pub.key, audience: "private" })).toBeNull();
+        expect(await store.resolve({ organizationId: orgId, key: priv.key, audience: "public_site" })).toBeNull();
+        expect(await store.resolveMeta({ organizationId: orgId, key: pub.key, audience: "private" })).toBeNull();
+        expect(await store.resolveMeta({ organizationId: orgId, key: priv.key, audience: "public_site" })).toBeNull();
+      });
+
+      it.each([
+        ["application/pdf", "%PDF-1.7 f289"],
+        ["application/json", '{"f289":true}'],
+      ])("store(public_site, %s) throws BlobValidationError before the CHECK would, and writes nothing", async (contentType, body) => {
+        const store = getBlobStore();
+        const bytes = Buffer.from(`${body} ${randomUUID()}`);
+        let caught: unknown;
+        try {
+          await store.store({ organizationId: orgId, bytes, contentType, audience: "public_site" });
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(BlobValidationError);
+        expect((caught as Error).message).toBe(
+          `blob-store: audience "public_site" requires an image content type (png, jpeg or webp); got "${contentType}"`,
+        );
+        const rows = await getPlatformDb()
+          .select({ id: blobAssets.id })
+          .from(blobAssets)
+          .where(sql`${blobAssets.organizationId} = ${orgId} and ${blobAssets.contentHash} = ${createHash("sha256").update(bytes).digest("hex")}`);
+        expect(rows).toHaveLength(0);
+      });
+
+      it("a PDF and a JSON bundle are fine as private", async () => {
+        const store = getBlobStore();
+        const pdf = await store.store({ organizationId: orgId, bytes: Buffer.from(`%PDF-1.7 f289 ${randomUUID()}`), contentType: "application/pdf", audience: "private" });
+        const json = await store.store({ organizationId: orgId, bytes: Buffer.from(`{"f289":"${randomUUID()}"}`), contentType: "application/json", audience: "private" });
+        expect(pdf.audience).toBe("private");
+        expect(json.audience).toBe("private");
+      });
+
+      it("an audience outside the vocabulary cannot be stored (the type forbids it; a cast gets as far as the database CHECK)", async () => {
+        const store = getBlobStore();
+        let caught: unknown;
+        try {
+          await store.store({ organizationId: orgId, bytes: png("vocab"), contentType: "image/png", audience: "other" as never });
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeDefined();
+        expect(pgConstraintOf(caught)).toBe("blob_assets_audience_allowed");
+      });
     });
   },
 );

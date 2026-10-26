@@ -13,24 +13,25 @@ import { ButtonGroup, type ButtonGroupItem } from "@/components/shared/button-gr
  * exactly the kind of thing this feature's own cross-cutting risk note warns
  * against for its read functions.
  *
- * The Parishes tab is shown ONLY when `canViewHidden` — checked DIRECTLY via
- * `hasPermission(..., 'directory.view_hidden')` by every caller of this
- * component, never a flag (Phase 3 design: "a nav 'Parishes' link is shown
- * only when `hasPermission(...)` is true, checked directly"). An ordinary
- * viewer never sees the tab exists; `getParishRoster()` re-verifies the same
- * permission regardless, so this is a visibility convenience, not the
+ * The Parishes tab is shown ONLY when `showParishes` - true for a viewer who
+ * holds `directory.view_hidden`, or (when the org's `org_portal.parishes` toggle
+ * is on) any of `parishes.assign`, `people.manage` or `officers.manage`
+ * (`canReadParishRoster()`, docs/work-log/2026-10-25-parish-management.md).
+ * Checked directly by every caller of this component, never a flag. An ordinary
+ * viewer never sees the tab exists; `getParishesOverview()` re-verifies the same
+ * authority regardless, so this is a visibility convenience, not the
  * enforcement.
  */
 export function DirectoryNav({
   slug,
   view,
   search,
-  canViewHidden,
+  showParishes,
 }: {
   slug: string;
   view: "members" | "households" | "parishes";
   search: string;
-  canViewHidden: boolean;
+  showParishes: boolean;
 }) {
   const searchParam = search ? `search=${encodeURIComponent(search)}` : "";
   const membersHref = `/o/${slug}/directory${searchParam ? `?${searchParam}` : ""}`;
@@ -57,7 +58,7 @@ export function DirectoryNav({
       "aria-current": view === "households" ? "page" : undefined,
     },
   ];
-  if (canViewHidden) {
+  if (showParishes) {
     items.push({
       key: "parishes",
       label: "Parishes",

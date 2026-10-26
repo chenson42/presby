@@ -14,6 +14,7 @@ import {
   permissions,
 } from "@/lib/db/domain/authz";
 import { organizations } from "@/lib/db/domain/org";
+import { isSeatOnlyPermissionKey } from "@/lib/parishes-pure";
 
 /**
  * Tenant role *definition* administration —
@@ -271,7 +272,10 @@ export async function listPermissionCatalog(): Promise<
     })
     .from(permissions)
     .orderBy(permissions.sensitivityTier, permissions.module, permissions.key);
-  return rows;
+  // A seat-only key (`parishes.assign`) is held through a recorded seat and
+  // can never sit on an editable role: both callers are role editors, so it is
+  // not offered (DECISION-242, F260). The database refuses it regardless.
+  return rows.filter((row) => !isSeatOnlyPermissionKey(row.key));
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +468,7 @@ export type CreateRoleResult =
   | { kind: "forbidden" }
   | { kind: "escalation_denied"; missingPermissions: string[] }
   | { kind: "duplicate_key" }
+  | { kind: "seat_only_key" }
   | { kind: "invalid_input"; reason: string };
 
 /**
@@ -493,6 +498,12 @@ export async function createRole(
       const validation = validateKeyAndName(input.key, input.name);
       if (!validation.ok) {
         return { kind: "invalid_input", reason: validation.reason };
+      }
+
+      // A seat-only key is held through a recorded seat, never a role someone
+      // can edit (DECISION-242, F260); the database trigger is the backstop.
+      if (input.permissionKeys.some(isSeatOnlyPermissionKey)) {
+        return { kind: "seat_only_key" };
       }
 
       const subsetCheck = await assertPermissionSubset(
@@ -549,6 +560,7 @@ export type SetRolePermissionsResult =
   | { kind: "protected_role" }
   | { kind: "not_found" }
   | { kind: "escalation_denied"; missingPermissions: string[] }
+  | { kind: "seat_only_key" }
   | { kind: "self_lockout_blocked" };
 
 /**
@@ -588,6 +600,10 @@ export async function setRolePermissions(
     }
     if (role.isProtected) {
       return { kind: "protected_role" };
+    }
+
+    if (newPermissionKeys.some(isSeatOnlyPermissionKey)) {
+      return { kind: "seat_only_key" };
     }
 
     const oldKeys = await permissionKeysForRole(tx, roleId);
@@ -746,6 +762,7 @@ export type AdoptTemplateResult =
   | { kind: "template_not_found" }
   | { kind: "escalation_denied"; missingPermissions: string[] }
   | { kind: "duplicate_key" }
+  | { kind: "seat_only_key" }
   | { kind: "invalid_input"; reason: string };
 
 /**
@@ -805,6 +822,10 @@ export async function adoptTemplate(
         tx,
         template.id,
       );
+
+      if (templatePermissionKeys.some(isSeatOnlyPermissionKey)) {
+        return { kind: "seat_only_key" };
+      }
 
       const key = input.key ?? template.key;
       const rawName = input.name ?? template.name;

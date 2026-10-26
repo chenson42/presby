@@ -107,7 +107,7 @@ async function insertBundle(sql: Sql, orgId: string, bundle: { pages: unknown[] 
   const rows = (await withDbRetry("careers bundle", () => sql`
     insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes)
     values (${orgId}::uuid, ${hash}, 'application/json', ${bytes.byteLength}, decode(${bytes.toString("hex")}, 'hex'))
-    on conflict (organization_id, content_hash) do update set content_type = excluded.content_type
+    on conflict (organization_id, audience, content_hash) do update set content_type = excluded.content_type  -- 0072 (F289, F341): dedup is per audience; the bundle is private (the column default)
     returning id`)) as { id: string }[];
   return rows[0]!.id;
 }

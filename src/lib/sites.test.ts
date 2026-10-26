@@ -356,6 +356,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
       organizationId: orgLive,
       bytes: bundleBytes,
       contentType: "application/json",
+      audience: "private",
     });
     await recordSiteIngest(orgLive, {
       commitSha: "fixture-sha-1",
@@ -383,6 +384,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         "utf-8",
       ),
       contentType: "application/json",
+      audience: "private",
     });
     await recordSiteIngest(orgSuspended, {
       commitSha: "fixture-sha-suspended-1",
@@ -623,6 +625,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         organizationId: orgLive,
         bytes: Buffer.from("not a real image, just fixture bytes", "utf-8"),
         contentType: "image/png",
+        audience: "public_site",
       });
       logoBlobKey = logoBlob.key;
 
@@ -791,6 +794,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
           "utf-8",
         ),
         contentType: "application/json",
+        audience: "private",
       });
       await recordSiteIngest(orgLive, {
         commitSha: "fixture-sha-2",
@@ -827,6 +831,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
         organizationId: orgLive,
         bytes: originalBundleBytes,
         contentType: "application/json",
+        audience: "private",
       });
       await recordSiteIngest(orgLive, {
         commitSha: "fixture-sha-1",
@@ -849,6 +854,7 @@ describe.skipIf(!hasDb)("sites.ts (Postgres-backed, real dev database)", () => {
           "utf-8",
         ),
         contentType: "application/json",
+        audience: "private",
       });
 
       // An ordinary content commit on the suspended org's repo — the

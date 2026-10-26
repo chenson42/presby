@@ -492,6 +492,19 @@ describe.skipIf(!hasDb)(
         expect(Array.isArray(catalog)).toBe(true);
         expect(catalog.length).toBeGreaterThan(0);
       });
+
+      // DECISION-242, F260: both callers are role editors, and a seat-only key
+      // can never sit on an editable role, so the editor never offers it.
+      it("omits a seat-only key (parishes.assign) although the permission row exists", async () => {
+        const platform = getPlatformDb();
+        const [row] = await platform
+          .select({ key: permissions.key })
+          .from(permissions)
+          .where(eq(permissions.key, "parishes.assign"));
+        expect(row?.key).toBe("parishes.assign");
+        const catalog = await listPermissionCatalog();
+        expect(catalog.map((p) => p.key)).not.toContain("parishes.assign");
+      });
     });
 
     // -----------------------------------------------------------------
@@ -818,6 +831,18 @@ describe.skipIf(!hasDb)(
         expect(result.missingPermissions).toContain("directory.view");
       });
 
+      it("seat_only_key: a role carrying parishes.assign is refused even for a roles.manage holder, and nothing is created (DECISION-242, F260)", async () => {
+        const result = await createRole(adminPerson, orgA, {
+          key: "seat_key_attempt",
+          name: "Seat Key Attempt",
+          permissionKeys: ["directory.view", "parishes.assign"],
+        });
+        expect(result).toEqual({ kind: "seat_only_key" });
+        const listed = await listRoleDefinitions(adminPerson, orgA);
+        if (listed.kind !== "ok") throw new Error("expected ok");
+        expect(listed.roles.map((r) => r.key)).not.toContain("seat_key_attempt");
+      });
+
       it("a roles.manage holder CAN create a role carrying a subset of their own permissions", async () => {
         const result = await createRole(adminPerson, orgA, {
           key: "fresh_custom_role",
@@ -898,6 +923,19 @@ describe.skipIf(!hasDb)(
       it("returns not_found for a role belonging to another org", async () => {
         const result = await setRolePermissions(orgBPerson, orgB, editableRoleA, []);
         expect(result).toEqual({ kind: "not_found" });
+      });
+
+      it("seat_only_key: adding parishes.assign to an editable role is refused, and the role keeps its permissions (DECISION-242, F260)", async () => {
+        const before = await getRoleDefinition(adminPerson, orgA, editableRoleA);
+        if (before.kind !== "ok") throw new Error("expected ok");
+        const result = await setRolePermissions(adminPerson, orgA, editableRoleA, [
+          ...before.role.permissionKeys,
+          "parishes.assign",
+        ]);
+        expect(result).toEqual({ kind: "seat_only_key" });
+        const after = await getRoleDefinition(adminPerson, orgA, editableRoleA);
+        if (after.kind !== "ok") throw new Error("expected ok");
+        expect(after.role.permissionKeys).toEqual(before.role.permissionKeys);
       });
 
       // The three tests below run in sequence against the SAME role

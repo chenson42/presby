@@ -238,6 +238,21 @@ describe("HomePage — platform.merged_home ON", () => {
     expect(screen.queryByRole("link", { name: /^Admin\b/ })).toBeNull();
   });
 
+  it("the Developer card describes the sections that exist, not an API or a schema reference", async () => {
+    cachedAuth.mockResolvedValue({ user: sessionUser() });
+    isFlagEnabled.mockResolvedValue(true);
+    cachedUserOrganizations.mockResolvedValue([]);
+    cachedIsPlatformAdmin.mockResolvedValue(true);
+    sessionCanAccessAdmin.mockReturnValue(false);
+
+    render(await HomePage());
+
+    expect(
+      screen.getByText("Data model, diagrams and where the engineering docs live."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Schema reference/)).toBeNull();
+  });
+
   it("holding both platform predicates renders both cards", async () => {
     cachedAuth.mockResolvedValue({
       user: sessionUser({ features: ["admin.dashboard"] }),

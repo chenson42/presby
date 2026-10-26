@@ -9,9 +9,9 @@
  *      (the (org) contract's 2026-08-18 measurement). Loading feedback is
  *      per-card `Suspense` only.
  *   2. No string literal beginning `/o/` under the console or in
- *      `components/admin-portal/`: nothing on the platform tier links into a
+ *      `components/admin-portal/` or the shared `console-*` shell: nothing on the platform tier links into a
  *      tenant route (Two Hierarchies, DECISION-251).
- *   3. `components/admin-portal/` never mounts `BrandTokens` and never reaches
+ *   3. `components/admin-portal/` and `shared/console-*` never mounts `BrandTokens` and never reaches
  *      `getPlatformDb`: it is presentation, in the platform palette.
  *   4. `error.tsx` does not reference `error.message` (E14).
  */
@@ -22,6 +22,13 @@ import { describe, expect, it } from "vitest";
 const ROOT = resolve(__dirname, "../../../..");
 const ADMIN_DIR = resolve(__dirname);
 const PORTAL_DIR = resolve(ROOT, "src/components/admin-portal");
+const SHARED_DIR = resolve(ROOT, "src/components/shared");
+
+/** The promoted shell (DECISION-261) keeps the scans it had in admin-portal/. */
+const consoleShellFiles = () =>
+  readdirSync(SHARED_DIR)
+    .filter((n) => /^console-.*\.tsx?$/.test(n))
+    .map((n) => join(SHARED_DIR, n));
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -52,7 +59,11 @@ describe("console shell boundaries", () => {
   });
 
   it("links nowhere into /o/ from the console or its shell components", () => {
-    const files = [...walk(ADMIN_DIR), ...walk(PORTAL_DIR)].filter(isSource);
+    const files = [
+      ...walk(ADMIN_DIR),
+      ...walk(PORTAL_DIR),
+      ...consoleShellFiles(),
+    ].filter(isSource);
     expect(files.length).toBeGreaterThan(10);
     const offenders = files.filter((f) =>
       /["'`]\/o\//.test(stripComments(readFileSync(f, "utf8"))),
@@ -60,8 +71,9 @@ describe("console shell boundaries", () => {
     expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
   });
 
-  it("keeps components/admin-portal free of BrandTokens and getPlatformDb", () => {
-    for (const f of walk(PORTAL_DIR).filter(isSource)) {
+  it("keeps components/admin-portal and the shared console shell free of BrandTokens and getPlatformDb", () => {
+    expect(consoleShellFiles().filter(isSource).length).toBe(4);
+    for (const f of [...walk(PORTAL_DIR), ...consoleShellFiles()].filter(isSource)) {
       const src = stripComments(readFileSync(f, "utf8"));
       expect(src, relative(ROOT, f)).not.toMatch(/BrandTokens|getPlatformDb/);
     }

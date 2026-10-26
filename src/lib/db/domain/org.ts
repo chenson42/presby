@@ -449,15 +449,42 @@ export const orgUnits = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    unitType: text("unit_type").notNull(), // parish | campus | district
+    // parish | campus | district: org_units_unit_type_check below (F259).
+    // parish and district are deacon districts; a campus can hold neither a
+    // household nor a deacon term (drizzle/0068 section 6).
+    unitType: text("unit_type").notNull(),
+    // Stored normalized (org_units_name_shape); normalizeDistrictName() in
+    // src/lib/parishes-pure.ts also strips control and zero-width characters.
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Null = active. drizzle/0068 section 2, DECISION-243. Written only by
+    // src/lib/parishes.ts (archive / restore); the actor is in audit_events.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
   (t) => [
     index("org_units_org_idx").on(t.organizationId, t.unitType),
     unique("org_units_id_org_key").on(t.id, t.organizationId),
+    // One ACTIVE district per lower(name) per org; a restore into a taken
+    // name raises unique_violation here (mapped to name_taken).
+    uniqueIndex("org_units_active_name_idx")
+      .on(t.organizationId, sql`lower(${t.name})`)
+      .where(sql`${t.archivedAt} is null`),
+    check("org_units_unit_type_check", sql`${t.unitType} in ('parish', 'campus', 'district')`),
+    check(
+      "org_units_name_shape",
+      sql`${t.name} = btrim(${t.name}) and ${t.name} is nfc normalized and char_length(${t.name}) between 1 and 80`,
+    ),
+    // NOT EXPRESSIBLE HERE (SQL-only, drizzle/0068_presby_parishes.sql):
+    //   * DELETE is revoked from presby_app and presby_platform (section 10,
+    //     R2, F258): a district is archived, never deleted;
+    //   * trigger org_units_guard_delete, presby_org_units_guard_delete()
+    //     (section 10): refuses DELETE on the owner path too, except the
+    //     fixture-teardown cascade (parent organization already gone);
+    //   * presby_guard_org_unit_target() (section 6) on households and
+    //     officer_terms refuses a newly set archived, campus or missing
+    //     district, reading this row FOR SHARE.
   ],
 );
 

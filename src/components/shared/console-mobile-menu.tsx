@@ -13,9 +13,9 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import {
-  AdminNavLinks,
-  type AdminNavLinkGroup,
-} from "@/components/admin-portal/admin-nav-links";
+  ConsoleNavLinks,
+  type ConsoleNavLinkGroup,
+} from "@/components/shared/console-nav-links";
 
 /**
  * The phone navigation (below `md`): a visible "Menu" button (icon AND text,
@@ -37,9 +37,13 @@ import {
 function MobileMenu({
   groups,
   version,
+  consoleLabel,
+  idPrefix,
 }: {
-  groups: readonly AdminNavLinkGroup[];
+  groups: readonly ConsoleNavLinkGroup[];
   version: string;
+  consoleLabel: string;
+  idPrefix: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -57,13 +61,17 @@ function MobileMenu({
       </SheetTrigger>
       <SheetContent side="left" className="gap-0">
         <SheetHeader className="border-b border-border">
-          <SheetTitle>Platform admin</SheetTitle>
+          <SheetTitle>{consoleLabel}</SheetTitle>
           <SheetDescription className="sr-only">
-            Platform admin pages
+            {consoleLabel} pages
           </SheetDescription>
         </SheetHeader>
-        <nav aria-label="Platform admin" className="flex-1 overflow-y-auto p-4">
-          <AdminNavLinks groups={groups} onNavigate={() => setOpen(false)} />
+        <nav aria-label={consoleLabel} className="flex-1 overflow-y-auto p-4">
+          <ConsoleNavLinks
+            groups={groups}
+            idPrefix={idPrefix}
+            onNavigate={() => setOpen(false)}
+          />
           <p className="mt-6 px-3 text-xs text-muted-foreground">
             Version {version}
           </p>
@@ -73,13 +81,28 @@ function MobileMenu({
   );
 }
 
-export function AdminMobileMenu({
+export function ConsoleMobileMenu({
   groups,
   version,
+  consoleLabel,
+  idPrefix,
 }: {
-  groups: readonly AdminNavLinkGroup[];
+  groups: readonly ConsoleNavLinkGroup[];
   version: string;
+  consoleLabel: string;
+  idPrefix: string;
 }) {
   const pathname = usePathname();
-  return <MobileMenu key={pathname} groups={groups} version={version} />;
+  // No groups, no Menu: a viewer with no nav (the forbidden state) gets no
+  // button that opens an empty sheet.
+  if (groups.length === 0) return null;
+  return (
+    <MobileMenu
+      key={pathname}
+      groups={groups}
+      version={version}
+      consoleLabel={consoleLabel}
+      idPrefix={idPrefix}
+    />
+  );
 }

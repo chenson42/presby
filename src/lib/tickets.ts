@@ -193,6 +193,7 @@ export async function fileTicket(
       const meta = await getBlobStore().resolveMeta({
         organizationId,
         key: input.attachmentKey,
+        audience: "private",
       });
       if (!meta) return { kind: "invalid_attachment" };
     }
@@ -459,6 +460,7 @@ export async function getTicketThread(
         const meta = await getBlobStore().resolveMeta({
           organizationId,
           key: row.attachment_asset_key,
+          audience: "private",
         });
         if (meta) {
           attachment = { key: row.attachment_asset_key, contentType: meta.contentType };
@@ -549,6 +551,7 @@ export async function replyToTicket(
       const meta = await getBlobStore().resolveMeta({
         organizationId,
         key: input.attachmentKey,
+        audience: "private",
       });
       if (!meta) return { kind: "invalid_attachment" };
     }

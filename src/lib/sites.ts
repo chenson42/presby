@@ -210,8 +210,10 @@ export interface PublishedSite {
    * commit's report for the full reasoning. Phase 3's own
    * `renderSiteBundle()` signature takes an `imageUrl: (manifestKey: string)
    * => string` builder, and the asset route
-   * (`(public)/site/[slug]/assets/[key]/route.ts`, commit 3) resolves `[key]`
-   * as a literal `blob_assets.id` via `getBlobStore().resolve()` — but
+   * (`(public)/site/[slug]/assets/[key]/route.ts`, commit 3) takes `[key]` as
+   * a literal `blob_assets.id` and serves it only if the database's public
+   * door (`getBlobStore().resolvePublic()`, F289) says it is a `public_site`
+   * image or a listed person's photo — but
    * content only ever references a stable `manifestKey`. Without exposing
    * the manifestKey -> blobKey map the ingest route already builds and
    * stores (`recordSiteIngest`'s own bundle shape: `{ schemaVersion, pages,
@@ -416,6 +418,7 @@ async function hydratePublishedSite(
   const blob = await getBlobStore().resolve({
     organizationId: row.organization_id,
     key: row.content_bundle_key,
+    audience: "private",
   });
   if (!blob) return { kind: "not_found" };
 

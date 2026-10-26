@@ -31,6 +31,7 @@ import { seedE2EOrgs } from "./seed-orgs";
 import { withDbRetry } from "./db";
 import { sweepStaleDomainsUiFixtures } from "./domains-ui-fixture";
 import { sweepStaleInvitationFixtures } from "./invitation-fixture";
+import { sweepStaleParishFixtures } from "./parish-fixture";
 
 const AUTH_DIR = path.resolve(__dirname, ".auth");
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -130,6 +131,18 @@ async function sweepStaleInvitationFixtureOrgs(platformDbUrl: string): Promise<v
   if (!platformDbUrl) return;
   const removed = await sweepStaleInvitationFixtures(neon(platformDbUrl));
   if (removed > 0) console.warn(`[globalSetup] swept ${removed} stale e2e-invite-* organization(s) left by an earlier run`);
+}
+
+/**
+ * The parish-management specs (e2e/parishes.spec.ts, e2e/hydration/parishes-controls.spec.ts) build a throwaway
+ * congregation (`e2e-parish-*`) in which the `mfa-enrolled` user is a member. If teardown lost to a Neon connection
+ * drop, that membership would change the user's post-login landing for every later spec. Sweep any leftover (and its
+ * fixed-range people) before a session is acquired, exactly as the invitation and custom-domains fixtures do.
+ */
+async function sweepStaleParishFixtureOrgs(platformDbUrl: string): Promise<void> {
+  if (!platformDbUrl) return;
+  const removed = await sweepStaleParishFixtures(neon(platformDbUrl));
+  if (removed > 0) console.warn(`[globalSetup] swept ${removed} stale e2e-parish-* organization(s) left by an earlier run`);
 }
 
 async function signInAndSave(
@@ -328,6 +341,7 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   await withDbRetry("seed e2e orgs", () => seedE2EOrgs(platformDbUrl));
   await sweepStaleDomainsUiFixtureOrgs(platformDbUrl);
   await sweepStaleInvitationFixtureOrgs(platformDbUrl);
+  await sweepStaleParishFixtureOrgs(platformDbUrl);
   await cleanupTestFeedback(dbUrl);
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });

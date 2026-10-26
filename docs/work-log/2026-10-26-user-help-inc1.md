@@ -783,3 +783,12 @@ Named per batch above: **orchestrator** (Batch 0), **api-developer** (Batch 1), 
 # Phase 6 — Shipped vs Intent (analyst)
 
 *Pending. The walk repeats for every published page, as its reader, on a dev server at 360px; Help impact is checked against Rule 17.*
+
+---
+
+## Operator rulings on Phase 3 (2026-10-26)
+
+- **O1 placeholders:** approved `worship-planning`, `children-check-in`, `communications`, `event-sign-ups` and `presbytery-tools`. **Struck:** `ledger`, `meeting-minutes`, `directory-export` (operator did not select "Money & records"). No importer placeholder.
+- **O3 Google sign-in:** operator verbatim: "it hasn't been configured yet, but document it still. i'll turn it on and test soon." The `signing-in` page documents Google sign-in. Before that page publishes, the orchestrator confirms with the operator that Google sign-in works in production; until confirmed, the Google section is the one known-unverified claim and Phase 6 must check it.
+- **O5 Rule 17 and the CLAUDE.md / agent-file / template edits:** approved as drafted; the orchestrator applies them at integration.
+- **O2, O4, O6, O7:** defaults taken (link to the public repository until the contact form ships; static header shows "Sign in" to everyone; each in-flight feature's page publishes in its own integration commit, 2b included; add the six "How features are turned on" links).

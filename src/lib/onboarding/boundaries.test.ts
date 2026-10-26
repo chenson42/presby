@@ -477,3 +477,213 @@ describe("2b B1: scripts/seed.ts creates stamped users on the owner connection (
     expect(INSERTERS("await platformDb.insert(schema.users).values({})")).toEqual(["platformDb"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Community Increment 2b, Batch B2 (Phase 3 "Library > Boundaries"; amendment 2
+// sections 7.2 and 7.4, T-11; E-24, E-30, E-39). The congregation's own sign-in
+// invitation has one library, one set of definers, one in-place acceptance and
+// one listing; the properties that keep them safe are properties of WHERE they
+// are named and what they import. Tripwires, not the control (the definers and
+// the DB tests are). Every scan proves it can fail with an offending sample.
+// ---------------------------------------------------------------------------
+
+const ORG_INVITE_TS = path.join(ONBOARDING, "org-invite.ts");
+const IN_PLACE_TS = path.join(ONBOARDING, "in-place.ts");
+const ACCEPT_TS = path.join(ONBOARDING, "accept.ts");
+const NO_ORG_PAGE = path.join(NO_ORG_DIR, "page.tsx");
+
+describe("2b B2: org-invite.ts is the congregation's side only, and the only file that names its definers", () => {
+  const code = read(ORG_INVITE_TS);
+
+  it("holds presby_app through withOrgContext: never getPlatformDb, never the platform issue module", () => {
+    expect(code).toMatch(/withOrgContext/);
+    expect(code).not.toMatch(/getPlatformDb/);
+    expect(code).not.toMatch(/from\s+["']\.\/issue["']|onboarding\/issue/);
+  });
+
+  it("never reads users, the invitation table or the contact table (the sender's own row is read in SQL by the definer, DECISION-189; the address comes through contact-methods/reader.ts)", () => {
+    expect(code).not.toMatch(/\bfrom\s+users\b|\bjoin\s+users\b/i);
+    expect(code).not.toMatch(/accountInvitations|\bfrom\s+account_invitations\b|\bjoin\s+account_invitations\b/i);
+    expect(code).not.toMatch(/contact_methods|contactMethods|presby_person_email/);
+    expect(code).toMatch(/@\/lib\/contact-methods\/reader/);
+  });
+
+  it("touches email_queue only through insertQueueRowInTx, cancelQueuedEmail and attemptQueuedSend", () => {
+    expect(code).not.toMatch(/emailQueue|\bemail_queue\b/);
+    const queueImports = /import\s*\{([^}]*)\}\s*from\s*["']@\/lib\/email\/queue["']/.exec(code);
+    expect(queueImports, "the queue import").not.toBeNull();
+    expect(queueImports![1]!.split(",").map((s) => s.trim()).filter(Boolean).sort()).toEqual(
+      ["attemptQueuedSend", "cancelQueuedEmail", "insertQueueRowInTx"].sort(),
+    );
+  });
+
+  it("writes its audit rows with insertAuditRow in the transaction, never recordAudit() (a failed audit insert must fail the change)", () => {
+    expect(code).toMatch(/insertAuditRow\(tx,/);
+    expect(code).not.toMatch(/recordAudit\(/);
+  });
+
+  it("the five definers are named in exactly org-invite.ts", () => {
+    for (const fn of [
+      "presby_issue_sign_in_invitation",
+      "presby_resend_sign_in_invitation",
+      "presby_revoke_sign_in_invitation",
+      "presby_sign_in_invitation_states",
+      "presby_sign_in_card_standing",
+    ]) {
+      expect(namers(new RegExp(fn)).map(rel), fn).toEqual([rel(ORG_INVITE_TS)]);
+    }
+  });
+
+  it("org-invite.ts is imported only from the tenant portal (src/app/(org)/): never (admin), (invite), no-organization or src/auth.ts", () => {
+    const importers = NON_TEST.filter((f) => f !== ORG_INVITE_TS && /@\/lib\/onboarding\/org-invite|from\s+["']\.\/org-invite["']/.test(read(f)));
+    expect(importers.length).toBeGreaterThan(0);
+    const outside = importers.filter((f) => !f.startsWith(path.join(SRC, "app", "(org)") + path.sep)).map(rel);
+    expect(outside).toEqual([]);
+  });
+
+  it("the scan can fail: a platform import, a users read and a contact-table read are all caught", () => {
+    expect(/getPlatformDb/.test('import { getPlatformDb } from "@/lib/db";')).toBe(true);
+    expect(/\bfrom\s+users\b|\bjoin\s+users\b/i.test("select 1 from users u where u.id = x")).toBe(true);
+    expect(/contact_methods|contactMethods/.test("select value from contact_methods")).toBe(true);
+    expect(/emailQueue|\bemail_queue\b/.test("insert into email_queue")).toBe(true);
+  });
+});
+
+describe("2b B2: the in-place acceptance and the listing each have one TypeScript door and one SQL door", () => {
+  it("presby_accept_in_place is named in exactly accept.ts, and presby_list_invitations_for_account in exactly in-place.ts", () => {
+    expect(namers(/presby_accept_in_place/).map(rel)).toEqual([rel(ACCEPT_TS)]);
+    expect(namers(/presby_list_invitations_for_account/).map(rel)).toEqual([rel(IN_PLACE_TS)]);
+  });
+
+  it("acceptInvitationInPlace is referenced only by accept.ts and the no-organization action; listInvitationsForAccount only by in-place.ts and the no-organization page", () => {
+    const accept = namers(/\bacceptInvitationInPlace\b/);
+    expect(accept.filter((f) => f !== ACCEPT_TS && f !== NO_ORG_ACTIONS).map(rel)).toEqual([]);
+    expect(accept).toContain(NO_ORG_ACTIONS);
+    const listing = namers(/\blistInvitationsForAccount\b/);
+    expect(listing.filter((f) => f !== IN_PLACE_TS && f !== NO_ORG_PAGE).map(rel)).toEqual([]);
+    expect(listing).toContain(IN_PLACE_TS);
+  });
+
+  it("in-place.ts and accept.ts hold presby_app only", () => {
+    for (const f of [IN_PLACE_TS, ACCEPT_TS]) expect(read(f), rel(f)).not.toMatch(/getPlatformDb/);
+  });
+
+  it("the Check-again scan is no longer vacuous: the action exists and calls connect from the session only (E-30)", () => {
+    const source = read(NO_ORG_ACTIONS);
+    expect([...source.matchAll(/connectSignedInAccount\(/g)]).toHaveLength(1);
+    expect(source).toMatch(/userId:\s*session\.user\.id/);
+    expect(source).toMatch(/secondFactorVerified:\s*session\.user\.twoFactorVerified\s*===\s*true/);
+  });
+
+  it("the in-place action takes the user id and the factor flag from the session only", () => {
+    const source = read(NO_ORG_ACTIONS);
+    const call = /acceptInvitationInPlace\(\{([\s\S]*?)\}\)/.exec(source);
+    expect(call, "the call").not.toBeNull();
+    expect(call![1]).toMatch(/userId:\s*session\.user\.id/);
+    expect(call![1]).toMatch(/secondFactorVerified:\s*session\.user\.twoFactorVerified\s*===\s*true/);
+    expect(call![1]).not.toMatch(/formData|searchParams|cookies|params/i);
+  });
+
+  it("nothing under src/app/no-organization/ imports getPlatformDb", () => {
+    const files = walk(NO_ORG_DIR).filter((f) => !isTest(f));
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter((f) => /getPlatformDb/.test(read(f))).map(rel)).toEqual([]);
+  });
+
+  it("the in-place feature files are now present in the DECISION-230 scan (it is not vacuous for in-place.ts)", () => {
+    expect(statSync(IN_PLACE_TS).isFile()).toBe(true);
+    expect(read(IN_PLACE_TS)).not.toMatch(/two-factor-grant|unstable_update/);
+  });
+});
+
+describe("2b B2: nothing outside the 0065 definers writes people.user_id (the A2 owner-path scan, DECISION-208)", () => {
+  /**
+   * The owner path is not bound by the `people_guard_user_link` trigger (the
+   * guard refuses every non-owner role), so this scan is the mitigation: no
+   * non-test application file may write the column. `src/lib/testing/` writes
+   * fixtures on the owner connection on purpose and is excluded.
+   */
+  const WRITES = [
+    /\bupdate\s+people\s+set\b[^;`]*\buser_id\b/i,
+    /\binsert\s+into\s+people\b[^;`]*\buser_id\b/i,
+    /\.update\(\s*people\s*\)[\s\S]{0,300}?\.set\(\s*\{[^}]*\buserId\b/,
+    /\.insert\(\s*people\s*\)[\s\S]{0,400}?\.values\(\s*\{[^}]*\buserId\b/,
+  ];
+  const writes = (source: string) => WRITES.some((re) => re.test(source));
+
+  it("no non-test file under src/ (outside src/lib/testing/) writes userId in a people insert or update", () => {
+    const offenders = namers(/./).filter((f) => writes(read(f))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it("the scan reads real files (not vacuous)", () => {
+    expect(namers(/\bpeople\b/).length).toBeGreaterThan(10);
+  });
+
+  it("the scan can fail: each shape of write is caught, and a read is not", () => {
+    expect(writes("await tx.execute(sql`update people set user_id = ${u} where id = ${p}`)")).toBe(true);
+    expect(writes("insert into people (first_name, user_id) values ('a', 'b')")).toBe(true);
+    expect(writes("await tx.update(people).set({ userId: u }).where(eq(people.id, p))")).toBe(true);
+    expect(writes("await tx.insert(people).values({ firstName: 'a', userId: u })")).toBe(true);
+    expect(writes("select user_id from people where id = 1")).toBe(false);
+    expect(writes("await tx.update(people).set({ firstName: 'a' })")).toBe(false);
+  });
+});
+
+describe("2b B2: the pure copy and type modules are client-safe", () => {
+  const PURE = ["sign-in-types.ts", "sign-in-copy.ts", "no-organization-copy.ts", "labels.ts", "invitation-copy.ts"];
+
+  it("none imports the database (a TYPE import aside), server-only, the audit writer or a library module", () => {
+    for (const name of PURE) {
+      const code = read(path.join(ONBOARDING, name));
+      expect(code, name).not.toMatch(/import\s+(?!type)[^;]*from\s+["']@\/lib\/db/);
+      expect(code, name).not.toMatch(/server-only|audit-tx|getPlatformDb|next\/headers/);
+      expect(code, name).not.toMatch(/from\s+["']\.\/(org-invite|issue|accept|in-place|connect)["']/);
+    }
+  });
+
+  it("the scan can fail", () => {
+    expect(/import\s+(?!type)[^;]*from\s+["']@\/lib\/db/.test('import { db } from "@/lib/db";')).toBe(true);
+    expect(/import\s+(?!type)[^;]*from\s+["']@\/lib\/db/.test('import type { X } from "@/lib/db/domain/invitations";')).toBe(false);
+  });
+});
+
+describe("2b B2: the 0065 migration deletes no record (rows are never deleted; every removal is a terminal timestamp)", () => {
+  const deletes = (source: string) => [...source.replace(/^\s*--.*$/gm, "").matchAll(/\bdelete\s+from\s+([a-z_]+)/gi)].map((m) => m[1]!.toLowerCase());
+
+  it("its only deletes are SPENT single-use email-verification tokens (the email change consumes its token); no invitation, person, user, contact or audit row", () => {
+    const migration = readFileSync(path.join(ROOT, "drizzle/0065_presby_sign_in_and_connect.sql"), "utf8");
+    const targets = deletes(migration);
+    expect(targets.length).toBeGreaterThan(0);
+    expect([...new Set(targets)]).toEqual(["email_verification_tokens"]);
+  });
+
+  it("the scan can fail: a delete of an invitation is caught", () => {
+    expect(deletes("delete from account_invitations where id = 1;")).toEqual(["account_invitations"]);
+    expect(deletes("-- delete from people\nselect 1")).toEqual([]);
+  });
+});
+
+describe("2b B2: the platform's masked panel never holds a full address or a token hash", () => {
+  const ISSUE_TS = path.join(ONBOARDING, "issue.ts");
+  /** The code of summarizeOrgSentInvitations with its one SQL template (the mask) removed. */
+  const summarizeCode = (source: string) => {
+    const start = source.indexOf("export async function summarizeOrgSentInvitations");
+    if (start < 0) return null;
+    return source.slice(start).replace(/sql<string \| null>`[\s\S]*?`/, "MASK");
+  };
+
+  it("selects named columns only: never the whole row, the address column or the hash outside the SQL mask", () => {
+    const code = summarizeCode(read(ISSUE_TS));
+    expect(code, "summarizeOrgSentInvitations").not.toBeNull();
+    expect(code).toMatch(/MASK/);
+    expect(code).not.toMatch(/inv:\s*accountInvitations\b/);
+    expect(code).not.toMatch(/emailNormalized|tokenHash|createdByUserId|\.personId|inviteeFirstName|inviteeLastName/);
+  });
+
+  it("the scan can fail: a whole-row select and a read of the address column are caught", () => {
+    const bad = summarizeCode("export async function summarizeOrgSentInvitations() { select({ inv: accountInvitations, x: r.emailNormalized }) }");
+    expect(/inv:\s*accountInvitations\b/.test(bad!)).toBe(true);
+    expect(/emailNormalized/.test(bad!)).toBe(true);
+  });
+});

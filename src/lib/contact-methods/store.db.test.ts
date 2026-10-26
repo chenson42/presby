@@ -562,6 +562,17 @@ describe.skipIf(!hasDb)("contact-methods/store.ts (Postgres-backed)", { timeout:
       expect((await notes(me, [a]))[0]!.names).toEqual([`Winnie Pref${stamp}`]);
     });
 
+    it("never names a DECEASED holder: a relative's old shared address must not block anyone (Community Increment 2b, one meaning of 'another live person' in three places)", async () => {
+      const me = await person("Living");
+      const a = addr("deceased");
+      const gone = await person("Passed");
+      await seedEmail(gone, a, { main: true });
+      // Alive, the holder is named; the note and R29's check agree.
+      expect(await notes(me, [a])).toEqual([{ address: a, names: [expect.stringContaining("Passed")], more: 0 }]);
+      await q(sql`update people set date_of_death = current_date - 30 where id = ${gone}`);
+      expect(await notes(me, [a])).toEqual([]);
+    });
+
     it("never names: the person themself, an ENDED holder, an ended membership, a merged person, or another organization's person", async () => {
       const me = await person("Solo");
       const a = addr("solo");
@@ -614,6 +625,35 @@ describe.skipIf(!hasDb)("contact-methods/store.ts (Postgres-backed)", { timeout:
 
     it("an empty list is no query and no note", async () => {
       expect(await notes(await person("Empty"), [])).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe("personIdsWithCredentialEmail: 'has an address on file' is the credential reader's answer (Community Increment 2b markers and Session rows)", () => {
+    const withAddress = async (ids: string[]) => {
+      const { personIdsWithCredentialEmail } = await import("./reader");
+      return inOrgA((tx) => personIdsWithCredentialEmail(tx, ids));
+    };
+
+    it("returns exactly the people with an active main address, reading nothing but their ids", async () => {
+      const has = await person("HasAddress");
+      await seedEmail(has, addr("has"), { main: true });
+      const none = await person("NoAddress");
+      const endedOnly = await person("EndedOnly");
+      await seedEmail(endedOnly, addr("ended"), { endedAt: true });
+      const found = await withAddress([has, none, endedOnly, has]);
+      expect([...found]).toEqual([has]);
+    });
+
+    it("is RLS-scoped: a person with no membership at this organization is absent even with an address", async () => {
+      const elsewhere = await fx.makePerson("Elsewhere", `Reader${stamp}`);
+      await fx.addMember(orgB, elsewhere);
+      await seedEmail(elsewhere, addr("elsewhere"), { main: true });
+      expect((await withAddress([elsewhere])).size).toBe(0);
+    });
+
+    it("an empty list is no query", async () => {
+      expect((await withAddress([])).size).toBe(0);
     });
   });
 });

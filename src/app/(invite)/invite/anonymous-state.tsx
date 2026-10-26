@@ -30,7 +30,10 @@ export function AnonymousState({
   token: string;
   localLoginEnabled: boolean;
 }) {
-  const guess = splitName(preview.personDisplayName);
+  // A sign-in invitation never pre-fills a name (G5): the invitee sees nothing
+  // about the person before signing in. (The preview already returns none to an
+  // anonymous visitor; this keeps it true if that ever changes.)
+  const guess = preview.purpose === "sign_in" ? { first: "", last: "" } : splitName(preview.personDisplayName);
   const firstName = preview.inviteeFirstName ?? guess.first;
   const lastName = preview.inviteeLastName ?? guess.last;
   return (

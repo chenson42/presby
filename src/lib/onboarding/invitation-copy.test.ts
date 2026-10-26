@@ -18,29 +18,29 @@ import {
 describe("acceptanceSentence - the copy table", () => {
   it("founding administrator, name known", () => {
     expect(acceptanceSentence({ purpose: "founding_administrator", name: "Marisol Quenby", address: "a@example.invalid" })).toBe(
-      "The founding administrator designation takes effect when Marisol Quenby accepts it from the email. Until then nobody holds this role.",
+      "The founding administrator designation takes effect when Marisol Quenby accepts it. Until then nobody holds this role.",
     );
   });
   it("treasurer, name known", () => {
     expect(acceptanceSentence({ purpose: "treasurer", name: "Perpetua", address: "a@example.invalid" })).toBe(
-      "The treasurer designation takes effect when Perpetua accepts it from the email. Until then nobody holds this access.",
+      "The treasurer designation takes effect when Perpetua accepts it. Until then nobody holds this access.",
     );
   });
   it("no name, address known", () => {
     expect(acceptanceSentence({ purpose: "treasurer", name: null, address: "a@example.invalid" })).toBe(
-      "The treasurer designation takes effect when the person at a@example.invalid accepts it from the email. Until then nobody holds this access.",
+      "The treasurer designation takes effect when the person at a@example.invalid accepts it. Until then nobody holds this access.",
     );
     expect(acceptanceSentence({ purpose: "founding_administrator", address: "a@example.invalid" })).toContain(
-      "when the person at a@example.invalid accepts it from the email. Until then nobody holds this role.",
+      "when the person at a@example.invalid accepts it. Until then nobody holds this role.",
     );
   });
   it("no name, no address", () => {
     expect(acceptanceSentence({ purpose: "founding_administrator" })).toBe(
-      "The founding administrator designation takes effect when the invitee accepts it from the email. Until then nobody holds this role.",
+      "The founding administrator designation takes effect when the invitee accepts it. Until then nobody holds this role.",
     );
     expect(acceptanceSentence({ purpose: "treasurer", name: "  ", address: " " })).toContain("when the invitee accepts it");
   });
-  it("makes no claim about delivery (only 'from the email')", () => {
+  it("makes no claim about delivery (it says only when the designation takes effect)", () => {
     expect(acceptanceSentence({ purpose: "treasurer", name: "Perpetua" })).not.toMatch(/inbox|delivered|received|opened/i);
   });
 });

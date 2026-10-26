@@ -406,18 +406,8 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
       expect(await threeWays({ endedOn: "2024-01-01" })).toEqual({ card: false, issue: false, connect: false, notes: false });
     });
 
-    it("the other holder is deceased: the definers agree it is not shared", async () => {
-      const r = await threeWays({ deceased: "2024-01-01" });
-      expect({ card: r.card, issue: r.issue, connect: r.connect }).toEqual({ card: false, issue: false, connect: false });
-    });
-
-    // Batch B2 adds `p2.date_of_death is null` to findSharedAddressNotes
-    // (Phase 3 amendment 2, 1.2 item 5). Until then the note still counts a
-    // deceased holder. `it.fails` turns into a failure the moment B2 lands,
-    // which is the cue to make it a plain `it` (and fold it into the case above).
-    it.fails("the other holder is deceased: findSharedAddressNotes agrees too (B2 flips this)", async () => {
-      const r = await threeWays({ deceased: "2024-01-01" });
-      expect(r.notes).toBe(false);
+    it("the other holder is deceased: all four agree it is not shared (findSharedAddressNotes gained date_of_death is null in Batch B2)", async () => {
+      expect(await threeWays({ deceased: "2024-01-01" })).toEqual({ card: false, issue: false, connect: false, notes: false });
     });
   });
 });

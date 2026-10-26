@@ -58,21 +58,30 @@ import { users } from "../schema";
  *     except by the fixture-teardown cascade from a `deletable_until`
  *     organization.
  *
- * WRITES: src/lib/onboarding/issue.ts (owner connection) inserts rows and
- * performs the revoke / supersede transitions (Batch 2b). Acceptance and
- * blocking happen only inside `presby_accept_invitation()`.
+ * WRITES: src/lib/onboarding/issue.ts (owner connection) inserts the platform
+ * designation rows and performs their revoke / supersede transitions. The
+ * congregation's sign-in rows (`purpose = 'sign_in'`, `origin = 'org'`) are
+ * written only by the 0065 issue / resend / revoke definers, called only from
+ * src/lib/onboarding/org-invite.ts. Acceptance and blocking happen only inside
+ * the shared acceptance core (`presby__accept_invitation_core`), reached
+ * through `presby_accept_invitation()` and `presby_accept_in_place()`.
  *
  * RETENTION: nulling `emailNormalized` 90 days after an invitation ends is
  * POLICY, NOT YET ENFORCED (no sweep exists; S6). Do not claim it in
  * user-facing copy.
  */
 
+/**
+ * The 0059 vocabularies (what the platform designation flow has always
+ * handled). The APPLICATION unions further down (`AccountInvitationPurpose`,
+ * `AccountInvitationOrigin`, `AccountInvitationBlockedReason`) are derived
+ * from the `*_ALLOWED` lists, which add 0065's members; these base lists stay
+ * so the 0059 CHECK pins in invitations.schema.test.ts keep meaning what they
+ * said.
+ */
 export const ACCOUNT_INVITATION_PURPOSES = ["founding_administrator", "treasurer"] as const;
-export type AccountInvitationPurpose = (typeof ACCOUNT_INVITATION_PURPOSES)[number];
 
-/** 0065 adds `org` to the CHECK (ACCOUNT_INVITATION_ORIGINS_ALLOWED); this union widens in 2b's Batch B2. */
 export const ACCOUNT_INVITATION_ORIGINS = ["platform"] as const;
-export type AccountInvitationOrigin = (typeof ACCOUNT_INVITATION_ORIGINS)[number];
 
 /** The closed list a committed `blockedAt` carries (DECISION-188). */
 export const ACCOUNT_INVITATION_BLOCKED_REASONS = [
@@ -85,7 +94,6 @@ export const ACCOUNT_INVITATION_BLOCKED_REASONS = [
   "not_applicable",
   "provisioning_incomplete",
 ] as const;
-export type AccountInvitationBlockedReason = (typeof ACCOUNT_INVITATION_BLOCKED_REASONS)[number];
 
 /**
  * The two purposes a platform designation covers: the scope of
@@ -100,14 +108,11 @@ export const ACCOUNT_INVITATION_DESIGNATION_PURPOSES = ["founding_administrator"
  * database's truth, pinned against the migration text by
  * invitations.schema.test.ts.
  *
- * The application unions above (`AccountInvitationPurpose`,
- * `AccountInvitationOrigin`, `AccountInvitationBlockedReason`) deliberately
- * stay at what application code handles today. Increment 2b's Batch B2
- * widens them in the same commit as the exhaustive copy and routing that
- * every new member needs (labels.ts, invitation-email.ts, invite-summary.tsx,
- * issue.ts), so each commit typechecks. Before then nothing creates a
- * `sign_in` / `org` row or commits `person_deceased`: only Batch A2's
- * definers do, and only Batch B2 calls them.
+ * The application unions are derived from these (Community Increment 2b,
+ * Batch B2), in the same commit as the exhaustive copy and routing every new
+ * member needs (labels.ts, invitation-email.ts, invite-summary.tsx, accept.ts,
+ * issue.ts), so each commit typechecks. A `sign_in` / `org` row is created
+ * only by the 0065 definers, called only from `org-invite.ts`.
  */
 export const ACCOUNT_INVITATION_PURPOSES_ALLOWED = [...ACCOUNT_INVITATION_PURPOSES, "sign_in"] as const;
 export const ACCOUNT_INVITATION_ORIGINS_ALLOWED = [...ACCOUNT_INVITATION_ORIGINS, "org"] as const;
@@ -115,6 +120,10 @@ export const ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED = [
   ...ACCOUNT_INVITATION_BLOCKED_REASONS,
   "person_deceased",
 ] as const;
+
+export type AccountInvitationPurpose = (typeof ACCOUNT_INVITATION_PURPOSES_ALLOWED)[number];
+export type AccountInvitationOrigin = (typeof ACCOUNT_INVITATION_ORIGINS_ALLOWED)[number];
+export type AccountInvitationBlockedReason = (typeof ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED)[number];
 
 /** Expiry cap (the CHECK). issue.ts's default is 7 days (Q3). */
 export const ACCOUNT_INVITATION_MAX_EXPIRY_DAYS = 30;

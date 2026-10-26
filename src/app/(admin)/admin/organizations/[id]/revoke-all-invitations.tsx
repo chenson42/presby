@@ -40,6 +40,9 @@ export function RevokeAllInvitations({
     startTransition(async () => {
       const fd = new FormData();
       fd.set("organizationId", organizationId);
+      // The action requires a scope (F198). This control is the designations
+      // lever; the org-sent lever is a second control (Batch C).
+      fd.set("scope", "designations");
       const outcome = await revokeAllInvitationsAction(fd);
       if (outcome.ok) {
         setMessage({ ok: true, text: "All open invitations were revoked." });

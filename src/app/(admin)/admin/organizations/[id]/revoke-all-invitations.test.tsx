@@ -47,7 +47,9 @@ describe("RevokeAllInvitations", () => {
     });
     const fd = mockRevokeAll.mock.calls[0][0] as FormData;
     expect(fd.get("organizationId")).toBe("org-1");
-    expect([...fd.keys()]).toEqual(["organizationId"]);
+    // The action requires a scope (F198); this control is the designations lever.
+    expect(fd.get("scope")).toBe("designations");
+    expect([...fd.keys()]).toEqual(["organizationId", "scope"]);
     expect(screen.getByRole("status").textContent).toMatch(/all open invitations were revoked/i);
     expect(toastSuccess).toHaveBeenCalled();
   });

@@ -15,6 +15,15 @@ import {
 } from "@/lib/roll";
 import { isUuid } from "@/lib/is-uuid";
 import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
+import {
+  resendSignInInvitation,
+  revokeSignInInvitation,
+  sendSignInInvitation,
+  type SignInContext,
+  type SignInSendResult,
+} from "@/lib/onboarding/org-invite";
+import { signInRefusalMessage } from "@/lib/onboarding/sign-in-copy";
+import type { SignInActionResult } from "@/lib/onboarding/sign-in-types";
 import type { ActionResult } from "@/types/actions";
 import {
   PARTICIPANT_COPY,
@@ -358,4 +367,159 @@ export async function undoParticipantEntryAction(
       undoneKind: result.voidedKind,
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Sign-in invitations (Community Increment 2b, Batch B2; Phase 3 "Server
+// actions"). The congregation invites one of its own people from the person's
+// edit page. Same plumbing as every action above: `auth()` not `cachedAuth()`,
+// `resolveOrgContext()` re-run inside the body, and the organization, the acting
+// person and the acting USER are all derived here from the session and the slug,
+// never from the client. The client supplies a person id (a selection), the
+// address the sender CONFIRMED and whether they acknowledged; the address the
+// email goes to is chosen by the database from the person's record, so a posted
+// address can only be refused (`address_changed`), never used.
+//
+// These actions hold no `db.*` call and write no audit row of their own: the
+// library writes `invitation.created / .resent / .revoked` in the transaction
+// that made the change (a failed audit insert rolls the invitation back), so
+// `check:audit` passes vacuously, as it does for the actions above.
+// ---------------------------------------------------------------------------
+
+type SignInGate =
+  | { ok: true; ctx: SignInContext; congregation: string }
+  | { ok: false; error: string };
+
+async function signInGate(slug: string): Promise<SignInGate> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: "You must be signed in to do that." };
+  if (typeof slug !== "string") return { ok: false, error: "You don't have access to that organization." };
+  const resolved = await resolveOrgContext(session.user.id, slug);
+  if (resolved.kind !== "ok") return { ok: false, error: "You don't have access to that organization." };
+  return {
+    ok: true,
+    congregation: resolved.org.name,
+    ctx: {
+      organizationId: resolved.org.organizationId,
+      actingPersonId: resolved.org.personId,
+      actingUserId: session.user.id,
+      actingUserEmail: session.user.email ?? null,
+    },
+  };
+}
+
+/** Rebuild the input from its known fields: a forged extra property cannot flow through. */
+function signInInput(input: unknown): { personId: string; confirmedAddress: string; acknowledged: boolean } | null {
+  if (typeof input !== "object" || input === null) return null;
+  const { personId, confirmedAddress, acknowledged } = input as Record<string, unknown>;
+  return {
+    personId: typeof personId === "string" ? personId : "",
+    confirmedAddress: typeof confirmedAddress === "string" ? confirmedAddress : "",
+    acknowledged: acknowledged === true,
+  };
+}
+
+function revalidateSignIn(slug: string, personId: string): void {
+  revalidatePath(`/o/${slug}/admin/community/${personId}/edit`);
+  revalidatePath(`/o/${slug}/admin/community`);
+  revalidatePath(`/o/${slug}/admin/community/pending`);
+  revalidatePath(`/o/${slug}/admin/officers`);
+}
+
+function sendResultToAction(result: SignInSendResult, congregation: string): SignInActionResult {
+  switch (result.kind) {
+    case "ok":
+      return {
+        ok: true,
+        data: { address: result.address, expiresAt: result.expiresAt.toISOString(), delivery: result.delivery },
+      };
+    case "forbidden":
+      return { ok: false, error: signInRefusalMessage("forbidden") };
+    case "invalid_input":
+      // A confirmation that is not even an address cannot match the record: the
+      // same sentence as a stale confirmation (nothing new to say).
+      return { ok: false, error: signInRefusalMessage("address_changed") };
+    case "totp_unavailable":
+      return { ok: false, error: signInRefusalMessage("totp_unavailable") };
+    case "link_origin_unavailable":
+      return { ok: false, error: signInRefusalMessage("link_origin_unavailable") };
+    case "db_error":
+      return { ok: false, error: signInRefusalMessage("db_error") };
+    case "refused": {
+      if (result.reason === "needs_acknowledgement") {
+        // Not an error: the dialog shows its acknowledgement paragraphs.
+        return { ok: false, error: "", needsAcknowledgement: result.ackReasons ?? [] };
+      }
+      if (result.reason === "cooldown") {
+        const minutes = result.nextResendAt
+          ? Math.max(1, Math.ceil((result.nextResendAt.getTime() - Date.now()) / 60_000))
+          : 1;
+        return {
+          ok: false,
+          error: signInRefusalMessage("cooldown", { minutes }),
+          retryAfterMinutes: minutes,
+        };
+      }
+      return {
+        ok: false,
+        error: signInRefusalMessage(result.reason, { name: result.personName ?? null, congregation }),
+      };
+    }
+  }
+}
+
+/**
+ * Invite a person to sign in. Gate: a signed-in member of this organization who
+ * holds `people.manage` (the library checks it; the definer re-checks it).
+ */
+export async function sendSignInInvitationAction(
+  slug: string,
+  input: { personId: string; confirmedAddress: string; acknowledged?: boolean },
+): Promise<SignInActionResult> {
+  const gate = await signInGate(slug);
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const clean = signInInput(input);
+  if (!clean) return { ok: false, error: signInRefusalMessage("not_found") };
+
+  const result = await sendSignInInvitation(gate.ctx, clean);
+  if (result.kind === "ok") revalidateSignIn(slug, clean.personId);
+  return sendResultToAction(result, gate.congregation);
+}
+
+/** Send the open invitation again: the earlier link stops working and the CURRENT address is re-read. */
+export async function resendSignInInvitationAction(
+  slug: string,
+  input: { personId: string; confirmedAddress: string; acknowledged?: boolean },
+): Promise<SignInActionResult> {
+  const gate = await signInGate(slug);
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const clean = signInInput(input);
+  if (!clean) return { ok: false, error: signInRefusalMessage("not_found") };
+
+  const result = await resendSignInInvitation(gate.ctx, clean);
+  if (result.kind === "ok") revalidateSignIn(slug, clean.personId);
+  return sendResultToAction(result, gate.congregation);
+}
+
+/** Cancel the person's open invitation. Terminal; refunds no limit. */
+export async function revokeSignInInvitationAction(
+  slug: string,
+  input: { personId: string },
+): Promise<ActionResult> {
+  const gate = await signInGate(slug);
+  if (!gate.ok) return { ok: false, error: gate.error };
+  const personId = typeof input?.personId === "string" ? input.personId : "";
+
+  const result = await revokeSignInInvitation(gate.ctx, { personId });
+  switch (result.kind) {
+    case "ok":
+      revalidateSignIn(slug, personId);
+      return { ok: true };
+    case "forbidden":
+      return { ok: false, error: signInRefusalMessage("forbidden") };
+    case "refused":
+      return { ok: false, error: signInRefusalMessage(result.reason) };
+    case "db_error":
+      return { ok: false, error: signInRefusalMessage("db_error") };
+  }
 }

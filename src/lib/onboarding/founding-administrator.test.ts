@@ -66,11 +66,22 @@ describe("founding-administrator.ts — the module's shape and the DECISION-155 
     expect(CODE).toMatch(/presby_founding_administrator_holder_count/);
   });
 
-  it("no module under src/lib/onboarding imports a resolver-side file (a TYPE import of OrganizationType aside)", () => {
+  /**
+   * The ONE tenant-side module in this directory. `org-invite.ts` (Community
+   * Increment 2b) is the congregation's own sign-in invitation: it is reached by
+   * a signed-in member of THAT organization through `withOrgContext()`, so it
+   * must import the resolver. Every other module here is a platform designation
+   * or a pure/shared file and keeps DECISION-155's boundary. The exemption is
+   * named, and the next test pins that it cannot grow silently.
+   */
+  const TENANT_SIDE = ["org-invite.ts"];
+
+  it("no module under src/lib/onboarding imports a resolver-side file (a TYPE import of OrganizationType aside), except the named tenant-side module", () => {
     const dir = path.join(ROOT, "src/lib/onboarding");
     const offenders: string[] = [];
     for (const name of readdirSync(dir)) {
       if (!name.endsWith(".ts") || /\.test\.ts$/.test(name)) continue;
+      if (TENANT_SIDE.includes(name)) continue;
       const code = readFileSync(path.join(dir, name), "utf8")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^\s*\/\/.*$/gm, "");
@@ -79,6 +90,14 @@ describe("founding-administrator.ts — the module's shape and the DECISION-155 
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("the tenant-side exemption is exactly org-invite.ts, and it does use the resolver (the exemption is not vacuous)", () => {
+    expect(TENANT_SIDE).toEqual(["org-invite.ts"]);
+    const code = readFileSync(path.join(ROOT, "src/lib/onboarding/org-invite.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(code).toMatch(/import\s*\{[^}]*\bwithOrgContext\b[^}]*\}\s*from\s*["']@\/lib\/authz["']/);
   });
 });
 

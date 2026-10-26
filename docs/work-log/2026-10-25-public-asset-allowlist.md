@@ -1882,3 +1882,238 @@ Which layer refuses, by connection:
 - the U4 renamed-import fix and the test-name suffix (Findings 1–2), for the implementer or as TODO lines;
 - the Rule 16 re-run of `scripts/test-rls.sql` on merged `development`, and clearing the worktree's `.next/dev` (Findings 4–5);
 - the pre-existing 381px overflow on the live site, as a TODO candidate (Finding 6).
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst), bug-fix variant: F289 public-asset allowlist
+
+**Worktree and branch:** `/Users/cshenso/git/presby-platform/presby-assets`, `pipeline/public-asset-allowlist`, HEAD `f1be5da`, plus the four uncommitted Rule 16 files, which match the integration patch.
+**Date:** 2026-10-25
+
+## VERDICT
+
+**SHIP WITH NOTES.** The bug no longer manifests, and I confirmed that on my own server. The notes are small, test-only or documentation items, plus three production and integration preconditions that gate the merge. None of them reopens the pipeline.
+
+## ONE-LINE TAKE
+
+> The public asset route now serves only a `public_site` image, or the photo of a person a public roster currently lists. Every other blob (a statement PDF, a ticket screenshot, the content bundle, an unlisted person's photo) gets the same neutral, uncacheable 404 as a uuid that doesn't exist, and the public site's own images and logos still render at 360px.
+
+## Evidence I relied on
+
+I ran this myself.
+
+- **Server and data.**
+  - I started my own `npm run dev -- -p 3600`, after clearing `.next/dev`, with `AUTH_URL` and `E2E_BASE_URL` set to `http://localhost:3600` and the test fakes in the environment.
+  - It ran against the pipeline Neon branch `pipeline-asset-allowlist`, not `development` or production.
+  - I stopped it by PID, and nothing is left listening on :3600.
+- **E1, `e2e/custom-domains/assets.spec.ts`:** 12/12 on this server, covering:
+  - a simulated custom host, canonical and alias;
+  - the platform host;
+  - the `sites.public_render` off-and-restore case;
+  - a real-browser natural-size check;
+  - a 360px pass.
+- **Hand probes on the branch's one live non-fixture site, platform host.** I'm naming it by role only, because the repo is public.
+
+| Request | Result |
+|---|---|
+| A public image | 200, `image/png`, `public, max-age=31536000, immutable`, `nosniff` |
+| The same key in uppercase | The same 200 |
+| A private PNG on that org | 404, `{"error":"Not found"}` (21 bytes), `no-store`, `nosniff` |
+| The org's bundle JSON | The same 404 |
+| A random uuid | The same 404 |
+| `not-a-uuid` | The same 404 |
+| An unmapped host with a real key | 404 |
+
+- **Real browser at 360px on that live site.**
+  - 9 of 9 images load, with a furthest image edge of x=340, and nothing returned a non-200.
+  - `scrollWidth` is 381. QA already showed this is pre-existing, and I reproduced the same number.
+  - The fixture pages in E1 are not 381px wide at 360px.
+
+**What I did not or could not walk:**
+- A blob referenced by a real `ticket_messages` or `giving_statements` row. Neither exists on the branch or in production. That path is proven at the database function by D1 and D4, which QA mutation-tested.
+- A roster photo, because no photo exists anywhere. Same basis.
+- The "walk as the person the path creates" requirement. It doesn't apply: nothing changes how an account connects to an organization, how a role is granted, or what a new account can reach. The walk that applies is the anonymous visitor's, and I did it.
+
+**Environment caveat.** My first start, a bare `npx next dev -p 3600`, returned a 500 on every page, and all 12 E1 tests failed. The cause was a Turbopack `next/font/google` resolution error ("queries have exactly one entry"). The second start used `npm run dev` (which runs `dotenv -e .env.local`) and I cleared `.next/dev` again; that one was clean. I changed two things at once, so I don't know which one fixed it. This doesn't touch the verdict, because the failure is in font resolution, which the diff doesn't change. Folded into follow-up 7.
+
+## What's Working
+
+- **The leak is closed in the database, not only in the route.**
+  - `audience` is fail-closed (default `private`) and immutable by trigger.
+  - Private consumers cannot reference a public row, because of the three-column foreign key.
+  - One definer is the only door.
+  - The image-type check is repeated in the definer, a database CHECK and the adapter.
+- **The route is one answer for every miss.** The 404 is byte-identical and `no-store`. A malformed key makes no database read and no `console.error`. A case variant of a key gets the canonical answer.
+- **Legitimate pages are untouched.** Marks and bundle images keep their immutable header. The `/signin` branded logo is unchanged. The fixture pages and the live site both render every image at 360px.
+- **The operator's rulings are built in.**
+  - `hide_photo` wins, and the door calls the roster functions so the page and the door cannot drift.
+  - Roster photos get `private, max-age=86400`.
+  - The wordmark stays private.
+- **QA's independent mutations (M1, M3, M4) turned the right tests red.** That is stronger evidence than the implementer's own runs.
+
+## Intent-vs-Shipped Diff
+
+- Phase 1 said: serve a blob only if a public page references it (Tier 2). Shipped: Tier 1 (`audience = 'public_site'`), with Tier 2 takedown tracked. **Acceptable drift.** It was proposed in the Phase 1 addendum and confirmed by the operator default on 2026-10-25. The visible consequence is that an image dropped from a bundle stays fetchable by its uuid. The runbook, DECISION-277 and the release note all say so.
+- Phase 1 said: one neutral 404, `no-store`, same work and timing. Shipped: the status, body and header set are identical (E1 and my probes). Timing equality is unverified, and the design says so openly. **Matches.**
+- Phase 1 said: validate the key as a uuid first. Shipped: `parseBlobKey`, with no read and no log on a malformed key. **Matches.**
+- Phase 1 said: roster photos get a short cache. Shipped: `private, max-age=86400`, with the exact string pinned. **Matches.** The `private` directive goes slightly beyond the "short public TTL" Phase 1 asked for, in the safe direction.
+- Phase 1 said: drop the `?? manifestKey` fallback. Shipped: a nil-uuid constant, because the site-kit contract can't render "no image". **Acceptable drift**, tracked.
+- Phase 1 said: `hide_photo` per the operator ruling. Shipped: it wins on `person_id` alone, so a photo hidden at any organization is withheld on every roster. **Acceptable drift.** It fails closed and keeps the release-note sentence true.
+- Phase 1 said: fixtures need updating, owned by the orchestrator. Shipped: the patch has four diffs. The fourth, `public-calendar-fixture.ts`, was found because a merged pipeline used `ON CONFLICT (organization_id, content_hash)`, which 0072 drops (F341). **Matches, plus a catch.**
+- Phase 1 said: rewrite comments that say the route "resolves any blob key". Shipped: done (C7). **Matches.**
+- Phase 1 said: show the 360px pass. Shipped: E1 plus my own pass. **Matches.**
+
+## Edge Cases
+
+- Empty state: pass. A site with no images and no mark renders as before. Misses are the neutral 404.
+- Failure microcopy: pass. A read failure gives the same 404, with one log line carrying only `{ mode, slug, key }`. No SQL or error text.
+- Permission gate: pass. The route is public. `sites.public_render` is the only gate, and the flag-off case is the same 404 and comes back after restore (E1 test 8, passed on my run). No new flag, in line with the operator's rule. QA's feature-gate audit found no protected route changed beyond an `audience` literal.
+- Audit event: not applicable. There is no mutation. The migration is provisioning, the 0057 precedent.
+- Mobile (360px): pass for this change. Images load and none overflows. The 381px live-site overflow is pre-existing (follow-up 6).
+
+## Rulings on QA's findings
+
+1. **U4 renamed-import gap.** **TODO, not now.**
+   - It is a test-only, third-layer hardening, and nothing fails open without it.
+   - A wrong `store` literal is refused by the composite foreign keys, the image CHECK and the catalog test. A wrong `resolve` literal returns null.
+   - Reopening the branch for it would add a QA re-run and change HEAD after the evidence trail closed.
+   - Land it, with the `ImportSpecifier`/`propertyName === "getBlobStore"` alias check and a self-test case, in the first pipeline that next edits `audience-callsites.test.ts`. Treasury moving its FORWARD row and site-ingest adding `findByContentHashes` are both due soon. The deadline is whichever comes first.
+2. **Test-name suffixes (`— regression for F289 …`).**
+   - The house convention is written in four implementer agent files and in qa.md, but no tripwire enforces it.
+   - Bundle it into the same test-only commit as ruling 1, rather than a drive-by rename now. File headers already cite F289.
+3. **Release-note sentence.** Accepted and supplied below. It states the directory-toggle residual plainly.
+4. **Worktree `.next/dev` cache.** Cleared and used clean. A one-line note goes in `docs/testing.md` (follow-up 7). This is workflow friction, not a product defect.
+5. **Branch data drift.**
+   - `test-rls.sql:217` and `:516` are known.
+   - `:7927` (`statistics.publish` held by 2 roles) is pre-existing.
+   - Section 67 needs Fernwood's `organization_sites` row. The orchestrator applied 0067 and the calendar seed to `development` on 2026-10-26.
+   - Re-running the full file on merged `development` is the Rule 16 gate (integration step 4 below). That is the evidence that closes this, not a TODO.
+6. **381px on the live site.** TODO, since it isn't this change's. Pre-existing, with no element box past 361px, so an overflow source must exist outside the measured boxes.
+
+## Release-note text (final; version "the next patch", expected 0.46.1)
+
+```markdown
+### Fix: your website no longer serves files it never published
+
+**Value:** Your congregation's public website now hands out only the images
+it actually uses, so a stored file that was never meant to be public cannot
+be fetched by its web address.
+
+#### What's New
+
+- **Only published images are served.** A congregation's website now serves
+  its page images, its logo, and the photos of people who are currently
+  listed on a public staff, officer or committee list. Any other stored file
+  now answers "not found", the same as a file that doesn't exist.
+- **What this closes.** Before this change, a stored file belonging to a
+  congregation (a support-ticket screenshot, a contribution statement, the
+  website's own content file) could be fetched by anyone who already knew its
+  exact, random web address while the website was live. At the time of this
+  change, production held no ticket attachments, no contribution statements
+  and no person photos, so none of those could have been fetched this way.
+  The website's content file could have been.
+- **Hidden photos stay hidden.** A person who has chosen to hide their photo
+  in the directory no longer has it shown on public lists, even when they are
+  listed. No person photos are stored in the platform today.
+- **Photos on public lists are kept for about a day.** Browsers hold them for
+  about a day instead of a year, so an un-listed person's photo stops showing
+  sooner.
+- **No action needed.** Nothing to re-publish, and the website looks the same.
+
+#### Things to know
+
+- A listed person's photo can still be fetched by its exact link while the
+  staff or committee list is switched off on the website.
+- An image removed from your website can still be fetched by its exact link
+  until a follow-up change.
+- Copies already saved by browsers, search engines or web archives cannot be
+  recalled.
+- The staff, officer and group "show on website" confirmation now says a
+  photo appears only if one is on file and the person hasn't hidden it.
+```
+
+Re-read the production counts behind "no ticket attachments, no statements, no person photos" on release day, as QA asked.
+
+## Production apply ordering (a gate, and an operator action)
+
+**0072 must be applied to production before the merge, not after.** A merge to `main` deploys the new code to production. That code calls `presby_public_site_asset()` and writes `audience`. Without the migration, the function doesn't exist, so every public image and logo on the live site becomes a neutral 404. Ingest, logo uploads, ticket attachments and statement issuance would also fail on the missing column. The reverse order is safe: old code on the new schema is compatible.
+
+The `docs/deployment.md` section "Public asset audience (0072)" is the runbook, and its order is right. The gate steps, in short:
+
+1. **Merge `origin/main` into the branch first.**
+   - QA verified the branch's merge base `21beebc`, and `main` has since moved to `8602994`.
+   - Parish 0.45.0 and the developer portal 0.46.0 land first and will move it again.
+   - After that merge, grep for `ON CONFLICT (organization_id, content_hash)` and for `getBlobStore()` calls or `blob_assets` inserts without `audience` (F341). Typecheck and the U4 scan will catch the second kind.
+2. **Rehearse on a throwaway Neon branch created from production**, not only the snapshot. Compare the NOTICE count against the V1-computed expectation. Production has 1 live site bundle and 1 mark, and 82 images in total, so the flip N should be well under 82, since orphans and superseded bundles stay private.
+3. **Re-read the preconditions on production the same day** (runbook step 0). Take the `pre-0072` snapshot.
+4. **Apply the migration**, then hold. The command is:
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0072_presby_blob_audience.sql`
+   - Use the direct (non-pooler) endpoint, because the file uses a temp table.
+   - From that moment to the promotion there must be **no site-repo push, no logo upload and no ticket attachment**. The first real `site-fpcw` ingest has never succeeded and needs the operator's explicit go. It must not happen in this window.
+5. **Promote (merge), then run V1-V6**, including `curl -sI` for `x-vercel-cache` and the phone view of the live home page.
+6. **`GIVING_STATEMENTS_ENABLED` stays unset** until V1-V6 pass.
+
+Applying to production is the operator's own gesture. This verdict doesn't authorize it.
+
+Also apply 0072 to the shared **`development`** branch at integration, so the fixtures and the merged `test-rls.sql` can run there. Check the `_journal.json` entry's `when` against the last entry on `main` at integration. It is `1788137573186`, 0067's value plus 8 days, so a later migration that merged first with a larger `when` would need it adjusted. `idx` stays 72.
+
+## Integration list (orchestrator, Rule 16)
+
+1. **Rule 16 files, from `docs/work-log/public-asset-allowlist.integration.patch`** (four diffs):
+   - `drizzle/meta/_journal.json`;
+   - `scripts/test-rls.sql`, which appends `\ir assets/test-rls-72.sql` as section 72;
+   - `e2e/support/custom-hosts.ts`;
+   - `e2e/support/public-calendar-fixture.ts`, the F341 `ON CONFLICT` target.
+
+   Commit these four in the integration commit, not mid-pipeline.
+2. **Registers:**
+   - `docs/schema-design-2.md`: F289, F340 (`people.organization_id` does not exist) and F341 (`ON CONFLICT` target dropped by 0072). F289, F297 and F298 are not yet on this branch's `main`, so they are filed elsewhere. F297 (`x-vercel-cache`) is closed by V5 and F298 (cross-audience dedup) by the audience-scoped key. Record the disposition where each is filed, in treasury's log and careers' log.
+   - `docs/decisions.md`: DECISION-277 at the top, newest first, with its final text from Phase 3. Add the amendments from Batch 1 (the `people.organization_id` correction, the `person_privacy` join on `person_id` alone, and the `idx: 72` journal rule) and the directory-toggle residual with the operator's 2026-10-26 deferral.
+3. **`docs/TODO.md`:** the lines below, plus a Done line.
+4. **`scripts/test-rls.sql`:** re-run in full as `presby_app` on merged `development`. Expect only the known drift. Section 72 must be 24/24, and section 67 must now pass with Fernwood's site row present.
+5. **Housekeeping:** the three leftover `.env.local` copies in the shared scratchpad that QA listed can be removed.
+6. **Rule 12:** not applicable. The origin was an agent's Phase 1 finding in careers, not a member feedback row.
+7. **Rule 13:** no what's-new entry. This is security hardening plus an org-admin dialog sentence, and no member-visible behavior changes. The release note is the vehicle.
+8. **Rule 14:** update the functionality-map bullets in the same cluster as the release note.
+   - Line 21, public sites: the asset route serves only `public_site` images or a currently listed person's photo, via `presby_public_site_asset()`. Add the cache classes, the neutral `no-store` 404 and the `blob_assets.audience` column.
+   - Line 103, the staff and committee directory primitives: `hide_photo` withholds a photo, and the toggle wording changed.
+   - Line 15's schema index: mention `audience`.
+9. **Rule 15:** agree with tech-lead, no `docs/architecture.md` change. It is a column and a serving rule on an existing definer pattern, not a new subsystem or data flow.
+10. **Done line at ship:** `F289 closed; F297/F298 closed (migration 0072, v0.46.1)`.
+
+## Follow-Ups (TODO-ready)
+
+- [ ] F289 Tier 2, takedown by reference: serve a `public_site` image only while the live bundle's `imageKeys` or the mark names it; decide `s-maxage` on the `site` class with it, since they conflict — `docs/work-log/2026-10-25-public-asset-allowlist.md` DECISION-277
+- [ ] `people.photo_key` becomes `uuid` with the composite FK `(photo_key, organization_id, asset_audience) → blob_assets(id, organization_id, audience)` pinned to `private`, together with the first photo writer (which stores photos as `private`); the photos pipeline's 0078 must restate the roster functions' `search_path`, revoke and grant, and keep `hide_photo` joined on `person_id` alone — same work-log, R4
+- [ ] Brand restore must re-`store()` the old bytes as `public_site`, not repoint at a historical key; note it on DECISION-059's restore text — same work-log, R1.4
+- [ ] When the first page renders the wordmark, `store(public_site)` it and add it to the public set (operator ruling: the mark only until then) — same work-log
+- [ ] presby-site-kit: let `imageUrl` return `undefined`, so an unmapped image key renders no `<img>` (today it is a nil-uuid URL and a broken image) — same work-log, Gap 7
+- [ ] **Deferred, not open:** whether a listed person's photo should be fetchable while `sites.public_staff_directory` / `sites.public_committee_directory` is off. Today it is, by exact uuid. The operator deferred it on 2026-10-26 ("we can test that in the future"). The release note and `docs/deployment.md` both state the residual — same work-log, Edge Case 19. This replaces the "Operator question" line.
+- [ ] Test-only hardening in `src/lib/storage/audience-callsites.test.ts`: treat an `ImportSpecifier` whose `propertyName` is `getBlobStore` as an alias violation (QA reproduced the `import { getBlobStore as gbs }` bypass) and add a self-test case. In the same commit, suffix the F289 tests `— regression for F289 public asset allowlist` (`route.test.ts`, `blob-key.test.ts`, `blob-store-public.test.ts`, `public-asset.db.test.ts`, `blob-audience.db.test.ts`, `public-roster-photo.db.test.ts`, `assets.spec.ts`). Land it with the first pipeline that edits that scan table, before treasury merges — same work-log, QA findings 1-2
+- [ ] The first customer's live public site measures 381px wide at a 360px viewport (`documentElement.scrollWidth`; every image box ends at x=340 and no element box passes 361px, so the overflow source is outside the measured boxes). Find it in the site content or site kit. Pre-existing, same on pre-fix code — same work-log, QA finding 6
+- [ ] The staff, officer and group "show on website" toggles live in a `hidden sm:table-cell` cell, so the confirmation dialog can't be reached from the roster on a phone. Pre-existing, found in F289 Batch 2 — same work-log, deviation 5
+- [ ] `docs/testing.md`: for a dev lane in a worktree, start the server with `npm run dev -- -p <port>` (not a bare `npx next dev`) and clear `.next/dev` first. A restarted dev server on a stale `.next` loops on `/signin`, and a bare start returned a Turbopack `next/font/google` 500 on my run. Cause unverified — same work-log, QA finding 4, plus this walk
+- [ ] Any pipeline writing `blob_assets` with `ON CONFLICT` targets `(organization_id, audience, content_hash)` since 0072. Add this to the tech-lead checklist or `docs/testing.md` — F341
+- [ ] `drizzle/0053:833` still cites `assets.ts:63-78`, which has moved to `:87-101`. Don't edit a shipped migration; note it in the migrations section of `docs/deployment.md` — Batch 1 integration patch
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. Own :3600 server on the pipeline Neon branch (not `development`): E1 12/12; private PNG, bundle JSON, random uuid and malformed key all give the identical neutral `no-store` 404 on the live site, while its public images render 9/9 at 360px. Rulings on QA findings 1-6 given. Release note supplied. Production apply ordering stated: 0072 before merge, rehearsed on a production-derived branch, no ingest or logo upload in the window. Integration list and TODO lines supplied. Rules 12-15 applied. Not exercised: real ticket/statement/photo rows (none exist; covered by D1/D4 with QA mutations). | SHIP WITH NOTES | 2026-10-25 |
+
+**Handoff:** orchestrator.
+- Integration: apply the four-diff patch, DECISION-277, F289/F340/F341 and the TODO lines.
+- Merge `origin/main` and re-run section 72 plus a fast suite.
+- Re-run full `test-rls.sql` on merged `development`.
+- Operator: the production 0072 apply, then the merge, then V1-V6, then `/release-notes`.
+
+Files and artifacts:
+- `/Users/cshenso/git/presby-platform/presby-assets/docs/work-log/2026-10-25-public-asset-allowlist.md`
+- `/Users/cshenso/git/presby-platform/presby-assets/docs/work-log/public-asset-allowlist.integration.patch`
+- `/Users/cshenso/git/presby-platform/presby-assets/docs/deployment.md` (section at line 879)
+- `/Users/cshenso/git/presby-platform/presby-assets/drizzle/0072_presby_blob_audience.sql`
+- `/Users/cshenso/git/presby-platform/presby-assets/e2e/custom-domains/assets.spec.ts`
+- 360px screenshot of the live site (scratchpad): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6-360.png`
+
+I edited no tracked files and used no `git stash`. The worktree has the same four uncommitted files as before. My run regenerated `.next/dev`, wrote to the ignored `test-results/` folder and left the usual E1 fixture traffic on the pipeline branch, which the spec tears down itself.

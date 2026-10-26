@@ -774,7 +774,7 @@ test.describe("Admin — treasurer invitation (online giving)", () => {
     const notice = section.getByRole("status").filter({ hasText: /Invitation (sent|created)/ });
     await expect(notice).toBeVisible({ timeout: 20_000 });
     await expect(notice).toContainText(`Invitation sent to ${treasurerEmail}.`);
-    await expect(notice).toContainText(/The treasurer designation takes effect when .+ accepts it from the email\. Until then nobody holds this access\./);
+    await expect(notice).toContainText(/The treasurer designation takes effect when .+ accepts it\. Until then nobody holds this access\./);
     // The open line replaces "nobody holds ... until it is accepted" with the named person.
     await expect(section).toContainText(/An invitation is open for .+\. Nobody holds this access until .+ accepts it\./);
     // The pending row replaces the form: the control is gone, the row shows the address and its state.
@@ -978,7 +978,7 @@ test.describe("Admin — founding administrator invitation", () => {
     await expect(notice).toBeVisible({ timeout: 20_000 });
     noticeForNewAddress = ((await notice.textContent()) ?? "").replace(/\s+/g, " ").trim();
     expect(noticeForNewAddress).toContain(
-      `The founding administrator designation takes effect when ${INVITE_NAMES.first} ${INVITE_NAMES.last} accepts it from the email. Until then nobody holds this role.`,
+      `The founding administrator designation takes effect when ${INVITE_NAMES.first} ${INVITE_NAMES.last} accepts it. Until then nobody holds this role.`,
     );
     expect(noticeForNewAddress).toContain(`Invitation sent to ${address}.`);
     // The notice names the typed address and name; mask them so the second send's screen can be

@@ -1595,3 +1595,11 @@ Files read for this addendum:
 | organization_sites with bundle / live | 1 / 1 |
 
 No private-consumer row exists in production today: the backfill's private set is empty there, and the public set is the one mark, the one live bundle and its images (orphans and superseded bundles stay private under Gap 11). Open Question 4 proceeds on the analyst default: **Tier 1 in 0072; Tier 2 (takedown by reference) a tracked follow-up.**
+
+## Orchestrator rulings on Phase 4 Batch 1 (2026-10-26)
+
+- **Which privacy row hides a roster photo:** join `person_privacy` on `person_id` alone, as built. A photo hidden at any organization stays hidden on every organization's public roster. This is the operator's "hide_photo wins" ruling, and the person-photos pipeline (F333) designs against the same rule. The red test under the alternative stays.
+- **`people.organization_id` does not exist (design defect):** registered as **F340**. Matching photos on the key alone and the index `people_photo_key_lower_idx on people (lower(photo_key))` are accepted.
+- **Journal idx = 72** (idx equals the migration number) accepted; P3's `<next>` is corrected in the integration patch.
+- **Directory toggles do not gate roster photos:** operator, 2026-10-26 — "nah. we can test that in the future." Edge Case 19 stays an accepted, deferred item; the TODO question line becomes a deferred line.
+- **For Batch 2 (from the site-ingest pipeline, Phase 2 S1):** in `audience-callsites.test.ts`, treat every `getBlobStore().<method>(` call as requiring an audience literal, with a named exemption list (`resolvePublic`), so a later adapter method (the ingest pipeline's `findByContentHashes`, the photos pipeline's `resolveMany`) needs only a table edit, not a scan-logic change.

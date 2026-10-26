@@ -1,7 +1,7 @@
 # Two-factor enrolment secret race — Work Log
 
 > **Slug:** `2026-10-26-totp-enroll-race`
-> **Surface:** (account) `/account/2fa` enrolment, and the shared helper used by `/admin/2fa`
+> **Surface:** (account) `/account/2fa` enrolment; `getOrCreatePendingEnrollment` has that page as its only caller (`/admin/2fa` does not use it)
 > **Permission(s):** existing (none new)
 > **Flag(s):** not needed
 > **Estimated complexity:** small
@@ -17,9 +17,9 @@
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-10-26 |
-| 2 — Architectural review | architect | **Skipped** — fix is a conflict-safe insert plus re-select inside `getOrCreatePendingEnrollment`; no schema, dependency or invariant change (reopens if a migration, trigger or lock is proposed) | — | 2026-10-26 |
-| 3 — Technical design | tech-lead | In progress | — | 2026-10-26 |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 2 — Architectural review | architect | **Skipped** — fix is a conflict-safe conditional upsert plus re-select inside `getOrCreatePendingEnrollment` (Phase 3 chose the conditional upsert; the same conditions hold); no schema, dependency or invariant change (reopens if a migration, trigger or lock is proposed) | — | 2026-10-26 |
+| 3 — Technical design | tech-lead | Complete | Design complete; implementer named (full-stack-developer) | 2026-10-26 |
+| 4 — Implementation | full-stack-developer | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -196,58 +196,184 @@ Files read:
 
 # Phase 3 — Technical Design (tech-lead)
 
+Bug-fix variant, brief design. Phase 2 stays skipped: every condition in the Phase 1 skip notation holds (no migration, trigger, lock, advisory lock, transaction, dependency, new directory, grant or constraint change, invariant change). If the implementer finds the fix needs any of those, stop and reopen Phase 2.
+
 ## Summary
 
-[One paragraph: what we're building and why.]
+Root cause: `getOrCreatePendingEnrollment` (`src/lib/totp-pending.ts:46-77`) is a check-then-act sequence across three separate round trips (`findFirst`, mint in memory, `insert … on conflict do update`). The upsert is unconditional, so it overwrites a row another render committed a moment earlier, and each caller returns the secret *it minted*, not the secret the database ended up holding. Two concurrent first renders of `/account/2fa` (the browser double-fetches on the `/totp` redirect) both see no row, both mint, the last write wins, and one page shows a secret the database no longer holds; `completeEnrollment` verifies against the stored one and refuses a correct code. The expired-row case races identically because the same unconditional `do update` replaces it.
+
+Fix: one atomic conditional upsert that only ever writes when there is no row or the row is expired, followed, for the loser, by a read of what the winner stored. The function never returns a secret it minted unless the database confirmed, in the same statement, that its own ciphertext is the stored one, and it always derives the returned value by decrypting the stored ciphertext.
 
 ## Permissions & Flags
 
-- Permission key(s): `area.action`
-- Default role bindings: [list]
-- Feature flag(s): [key, or "not needed"]
+- Permission key(s): none new. `/account/2fa` stays auth-only (no `FEATURES` gate), unchanged.
+- Default role bindings: none.
+- Feature flag(s): not needed. Rollback is a plain revert (no schema change).
+- Audit: no new event (minting a pending secret is not audited today; `TOTP_ENROLLED` and the admin reset already are).
 
 ## API Contract
 
-- `POST /api/...` — purpose, request body, response shape
-- `GET /api/...` — purpose, query params, response shape
-- Or server-action signatures: `async function actionName(input): Promise<Result>`
+No route or action changes. The one signature is unchanged:
+
+`getOrCreatePendingEnrollment(userId: string, email: string): Promise<{ secret: string; uri: string }>`
+
+New behaviour: on exhausting its attempts it rejects with `new Error("Pending two-factor enrolment could not be established")` (a constant string; it carries no user id, secret, ciphertext or URI). A decrypt failure (rotated key) still rejects from `decryptSecret` and is not caught.
+
+### The shape of the fix (for the implementer)
+
+Inside `getOrCreatePendingEnrollment`, replace the body with a loop of at most `MAX_ATTEMPTS = 3` (module constant, not exported), each attempt two autocommit statements, no transaction:
+
+1. **Read a fresh row.** `db.select({ secretCiphertext }).from(userTotpPendingEnrollments).where(and(eq(userId, userId), gt(expiresAt, sql\`now()\`))).limit(1)`. If a row comes back: `decryptSecret(row.secretCiphertext)`, return `{ secret, uri: otpauthUrl(email, secret) }`. This is the reload path and writes nothing.
+2. **Insert, or replace only if expired, in one statement.**
+   ```
+   insert into user_totp_pending_enrollments (user_id, secret_ciphertext, expires_at)
+   values ($user, $fresh_ciphertext, now() + make_interval(mins => 10))
+   on conflict (user_id) do update
+     set secret_ciphertext = excluded.secret_ciphertext,
+         expires_at        = excluded.expires_at,
+         created_at        = now()
+     where user_totp_pending_enrollments.expires_at <= now()
+   returning secret_ciphertext
+   ```
+   In Drizzle: `.insert().values({ userId, secretCiphertext: ct, expiresAt: sql\`…\` }).onConflictDoUpdate({ target: userId, set: {…}, setWhere: sql\`${table.expiresAt} <= now()\` }).returning({ secretCiphertext })`. `PENDING_TTL_MINUTES` is bound as the interval parameter, not string-built. Mint with `encryptSecret(generateSecret())` inside the attempt; a lost attempt's ciphertext is simply discarded. If `returning` yields a row, this call wrote the row (inserted, or replaced an expired one): decrypt *that returned ciphertext* and return it (one code path: the page always shows what was read back from the database). If it yields no row, another caller holds a fresh row: go round again; step 1 of the next attempt reads the winner's secret.
+3. **Exhaustion.** After `MAX_ATTEMPTS` with no return, throw the constant error above. Never return the locally minted secret.
+
+The expiry clock moves from the app (`new Date()`) to the database (`now()`) for every comparison *inside the helper*, so the freshness test and the write that follows it cannot disagree across two machines' clocks. `completeEnrollment`'s own `pending.expiresAt < new Date()` (`actions.ts:88`) is left alone; the skew between the app and Neon is sub-second against a 10-minute window (unverified in tests; named as a residual in Edge Cases).
+
+### Why this shape (READ COMMITTED)
+
+The connection is autocommit READ COMMITTED, each statement taking its own snapshot, so the safety has to live in one statement, not across two.
+
+- `INSERT … ON CONFLICT DO UPDATE` is an atomic insert-or-update. If another session has inserted the row but not yet committed, the second insert blocks on that transaction's outcome; when it commits, the second statement locks the committed row and evaluates the `DO UPDATE … WHERE` against the *latest committed version* of it. The winner's row has `expires_at` in the future, the predicate is false, the row is neither updated nor returned. That is documented behaviour: only rows actually inserted or updated appear in `RETURNING`. So exactly one concurrent statement writes per (user, expired-or-absent state), for first render and expiry alike, and a loser learns it lost from the empty `RETURNING`, not from a guess.
+- The loser's next statement starts after the winner committed (the loser was blocked on that very commit, or the row was already committed), so its fresh snapshot contains the winner's row. READ COMMITTED gives that read-your-predecessor guarantee for free; no retry-for-visibility is needed. The bounded retry exists for the other cause of an empty read, a row *deleted* between the two statements (admin reset, or the maintenance cron's expired-row GC). The next attempt then finds no row and inserts.
+- Rejected, option A: `on conflict do nothing` + re-select. It does not replace an expired row (the conflicting expired row is left in place), so it would need a separate `delete … where expires_at <= now()` first: two statements to make the expiry case correct, against one for the conditional upsert. It also gives a loser no way to tell "lost to a fresh row" from "row was expired" without the re-select. The conditional upsert subsumes it.
+- Rejected: a transaction with `SELECT … FOR UPDATE`, an advisory lock, or a unique index/trigger. They would reopen Phase 2 and the primary key on `user_id` already provides the arbiter.
+- Cost: a reload within the TTL is one indexed read and no write (today it is also one read). First render and post-expiry render are one read plus one write (today: one read plus one write). No extra latency on the common path.
+
+Logging: the function logs nothing. No `console.*`, no error `cause`, no interpolation of secret, ciphertext, URI, or even the user id into a message. A unit test pins this for the failure path (T8).
 
 ## Data Model
 
-[New tables / columns / indexes, or "No schema changes required."]
+No schema changes required. No migration (0080 stays unused), no new constraint, no grant change (`presby_app` already has full CRUD on `user_totp_pending_enrollments`, 0048; `ON CONFLICT DO UPDATE … WHERE` and `RETURNING` need only the SELECT and UPDATE it already holds). `schema.ts` untouched.
 
 ## Component / Page Plan
 
-- Pages to create: [list]
-- Components to create: [list]
-- Files to modify: [list]
+- Pages to create: none. Components to create: none. UI unchanged.
+- Files to modify:
+  - `src/lib/totp-pending.ts` — the fix above; correct the docstring (see below).
+  - `src/lib/totp-pending.test.ts` — replaced wholesale (see Test plan).
+  - `src/app/(account)/account/2fa/page.tsx:113-116` — the comment ("reuse the pending row if it's still valid, otherwise mint a new one") stays true; add one clause: "the page shows what the database holds". Optional, comment only.
+- Files to create: `src/lib/totp-pending.exhaustion.test.ts` (mocked-db unit spec, runs in plain `npm test`); `e2e/totp-enrol-concurrency.spec.ts` (the concurrent-fetch probe).
+- Docstring correction (`totp-pending.ts:1-18, 39-45`): delete "used by the admin /admin/2fa and account /account/2fa pages" and the "previously duplicated … in admin/2fa/page.tsx" paragraph. State instead: sole caller is `src/app/(account)/account/2fa/page.tsx`; `/admin/2fa` is a policy and stranded-users page and does not call it; the contract is "one stored secret per pending enrolment, the page always shows what the database holds, a fresh row is never overwritten, an expired row is replaced atomically". Replace "makes it straightforward to unit-test by mocking the DB" with "tested against the real database (`totp-pending.test.ts`)". Fix the work-log header's Surface line to match (done in this commit).
+
+## Test plan (Phase 4 writes these; tests land first and are shown red)
+
+Order: the implementer writes the two spec files, runs them against the **unfixed** helper (red), commits that as a WIP commit or keeps a scratch copy of the old file for comparison (never `git stash`: worktrees share one stash list), then applies the fix and shows green. The Phase 5 QA check is "T1, T2 and T9 fail on the old helper".
+
+**`src/lib/totp-pending.test.ts` (DB-backed, replaces the replica spec).** Harness per `credentials.test.ts`: `describe.skipIf(!hasDb)`, dynamic imports in `beforeAll`, Fixture: throwaway `users` rows (`@example.invalid` addresses, random UUIDs) created through `getPlatformDb()`, removed in `afterAll` (the FK cascade removes pending rows; fixture teardown only, the application code never hard-deletes users). Needs `AUTH_TOTP_ENCRYPTION_KEY` (present in `.env.local`, `db.yml`, `ci.yml`); a missing key makes the helper throw, which is a loud failure and not a skip. Run with `npm run test:db`; the pool is 10, so N = 16 parallel calls still interleave heavily.
+
+| # | Case | Assertion | Red on old helper? |
+|---|---|---|---|
+| T1 | Concurrent first render: 16 parallel `getOrCreatePendingEnrollment(u, email)` for a user with no row | exactly 1 distinct `secret` across the 16 results; exactly 1 row in the table; `decryptSecret(row.secretCiphertext)` equals that secret; every `uri` contains it | yes (loser returns its own minted secret) |
+| T2 | Expiry race: seed an expired row (known S0, `expires_at` an hour ago), then 16 parallel calls | 1 distinct secret, not S0; stored row decrypts to it; stored `expires_at` is more than 9 minutes in the future (read with `expires_at > now() + interval '9 minutes'` in SQL, no JS clock) | yes |
+| T3 | Reload within TTL: two sequential calls | same secret; stored ciphertext, `created_at` and `expires_at` byte-identical before and after the second call (a fresh row is never rewritten) | no (pins preserved behaviour) |
+| T4 | Fresh row under concurrency: seed a fresh row with known secret S, 16 parallel calls | all equal S; row unchanged | no (pin) |
+| T5 | Fresh after delete: call, `delete` the user's pending row (the admin-reset shape), call again | second secret differs from the first; row decrypts to the second | no (pin) |
+| T6 | Two users: 16 interleaved parallel calls (8 per user) | one distinct secret per user, the two differ, each stored row is keyed to its own user | no on a quiet DB, yes with the race; pin |
+| T7 | Rotated key: fresh row with an undecryptable ciphertext | the call rejects, and the row is untouched (not re-minted over a fresh row, Phase 1 gap 4) | no (pin) |
+
+**`src/lib/totp-pending.exhaustion.test.ts` (no DB; mocks `@/lib/db`, imports the real subject and the real `two-factor`).** The mocked builder chain records the `ciphertext` passed to `.values()`.
+- T8 (exhaustion): `select` always yields `[]` and `returning` always yields `[]`. The call rejects with the constant message; `insert` was called exactly 3 times; the rejection message, and everything written to `console.*` spies during the call, contains neither any recorded ciphertext nor its decrypted secret; no value is returned.
+- T9 (loser returns the winner's secret): attempt 1 `select` yields `[]`, `returning` yields `[]`; attempt 2 `select` yields a row whose ciphertext is `encryptSecret("WINNERSECRETWINNER")`. The call resolves to that secret and `uri`, and not to the secret it minted in attempt 1 (red on the old helper, which returns its local mint).
+- T9b (bounded retry recovers): attempt 1 empty/empty, attempt 2 `select` empty and `returning` yields the row it wrote → resolves on attempt 2 with the decrypted returned ciphertext.
+
+The old replica predicate tests (`shouldReuseRow`) are deleted: they never imported the subject.
 
 ## Implementation Order
 
-1. Schema (if any) → `npm run db:push` on a Neon branch
-2. `FEATURE_CATALOG` entry + seed binding
-3. Route handlers / server actions
-4. UI
-5. Audit events for security-sensitive paths
-6. Release notes entry
+1. Tests first (T1-T9b), run red against the unfixed helper; capture the failing output in the Phase 4 notes.
+2. `totp-pending.ts` fix and docstring; tests green; `npm run typecheck`, `npm run lint`, `npm run check` (zero violations; `check:sql-date` does not apply, no `sql<Date>`; `check:audit` unaffected, no actions file touched).
+3. The e2e probe and the running-server gate below.
+4. Work-log Phase 4 record; docs reconciliation (TODO lines and DECISION-290, below, are integration-time edits to shared files, applied by the orchestrator at merge per Rule 16).
+5. Release notes after Phase 6 SHIP IT via `/release-notes`.
+
+No schema, `FEATURE_CATALOG`, seed binding, route, action, UI or audit step applies.
+
+## e2e blast radius and the Phase 4 gate (treated as auth-touching)
+
+Specs that visit `/account/2fa` and could be affected by any change to enrolment: `invitation-new-account.spec.ts` (reads the secret at line 195 and enrols; the flake's origin), `invitation-existing-account.spec.ts`, `account-page.spec.ts`, `post-login-routing.spec.ts`, `member-home.spec.ts`, `role-boundaries.spec.ts`, `giving-shell.spec.ts`, and `visual-parity.spec.ts` via `e2e/support/routes.ts` (the QR repaints; already a documented time-sensitive route, TODO line 482, no new impact). None asserts a behaviour the fix alters: the page markup, copy, TTL and the secret's lifetime are the same; only the cause of a mismatch between the shown and stored secret disappears. `totp-full-login`, `totp-code-entry`, `totp-recovery-code` use an already-enrolled user and never call the helper; they are run as the login-path smoke.
+
+Flags the gate depends on: none beyond the committed baseline. The new probe reads `/account/2fa` as a signed-in, unenrolled throwaway user and sets no flag, so it adds nothing to `scripts/ci/e2e-baseline-flags.sql`. `invitation-new-account` sets no flag itself (its throwaway org carries `require_two_factor`). If the implementer finds the probe needs `auth.require_2fa` to reach the page, the probe sets it through `e2e/support/flags.ts` with capture-then-restore, and says so in the Phase 4 notes.
+
+Gate (all against the worktree's own dev server, `E2E_BASE_URL=http://localhost:3630`, started by the implementer, stopped by PID; a run that attached to :3000 is discarded):
+
+1. `invitation-new-account` with `--repeat-each=40 --workers=1`: 40 of 40 pass, no retries counted as passes. This is corroborating evidence only (at a 1-in-20 rate, 40 clean runs is about 87% confidence); the deterministic gate is item 3.
+2. `totp-full-login` (MFA-enrolled seeded user), plus `totp-code-entry` and `totp-recovery-code`.
+3. New `e2e/totp-enrol-concurrency.spec.ts`: for a fresh unenrolled user signed in through the real form, fire 8 concurrent `GET /account/2fa` requests through the page's authenticated request context (`Promise.all`), parse the manual-key `<pre>` from each response, and assert all 8 secrets are identical; then reload in the browser and assert the same secret; repeat for three fresh users. On the old helper this fails with near certainty. (Implementer verifies the secret is present in the server-rendered HTML; if `HydrationGate` defers it, drive 8 parallel pages with `Promise.all(page.goto)` in separate pages of one context instead.)
+4. A 360px look at the enrolment page (`/account/2fa` as the unenrolled user): QR code and manual key visible, no horizontal scroll, Playwright screenshot saved to the Phase 4 notes. The markup is unchanged, so this is a regression look, not a design review.
+5. Standard: `npm run typecheck`, `npm run lint`, `npm run check`, `npm run test`, `npm run test:db` (at least `totp-pending.test.ts` and the unit suite), `next build`.
+
+QA returns BLOCKED, not PASS, if items 1-3 are deferred.
 
 ## Carry-forward
 
 | Phase 1 gap / Phase 2 ruling | Addressed here (where), or *deferred* (who accepted) |
 |---|---|
-| [gap or ruling] | [section, or deferred + who accepted] |
+| Gap 1: empty re-select needs a bounded retry and a defined failure | Addressed: shape of the fix, `MAX_ATTEMPTS = 3`, constant error, never returns an unstored secret; pinned by T8, T9b |
+| Gap 2: replica spec cannot fail before the fix; DB-backed regression test | Addressed: Test plan T1-T7 (DB-backed, T1/T2 red on the old helper) and T8-T9b; the replica spec is deleted |
+| Gap 3: non-transactional `replaceRecoveryCodes` in `completeEnrollment` | *Deferred* — out of scope as confirmed in Phase 1; filed as a TODO line (below) |
+| Gap 4: rotated key must not worsen, never silently re-mint over a fresh row | Addressed: decrypt is outside any catch; T7 pins that the row is untouched |
+| Gap 5: stale docstring and header ("shared with `/admin/2fa`") | Addressed: docstring correction under Component / Page Plan; header Surface line corrected |
+| Gap 6 (TODO.md:413): `completeEnrollment` has no rate limit | *Deferred* — stays in its existing TODO line; no `checkRateLimit` is added here (Phase 1 ruling) |
+| Visual-parity note (TODO.md:482) | Addressed: no new impact; named in the e2e blast radius |
+| Must preserve: one stored secret per pending enrolment | Addressed: primary key unchanged; T1, T6 |
+| Must preserve: always return what is stored | Addressed: both return paths decrypt a ciphertext read back from the database; T1, T9 |
+| Must preserve: a fresh row is never overwritten | Addressed: `do update … where expires_at <= now()`; T3, T4 |
+| Must preserve: expiry replacement is itself conflict-safe | Addressed: the same conditional upsert; T2 |
+| Must preserve: fresh secret after completion or reset | Addressed: completion and admin reset still delete the row, the next call inserts; T5 |
+| Must preserve: no secret leaks, no logging, keyed on session `userId`, no new client channel | Addressed: no logging, constant error message, key on `userId` in both statements; T8, T6 |
+| Must preserve: `callbackUrl` sanitising and the `isTotpConfigured` / already-enrolled ordering in `page.tsx` | Addressed: `page.tsx` code is not edited (comment only) |
+| Auth-touching treatment: MFA smoke on port 3630, BLOCKED if deferred | Addressed: the e2e gate above |
+| Phase 2 skip conditions (no migration, trigger, lock, dependency, invariant) | Addressed: all hold; no transaction, lock or advisory design is used; stop and reopen Phase 2 if that changes |
+| Out of scope: other replica specs, TTL, copy, `/admin/2fa`, the 2b `enrolOnPage` workaround | *Deferred* — Phase 1 out-of-scope list, accepted by the user at Phase 1; the workaround removal gets a TODO line |
 
 ## Edge Cases & Risks
 
-- [Thing that could fail or that needs special handling; each claim cites the test that pins it or says "unverified"]
+- Concurrent first render converges on one secret — pinned by T1 (DB). Expiry race converges — T2. Reload within the TTL does not rewrite the row — T3. A fresh row survives a burst — T4. A deleted row yields a new secret — T5. Cross-user isolation — T6. Rotated key surfaces and does not re-mint — T7. Bounded failure with no leak — T8. Loser returns the winner's secret — T9.
+- Two tabs, or the double-fetch, in the same millisecond: covered end to end by the concurrent probe (e2e gate item 3).
+- A pending row deleted by an admin reset or the cron GC between the read and the upsert: handled by the loop (the next attempt inserts); the deterministic mocked path is T9b; a live deletion race is unverified (not worth a flaky test).
+- A decrypt failure inside the loop on a *just written* row cannot occur with a consistent key, because the helper encrypted it a statement earlier; if it did, it rejects (no catch), same as a rotated key.
+- Clock: freshness and the TTL now use the database clock inside the helper, while `completeEnrollment` (`actions.ts:88`) compares `expires_at` to the app clock. The skew is far below the 10-minute window and only moves the expiry edge by that skew; unverified, accepted, no test.
+- A thrown `Pending two-factor enrolment could not be established` (three consecutive lost attempts, expected only under sustained deletes) falls to Next's default error page; there is no new string, no `error.tsx` is added (the same fall-through as a rotated-key decrypt failure today). Unverified in a browser.
+- Neon pool: statements are autocommit and independent; no statement relies on connection affinity. The Drizzle `setWhere` rendering of the column reference (qualified vs bare) must be checked in the generated SQL by the implementer; both are valid in `ON CONFLICT DO UPDATE … WHERE`. T2 would fail loudly if it were not.
 
 ## Copy
 
-- [Every user-facing string, checked against the accepted residuals: copy may not deny a residual the record admits]
+No user-facing string is added or changed in the product: page text, buttons, toasts and errors are untouched. The constant thrown message is an internal error that is never rendered to the person (Next's default error page shows no message in production), and it is not new product copy.
+
+One release-note line is user-facing and is written here, so it gets the four checks now. Proposed text for the next patch (final wording belongs to `/release-notes` at ship, held to these checks):
+
+> Fixed an occasional problem when setting up two-factor sign-in for the first time: the code from your authenticator app could be refused even though it was correct. The setup page now always shows the key that was saved, so the first code you enter works.
+
+1. *Residuals.* It denies no accepted residual and no Phase 1 ruling: it makes no claim about the unfixed rate limit (Gap 6), the recovery-code replacement (Gap 3) or key rotation; it says "occasional" and "could be", and promises only the stated case (a first-time setup where two requests overlapped).
+2. *Source of truth.* The claim that "the page shows the key that was saved" is established by the helper reading the stored `secret_ciphertext` (T1, T9). The line makes no claim about a person's account state or date.
+3. *Audience.* Release notes are read by members and administrators; the line asks nobody to do anything.
+4. *Neighbours.* Greps of `src/` for `Reload the page`, `did not match` and enrolment copy: `actions.ts:80-92` ("No pending enrollment found. Reload the page to start over.", "Enrollment session expired. Reload the page to start over.", "That code did not match. Try again.") all stay true after the fix (a wrong code or an expired or reset session still produces them); none becomes stale. No file is a modify target for copy.
+
+## Proposed docs reconciliation (integration time, by the orchestrator; shared files)
+
+TODO.md:
+- Add: `- [ ] **completeEnrollment: non-transactional recovery-code replacement (adjacent race).** It reads the pending row, verifies, upserts user_totp, deletes the pending row, then replaceRecoveryCodes (delete then insert) with no transaction, so two tabs submitting at once can interleave recovery codes; the client's inFlight guard covers one tab only. Fix with one transaction, with the rate limit (Gap 6) in the same edit. — docs/work-log/2026-10-26-totp-enroll-race.md Phase 1 gap 3`
+- Keep the Gap 6 line (`docs/TODO.md:413`) unchanged.
+- Amend item (12) of the test-coverage punch list (`docs/TODO.md:213`): `totp-pending.test.ts` is now a real DB-backed spec; only `admin/users/[id]/actions.test.ts` remains a replica.
+- Add: `- [ ] **Remove the invitation-new-account enrolOnPage reload-and-retry workaround (Community 2b) once the totp-enroll-race fix is merged.**`
+- Move the pipeline's own line to Done at ship.
+
+decisions.md, DECISION-290 (implementation entry, newest first): "A pending two-factor secret is created by one conditional upsert (`on conflict (user_id) do update … where expires_at <= now() returning`), never by find-then-write, and the page shows only a ciphertext read back from the database. Rejected: `do nothing` + re-select (does not replace an expired row), and a lock or transaction (reopens Phase 2, unneeded under READ COMMITTED). Bounded to 3 attempts, then a constant error; never returns an unstored secret."
 
 ## Implementer
 
-[database-admin | api-developer | ux-developer | full-stack-developer]
+**full-stack-developer** (small, coupled: one helper, two spec files and one e2e probe; no schema, route or UI work). Release: **the next patch** after the current queue (0.46.0 developer portal, 0.46.1 F289, 0.46.2 ingest, 0.47.0 careers).
 
 ---
 

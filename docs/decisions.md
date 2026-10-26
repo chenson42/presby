@@ -4,6 +4,23 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-290 — A pending two-factor secret is created by one conditional upsert and the enrolment page shows only a ciphertext read back from the database; never find-then-write.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA PASS, Phase 6 SHIP IT) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-totp-enroll-race` (F342; no migration; v0.46.2)
+
+- **Decision.** `getOrCreatePendingEnrollment` (`src/lib/totp-pending.ts`) reads a fresh row first (`expires_at > now()`), and otherwise runs `insert … on conflict (user_id) do update set … where user_totp_pending_enrollments.expires_at <= now() returning secret_ciphertext`. A row returned means this call wrote the row; no row returned means another caller holds a fresh one and the next attempt reads the winner's. Both return paths decrypt a ciphertext read back from the table, so the page never shows a secret it minted but the database does not hold. Bounded to `MAX_ATTEMPTS = 3`, then a constant error (`Pending two-factor enrolment could not be established`); it never returns an unstored secret, logs nothing, and carries no user id, secret, ciphertext or URI in any message.
+- **Why it works.** The connection is autocommit READ COMMITTED, so the safety must live in one statement. A concurrent insert blocks on the first one's commit, then re-evaluates the `DO UPDATE … WHERE` against the committed row; a fresh row fails the predicate and is neither updated nor returned. Exactly one concurrent statement writes per absent-or-expired state, for first render and for expiry alike. The retry exists only for a row deleted between the two statements (an admin reset or the maintenance GC).
+- **Rejected.** `on conflict do nothing` plus a re-select: it does not replace an expired row, so it needs a separate delete first, and a loser cannot tell "lost to a fresh row" from "row was expired". A transaction with `select … for update`, an advisory lock, or a unique index or trigger: each would reopen Phase 2, and the primary key on `user_id` is already the arbiter.
+- **Clock.** Freshness and the 10-minute TTL inside the helper use the database clock (`now()`, the TTL bound as a parameter), so the test and the write cannot disagree across two machines.
+- **Accepted residuals.**
+  - The helper uses the database clock while `completeEnrollment` (`actions.ts:88`) compares `expires_at` to the app clock. The skew is sub-second against a 10-minute window and is unverified. It only moves the expiry edge by that skew.
+  - A live delete-between-statements race (an admin reset or the GC removing the winner between the read and the upsert) is covered only by the scripted-database spec T9b, not by a live test; it was not worth a flaky one. The exhaustion error reaching Next's default error page has not been looked at in a browser.
+- **Test discipline.** `totp-pending.test.ts` is DB-backed and was red on the old helper (T1, T2, T6); the old replica spec that never imported its subject is deleted. `e2e/totp-enrol-concurrency.spec.ts` fires eight concurrent renders of `/account/2fa` for a fresh user and was red 3 of 3 on the old helper.
+- **Not decided here.** The `completeEnrollment` rate limit (Gap 6) and its non-transactional recovery-code replacement stay tracked in `docs/TODO.md`; F166 (first enrolment loses the recovery codes) is untouched.
+- **Revisit if** a second caller of the helper appears, the TTL or the table's primary key changes, or a migration is proposed for this table.
+
+---
+
 **DECISION-279 — Site ingest gains a staged, content-addressed transport; the legacy single POST stays.**
 
 **Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; built as designed, deviations recorded in the work-log; QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-site-ingest-size` (F324)

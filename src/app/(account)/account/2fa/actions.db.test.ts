@@ -12,7 +12,8 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
+import { generateSync } from "otplib";
 
 vi.mock("server-only", () => ({}));
 
@@ -34,6 +35,7 @@ describe.skipIf(!hasDb)("2fa actions (Postgres-backed, real dev database)", () =
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
   let encryptSecret: typeof import("@/lib/two-factor").encryptSecret;
   let hashRecoveryCode: typeof import("@/lib/two-factor").hashRecoveryCode;
+  let generateSecret: typeof import("@/lib/two-factor").generateSecret;
   let schema: typeof import("@/lib/db/schema");
 
   const created: string[] = [];
@@ -87,14 +89,42 @@ describe.skipIf(!hasDb)("2fa actions (Postgres-backed, real dev database)", () =
   beforeAll(async () => {
     actions = await import("./actions");
     ({ getPlatformDb } = await import("@/lib/db"));
-    ({ encryptSecret, hashRecoveryCode } = await import("@/lib/two-factor"));
+    ({ encryptSecret, generateSecret, hashRecoveryCode } = await import("@/lib/two-factor"));
     schema = await import("@/lib/db/schema");
   });
 
   beforeEach(() => {
     mockAuth.mockReset();
     mockUpdate.mockReset();
+    mockUpdate.mockImplementation(async () => ({ user: { twoFactorVerified: true } }));
   });
+
+  /** A not-yet-enrolled user with a fresh pending secret; returns a correct code for it. */
+  async function pendingUser() {
+    const u = await makeUser();
+    const secret = generateSecret();
+    const ciphertext = encryptSecret(secret);
+    await getPlatformDb()
+      .insert(schema.userTotpPendingEnrollments)
+      .values({ userId: u.id, secretCiphertext: ciphertext, expiresAt: sql`now() + interval '5 minutes'` });
+    return { ...u, secret, ciphertext, code: () => generateSync({ secret }) };
+  }
+
+  async function storedSecret(userId: string): Promise<string | undefined> {
+    const rows = await getPlatformDb()
+      .select({ c: schema.userTotp.secretCiphertext })
+      .from(schema.userTotp)
+      .where(eq(schema.userTotp.userId, userId));
+    return rows[0]?.c;
+  }
+
+  async function pendingRows(userId: string): Promise<number> {
+    const rows = await getPlatformDb()
+      .select({ id: schema.userTotpPendingEnrollments.userId })
+      .from(schema.userTotpPendingEnrollments)
+      .where(eq(schema.userTotpPendingEnrollments.userId, userId));
+    return rows.length;
+  }
 
   afterAll(async () => {
     // Fixture teardown only; the FK cascades remove the TOTP rows. The
@@ -133,5 +163,67 @@ describe.skipIf(!hasDb)("2fa actions (Postgres-backed, real dev database)", () =
     expect(after).toHaveLength(10);
     expect(after.some((h) => before.includes(h))).toBe(false);
     expect(await auditActionsOf(u.id)).toEqual(["totp.recovery_codes.regenerated"]);
+  });
+
+  it("D1 two concurrent confirmations of one pending secret: exactly one wins, the secret is unchanged and the winner's ten codes are the stored ones — regression for F166 silent replacement", async () => {
+    const u = await pendingUser();
+    signedInAs(u, { twoFactorVerified: false });
+    const code = u.code();
+    const results = await Promise.all([actions.completeEnrollment({ code }), actions.completeEnrollment({ code })]);
+
+    const wins = results.filter((r) => r.ok);
+    const losses = results.filter((r) => !r.ok);
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(1);
+    expect(losses[0]!.ok === false && losses[0]!.error).toMatch(
+      /already set up on this account|No setup in progress was found/,
+    );
+
+    expect(await storedSecret(u.id)).toBe(u.ciphertext);
+    const winnerCodes = (wins[0]!.ok && wins[0]!.data?.recoveryCodes) || [];
+    expect(winnerCodes).toHaveLength(10);
+    expect(await hashesOf(u.id)).toEqual(winnerCodes.map((c) => hashRecoveryCode(c)).sort());
+    expect(await pendingRows(u.id)).toBe(0);
+    expect(await auditActionsOf(u.id)).toEqual(["totp.enrolled"]);
+  });
+
+  it("D2 an already-enrolled user cannot replace the secret by confirming a pending one: refused, secret and codes byte-identical, no grant, no audit — regression for F166 silent replacement", async () => {
+    const u = await enrolledUser();
+    const secretBefore = await storedSecret(u.id);
+    const hashesBefore = await hashesOf(u.id);
+    const attacker = generateSecret();
+    await getPlatformDb()
+      .insert(schema.userTotpPendingEnrollments)
+      .values({ userId: u.id, secretCiphertext: encryptSecret(attacker), expiresAt: sql`now() + interval '5 minutes'` });
+
+    signedInAs(u, { twoFactorVerified: false });
+    const r = await actions.completeEnrollment({ code: generateSync({ secret: attacker }) });
+
+    expect(r).toEqual({
+      ok: false,
+      error: "Two-factor authentication is already set up on this account, possibly in another tab. Reload this page.",
+    });
+    expect(await storedSecret(u.id)).toBe(secretBefore);
+    expect(await hashesOf(u.id)).toEqual(hashesBefore);
+    expect(await pendingRows(u.id)).toBe(0);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(await auditActionsOf(u.id)).toEqual([]);
+  });
+
+  it("D4 a first enrolment stores the pending secret, ten hashed codes, deletes the pending row and audits sessionVerified", async () => {
+    const u = await pendingUser();
+    signedInAs(u, { twoFactorVerified: false });
+    const r = await actions.completeEnrollment({ code: u.code() });
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.data?.sessionVerified).toBe(true);
+    expect(await storedSecret(u.id)).toBe(u.ciphertext);
+    expect(await hashesOf(u.id)).toHaveLength(10);
+    expect(await pendingRows(u.id)).toBe(0);
+    const audit = await getPlatformDb()
+      .select({ m: schema.auditEvents.metadata })
+      .from(schema.auditEvents)
+      .where(eq(schema.auditEvents.resourceId, u.id));
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.m).toEqual({ sessionVerified: true });
   });
 });

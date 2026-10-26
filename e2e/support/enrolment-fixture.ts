@@ -111,3 +111,54 @@ export async function readPanelCodes(page: Page): Promise<string[]> {
   const codes = await page.locator("ul.font-mono li").allTextContents();
   return codes.map((c) => c.trim());
 }
+
+/** The cookie the F166 fix removed. It must never reach a browser again. */
+export const RETIRED_FRESH_CODES_COOKIE = "claudecode_fresh_recovery_codes";
+
+export async function expectNoFreshCodesCookie(context: BrowserContext): Promise<void> {
+  const names = (await context.cookies()).map((c) => c.name);
+  expect(names, "no plaintext recovery-code cookie, ever").not.toContain(RETIRED_FRESH_CODES_COOKIE);
+}
+
+/** Every main-frame URL the page visits, in order (the history a "no /totp hop" assertion reads). */
+export function recordUrls(page: Page): string[] {
+  const urls: string[] = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) urls.push(frame.url());
+  });
+  return urls;
+}
+
+/**
+ * On /account/2fa's enrolment form: reads the manual key, types a real code for it (the sixth digit
+ * confirms, DECISION-257) and returns the secret so a spec can compute more codes later.
+ */
+export async function typeEnrolmentCode(page: Page, generate: (secret: string) => string): Promise<string> {
+  const { enterTotpCode } = await import("./totp-page");
+  const secret = await readManualKey(page);
+  await enterTotpCode(page, generate(secret));
+  return secret;
+}
+
+/**
+ * After the panel shows: lets the server-action re-render and any follow-up fetch settle, then proves the
+ * panel is STILL up and the management view never took its place. A negative wait has no event to listen
+ * for, so this is a dwell (the one legitimate waitForTimeout: nothing here synchronizes hydration).
+ */
+export async function expectPanelSurvives(page: Page, dwellMs = 2_000): Promise<void> {
+  await page.waitForLoadState("networkidle");
+  const end = Date.now() + dwellMs;
+  do {
+    await expect(page.getByRole("heading", { level: 2, name: "Recovery codes — save these now" })).toBeVisible();
+    await expect(page.getByText(/you enrolled on/i)).toHaveCount(0);
+    await page.waitForTimeout(250);
+  } while (Date.now() < end);
+  expect(await readPanelCodes(page)).toHaveLength(10);
+}
+
+/** What /api/auth/session says about the 2FA claim right now. */
+export async function sessionClaim(page: Page): Promise<{ twoFactorRequired?: boolean; twoFactorVerified?: boolean }> {
+  const res = await page.context().request.get("/api/auth/session");
+  const body = (await res.json()) as { user?: { twoFactorRequired?: boolean; twoFactorVerified?: boolean } };
+  return body.user ?? {};
+}

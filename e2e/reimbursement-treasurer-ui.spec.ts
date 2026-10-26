@@ -4,11 +4,12 @@
  * inc1.md, Phase 3 "Component / Page Plan", Copy C7 to C9, the Batch 4 amendment S1
  * to S7 and X3, X6, X7).
  *
- * This is the treasurer-UI slice. What stays in Batch 7's four specs, named where
- * it would go: the signed-out MFA deep link through /signin and /totp to a request,
- * the role-bundle test (a treasurer made by the real invitation accept), the CSV
- * export's bytes, the Features-page toggle, and any receipt (Batch 2b). The member
- * side is `reimbursement-member.spec.ts`.
+ * This is the treasurer-UI slice. The signed-out MFA deep link through /signin and
+ * /totp is `reimbursement-treasurer.spec.ts`, the role-bundle test (a treasurer made by
+ * the real invitation accept) `reimbursement-role-bundle.spec.ts`, the CSV export's
+ * bytes `reimbursement-csv.spec.ts`, the Features-page toggle
+ * `reimbursement-toggle.spec.ts`; any receipt waits for Batch 2b. The member side is
+ * `reimbursement-member.spec.ts`.
  *
  * Everything lives in a THROWAWAY congregation (`e2e-reimbt-<stamp>`) removed in
  * afterAll by deleting that organization (the cascade takes every reimbursement
@@ -25,241 +26,40 @@
  * REQUESTS ARE SEEDED THROUGH THE DEFINERS (save_draft, submit, approve, waive,
  * record_payment) in one `DO` block per request, with the organization set the way
  * `withOrgContext` sets it: the same code the app runs, no hand-written rows that
- * could skip a trigger. The fixture helpers are inline (the Rule 16
- * `e2e/support/reimbursement-fixture` is Batch 7's); the id range is the design's.
+ * could skip a trigger. The seeding, the throwaway congregation and the second payer
+ * live in `support/reimbursement-fixture.ts` (Batch 7 lifted them out of this file;
+ * the id range is the design's).
  */
 import { test, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { platformSql, withDbRetry, type Sql } from "./support/db";
-import { verifiedContext } from "./support/giving-fixture";
-import { E2E_USERS, storageStatePath } from "./support/users";
-
-const TOGGLE = "org_portal.reimbursement";
-const P = "e2e96000-0000-4000-8000-";
-const pid = (n: number) => `${P}${String(n).padStart(12, "0")}`;
-
-const NAMES = {
-  org: "E2E Treasurer Fixture Church",
-  property: "Property Committee",
-  worship: "Worship Committee",
-  supplies: "Supplies",
-  treasurer: "Octavia Vance",
-  requester: "Tamsin Brightwater",
-  secondPayer: "Wren Podmore",
-  payerRole: "E2E Payer",
-} as const;
+import {
+  noHorizontalScroll,
+  orgToday as orgTodayOn,
+  REIMB_NAMES as NAMES,
+  removeReimbursementFixture,
+  seedRequest as seedRequestOn,
+  setupReimbursementFixture,
+  statusOf as statusOfOn,
+  tallEnough,
+  verifiedTreasurerContext,
+  waitHydrated,
+  type ReimbursementFixture,
+  type SeedSpec,
+} from "./support/reimbursement-fixture";
+import { storageStatePath } from "./support/users";
 
 const LONG_PURPOSE = "Unbroken".repeat(50); // 400 characters, no space
 const LONG_VENDOR = "WaterlooAndWestminsterWholesaleFurnitureAndFixtureSupplyCompanyIncorporated"; // 74 characters, no space
 
-interface Fixture {
-  orgId: string;
-  slug: string;
-  groupProperty: string;
-  groupWorship: string;
-  categorySupplies: string;
-  treasurerUser: string;
-  treasurerPerson: string;
-  requesterUser: string;
-  requesterPerson: string;
-  chairUser: string;
-  chairPerson: string;
-  secondUser: string;
-  secondPerson: string;
-  treasurerRole: string;
-  payerRole: string;
-}
-
 let sql: Sql;
-let fx: Fixture;
+let fx: ReimbursementFixture;
 let treasurerContext: BrowserContext;
 const ids: Record<string, string> = {};
 
+const seedRequest = (spec: SeedSpec) => seedRequestOn(sql, fx, spec);
+const statusOf = (requestId: string) => statusOfOn(sql, requestId);
+const orgToday = () => orgTodayOn(sql);
 const rows = async <T = Record<string, unknown>>(query: Promise<unknown>) => (await query) as T[];
-
-async function userIdByEmail(email: string): Promise<string> {
-  const found = await rows<{ id: string }>(sql`select id from users where email = ${email}`);
-  if (!found[0]) throw new Error(`[reimbursement-treasurer-ui] no user row for ${email}; globalSetup must run first`);
-  return found[0].id;
-}
-
-async function personIdForUser(userId: string): Promise<string> {
-  const found = await rows<{ id: string }>(sql`select id from people where user_id = ${userId}::uuid`);
-  if (!found[0]) throw new Error("[reimbursement-treasurer-ui] the seeded fixture user has no person row");
-  return found[0].id;
-}
-
-async function addMembership(orgId: string, personId: string, engagement: "regular" | "visitor", roll: "active" | null) {
-  await withDbRetry("add membership", () => sql`
-    with armed as (select set_config('app.person_claim_authorized', ${personId}, true))
-    insert into memberships (organization_id, person_id, engagement_status, current_roll)
-    select ${orgId}::uuid, ${personId}::uuid, ${engagement}, ${roll} from armed
-    on conflict (person_id, organization_id) do update
-      set engagement_status = excluded.engagement_status, current_roll = excluded.current_roll`);
-}
-
-async function removeOrg(orgId: string) {
-  try {
-    await withDbRetry(`delete treasurer-ui org ${orgId}`, async () => {
-      await sql`alter table group_memberships disable trigger group_memberships_reject_derived`;
-      try {
-        await sql`delete from organizations where id = ${orgId}::uuid`;
-      } finally {
-        await sql`alter table group_memberships enable trigger group_memberships_reject_derived`;
-      }
-    });
-  } finally {
-    await withDbRetry("re-enable roster trigger", () => sql`alter table group_memberships enable trigger group_memberships_reject_derived`);
-  }
-}
-
-async function removeStale() {
-  const stale = await rows<{ id: string }>(sql`select id from organizations where slug ~ '^e2e-reimbt-[0-9]+$'`);
-  for (const { id } of stale) await removeOrg(id);
-  await withDbRetry("delete fixture people", () => sql`delete from people where id in (${pid(40)}::uuid, ${pid(41)}::uuid, ${pid(42)}::uuid)`);
-  await withDbRetry("delete fixture users", () => sql`delete from users where email = 'e2e-reimbt-wren@presby.invalid'`);
-}
-
-const lit = (value: string) => `'${value.replace(/'/g, "''")}'`;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const uuidLit = (value: string) => {
-  if (!UUID.test(value)) throw new Error(`not a uuid: ${value}`);
-  return `'${value}'::uuid`;
-};
-
-interface SeedSpec {
-  key: string;
-  group: string;
-  cents: number;
-  purpose: string;
-  kind?: "reimburse" | "vendor";
-  vendor?: string;
-  daysAgo?: number;
-  category?: string | null;
-  /** submitted | approved (by the chair) | paid (approved, waived, paid by the treasurer). */
-  upTo: "submitted" | "approved" | "waived" | "paid";
-  /** A payment reference for `paid`. */
-  reference?: string;
-}
-
-/** One request in the state the spec needs, made by the definers themselves. Returns its id. */
-async function seedRequest(spec: SeedSpec): Promise<string> {
-  const kind = spec.kind ?? "reimburse";
-  const requester = uuidLit(fx.requesterUser);
-  const chair = uuidLit(fx.chairUser);
-  const treasurer = uuidLit(fx.treasurerUser);
-  const days = spec.daysAgo ?? 3;
-  const steps = [
-    `select s.request_id, s.revision into v_rid, v_rev from presby_reimbursement_save_draft(
-       ${lit(spec.key)}, ${lit(kind)}, ${uuidLit(spec.group)}, null, ${spec.vendor ? lit(spec.vendor) : "null"}, ${spec.cents},
-       ((now() at time zone 'America/New_York')::date - ${days}), ${lit(spec.purpose)},
-       ${spec.category === null ? "null" : uuidLit(spec.category ?? fx.categorySupplies)}, null, true, ${requester}) s;`,
-    `select s.revision into v_rev from presby_reimbursement_submit(v_rid, v_rev, ${requester}) s;`,
-  ];
-  if (spec.upTo !== "submitted") {
-    steps.push(`perform * from presby_reimbursement_approve(v_rid, v_rev, 'seat', ${chair});`);
-  }
-  if (spec.upTo === "waived" || spec.upTo === "paid") {
-    steps.push(`perform * from presby_reimbursement_waive_receipt(v_rid, null, ${treasurer});`);
-  }
-  if (spec.upTo === "paid") {
-    steps.push(
-      `perform * from presby_reimbursement_record_payment(v_rid, 'check', ${lit(spec.reference ?? "1001")},
-         (now() at time zone 'America/New_York')::date, null, ${treasurer});`,
-    );
-  }
-  await withDbRetry(`seed request ${spec.key}`, () =>
-    sql.query(`
-      do $do$
-      declare v_rid uuid; v_rev integer;
-      begin
-        perform set_config('app.current_org_id', ${lit(fx.orgId)}, true);
-        ${steps.join("\n        ")}
-      end $do$`),
-  );
-  const found = await rows<{ id: string }>(
-    sql`select id from reimbursement_requests where organization_id = ${fx.orgId}::uuid and client_key = ${spec.key}`,
-  );
-  if (!found[0]) throw new Error(`[reimbursement-treasurer-ui] the seed for ${spec.key} produced no request`);
-  return found[0].id;
-}
-
-async function statusOf(requestId: string): Promise<string> {
-  return (await rows<{ status: string }>(sql`select status from reimbursement_requests where id = ${requestId}::uuid`))[0]!.status;
-}
-
-async function setupFixture(stamp = Date.now()): Promise<Fixture> {
-  await removeStale();
-  const slug = `e2e-reimbt-${stamp}`;
-  const orgId = `e2e96001-0000-4000-8000-${String(stamp % 1_000_000_000_000).padStart(12, "0")}`;
-  const treasurerUser = await userIdByEmail(E2E_USERS["mfa-enrolled"].email);
-  const requesterUser = await userIdByEmail(E2E_USERS.member.email);
-  const chairUser = await userIdByEmail(E2E_USERS["presbytery-nogrant"].email);
-  const requesterPerson = pid(2);
-  const treasurerPerson = pid(40);
-  const secondPerson = pid(41);
-  const chairPerson = await personIdForUser(chairUser);
-  const groupProperty = pid(10);
-  const groupWorship = pid(11);
-  const categorySupplies = pid(20);
-  const treasurerRole = pid(30);
-  const payerRole = pid(31);
-
-  await withDbRetry("clear fixture people", () => sql`delete from people where id in (${requesterPerson}::uuid, ${treasurerPerson}::uuid, ${secondPerson}::uuid)`);
-  const second = await rows<{ id: string }>(
-    sql`insert into users (email, name) values ('e2e-reimbt-wren@presby.invalid', 'Wren Podmore') returning id`,
-  );
-  const secondUser = second[0]!.id;
-
-  await sql`
-    insert into organizations (id, organization_type, name, slug, path, platform_status, deletable_until)
-    values (${orgId}::uuid, 'congregation', ${NAMES.org}, ${slug}, ${slug.replace(/-/g, "_")}, 'managed', now() + interval '3 hours')`;
-  await sql`
-    insert into groups (organization_id, group_type_id, name, membership_source, derived_from, is_protected)
-    select ${orgId}::uuid, (select id from group_types where key = 'roster'), 'Active Membership', 'derived', 'active_membership', true`;
-  await sql`
-    insert into groups (id, organization_id, group_type_id, name, membership_source)
-    values (${groupProperty}::uuid, ${orgId}::uuid, (select id from group_types where key = 'roster'), ${NAMES.property}, 'managed'),
-           (${groupWorship}::uuid, ${orgId}::uuid, (select id from group_types where key = 'roster'), ${NAMES.worship}, 'managed')`;
-  await sql`
-    insert into people (id, user_id, first_name, last_name, deletable_until)
-    values (${requesterPerson}::uuid, ${requesterUser}::uuid, 'Tamsin', 'Brightwater', now() + interval '3 hours'),
-           (${treasurerPerson}::uuid, ${treasurerUser}::uuid, 'Octavia', 'Vance', now() + interval '3 hours'),
-           (${secondPerson}::uuid, ${secondUser}::uuid, 'Wren', 'Podmore', now() + interval '3 hours')`;
-  for (const person of [requesterPerson, treasurerPerson, secondPerson, chairPerson]) await addMembership(orgId, person, "regular", "active");
-
-  await sql`
-    insert into group_memberships (organization_id, group_id, person_id, group_role, source, starts_on)
-    values (${orgId}::uuid, ${groupProperty}::uuid, ${chairPerson}::uuid, 'chair', 'managed', date '2020-01-01')`;
-  await sql`
-    insert into reimbursement_chargeable_groups (organization_id, group_id, created_by_user)
-    values (${orgId}::uuid, ${groupProperty}::uuid, ${chairUser}::uuid), (${orgId}::uuid, ${groupWorship}::uuid, ${chairUser}::uuid)`;
-  await sql`
-    insert into reimbursement_categories (id, organization_id, name, created_by_user)
-    values (${categorySupplies}::uuid, ${orgId}::uuid, ${NAMES.supplies}, ${chairUser}::uuid)`;
-
-  // The treasurer: the four keys. The payer role (pay only) is what the Treasury team page grants to Wren.
-  await sql`
-    insert into app_roles (id, organization_id, key, name, role_kind, is_protected)
-    values (${treasurerRole}::uuid, ${orgId}::uuid, 'e2e_reimb_treasurer', 'E2E Treasurer', 'custom', false),
-           (${payerRole}::uuid, ${orgId}::uuid, 'e2e_reimb_payer', ${NAMES.payerRole}, 'custom', false)`;
-  await sql`
-    insert into app_role_permissions (role_id, permission_key)
-    values (${treasurerRole}::uuid, 'reimbursement.request_for_others'), (${treasurerRole}::uuid, 'reimbursement.view'),
-           (${treasurerRole}::uuid, 'reimbursement.pay'), (${treasurerRole}::uuid, 'reimbursement.manage'),
-           (${payerRole}::uuid, 'reimbursement.pay')`;
-  await sql`
-    insert into role_grants (organization_id, role_id, person_id, starts_on, granted_by)
-    values (${orgId}::uuid, ${treasurerRole}::uuid, ${treasurerPerson}::uuid, date '2020-01-01', ${treasurerUser}::uuid)`;
-  await withDbRetry("set toggle", () => sql`
-    insert into organization_feature_toggles (organization_id, feature_key, enabled)
-    values (${orgId}::uuid, ${TOGGLE}, true)
-    on conflict (organization_id, feature_key) do update set enabled = true`);
-
-  return {
-    orgId, slug, groupProperty, groupWorship, categorySupplies, treasurerUser, treasurerPerson, requesterUser, requesterPerson,
-    chairUser, chairPerson, secondUser, secondPerson, treasurerRole, payerRole,
-  };
-}
 
 const base = () => `/o/${fx.slug}/admin/reimbursements`;
 
@@ -269,39 +69,8 @@ async function treasurerPage(width = 1280, height = 900): Promise<Page> {
   return page;
 }
 
-async function noHorizontalScroll(page: Page) {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(overflow, "the page must not scroll sideways").toBeLessThanOrEqual(0);
-}
-
-/**
- * React has attached to the page: a button carries its React props. A page with a form also has a
- * HydrationGate, which reports the same moment with `aria-busy`; one without (a dialog trigger only)
- * has nothing else to wait on, and a click before this would do nothing.
- */
-async function waitHydrated(page: Page) {
-  await page.waitForFunction(() =>
-    Array.from(document.querySelectorAll("button")).some((b) => Object.keys(b).some((k) => k.startsWith("__reactProps$"))),
-  );
-  const gate = page.locator('fieldset[data-slot="hydration-gate"]').first();
-  if ((await gate.count()) > 0) await expect(gate).not.toHaveAttribute("aria-busy", "true");
-}
-
 async function shot(page: Page, folder: "360" | "1280", name: string, fullPage = true) {
   await page.screenshot({ path: `test-results/reimbursement-treasurer-${folder}/${name}.png`, fullPage });
-}
-
-async function tallEnough(page: Page, testId: string, width: number) {
-  const button = page.getByTestId(testId);
-  await button.scrollIntoViewIfNeeded();
-  const box = (await button.boundingBox())!;
-  expect(box.height, testId).toBeGreaterThanOrEqual(44);
-  expect(box.x, testId).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width, testId).toBeLessThanOrEqual(width);
-}
-
-async function orgToday(): Promise<string> {
-  return (await rows<{ d: string }>(sql`select to_char((now() at time zone 'America/New_York')::date, 'YYYY-MM-DD') as d`))[0]!.d;
 }
 
 async function contextFor(browser: Browser, role: "member" | "presbytery-nogrant", width = 360, height = 740) {
@@ -315,7 +84,7 @@ test.describe("Reimbursements, treasurer side", () => {
 
   test.beforeAll(async ({ browser }) => {
     sql = platformSql("reimbursement-treasurer-ui.spec");
-    fx = await setupFixture();
+    fx = await setupReimbursementFixture(sql, { tag: "t" });
     ids.claim = await seedRequest({ key: "tui-claim-0001", group: fx.groupProperty, cents: 4250, purpose: "Folding tables for the fellowship hall", upTo: "approved" });
     ids.payable = await seedRequest({ key: "tui-payable-001", group: fx.groupProperty, cents: 1999, purpose: "Hymnal repair kit", upTo: "waived" });
     ids.override = await seedRequest({ key: "tui-override-01", group: fx.groupWorship, cents: 7500, purpose: "Choir folders", upTo: "submitted" });
@@ -327,15 +96,13 @@ test.describe("Reimbursements, treasurer side", () => {
     ids.long = await seedRequest({
       key: "tui-long-000001", group: fx.groupProperty, cents: 500, purpose: LONG_PURPOSE, kind: "vendor", vendor: LONG_VENDOR, upTo: "submitted",
     });
-    treasurerContext = await verifiedContext(browser, `${base()}`);
+    treasurerContext = await verifiedTreasurerContext(browser, base());
   });
 
   test.afterAll(async () => {
     await treasurerContext?.close().catch(() => undefined);
     if (!fx) return; // setup failed before the fixture existed; the next run's sweep clears any leftover
-    await removeOrg(fx.orgId);
-    await withDbRetry("delete fixture people", () => sql`delete from people where id in (${pid(2)}::uuid, ${pid(40)}::uuid, ${pid(41)}::uuid)`);
-    await withDbRetry("delete fixture user", () => sql`delete from users where id = ${fx.secondUser}::uuid`);
+    await removeReimbursementFixture(sql, fx);
   });
 
   // -------------------------------------------------------------------------

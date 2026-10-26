@@ -31,6 +31,7 @@ Developer portal Increment 1 (v0.46.0, DECISION-258/261, F283-F285 and F288, no 
 The two-factor enrolment secret race (v0.46.2, DECISION-290, F342, no migration) took `2af`; the next findings subsection is `2ag`.
 Site ingest over the request-size limit (v0.46.3, DECISION-279, F324, no migration) took `2ag` (`2af` is the two-factor enrolment secret race, v0.46.2, F342); the next findings subsection is `2ah`. Its numbers were pre-assigned, so the figures above are unchanged.
 Careers Increment 1 (v0.47.0, migration 0071, DECISION-264/265/266 and 278, F290, F292-F295 and F311-F320; DECISION-262/263 and migration 0075 are Increment 2's) took `2ah`; the next findings subsection is `2ai`. Integration is on `pipeline/careers` (worktree `presby-careers`, Neon `pipeline-careers`, port 3580), merged with main at 0.46.3 and not yet pushed; the apply order and the production runbook are `docs/deployment.md` "Careers (0071)". F291 (the ticket forms' 10 MB claim) is queued as its own bug-fix.
+Community Increment 2b (v0.48.0, migration 0065, DECISION-207/208 amended and 225-228, F186, F187, F192-F198 and F230-F233; F199 was closed in v0.42.0) took `2ai`; the next findings subsection is `2aj`. Integration is on `pipeline/signin-invites` (worktree `presby-2b`, Neon `ep-delicate-tree`, port 3540), merged with main at 0.47.0 and not yet pushed; the apply order and the production runbook are `docs/deployment.md` "Sign-in invitations and connect at sign-in (0065)": snapshot production, apply 0065 on the direct endpoint, then merge and deploy. **Operator ruling 2026-10-26: real sign-in invitations are held until F166 (recovery codes and landing on first enrolment) ships, and the what's-new entry is published only after F166;** the release is otherwise complete, and F232 (a `people.manage` holder can address an authority-bearing record to a mailbox they control; detect-only) is an accepted open `paper` residual. Two-factor becomes role-based in F343 (`2026-10-26-2fa-default`, migration 0080, unmerged): when the second of the two merges, the TODO line on re-checking 2b's new-account walks applies.
 
 ---
 
@@ -189,7 +190,7 @@ arm of F176 closed); removing the Main promotes the oldest remaining address, au
 key; the platform invitation screen warns when the address is on a signed-in person. Migration `0064`, DECISION-215–219, F210–F217
 (`docs/schema-design-2.md` §2w). QA PASS (run 2), Phase 6 SHIP WITH NOTES; every note is a `docs/TODO.md` line. Two CLAUDE.md edits are
 for operator review in the diff (a Project Layout line for `src/lib/contact-methods/` and one sentence under Permissions vs Flags: a contact
-email authenticates nothing).
+email authenticates nothing); **amended by Community 2b, v0.48.0 (DECISION-227):** a contact email still authenticates nothing, but inside a definer it may also identify the one person an authenticated, address-proven account belongs to, and proof of an address is `users.email_verified` bound to the current address (DECISION-225), never `contact_methods.verified_at`).
 
 **What is and is not true of it.** Giving statement notices stay on the donor record (operator, 2026-10-23: "keep giving on the donor record
 for now"); the personal-address fallback is a TODO. A staff member who is only a staff anchor shows no Work address to members (told to the

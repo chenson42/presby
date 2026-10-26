@@ -351,8 +351,10 @@ export async function savePrimaryPhone(
 
 /**
  * "Also on file for {Name}" (ER23b): for each address, the OTHER live,
- * unmerged people at the CURRENT organization (a membership with `ended_on is
- * null`) who hold it as an active email. R29's predicate (2b's `address_shared`),
+ * unmerged, living people (`date_of_death is null`, Community Increment 2b:
+ * a deceased relative's old shared address must not block anyone) at the
+ * CURRENT organization (a membership with `ended_on is null`) who hold it as an
+ * active email. R29's predicate (2b's `address_shared`),
  * on the RLS connection only: never the platform connection and never across
  * organizations, so the note can only name people this administrator can
  * already see. Names are `preferred or first, last`, ordered by last then
@@ -370,6 +372,7 @@ export async function findSharedAddressNotes(
            coalesce(p2.preferred_name, p2.first_name) || ' ' || p2.last_name as name
       from contact_methods cm
       join people p2 on p2.id = cm.person_id and p2.merged_into_id is null
+                    and p2.date_of_death is null
       join memberships m2 on m2.person_id = p2.id
                          and m2.organization_id = presby_current_org()
                          and m2.ended_on is null

@@ -96,8 +96,17 @@ vi.mock("./treasurer-designation-section", () => ({
 }));
 
 const mockListInvitations = vi.hoisted(() => vi.fn());
+const mockSummarizeOrgSent = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/onboarding/issue", () => ({
   listInvitationsForOrg: (...args: unknown[]) => mockListInvitations(...args),
+  summarizeOrgSentInvitations: (...args: unknown[]) => mockSummarizeOrgSent(...args),
+}));
+const orgSentPanelSpy = vi.hoisted(() => vi.fn());
+vi.mock("./org-sent-invitations", () => ({
+  OrgSentInvitations: (props: unknown) => {
+    orgSentPanelSpy(props);
+    return <div data-testid="org-sent-panel" />;
+  },
 }));
 vi.mock("@/lib/auth/local-login", () => ({ isLocalLoginEnabled: async () => true }));
 vi.mock("@/lib/two-factor", () => ({ isTotpConfigured: () => true }));
@@ -179,6 +188,7 @@ beforeEach(() => {
   mockListGiving.mockResolvedValue(holdersOf(0));
   mockListHealth.mockResolvedValue([]);
   mockListInvitations.mockResolvedValue([]);
+  mockSummarizeOrgSent.mockResolvedValue({ counts: {}, revocable: 0, rows: [] });
 });
 
 afterEach(() => {
@@ -194,6 +204,8 @@ afterEach(() => {
   treasurerSectionSpy.mockReset();
   mockListHealth.mockReset();
   healthSectionSpy.mockReset();
+  mockSummarizeOrgSent.mockReset();
+  orgSentPanelSpy.mockReset();
   mockListInvitations.mockReset();
   revokeAllSpy.mockReset();
   orgRowRef.current = null;
@@ -616,5 +628,24 @@ describe("OrganizationBrandDetailPage — invitations (account-invitations Batch
     expect(screen.getByRole("alert").textContent).toMatch(/couldn.t load this organization.s invitations/i);
     expect(screen.getByTestId("founding-section")).toBeTruthy();
     expect(foundingSectionSpy.mock.calls[0][0].invitations).toEqual([]);
+  });
+
+  it("reads the congregation's own sign-in invitations once and hands the panel the summary", async () => {
+    arrange();
+    const summary = { counts: { pending: 2 }, revocable: 2, rows: [] };
+    mockSummarizeOrgSent.mockResolvedValue(summary);
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(mockSummarizeOrgSent).toHaveBeenCalledTimes(1);
+    expect(mockSummarizeOrgSent).toHaveBeenCalledWith(ORG_ID);
+    expect(screen.getByTestId("org-sent-panel")).toBeTruthy();
+    expect(orgSentPanelSpy.mock.calls[0][0]).toEqual({ organizationId: ORG_ID, summary });
+  });
+
+  it("a failed org-sent read hands the panel null (it says so) and the page still renders", async () => {
+    arrange();
+    mockSummarizeOrgSent.mockRejectedValue(new Error("boom"));
+    render(await OrganizationBrandDetailPage({ params: makeParams() }));
+    expect(orgSentPanelSpy.mock.calls[0][0]).toEqual({ organizationId: ORG_ID, summary: null });
+    expect(screen.getByTestId("founding-section")).toBeTruthy();
   });
 });

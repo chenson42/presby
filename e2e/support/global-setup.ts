@@ -337,7 +337,10 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   // The suite owns its users. Any failure here throws — see the file header.
   // Both re-run on every start against a populated database (idempotent by header), so a
   // dropped connection mid-seed is retried as a whole.
-  await withDbRetry("seed e2e users", () => seedE2EUsers(dbUrl));
+  // The OWNER connection: since drizzle/0065 (users_guard_email_proof, Community
+  // Increment 2b) a non-owner role may not write users.email_verified, and the
+  // fixture roster is stamped proven. Proof is an owner-path fact.
+  await withDbRetry("seed e2e users", () => seedE2EUsers(platformDbUrl));
   await withDbRetry("seed e2e orgs", () => seedE2EOrgs(platformDbUrl));
   await sweepStaleDomainsUiFixtureOrgs(platformDbUrl);
   await sweepStaleInvitationFixtureOrgs(platformDbUrl);

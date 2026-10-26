@@ -338,7 +338,9 @@ describe.skipIf(!hasDb)("src/lib/onboarding/accept.ts (Postgres-backed)", { time
       const s = await setup();
       const before = await fx.snapshot(s.orgId, s.address);
       const r = await accept.acceptInvitation({ token: s.token, mode: s.mode });
-      expect(r).toEqual({ kind: "blocked", reason });
+      // The result carries the PURPOSE (the invitee's copy depends on it, G6) and
+      // the congregation's public name (Community Increment 2b, Batch B2).
+      expect(r).toEqual({ kind: "blocked", reason, purpose: s.purpose, organizationName: expect.stringContaining("Fixture") });
 
       const rows = await audit(s.orgId);
       expect(rows).toHaveLength(1);

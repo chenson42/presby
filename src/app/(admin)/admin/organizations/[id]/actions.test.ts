@@ -1135,7 +1135,7 @@ const ALL_ACTIONS: Array<[string, (fd: FormData) => Promise<unknown>, Record<str
   ["inviteTreasurerAction", inviteTreasurerAction, TR_FIELDS, mockCreateInvitation],
   ["resendInvitationAction", resendInvitationAction, { organizationId: VALID_ORG, invitationId: VALID_INVITATION }, mockResendInvitation],
   ["revokeInvitationAction", revokeInvitationAction, { organizationId: VALID_ORG, invitationId: VALID_INVITATION }, mockRevokeInvitation],
-  ["revokeAllInvitationsAction", revokeAllInvitationsAction, { organizationId: VALID_ORG }, mockRevokeAll],
+  ["revokeAllInvitationsAction", revokeAllInvitationsAction, { organizationId: VALID_ORG, scope: "designations" }, mockRevokeAll],
 ];
 
 describe.each(ALL_ACTIONS)("%s - authorization", (_name, action, fields, issueMock) => {
@@ -1399,18 +1399,40 @@ describe("resendInvitationAction / revokeInvitationAction / revokeAllInvitations
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
-  it("revoke-all revokes the organization's open invitations and revalidates; a failure does not", async () => {
+  it("revoke-all revokes the organization's open invitations within the posted scope and revalidates; a failure does not", async () => {
     mockRevokeAll.mockResolvedValue({ kind: "ok", revoked: 2 });
-    expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG }))).toEqual({ ok: true });
+    expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG, scope: "designations" }))).toEqual({ ok: true });
     expect(mockRevokeAll).toHaveBeenCalledWith({
       organizationId: VALID_ORG,
+      scope: "designations",
       actor: { userId: "operator-1", email: "operator@example.invalid" },
     });
     expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/organizations/${VALID_ORG}`);
     mockRevalidatePath.mockClear();
     mockRevokeAll.mockResolvedValue({ kind: "db_error" });
-    expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG }))).toMatchObject({ ok: false });
+    expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG, scope: "designations" }))).toMatchObject({ ok: false });
     expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("revoke-all passes the org_sent scope through (the congregation's own sign-in invitations, F198)", async () => {
+    mockRevokeAll.mockResolvedValue({ kind: "ok", revoked: 1 });
+    expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG, scope: "org_sent" }))).toEqual({ ok: true });
+    expect(mockRevokeAll).toHaveBeenCalledWith(expect.objectContaining({ scope: "org_sent" }));
+  });
+
+  it.each([
+    ["missing", {}],
+    ["empty", { scope: "" }],
+    ["unknown", { scope: "everything" }],
+    ["inherited key name", { scope: "constructor" }],
+    ["wrong case", { scope: "Designations" }],
+  ])("revoke-all refuses a %s scope and never calls the library (a caller cannot revoke the other origin by omission)", async (_name, extra) => {
+    mockRevokeAll.mockClear();
+    expect(await revokeAllInvitationsAction(formData({ organizationId: VALID_ORG, ...extra }))).toEqual({
+      ok: false,
+      error: "Invalid scope.",
+    });
+    expect(mockRevokeAll).not.toHaveBeenCalled();
   });
 });
 

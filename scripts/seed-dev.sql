@@ -1978,3 +1978,11 @@ commit;
 -- person-emails and public-calendar includes; owner-only rows (two live sites, the careers toggle,
 -- one posting in each state). scripts/careers/test-rls-71.sql needs it.
 \ir careers/seed-dev-careers.sql
+
+-- Sign-in invitations and auto-connect fixture (drizzle/0065). Its own file and
+-- transaction, run LAST: it writes the org_portal.sign_in_connect toggle row for
+-- EVERY organization (an absent row is off, DECISION-097) and needs the earlier
+-- fixtures (Alder Creek, Fernwood, the invitations and person-emails seeds).
+-- Idempotent. scripts/sign-in-invitations/test-rls-65.sql and
+-- scripts/giving/test-rls-46.sql need it.
+\ir sign-in-invitations/seed-dev-sign-in.sql

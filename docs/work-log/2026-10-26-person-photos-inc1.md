@@ -21,6 +21,7 @@
 | 3 — Technical design | tech-lead | Complete; designed against the F289 0072 **draft** (`presby-assets` worktree, unmerged); three Phase 2 rulings corrected (R3 invoker to definer, R2 Drizzle declaration, R5 dead join); F333–F337 raised; open rulings O1–O4 | Design complete | 2026-10-26 |
 | 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied); F338 ruled by the orchestrator (the barrel line and the dev-docs entry are committed on the branch). Batch 2 (api-developer) complete: sharp 0.35.5 installed, image pipeline, store, reader, consequences, copy, four server actions, `resolveMany`, directory swap to `photoThumbKey`, catalog toggle, audit keys and the off-warning; 644 unit files / 9718 tests, 63 DB-backed files / 1351 tests, RLS 78 = 82 and RLS 72 = 24, `npm run check` 8/8, build and typecheck and lint clean. Batch 3 (ux-developer) complete: photos page, upload island with client downscale, designate and remove dialogs, edit-page link, three listing-dialog rewrites, UI copy, unit, e2e and hydration specs, browser walk at 360 and 1280 px; QA next | Batch 3 done | 2026-10-26 |
 | 5 — Verification | qa | Complete (run 1): all gates green; copy truthfulness (a)(b)(c) failed | FAIL | 2026-10-26 |
+| 3 — amendment (Phase 5 run 1 copy rulings) | tech-lead | Complete: rulings R-a (withheld-aware consequences; snapshot carries `minor`, `directoryWithheld`, `websiteWithheld`), R-b (new "Clear for website" control and dialog variant), R-c (count distinct photos); tests T1-T11 named; implementer full-stack-developer; no schema, route, flag or permission change. See the amendment at the end of this log | Design complete; back to Phase 4 | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -432,6 +433,7 @@ Staged by the implementers as patches under `scripts/person-photos/integration/`
 | **Operator Q1-Q4** | Q1 fallback with attestation (above); Q2 per congregation; Q3 `people.manage`; Q4 adults only, null DOB allowed, audited attestation. Q5 is open (O2). |
 | **DECISION-285-288** | Final text amended below. |
 | F289's open question "listed photo fetchable while `sites.public_staff_directory` is off?" | Unchanged here. This feature adds the toggle gate only; the platform flags still do not gate the door. Left to F289's follow-up (operator). |
+| **Phase 5 run 1 copy FAIL** (a), (b), (c) and the `directory_hidden` note | Addressed in "Phase 3 — amendment (Phase 5 run 1 copy rulings)" at the end of this log; the adapter double-submit race (Batch 2 deviation 7) is a TODO candidate recorded in that amendment's carry-forward. |
 
 ## Edge Cases & Risks
 
@@ -1178,3 +1180,187 @@ No route handler was added (`scan.test.ts`). The public door's route is unchange
    - Count distinct photos in the warning.
    - Add exact-text tests that fail on the old strings.
 3. Then back to qa for a scoped re-run: copy, consequences, the photos page specs and the walk.
+
+---
+
+## Phase 3 — amendment (Phase 5 run 1 copy rulings)
+
+**Author:** tech-lead, 2026-10-26. **Trigger:** Phase 5 run 1, FAIL on copy truthfulness only (items (a), (b), (c) and the `copy.ts:98` note). **Class:** a Phase 3 copy defect: every string QA cited is the design's own Copy text, so the fix is a ruling here, not an implementer judgment. **Phase 2 skip:** no new dependency, table, route, action, flag, permission or schema change; nothing here touches an invariant, so no architect pass. **Implementer:** **full-stack-developer** (judged, not the default `ux-developer`): the change spans a server read (`reader.ts`, the snapshot and the count), pure copy and consequence files, and two client components, and it is small and coupled (one snapshot type feeds all of them). Splitting it between ux-developer and api-developer would add a handoff on a type both sides edit.
+
+### Root cause (one paragraph)
+
+The design's consequence sentences were written as promises ("will appear") but computed from a snapshot that carries only `listed`, `website` and `directory`; SQL's withheld answers (`hide_photo`, `merged`, under 18) were read by `reader.ts` for the page's status lines and never reached the dialogs. Separately: (b) C2's unattested line named a remedy the page had no control for, because the current directory photo's tile offers only stop, use-on-website and remove; (c) C1's count source counts designation rows, and one photo can carry two. The Phase 3 Copy check 2 ("source of truth") was recorded as passed for C4 on the strength of the listing read alone; it is reopened here and the claim is reworded to what the queries establish.
+
+### Feasibility check (live tree, 0df93af)
+
+- No migration. The data the snapshot needs is already read in `reader.ts` (`dirRow.withheld`, `webRow.withheld`, `minorRow.minor`). **One limit the design must respect:** `presby_person_public_photo_status()` and `presby_person_directory_photo()` start from the designation (`from c ...`), so with **no** active designation they return **zero rows** and `withheld` is unknown, not null-because-fine. `hide_photo` and `merged` are therefore known to the page only when a designation exists; the **under-18 answer is always known** (`presby_photo_subject_is_minor`, already read as `isMinor`). The design therefore may not say "nothing withholds it" for a person with no designation. Every "can appear" sentence below carries the "unless something withholds it" tail for that reason. Adding a withheld-without-designation read would be a new SQL function (an in-place 0078 correction), which this ruling declines: the hedge is true in every state and costs no schema work.
+- `PhotoStateSnapshot` is a type-only export used by `reader.ts`, `consequences.ts`, `tile-controls.tsx`, `designate-dialog.tsx`, `confirm-dialogs.tsx` and their tests. Adding fields is a compile-visible change; the implementer lets `tsc` list every fixture that needs the new fields.
+- The store already handles a changed attestation on the **same** photo as end-then-insert (Batch 2 deviation 6); no store change. The implementer confirms with an existing `store.db.test.ts` case or adds one (see T8).
+- `src/auth.ts`, the proxy, `authz.ts`, the permission catalog and every flag seed are untouched. No new `FEATURES` key, no flag. The org toggle `org_portal.person_photos` is unchanged.
+
+### Rulings
+
+**Rule applied to every string below (new, and retroactive to C1 to C8):** a sentence about what a surface *will* show is allowed only where the query behind it establishes it; where the snapshot cannot establish it, the sentence says *can*, names the condition, and ends with the unless-clause. Re-checked against every C-string; the retroactive hits are R-a5, R-a6 and R-a7 below, and nothing else in C1 to C8 changes (the C8 listing-dialog text already says "may").
+
+#### R-a. Dialogs ignoring withheld states (QA (a))
+
+**R-a1. Data the snapshot must carry.** `PhotoStateSnapshot` (in `consequences.ts`) gains three fields; the reader fills them from answers it already holds:
+
+```ts
+/** presby_photo_subject_is_minor: ALWAYS known (the one withheld reason that needs no designation). */
+minor: boolean;
+/** presby_person_directory_photo().withheld when it reported hide_photo (scoped to this org); else null.
+ *  null means "none reported", NOT "none applies": with no directory designation the function returns no row. */
+directoryWithheld: "hide_photo" | null;
+/** presby_person_public_photo_status().withheld when it reported hide_photo or merged; else null. Same caveat. */
+websiteWithheld: "hide_photo" | "merged" | null;
+```
+
+`reader.ts` sets `minor: isMinor`, `directoryWithheld: dirRow?.withheld === "hide_photo" ? "hide_photo" : null`, `websiteWithheld: webRow?.withheld` mapped likewise for `hide_photo` and `merged` (`minor` and `toggle_off` never go in these two fields: minor is the `minor` field, and the toggle is off only on a page that does not render). `consequencesFor` still reads no database.
+
+**R-a2. The derivation.** `directoryPhotoServesWebsite` gains the withheld conditions: `attested && website === null && listed && !minor && websiteWithheld === null`. Where it is false because of withholding, the dialogs say nothing about the website falling back (they must not claim the fallback is in use).
+
+**R-a3. Exact strings (`CONSEQUENCE_COPY` in `copy.ts`, replacing the old ones; `{first}` is the first name).** The cell of "who sees it": a `people.manage` holder on the photos page.
+
+| Key | Replacement (verbatim) | Replaces |
+|---|---|---|
+| `directoryAlsoOnWebsite(first)` | `Because {first} is listed on the public website and has no website photo, this photo can also appear there while the website is published, unless something withholds it, such as {first} hiding their photo or appearing to be under 18.` | `copy.ts:142` |
+| `websiteListed(first)` | `{first} is listed, so this photo can appear on the website while the website is published, unless something withholds it, such as {first} hiding their photo or appearing to be under 18.` | `copy.ts:149` |
+| `minorBlocked(first)` (new) | `{first} appears to be under 18, so a photo of {first} can't be chosen for the directory or the website yet.` | new |
+| `directoryHidden(first)` (new) | `{first} has hidden their photo, so the directory won't show this photo while that is so.` | new |
+| `websiteHidden(first)` (new) | `{first} has hidden their photo, so the website won't show this photo while that is so.` | new |
+| `websiteMerged` (new) | `This record was merged into another, so the website won't show this photo.` | new |
+| `removeIsWebsiteWithheld` (new) | `It is also their website photo, which the website isn't showing at the moment.` | used instead of `removeIsWebsite` when `minor` or `websiteWithheld` is set |
+
+`directoryWebsiteConditional`, `directoryWebsiteWillStop`, `websiteNotListed`, `websiteReplaces`, `directoryAlsoOnWebsiteEnds`, `websiteStops`, `websiteFallsBack`, `websiteShowsNone`, `websiteCaches`, `removeBase`, `removeIsFallback`, `removeIsWebsite` (when nothing is withheld) and `removeCaches` are **unchanged and stay true**: each is either "only if", a statement of what the designation is, or a "will show no photo" claim that holds whether or not the site is published.
+
+**R-a4. Which sentences each intent returns** (the whole of `consequencesFor`, so the implementer cannot choose differently):
+
+- `designate_directory`:
+  - `state.minor` -> `[minorBlocked]` and nothing else.
+  - else: `directoryHidden` first if `directoryWithheld`; then, if `attested`: `websiteHidden` or `websiteMerged` (by `websiteWithheld`) if set, else (`listed && website === null`) `directoryAlsoOnWebsite`, else `directoryWebsiteConditional`; if **not** attested and `directoryPhotoServesWebsite`: `directoryWebsiteWillStop`.
+- `designate_website`:
+  - `state.minor` -> `[minorBlocked]`.
+  - else `websiteHidden` or `websiteMerged` if `websiteWithheld`, else `websiteListed` if `listed`, else `websiteNotListed`; then `websiteReplaces` if another website photo is active (unchanged).
+- `undesignate_directory`: `directoryInitials`, then `directoryAlsoOnWebsiteEnds` if `directoryPhotoServesWebsite` (now withheld-aware).
+- `undesignate_website`: `websiteStops`; then `websiteFallsBack` only if `directory.attested && !minor && websiteWithheld === null`, else `websiteShowsNone`; then `websiteCaches`.
+- `remove`: `removeBase`; `removeIsDirectory` if the directory photo; if the website photo: `removeIsWebsiteWithheld` when `minor || websiteWithheld !== null`, else `removeIsWebsite`; `removeIsFallback` if it is the serving fallback; `removeCaches` if website photo or fallback (unchanged rule: a browser may hold a copy served before the withholding).
+
+**R-a5. The directory dialog body (`DESIGNATE_COPY.directory.body`, `copy.ts:219`)**, now `body(name, first)`: `Members who can see {name} in the directory will see this photo instead of their initials, unless {first} has hidden their photo or appears to be under 18.` (true for `hide_photo`, minor, `directory_hidden` and ended members alike: "members who can see {name}" is empty for the last two; the `DesignateDialog` call site passes `state.first`).
+
+**R-a6. Retroactive: the two other "directory will show" strings (found by the neighbours grep; not cited by QA but false for a `directory_hidden` or ended member, the same defect as `copy.ts:98`).**
+- `directoryInitials(first)` (`copy.ts:154`): `Wherever {first} appears in the directory, their initials will show instead.`
+- `removeIsDirectory(first)` (`copy.ts:166`): `It is {first}'s directory photo, so wherever {first} appears in the directory it will show initials instead.`
+
+**R-a7. The QA note on `copy.ts:98` and `:99` (a directory line false for `directory_hidden` or ended members).** Ruled as wording, **not** data: `presby_person_directory_photo` reads neither `directory_hidden` nor membership status, and the directory's eligibility predicate (`directoryEligibilityWhereSql`, roll status, tombstone, ended, deceased) is the directory's, not this feature's; reading it here would be a second copy of a privacy predicate (the risk `directory.ts` itself names). So the lines become conditional on who can see the person:
+- `DIRECTORY_LINES.shown(first)`: `Directory: members who can see {first} in the directory see the photo marked "Directory" below.`
+- `DIRECTORY_LINES.none(first)`: `Directory: no photo chosen, so members who can see {first} in the directory see initials.`
+`hide` and `minor` lines are unchanged ("not shown" is true in every state). Both become functions of `first` (they are strings today, so `statusLines` and the e2e and page tests that name them change).
+
+**R-a8. Behaviour that follows from the strings.** The designate dialogs (directory, website and the new clear dialog of R-b) disable their **confirm** button when `state.minor` (the store refuses a minor; the sentence says so before the click, so the refusal toast `minor` ("...can't be added yet") is reachable only by a stale page or a forged request, and keeps its C6 wording; **neighbour noted**: that string says "added" where the act would be "chosen"; accepted, because the disabled button removes the honest path to it). Nothing else about the dialogs changes.
+
+**Copy checks (one line per group).**
+- *Residuals:* the website dialog body (`DESIGNATE_COPY.website.body`, search engines and archives keep copies) is unchanged and the new `clear` body repeats it; no sentence denies the cached-copy residual; `removeCaches` and `websiteCaches` are kept for every case where a browser may hold a copy.
+- *Source of truth:* "can appear ... while the website is published" is the roster functions' own gate (the listing line already says it); **not read** by the snapshot: site status and the platform `sites.*` flags, so no sentence says "will appear"; `minor` from `presby_photo_subject_is_minor`, `directoryWithheld` from `presby_person_directory_photo`, `websiteWithheld` from `presby_person_public_photo_status`; the last two are known only when a designation exists, so the unless-clause stays in the hedge.
+- *Audience:* every string here is shown to a `people.manage` holder on the photos page, who can perform the one instruction it gives (none of the dialog sentences instruct).
+- *Neighbours:* grep of `will appear|will also appear|will see|will show|will leave|members see` across `src` and `e2e`: modify targets are `copy.ts:98,99,142,149,154,166,219`; unrelated hits (giving, whats-new, calendar) are not about photos and stay. The C8 listing dialogs already say "may", unchanged.
+
+#### R-b. The unattested remedy has no control (QA (b))
+
+**Ruling: make the dialog reachable (a new button on the current directory photo's tile); do not reword.** Reasons: the two other ways to word it ("stop using it, then choose it again and tick the box") pass through an initials state the copy never mentions and make a consent step a two-click chore; the store already supports it; and consent clearing is the one thing this feature exists to make deliberate. The cost is one button, one dialog variant and four strings.
+
+**R-b1. The control.** On the tile that is the current directory photo **and is not attested** and the person is not a minor, `TileControls` renders a fourth button, label **`Clear for website`** (`PAGE_COPY.clearForWebsite`), above "Use on website". It opens the existing `DesignateDialog` in a third variant `clear`: `purpose: "directory"`, `attested: true`, the same photo. Other tiles, attested tiles and minors never show it. `TileControls` gains `directoryAttested: boolean` (from `PhotoTileView.directoryAttested`, already read) and reads `state.minor`. **Withdrawing a clearance without losing the directory photo is not added** (see Out of scope and the carry-forward): today it is stop-then-choose-unticked, and the dialogs say what happens at each step.
+
+**R-b2. Exact strings (`DESIGNATE_COPY.clear`, plus the button label):**
+
+| Key | Text (verbatim) |
+|---|---|
+| `PAGE_COPY.clearForWebsite` | `Clear for website` |
+| `DESIGNATE_COPY.clear.title` | `Clear this photo for the website?` |
+| `DESIGNATE_COPY.clear.body(first)` | `This is {first}'s directory photo. Clearing it lets the public website use it too when {first} is listed and no website photo is chosen. Anyone on the internet can see a photo on the public website. Search engines and web archives may keep copies, and removing the photo later can't recall them.` |
+| `DESIGNATE_COPY.clear.checkbox` | the existing `DESIGNATE_COPY.directory.checkbox(first)`, verbatim: `I have {first}'s permission to also use this photo on the public website if they are listed there and no website photo is chosen.` |
+| `DESIGNATE_COPY.clear.confirm` | `Clear for website` (disabled until the box is ticked, and when `state.minor`) |
+
+The consequence sentences under the box are `consequencesFor(state, { kind: "designate_directory", photoId, attested: ticked })`, as for the directory variant. Because the box starts unticked and the confirm needs it ticked, an unticked confirm cannot occur (it would be a no-op).
+
+**R-b3. The remedy line (`WEBSITE_LINES.unattested`, `copy.ts:108-109`), verbatim:** `Website: none. The directory photo isn't cleared for the website. Choose a website photo, or choose "Clear for website" on the photo marked "Directory".`
+
+**R-b4. Under 18.** `statusLines` and `websiteLine` gain the person's `minor` flag. When the answer would be the unattested remedy and `minor` is true, the line is `WEBSITE_LINES.minor(first)` instead (a remedy that cannot be performed is not offered). The existing precedence (an SQL withheld answer wins over the remedy) is kept. `hide_photo` with no designation is not known to the page, so the remedy line may appear for a person who has hidden their photo; that is true (the photo is not cleared) and promises no photo, and is accepted.
+
+**Copy checks.** *Residuals:* the `clear` body names the search-engine residual. *Source of truth:* "This is {first}'s directory photo" is the active, non-removed directory designation (`PhotoTileView.isDirectory`, unattested = `!directoryAttested`); the conditional "when listed and no website photo" is R3 itself, not a claim about the current state. *Audience:* the `people.manage` holder who sees the page also sees and can press "Clear for website" (the same gate as the three existing buttons; `HydrationGate` as theirs). *Neighbours:* the only string naming the remedy is `copy.ts:108-109`; `reader-derive.test.ts:55` asserts the old words and is a modify target.
+
+#### R-c. The off-warning counts designations, not photos (QA (c))
+
+**Ruling: count distinct photos; the strings do not change.** One headshot chosen for the directory and cleared for, or chosen for, the website is one photo, and "1 photo is currently chosen for the directory or the website" is true. Reworking the noun ("photo choices") would make the warning describe the table instead of what the church knows.
+
+- `reader.ts:74` `countPhotoDesignations(tx)` is renamed **`countChosenPhotos(tx)`** and counts `count(distinct person_photo_designations.photo_id)` over the same join and filter (`ended_at is null`, `removed_at is null`) in the transaction's organization. Importers to update: `src/lib/org-feature-warnings.ts:5,32,65`, `src/lib/org-feature-warnings.photos.test.ts:6,18`, `src/lib/person-photos/public-photo.db.test.ts:337,342` (and its title), and any `scan.test.ts` name reference.
+- `offWarningCopy(count)` and `OFF_WARNING_FALLBACK` (`copy.ts:73-84`) are unchanged: the singular and plural forms already exist ("{n} photo is ..." / "{n} photos are ..."), now fed the right number. The doc comments at `reader.ts:64-73` and `org-feature-warnings.ts:30-33` say "active designations on live photos" and become "distinct photos with an active designation".
+
+**Copy checks.** *Residuals:* unchanged (cached-copy sentence, "nothing is deleted"). *Source of truth:* the distinct `photo_id` of active designations on non-removed photos in this organization, worded "chosen for", never "shown" (a hidden or under-18 photo is still chosen). *Audience:* the `org_features.manage` holder at `/admin/features`; the string instructs nothing. *Neighbours:* `org-features.ts:207` (the toggle's description) says "choose the photo members see in the directory"; true, unchanged.
+
+### Tests the implementer adds (each fails on the current strings or code; written red first)
+
+| # | File | Exact assertion |
+|---|---|---|
+| T1 | `consequences.test.ts` | A table of `(state, intent) -> toEqual([...exact sentences])` taking the sentences from R-a4 literally, covering: listed and no website photo, ticked (the new `directoryAlsoOnWebsite` text), `websiteListed` text, `minor` (each of the three designate intents returns `[minorBlocked(first)]` on designate and the removal and un-designate rows are unchanged for minor except `removeIsWebsiteWithheld` and `websiteShowsNone`), `directoryWithheld: "hide_photo"`, `websiteWithheld: "hide_photo"` and `"merged"`. The existing rows that assert the old text ("will also appear", `consequences.test.ts:46` and the like) are updated to the new text. |
+| T2 | `consequences.test.ts` | A property test over the full product of `{listed, website, directory (none, unattested, attested), minor, directoryWithheld, websiteWithheld} x {all five intents}`: no returned sentence matches `/will (also )?appear/`; and no returned sentence matches `/will (also )?(appear|use|leave|fall back)/` when `minor` or `websiteWithheld !== null` or `directoryWithheld !== null`, except the three "show no photo" sentences. Plus `directoryPhotoServesWebsite` is `false` for every withheld combination (extending the mirror test at `consequences.test.ts:215`). |
+| T3 | `copy.test.ts` | Exact equality of every string in R-a3, R-a5, R-a6, R-a7, R-b2, R-b3, with the **verbatim old strings asserted absent** (`copy.ts:98,99,108-109,142,149,154,166,219` as of 0df93af). |
+| T4 | `reader-derive.test.ts` | Replace `:55`'s `toContain("clear the directory photo for the website")` with: `WEBSITE_LINES.unattested` contains `PAGE_COPY.clearForWebsite` as `"Clear for website"` (couples the remedy to the control's label); `statusLines` with `minor: true` and `unattestedDirectoryOnly: true` returns `WEBSITE_LINES.minor(first)`; the SQL-withheld-wins test at `:51-53` stays. |
+| T5 | a new DB-backed case in `public-photo.db.test.ts` (or the reader's DB suite) | Fixture rows: (i) a listed adult with a website designation and `person_privacy.hide_photo`: `readPhotoSet(...).set.state` has `websiteWithheld: "hide_photo"` and `directoryWithheld: null` (no directory designation); (ii) with a directory designation too: both `"hide_photo"`; (iii) a merged tombstone with a website designation: `websiteWithheld: "merged"`; (iv) a minor with **no** designation: `state.minor === true` and both withheld fields `null` (pins the zero-row limit stated in the feasibility check). |
+| T6 | `designate-dialog.test.tsx` | The directory body renders exactly R-a5; with `state.minor` the confirm button is disabled and the only consequence sentence is `minorBlocked`; with `websiteWithheld: "hide_photo"` and a listed person the website dialog shows `websiteHidden` and **not** `websiteListed`; the `clear` variant: title, body, checkbox verbatim, confirm disabled until ticked, disabled when minor, and on click `designatePersonPhotoAction` is called with `{ photoId, purpose: "directory", attested: true }`. |
+| T7 | `photo-grid.test.tsx` | The "Clear for website" button is present exactly on a current directory tile with `directoryAttested: false`; absent on an attested directory tile, on a non-directory tile, and when `state.minor`. The buttons' accessible names for the other tiles are unchanged. |
+| T8 | `store.db.test.ts` | Confirm (add only if absent) that designating the same photo for the directory with `attested: true` over an unattested active designation ends the old row and inserts a new one carrying `public_attested_at/by`, one `audit_events` row, and that the active-designation count for the person stays one. |
+| T9 | `org-feature-warnings.photos.test.ts` and a DB case | Unit: the mock is renamed `countChosenPhotos`; the existing singular and plural strings stay. DB: one photo with an active directory **and** an active website designation (attested) yields `countChosenPhotos(tx) === 1` (the old function returns 2), and the rendered title and description for that count are `"1 photo is currently chosen for the directory or the website. Turning this off hides it everywhere, ..."`. A second case: two photos, one of them doubly designated, returns 2. |
+| T10 | e2e (`e2e/person-photos.spec.ts`) | Existing assertions on changed strings are updated: `:160` and `:290` become `Directory: no photo chosen, so members who can see {first} in the directory see initials.`; `:178` becomes `Directory: members who can see {first} in the directory see the photo marked "Directory" below.`; `:282` becomes `It is {first}'s directory photo, so wherever {first} appears in the directory it will show initials instead.` New flow: an unattested directory photo for a person with no website photo shows the new remedy line; click "Clear for website", tick the box, confirm; the page then shows `Website: the directory photo, because it was cleared for the website.` and the tile's chip reads `Directory, cleared for website`; at 360 and 1280 px, the dialog fits and its buttons are at least 44 px. |
+| T11 | e2e (`e2e/hydration/person-photos-upload.spec.ts:92-100`) | The `seedPhoto` directory photo is unattested, so its tile now has a fourth button: add `Clear for website` to the list of controls asserted disabled before hydration (and enabled after). |
+
+**e2e blast radius, named (existing specs this change alters):** `e2e/person-photos.spec.ts:160,178,282,290` (strings), `e2e/hydration/person-photos-upload.spec.ts:92-100` (a new control on the tile), and the unit specs `consequences.test.ts`, `copy.test.ts`, `reader-derive.test.ts`, `designate-dialog.test.tsx`, `photo-grid.test.tsx`, `page.test.tsx:85` (the directory line string), `org-feature-warnings.photos.test.ts`, `public-photo.db.test.ts:337-342`. **Feature flags these specs depend on:** none new. Every spec above sets `org_portal.person_photos` for its organization through the existing photo fixture and `e2e/support/flags.ts`; no platform flag is read, none is added to `scripts/ci/e2e-baseline-flags.sql`.
+
+### Implementation order
+
+1. `types.ts` and `consequences.ts` (snapshot fields, the derivation, the intent table): T1, T2 red first.
+2. `copy.ts` (every string in R-a, R-b, R-c): T3, T4 red first.
+3. `reader.ts` (fill the three fields, rename the count, `statusLines` minor input) and `org-feature-warnings.ts`: T5, T9 red first.
+4. `tile-controls.tsx`, `designate-dialog.tsx` (third variant, disabled-on-minor, `body(name, first)`): T6, T7.
+5. e2e updates and the new flow: T10, T11.
+6. Release notes: the C9 draft needs no change (it says photos are not shown for under-18 or hidden photos and mentions no "will appear"); add one clause only if the orchestrator wants the new button announced: "A directory photo that was not cleared for the website can be cleared later from the photo's own buttons."
+
+No audit-event change: the clear action is the existing designate action (`person_photo.designated`, with its attestation fields). No schema, no new route, no server-action signature change.
+
+### Edge cases
+
+| Case | Handling | Pinned by |
+|---|---|---|
+| Person has no designation and has hidden their photo | The dialog cannot know (SQL returns no row); it shows the hedged "can appear ... unless something withholds it" sentence, true in that state | T1, T5(iv) |
+| Person is under 18 with existing photos | Designate dialogs show `minorBlocked` and a disabled confirm; un-designate and remove stay available (Batch 2: never refused for a minor) | T1, T6 |
+| `directory_hidden` or ended member | Directory lines and the two retroactive strings are conditional on who can see the person | T3, T10 |
+| Stale page: the directory photo was cleared by someone else, then "Clear for website" is clicked | The action re-designates the same photo as attested; idempotent (Batch 2 deviation 6: same photo and same attestation writes nothing); the page refreshes | T8 |
+| Photo removed by someone else, then cleared | `already_removed`, existing message | existing U8 |
+| Two simultaneous clears | Advisory lock serializes; the second is the same-state no-op | T8 |
+| "Clear for website" label at 360 px | Full-width, min-h-11, like its siblings; no horizontal scroll | T10 (claim *unverified* until it runs) |
+| Consent withdrawn by the person | No dedicated control; today stop-then-choose-unticked | *deferred*, see carry-forward |
+
+### Out of scope (the operator confirms)
+
+A control to **withdraw** a website clearance without stopping the directory photo; reading site publication status or the `sites.*` flags into the dialogs; reading directory eligibility (`directory_hidden`, roll status) into the page; a new SQL function returning withheld reasons when no designation exists; success toasts for designate, un-designate and remove (QA: UX for Phase 6, not a copy defect).
+
+### Carry-forward (this amendment)
+
+| Item | Addressed here, or *deferred* |
+|---|---|
+| QA (a): "will appear" ignores withheld, hide_photo, merged, unpublished site | R-a1 to R-a5, T1, T2, T5, T6. Unpublished site and `sites.*` flags: the sentences say "while the website is published" and are not claimed as read (Out of scope). |
+| QA (b): remedy with no control | R-b1 to R-b4, T4, T6, T7, T10, T11. |
+| QA (c): count of designations | R-c, T9. |
+| QA note: `copy.ts:98` false for `directory_hidden` or ended | R-a7 (wording, not data), T3, T10. |
+| QA observation 1: shared scratchpad name collisions between parallel QA agents | *Deferred* to the orchestrator (per-agent scratch names); not a design item. |
+| QA observation 2 / Batch 2 deviation 7: the adapter's double-submit dedup race (`blob-store.ts` check-then-insert; a simultaneous double submit surfaces `23505` as a generic failure) also affects the **logo** and **ticket** attachment paths | **TODO candidate for `docs/TODO.md`** (not edited here, Rule 16 shared file): "Blob adapter `store()` check-then-insert races on a simultaneous double submit; person photos retry once on `23505` (`store.ts`), logo and ticket paths do not. Fix once in `blob-store.ts` (insert ... on conflict, or retry inside the adapter) and drop the per-caller retry. Found by D1 (Batch 2 deviation 7), re-raised by Phase 5 run 1." Owner: orchestrator at integration; accepted by: none yet (needs the operator to place it). |
+| TODO candidate (new): withdraw a website clearance without losing the directory photo | **Deferred** to a follow-up increment; accepted by: none yet (operator to confirm Out of scope). Consent withdrawal today is stop-then-choose-unticked, and the C5 dialogs say what happens at each step. |
+| Phase 1 G4 (consent matrix), G9 (honest dialog copy), G16 (stale copy), G17 (360 px, native dialogs) | Re-opened and addressed above; every other Phase 1 gap and Phase 2 ruling is unchanged from the Carry-forward table in this document, and none of R-a, R-b, R-c touches it (no schema, flag, route or permission change). |
+| Proposed decision text, for the orchestrator to number at integration (the pre-assigned 285-289 are spent) | "Consequence sentences state only what the snapshot's queries establish: they say *can* with a named unless-clause where a withheld reason is unknowable without a designation, and `PhotoStateSnapshot` carries `minor`, `directoryWithheld` and `websiteWithheld`. The remedy on the page must name a control the page has. The off-warning counts distinct photos." |
+| Findings for the orchestrator to number | (1) the design's Copy check 2 passed C4 on the listing read alone while the snapshot lacked withheld; (2) the public-photo and directory functions start from the designation, so withheld is invisible without one (a documented limit, not a defect); (3) C1's count source counted rows, not photos. |
+
+### Per-Phase Status row (recorded in the table at the top)
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 3 — amendment (Phase 5 run 1 copy rulings) | tech-lead | Complete: rulings R-a (withheld-aware consequences, snapshot carries `minor`, `directoryWithheld`, `websiteWithheld`), R-b (new "Clear for website" control and dialog variant), R-c (count distinct photos); 11 tests T1-T11 named; implementer full-stack-developer; no schema, route, flag or permission change | Design complete; back to Phase 4 | 2026-10-26 |

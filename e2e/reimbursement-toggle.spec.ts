@@ -185,6 +185,7 @@ test.describe("Reimbursements: the organization toggle, from the Features page",
     // The shared Features page titles every off-dialog "Turn off {name}?" and renders only the warning's description;
     // C1's own title ("Reimbursement requests are still open") is the warning's `title`, which that page does not draw
     // (giving's is the same). Pinned as shipped, and reported to the tech-lead as a Copy gap.
+    await page.waitForTimeout(400); // let the dialog finish fading in before the screenshot
     await shot(page, "off-warning", false);
     await dialog.getByRole("button", { name: "Keep it on" }).click();
     await expect(dialog).toHaveCount(0);

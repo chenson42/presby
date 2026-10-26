@@ -131,6 +131,7 @@ test.describe("Reimbursements: the approver, from the emailed link", () => {
     await page.getByTestId("approve-open").click();
     const dialog = page.getByRole("alertdialog");
     await expect(dialog).toContainText(`$42.50 to ${NAMES.requester}, charged to ${NAMES.property}.`);
+    await page.waitForTimeout(400); // let the dialog finish fading in before the screenshot
     await shot(page, "approve-dialog", false);
     await dialog.getByTestId("approve-confirm").click();
     await expect(page.getByTestId("request-banner")).toContainText("Waiting for payment.");

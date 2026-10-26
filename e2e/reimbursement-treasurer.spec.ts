@@ -209,6 +209,7 @@ test.describe("Reimbursements: the MFA-enrolled treasurer from a signed-out deep
     expect(await statusOf(sql, ids.stale)).toBe("paid");
     // What was typed is still there, and a reload shows the truth: no Void button on a paid request.
     await expect(dialog.getByLabel("Reason", { exact: true })).toHaveValue("Bought on the church card instead");
+    await page.waitForTimeout(400);
     await shot(page, "stale-refusal", false);
     await page.reload();
     await expect(page.getByTestId("request-banner")).toContainText("Paid on");
@@ -262,6 +263,7 @@ test.describe("Reimbursements: the MFA-enrolled treasurer from a signed-out deep
     );
     await expect(dialog.getByTestId("override-team-link")).toHaveAttribute("href", `${base()}/team`);
     expect(await statusOf(sql, ids.override)).toBe("submitted");
+    await page.waitForTimeout(400); // let the dialog finish its transition before the screenshot
     await shot(page, "override-refusal", false);
     await page.keyboard.press("Escape");
 

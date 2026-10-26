@@ -90,7 +90,7 @@ async function addMembership(orgId: string, personId: string, engagement: "regul
 }
 
 async function removeStale() {
-  const stale = await rows<{ id: string }>(sql`select id from organizations where slug ~ '^e2e-reimb-[0-9]+$'`);
+  const stale = await rows<{ id: string }>(sql`select id from organizations where slug ~ '^e2e-reimb[a-z]*-[0-9]+$'`);
   for (const { id } of stale) await removeOrg(id);
   await withDbRetry("delete fixture people", () => sql`delete from people where id in (${pid(2)}::uuid, ${pid(4)}::uuid)`);
 }

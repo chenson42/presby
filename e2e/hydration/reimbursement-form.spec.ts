@@ -72,7 +72,7 @@ test.describe("Hydration - reimbursement request form (DECISION-159)", () => {
 
   test.beforeAll(async () => {
     sql = platformSql("hydration/reimbursement-form.spec");
-    const stale = (await sql`select id from organizations where slug ~ '^e2e-reimb-[0-9]+$'`) as { id: string }[];
+    const stale = (await sql`select id from organizations where slug ~ '^e2e-reimb[a-z]*-[0-9]+$'`) as { id: string }[];
     await removeOrgs(stale.map((r) => r.id));
     await withDbRetry("clear people", () => sql`delete from people where id in (${pid(2)}::uuid, ${pid(5)}::uuid)`);
 

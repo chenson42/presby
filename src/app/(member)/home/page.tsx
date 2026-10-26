@@ -167,7 +167,7 @@ export default async function HomePage() {
                     href="/admin"
                     title="Admin"
                     badge="Platform"
-                    description="Users, roles, flags, and the platform operations shell."
+                    description="Organizations, support, accounts and platform settings."
                   />
                 )}
                 {isPlatformAdmin && (

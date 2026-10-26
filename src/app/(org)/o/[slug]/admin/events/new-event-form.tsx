@@ -24,6 +24,13 @@ import { EventTypePicker } from "@/components/org-portal/event-types/event-type-
 import { createEventSchema, type CreateEventFormValues } from "./event-schema";
 import { createEventAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
+import {
+  OPEN_TO_EVERYONE_LABEL,
+  WEBSITE_HINT,
+  WEBSITE_HINT_MEMBERS_ONLY,
+  WEBSITE_LABEL,
+  openToEveryoneHint,
+} from "./website-listing-copy";
 
 const SELECT_CLASSES =
   "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
@@ -36,6 +43,7 @@ function defaultValues(): CreateEventFormValues {
     startsAt: "",
     endsAt: "",
     isPublic: true,
+    websiteListed: false,
     allowsCheckin: false,
     eventTypeId: "none",
     repeats: false,
@@ -87,6 +95,7 @@ export function NewEventForm({
     formState: { errors, isDirty },
   } = form;
   const repeats = useWatch({ control: form.control, name: "repeats" });
+  const isPublic = useWatch({ control: form.control, name: "isPublic" });
   const patternType = useWatch({ control: form.control, name: "patternType" });
 
   // H3 (docs/reviews/2026-08-26-portal-ux.md) — no in-form Back/Cancel link
@@ -107,6 +116,9 @@ export function NewEventForm({
       startsAt: values.startsAt,
       endsAt: values.endsAt || undefined,
       isPublic: values.isPublic,
+      // The server derives the stored value (wish AND open to everyone); this
+      // keeps the posted wish honest too.
+      websiteListed: values.isPublic && values.websiteListed === true,
       allowsCheckin: values.allowsCheckin,
       eventTypeId: values.eventTypeId === "none" ? null : values.eventTypeId,
       recurrence: values.repeats ? { pattern, count: Number(values.count) } : undefined,
@@ -206,13 +218,29 @@ export function NewEventForm({
           <input
             type="checkbox"
             className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            {...register("isPublic")}
+            {...register("isPublic", {
+              // Members-only can never be on the website: clear the wish here
+              // (the server re-derives it regardless).
+              onChange: (e) => {
+                if (!e.target.checked) form.setValue("websiteListed", false);
+              },
+            })}
           />
-          Visible on the public calendar
+          {OPEN_TO_EVERYONE_LABEL}
+        </label>
+        <p className="-mt-2 text-sm text-muted-foreground">{openToEveryoneHint(orgName)}</p>
+
+        <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!isPublic}
+            {...register("websiteListed")}
+          />
+          {WEBSITE_LABEL}
         </label>
         <p className="-mt-2 text-sm text-muted-foreground">
-          If unchecked, the event still shows on the member calendar for everyone in {orgName}.
-          It just stays off the public website.
+          {isPublic ? WEBSITE_HINT : WEBSITE_HINT_MEMBERS_ONLY}
         </p>
 
         <label className="inline-flex min-h-11 items-center gap-2 text-sm">

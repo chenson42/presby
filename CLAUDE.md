@@ -109,6 +109,16 @@ src/components/org-portal/ — tenant-portal-specific composition (tile grid,
                          Distinct from src/components/shared/ because these
                          compose org-portal-only concepts platform-shell
                          pages never use
+src/components/admin-portal/ — admin-console-only composition (the nav, phone
+                         menu, header, and the admin forbidden state;
+                         DECISION-253). Parallel to org-portal/; generic
+                         pieces (LoadError, EmptyState, CountCard) stay in
+                         shared/
+src/lib/admin-portal/  — the admin console's data: nav.ts (the nav registry,
+                         pure and synchronous, which replaced the tile
+                         registry) and dashboard/ (the card readers, held to
+                         platform-axis tables by boundaries.test.ts;
+                         DECISION-252/253)
 src/proxy.ts           — The proxy (admin + 2FA on /admin and /o/*, and the
                          custom-host branch that rewrites any non-platform host
                          to /site/<host>). Runs on Node.js (Next 16) but never
@@ -585,7 +595,7 @@ importing `@/lib/db` breaks the build — no longer holds, but the rule stands
 would be a second enumeration-sensitive path (DECISION-040), and it must stay a
 pure function of host, path and session claims. It imports `edgeAuth`, the
 permission constants, and `src/lib/domains/host.ts`, `probe.ts` and
-`cron-passthrough.ts` — nothing else. `npm run check:proxy-imports` enforces it.
+`cron-passthrough.ts` — nothing else. `npm run check:proxy-imports` enforces it. Because the proxy trusts the session's 2FA claim, that claim is set only inside a server-side verification grant (`src/lib/auth/two-factor-grant.ts`); the jwt callback's update branch reads nothing from the update payload (DECISION-230).
 
 ### A Custom Host Is a Key, Not an Identity
 
@@ -779,3 +789,6 @@ tenants is not, so the copy may not vary — including its response time.
 resolves: `/launch` degrades from a 307 to a client-side redirect, and
 `notFound()` on `/o/<slug>` renders the 404 page at HTTP 200. Measured
 2026-08-18. Segments that always render (`/home`, `/no-organization`) keep theirs.
+The rule also covers `(admin)/admin/**`: its detail routes call `notFound()`, so
+no `loading.tsx` may exist there (DECISION-251); loading feedback is per-card
+`Suspense`, and `shell-boundaries.test.ts` pins the absence.

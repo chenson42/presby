@@ -20,15 +20,15 @@
  * driver, which now and then answers `fetch failed` / `Connection terminated unexpectedly`. A teardown
  * that died on one left the congregation behind with a membership for the `mfa-enrolled` user, and the
  * next run's post-login landing for that user was `/home`, not `/admin` (five TOTP specs timed out).
- * So (1) every teardown step is retried with backoff (`withDbRetry`; each step is idempotent);
+ * So (1) every teardown step is retried with backoff (`withDbRetry`, now in ./db; each step is idempotent);
  * (2) setup sweeps any stale fixture org first; and (3) `sweepStaleDomainsUiFixtures` is also called by
  * globalSetup, so a leak from an earlier run is gone before ANY spec signs the user in.
  */
 import { generateSync } from "otplib";
 import type { Browser, BrowserContext } from "@playwright/test";
-import type { Sql } from "./db";
+import { withDbRetry, type Sql } from "./db";
 import { E2E_TOTP_TEST_SECRET } from "./totp-fixture";
-import { enterTotpCode } from "./totp-page";
+import { enterTotpCode, waitForTotpVerified } from "./totp-page";
 import { E2E_USERS, storageStatePath } from "./users";
 
 /**
@@ -63,29 +63,6 @@ async function userIdByEmail(sql: Sql, email: string): Promise<string> {
   const rows = (await sql`select id from users where email = ${email}`) as { id: string }[];
   if (!rows[0]) throw new Error(`[domains-ui-fixture] no user row for ${email}; globalSetup must run first`);
   return rows[0].id;
-}
-
-/** The shape of a dropped Neon connection (the HTTP driver's `fetch failed`, the pool's reset, a socket timeout). */
-const DB_DROP = /fetch failed|Connection terminated|terminating connection|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|timeout|NeonDbError/i;
-
-/**
- * Retries `step` with exponential backoff (0.5 s, 1 s, 2 s, 4 s) while it fails with a connection-drop error;
- * any other error (a constraint, a bug) is thrown at once. Every caller passes an IDEMPOTENT step, so a drop
- * that landed after the statement committed is harmless on the retry. Exported for the unit test.
- */
-export async function withDbRetry<T>(label: string, step: () => Promise<T>, opts: { attempts?: number; baseMs?: number } = {}): Promise<T> {
-  const attempts = opts.attempts ?? 5;
-  const baseMs = opts.baseMs ?? 500;
-  for (let n = 1; ; n++) {
-    try {
-      return await step();
-    } catch (err) {
-      const message = String((err as { message?: unknown })?.message ?? err) + String((err as { cause?: unknown })?.cause ?? "");
-      if (n >= attempts || !DB_DROP.test(message)) throw err;
-      console.warn(`[domains-ui-fixture] ${label}: connection dropped, retry ${n}/${attempts - 1}`);
-      await new Promise((resolve) => setTimeout(resolve, baseMs * 2 ** (n - 1)));
-    }
-  }
 }
 
 /**
@@ -208,8 +185,7 @@ export async function verifiedContext(browser: Browser, callbackPath = "/home"):
   const page = await context.newPage();
   await page.goto(`/totp?callbackUrl=${encodeURIComponent(callbackPath)}`);
   await enterTotpCode(page, generateSync({ secret: E2E_TOTP_TEST_SECRET }));
-  await page.getByRole("button", { name: /^verify$/i }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/totp"), { timeout: 15_000 });
+  await waitForTotpVerified(page);
   await page.close();
   return context;
 }

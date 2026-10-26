@@ -4,6 +4,167 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-257 — The two-factor code is submitted when its last digit lands; `OneTimeCodeInput` says whether the completion was exactly code-length; the session grant stays inside `verifyTotpAction`. Amends DECISION-193(a) and the "nothing auto-submits" sentence of `docs/ui-standards.md` (DECISION-192/193).**
+
+**Status:** Resolved (operator request 2026-10-25; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-totp-autosubmit` (no migration; v0.44.1)
+
+- **Rule.** `onComplete(code, { exact })` fires on a user edit that leaves the code complete and changed. A consumer may submit only when `exact` is true. `exact` is true only when no delivered digit was dropped: a paste or autofill that drops a digit fills the boxes and waits for the button. That covers an over-long run and a short run that overflows the remaining boxes (three typed digits plus a four-digit paste into box 4). A six-digit run delivered into a later box restarts at box 1, drops nothing, and submits (the C-4b rule: it is an exact whole code, and blocking it would defeat whole-code autofill, the case this decision exists for). Recovery codes never auto-submit (variable length, no last-character event).
+- **`/totp`.** The trigger arms a ref; an effect keyed on the code runs after the commit that carries the six digits and calls `form.requestSubmit()` on the existing `<form action={verifyTotpAction}>`. The client never calls the action's internals, `unstable_update` or `@/auth`: the 0.42.3 grant (`withTwoFactorGrant`) opens only inside the action. One submission per complete code; none while pending; a hole re-arms.
+- **Reset.** After an attempt settles (`useFormStatus` pending true then false) the digit boxes are cleared and refocused by remounting the input. It is keyed on completion, not on the URL, because two failures in a row redirect to the same URL (F282).
+- **`/account/2fa`.** The same trigger calls the existing handler directly with the code it was handed; the input is remounted (and focused) after a failure.
+- **Accepted residuals.**
+  - **A mistyped last digit** is submitted at once: one of ten attempts a minute on `/totp` and one `totp.verify_failed` audit row, with no chance to correct. Accepted because the code expires in about 30 seconds; the Verify button stays as the fallback. Expect more `verify_failed` rows from fast typos.
+  - **O-9, the one known hole in `exact`.** A two-character, non-paste change event into a filled, selected box of a complete code (a keyboard-suggestion chip, or a drag-and-drop of two digits onto box 6) drops a digit and is still `exact`, so it submits. It costs one attempt and one `verify_failed` row, the same as the mistyped-last-digit residual, and the Verify button is still there. It is not fixed here because an ordinary overtype (the box holds `6`, the caret is after it, the user types `7`, and the browser reports `67`) has the same two-character shape; a fix must tell "the old digit plus one new one" from "two unrelated digits" and deserves its own failing-first test (`docs/TODO.md`). `paper`.
+  - **`completeEnrollment` has no rate limit** (pre-existing, unchanged, `docs/TODO.md`).
+  - **A thrown `completeEnrollment` shows no message** on `/account/2fa` (O-4; the boxes re-enable and Confirm works; `docs/TODO.md`).
+- **Not verified on a real device** (O-5): iOS and Android one-time-code autofill, a screen reader, and bfcache back-navigation are emulated in e2e and tracked as a manual check (`docs/TODO.md`).
+- **Rejected.** Keying the form on `error` (identical URL on repeat failure); a `useActionState` wrapper (a second action entry point near the grant); submitting from the change handler (posts the previous hidden value).
+
+---
+
+**DECISION-241 — Public events calendar: the implementation shape.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (events Increment 4, v0.44.0, migration 0067)
+
+- **Names.** The column is `events.website_listed` (matching `public_listed` elsewhere, DECISION-131), the CHECK `events_website_requires_public`, the definer `presby_public_events_calendar(p_slug)`, the toggle `org_portal.public_calendar` (worship category, `orgTypes: null`, self-service), the slot `eventsCalendar`, the audit keys `event.listed_on_website` and `event.unlisted_from_website`.
+- **The window and cap live in the function and are mirrored by named constants.** Previous month through 12 months ahead (14 months), 400 rows; on truncation the window shrinks to the last complete month, and a truncation that leaves none returns `unavailable`. A test pins the SQL literals to the TypeScript constants and to the catalog, so the SQL composition of the toggle, category axis and default zone cannot drift from `orgFeatureEnabledInTx` and `DEFAULT_ORG_TIME_ZONE`. A differential DB test compares the two over the whole axis × category × toggle matrix.
+- **One DOM per month.** The panels are server-rendered once and laid out by CSS (a seven-column grid from `md`, a day list below, or the list everywhere by the visitor's choice); event details are native `<details>`. The client island holds only the active month index, the layout and the "earlier days" state, and receives panels, not event data. A `location.hash` mirror (Phase 2's optional suggestion) is declined: a deep link to a month is not needed to replace the old embed and adds a client-only effect to test; revisit if a church asks to link to a month.
+- **Pure rules shared by the count and the write.** `deriveListed`, `planSeriesListing` and `inheritedListing` live in `src/lib/events/website-listing.ts`. A series is published or unpublished "this and all later" through `setSeriesWebsiteListing`, which locks the series rows; changing one event goes through the edit form. This replaces Phase 1 Flow 3's scope choice inside one form with two surfaces of equal capability, avoiding a dual-mode form value (DECISION-133). New occurrences inherit from the latest non-cancelled occurrence AND the parent's `is_public`.
+- **Audit in the same transaction.** `insertAuditRow` (not `recordAudit`) on all four writers, one row per column-changing write, none for a no-op or a cancel. The lib functions take an `EventActor { userId, email }` so the row carries who did it.
+- **Declined Phase 2 suggestions, with reasons.** `website_listed_by/_at`: the audit row is authoritative and nothing reads the columns; adding them later is additive. A partial index: the window is a bounded range scan on `events_org_starts_idx` and the table is small per organization; revisit if an `EXPLAIN` on a several-thousand-row organization says otherwise.
+- **No off-warning and no on-confirmation for the toggle.** Rollback should be one click; the on-direction exposure is bounded by the per-event mark (F255 tracks the residual).
+- **G9 (where-the-calendar-appears status line) is deferred**, with the reasons in the work-log's Carry-forward (`docs/TODO.md`).
+- **Revisit if** a church needs a month deep link, the payload for a busy organization is measured large (about 0.75 MB of uncompressed HTML for 2 events and 4.1 MB at the 400-event maximum, accepted; `docs/TODO.md`), or a fifth writer of `website_listed` appears (it must audit).
+
+---
+
+**DECISION-240 — Event writes stay unaudited except when the website column changes; narrowly amends DECISION-113 ruling 5.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar`
+
+- Event create, edit, extend and cancel remain unaudited **except** when `events.website_listed` changes. Any write path that flips it in either direction writes **one** in-transaction audit row via `insertAuditRow` (`src/lib/audit-tx.ts`, so the change and the audit commit together).
+- That covers `createEvent` (including a series), `updateEvent` (including the derived clear when `is_public` goes false), `extendSeriesPattern` (new occurrences inherited as listed), and the series-scope mutation `setSeriesWebsiteListing`. The row carries the new `AUDIT_ACTIONS` keys (listed/unlisted), the scope, the root event id, and the changed and skipped counts.
+- The org toggle flip is already audited by `toggleOrgFeature()`. Cancelling an event is not audited; it narrows exposure and the read filters it out (F254).
+- **Accepted residual (`paper`).** A future writer that sets the column directly would escape the audit; the only code writers are the four above, and the TypeScript field is written nowhere else.
+
+---
+
+**DECISION-239 — A navigable public live slot affirms DECISION-132's redline: month navigation is a pre-rendered bounded window switched by a client island.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar`
+
+- DECISION-132's live-slot redline is affirmed **without amendment** for a navigable slot. The island receives only server-rendered panels and an index. Request-derived parameters (`?month=`) and a JSON endpoint are rejected. A client-only `location.hash` mirror is permitted because it never reaches the server (DECISION-241 declines to build it).
+- Public calendar components are built in `(public)/site/[slug]` (flat or `_`-private folder). They reuse only the pure `src/lib/calendar` / `src/lib/events` layer and never import `(org)` route files.
+
+---
+
+**DECISION-238 — Public events calendar publication: a per-event column off by default, tied to `is_public` by a CHECK and re-filtered at read time; one `SECURITY DEFINER` read that always returns one row.**
+
+**Status:** Resolved (architect, Phase 2; operator rulings Q1 and Q3, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (migration 0067)
+
+- Publication is a new per-event column, `events.website_listed`, **off by default**, tied to `is_public` by the table CHECK `events_website_requires_public` and re-filtered on `is_public` at read time (it holds even with the CHECK dropped).
+- The anonymous read is one `SECURITY DEFINER` function, `presby_public_events_calendar(p_slug)`, that **always returns one row**. Inside it, it checks: org active, site live, and the toggle composed exactly as `orgFeatureEnabledInTx` composes it, **including the category axis read from `feature_flags` inside the function**. It returns a `jsonb_build_object` allow-list with no ids.
+- The window and row cap are fixed inside the function, and every non-serving reason and every read failure collapses to `unavailable` (DECISION-154). The reader lives in `src/lib/public-calendar.ts`, not the pure `src/lib/calendar/`.
+- The toggle is self-service (`operatorEnabled: false`, operator ruling Q3). The new function does not repeat `presby_public_giving_config`'s omission of the category axis (F250, tracked in `docs/TODO.md`).
+- **Accepted residuals.** A cancelled event keeps the flag true and the read filters it (F254, `paper`); the table has no length CHECK, so the definer clips (F256, `paper`); a published event's free text is public and may be archived, which the form and release note say.
+
+---
+
+**DECISION-255 — Status treatment is staged: existing tokens with an icon and text in Increments 1–3; the reserved semantic slice lands in Increment 4.**
+
+**Status:** Resolved (architect, Phase 2) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (stage one shipped in v0.43.0; no migration)
+
+- **Stage one.** Failure is `text-destructive` with `CircleAlert` and a label; needs attention is `text-foreground` on `border-foreground` with `TriangleAlert` and the words "Needs attention"; all-clear is `text-muted-foreground` with `CircleCheck`. No palette literal in any new file, no new token. Status is never carried by colour alone.
+- **Stage two (Increment 4, short Phase 2 addendum).** Declare `--success`, `--warning`, `--info` (and foregrounds) for both schemes, drop `reserved`, add contrast proofs, add `Badge` variants with a header-commented divergence, convert the 43 existing palette literals.
+- **Revisit if** the contrast proofs for the three families cannot be met in both schemes.
+
+---
+
+**DECISION-253 — `src/components/admin-portal/` is the home for admin-only composition; the nav registry replaces the tile registry; the admin shell mounts `AvatarMenu`; one copy-only change to frozen `permissions.ts`.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0; no migration)
+
+- **Placement.** Admin-only composition (`AdminNav`, `AdminNavLinks`, `AdminMobileMenu`, `AdminHeader`, `AdminForbidden`) lives in `src/components/admin-portal/`, parallel to `org-portal/`. Generic pieces (`LoadError`, `EmptyState`, `CountCard`) live in `shared/`. The forbidden state stays admin-only so it cannot become the byte-identical `(org)` miss response of DECISION-040.
+- **Registry.** `src/lib/admin-portal/nav.ts` replaces `ADMIN_TILES` (`tiles.ts`, `visible-tiles.ts` and `tile-icons.ts` are deleted) under DECISION-123's constraints: pure synchronous data, filtering in a co-located helper. `DomainTileSections` and `TileGrid` remain for `(org)`.
+- **Shell.** The header mounts `AvatarMenu`, not `GlobalNav` (whose `OrgSwitcher` would put `/o/` links and a tenant read in admin chrome). The inline sign-out is removed; there is one sign-out path.
+- **Frozen file.** The `name` and `description` of `FEATURES.ADMIN_ORGANIZATIONS` may be corrected as copy; keys, map and order are untouched, pinned by a test. Deployed `features` rows keep the old text and nothing displays it.
+- **Layout.** `<main>` is `p-4 sm:p-8` with `min-w-0`, noted in `docs/ui-standards.md`.
+- **Revisit if** a second consumer appears for a collapsing-nav primitive (then promote it to `shared/`).
+
+---
+
+**DECISION-252 — The platform tier shows only platform-axis data; dashboard readers are held to an allow-list of tables by a source-scan test; the 2FA predicate is the one recorded exception.**
+
+**Status:** Resolved (architect, Phase 2; operator ruling Q8; tech-lead, Phase 3; scan scope ruled by the orchestrator after QA runs 1–5) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0; no migration)
+
+- **Rule.** The dashboard may show counts, ages and links for organizations, accounts, invitations, queue rows, tickets and feedback (as counts), domains, sites, flags and audit rows. It never shows a count or content derived from people, the roll, gifts, events or attendance. No names beyond the public `organizations.name`, no amounts, no ticket or feedback text.
+- **Enforcement.** Readers live in `src/lib/admin-portal/dashboard/`. `boundaries.test.ts` reads the source of every non-test file in that directory and allows only listed tables (by import, and as a closed set of table names in any string or template literal), listed modules and one `presby_*` function. It reports a tenant table written as an import or as a name until someone edits the list on purpose, in review. It covers only files in that directory. The audit reader never selects `metadata` whole.
+- **The exception.** "Required but not enrolled" resolves through `people` and `memberships`. It lives in `src/lib/admin/two-factor-stranded.ts`, outside the scanned directory on purpose, and returns accounts or a count. `/admin/2fa`'s per-organization `member_count` stays page-local and is never extracted. If the card is read as extending the exception, drop the card.
+- **Sub-panels** in the Increment 2 workspace check their own keys inside a page gated by `ADMIN_ORGANIZATIONS`.
+- **Accepted residual (`paper`).** The boundaries scan guards against a careless reader written in this directory's idioms, not a deliberately evasive one: it reads source text and cannot see (1) a computed property access (`db[key]`); (2) a table name assembled at runtime rather than written in a literal, whether in JavaScript (concatenation into a variable that reaches `execute`) or in SQL (`format()`, `||` on string pieces, a `U&"…"` escape); (3) a helper module outside the directory, including any allow-listed `@/lib/*` module, that itself reads a tenant table; or (4) a reader written to evade a source-text scan, such as an escape trick the decoder does not model, a shadowed helper, or an expression that misleads the scanner's own tokenizer. These are `paper`; review and the retrospective are the control for all four, as for readers outside the directory.
+- **Revisit if** the operator wants a members-per-organization figure on the platform tier (a Two Hierarchies decision, not a card).
+
+---
+
+**DECISION-251 — The platform console is two tiers in the existing `(admin)/admin` tree; every section page gates before it parses; no `loading.tsx` exists under `(admin)/admin`.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-platform-admin-redesign-inc1` (v0.43.0 carries the shell; Increment 2 the workspace; no migration)
+
+- **Tiers.** Tier 1 is `/admin` and the cross-organization lists under one persistent platform nav. Tier 2 is the organization workspace, real section routes under `/admin/organizations/[id]/**`, under the same nav.
+- **Order.** Every workspace page calls `requireWorkspaceOrg(params)` first: permission, then UUID, then one `cache()`d organization read. There is no data-reading `[id]` layout, because a layout renders concurrently with its page and cannot stop the page's reads.
+- **No `loading.tsx` under `(admin)/admin`, including at `/admin` itself.** A `loading.tsx` wraps every descendant route in Suspense, so the four `notFound()` routes (`organizations/[id]`, `users/[id]`, `tickets/[id]`, `whats-new/[id]`) would answer their 404s with HTTP 200 (the (org) contract's 2026-08-18 measurement). Loading feedback is per-card `Suspense`. A source-scan test (`shell-boundaries.test.ts`) pins the absence.
+- **Error boundary.** `(admin)/admin/error.tsx` renders calm copy and never `error.message`. It does not catch its own layout, so the layout wraps the live `isPlatformAdmin` read in a `catch`.
+- **No proxy rule and no link into `/o/<slug>`.** Pages own per-feature checks; nothing under the console links into a tenant route, pinned by a scan.
+- **Revisit if** a console route needs a streaming skeleton badly enough to justify a route group whose descendants never call `notFound()`.
+
+---
+
+**DECISION-246 — A non-credentials sign-in must carry `email_verified === true`; the gate refuses before any user lookup. Amends DECISION-015 point 2; fulfils the `evaluateSignIn()` clause of DECISION-187.**
+
+**Status:** Resolved (operator-visible finding F231, architect ruling in the 2b addendum 2, R38) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-google-email-verified` (v0.42.4; no migration)
+
+- **Rule.** `evaluateSignIn(provider, user, claims, findUserByEmail)` returns `false` for every non-credentials provider unless `claims.emailVerified === true` (strict boolean: `false`, absent, `null`, `"true"`, `1` all refuse), and decides that before the no-email check and before it reads `users`. The `signIn` callback in `src/auth.ts` feeds `{ emailVerified: profile?.email_verified }`. `claims` is a required parameter with no default, so a call site that forgets it is a compile error.
+- **Amendment to DECISION-015 point 2.** That point said keying the OAuth lookup on `user.email` is safe because Google "verifies [the email] at token issuance". The protocol does not guarantee that: the profile carries an `email_verified` claim that may be `false` or absent, and Auth.js does not enforce it. With `allowDangerousEmailAccountLinking: true`, an unverified claim of an existing user's address signed in as that user (an enrolled user still met `/totp`: a mitigation, not the fix), and a claim of an unused address created a pre-claimed account that, for an address in `INITIAL_ADMIN_EMAILS`, received `ADMIN_ROLE`. The verified claim, not the issuer, is the proof. The email-keyed lookup, the soft-deactivation rule and the credentials short-circuit in DECISION-015 stand.
+- **Fulfils DECISION-187.** The refusal is a pure decision inside `evaluateSignIn()`. Nothing is applied from `signIn` or `jwt`, no verified flag is persisted to the token or to `users.emailVerified`, and `jwt` is untouched.
+- **Refusal behaviour.** A refusal returns `false`, so Auth.js shows its generic "Access Denied" page, byte-identical to a deactivated or no-email refusal (no string changes; no enumeration). One PII-free `console.warn` (`provider` and `typeof` the claim only; never email, subject id or name) records a claim refusal. No audit row: a refusal is not a mutation and an unauthenticated party would be writing it. No flag: a security refusal must not be switchable.
+- **What it does and does not cover.** The gate is a property of the claim, not of the provider's name. A second provider that asserts `email_verified: true` passes it with no further design work, and the claim is only as trustworthy as its issuer (a tenant-controlled OIDC IdP can assert it for any address). Any second provider therefore needs its own design review before it is registered, and `allowDangerousEmailAccountLinking` should be set to `false` for it. The email and WebAuthn Auth.js paths pass no profile and would be refused; neither is configured.
+- **Rejected.** Persisting the claim (a state change from `signIn`/`jwt`; a design question for Increment 2b). Removing `allowDangerousEmailAccountLinking` (breaks existing-account Google sign-in; unnecessary once gated). An optional claim argument defaulting to allow (reopens the hole at any missed call site). An audit row per refusal. A flag.
+- **Accepted residual (`paper`).** No automated test drives a real Google exchange: that the claim arrives rests on the wiring test (`src/auth.sign-in.test.ts`), a dependency tripwire that reads the installed `@auth/core`, and a reading of its OIDC path. Google is configured in no environment, and production `accounts` has 0 rows, so the defect was latent. Verify the claim shape on `development` when Google is first configured. A user whose profile reports the address unverified sees the generic Access Denied page and is told nothing specific (TODO: `/signin` message for OAuth failures).
+- **Revisit if** `@auth/core` stops passing `profile` to the `signIn` callback (the tripwire fails first), a second provider is added, or Increment 2b decides to persist a verified flag.
+
+---
+
+**DECISION-231 — Workflow guardrails: the push gate parses commands instead of scanning them and refuses a command that moves HEAD and pushes; Playwright refuses port 3000 from a worktree; `withDbRetry` is one shared helper whose scope is idempotence; the flag reset is a guarded SQL file checked against the seed.**
+
+**Status:** Resolved (tech-lead, implementation; operator rulings Q1-Q9 on the analyst's defaults, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-retro-workflow-efficiency` (Phase 3; no `src/` or `drizzle/` change, no version bump)
+
+- **Gate.** `scripts/pre-push-gate.mjs` tokenizes the command (quotes, `$()` and backticks, heredocs, comments, `bash -c`/`eval` recursion to depth 6, `command`/`env`/path prefixes) and refuses one command in which a HEAD mover (`commit`, `merge`, `rebase`, `cherry-pick`, `am`, `pull`, `revert`, `reset`) precedes a push that targets this repository, even with a fresh marker. The target-repository check comes first so `scratch/` checkouts stay exempt. **Accepted residuals** (listed in the script header and pinned by tests that say when to remove them): aliases, variable indirection, non-shell wrappers, `checkout`/`switch`, depth over 6; `git push $(git commit ...)` with a fresh marker (an unquoted `$()` is ordered after the command that encloses it); and prefixes that carry flags of their own (`nice -n`, `time -p`, `command -p`, and `env -u NAME` / `exec -a NAME`), where the flag is read as the command and the push behind it is not seen. Prefixes are followed when they carry no flags of their own; `env` also skips bare flags such as `-i`. The gate catches an agent's mistakes, not an adversary.
+- **Playwright.** A dev-lane config load in a linked worktree with the resolved loopback port 3000 throws, unless `PW_ALLOW_3000=1`; never in CI or the main checkout. The dev lane does not need `-p` or `AUTH_URL` where `.env.local` sets no `AUTH_URL`: Phase 5 signed in on :3480 without either. Passing `-p <port>` from the command is an optional follow-up (`docs/TODO.md`).
+- **Retry.** `withDbRetry` lives in `e2e/support/db.ts`. A step may be wrapped only if repeating it after a lost reply leaves the same end state; plain INSERTs, state-machine edges and read-then-overwrite "prior state" captures are never wrapped. Only connection drops retry: SQLSTATE class 08 and 57P01-57P03/53300, or a `fetch failed`/reset/connect-timeout text; constraint errors and statement/lock timeouts throw at once. Nested wrappers run once (outermost retries). That a wrapped teardown survives a real Neon drop is unverified.
+- **Reset.** `scripts/ci/e2e-reset-flags.sql` is one transaction that refuses unless `-v pipeline_branch=1`, sets every seeded global flag to its `scripts/seed.ts` value, applies the baseline file, and is checked against `seed.ts` by a unit test. **Accepted residual:** per-organization toggles and `rollout_percent` are not reset.
+- **Briefings.** `briefings-check` counts recorded decisions above the marker that `docs/briefings.md` does not name (ranges expanded); the marker stays the contiguous floor. A number mentioned in passing silences it (accepted).
+- **AGENTS.md.** Committed in the form `next dev` writes, guarded by a test against the installed generator, rather than disabling `agentRules` (which would delete the block).
+- **Also shipped.** `npm run worktrees:report` is read-only: free disk and per-worktree state, suggesting removal only for a worktree that has commits of its own, all on `origin/main` (as of the last fetch), a named branch and a clean tree (a bare `git worktree remove` of a fresh worktree silently deletes its untracked `.env.local`; Phase 5 FAIL-1). It cannot see squash-merged or fast-forwarded branches. `stats:escape` accepts `--since` (an allowlisted date or "N days ago" form, passed to git through `execFileSync`, never a shell; default output unchanged).
+- **Revisit if** Next changes the agent-file generator's path, a Phase 5 run shows a non-3000 dev server needs more than `-p` and `AUTH_URL`, or the gate's residuals produce a real unchecked push.
+
+---
+
+**DECISION-230 — The session's 2FA claim is set only inside a server-side verification grant; the jwt callback's update branch reads nothing from the update payload; client session updates are refused at the route.**
+
+**Status:** Resolved (architect, Phase 2; operator ruling on existing sessions, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-24-session-update-hardening` (v0.42.3; no migration)
+
+- **Mechanism.** The TOTP and recovery verification actions wrap `unstable_update({})` in `withTwoFactorGrant(userId, method, ...)`, an `AsyncLocalStorage` scope in a `server-only` module (`src/lib/auth/two-factor-grant.ts`). The jwt callback sets `twoFactorVerified = true` only when `trigger === "update"` and `takeTwoFactorGrant(token.sub)` finds a single-use grant for that user in the current request. Nothing is serialized, so there is nothing to replay. The update branch accepts no boolean, roles or features from the payload; every legitimate caller only wants the refresh, which `trigger === "update"` already causes. The sign-in reset of the claim is unchanged.
+- **Route.** `POST /api/auth/session` answers 405 with `Allow: GET` and no body or cookie, at `src/app/api/auth/[...nextauth]/route.ts`. This is defence in depth: `unstable_update` calls `Auth()` in-process and never reaches the route, so it is unaffected, and the proxy stays a pure function of host, path and claims.
+- **The grant helper is never exported from, or wrapped by, a `'use server'` module,** because every exported async function in such a file is a callable endpoint. It is not imported by `src/lib/auth/config.ts` or the proxy (`check:proxy-imports` backs this).
+- **Fallback, not used.** If request context ever stopped reaching the jwt callback, the approved alternative is an HMAC proof derived from `AUTH_SECRET`, bound to the subject and a per-session id, short-lived, compared in constant time. It was not needed: the grant propagated in the dev and `next start` runs. The failure mode is fail-closed (a loop on `/totp`).
+- **Rejected for this fix.** A per-user `users.two_factor_verified_at` cannot tell one session from another. A per-session server record is the right design for revocation and is tracked in `docs/TODO.md`.
+- **Operator ruling, 2026-10-25: existing sessions are not rotated.** There are two active production accounts, both the operator's, so no member is forced to verify again. The fix covers new activity; it cannot show whether an existing session already carries a claim it did not earn, because that leaves no audit mark. Such a session stays verified until its token expires (about 30 days).
+- **Accepted residual (`paper`).** A verified claim outlives an administrator's TOTP reset or a sign-out elsewhere until the token expires. Tracked as the revocation follow-up.
+- **Disclosure hygiene.** Release notes, commit titles and the PR stay neutral until deploy.
+- **Revisit if** Auth.js or Next changes how async context reaches the jwt callback, `next.config.ts` sets `trailingSlash` or `skipTrailingSlashRedirect` (the route check matches `/api/auth/session` exactly; the callback layer does not depend on it).
+
+---
+
 **DECISION-229 — Accelerated Feature tier: low-risk Feature-class work skips the architect and a separate design spawn, and keeps QA whole.**
 
 **Status:** Resolved (operator, "Adopt it", 2026-10-24) · **Date:** 2026-10-24 · **Feature:** the 2026-10-24 retrospective, `docs/reviews/2026-10-24-retrospective.md` ("The risk-tiered pipeline"; implementation, tech-lead)
@@ -287,7 +448,7 @@ You cannot responsibly revoke an unnamed person, and the confirm must name them.
 
 **Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-review-polish` (Phase 3, tech-lead; confirmed as shipped in Phase 4)
 
-- **(a) Code entry.** `OneTimeCodeInput` is six real generated `<Input>` boxes plus one hidden `name`d input carrying the joined digits, not a single hidden input under presentational cells (DECISION-192 holds either way). Backspace and Delete both erase backward across boxes; paste and whole-code autofill spread across boxes; there is no auto-submit, and completing the code moves focus to Verify. On `/totp` the digit mode and the recovery mode mount mutually exclusive `token` fields, so `FormData.get("token")` can never pick the wrong one.
+- **(a) Code entry.** `OneTimeCodeInput` is six real generated `<Input>` boxes plus one hidden `name`d input carrying the joined digits, not a single hidden input under presentational cells (DECISION-192 holds either way). Backspace and Delete both erase backward across boxes; paste and whole-code autofill spread across boxes; there is no auto-submit, and completing the code moves focus to Verify (amended by DECISION-257). On `/totp` the digit mode and the recovery mode mount mutually exclusive `token` fields, so `FormData.get("token")` can never pick the wrong one.
 - **(b) Layout vocabulary.** `renderEmail` takes a closed block vocabulary (`p`, `facts`, `list`, `quote`) plus one optional action and a footnote, escapes everything, and declares a single `color-scheme: light` while only one scheme ships.
 - **(c) Imports.** Message builders for the two `'use server'` account senders live in `src/lib/email/account-messages.ts`; every sender imports `@/lib/email/render` directly, never through the `@/lib/email` barrel that several tests stub.
 - **(d) Links.** Ticket and feedback mail links are built from `platformOrigin()` and the button is omitted when it is `null` (F165).
@@ -370,7 +531,7 @@ Google's published fill, stroke, text and "G" colours for the light and dark but
 
 **Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-invitations` (Phase 2, R3; amends Phase 1 C4, Flow 8, G11, Q8)
 
-`src/auth.ts` and `src/lib/auth/` are unchanged in Increment 1. Google sign-in for an invitee (Increment 3) means configuring Google, adding `email_verified === true` to `evaluateSignIn()`, and a Flow 4 e2e through Google; it never adds an automatic claim to the auth callbacks.
+`src/auth.ts` and `src/lib/auth/` are unchanged in Increment 1. Google sign-in for an invitee (Increment 3) means configuring Google and a Flow 4 e2e through Google (the `email_verified === true` gate in `evaluateSignIn()` shipped in 0.42.4, DECISION-246); it never adds an automatic claim to the auth callbacks.
 
 (2026-10-21, Phase 2.)
 

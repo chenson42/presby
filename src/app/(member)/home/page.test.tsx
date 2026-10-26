@@ -217,6 +217,9 @@ describe("HomePage — platform.merged_home ON", () => {
     expect(screen.getByRole("heading", { name: "Platform" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /^Admin\b/ })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /^Developer\b/ })).toBeNull();
+    // The card describes the console as it is now, not as "the platform operations shell".
+    expect(screen.getByText("Organizations, support, accounts and platform settings.")).toBeTruthy();
+    expect(screen.queryByText(/operations shell/i)).toBeNull();
   });
 
   it("isPlatformAdmin alone (zero organizations) renders the Developer card but not Admin, and no org section — Developer-card independence (DECISION-044)", async () => {

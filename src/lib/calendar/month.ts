@@ -163,6 +163,23 @@ export function isDayKey(value: string): boolean {
   return dayKeyFromUtc(date) === value && date.getUTCFullYear() === year;
 }
 
+/**
+ * Items grouped by their `dayKey`, in the order they arrived. Generic so the
+ * member calendar's entries and the public calendar's events share one grouper
+ * (the public view never imports an `(org)` route file, DECISION-239).
+ */
+export function groupByDay<T extends { dayKey: string }>(
+  items: readonly T[],
+): Map<string, T[]> {
+  const byDay = new Map<string, T[]>();
+  for (const item of items) {
+    const list = byDay.get(item.dayKey);
+    if (list) list.push(item);
+    else byDay.set(item.dayKey, [item]);
+  }
+  return byDay;
+}
+
 /** The Sunday-first grid covering `ref`: whole weeks, 4-6 of them. */
 export function buildMonthGrid(ref: MonthRef): MonthGrid {
   const first = utcFromParts(ref.year, ref.month, 1);

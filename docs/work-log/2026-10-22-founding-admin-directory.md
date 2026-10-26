@@ -9092,3 +9092,66 @@ None. The pipeline does not reopen.
    - Whether to publish the what's-new entry at release or after F166.
 
 After that, **deployment-engineer** carries the runbook, and the operator does the production walk and the one-time Google check. Nothing is committed or pushed without the operator's say-so.
+
+---
+
+## Integration — merged tree and release 0.48.0 (orchestrator-run integration agent, 2026-10-26)
+
+Recorded verbatim from the integration agent's report.
+
+Community 2b is merged with main, integrated and released as 0.48.0 on `pipeline/signin-invites`, with nothing pushed and production untouched. After the merge, typecheck, lint, all eight tripwires, the unit suite, the DB lane, the SQL isolation suites and 71 e2e specs pass. The full chromium run printed "557 passed" but its log lost the lines for about half its tests, so I re-ran the 2b specs separately (57/57) and can't name which specs the 557 covered. Two of the four checks you asked about need your eye: the Moderator seat and the extra CLAUDE.md sentence (details below).
+
+## Commits (oldest first, tree clean)
+
+| Commit | What |
+|---|---|
+| `5cd92ee` | Merge of `origin/main` (0.47.0) |
+| `7ba0e81` | `fix(invitations)`: email line is now "Accepting takes about a minute: you sign in, or choose a password if you are new." Email and test updated. |
+| `eacd10a` | `chore(integration)`: everything in item 4 of your list |
+| `b868139` | `chore(release)`: 0.48.0, `docs/release-notes/v0.48.md`, with v0.47 linking forward |
+| `bd7bad5` | `docs(briefings)`: entry plus marker moved to `decision=231 commit=b868139` |
+
+## Conflicts
+
+- **Three textual conflicts, not one.** Main moved after the dry run: `src/lib/audit.ts` and `src/lib/audit.test.ts` (careers keys against 2b's two), plus `src/lib/org-feature-catalog.test.ts`. I kept both sides in each; the toggle-only list is `calendar, careers, domains, giving, mail_domain, parishes, public_calendar, sign_in_connect`.
+- **Same-file merges.** I read them for clashes (org-features, officers page and roster, people.ts, org-provisioning, founding-administrator tests). The merged text shows no clash apart from the Moderator seat below.
+- **Not edited.** `e2e/support/invitation-ui.ts` has no main-side change, so nothing to take. 0065 adds no tables, so there are no domain-index or `dev-docs.ts` additions.
+- **Neon.** On `ep-delicate-tree` (host checked each time) I applied 0067, 0068, 0071 and 0072.
+
+## Test results on the merged tree
+
+- **Static checks:** typecheck, lint and `npm run check` all pass.
+- **Unit suite:** 691 files and 10,708 tests passed.
+- **Serial DB lane:** 800 files, 13,868 passed, 0 failed, 1 skipped, which is the same pre-existing skip as before.
+- **`test-rls-65.sql` as `presby_app`:** exit 0, 92 passes.
+- **Full `test-rls.sql`** with stop-on-error off: 1,564 passes. The only three failures are the known drift ones (presbytery member count, the 2fa policy line, the statistics.publish count). The section-44 conversions, sections 65, 67, 68, 71 and 72 all pass.
+- **Auth-gate specs on :3540:** `totp-full-login`, `totp-callback-bypass`, `session-claim-integrity` and `branded-signin` pass, 14 of 14, with the global-setup patch applied for real.
+- **Chromium project:** it ran and printed "557 passed" with exit 0. The log lost the lines for about half of those tests, so I re-ran 2b's own specs on their own:
+  - `community-sign-in-invite`
+  - `no-organization-connect`
+  - `invitation-new-account`
+  - `invitation-existing-account`
+  - `invitation-fixture-sweep`
+  - `sign-in-connect-smoke`
+  - the two community hydration specs
+
+  All 57 pass.
+- **Playwright browser:** the merge brought a newer Playwright, so I ran `npx playwright install chromium` (a 92 MB download).
+- **Not run:** the custom-hosts project, the prod lane, and the QA live-catalog probes.
+- **Housekeeping:** `npm run docs:erd` added main's missing careers diagram to `docs/schema-design.md`. I stopped both :3540 servers by PID and the port is free.
+
+## Where things are
+
+- **0065 runbook:** `docs/deployment.md`, section "Sign-in invitations and connect at sign-in (0065)", after the careers section. It follows the Phase 6 specification, including the hold on real invitations and the point that connect-at-sign-in is on by default.
+- **Release note and TODO:** the operator section of the v0.48 note and the TODO ("Held until F166 ships") both carry the hold on real invitations until F166, and the what's-new entry after F166.
+- **TODO:** I added the 2b follow-ups and a re-check line for when F343 and 2b both merge.
+
+## For your attention
+
+1. **Moderator seat found at integration.** The `deacons_moderator` derived group from 0068 isn't in 0065's closed derived list `('active_membership','session','diaconate')`. A Moderator therefore counts as authority-bearing through `parishes.assign`. Auto-connect asks them for a second factor, but a sender needs `parishes.assign` to invite them and `officers.manage` is not asked for. It fails closed, so nothing is exposed. I filed it as a TODO and did not change 0065, because classifying the seat is a decision that needs your ruling.
+2. **One extra CLAUDE.md sentence.** Beyond your three edits I also landed Phase 3's "A congregation's sign-in invitation is the same mechanism…" sentence, because the approved edit 3 says it is kept as written. Drop it in review if you don't want it.
+3. **`dev-docs.ts` INVARIANTS.** The two entries list no residuals, so there was nowhere to add F232 and I edited nothing there.
+4. **Briefings marker.** I set it to 231, the contiguous floor, rather than 228. Every recorded number above 224 is named.
+5. **F343.** When it merges, the `invitations.db.test.ts:755`, `accept.db.test.ts:149`, `invitation-new-account` and `invitation-existing-account` assertions on the new-account default flip, as the F343 branch already lists. The TODO line also asks for the 2b new-account walks to be re-checked.
+
+The work-log has no integration or merged-tree section yet; the orchestrator can paste the results above in.

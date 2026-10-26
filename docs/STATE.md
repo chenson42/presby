@@ -3,11 +3,33 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-25 (v0.42.5 is live; platform admin redesign Increment 1 is integrated on its branch as v0.43.0).
+Updated 2026-10-25 (latest): v0.43.0 (platform admin dashboard, PR #55) is merged to `main`; the public events calendar (events Increment 4) has `main` merged into its branch and is integrated as v0.44.0, waiting for migration 0067 to be applied to production BEFORE it merges.
 
 ---
 
-## RESUME HERE — 2026-10-25 (late): v0.42.5 is live; platform admin redesign Increment 1 is integrated as v0.43.0
+## RESUME HERE — 2026-10-25 (latest): 0.43.0 is merged; the public events calendar is integrating as v0.44.0; apply 0067 to production BEFORE merging
+
+`main` is at `2a25584`: v0.42.5 plus **v0.43.0** (platform admin redesign Increment 1, PR #55: the `/admin` dashboard, grouped nav, phone menu,
+`error.tsx`, no `loading.tsx` under `(admin)`; DECISION-251/252/253/255; F274-F276 and F281 in `docs/schema-design-2.md` section 2aa; no
+migration). `pipeline/public-events-calendar` (worktree `presby-cal`, Neon `pipeline-public-events-calendar`, port 3500) has merged `main` and
+stays **v0.44.0**: the release-note chain is v0.42 to v0.43 to v0.44, and its findings are section **2ab** (F250-F256; DECISION-238-241). QA run 2
+PASS, Phase 6 SHIP WITH NOTES.
+
+**The calendar's deploy order is unchanged: apply 0067 to production BEFORE merging.** Every merge to `main` auto-deploys and the new code selects
+`events.website_listed`. The runbook is `docs/deployment.md` "Public events calendar (0067)". Nothing is public until the
+`org_portal.public_calendar` toggle is on, the site's maintainer places the `eventsCalendar` slot, and an editor ticks the per-event box. The three
+not-done items (real-iPhone check before any toggle goes on; the FPCW public-site integration; the custom-host check and the Track K event import
+before DNS moves) are `docs/TODO.md` lines; the detail is in the previous handoff below.
+
+**Next:** `/pre-push`, snapshot production, apply 0067, `/merge-pr`, deploy, smoke the events admin page and an anonymous public-site page, then
+remove the worktree and Neon branch. Platform admin redesign Increment 2 Phase 3 proceeds from `main` in `presby-padmin`.
+
+**Next free numbers:** DECISION-**262**, F**289**, migration **0071** (these are the platform-admin handoff's figures and already count this
+pipeline's DECISION-238-241, F250-F256 and 0067). Findings subsection `2ab` is now taken (public events calendar); the next is `2ac`.
+
+---
+
+## Previous handoff — 2026-10-25 (late): v0.42.5 is live; platform admin redesign Increment 1 is integrated as v0.43.0 (now merged, PR #55)
 
 **Live in production:** v0.42.3 (session handling hardening; the production sign-in smoke passed 2026-10-25 22:49 UTC, `totp.verify_succeeded`,
 no failures), v0.42.4 (a non-credentials sign-in must carry `email_verified === true`, F231, DECISION-246) and v0.42.5 (the new-organization form
@@ -41,6 +63,41 @@ is `2ab`. Integration is serialized one PR at a time through `/merge-pr` (Workfl
 
 **Not forgotten:** the F166 bug-fix pipeline, the operator questions in `docs/TODO.md`, the sibling hand-off for the 0.42.3 session fix, and the
 overdue periodic reviews.
+
+---
+
+---
+
+## Previous handoff — 2026-10-25 (later): the public events calendar is integrated as v0.44.0; apply 0067 to production BEFORE merging (superseded by the block above)
+
+`pipeline/public-events-calendar` (worktree `presby-cal`, Neon `pipeline-public-events-calendar`, port 3500) is merged up to `main` at v0.42.5 and
+integrated as **v0.44.0** (v0.43.0 was PR #55, the platform admin dashboard, open at the time; it has since merged and the v0.42/v0.43/v0.44
+release-note links are resolved). QA run 2 PASS, Phase 6 **SHIP WITH NOTES**. A congregation's public website can show an
+events calendar (a month grid on a computer, a list on a phone) through a new `eventsCalendar` live slot. Nothing is public until all three
+happen: an administrator turns on the `org_portal.public_calendar` toggle (seeded off, self-service), the site's maintainer places the slot on a
+page, and an editor ticks the new per-event box `events.website_listed` ("Show on our website's public calendar", off by default, only possible on
+an "open to everyone" event). DECISION-238-241; findings F250-F256 in `docs/schema-design-2.md` §2ab (F257 returned unused); migration **0067**
+(journal idx 67, with idx 65 and 66 left for Community 2b and 3a).
+
+**Deploy order matters: apply 0067 to production BEFORE merging.** Every merge to `main` auto-deploys, and the new code selects
+`events.website_listed`, so the events admin pages would error until the column exists. Old code against the new schema is unaffected. The runbook
+is `docs/deployment.md` "Public events calendar (0067)". Also apply 0067 and `scripts/public-calendar/seed-dev-public-calendar.sql` to the shared
+`development` branch, then run the full `scripts/test-rls.sql` as `presby_app` there (section 67 adds 58 passes; the three known drift failures at
+lines 217, 516 and 7927 are pre-existing).
+
+**Not done, and not a code change (the integration step, operator-owned):** (1) a real iPhone check of the `<details>` rows; it gates turning the
+toggle on for a congregation, not merging. (2) The FPCW public-site integration: replace `site-fpcw/content/upcoming-events.json`'s Google
+Calendar `prose` block with `{ "type": "liveSlot", "props": { "slot": "eventsCalendar" } }` on a branch; `site-fpcw` has no repository
+variables and has never ingested, and the first real ingest publishes the whole migrated site, so it needs the operator's explicit go. (3) The
+custom-host check at FPCW's cutover (only simulated on `*.invalid` hosts today), and the Track K event import must land before DNS moves or the
+calendar is empty on day one. All three are `docs/TODO.md` lines. The what's-new post is drafted and deferred until the first toggle goes on.
+
+**Next:** `/pre-push`, snapshot production, apply 0067, `/merge-pr`, deploy, smoke the events admin page and an anonymous public-site page, then
+remove the worktree and Neon branch.
+
+**Numbers:** this pipeline used DECISION-238-241, F250-F256 and migration 0067; F257 was reserved and returned unused. The next-free numbers in the section below are unchanged by it.
+
+---
 
 ---
 
@@ -81,7 +138,7 @@ DECISION-231, F239 (`docs/schema-design-2.md` §2z), TODO lines for its residual
 | F231, refuse an unverified Google email claim (`2026-10-25-google-email-verified`) | `presby-gauth` | Integrated on its branch as **0.42.4** (Phase 6 SHIP WITH NOTES) | DECISION-246; F231; no migration; port 3520 | `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
 | Retro workflow-efficiency (`2026-10-25-retro-workflow-efficiency`, promoted to a full Feature by QA run 1) | `presby-wf` | Integrated on its branch (Phase 6 SHIP WITH NOTES) | DECISION-231; F239; no migration; port 3480 | `/pre-push`, `/merge-pr`, then remove the worktree |
 | Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Phase 3 (3a) running | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | Phase 3, then Phase 4 |
-| Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Phase 3 done | migration 0067; DECISION-238-241; F250-F257; port 3500 | Phase 4 queued |
+| Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Integrated on its branch as **0.44.0** (Phase 6 SHIP WITH NOTES) | migration 0067; DECISION-238-241; F250-F256; port 3500 | Snapshot production, apply 0067, `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
 | Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Phase 3 done | migration 0068; DECISION-242-245; F258-F265; port 3510 | Phase 4 queued |
 
 **Next free numbers:** DECISION-**251**, F**274**, migration **0070**. F234-F236 and F238 were returned unused. Integration of these branches is

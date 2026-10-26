@@ -112,6 +112,33 @@ export const ORG_FEATURE_CATALOG = [
     orgTypes: null,
     operatorEnabled: false as const,
   },
+  // Public events calendar (docs/work-log/2026-10-25-public-events-calendar.md,
+  // Phase 3 "Names"; DECISION-238, DECISION-241). TOGGLE-ONLY (`flag: null`), no
+  // platform flag (operator: per-org toggles, not new global flags, pre-live).
+  // Provisioned OFF: a missing row is off, `createOrganization()` writes nothing
+  // for it and 0067 backfills no rows. SELF-SERVICE (`operatorEnabled: false`,
+  // Q3): the congregation's `org_features.manage` holder turns it on.
+  //
+  // THE ANONYMOUS READ COMPOSES THIS ENTRY IN SQL. `presby_public_events_calendar`
+  // (drizzle/0067) repeats this entry's key, its `category` and its `orgTypes`
+  // (null: presbyteries and synods have sites and events too) and the category
+  // axis flag, because an anonymous request has no `personId` and cannot call
+  // `orgFeatureEnabledInTx`. `public-calendar.test.ts` pins every one of those
+  // literals to this entry, and `public-calendar.db.test.ts` compares the SQL
+  // with `orgFeatureEnabledInTx` over the whole axis x category x toggle matrix.
+  // Changing the key, category or `orgTypes` here without the migration fails
+  // those tests, on purpose.
+  {
+    key: "org_portal.public_calendar",
+    name: "Public events calendar",
+    description:
+      "Shows the events your team has marked for the website on your public website. Only marked events appear. Whoever maintains your website must also place the calendar on a page.",
+    category: "worship" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: null,
+    operatorEnabled: false as const,
+  },
   // Online giving (docs/work-log/2026-10-15-online-giving.md, Phase 3
   // "Permissions & Flags"; R11 / DECISION-172). TOGGLE-ONLY: there is NO
   // platform flag (`flag: null`) — drizzle/0055 deleted the old

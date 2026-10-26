@@ -10,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import type { EventListEntry } from "@/lib/events";
+import { FOR_WEBSITE_BADGE, visibilityLabel } from "./website-listing-copy";
 
 /**
  * `/o/<slug>/admin/events` — the full event list, ordered by `startsAt`
@@ -64,12 +65,17 @@ export function EventsList({
                   Series
                 </Badge>
               )}
+              {entry.websiteListed && !entry.cancelledAt && (
+                <Badge variant="outline" className="ml-2">
+                  {FOR_WEBSITE_BADGE}
+                </Badge>
+              )}
             </TableCell>
             <TableCell className="text-muted-foreground">
               <FormattedDate value={entry.startsAt} mode="datetime" />
             </TableCell>
             <TableCell className="hidden text-muted-foreground sm:table-cell">
-              {entry.isPublic ? "Public" : "Members only"}
+              {visibilityLabel(entry.isPublic)}
             </TableCell>
             <TableCell>
               {entry.cancelledAt ? (

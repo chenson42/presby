@@ -15,6 +15,8 @@ import { PresbyteryFallback } from "./presbytery-fallback";
 import { PublicStaffDirectory } from "./staff-directory";
 import { PublicCommitteeDirectory } from "./committee-directory";
 import { PublicGivingSlot } from "./public-giving-slot";
+import { PublicEventsCalendarSlot } from "./public-events-calendar-slot";
+import { PUBLIC_CALENDAR_SLOT } from "@/lib/calendar/public-contract";
 
 /**
  * DECISION-121 — org types that get the minimal sign-in fallback instead of
@@ -384,6 +386,14 @@ export async function renderSitePage(
       // marker's `filter.fund` is validated against the organization's online funds inside
       // the slot.
       giving: (filter) => <PublicGivingSlot slug={slug} siteKey={key} filter={filter} />,
+      // The public events calendar (DECISION-238/239). Closes over the DATABASE-RETURNED `slug`
+      // and `urls` ONLY - never `key`, a request, headers, cookies or searchParams (DECISION-132):
+      // the read takes the slug, the one outbound link is `urls.portalCalendar()`, and the marker's
+      // `filter` is narrowed to `view: "month" | "list"` inside the slot. The name is one exported
+      // constant (`PUBLIC_CALENDAR_SLOT`) so a later "where does it appear" walker reuses it.
+      [PUBLIC_CALENDAR_SLOT]: (filter) => (
+        <PublicEventsCalendarSlot slug={slug} urls={urls} filter={filter} />
+      ),
     },
   });
 

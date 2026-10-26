@@ -7,9 +7,12 @@ import {
   cancelEvent,
   createEvent,
   extendSeriesPattern,
+  setSeriesWebsiteListing,
   updateEvent,
   type CreateEventInput,
+  type EventActor,
   type ExtendSeriesInput,
+  type SeriesListingOutcome,
   type UpdateEventInput,
 } from "@/lib/events";
 import type { ActionResult } from "@/types/actions";
@@ -32,11 +35,17 @@ import type { ActionResult } from "@/types/actions";
  * verbatim the same helper `admin/groups/actions.ts`/`admin/officers/
  * actions.ts` define.
  *
- * NO AUDIT WRITE ON ANY OF THESE FOUR ACTIONS — DECISION-113 ruling 5, event
- * create/edit/cancel is content configuration, not an identity/access/
- * security-control mutation (matching the `replaceOrganizationServiceTimes`/
- * `setOrganizationProfile` precedent). This is deliberate, not an oversight —
- * do not add one without a fresh architectural ruling.
+ * AUDIT LIVES IN THE LIB, NOT HERE (DECISION-240, amending DECISION-113
+ * ruling 5). Event create, edit, extend and cancel are content configuration
+ * and are not audited - EXCEPT when `events.website_listed` changes (an event
+ * going onto, or coming off, the public website is a disclosure change). The
+ * four writers that can change it (`createEvent`, `updateEvent`,
+ * `extendSeriesPattern`, `setSeriesWebsiteListing`) write that one row
+ * themselves with `insertAuditRow(tx, ...)` in the SAME transaction as the
+ * change, so it cannot commit without it; that is why this file carries no
+ * `recordAudit()` (the `check:audit` tripwire scans `actions.ts` only). These
+ * actions pass the acting user and email through as an `EventActor`. A
+ * cancel changes nothing about the listing and writes nothing.
  *
  * USES `auth()` DIRECTLY, NOT `cachedAuth()` — server actions are each a
  * separate invocation, so `cache()` is a no-op; same convention every other
@@ -44,7 +53,7 @@ import type { ActionResult } from "@/types/actions";
  */
 
 async function resolveActingIdentity(slug: string): Promise<
-  | { ok: true; personId: string; organizationId: string; userId: string }
+  | { ok: true; personId: string; organizationId: string; actor: EventActor }
   | { ok: false; error: string }
 > {
   const session = await auth();
@@ -64,7 +73,7 @@ async function resolveActingIdentity(slug: string): Promise<
     ok: true,
     personId: resolved.org.personId,
     organizationId: resolved.org.organizationId,
-    userId: session.user.id,
+    actor: { userId: session.user.id, email: session.user.email ?? null },
   };
 }
 
@@ -101,7 +110,7 @@ export async function createEventAction(
   const result = await createEvent(
     identity.personId,
     identity.organizationId,
-    identity.userId,
+    identity.actor,
     input,
   );
 
@@ -125,7 +134,12 @@ export async function updateEventAction(
   const identity = await resolveActingIdentity(slug);
   if (!identity.ok) return { ok: false, error: identity.error };
 
-  const result = await updateEvent(identity.personId, identity.organizationId, input);
+  const result = await updateEvent(
+    identity.personId,
+    identity.organizationId,
+    identity.actor,
+    input,
+  );
 
   if (result.kind !== "ok") {
     return mapForbiddenOrInvalid(result);
@@ -148,7 +162,12 @@ export async function extendSeriesPatternAction(
   const identity = await resolveActingIdentity(slug);
   if (!identity.ok) return { ok: false, error: identity.error };
 
-  const result = await extendSeriesPattern(identity.personId, identity.organizationId, input);
+  const result = await extendSeriesPattern(
+    identity.personId,
+    identity.organizationId,
+    identity.actor,
+    input,
+  );
 
   if (result.kind !== "ok") {
     return mapForbiddenOrInvalid(result);
@@ -158,6 +177,39 @@ export async function extendSeriesPatternAction(
   revalidatePath(`/o/${slug}/admin/events/${input.parentEventId}`);
 
   return { ok: true, data: { occurrenceIds: result.data.occurrenceIds } };
+}
+
+// ---------------------------------------------------------------------------
+// setSeriesWebsiteListingAction
+// ---------------------------------------------------------------------------
+
+/**
+ * "Put this and all later events on the website" / "take them off". The counts
+ * the caller toasts are the ones the lib RETURNS (what actually changed), not
+ * the confirmation's.
+ */
+export async function setSeriesWebsiteListingAction(
+  slug: string,
+  input: { eventId: string; listed: boolean },
+): Promise<ActionResult<SeriesListingOutcome>> {
+  const identity = await resolveActingIdentity(slug);
+  if (!identity.ok) return { ok: false, error: identity.error };
+
+  const result = await setSeriesWebsiteListing(
+    identity.personId,
+    identity.organizationId,
+    identity.actor,
+    { eventId: input.eventId, listed: input.listed },
+  );
+
+  if (result.kind !== "ok") {
+    return mapForbiddenOrInvalid(result);
+  }
+
+  revalidatePath(`/o/${slug}/admin/events`);
+  revalidatePath(`/o/${slug}/admin/events/${input.eventId}`);
+
+  return { ok: true, data: result.data };
 }
 
 // ---------------------------------------------------------------------------

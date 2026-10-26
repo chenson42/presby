@@ -104,7 +104,7 @@ export function TeamList({ slug, grants }: { slug: string; grants: TeamGrant[] }
               ) : (
                 <p className="text-sm text-muted-foreground">
                   This one is managed under Roles, because it is given to a group or includes permissions
-                  outside Giving.
+                  outside Giving and Reimbursements.
                 </p>
               )}
             </div>

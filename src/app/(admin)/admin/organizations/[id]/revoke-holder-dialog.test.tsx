@@ -128,7 +128,7 @@ describe("RevokeHolderDialog - content", () => {
     renderDialog(holderRow({ roleNames: ["Treasurer"], companionRoleNames: [] }), "treasurer");
     const text = screen.getByRole("alertdialog").textContent ?? "";
     expect(text).toMatch(/manage giving at Alder Creek Presbyterian Church/);
-    expect(text).toMatch(/Gift and donor records are not changed\. This is recorded in the audit log\./);
+    expect(text).toMatch(/Gift, donor and reimbursement records are not changed\. This is recorded in the audit log\./);
     expect(text).not.toMatch(/no access to them/i);
     expect(text).toMatch(/its own Giving team page/);
     expect(text).toMatch(/Nobody will be able to manage giving/);

@@ -79,7 +79,7 @@ describe("grantGivingRoleAction", () => {
   it.each([
     [{ kind: "invalid_role" }, /isn't available/],
     [{ kind: "invalid_target" }, /current membership/],
-    [{ kind: "not_giving_only" }, /Grant it from Roles/],
+    [{ kind: "not_giving_only" }, /outside Giving and Reimbursements\. An administrator can grant it from Roles\./],
     [{ kind: "escalation_denied", missingPermissions: ["giving.record"] }, /giving\.record/],
     [{ kind: "already_granted" }, /already has/],
     [{ kind: "forbidden" }, /permission/],
@@ -137,7 +137,7 @@ describe("ensureGivingRoleAction", () => {
 
   it.each([
     [{ kind: "template_not_found" }, /Contact support/],
-    [{ kind: "not_giving_only" }, /outside Giving/],
+    [{ kind: "not_giving_only" }, /outside Giving and Reimbursements/],
     [{ kind: "escalation_denied", missingPermissions: ["giving.record"] }, /giving\.record/],
   ])("maps %j", async (libResult, pattern) => {
     gate.mockResolvedValue(IDENTITY);

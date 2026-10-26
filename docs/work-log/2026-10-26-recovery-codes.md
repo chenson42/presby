@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete; mechanism confirmed; adjacent HIGH finding F344 (regenerate bypasses the second factor); three Phase 3 decisions | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete; R1–R6 binding; option A rebuilt as a client holder that survives the re-render; cookie removed; F344 refusal + audit key; grant allow-list test; DECISION-292 proposed | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete. R1–R6 and DECISION-292 carried; `completeEnrollment` per R1 plus a transaction; client holder at the root of every `/account/2fa` branch (layout fallback is a Phase 4 decision); cookie path removed; F344 refusal + audit key + page notice; set-equal grant allow-list; failing-first plan; eight smokes on 3650 and the handoff spec in the prod lane on 3651; Copy table C1–C12 with the four checks; no migration. Open for the operator: "Copy all" deferred | Design complete | 2026-10-26 |
-| 4 — Implementation | full-stack-developer | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Complete. Two `fix:` commits (F344 `3fd43eb`, F166 `0b43c04`). All R1-R6 and Copy C1-C12 as designed; no layout fallback needed (smoke 1 shows no remount, probe recorded); `update()` returns the projected session, so `sessionVerified` is the strict form. Failing-first red recorded for every behaviour change; eight smokes green on :3650, the handoff spec green on :3651 with a negative control red. Gates: typecheck, lint, build, `npm run check` (8/8), unit suite 9546 pass, DB-backed tests pass | Ready for QA | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -767,33 +767,86 @@ Also run F343's "administrators and treasurers still enrol on the way in" case a
 
 # Phase 4 — Implementation
 
+**Implementer:** full-stack-developer. **Commits (no push):** `3fd43eb` `fix(auth): regenerating recovery codes needs a verified session (F344)` (`Caught-By: agent-review`, `Discovered-In: Phase-1`); `0b43c04` `fix(auth): first enrolment keeps the recovery codes on screen and lands without a second challenge (F166)` (`Caught-By: agent-review`, `Discovered-In: Phase-6`, following the design; the orchestrator's note said `human-review` for F166, "follow the design if it says otherwise", and Phase 3 says otherwise: the 2b Phase 6 analyst found it). Both carry `Work-Log: 2026-10-26-recovery-codes` and the attribution lines. Merged `origin/main` first: already up to date (0.46.2).
+
 ## Files Created
 
-- `path/to/file` — purpose
+- `src/app/(account)/account/2fa/enrolment-handoff.tsx` — the client holder (`EnrolmentHandoff`, `useRecoveryCodesHandoff`); h1 focused on mount; takes the sanitized `callbackUrl` as a prop and reads no query string.
+- `src/app/(account)/account/2fa/recovery-codes-panel.tsx` — presentational amber panel, shared by the holder and `RegenerateCodesForm`.
+- `src/app/(account)/account/2fa/continue-button.tsx` — `<Button asChild className="mt-6 min-h-11 w-full"><a>` (a plain `<a>` on purpose).
+- `src/app/(account)/account/2fa/confirm-its-you.tsx` — F344 notice and link (a file of its own so `page.tsx` has exactly three `return (`, which P4 pins). Created in `3fd43eb` inline in `page.tsx`, extracted in `0b43c04`.
+- Tests: `actions.db.test.ts`, `page.test.tsx`, `enrolment-handoff.test.tsx`, `regenerate-codes-form.test.tsx`, `src/lib/auth/two-factor-grant.boundaries.test.ts`.
+- e2e: `e2e/support/enrolment-fixture.ts` (a new file, per Rule 16; no existing support file edited), `e2e/totp-regenerate-gate.spec.ts`, `e2e/totp-first-enrolment.spec.ts`, `e2e/hydration/totp-enrol-handoff.spec.ts`.
 
 ## Files Modified
 
-- `path/to/file` — what changed
+- `actions.ts` — `completeEnrollment` per R1 (possession proof, one transaction, `ON CONFLICT DO NOTHING RETURNING` as the already-enrolled guard, grant after the commit, caught update, `{ sessionVerified }` audit, no `revalidatePath`, no cookie); `regenerateRecoveryCodes` refuses when `!twoFactorVerified`, audits, replaces inside a transaction, no cookie; `replaceRecoveryCodes(executor, userId, codes)`; `clearFreshCodesCookieAction`, `setFreshRecoveryCodesCookie`, the `next/headers` import and the cookie constant removed.
+- `page.tsx` — `EnrolmentHandoff` at the root of all three branches; `hasCallback`; the management Continue; Regenerate for a verified session, the notice otherwise; no `next/headers`.
+- `totp-enroll-form.tsx` (panel and Continue removed, `present()` through the context, C11 on a thrown action), `regenerate-codes-form.tsx` (shared panel, C12), `totp-enroll-form.test.tsx`, `actions.test.ts` (rewritten), `src/lib/audit.ts` + `audit.test.ts` (new key), `src/lib/two-factor.ts` (cookie constant and its comment), `src/lib/auth/two-factor-grant.ts` (R5 comment naming the call sites), `docs/testing.md`, `e2e/invitation-new-account.spec.ts`, `e2e/invitation-existing-account.spec.ts`, `e2e/totp-enrol-concurrency.spec.ts`.
+- **Deleted:** `src/components/shared/fresh-recovery-codes.tsx` and its test.
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+None. No migration (0081 stays unused); nothing applied to any database. The DB-backed tests ran against my own Neon branch (`ep-shy-sound`) with no migration needed.
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+- `TOTP_ENROLLED` on every successful enrolment, `metadata: { sessionVerified }` (E7, D4; the e2e asserts the row).
+- New `TOTP_RECOVERY_CODES_REGENERATE_REFUSED` = `totp.recovery_codes.regenerate_refused`, `metadata: { twoFactorRequired }`, actor = the first-factor session (R1, R2, D3, smoke 6). `TOTP_RECOVERY_CODES_REGENERATED` unchanged. `npm run check:audit` passes.
+- Action gates: `completeEnrollment` and `regenerateRecoveryCodes` stay auth-only (`auth()`; no `FEATURES.*`, no flag, by design); `regenerateRecoveryCodes` additionally requires `session.user.twoFactorVerified`.
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+**Verified the two open Phase 4 items.**
+1. `unstable_update({})` returns the projected session: the strict form held. `sessionVerified` is `updated?.user?.twoFactorVerified === true`, and a running server wrote `{ "sessionVerified": true }` into the `totp.enrolled` audit row and reported `twoFactorVerified: true` from `/api/auth/session` (asserted in `hydration/totp-enrol-handoff.spec.ts`, both lanes). The "completed without throwing" fallback was not needed; E6 pins the strict form (a resolved session without the claim, or `null`, is `false`).
+2. Smoke 1 shows **no remount**; the layout fallback was not used and DECISION-292 needs no deviation note. A temporary probe spec (deleted) recorded the enrolment POST response: `200`, `x-action-revalidated: 1`, body containing the management-view tree, so the re-render does happen. The holder's panel node survived it (a `data-` mark set on the h1 after the panel appeared was still on the same node after network idle plus a 3 s dwell). The production build behaves the same way (below).
 
-Strings added or changed: [file:line each, or "none"]
+**Deviations from the design (all within its bounds).**
+- `ConfirmItsYou` lives in `confirm-its-you.tsx`, not inline (P4's `return (` count). The design left the file unnamed.
+- Commit 1 (F344) kept the fresh-codes cookie on the regenerate path, so until commit 2 the regenerate-gate spec's "exactly one panel" assertion can see the duplicate panel the cookie produces (seen once during a negative control, with the check disabled). It is deterministic on the final tree. Stated in the commit body.
+- G2's regex requires `withTwoFactorGrant(session.user.id, …)` literally (R4), so `completeEnrollment` writes that and binds `userId` separately for the rest.
+- `e2e/totp-first-enrolment.spec.ts` asserts "no link on the page goes to the hostile host" rather than "`page.content()` does not contain it": Next echoes the request URL (with the hostile text) into the page's own payload, which is not a link or redirect.
+- The "refused call" in smoke 6 is the stale-tab press (design adaptation), driven by `signInViaApi` on the same context.
 
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
+**Failing-first record (red on the unchanged tree, then green).**
+- F344, commit 1: `actions.test.ts` R1, R2, R6 red (action returned `ok: true`; no transaction); `audit.test.ts` A1 red (catalog 155 vs 156, key missing); `page.test.tsx` P5, P5b, P5c, P5d red (no notice); `actions.db.test.ts` D3 red against the real database (`refused.ok` was `true`: an unverified session replaced the codes). E2E: with the guard disabled (`if (false as boolean && …)`) `totp-regenerate-gate.spec.ts` went red on the duplicate panel; restored, green.
+- F166, commit 2: `actions.test.ts` E1, E3, E4, E5, E6, E7, E9, E10, E11, S1 (x2), S1b and R3's no-cookie assertion red (13 of 22); `two-factor-grant.boundaries.test.ts` G1-G4 red (importer list, call sites, `clearFreshCodesCookieAction` still exported, no client holder); `actions.db.test.ts` D1 (old copy / race), D2 (`ok: true`: the secret was replaced) and D4 red. All six new e2e cases red against the unchanged server (panel never present, or the management view took its place: the `Recovery codes — save these now` heading disappeared in `expectPanelSurvives`). `enrolment-handoff`, `regenerate-codes-form` and the `page` P1-P4 / `totp-enroll-form` F1-F3 tests were written against components that did not exist or whose contract changed (module-not-found / panel-inside-form), then green.
+- **Negative control, production lane:** in a scratch copy, the enrolled branch of `page.tsx` was changed to a fragment (the holder not at that root): `hydration/totp-enrol-handoff.spec.ts` on :3651 went red (the panel never showed). The scratch copy was removed afterwards.
+
+**Gates (all on this worktree at HEAD `0b43c04`).**
+- `npm run typecheck` clean; `npm run lint` clean (`--max-warnings=0`); `npm run build` exit 0; `npm run check` 8/8 pass (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
+- `npm test`: 637 files passed, 89 skipped; 9546 tests passed, 2688 skipped (the skips are the DB-backed suites).
+- DB-backed, serial, against my own branch: `actions.db.test.ts` (D1, D2, D3, D3b, D4) + `totp-pending.test.ts` + `totp-pending.exhaustion.test.ts`: 15 passed.
+- 360px looked at (screenshots from the running specs, read in the review): the codes panel (ten codes in two columns, no overflow, Continue 44px full width, all visible in one 740px screen), the management view with Continue directly under "You enrolled on", the F344 notice (link 44px), and the regenerated panel with the C12 footnote. `scrollWidth <= clientWidth` is asserted in each spec.
+
+**Running-server gate (server by hand on :3650, own `.next/dev`, fakes and `RATE_LIMIT_DISABLED`, `E2E_BASE_URL`/`AUTH_URL` :3650, `E2E_ALLOW_SHARED_DB=true`; never :3000).**
+
+| Smoke | Spec | Result |
+|---|---|---|
+| 1 invitee (required) enrols; panel survives; Continue to `/o/<slug>`, no `/totp` hop | `invitation-new-account` x10 | 10 / 10 pass, then a further 20 / 20 (30 consecutive passes on HEAD; F342's flake rate was about 1 in 20) |
+| 1b throwaway required user, session verified, 360px, no cookie, audit `{sessionVerified:true}` | `hydration/totp-enrol-handoff` | pass on :3650 (`chromium`) and on :3651 (`prod-build`, scratch copy with hardlinked `node_modules`, production build) |
+| 1c treasurer, existing account, arm B | `invitation-existing-account` (3 enrol/accept cases + the other-account case) | pass |
+| 2 administrator `/admin` to `/totp` to `/account/2fa?callbackUrl=/admin`, Continue lands `/admin` | `totp-first-enrolment` | pass |
+| 3 voluntary, not required, no `callbackUrl`, Continue `/launch`, session verified | same | pass |
+| 4 reload: no earlier code string, full-width 44px management Continue, no fresh-codes cookie at any checkpoint | same | pass |
+| 5 hostile `callbackUrl` (`//evil.example`, `/\evil.example`, `/.//evil.example`) gives `/launch` in the panel and the management Continue | same (x3) | pass |
+| 6 F344: notice, no button, link to `/totp` returning to `/account/2fa`, regenerate survives the re-render, stale tab refused with the audit row and unchanged hashes | `totp-regenerate-gate` | pass |
+| 7 two tabs, same code: one wins, loser told, winner's codes sign in at `/totp`, secret unchanged | `totp-enrol-concurrency` (new case; the three F342 cases unchanged) | pass |
+| 8 regression: `totp-full-login`, `totp-code-entry` (18), `totp-recovery-code`, `totp-callback-bypass` (7), `session-claim-integrity`, `hydration/totp-challenge` (also on :3651) | unchanged specs | 34 passed with `invitation-existing-account`; `hydration/totp-challenge` also passes in the production lane |
+
+Server PID noted and stopped by PID at the end; nothing left listening on 3650 or 3651.
+
+**Things the next phase must know.**
+- **Coordination item (not edited here; `presby-2b`).** Once this merges, `e2e/no-organization-connect.spec.ts:22,225-228`, `e2e/community-sign-in-invite.spec.ts:437-439` and `e2e/support/sign-in-invite-fixture.ts:511` `enrolOnPage` assert the old behaviour ("Enrolment does NOT verify the session (E-35)", a `/totp` challenge after enrolling, the "You enrolled on" settle) and will fail; whichever merges second re-runs them. Not touched (Community 2b worktree is off limits).
+- **Shared files left for integration (Rule 16):** `docs/decisions.md` DECISION-292 (with the Phase 3 additions), `docs/schema-design-2.md`, `docs/TODO.md`, `docs/STATE.md`, `docs/reviews/log.md`. Also stale after this change: `docs/product/functionality-map.md:153` ("Shared UI ... fresh-recovery-codes") and `docs/starter-contributions/README.md` B4 (the starter-contribution entry describes the cookie mechanism now deleted: replace it with F166/F344 per the Phase 2 suggestion).
+- **Strings added or changed:** C1-C12 as in the Copy table, at `enrolment-handoff.tsx` (C1-C6), `confirm-its-you.tsx` (C7), `actions.ts` (C8, C9, C10), `totp-enroll-form.tsx` (C11), `regenerate-codes-form.tsx` (C12) and `continue-button.tsx` (C6 label). No string outside the table was needed.
+- **Observation for QA/orchestrator:** the F344 refusal path can only be reached through a stale page (the page hides the button for an unverified session), so the e2e drives it with a second sign-in on the same cookie jar (`signInViaApi`); D3, R1 and R2 pin the action itself without a browser.
+
+**What to test in the browser (Phase 5/6 walk).** At 360px, as an accepted-invitation new account: `/invite/accepted`, sign in, enrol (type the six digits from the shown key), see the ten codes stay up and "Two-factor authentication enabled", press Continue and arrive in the congregation with no second prompt; then reload `/account/2fa?callbackUrl=...` (management view with Continue, no codes); then sign in again in another tab and press Regenerate in the first (the refusal toast), reload (the "Confirm it's you" notice), confirm at `/totp`, regenerate.
+
+**Next agent:** qa (Phase 5): the auth-touching rule is met by the table above (MFA-enrolled seeded user in the regression specs, real dev server on its own port, production lane for the handoff spec).
+
+Strings added or changed: `enrolment-handoff.tsx` (C1-C6), `confirm-its-you.tsx` (C7), `actions.ts` (C8-C10), `totp-enroll-form.tsx` (C11), `regenerate-codes-form.tsx` (C12).
 
 ---
 

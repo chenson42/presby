@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete. R1–R6 and DECISION-292 carried; `completeEnrollment` per R1 plus a transaction; client holder at the root of every `/account/2fa` branch (layout fallback is a Phase 4 decision); cookie path removed; F344 refusal + audit key + page notice; set-equal grant allow-list; failing-first plan; eight smokes on 3650 and the handoff spec in the prod lane on 3651; Copy table C1–C12 with the four checks; no migration. Open for the operator: "Copy all" deferred | Design complete | 2026-10-26 |
 | 4 — Implementation | full-stack-developer | Complete. Two `fix:` commits (F344 `3fd43eb`, F166 `9e48cf8`). All R1-R6 and Copy C1-C12 as designed; no layout fallback needed (smoke 1 shows no remount, probe recorded); `update()` returns the projected session, so `sessionVerified` is the strict form. Failing-first red recorded for every behaviour change; eight smokes green on :3650, the handoff spec green on :3651 with a negative control red. Gates: typecheck, lint, build, `npm run check` (8/8), unit suite 9546 pass, DB-backed tests pass | Ready for QA | 2026-10-26 |
 | 5 — Verification | qa | Run 1 FAIL (R4 test gap, test-only); run 2: R4 closed (probes d/e/g/h red), production tree identical to run 1 (490/490 stands); n4 .js residual → TODO | PASS | 2026-10-26 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Walked new invitee, deep-link admin, platform admin, voluntary, password-only at 360px; release note revised (no exploit recipe); DECISION-292 accepted with (g)/(h) | SHIP IT | 2026-10-26 |
 
 ---
 
@@ -1070,201 +1070,169 @@ Evidence is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presb
 
 ---
 
-# Phase 6 — Shipped vs Intent (analyst)
+# Phase 6: Shipped vs Intent (analyst), F166 recovery codes and F344 regenerate bypass
+
+Bug-fix variant. I walked the branch at HEAD `c884424`, whose production code is tree-identical to QA's `3588b21`. The server was my own, on :3650, at 360x740 in Chromium. I stopped it by PID and nothing is listening there. All throwaway users and invitation orgs are gone, and `auth.require_2fa` is back to its captured value (true). The worktree is clean.
 
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP IT.**
+
+The bug no longer manifests for any of the people the path creates. Every Phase 1 gap is addressed in code or deferred with an owner, and nothing blocks. Five follow-ups come out of the ship and are listed as TODO-ready lines below. One has an ordering condition: whichever of this branch and Community 2b merges second must update 2b's E-35 e2e lines, or the e2e run goes red.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A new invitee who finishes two-factor setup now sees ten recovery codes that stay put, presses a 44px Continue and lands in the congregation with no second prompt. A password-only session can no longer mint codes without confirming it's them first.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The codes survive the re-render.** The panel was still up after the post-action re-render and a 6-second dwell. The same ten codes were on screen (stable: true), and "You enrolled on" appeared 0 times.
+- **The destination survives.** Continue's `href` was `/launch`, `/o/<slug>/admin/roles` or `/admin`, depending on the entry. After clicking it the URL history had no `/totp` in it.
+- **The session counts as verified.** `/api/auth/session` reported `twoFactorVerified: true` right after enrolment.
+- **The reload case has a way onward.** A reload shows the management view with a 44px full-width Continue directly under "You enrolled on". None of the earlier code strings were in the DOM.
+- **F344 reads like help, not an error.** The password-only page says "To make new recovery codes, first confirm it's you…" with a 44px "Confirm it's you" link. That link goes to `/totp` and comes back to `/account/2fa`, and after the code the button is there.
+
+## The Walk (as the person each path creates, dev server, 360x740)
+
+Horizontal scroll was 0 on every page. The cookie names seen across the whole walk were `authjs.callback-url`, `authjs.csrf-token` and `authjs.session-token`. There was no fresh-codes cookie at any point. Screenshots and the full log are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6/` (`walk.log`, `shots/`).
+
+**(1) Accepted-invitation new account, founding administrator, required to enrol, entering via "Sign in":**
+
+| # | Page | What it shows |
+|---|---|---|
+| 1 | `/invite?token=…` | "You're invited"; the masked address `e***@example.invalid`; the create-account form with the password rules stated. |
+| 2 | `/invite/accepted` | "Your account is ready", with "If your role needs two-factor sign-in, you will be walked through setting it up the first time" and a Sign in button. |
+| 3 | `/signin?callbackUrl=/launch` | The standard sign-in form. |
+| 4 | `/account/2fa?callbackUrl=%2Flaunch` | "Enroll in two-factor authentication": QR code, manual key, six digit boxes. |
+| 5 | same URL, after the sixth digit | h1 "Two-factor authentication enabled". The body says the codes are "shown only once: if you reload or leave this page, we cannot show them again". Ten codes in two columns, then Continue (44x296, `href=/launch`). There is no C5 line, because the session was verified. |
+| 6 | same, 6 seconds later | Identical: same codes, no management view. |
+| 7 | `/o/<slug>` (Continue, then `/launch`) | "Good morning, Rosalind." with the portal home. There was no `/totp` hop. |
+| 8 | `/home` | The congregation card and what's-new. |
+| 9 | `/admin` | `/access-pending?from=/admin`: "Access pending". Correct for a tenant administrator, but see the TODO line on its copy. |
+| 10 | `/account` | "Two-factor authentication: Active, Manage / regenerate codes". |
+| 11 | `/account/2fa?callbackUrl=%2Flaunch` (a reload) | Management view with Continue, "10 unused codes remaining", and the Regenerate button. |
+
+**(2) Founding administrator who must enrol, entering by deep link:**
+- I opened `/o/<slug>/admin/roles` signed out. That went to `/signin?callbackUrl=…%2Fadmin%2Froles`, then to `/account/2fa?callbackUrl=<the same deep link>`.
+- The codes stayed up and Continue's `href` was the deep link. After clicking it I landed on "Roles", with no `/totp` hop.
+- That page reads "Role administration isn't turned on for E2E Invitation Church yet". That is the fixture org's per-org toggle, not this change.
+- I also walked a platform-admin-role user: `/signin?callbackUrl=/admin`, then `/account/2fa?callbackUrl=%2Fadmin`, then the codes, then Continue. It landed on `/admin` ("Good morning…") with no `/totp` hop.
+
+**(3) Voluntary enrolment, not required, no `callbackUrl`:**
+- The sign-in landed on `/no-organization`.
+- `/account` showed "Not set up" with a "Set up two-factor authentication" link.
+- `/account/2fa` showed the enrol form with no `callbackUrl`.
+- The panel followed, with Continue pointing at `/launch` and the session verified.
+- Continue went to `/no-organization`.
+
+**(4) Password-only session on an enrolled account:**
+- *Required account.* Password sign-in landed on `/totp`. I then opened `/account/2fa` directly. It showed the notice and the "Confirm it's you" link (44px, `href=/totp?callbackUrl=%2Faccount%2F2fa`) and no Regenerate button. The recovery-code hashes were unchanged.
+- *The way back.* The link led to `/totp`, and a code returned me to `/account/2fa` with the button present. Pressing it showed "New recovery codes — save these now". The panel survived the re-render, and the count refreshed to 10 under it. The C12 footnote was visible.
+- *Not-required account.* Same notice, no button, and `/totp` accepted the code.
+- *Stale tab.* With the verified page open, a second sign-in reset the claim. Pressing Regenerate showed the toast "Confirm it's you with your authenticator app or a recovery code first. Reload this page to see how." No panel appeared and the hashes were unchanged. The audit row was `totp.recovery_codes.regenerate_refused` with `{"twoFactorRequired": true}`, or `false` for the not-required account. Reloading showed the notice.
+- *Audit.* The enrolment rows read `totp.enrolled {"sessionVerified": true}`, per QA's run.
+
+**Not walked by me:**
+- A real phone: this was desktop Chromium at 360px, and the TODO below covers a phone check.
+- The production-build lane: QA ran it.
+- Back after Continue: QA checked it and saw 0 codes.
+- The C11 database-failure toast: it is unit-pinned (F3) and cannot be driven reliably.
+- The lost-response case: that is residual (d).
+
+The server log held two "destination stream errored" lines. They came from my own script aborting navigations mid-stream, not from the feature.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Gap 1, regenerate bypasses the second factor:** Phase 1 said fix it in this file before any non-operator is invited. Shipped: refused for any unverified session, with an audit row and a page notice. Verdict: matches.
+- **Gap 2, plaintext cookie:** Phase 1 said remove it if the panel is the display. Shipped: cookie, helper, action and component are gone from both paths, and the walk saw none. Verdict: matches.
+- **Gap 3, once versus survives a reload:** The operator ruled "shown once". Shipped: the codes are lost on reload, and the copy says so plainly (C2, C12). Verdict: matches the ruling.
+- **Gap 4, no way onward from the management view:** Shipped: a 44px Continue appears when the URL carried a `callbackUrl`. With none, the way out is still "← Home", which is small (the 17px finding from the 2b walk) and is untracked. See the follow-up lines. Verdict: acceptable drift.
+- **Gap 5, Copy all or download:** Deferred, and not ruled by the operator. Tracked below.
+- **Gap 6, the extra `/totp` challenge:** The operator said remove it. Shipped: the grant is opened after the possession proof and the commit, and there was no `/totp` hop in any walk. If the update fails, C5 says "may be asked … once more". Verdict: matches.
+- **Gap 7, untested end to end:** The e2e types real codes from the shown key. My walk did the same with a fresh script. Verdict: matches.
+- **Adversarial pass:** The redirect target is sanitized server-side only (QA ran the hostile cases). The grant sits after `verifyToken`, and the already-enrolled guard is the insert itself. The allow-list is set-equal. Verdict: matches. DECISION-292 names the residuals.
+- **Failure microcopy:** The thrown-action toast (C11) closes the old TODO about a silent failure. Verdict: matches.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state: pass. The not-configured branch keeps the holder; the new-account `/account/2fa` is the enrol form.
+- Failure microcopy: pass. C8 and C11 are human and carry the way back. C9 and C10 are hedged and truthful.
+- Permission gate: pass. The route stays auth-only by design. The refusal is a session-state check, not a `FEATURES.*` key. I confirmed it for required and not-required accounts.
+- Audit event: pass. `TOTP_ENROLLED` carries `sessionVerified`. The new refusal key fired with `twoFactorRequired`. QA found no secret in any metadata or in the server log.
+- Mobile (360px): pass. One nit: "Regenerate recovery codes" measured 32x239. It was already `size="sm"` before this change and is tracked below.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Rulings
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+**Release-note draft: revise before it ships.**
+- *Version.* The draft says v0.46.3, which is wrong: 0.46.3 already shipped as the site-ingest fix. This is a patch after whatever is on main at merge. That is 0.47.1 if it merges before 2b, or 0.48.1 if it merges after 2b's 0.48.0. The entry goes under that minor's release-notes file.
+- *Disclosure.* The "Also fixed" paragraph says "someone who knew only your password could make new codes and use one to get past the second step". That is an exploit recipe for a bypass present in every deployment, in a public repository. The 0.42.3 and 0.42.2 notes set the precedent of neutral wording for security fixes, so it must go.
+- *Residuals.* The "does not change" paragraph is honest and does not deny any residual, so it stays. I tightened (a) so it no longer explains how to enrol someone else's account.
+- *Wording.* "You are signed in as verified" is odd. Say it counts as confirming it's you.
+- Suggested text for the orchestrator, with the TOC type `Fix`:
 
-## Red Flags (if NEEDS REWORK)
+> ### Fix: setting up two-factor sign-in keeps your recovery codes on screen
+>
+> **Value:** When you set up two-factor sign-in for the first time, your ten recovery codes now stay on the page until you choose Continue, and Continue takes you where you were going without asking for another code.
+>
+> #### What's New
+> - **The codes stay on screen.** Before, they disappeared within a second of finishing setup, along with the Continue link.
+> - **Continue takes you on.** Finishing setup counts as confirming it's you for this sign-in. If that did not work for any reason, the page says you may be asked for one more code.
+> - **The codes are shown once.** If you reload or leave the page they are not shown again, so save them first. If you lose them, make a new set from the Two-Factor Auth page.
+> - **Making a new set now asks you to confirm first.** If you have not confirmed it's you in this sign-in, with your authenticator app or a recovery code, the page shows a short "Confirm it's you" step in place of the button and brings you back. This also applies to an account that has set up two-factor but is not required to use it.
+> - **Coming back to the setup page** with a destination now offers a Continue button.
+> - **What this does not change.** Setting up two-factor on an account that has not done so yet is still open to whoever is signed in to that account, as before, and now counts as confirmed straight away. If your connection drops at the very moment setup finishes, you may be set up without having seen your codes; confirm it's you, then make a new set. If an administrator resets someone's two-factor, a browser that is already signed in stays signed in until it signs out. Setup still has no limit on how many codes can be tried in a row.
+>
+> **Notes for the operator:** no migration, no new setting. A recovery-codes cookie from before this update expires on its own; nothing reads it.
 
-- [Specific. What has to change before this ships.]
+Run the `/release-notes` flow, including the briefing entry that follows the 0.47.0 release commit in the log.
 
-## Orchestrator ruling (2026-10-26)
+**DECISION-292: accept, with changes at integration.**
+- Merge the four Phase 3 additions. Amend the fourth: the layout fallback was not used. Smoke 1 showed no remount in either lane, so residual (c) is pinned by e2e and the fallback stays as the sanctioned response if Next changes.
+- Add two accepted residuals, both `paper`.
+  - (g) The grant allow-list is a regex source scan. Obfuscation (computed member names, split specifiers, Unicode escapes, string-literal comment tricks) and non-TS source are not caught.
+  - (h) The "every `return (` opens with the holder" pin misses a parenless `return <X/>`.
+- Add a one-line "amended by DECISION-292" pointer to DECISION-230.
+- Status goes from Proposed to Accepted.
+- Number 292 is free: main's top is 290 and `presby-2fa` holds 291. Re-check at integration. The F344 and F166 section in `docs/schema-design-2.md` takes the next letter after §2af, and F343 will want the same letter, so whoever integrates second takes the next one.
+- Neither sibling worktree adds a grant importer, so G1 to G4 stay valid after the merge. The only textual overlap with main or 2b is `src/lib/audit.ts` and `audit.test.ts`. Both are catalog adds, and the test count is derived.
 
-- **F344** registered for Phase 1 Gap 1: `regenerateRecoveryCodes` checks only `auth()` and an existing enrolment, never `twoFactorVerified`, and `/account/2fa` is not 2FA-gated — a first-factor-only session can mint fresh recovery codes and pass `/totp`. **Fixed in this pipeline** (same file, before any non-operator is invited): refuse with the same `twoFactorRequired && !twoFactorVerified` check style as `(invite)/actions.ts:225`, plus a failing-first test. Decide in Phase 3 whether an enrolled-but-not-required account's unverified session should also be refused (recommend yes: regenerating codes should require a verified session whenever an enrolment exists).
-- Options A/B/C and the reload question go to the operator.
+**TODO edits (Rule 10).** Line numbers shifted since Phase 3, so match on text.
+- *Close.* F166 (TODO:173) is closed by the codes panel and no second challenge. F344 is added and closed, and the "thrown `completeEnrollment` shows no message" line (~445) is closed by C11. The non-transactional replacement line (~448) is closed for both paths by the transaction.
+- *Reword.* The rate-limit line (~447) stays open. Strip "same edit as the rate limit" from it.
+- *Rewrite.* Rewrite the `enrolOnPage` line (~449) as the 2b e2e update in the lines below.
 
-## Operator rulings (2026-10-26)
+**Rules.**
+- *Rule 12:* not applicable. The work-log Source block records no feedback row. The bug came from the 2b walk and the invitations Batch 4 probe.
+- *Rule 13:* no standalone what's-new entry, because it is a bug fix. For 2b, publish its what's-new entry only when real invitations actually open: after this and 2b are both live in production, and after the production walk below. The 2b copy ("one more step: set up two-factor, then Check again") stays true, and what it promises now holds.
+- *Rule 14:* in `docs/product/functionality-map.md`, update three lines:
+  - 121: per-user 2FA, codes shown once in client memory, enrolment ends verified, regenerate needs a verified session.
+  - 55: the enrolment hop ends verified.
+  - 153: drop "fresh-recovery-codes".
+  - Phase 3 said line 35; the lines are those three.
+- *Rule 15:* no `architecture.md` change, and `CLAUDE.md` stays true as written.
+- *Starter-contributions B4:* replace the cookie-mechanism entry with F166 and F344 as `backport-ready`, and stage them for `/downstream-sync`.
 
-- **Codes: "Shown once"** — option A: the client panel is the one display; `completeEnrollment` stops setting the fresh-codes cookie on the enrol path and stops re-rendering the page away from the panel (prove on a running server that no re-render still fires); the management view gains a full-width Continue to the sanitized `callbackUrl` for reload/back/second tab. Reload loses the codes; Regenerate (after the F344 fix) is the recovery.
-- **Second prompt: "Remove it"** — option C: `completeEnrollment` marks the session verified through `withTwoFactorGrant` (DECISION-230 pattern), under all five conditions in Phase 1's adversarial pass, incl. refusing when a `user_totp` row already exists. Needs a short Phase 2.
-- **F344** fixed here (see the orchestrator ruling above).
+**Before the operator lifts the invitations hold.** Walk this once in production as a real invitee: invitation, enrolment, codes, Continue, landing. Add it to the production checklist as an item in the invitations section. The three 2026-10-23 escapes were found exactly that way.
 
-**Orchestrator (2026-10-26):** F166 fix commit reworded to `Discovered-In: Phase-4` (now `9e48cf8`; was `0b43c04`), per QA's trailer note.
+## Follow-Ups (TODO-ready)
 
-## Phase 4 — QA run 1 fix (R4 test)
-
-Test-only; `src/lib/auth/two-factor-grant.boundaries.test.ts` is the one file changed, no production code.
-
-- **G1** also catches `export *` and `export * as ns` (a `*` re-export takes the name `*` and fails the set), and a catch-all: the string `…two-factor-grant` may appear exactly once in each of `src/auth.ts` and the two allowed action files and nowhere else, so `require`, a side-effect import or any form the parse does not model fails too.
-- **G2** counts the identifier, not the call syntax: every `\bwithTwoFactorGrant\b` per non-test `src` file outside the grant module. The two allowed files must hold exactly 1 (the import) plus their shaped calls (3 in the totp actions, 2 in the enrolment actions); every other file must hold 0. The number of shaped calls must equal the count minus one, so an alias, `.call`/`.apply`, `typeof`, or an aliased import from a barrel (all still spell the name) can no longer hide.
-- **G2b (new)** does the same for `takeTwoFactorGrant`: only `src/auth.ts`, exactly twice (import plus the one `trigger === "update" && takeTwoFactorGrant(userId)` site).
-- Known limit, unchanged: comments are stripped by regex before scanning, so a string literal containing `/*` could swallow code up to the next `*/`; this is not a shape any current file has.
-
-Mutation matrix (one mutation at a time on the worktree, each restored; the old test is `git show HEAD:` of the pre-fix file run under a temporary name, deleted afterward). Red-first: the old test stayed green on d, e, g, h (and on k and m); the new one goes red on all of them.
-
-| Probe | Old test | New test |
-|---|---|---|
-| HEAD, no mutation | green | green |
-| a: new importer file calling the grant | red | red (G1, G2) |
-| b: second shaped call in `2fa/actions.ts` | red | red (G2) |
-| c: extra export in `2fa/actions.ts` | red | red (G3) |
-| d: `export * from` the grant module in a new file | green | red (G1) |
-| e: that barrel plus an aliased import and call | green | red (G1, G2) |
-| f: `'use server'` named re-export | red | red (G2, G3) |
-| g: `const g = withTwoFactorGrant` in an allowed file | green | red (G2) |
-| h: `withTwoFactorGrant.call(null, …)` | green | red (G2) |
-| i: `'use client'` file under `2fa/` importing `@/auth` | red | red (G4) |
-| j: `export * as ns from` the grant module | red | red (G1) |
-| k: extra `takeTwoFactorGrant` mention in `src/auth.ts` | green | red (G2b) |
-| l: `takeTwoFactorGrant` imported in a new file | red | red (G1, G2b) |
-| m: `require("./two-factor-grant")` | green | red (G1) |
-
----
-
-## Phase 5 — Test Verification (qa), run 2
-
-**HEAD verified:** `37edfa7` on `pipeline/recovery-codes`, in worktree `/Users/cshenso/git/presby-platform/presby-f166`. The worktree was clean before and after.
-
-**Scope run** (narrow, per run 1's re-verification scope):
-- In full: typecheck, lint, `npm run check`, the unit suite.
-- `src/lib/auth/two-factor-grant.boundaries.test.ts`, verbose.
-- Mutation probes a–m, re-applied independently, plus seven new evasions (n1–n6, with n2b and n3b).
-- The tree identity and the commit-trailer checks.
-
-**Not re-run:** e2e (dev and prod lanes), DB-backed suites, the 360px walk, and failing-first for the production fixes. Those results rest on run 1. Production code is tree-identical to run 1's HEAD (see below), so they still apply. I did not reset flags because I ran no e2e.
-
-## Tree identity and commit trailers
-
-- **`src` excluding the boundaries test:** `git diff 3588b21 HEAD -- src ':!src/lib/auth/two-factor-grant.boundaries.test.ts'` is 0 bytes. Across the whole repo, `3588b21..HEAD` changes only `docs/work-log/2026-10-26-recovery-codes.md` and the boundaries test.
-- **The reword:** `0b43c04^{tree}` and `9e48cf8^{tree}` are both `b0e0b2a4…`, and both have parent `3fd43eb`. The only difference between the two commit messages is `Discovered-In: Phase-6` → `Discovered-In: Phase-4` (line 38). `Caught-By: agent-review` and `Work-Log: 2026-10-26-recovery-codes` are present.
-- **`37edfa7`:** a `test(auth):` commit touching only the test file and the work-log. It carries a `Work-Log:` trailer.
-
-## Type Check
-
-- `npm run typecheck`: **PASS**
-- `npm run lint`: **PASS**
-- `npm run check`: **PASS**, all eight tripwires (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports).
-
-## Unit Tests
-
-- **Full suite:** 726 files (637 passed, 89 skipped); 12,235 tests (9,547 passed, 2,688 skipped); 31.4s; no failures.
-  - That is one more test than run 1 (9,546), which is G2b.
-  - The 89 skipped files are the DB-backed set, as in run 1. No pure-TS test is skipped.
-- **Boundaries file:** G1, G2, G2b, G3 and G4 all pass on HEAD (5/5).
-
-## Regression Tests Added (R4 allow-list, red-first verified independently)
-
-**Method.** I made a `git archive HEAD` copy per probe under the scratchpad, applying one mutation to a fresh copy each time. I ran both the new test and run 1's test (`git show 3588b21:` of the file) against each copy.
-
-| Probe | Run 1 test | New test (HEAD) | Failing assertion |
-|---|---|---|---|
-| HEAD, no mutation | green 4/4 | **green 5/5** | — |
-| a: new importer file calling the grant | red | red | G1, G2 |
-| b: second shaped call in `2fa/actions.ts` | red | red | G2 |
-| c: extra export in `2fa/actions.ts` | red | red | G3 |
-| **d**: `export * from` the grant module in a new file | green | **red** | G1 (`"qa-barrel.ts": ["*"]`) |
-| **e**: d plus an aliased import from the barrel, then a call | green | **red** | G1, G2 |
-| f: `export { withTwoFactorGrant }` in an allowed file | red | red | G2, G3 |
-| **g**: `const g = withTwoFactorGrant; g(id, …)` in an allowed file | green | **red** | G2 (count 3, expected 2, at `:91`) |
-| **h**: `withTwoFactorGrant.call(null, id, …)` | green | **red** | G2 |
-| i: `'use client'` file under `2fa/` importing `@/auth` | red | red | G4 |
-| j: `export * as ns from` the grant module | red | red | G1 |
-| k: extra `takeTwoFactorGrant` mention in `src/auth.ts` | green | red | G2b |
-| l: `takeTwoFactorGrant` imported in a new file | red | red | G1, G2b |
-| m: `require("./two-factor-grant")` plus a computed member | green | red | G1 (specifier catch-all) |
-
-All four probes from the run-1 FAIL (d, e, g, h) are red on the new test, and the old test was green on each of them. a, b, c, f, i, j and l stay red, and HEAD is green. I confirmed the failure reasons from the assertion diffs: d's red is the `*` entry, and g's red is the token count.
-
-**New evasions (QA run 2):**
-
-| Probe | New test | Ruling |
-|---|---|---|
-| n1: `await import("…/two-factor-grant")` plus a computed `["with"+"TwoFactorGrant"]` | **red** (G1) | caught |
-| n2: `` import(`…/two-factor-grant`) `` (template literal) then `m.withTwoFactorGrant(…)` | **red** (G2, name count) | caught |
-| n3: `import("@/lib/auth/" + "two-factor-grant")` plus a computed member | **red** (G1) | caught |
-| n2b: template-literal `import()` plus a computed member name | green | residual: deliberate obfuscation |
-| n3b: `import("@/lib/auth/two-factor-" + "grant")` plus a computed member | green | residual: deliberate obfuscation |
-| n5: `"/*"` … import and call … `"*/"` string literals in a new file | green | residual, already named by the implementer (regex comment stripping) |
-| n6: `with\u0054woFactorGrant(id, "totp", …)` in an allowed file (a Unicode escape of the same binding) | green; tsc and eslint both pass | residual: deliberate obfuscation |
-| n4: a new **`.js`** file under `src/lib/auth/` with a plain static import and call, imported by a `.ts` file | green; tsc and eslint both pass | **residual, follow-up (see below)** |
-
-**What the new test closes.** Anything that spells the identifier or quotes the module specifier as one string literal now goes red. Only deliberate obfuscation slips through: computed member names, a split specifier, Unicode escapes, or string-literal comment tricks. Each of those is conspicuous in review. Closing them would take a TypeScript-compiler symbol-reference check rather than regex, which is out of proportion here.
-
-**n4 is the one non-obfuscated miss, and I am not ruling it a FAIL.** The orchestrator may overrule; my reasons:
-1. `src/` holds zero `.js`, `.jsx`, `.mjs` or `.cjs` files (`git ls-files` returns 0).
-2. Every source-scan guard in the repo filters on `.ts`/`.tsx` (about 18, including `admin/shell-boundaries`, `parishes-boundaries`, `decide-boundaries`, `onboarding/boundaries` and `audience-callsites`). So this gap belongs to the repo's convention, not to this test, and widening only this walker would leave the other guards open.
-
-The proportionate fix is one repo-wide tripwire banning JS source under `src/` (`allowJs: true` is set). **TODO candidate:** "tripwire: no `.js/.jsx/.mjs/.cjs` under `src/` — every source-scan boundary test assumes TS." If the orchestrator would rather close it here, changing the boundaries test's `walk` regex (`:27`) to `\.(m|c)?(j|t)sx?$` is enough.
-
-## Coverage on Critical Modules
-
-Not re-measured, because no production code changed. Run 1's figures stand: `permissions.ts` 100%, `two-factor.ts` 91.1%, `flags.ts` 100%.
-
-## Feature-Gate Audit
-
-Unchanged from run 1. This diff touches no route or action, only a test file.
-
-## Schema/RLS Audit
-
-No schema touched.
-
-## Copy Truthfulness
-
-Not applicable to this diff: no user-facing string changed. Run 1's `copy truthfulness: PASS` stands.
-
-## Verdict
-
-**PASS.** The R4 allow-list test now has the property R4 states for every non-obfuscated TypeScript call-site shape. It counts the identifier and the module specifier, not the call syntax:
-- every run-1 probe (d, e, g, h) goes red;
-- every previously red probe stays red;
-- the implementer's j–m go red;
-- HEAD is green.
-
-Typecheck, lint, check (8/8) and unit (9,547) are green. Production code is tree-identical to run 1's HEAD, so the run-1 e2e, DB-backed, failing-first, security, 360px and copy results carry over unchanged. On the auth gate: the full login path for an MFA-enrolled user passed in run 1's full chromium run against this same production tree.
-
-**Residuals for the record (non-blocking):**
-- n4: JS source evades every source-scan guard. TODO candidate above.
-- Obfuscation-class evasions n2b, n3b, n5, n6.
-- Carried from run 1: P4 `page.test.tsx:214` counts only `return (`.
-- Carried from run 1: the 32px Regenerate button is a TODO candidate.
-- Carried from run 1: stale docs at `docs/product/functionality-map.md:153` and in `docs/starter-contributions/README.md` B4.
+- [ ] **"Copy all" / download button for recovery codes (low, needs operator confirmation).** Ten codes can only be screenshotted or selected today. Not ruled by the operator. — `docs/work-log/2026-10-26-recovery-codes.md` Phase 1 gap 5
+- [ ] **Community 2b: update the tests that assert the old enrolment behaviour when this merges (blocks whichever merges second).** `e2e/no-organization-connect.spec.ts` (header ~21-22, ~225-228) and `e2e/community-sign-in-invite.spec.ts` (~437-439) assert "enrolment does NOT verify the session (E-35)" and a `/totp` challenge afterwards. `e2e/support/sign-in-invite-fixture.ts` `enrolOnPage` (~511) is the reload-and-retry workaround and waits on "You enrolled on". Replace with the F166 flow (panel, Continue, no `/totp`), then re-run `invitation-new-account` x40. Replaces the earlier `enrolOnPage` line. — `docs/work-log/2026-10-26-recovery-codes.md` Phase 3 coordination item
+- [ ] **Tripwire: no `.js/.jsx/.mjs/.cjs` under `src/`.** Every source-scan boundary test assumes TS (QA n4). `allowJs` is set. A JS file with a plain import evades about 18 guards. Cheap and repo-wide. — Phase 5 run 2
+- [ ] **Grant allow-list residuals (low):** the regex scan misses obfuscation and a parenless `return <X/>` in `page.test.tsx` P4. Either leave as `paper` per DECISION-292 (g)/(h) or move the check to a compiler symbol-reference test. — Phase 5 runs 1 and 2
+- [ ] **Regenerate recovery codes button is 32px tall at 360px (below the 44px target), and `/account/2fa`'s "← Home" is about 17px.** Both pre-existing. Raise both to 44px when `/account/2fa` is next touched. — Phase 5 run 1; Phase 1 gap 4
+- [ ] **`/downstream-sync`: stage F166 and F344 and replace starter-contributions B4.** The fresh-codes cookie came from the starter. — Phase 2 suggestion
+- [ ] **Re-walk enrolment after F343 (`presby-2fa`) merges.** Administrators and treasurers still enrol on the way in, new plain members become voluntary. Re-run `invitation-new-account` and `invitation-existing-account`. — Phase 1 open question 4
+- [ ] **Extend the real-phone check (O-5) to the codes panel:** save the ten codes (select, screenshot) on iOS and Android and press Continue; add the production invitee walk to the checklist. — `2026-10-25-totp-autosubmit` O-5
+- [ ] **`/access-pending` copy for a tenant administrator who opens `/admin` (low, pre-existing):** it says "ask an administrator to grant you the right role" to someone who is the congregation's administrator. — Phase 6 walk, W1 page 9
 
 ## Per-Phase Status row
 
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
-| 5 — Verification (run 2) | qa | Complete. Narrow re-verification of the R4 test fix at `37edfa7`: typecheck, lint, check (8/8) pass; unit 9,547 pass (89 DB-backed files skipped, as in run 1); boundaries 5/5. Mutation probes a–m re-applied independently in `git archive` copies: d, e, g, h, k, m are green on the run-1 test and red on the new one; a, b, c, f, i, j, l are red on both; HEAD is green. New evasions: n1, n2, n3 caught; n2b, n3b, n5, n6 are obfuscation-class residuals; n4 (a `.js` file under `src`) is a repo-wide residual and a TODO candidate. Production `src` is tree-identical to `3588b21`. `9e48cf8` has the same tree as `0b43c04`, and its only message change is `Discovered-In: Phase-4`. e2e not re-run (production code unchanged; run 1's 490/490 stands). Flags not reset (no e2e run). | **PASS** | 2026-10-26 |
+| 6 — Shipped vs intent | analyst | Complete. Own :3650 walk at 360px of the accepted-invitation new account (sign-in entry and deep-link entry), a platform-admin enrolment via `/admin`, a voluntary enrolment, and a password-only session on an enrolled account. Codes stable, Continue 44px, no `/totp` hop, session verified, reload shows management Continue, F344 notice, refusal toast and audit row, hashes unchanged. Release note, DECISION-292, TODO, Rules 12-15, what's-new and version ruled. | **SHIP IT** | 2026-10-26 |
 
-**Handoff.** The next agent is the **analyst (Phase 6)**. For the orchestrator:
-- record the n4 TODO candidate, or rule that it be closed in this pipeline;
-- the run-1 integration notes still apply (functionality map line 153, starter-contributions B4).
+**Handoff.** The orchestrator records this section verbatim in the work-log, then does the integration housekeeping in one cluster (Rules 10, 14 and 16): the release notes, DECISION-292, §2ag, the TODO edits, the functionality-map lines and the B4 replacement. The order against 2b is the one thing that needs care: whichever merges second updates 2b's E-35 e2e. Commit and push are your gestures, with `/pre-push` between them.
 
-Probe logs and the full matrix are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-f166-r2/logs/` (`matrix.txt`, plus a log for each probe and each test). I deleted every scratch source copy by its literal path. No repository file was edited, and I did not use `git stash`.
+Files: `/Users/cshenso/git/presby-platform/presby-f166/docs/work-log/2026-10-26-recovery-codes.md` (record this section under Phase 6, replacing the placeholder template block). The walk scripts and evidence are under the `p6/` scratchpad path above. I edited no repository file and did not use `git stash`.
 
-**Orchestrator ruling (2026-10-26):** n4 (a `.js` file under `src/` evades every source-scan guard) is a repo-wide TODO at integration — "tripwire: no .js/.jsx/.mjs/.cjs under src/" — not closed in this pipeline.

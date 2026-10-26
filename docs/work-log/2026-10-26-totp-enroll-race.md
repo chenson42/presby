@@ -21,7 +21,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer named (full-stack-developer) | 2026-10-26 |
 | 4 — Implementation | full-stack-developer | Complete | Gate met: typecheck, lint, check, unit, DB-backed totp specs, running-server e2e (probe, login-path specs, 40/40) | 2026-10-26 |
 | 5 — Verification | qa | Complete; failing-first reproduced (6 specs red ×3, probe red 3/3); HEAD 40/40 DB ×5, auth e2e 31/31 ×2, invitation-new-account 40/40, full chromium 463/463, prod hydration 1/1 | PASS | 2026-10-26 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Walked as a brand-new account at 360px (reload + second tab stable, code enrols); release-note line revised; DECISION-290 to record with two residuals | SHIP IT | 2026-10-26 |
 
 ---
 
@@ -607,34 +607,149 @@ Evidence logs are all in `/private/tmp/claude-501/-Users-cshenso-git-presby-plat
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Pipeline:** F342, two-factor enrolment secret race. Bug-fix variant.
+**Worktree:** `/Users/cshenso/git/presby-platform/presby-enroll`, branch `pipeline/totp-enroll-race`, HEAD `f2f5830`.
+**Date:** 2026-10-26
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP IT.**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> The enrolment page now shows only the secret read back from the database, so a reload, a second tab or an overlapping fetch all show one stable key, and a code computed from that key enrols.
+
+## What I walked
+
+I ran the walk on my own dev server at :3630 with `.next/dev` cleared, on the worktree's own Neon branch (`ep-broad-smoke`). Nothing touched :3000.
+
+The person was a brand-new account (`two_factor_required = true`, not enrolled), at a 360x740 viewport. The account was a throwaway `@example.invalid` user that I created directly. It did not come through an accepted invitation.
+
+| Step | Result |
+|---|---|
+| Sign in from `/signin?callbackUrl=/launch` | Redirected to `/account/2fa?callbackUrl=%2Flaunch`. |
+| Open the manual-key disclosure | The key was 32 characters of base-32. The QR code, steps, six digit boxes and Confirm button were all in view. |
+| Reload | The key was identical to the first. |
+| Open `/account/2fa` in a second tab | The key was identical to the first. |
+| Pending rows in the database | Exactly 1. |
+| Horizontal overflow | 0 px. |
+| Type a code computed from the shown key | Enrolled. The page settled on "You enrolled on 10/26/2026", with 10 unused recovery codes remaining. 1 `user_totp` row, 0 pending rows left. |
+| Overflow on the management view | 0 px. |
+
+I looked at both screenshots myself:
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6-360-first.png`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6-360-enrolled.png`
+
+**Cleanup.**
+- I deleted the throwaway user. A follow-up count of `p6-walk-%` users returns 0.
+- I stopped the server by PID 69398. Port 3630 is free.
+- `git status` is clean. I edited no files and ran no `git stash`.
+
+**What I did not witness, and the evidence I rely on.** The race window is milliseconds wide and was seen about 1 in 20 times. A by-hand walk cannot reproduce or disprove it. For that I rely on three things:
+- **The helper read.** I re-read `src/lib/totp-pending.ts` at HEAD. Both return paths decrypt a ciphertext read back from the table. The upsert writes only when the row is absent or expired, and the function logs nothing.
+- **QA's failing-first run.** On the old helper, six unit/DB specs were red 3 of 3 times, and the concurrency probe was red 3 of 3 times ("eight concurrent renders showed 2 / 5 / 3 different keys"). On HEAD the 40 DB specs were green 5 of 5, the probe passed 31 of 31 twice, and `invitation-new-account` passed 40 of 40 on the real invited path.
+- **The probe's own proof.** The probe fires eight simultaneous renders and checks all eight carry one key. It then enrols with a code computed from that key, which is the same proof my walk gives from the person's side.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- The one failure the person could see, a correct code refused because the page showed a secret the database did not hold, has no remaining path. The page cannot show a secret it did not read from the row.
+- Reload and second tab are quiet. A reload writes nothing, so an authenticator entry already scanned keeps working.
+- The 360px page is unchanged: QR, key, boxes and button are in the viewport with no sideways scroll.
+- There is no leak surface. The only thrown message is a constant string, and the helper has no `console.*`.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1: one stored secret per enrolment, and the page shows what is stored. Shipped: one conditional upsert plus a read-back. Verdict: **matches**.
+- Phase 1: a fresh row is never overwritten, and expiry replacement is conflict-safe. Shipped: `do update … where expires_at <= now()`, pinned by T2, T3 and T4. Verdict: **matches**.
+- Phase 1 gap 1 (empty re-select needs a bounded retry): shipped `MAX_ATTEMPTS = 3`, then a constant error, and never an unstored secret. Verdict: **matches**.
+- Phase 1 gap 2 (a regression test that fails before the fix): the replica spec is replaced by a DB-backed spec, which is red on the old helper. Verdict: **matches**.
+- Phase 1 gap 4 (rotated key must not worsen): decrypt is outside any catch, and T7 pins that the row is untouched. Verdict: **matches**.
+- Phase 1 gap 5 (stale docstring): corrected. Verdict: **matches**.
+- Phase 1 gap 3 (the adjacent `completeEnrollment` race), Gap 6 (rate limit) and the 2b workaround: deferred, with the TODO lines below. Verdict: **acceptable drift**, since all three were out of scope.
+- Phase 1 said no UI change. Shipped: a comment only in `page.tsx`. Verdict: **matches**.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
+- Empty state (brand-new install and first enrolment): **pass**. A first render mints and stores a secret.
+- Failure microcopy: **pass**. No string changed. "That code did not match", "No pending enrollment found" and "Enrollment session expired" all stay true.
+  - **Unverified:** the three-attempts-exhausted throw falls to Next's default error page. Nobody has looked at it in a browser, and it is expected only under sustained deletes.
+- Permission gate: **pass**. `/account/2fa` is auth-only by design, and `session.user.id` keys every statement.
+- Audit event: **not applicable**. Minting a pending secret was never audited. `TOTP_ENROLLED` and the admin reset already are.
+- Mobile (360px): **pass**.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Observation outside this fix (already tracked, not a defect here)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+My enrol step showed what the code and the `invitation-new-account` spec comment already say: after the sixth digit, the page goes straight to the management view. The one-time "Recovery codes — save these now" panel is replaced before the person sees it. This is the open HIGH item **F166** on `main`, "before the first non-operator invitee".
 
-## Red Flags (if NEEDS REWORK)
+F342 does not touch or worsen F166, and my verdict does not depend on it. But the next thing a new invitee hits after this fix is F166. I recommend F166 be sequenced before the first real invitee.
 
-- [Specific. What has to change before this ships.]
+## Rulings
+
+### Release-note line
+
+Do not use the Phase 3 draft as written. Its sentence "so the first code you enter works" overclaims. A code can still be refused for other reasons, such as a mistyped code, a phone clock off by a step, or the 10-minute window expiring. "The first code" also says nothing about recovery codes, so it reads as "setup now works end to end", and F166 is still open. Use:
+
+> Fixed an occasional problem when setting up two-factor sign-in. The setup page could show a key that was not the one that had been saved, so a correct code from your authenticator app was refused. The page now always shows the saved key.
+
+The wording checks:
+- It scopes the claim to one cause and uses "occasional" and "could".
+- It denies no residual: F166, the rate limit (Gap 6), the recovery-code race and key rotation are all unmentioned.
+- It asks the reader to do nothing, and no neighbouring copy is made stale.
+
+`/release-notes` should hold it to the four checks. I would not add a what's-new entry (Rule 13).
+
+### DECISION-290
+
+**Record it.** The reservation is in place and the ruling is durable. A create-or-reuse helper must not be find-then-write, and the stored value is the only thing a page may show. It also records rejected alternatives that will otherwise be re-proposed. Use the Phase 3 text and add two accepted residuals so the decision does not read cleaner than the work:
+- The helper uses the database clock, while `completeEnrollment` compares expiry to the app clock. The skew is sub-second against a 10-minute window, and it is unverified.
+- A live delete-between-statements race is covered only by the scripted T9b.
+
+### Rules 12 to 15
+
+- **Rule 12:** not applicable. The source was an e2e flake found in Community 2b Batch D, not an in-app feedback row, so there is no `feedback` row to mark `done`.
+- **Rule 13:** no what's-new entry. It is a bug fix with a release-note line only.
+- **Rule 14:** no change to `docs/product/functionality-map.md`. No functionality was added, changed or removed.
+- **Rule 15:** no change to `docs/architecture.md`. Nothing is architectural.
+- **Rule 10:** the TODO edits are below, applied at integration by the orchestrator per Rule 16.
+
+### Version
+
+A patch: the next patch after whatever is on `main` at integration. Do not hard-code a number in the work-log or the note. The queue is 0.46.1 (F289), 0.46.2 (site ingest), then 0.47.0 (careers).
+
+### QA's `src/proxy.test.ts` hermeticity follow-up
+
+Accept it as a tracked TODO and do not fix it in this pipeline. It is pre-existing and environmental, and this diff touches nothing in `src/proxy*`. CI is unaffected. Record QA's correction to Phase 4: the cause is any loopback `NEXT_PUBLIC_APP_URL` in `.env.local`, not port 3630 specifically.
+
+## TODO-ready lines (docs/TODO.md)
+
+Add:
+
+- `- [ ] **completeEnrollment: non-transactional recovery-code replacement (adjacent race).** It reads the pending row, verifies, upserts user_totp, deletes the pending row, then replaceRecoveryCodes (delete then insert) with no transaction, so two tabs submitting at once can interleave recovery codes; the client's inFlight guard covers one tab only. Fix with one transaction, in the same edit as the rate limit (Gap 6). — docs/work-log/2026-10-26-totp-enroll-race.md (Phase 1 gap 3)`
+- `- [ ] **Remove the invitation-new-account enrolOnPage reload-and-retry workaround (Community 2b) once the F342 fix is on main.** The fix branch's own spec has no workaround and passed 40 of 40 without one; re-run the spec ×40 after removal. — docs/work-log/2026-10-26-totp-enroll-race.md`
+- `- [ ] **src/proxy.test.ts "treats loopback as the platform outside a production deployment" fails whenever .env.local has a loopback NEXT_PUBLIC_APP_URL (test hermeticity).** The platform-host set includes the host of NEXT_PUBLIC_APP_URL (domains/host.ts), and the test pins only NEXT_PUBLIC_PLATFORM_HOSTS. Stub NEXT_PUBLIC_APP_URL in that describe. CI is unaffected; pre-existing, not F342. — docs/work-log/2026-10-26-totp-enroll-race.md (Phase 5)`
+
+Amend:
+
+- Test-coverage punch-list item (12): `totp-pending.test.ts` is now a real DB-backed spec, and only `admin/users/[id]/actions.test.ts` remains a replica.
+- Optional: append a note to the F166 line that F342 (shipped) does not change it. It remains HIGH, before the first non-operator invitee.
+- Keep the Gap 6 line (`completeEnrollment` has no rate limit) unchanged. Line numbers have shifted on `main`, so reference it by text, not by number.
+
+Done (at integration, with the shipped patch number):
+
+- `- [x] 2026-10-26 — **F342 two-factor enrolment secret race** (<patch>, docs/work-log/2026-10-26-totp-enroll-race.md; no migration; DECISION-290). SHIP IT. The enrolment page showed a secret the database no longer held when two renders overlapped (about 1 in 20 on first sign-in); one conditional upsert now makes it show only the stored secret.`
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete | SHIP IT | 2026-10-26 |
+
+## Handoff
+
+The pipeline closes at SHIP IT. Next is the **orchestrator**. At integration it should:
+- apply the TODO lines above and DECISION-290 (with the two residuals);
+- run `/release-notes` with the revised line and the next patch version;
+- re-run `scripts/test-rls.sql` per Rule 16.
+
+No further agent is needed. The only code-adjacent follow-ups are the three tracked lines.
+

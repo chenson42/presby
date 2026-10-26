@@ -238,6 +238,23 @@ describe("grantRoleAction — GrantResult → ActionResult mapping", () => {
     });
   });
 
+  it("seat_only_role → says the role is held through the Moderator seat, no audit, no revalidate (DECISION-242)", async () => {
+    mockAuth.mockResolvedValueOnce(SESSION);
+    mockResolveOrgContext.mockResolvedValueOnce(RESOLVED_OK);
+    mockGrantRole.mockResolvedValueOnce({ kind: "seat_only_role" });
+    const result = await grantRoleAction("alder-creek", {
+      roleId: "role-1",
+      target: { kind: "person", personId: "target-1" },
+    });
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "This role is held through the Moderator of the Board of Deacons seat, so it can't be granted here.",
+    });
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
   it("escalation_denied → names every missing permission, no audit", async () => {
     mockGrantRole.mockResolvedValueOnce({
       kind: "escalation_denied",

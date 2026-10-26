@@ -6,52 +6,64 @@ import { cn } from "@/lib/utils";
 
 /**
  * The link list and the active state, the one piece of the console nav that
- * needs `usePathname()`. A client leaf under a server shell (`AdminNav`), the
+ * needs `usePathname()`. A client leaf under a server shell (`ConsoleNav`), the
  * same split `GlobalNav` and the org portal's `PortalNavLinks` use.
  *
  * It receives PLAIN DATA ({label, href, exact}), never functions or icon
  * components: a Lucide component object crossing the server/client boundary is
  * a live 500 (portal-nav-links.tsx documents the incident). `onNavigate` is
  * the one function prop and is only ever passed by another client component
- * (`AdminMobileMenu`), never by a Server Component.
+ * (`ConsoleMobileMenu`), never by a Server Component.
  *
  * ACTIVE STATE: an item matches when `pathname === href` or
  * `pathname.startsWith(href + "/")` (a segment boundary, so
  * `/admin/organizationsX` does not light Organizations); an `exact` item
- * matches only on equality. Of the matches, the LONGEST href wins, and it
+ * matches only on equality. Of the matches, the LONGEST matching prefix (href or `alsoActiveOn`) wins, and it
  * alone gets `aria-current="page"`. So `/admin/organizations/domains` lights
  * Domains and not Organizations, `/admin/organizations/<id>` lights
  * Organizations, and an unknown `/admin/whatever` lights nothing (Dashboard is
  * exact). The active item is marked by weight and fill AND `aria-current`,
  * never by colour alone.
  */
-export interface AdminNavLinkItem {
+export interface ConsoleNavLinkItem {
   label: string;
   href: string;
   exact?: boolean;
+  /** Extra path prefixes (segment boundary) that also light this item, e.g.
+   * a detail route that does not live under `href`. */
+  alsoActiveOn?: readonly string[];
 }
 
-export interface AdminNavLinkGroup {
+export interface ConsoleNavLinkGroup {
   key: string;
   heading: string | null;
   footer?: boolean;
-  items: readonly AdminNavLinkItem[];
+  items: readonly ConsoleNavLinkItem[];
 }
 
 /** The href of the single active item, or null. Exported for the unit test. */
 export function activeNavHref(
   pathname: string | null,
-  groups: readonly AdminNavLinkGroup[],
+  groups: readonly ConsoleNavLinkGroup[],
 ): string | null {
   if (!pathname) return null;
   let best: string | null = null;
+  let bestLen = -1;
   for (const group of groups) {
     for (const item of group.items) {
-      const matches = item.exact
-        ? pathname === item.href
-        : pathname === item.href || pathname.startsWith(`${item.href}/`);
-      if (matches && (best === null || item.href.length > best.length)) {
+      const prefixes = item.exact
+        ? [item.href]
+        : [item.href, ...(item.alsoActiveOn ?? [])];
+      let longest = -1;
+      for (const prefix of prefixes) {
+        const hit =
+          pathname === prefix ||
+          (!item.exact && pathname.startsWith(`${prefix}/`));
+        if (hit && prefix.length > longest) longest = prefix.length;
+      }
+      if (longest >= 0 && (best === null || longest > bestLen)) {
         best = item.href;
+        bestLen = longest;
       }
     }
   }
@@ -67,11 +79,14 @@ const LINK_BASE = "flex min-h-11 items-center rounded-md px-3 py-2 text-sm trans
 const LINK_ACTIVE = "bg-primary font-semibold text-primary-foreground";
 const LINK_IDLE = "text-foreground hover:bg-accent hover:text-accent-foreground";
 
-export function AdminNavLinks({
+export function ConsoleNavLinks({
   groups,
+  idPrefix,
   onNavigate,
 }: {
-  groups: readonly AdminNavLinkGroup[];
+  groups: readonly ConsoleNavLinkGroup[];
+  /** Heading-id prefix; `/admin` passes `admin-nav` so its ids are unchanged. */
+  idPrefix: string;
   /** Called on a link click. The phone menu uses it to close on a click on the
    * current page's own link, where the route does not change. */
   onNavigate?: () => void;
@@ -88,14 +103,14 @@ export function AdminNavLinks({
         >
           {group.heading ? (
             <p
-              id={`admin-nav-${group.key}`}
+              id={`${idPrefix}-${group.key}`}
               className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             >
               {group.heading}
             </p>
           ) : null}
           <ul
-            aria-labelledby={group.heading ? `admin-nav-${group.key}` : undefined}
+            aria-labelledby={group.heading ? `${idPrefix}-${group.key}` : undefined}
             className="space-y-0.5"
           >
             {group.items.map((item) => {

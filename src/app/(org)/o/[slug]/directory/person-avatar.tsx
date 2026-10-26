@@ -44,6 +44,7 @@ export async function resolvePhotoSrc(
   const resolved = await getBlobStore().resolve({
     organizationId,
     key: photoKey,
+    audience: "private",
   });
   if (!resolved) return null;
   return `data:${resolved.contentType};base64,${resolved.bytes.toString("base64")}`;

@@ -51,6 +51,7 @@ describe.skipIf(!hasDb)(
     let OrgAccessError: typeof import("@/lib/authz").OrgAccessError;
     let organizations: typeof import("@/lib/db/domain/org").organizations;
     let organizationBrands: typeof import("@/lib/db/domain/org").organizationBrands;
+    let blobAssets: typeof import("@/lib/db/domain/assets").blobAssets;
     let organizationBrandHistory: typeof import("@/lib/db/domain/org").organizationBrandHistory;
     let groupTypes: typeof import("@/lib/db/domain/groups").groupTypes;
     let groups: typeof import("@/lib/db/domain/groups").groups;
@@ -78,6 +79,7 @@ describe.skipIf(!hasDb)(
       ({ OrgAccessError } = await import("@/lib/authz"));
       ({ organizations, organizationBrands, organizationBrandHistory } =
         await import("@/lib/db/domain/org"));
+      ({ blobAssets } = await import("@/lib/db/domain/assets"));
       ({ groupTypes, groups } = await import("@/lib/db/domain/groups"));
       ({ people, memberships } = await import("@/lib/db/domain/people"));
       ({ permissions, appRoles, appRolePermissions, roleGrants } = await import(
@@ -429,6 +431,14 @@ describe.skipIf(!hasDb)(
           .from(organizationBrands)
           .where(eq(organizationBrands.organizationId, orgA));
         expect(row?.markAssetKey).not.toBeNull();
+
+        // F289 (DECISION-277): a logo is stored public_site - the public asset
+        // route serves a mark only if it is.
+        const [blob] = await getPlatformDb()
+          .select({ audience: blobAssets.audience })
+          .from(blobAssets)
+          .where(eq(blobAssets.id, row!.markAssetKey!));
+        expect(blob?.audience).toBe("public_site");
       });
 
       it("E-c2: a bad logo that is the ONLY change touches nothing — logo_rejected, existing brand row untouched", async () => {

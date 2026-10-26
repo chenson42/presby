@@ -13,6 +13,7 @@ import {
   type DirectoryStatus,
 } from "@/lib/directory";
 import { isFlagEnabled } from "@/lib/flags";
+import { canReadParishRoster } from "@/lib/parishes";
 import { OrgAccessDenied, OrgAccessEnded } from "../org-states";
 import {
   DirectoryFlagOff,
@@ -158,6 +159,20 @@ export default async function DirectoryPage({
       )
     : false;
 
+  // The Parishes tab is offered to a viewer who can read the roster by any route
+  // (`directory.view_hidden`, or - with the org toggle on - the Moderator seat,
+  // `people.manage` or `officers.manage`), so the first-day administrator is
+  // not walled out of it (G4). `canViewHidden` keeps its own, narrower meaning:
+  // it alone decides `includeHidden`. A second short transaction, only for a
+  // viewer without `directory.view_hidden` (unverified impact).
+  const showParishes =
+    canViewHidden ||
+    (directoryV2Enabled &&
+      (await canReadParishRoster(
+        resolved.org.personId,
+        resolved.org.organizationId,
+      )));
+
   if (view === "households") {
     // The exact `{ search }` shape Increment 3 shipped is preserved when
     // `canViewHidden` is false — the regression floor its own tests pin.
@@ -192,7 +207,7 @@ export default async function DirectoryPage({
           slug={slug}
           view={view}
           search={search}
-          canViewHidden={canViewHidden}
+          showParishes={showParishes}
         />
         <HouseholdsGrid
           households={householdsResult.households}
@@ -258,7 +273,7 @@ export default async function DirectoryPage({
           slug={slug}
           view={view}
           search={search}
-          canViewHidden={canViewHidden}
+          showParishes={showParishes}
         />
         {grid}
       </section>

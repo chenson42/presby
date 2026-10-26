@@ -213,6 +213,7 @@ export const getOrgMarkForLayout = cache(
     const resolved = await getBlobStore().resolve({
       organizationId,
       key: row.markAssetKey,
+      audience: "public_site",
     });
     if (!resolved) return null;
 

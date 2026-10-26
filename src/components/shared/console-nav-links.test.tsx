@@ -11,7 +11,7 @@ import { ADMIN_NAV_GROUPS } from "@/lib/admin-portal/nav";
 let pathname = "/admin";
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
-import { AdminNavLinks, activeNavHref } from "./admin-nav-links";
+import { ConsoleNavLinks, activeNavHref } from "./console-nav-links";
 
 afterEach(cleanup);
 
@@ -47,22 +47,22 @@ describe("activeNavHref", () => {
   });
 });
 
-describe("AdminNavLinks", () => {
+describe("ConsoleNavLinks", () => {
   it("marks exactly one link aria-current=page", () => {
     pathname = "/admin/organizations/domains";
-    render(<AdminNavLinks groups={ADMIN_NAV_GROUPS} />);
+    render(<ConsoleNavLinks groups={ADMIN_NAV_GROUPS} idPrefix="admin-nav" />);
     expect(currentLinks()).toEqual(["Domains"]);
   });
 
   it("marks nothing on an unknown path", () => {
     pathname = "/admin/whatever";
-    render(<AdminNavLinks groups={ADMIN_NAV_GROUPS} />);
+    render(<ConsoleNavLinks groups={ADMIN_NAV_GROUPS} idPrefix="admin-nav" />);
     expect(currentLinks()).toEqual([]);
   });
 
   it("renders group headings, links at least 44px tall, and omits an empty heading", () => {
     pathname = "/admin";
-    render(<AdminNavLinks groups={ADMIN_NAV_GROUPS} />);
+    render(<ConsoleNavLinks groups={ADMIN_NAV_GROUPS} idPrefix="admin-nav" />);
     expect(screen.getByText("Access and settings")).toBeTruthy();
     for (const a of screen.getAllByRole("link")) {
       expect(a.className).toContain("min-h-11");
@@ -73,8 +73,55 @@ describe("AdminNavLinks", () => {
   it("calls onNavigate when a link is clicked", () => {
     pathname = "/admin";
     const onNavigate = vi.fn();
-    render(<AdminNavLinks groups={ADMIN_NAV_GROUPS} onNavigate={onNavigate} />);
+    render(<ConsoleNavLinks groups={ADMIN_NAV_GROUPS} idPrefix="admin-nav" onNavigate={onNavigate} />);
     fireEvent.click(screen.getByRole("link", { name: "Dashboard" }));
     expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("alsoActiveOn", () => {
+  const groups = [
+    {
+      key: "main",
+      heading: null,
+      items: [
+        { label: "Home", href: "/x", exact: true },
+        { label: "Data", href: "/x/data", alsoActiveOn: ["/x/tables", "/x/erd"] },
+        { label: "Docs", href: "/x/docs" },
+      ],
+    },
+  ];
+  const active = (p: string) => activeNavHref(p, groups);
+
+  it("lights the item on a path under an alsoActiveOn prefix", () => {
+    expect(active("/x/tables/roll_actions")).toBe("/x/data");
+    expect(active("/x/erd/d-rolls")).toBe("/x/data");
+    expect(active("/x/tables")).toBe("/x/data");
+  });
+
+  it("respects the segment boundary of an alsoActiveOn prefix", () => {
+    expect(active("/x/tablesX")).toBeNull();
+  });
+
+  it("still lights only Home on its exact path, and Docs on /x/docs", () => {
+    expect(active("/x")).toBe("/x");
+    expect(active("/x/docs")).toBe("/x/docs");
+  });
+
+  it("marks aria-current on the rendered link", () => {
+    pathname = "/x/tables/roll_actions";
+    render(<ConsoleNavLinks groups={groups} idPrefix="x-nav" />);
+    expect(currentLinks()).toEqual(["Data"]);
+  });
+
+  it("uses the idPrefix for heading ids", () => {
+    pathname = "/admin";
+    const { container } = render(
+      <ConsoleNavLinks
+        groups={[{ key: "ref", heading: "Reference", items: [{ label: "A", href: "/a" }] }]}
+        idPrefix="developer-nav"
+      />,
+    );
+    expect(container.querySelector("#developer-nav-ref")).toBeTruthy();
   });
 });

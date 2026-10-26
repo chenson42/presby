@@ -33,7 +33,11 @@ import * as giving from "./giving";
 const readMigration = (file: string) =>
   readFileSync(fileURLToPath(new URL(`../../../../drizzle/${file}`, import.meta.url)), "utf8");
 const MIGRATION_0056 = readMigration("0056_presby_giving_statements.sql");
-const MIGRATION = `${readMigration("0055_presby_giving.sql")}\n${MIGRATION_0056}`;
+// drizzle/0072 (F289, DECISION-277) adds giving_statements.asset_audience, its
+// CHECK, and re-keys giving_statements_blob_fk three-column. Its giving_*
+// names join the set; everything 0055/0056 create is still read from them.
+const MIGRATION_0072 = readMigration("0072_presby_blob_audience.sql");
+const MIGRATION = `${readMigration("0055_presby_giving.sql")}\n${MIGRATION_0056}\n${MIGRATION_0072}`;
 
 /**
  * Created by 0056 but deliberately NOT declared in giving.ts: the composite FK
@@ -42,7 +46,9 @@ const MIGRATION = `${readMigration("0055_presby_giving.sql")}\n${MIGRATION_0056}
  * carries the matching `extra_fk` allowlist row. Nothing else may join this set.
  */
 const DDL_ONLY = new Set(["giving_statements_blob_fk"]);
-const BLOB_FK_SIGNATURE = "(blob_asset_id,organization_id) -> blob_assets(id,organization_id)";
+// check:schema-parity sorts by LOCAL column name, so asset_audience comes first.
+const BLOB_FK_SIGNATURE =
+  "(asset_audience,blob_asset_id,organization_id) -> blob_assets(audience,id,organization_id)";
 
 function namesCreatedByMigration(): Map<string, Set<string>> {
   const byTable = new Map<string, Set<string>>();
@@ -119,7 +125,7 @@ const COMPOSITE_FKS = [
   "giving_statement_deliveries_statement_fk",
 ];
 
-describe("drizzle/0055 + 0056 constraint and index names are mirrored in giving.ts", () => {
+describe("drizzle/0055 + 0056 (+ 0072) constraint and index names are mirrored in giving.ts", () => {
   const created = namesCreatedByMigration();
 
   it("the two migrations create exactly the fifteen giving tables the domain file declares", () => {
@@ -138,7 +144,7 @@ describe("drizzle/0055 + 0056 constraint and index names are mirrored in giving.
   });
 
   it.each(TABLES.map((t) => [getTableName(t), t] as const))(
-    "%s declares every name 0055/0056 create on it, and nothing they do not",
+    "%s declares every name 0055/0056/0072 create on it, and nothing they do not",
     (name, table) => {
       const declared = namesDeclaredByDrizzle(table);
       const expected = created.get(name) ?? new Set<string>();
@@ -152,7 +158,7 @@ describe("drizzle/0055 + 0056 constraint and index names are mirrored in giving.
       // must exist in 0055.
       for (const n of declared) {
         if (/_(organizations|users)_id_fk$/.test(n)) continue;
-        expect(expected.has(n), `${name} declares ${n}, which 0055/0056 do not create`).toBe(true);
+        expect(expected.has(n), `${name} declares ${n}, which 0055/0056/0072 do not create`).toBe(true);
       }
     },
   );
@@ -164,6 +170,18 @@ describe("0056: the DDL-only blob FK", () => {
       /constraint giving_statements_blob_fk foreign key \(blob_asset_id, organization_id\)\s+references blob_assets \(id, organization_id\)/,
     );
     expect([...(namesCreatedByMigration().get("giving_statements") ?? [])]).toContain("giving_statements_blob_fk");
+  });
+
+  it("0072 re-keys it three-column on the constant 'private', NO ACTION both ways (F44 kept)", () => {
+    expect(MIGRATION_0072).toMatch(
+      /add constraint giving_statements_blob_fk\s+foreign key \(blob_asset_id, organization_id, asset_audience\)\s+references blob_assets \(id, organization_id, audience\) on delete no action on update no action;/,
+    );
+    expect(MIGRATION_0072).toMatch(
+      /alter table giving_statements add constraint giving_statements_asset_audience_private check \(asset_audience = 'private'\);/,
+    );
+    expect([...(namesCreatedByMigration().get("giving_statements") ?? [])]).toContain(
+      "giving_statements_asset_audience_private",
+    );
   });
 
   it("giving.ts does not declare it (and does not import assets.ts)", () => {

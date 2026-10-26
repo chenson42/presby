@@ -113,6 +113,7 @@ export default async function BrandingPage({
     const resolvedAsset = await getBlobStore().resolve({
       organizationId: resolved.org.organizationId,
       key: brand.markAssetKey,
+      audience: "public_site",
     });
     if (resolvedAsset) {
       markSrc = `data:${resolvedAsset.contentType};base64,${resolvedAsset.bytes.toString("base64")}`;

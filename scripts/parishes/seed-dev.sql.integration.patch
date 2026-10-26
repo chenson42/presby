@@ -1,0 +1,15 @@
+diff --git a/scripts/seed-dev.sql b/scripts/seed-dev.sql
+index 93bd6a6..2ea8a8c 100644
+--- a/scripts/seed-dev.sql
++++ b/scripts/seed-dev.sql
+@@ -1960,3 +1960,10 @@ commit;
+ -- and staff position); contact rows only, idempotent.
+ -- scripts/person-emails/test-rls-64.sql needs it.
+ \ir person-emails/seed-dev-person-emails.sql
++
++-- Parish management fixture (drizzle/0068). Its own file and transaction, run
++-- AFTER the person-emails include (it needs Alder Creek's people, households
++-- and districts); idempotent. It replays 0068's seat provisioning for every
++-- congregation, so a database built from empty matches development.
++-- scripts/parishes/test-rls-68.sql needs it.
++\ir parishes/seed-dev-parishes.sql

@@ -194,9 +194,9 @@ test("a new invitee: preview consumes nothing, bad passwords are refused inline,
   // The secret is in the <pre> under "Can't scan? Enter manually" (in the DOM whether or not the <details> is open).
   const secret = ((await page.locator("details pre").textContent()) ?? "").trim();
   expect(secret).toMatch(/^[A-Z2-7]{16,}$/);
-  // Six labelled digit boxes (review-polish Batch B), typed through the shared helper.
+  // Six labelled digit boxes (review-polish Batch B), typed through the shared helper. The sixth digit confirms the
+  // enrolment by itself (DECISION-257): no button press, and the assertion below is the wait.
   await enterTotpCode(page, generateSync({ secret }));
-  await page.getByRole("button", { name: "Confirm enrollment" }).click();
   // The enrolment persists, and the page settles on the management view ("You enrolled on ..."). (The one-time
   // "enabled" panel with the recovery codes is replaced by that view as soon as the revalidated server tree
   // arrives, and the callbackUrl goes with it: a pre-existing behaviour of /account/2fa recorded as F166 in the

@@ -158,7 +158,7 @@ describe("the response", () => {
     expect(res.headers.get("content-length")).toBe(String(PDF.length));
     expect(Buffer.from(await res.arrayBuffer()).equals(PDF)).toBe(true);
     expect(findStatementForDownload).toHaveBeenCalledWith("person-1", "org-1", SID);
-    expect(resolveBlob).toHaveBeenCalledWith({ organizationId: "org-1", key: "blob-1" });
+    expect(resolveBlob).toHaveBeenCalledWith({ organizationId: "org-1", key: "blob-1", audience: "private" });
   });
 
   it("view OR manage may download", async () => {

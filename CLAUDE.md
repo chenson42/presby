@@ -100,7 +100,12 @@ src/components/ui/     — GENERATED shadcn primitives. Add with `npm run ui:add
                          header comment recording the divergence
 src/components/shared/ — cross-cutting, non-generated UI: avatar menu, org
                          switcher, global nav, feedback prompt, pagination,
-                         button-group. Platform-palette by default; anything
+                         button-group, and the console shell shared by /admin
+                         and /developer (console-header, console-nav,
+                         console-nav-links, console-mobile-menu; the console
+                         label, id prefix, main-landmark id and canAccessAdmin
+                         are required props, DECISION-261).
+                         Platform-palette by default; anything
                          rendered inside (org)/(public) still inherits brand
                          tokens via the cascade (see The Brand Is a Cascade
                          Override), not a per-component override
@@ -109,17 +114,24 @@ src/components/org-portal/ — tenant-portal-specific composition (tile grid,
                          Distinct from src/components/shared/ because these
                          compose org-portal-only concepts platform-shell
                          pages never use
-src/components/admin-portal/ — admin-console-only composition (the nav, phone
-                         menu, header, and the admin forbidden state;
-                         DECISION-253). Parallel to org-portal/; generic
-                         pieces (LoadError, EmptyState, CountCard) stay in
-                         shared/
+src/components/admin-portal/ — admin-console-only composition: now
+                         AdminForbidden and its siblings (the nav, phone menu
+                         and header moved to shared/ as console-*,
+                         DECISION-261; the developer portal imports
+                         AdminForbidden from here). Parallel to org-portal/;
+                         generic pieces (LoadError, EmptyState, CountCard)
+                         stay in shared/
 src/lib/admin-portal/  — the admin console's data: nav.ts (the nav registry,
                          pure and synchronous, which replaced the tile
                          registry) and dashboard/ (the card readers, held to
                          platform-axis tables by boundaries.test.ts;
                          DECISION-252/253)
-src/proxy.ts           — The proxy (admin + 2FA on /admin and /o/*, and the
+src/lib/developer-portal/ — the developer portal's data: pure registries (nav,
+                         provenance labels, the documentation-page rows) and
+                         the access decision (access.ts). No db or session
+                         imports; shell-boundaries.test.ts bars
+                         getPlatformDb from it (DECISION-258/261)
+src/proxy.ts           — The proxy (admin + 2FA on /admin, /developer and /o/*, and the
                          custom-host branch that rewrites any non-platform host
                          to /site/<host>). Runs on Node.js (Next 16) but never
                          reaches the database — see The Proxy Does Not Reach
@@ -150,7 +162,9 @@ src/app/launch/        — the post-login router. destination.ts holds the matri
 src/app/(org)/o/[slug]/ — org-scoped tree. The slug is the URL identifier and is
                          immutable; withOrgContext() only, getPlatformDb()
                          forbidden. See the (org) contract below
-src/app/(admin)/developer/ — generated schema reference
+src/app/(admin)/developer/ — the developer portal: home, data model,
+                         documentation placeholders (platform-admin only until
+                         the developer role lands)
 drizzle/00XX_presby_*.sql  — hand-written: RLS, triggers, functions. Drizzle Kit
                              does not emit any of these. An unreleased migration
                              (not yet applied to a shipped environment) may be
@@ -462,9 +476,12 @@ Generate an `AUTH_SECRET` with `openssl rand -base64 32`.
 
 ## Key Invariants
 
-These are the properties the system exists to enforce. `/developer` marks each
-one `database`, `trigger`, or `paper` — **paper means the schema permits a
-violation and only review will catch it.**
+These are the properties the system exists to enforce. `/developer/data-model`
+marks each one `database`, `trigger`, or `paper` — **paper means the schema
+permits a violation and only review will catch it.** Two headings below, No Real
+Data and Verify in a Browser, are deliberately left off that list (they are
+rules about the repository and about working practice, not properties of the
+running system); the page says so, and `src/lib/dev-docs.ts` records the reason.
 
 ### No Real Data
 
@@ -535,6 +552,7 @@ detected by audit (`org.*.revoked`, then `invitation.created` with
 A founding administrator who records themselves as a ruling elder, installed
 pastor, co-pastor or associate pastor becomes a Session approver (DECISION-205).
 This is permitted, stamped `selfRecorded` and `selfApproved`, and `paper`.
+Recording the Board of Deacons Moderator seat (`officer_terms.office = 'deacons_moderator'`) confers `parishes.assign` through the derived `deacons_moderator` group and nothing else; the key is seat-only, refused on a person grant, a commission or a delegation by trigger (DECISION-242). A founding administrator may record themselves in it; that is permitted, stamped `selfRecorded`, and `paper`.
 
 ### The Roll Is the System of Record
 

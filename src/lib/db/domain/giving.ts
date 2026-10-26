@@ -856,8 +856,11 @@ export const givingSettlementLines = pgTable(
 //     the statement's deletable_until or an org teardown cascade (P3-8).
 //   - giving_statement_deliveries_insert_guard (6d, ~line 615): recorder holds
 //     giving.manage; occurred_at stamped.
-//   - giving_statements_blob_fk (blob_asset_id, organization_id) ->
-//     blob_assets (id, organization_id), NO ACTION - DDL-ONLY. assets.ts is
+//   - giving_statements_blob_fk (blob_asset_id, organization_id,
+//     asset_audience) -> blob_assets (id, organization_id, audience), NO
+//     ACTION on delete and update (0056 section 1, re-keyed three-column by
+//     drizzle/0072 section 8; asset_audience is the constant 'private', so
+//     the PDF is never a public_site blob) - DDL-ONLY. assets.ts is
 //     imported by the storage adapter alone (DECISION-058; its header), so this
 //     file does not import it; scripts/check-schema-parity.ts allowlists the
 //     FK. blob_assets_giving_statement_guard (6e, ~line 637) keeps the referenced bytes
@@ -909,6 +912,9 @@ export const givingStatements = pgTable(
     coveredFeeCounted: boolean("covered_fee_counted").notNull(),
     // DDL-only composite FK to blob_assets (see the block comment above).
     blobAssetId: uuid("blob_asset_id").notNull(),
+    // Constant 'private' (drizzle/0072, DECISION-277): the third column of
+    // giving_statements_blob_fk. Never written by the application.
+    assetAudience: text("asset_audience").notNull().default("private"),
     pdfSha256: text("pdf_sha256").notNull(),
     issuedBy: uuid("issued_by")
       .notNull()
@@ -935,6 +941,7 @@ export const givingStatements = pgTable(
       .where(sql`${t.supersedesId} is not null`),
     index("giving_statements_org_year_idx").on(t.organizationId, t.taxYear),
     index("giving_statements_blob_idx").on(t.organizationId, t.blobAssetId),
+    check("giving_statements_asset_audience_private", sql`${t.assetAudience} = 'private'`),
     check("giving_statements_tax_year_range", sql`${t.taxYear} between 2000 and 2100`),
     check(
       "giving_statements_version_chain",

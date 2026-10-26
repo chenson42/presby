@@ -11,10 +11,15 @@
  *
  * PINNED TO THE DATABASE by source-scan tests (`officer-offices.test.ts`):
  *   - `OFFICER_OFFICES` equals the `officer_terms_office_allowed` CHECK in
- *     `drizzle/0062_presby_session_approval.sql` and `listOfficerRoster()`'s
- *     `all_offices` values list;
+ *     the newest migration that defines it (`drizzle/0068_presby_parishes.sql`,
+ *     which added `deacons_moderator`, DECISION-242; 0062 before it) and
+ *     `listOfficerRoster()`'s `all_offices` values list;
  *   - `SESSION_OFFICES` equals the `-> 'session'` arms of
- *     `presby_sync_derived_group()`'s CASE in the same migration.
+ *     `presby_sync_derived_group()`'s CASE in that same migration.
+ * `deacons_moderator` (the Moderator of the Board of Deacons) is a seat, not
+ * a Session office: it materialises into its own derived roster group, whose
+ * baseline role carries the seat-only key `parishes.assign`. `moderator` is
+ * unchanged (DECISION-079).
  * The array order is presentational; the pastor offices follow `ruling_elder`.
  */
 
@@ -24,6 +29,7 @@ export const OFFICER_OFFICES = [
   "co_pastor",
   "associate_pastor",
   "deacon",
+  "deacons_moderator",
   "clerk_of_session",
   "moderator",
   "treasurer",
@@ -38,6 +44,7 @@ export const OFFICE_LABELS: Record<OfficerOffice, string> = {
   co_pastor: "Co-Pastor",
   associate_pastor: "Associate Pastor",
   deacon: "Deacon",
+  deacons_moderator: "Moderator of the Board of Deacons",
   clerk_of_session: "Clerk of Session",
   moderator: "Moderator",
   treasurer: "Treasurer",
@@ -74,6 +81,29 @@ export const PASTOR_OFFICES = [
 ] as const satisfies readonly SessionOffice[];
 
 export type PastorOffice = (typeof PASTOR_OFFICES)[number];
+
+/**
+ * The offices whose recording confers authority through the resolver: the
+ * Session offices (DECISION-205) and the Moderator of the Board of Deacons seat
+ * (`parishes.assign`, DECISION-242). Used for the `selfRecorded` stamp on the
+ * audit row and the roster badge (F264) - one list, so a new authority-bearing
+ * office is added in exactly one place. `SESSION_OFFICES` stays the Session
+ * list: the derived-group CASE pin reads it, and the seat is not a Session
+ * office.
+ */
+export const AUTHORITY_OFFICES = [
+  ...SESSION_OFFICES,
+  "deacons_moderator",
+] as const satisfies readonly OfficerOffice[];
+
+export type AuthorityOffice = (typeof AUTHORITY_OFFICES)[number];
+
+export function isAuthorityOffice(value: unknown): value is AuthorityOffice {
+  return (
+    typeof value === "string" &&
+    (AUTHORITY_OFFICES as readonly string[]).includes(value)
+  );
+}
 
 export function isSessionOffice(value: unknown): value is SessionOffice {
   return (

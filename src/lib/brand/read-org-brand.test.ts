@@ -189,6 +189,7 @@ describe.skipIf(!hasDb)(
         organizationId: orgBranded,
         bytes: Buffer.from("fixture-logo-bytes-not-a-real-image"),
         contentType: "image/png",
+        audience: "public_site",
       });
       markKey = stored.key;
 

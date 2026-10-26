@@ -13,6 +13,9 @@
  * sign-in this spec asserts that NO `totp.verify_failed` row exists for the user
  * since the test began.
  *
+ * Once released, the typed real code is submitted by its sixth digit with no
+ * button press (DECISION-257) and lands on /admin.
+ *
  * It also proves the focus rule: box 1 takes focus after hydration, never before
  * (a disabled fieldset cannot take focus).
  *
@@ -32,6 +35,7 @@ import {
   totpBox,
   totpGroup,
   verifyButton,
+  waitForTotpVerified,
 } from "../support/totp-page";
 
 /** Holds every `/_next/static/**.js` request until the returned function is called. */
@@ -88,10 +92,9 @@ test.describe("Hydration - /totp challenge (DECISION-192)", () => {
     await expect(recoveryToggle(page)).toBeEnabled();
     await expect(totpBox(page, 1)).toBeFocused();
 
+    // The sixth digit submits the code (DECISION-257): no button press.
     await enterTotpCode(page, generateSync({ secret: E2E_TOTP_TEST_SECRET }));
-    await expect(verifyButton(page)).toBeEnabled();
-    await verifyButton(page).click();
-    await page.waitForURL(/\/admin$/, { timeout: 15_000 });
+    await waitForTotpVerified(page, /\/admin$/);
 
     // The persisted state: the verified sign-in wrote a success row and NO failed attempt.
     const rows = (await sql`

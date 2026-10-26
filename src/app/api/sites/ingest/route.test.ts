@@ -715,6 +715,7 @@ describe.skipIf(!hasDb)(
           .select({
             id: blobAssets.id,
             contentType: blobAssets.contentType,
+            audience: blobAssets.audience,
           })
           .from(blobAssets)
           .where(eq(blobAssets.organizationId, orgHappyId));
@@ -727,6 +728,11 @@ describe.skipIf(!hasDb)(
           (r) => r.contentType === "application/json",
         );
         expect(jsonBlob?.id).toBe(siteRow?.contentBundleKey);
+
+        // F289 (DECISION-277): the published IMAGE is public_site; the bundle
+        // JSON (read only server-side) is private.
+        expect(jsonBlob?.audience).toBe("private");
+        expect(blobRows.find((r) => r.contentType === "image/png")?.audience).toBe("public_site");
 
         // audit_events — queried directly.
         const [auditRow] = await platform

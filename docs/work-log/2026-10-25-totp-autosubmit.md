@@ -18,7 +18,7 @@
 | 2 — Architectural review | architect | Skipped — Accelerated Feature: no new directory, dependency, route, action, schema or invariant | — | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; implementer named (full-stack-developer); F282 registered | Design complete | 2026-10-25 |
 | 4 — Implementation | full-stack-developer | Complete; all Phase 4 gates green (dev lane :3560, prod-build lane :3561) | Ready for QA | 2026-10-25 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete; failing-first reproduced; auth e2e 58/58, full 523/523, prod lane 13/13, 0 skipped; probes 9/9; 360px checked | PASS | 2026-10-25 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -691,3 +691,156 @@ Failures: [...]
 ## Orchestrator rulings (2026-10-25)
 
 Open questions 1–4 proceed on the analyst's defaults (enrolment clears and refocuses; over-long paste fills but does not submit; optional one-line what's-new; one helper-level e2e change). Port 3560.
+
+---
+
+# Phase 5 — Verification (qa)
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-otp`, `pipeline/totp-autosubmit` at `404de0b`. Neon branch `pipeline-totp-autosubmit`; its endpoint differs from the main worktree's (development) endpoint.
+
+**Scope run.** The diff touches `e2e/support/*` and a shared component (`src/components/shared/one-time-code-input.tsx`), so the full e2e suite was required, and it touches `src/app/(auth)/`, so the auth gate applies.
+
+- **Static gates and unit:** typecheck, lint, `npm run check`, plain `npm test`, `npm run build`.
+- **Failing-first:** red-runs of the unit and e2e tests against the pre-change source in a scratch copy.
+- **Dev lane on :3560:** the named auth e2e set, then the full suite (default projects `chromium` and `custom-hosts`).
+- **Prod-build lane on :3561:** the whole `e2e/hydration/` directory.
+- **Browser:** adversarial probes and the 360px look.
+
+**Not run:** the DB-backed vitest suites (no migration, `authz.ts`, `src/lib/db/` or fixture change; CI covers them) and `test-rls.sql`. **Flag state:** global flags were reset to the CI baseline before any e2e run, using `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1` against this worktree's `PLATFORM_DATABASE_URL` only (COMMIT; the file is identical to the worktree's copy). Env vars were checked for presence only and never printed. Disk had 564 GiB free.
+
+## Type Check
+
+`npm run typecheck`: **PASS**. `npm run lint` (`--max-warnings=0`): **PASS**. `npm run check`: **PASS**, all eight tripwires including `check:hydration-gate` (H3), `check:audit` and `check:proxy-imports`. `npm run build`: **PASS**.
+
+## Unit Tests
+
+Total: 11096 | Passed: 8654 | Failed: 0 | Skipped: 2442 (77 files) | Duration: 25.2s
+- **Skips:** all 77 skipped files are the DB-backed `src/lib/**` suites (they need `.env.local` and serial mode). None of them is a changed or blast-radius file.
+- **The three changed files:** 100/100 passed, 0 skipped (`one-time-code-input.test.tsx` 55, `totp-challenge-form.test.tsx` 33, `totp-enroll-form.test.tsx` 12).
+
+**Failing-first, verified independently.** I built a `git archive HEAD` copy, put the three source files back at their `origin/main` versions (byte-identical to merge-base `b903154`), and kept the new tests. No `git stash` was used.
+
+| Suite | Red on old source | Matches Phase 4 record |
+|---|---|---|
+| `one-time-code-input.test.tsx` | 6 failed / 55 (C-1, C-2, C-2b, C-3, two `{ exact: true }` assertions) | yes |
+| `totp-challenge-form.test.tsx` | 9 failed / 33 (F-1, F-3 x2, F-8, F-9, F-9b, F-10, F-11, F-12) | yes |
+| `totp-enroll-form.test.tsx` | 6 failed / 12 (paste auto-submit, N-1, N-4, N-4b, N-5, N-6) | yes |
+| `e2e/totp-code-entry.spec.ts` (old-source dev server on :3560) | 6 failed / 17 (E-1, E-3, E-4 x2, E-5, E-6/E-7) | yes |
+| `e2e/invitation-new-account.spec.ts` | **red: 1 failed / 1** (times out waiting for "you enrolled on") | Phase 4 had not red-run this; now confirmed |
+
+The tests that pass on the old source (F-2, F-4, F-4b, F-5, F-6, F-7, S-1, N-2, N-3, E-2, E-8, E-9) assert that something does not happen, so passing there is expected. They stay as guards.
+
+## End-to-End Tests
+
+All runs used a real dev server on **:3560** that I started from the worktree with the e2e server env, and stopped by PID afterwards. The `mfa-enrolled` seeded user was used throughout. `totp-full-login.spec.ts` drives email and password, then `/totp` (wrong code, then real code typed with no click), then `/admin`.
+
+- **Named auth set** (`totp-code-entry`, `totp-full-login`, `totp-callback-bypass`, `totp-recovery-code`, `session-claim-integrity`, `branded-signin`, `post-login-routing`, `invitation-new-account`, `invitation-existing-account`, `hydration/totp-challenge`, `account-page`): Total 58 | Passed 58 | Failed 0 | Skipped 0 | 1.5m
+- **Full suite** (`--project=chromium --project=custom-hosts`): Total 523 (420 chromium + 103 custom-hosts) | Passed 523 | Failed 0 | Skipped 0 | Flaky 0 | 18.0m
+- **Prod-build lane** (`PW_PROD_PORT=3561 npm run test:e2e:prod -- e2e/hydration/`, its own `next build && next start`, run with no dev server up): Total 13 | Passed 13 | Failed 0 | 41.4s. This includes the /totp hydration spec: boxes disabled before release, no `verify_failed` row, and the typed real code lands on `/admin` with one success row.
+
+The four 0.42.3 guard specs (`totp-full-login`, `totp-callback-bypass`, `session-claim-integrity`, `branded-signin`) and the three fixtures changed only by deleted Verify clicks and a `waitForTotpVerified` swap. No assertion was touched. The remaining Verify clicks are the legitimate fallbacks: `totp-code-entry.spec.ts:248` (over-long paste) and `totp-recovery-code.spec.ts:90,106`.
+
+**Adversarial probes.** These were a throwaway spec in the scratch copy, run against the new-code server on :3560 with POSTs held by a route so the pending state persists. The copy is now deleted. All 9 passed:
+
+| Probe | Result |
+|---|---|
+| Whole-code autofill, then a Verify `click()` at 0 / 16 / 50 / 200 ms | 1 POST each: no double submit |
+| Type the sixth digit, then Enter twice at once | 1 POST |
+| Two identical whole-code `input` events plus a `change` in one tick (iOS pattern) | 1 POST |
+| Over-long paste `1234567` at 360px | fills `123456`, 0 POSTs; Verify enabled |
+| Recovery mode | covered by E-9 (no POST on typing) and `totp-recovery-code` |
+| Nothing submits before hydration | both lanes: fieldset disabled, 0 `verify_failed` rows |
+| Re-arm after two identical failures (F282) | E-6 passed: same URL both times, boxes clear and refocus, 3 POSTs, then signs in. On `/account/2fa` the same wrong code twice gave 2 POSTs |
+| `/account/2fa`: type `000000` then click Confirm at once | 1 POST; "Verifying…" and status region shown; after failure the toast appears, boxes are cleared and box 1 is focused |
+| 3 typed digits, then a 4-digit paste into box 4 | **auto-submitted** `000000` (1 POST); the 4th pasted digit was dropped. See Observation O-1 |
+
+**The 0.42.3 grant (S-1, plus reading the diff).**
+- `withTwoFactorGrant` and its `unstable_update({})` appear only at `src/app/(auth)/totp/actions.ts:86,132`.
+- `actions.ts` in both folders, `totp/page.tsx`, `src/lib/rate-limit.ts`, `src/auth.ts` and `src/proxy.ts` are byte-identical to `origin/main` (`git diff --quiet`).
+- The client calls only `formRef.current?.requestSubmit()` on the unchanged `<form action={verifyTotpAction}>`.
+- **Rate limit unchanged:** still `checkRateLimit('totp:<userId>', 10/60s)` in the untouched action, so auto-submits and button submits share it.
+
+**360px real-browser look** (Chromium at 360x740; screenshots in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/shots/`):
+- **/totp pending:** "Verifying…" disabled, status reads "Verifying your code.", focus on box 6, 0 px overflow.
+- **/totp failure:** boxes cleared and red-bordered, box 1 focused, unchanged alert copy wrapping to two lines, Verify disabled, 0 px overflow.
+- **/totp over-long paste:** waits for Verify.
+- **`/account/2fa`:** pending and failure states with 0 px overflow; box 1 focused after failure.
+- **Dev-only artifact:** the Next dev indicator pill overlaps the enrol button in the dev screenshots. It is not app UI.
+
+## Regression Tests Added
+
+- `F-1: the sixth digit posts exactly one token field and the callbackUrl, once…` — `src/app/(auth)/totp/totp-challenge-form.test.tsx:76` — guards against submitting from the change handler, which would post the stale hidden value (Gap 1).
+- `F-5` (:132), `C-2` (`src/components/shared/one-time-code-input.test.tsx:411`), `N-3` (`totp-enroll-form.test.tsx:111`), `E-8` (`e2e/totp-code-entry.spec.ts:230`) — guard against an over-long paste spending an attempt (Decision 3).
+- `F-7` (:158), `E-3` (`e2e/totp-code-entry.spec.ts:333`) — guard against double submission while pending, and pin the pending state at 360px.
+- `F-9` / `F-9b` (:186, :206), `E-6 / E-7` (`e2e/totp-code-entry.spec.ts:302`) — **F282**: reset and re-arm after a failure even when the redirect URL is identical.
+- `F-11` (:229) — guards against the recovery toggle flipping the `token` field mid-flight (R6).
+- `S-1` (:246) — guards the 0.42.3 rule that the grant opens only inside `verifyTotpAction`.
+- `N-1`, `N-4`, `N-4b`, `N-5` (`src/app/(account)/account/2fa/totp-enroll-form.test.tsx:84,123,136,145`) — guard enrolment auto-submit, clear and refocus after a failure, and guard release after a thrown call.
+- `E-1` (:269), `E-4` (:178, :208), `E-5` (:283), `E-9` (:365) — browser proof of the real action, the audit rows, paste and autofill, and recovery mode.
+- No `— regression for` suffix applies: this is a Feature, not a bug fix. Failing-first was confirmed above.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100% statements / 100% branches
+- `src/lib/two-factor.ts`: 91.3% statements (target 90%+), 100% branches
+- `src/lib/flags.ts`: 100% / 100%
+- Changed modules: `one-time-code-input.tsx` 100% stmts / 95.4% branch; `totp-challenge-form.tsx` 100% / 100%; `totp-enroll-form.tsx` 97.9% / 92.3%.
+
+## Feature-Gate Audit
+
+**No protected routes touched.** No route handler, server action, permission or flag was added or changed. `verifyTotpAction` and `completeEnrollment` are byte-identical to `origin/main`. `/totp` and `/account/2fa` stay auth-only and are not `FEATURES.*`-gated, as before.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| `verifyTotpAction` (unchanged) | yes (`actions.ts:29`) | n/a (auth-only by design) | n/a |
+| `completeEnrollment` (unchanged) | unchanged | n/a | n/a |
+
+## Copy Truthfulness
+
+- [x] **In the Copy table.** The one added string, "Verifying your code.", is in the design's Copy table. It appears at `src/app/(auth)/totp/totp-challenge-form.tsx:78` and `src/app/(account)/account/2fa/totp-enroll-form.tsx:175`. "Verifying…", "Verify", "Confirm enrollment" and both toggle labels were moved, not changed.
+- [x] **Source of the claim.** On /totp the claim reads `useFormStatus().pending`; on enrolment it reads the `pending` state. Neither reads the outcome or the code type, so it is also true for a recovery code in flight, and it promises nothing.
+- [x] **Instructions.** The string contains none. The viewer is any signed-in user mid-challenge or enrolling.
+- [x] **Older strings, with one exception.**
+  - Updated in the diff: `docs/ui-standards.md:407`, `docs/product/functionality-map.md:54`, `docs/testing.md:65`, the component, form and e2e header comments.
+  - Still true: the `/totp` error copy ("Try again, or use a recovery code").
+  - **Still false:** `docs/decisions.md:336` (DECISION-193(a): "there is no auto-submit, and completing the code moves focus to Verify"). That file is integration-only under Rule 16. The orchestrator must add the "(amended by DECISION-257)" pointer and DECISION-257 itself at integration, before merge.
+
+**Copy truthfulness: PASS.**
+
+## Observations (non-blocking; for Phase 6 / tech-lead)
+
+- **O-1: a short paste that overflows the remaining boxes still auto-submits, dropping a digit.**
+  - What happened: 3 typed digits plus a 4-digit paste into box 4 submitted, and the overflow digit was discarded (probe above).
+  - Why it passes: this matches the design's literal definition (`exact` = "delivered at most `length` digits"; `one-time-code-input.tsx:139` `digits.length <= length`).
+  - Why it matters: it misses the property Decision 3 was after, "a truncated input waits for the button". C-2, F-5 and E-8 encode the rule as written rather than that property.
+  - Cost: at most one attempt, the same as the accepted typo residual.
+  - Suggested follow-up: set `exact` only when no pasted digit is dropped (a full-length run from box 1, or `start + digits.length <= length`), and add a test for this case.
+- **O-2:** `docs/decisions.md:336` drift (above), required at integration.
+- **O-3:** typo in `docs/ui-standards.md:407`: "…move; A complete code…" (capital after a semicolon).
+- **O-4: a thrown `completeEnrollment` now fails silently** (implementer's flagged deviation, `totp-enroll-form.tsx` `catch`). The boxes re-enable with no message. This is strictly better than before, when the button stayed stuck on "Verifying…" with an unhandled rejection, but the user still gets no feedback. Pre-existing gap.
+- **O-5: not verified:**
+  - real iOS or Android one-time-code autofill (emulated by `fill()`, a clipboard paste and duplicate input events);
+  - a screen reader announcing the status region (asserted in the DOM only);
+  - bfcache back-navigation to `/totp`.
+- **O-6:** the disabled recovery toggle in the pending state shows no visible dimming (also noted by Phase 4). Cosmetic.
+- **O-7, process note: the stash entry is gone.** Phase 4 recorded that another pipeline's stash (`stash@{0}: On pipeline/signin-invites: a1-e33-lane`) was intact. `git stash list` now returns 0 entries. I ran no stash command. The orchestrator should check with the signin-invites pipeline that nothing was lost.
+
+**Leftovers:** worktree `git status` is clean at `404de0b`, as is the main checkout. Ports 3560 and 3561 are free. The scratch copy, including its copy of `.env.local`, is deleted.
+
+## Verdict
+
+**PASS**
+
+The auth-touching gate is met. The e2e suite ran against a real dev server on :3560 with the MFA-enrolled seeded user, covering password, then TOTP (typed, auto-submitted), then the post-login landing. All 58 auth specs, all 523 full-suite specs and all 13 prod-lane hydration specs passed with 0 skipped. Failing-first was reproduced independently for all three unit files and both changed e2e flows.
+
+---
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete; failing-first reproduced (unit 6/55, 9/33, 6/12; e2e 6/17 + invitation-new-account red); auth e2e 58/58, full 523/523, prod lane 13/13, 0 skipped; adversarial probes 9/9; 360px pending and failure checked on /totp and /account/2fa; flags reset to the CI baseline | PASS | 2026-10-25 |
+
+**Handoff:** to **analyst (Phase 6)**. Carry O-1 (a truncated partial paste auto-submits; a design-level choice worth a ruling or TODO), O-4 and O-5 into the shipped-vs-intent review. Before merge, the orchestrator must land DECISION-257 plus the DECISION-193(a) pointer at `docs/decisions.md:336`, and the Gap 6 TODO line (O-2). O-7 is for the orchestrator.

@@ -18,8 +18,8 @@
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete; gaps G1–G17; operator questions Q1–Q5; hard dependency on F289 0072 merging before Phase 4 | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete; R1–R12; DECISION-285–288 proposed; F330–F332; Q6 fallback consent (default attested-only); sharp approved | Approved with suggestions | 2026-10-26 |
-| 3 — Technical design | tech-lead | Pending | — | — |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 3 — Technical design | tech-lead | Increment 1 complete (see `-inc1`); Increments 2 and 3 pending, one child each | Design complete (Inc 1) | 2026-10-26 |
+| 4 — Implementation | database-admin, api-developer, ux-developer (Inc 1) | Blocked until F289 merges (see `-inc1`) | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -718,182 +718,16 @@ I edited no files, made no database connection and did not use `git stash`.
 
 ---
 
-# Phase 3 — Technical Design (tech-lead)
-
-## Summary
-
-[One paragraph: what we're building and why.]
-
-## Permissions & Flags
-
-- Permission key(s): `area.action`
-- Default role bindings: [list]
-- Feature flag(s): [key, or "not needed"]
-
-## API Contract
-
-- `POST /api/...` — purpose, request body, response shape
-- `GET /api/...` — purpose, query params, response shape
-- Or server-action signatures: `async function actionName(input): Promise<Result>`
-
-## Data Model
-
-[New tables / columns / indexes, or "No schema changes required."]
-
-## Component / Page Plan
-
-- Pages to create: [list]
-- Components to create: [list]
-- Files to modify: [list]
-
-## Implementation Order
-
-1. Schema (if any) → `npm run db:push` on a Neon branch
-2. `FEATURE_CATALOG` entry + seed binding
-3. Route handlers / server actions
-4. UI
-5. Audit events for security-sensitive paths
-6. Release notes entry
-
-## Carry-forward
-
-| Phase 1 gap / Phase 2 ruling | Addressed here (where), or *deferred* (who accepted) |
-|---|---|
-| [gap or ruling] | [section, or deferred + who accepted] |
-
-## Edge Cases & Risks
-
-- [Thing that could fail or that needs special handling; each claim cites the test that pins it or says "unverified"]
-
-## Copy
-
-- [Every user-facing string, checked against the accepted residuals: copy may not deny a residual the record admits]
-
-## Implementer
-
-[database-admin | api-developer | ux-developer | full-stack-developer]
-
----
-
-# Phase 4 — Implementation
-
-## Files Created
-
-- `path/to/file` — purpose
-
-## Files Modified
-
-- `path/to/file` — what changed
-
-## Schema Changes
-
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
-
-## Audit Events
-
-- [Action key written when the security-sensitive mutation fires]
-
-## Implementer Notes
-
-[Tradeoffs taken, anything that diverged from the design and why.]
-
-Strings added or changed: [file:line each, or "none"]
-
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
-
----
-
-# Phase 5 — Verification (qa)
-
-**Date:** YYYY-MM-DD
-**Verified by:** qa
-
-## Type Check
-
-`npm run typecheck`: PASS / FAIL
-
-## Unit Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
-
-## End-to-End Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
-
-## Regression Tests Added
-
-- [test name — file:line — guards against: brief description]
-
-## Coverage on Critical Modules
-
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
-
-## Feature-Gate Audit
-
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
-
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
-
-## Copy Truthfulness
-
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
-
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
-
-## Verdict
-
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
-
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
-
----
-
-# Phase 6 — Shipped vs Intent (analyst)
-
-## VERDICT
-
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
-
-## ONE-LINE TAKE
-
-> [The shipped feature in one honest sentence.]
-
-## What's Working
-
-- [Specific. The flow that works well and why.]
-
-## Intent-vs-Shipped Diff
-
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
-
-## Edge Cases
-
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
-
-## Follow-Ups (if SHIP WITH NOTES)
-
-- [Concrete, actionable. Each gets its own work-log entry.]
-
-## Red Flags (if NEEDS REWORK)
-
-- [Specific. What has to change before this ships.]
+# Increments
+
+The parent keeps the shared Phase 1, the operator rulings and Phase 2. Each shipped increment has its own child work-log with its own Phases 3 to 6 (CLAUDE.md → Per-Feature Tracking). Judgment-agent text stays verbatim in the child it belongs to.
+
+| Increment | Scope | Child work-log | Phase 3 | Migration | Status |
+|---|---|---|---|---|---|
+| 1. Staff-managed photos for adults | Org-scoped photo set and end-dated designations (directory, website with attestation and the attested-only fallback); `sharp` image pipeline; thumbnails in the directory; roster functions and the F289 door read the new designation; per-org toggle `org_portal.person_photos`; audit; client downscale | `2026-10-26-person-photos-inc1.md` | Complete 2026-10-26 | 0078 (0079 retires `people.photo_key` in a later release) | Phase 4 blocked until F289 (migration 0072) merges |
+| 2. Bulk harvest | Multi-file upload with in-memory name matching and a review queue; possibly avatars on Community lists | not created | Pending (only if the volume warrants) | none expected | Not started |
+| 3. Minors and households | Guardian consent workflow, `household_photos` | not created | Pending (after the children's ministry consent workflow ships) | TBD | Not started |
+| Separate pipeline: member self-service | Profile and privacy page; supplies self-upload and the first `hide_photo` writer | not created | Pending | TBD | Not started |
 
 ## Operator rulings on Phase 1 questions (2026-10-26)
 

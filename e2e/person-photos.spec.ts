@@ -275,6 +275,32 @@ test.describe("Person photos: the admin page", () => {
           [true, "website", true],
         ]);
 
+        // 5b. Phase 5 run 3 (T29, QA (e)): photo 1 is now BOTH the website photo and the cleared directory photo, so
+        // stopping the website designation moves nothing (the SQL core still selects it through the clearance). The
+        // dialog says that, and names the control that does take it off; it never says the website stops using it.
+        await one.getByRole("button", { name: "Stop using on website" }).click();
+        const stopDialog = page.getByRole("alertdialog");
+        await expect(stopDialog.getByText("Stop using this photo on the public website?")).toBeVisible();
+        await expect(
+          stopDialog.getByText(
+            `This photo is also ${first}'s directory photo, and it was cleared for the website, so this changes nothing on the website.`,
+          ),
+        ).toBeVisible();
+        await expect(stopDialog.getByText('To take it off the website, use "Stop using in directory" on this photo as well.')).toBeVisible();
+        await expect(stopDialog.getByText(/will no longer use this photo/)).toHaveCount(0);
+        await expect(stopDialog.getByText(/Browsers that already saved it/)).toHaveCount(0);
+        const stopBox = await stopDialog.boundingBox();
+        expect(stopBox!.x).toBeGreaterThanOrEqual(0);
+        expect(stopBox!.x + stopBox!.width).toBeLessThanOrEqual(vp.width);
+        await noHorizontalOverflow(page);
+        await stopDialog.getByRole("button", { name: "Cancel" }).click();
+        await expect(page.getByRole("alertdialog")).toHaveCount(0);
+        const afterCancel = await designationRows(sql, COMMUNITY_ORG.id, person.personId);
+        expect(afterCancel.filter((d) => !d.ended).map((d) => [d.photo_id === photos[0]!.id, d.purpose, d.attested]).sort()).toEqual([
+          [true, "directory", true],
+          [true, "website", true],
+        ]);
+
         // 6. A directory choice with the attestation: the directory photo moves to photo 2, cleared for the website.
         await two.getByRole("button", { name: "Use in directory" }).click();
         const dirDialog = page.getByRole("dialog");

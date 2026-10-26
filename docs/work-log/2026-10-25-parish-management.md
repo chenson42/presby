@@ -20,6 +20,7 @@
 | 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batches B, C); loop-back 1 done (see its section at the end) | Batch A complete: 0068 hand-written, applied twice (idempotent), rollback rehearsed, journal idx 68; test-rls-68 64/64 as presby_app; parishes.db.test.ts 25/25; staged seed + two integration patches. Batches B and C complete: library, actions, pages, components, Officers UI, e2e (parishes 10/10, hydration 3/3 on :3510 incl. the MFA-enrolled seat holder), 360px walk, global-setup patch staged; typecheck, lint, `npm run check`, `npm test` (8551), build and the parish DB suites green. Eight items for Phase 5/6 attention (see Implementer Notes) | Batches A, B, C done | 2026-10-25 |
 | 5 — Verification | qa | Run 1 FAIL (copy, NFC, seat-group injection). Run 2: unit 8578/8578, test:db 11115 (2 accepted canaries), test-rls-68 65/65, e2e 425/425, prod 79/79, failing-first re-proved for F2–F5 and the 0068 definer pin, 360px clean, copy PASS | PASS | 2026-10-25 |
 | 6 — Shipped vs intent | analyst | Founding-administrator walk at 360px done; F245 clause for DECISION-242; release 0.45.0; notes N1–N5 | SHIP WITH NOTES | 2026-10-25 |
+| Integration and release | tech-lead (orchestrated) | Merged `origin/main` 0.44.1 (conflicts in `drizzle/meta/_journal.json`, `src/lib/audit.ts`, `src/lib/audit.test.ts`, `src/lib/org-feature-catalog.test.ts`, both-sides kept); two post-merge e2e-fixture fixes (shared `withDbRetry`, TOTP typed-code sign-in); applied 0067 to this Neon branch; shared-file integration (DECISION-242 to 245, CLAUDE.md sentence, three patches, TODO, map, STATE, F258-F265); release 0.45.0; briefing and marker; production runbook for 0068 (end of this log). After the merge: typecheck, lint, check 8/8, unit 9258/9258; full serial `test:db` 11857 of 11860 with only the two accepted canary failures; `test-rls-68.sql` 65/65; full `test-rls.sql` 1364 passes with only the three known drift failures (:219, :518, :7953); `parishes.spec.ts` + `hydration/parishes-controls.spec.ts` 13/13 | Ready for `/pre-push` | 2026-10-25 |
 
 ---
 
@@ -2175,3 +2176,209 @@ Files referenced:
 - `/Users/cshenso/git/presby-platform/presby-parish/docs/product/functionality-map.md` (lines 18 and 69)
 - `/Users/cshenso/git/presby-platform/presby-parish/docs/TODO.md` (lines 51, 242 and 393 on `main`)
 - Walk screenshots and scripts, in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6/` (the screenshots are in `shots/`)
+
+
+---
+
+# Production runbook for migration 0068 (tech-lead, 2026-10-25; Phase 6 N5)
+
+*Written at the release step. This agent did not connect to production. The orchestrator or the operator runs it, in order, and stops at the first row that does not match "expect". The pre-ship and verification SQL below was run read-only against this pipeline's own Neon branch (where 0068 is already applied) to prove it parses and returns sensible shapes; the branch's values for "before the apply" items therefore differ from production's expected values, as noted in each block.*
+
+**Deploy order.** Snapshot production, run the pre-ship reads, apply 0068, run the verification queries, **then** merge and deploy 0.45.0. The migration header says why: it is additive for the old code (the old code never deletes `org_units`, never writes `archived_at`, never records the new office and writes only active, non-campus districts), whereas the new code selects `org_units.archived_at` and would fail on a database without it. Parish management is off everywhere after the deploy, so merging exposes nothing.
+
+**Which URL.** The owner connection on the **direct** (non-pooler) endpoint, the same one used for 0067 (`docs/deployment.md`, "Public events calendar (0067)"). Read the host out of the variable and confirm it is the production host before each step; never the development branch, never a pipeline branch.
+
+## Step 0 — snapshot and host check
+
+Take a production snapshot or restore point in the Neon console first. Then:
+
+```bash
+URL="<production owner direct URL>"      # set in the shell; do not paste it into a file
+echo "$URL" | sed -E 's#.*@([^/:?]+).*#\1#'   # print the host only; it must be the production host
+```
+
+## Step 1 — pre-ship reads (read-only; the file opens `begin transaction read only` and ends in `rollback`)
+
+```sql
+begin transaction read only;
+
+-- 1. Inherited gates. Both directory flags must read enabled = t.
+select key, enabled from feature_flags
+ where key in ('org_portal.directory', 'org_portal.directory_v2', 'org_portal.officers')
+ order by key;
+
+-- 2. Stop-block counts (0068 section 1). Every column must be 0.
+select
+  (select count(*) from org_units
+    where unit_type not in ('parish', 'campus', 'district'))                    as bad_type,
+  (select count(*) from org_units
+    where name <> btrim(name) or name is not nfc normalized
+       or char_length(name) not between 1 and 80)                               as bad_name,
+  (select count(*) from (select 1 from org_units
+                          group by organization_id, lower(name)
+                         having count(*) > 1) d)                                as dup_names,
+  (select count(*) from households h
+     join org_units u on u.id = h.org_unit_id and u.organization_id = h.organization_id
+    where u.unit_type = 'campus')                                               as households_at_campus,
+  (select count(*) from officer_terms ot
+     join org_units u on u.id = ot.org_unit_id and u.organization_id = ot.organization_id
+    where u.unit_type = 'campus' and (ot.ends_on is null or ot.ends_on > current_date)) as terms_at_campus,
+  (select count(*) from officer_terms
+    where office not in ('ruling_elder', 'installed_pastor', 'co_pastor', 'associate_pastor',
+                         'deacon', 'deacons_moderator', 'clerk_of_session', 'moderator',
+                         'treasurer', 'trustee'))                                as bad_office;
+
+-- 3. The global 'roster' group type must exist (expect 1) when any congregation exists.
+select (select count(*) from group_types where key = 'roster') as roster_group_type,
+       (select count(*) from organizations where organization_type = 'congregation') as congregations;
+
+-- 4. State before the apply. Expect: archived_at_column = 0, and seat_groups / seat_roles /
+--    seat_key all 0 (a non-zero seat_roles means an org already owns a role with that key;
+--    0068 leaves it untouched and says so in a NOTICE).
+select (select count(*) from information_schema.columns
+         where table_schema = 'public' and table_name = 'org_units'
+           and column_name = 'archived_at')                                      as archived_at_column,
+       (select count(*) from groups where derived_from = 'deacons_moderator')    as seat_groups,
+       (select count(*) from app_roles where key = 'deacons_moderator')          as seat_roles,
+       (select count(*) from permissions where key = 'parishes.assign')          as seat_key;
+
+-- 5. Sizing, for information.
+select (select count(*) from org_units) as units,
+       (select count(*) from households) as households,
+       (select count(*) from households where org_unit_id is null) as households_without_district;
+
+-- 6. IS NORMALIZED needs PostgreSQL 13 or later. Expect 130000 or more.
+show server_version_num;
+
+rollback;
+```
+
+Save it as `pre.sql`, run `psql "$URL" -v ON_ERROR_STOP=1 -f pre.sql`, and compare:
+
+| Block | Expect in production before the apply | If not |
+|---|---|---|
+| 1 gates | `org_portal.directory` and `org_portal.directory_v2` both `enabled = t` (`org_portal.officers` is informational: the Officers page is where the seat is recorded) | **Do not turn Parish management on for any congregation** until both directory flags are on (N5: the new pages sit behind the directory's own gates). This does not block the apply itself |
+| 2 stop-block counts | All six columns `0` | **Stop. Do not apply.** Each non-zero count is a row the new constraints cannot be built over; the migration would raise the same error and roll back. Report the counts; correcting rows is a human decision |
+| 3 roster type | `roster_group_type = 1` whenever `congregations > 0` | **Stop.** Section 1 of the migration raises without it |
+| 4 state | `archived_at_column = 0`, `seat_groups = 0`, `seat_roles = 0`, `seat_key = 0` | `archived_at_column = 1` means 0068 is already applied (re-applying is safe, the file is idempotent, but find out why). A non-zero `seat_roles` means an organization already owns a role keyed `deacons_moderator`; 0068 leaves it untouched and prints a NOTICE, and that congregation gets no seat role |
+| 5 sizing | information only | none |
+| 6 version | `130000` or more | **Stop.** `IS NORMALIZED` needs PostgreSQL 13 |
+
+(On this pipeline branch, where 0068 is already applied, block 4 reads `1 / 9 / 9 / 1`, block 1 reads all `f`, and blocks 2 and 3 read zeros and `1`: the shapes are right.)
+
+## Step 2 — apply
+
+```bash
+psql "$URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0068_presby_parishes.sql
+```
+
+Single transaction (`-1`) and `ON_ERROR_STOP`, so any failure leaves no partial state. Expect exit status 0, no `ERROR`, and zero or more NOTICE lines (the "already hold an org-owned deacons_moderator role" notice is the only one the file can print). The file is idempotent: if the connection drops mid-run, check that nothing was applied (block 4 above) and run the same command again.
+
+`drizzle/meta/_journal.json` already carries idx 68 (and 67) on this branch; the psql path records nothing else.
+
+## Step 3 — verification (read-only)
+
+```sql
+begin transaction read only;
+
+-- A. The sync function: a pinned SECURITY DEFINER with no application EXECUTE.
+--    Expect one row: prosecdef = t, proconfig = {"search_path=public, pg_temp"},
+--    owner = the migration owner, app_exec = f, platform_exec = f.
+select p.proname, p.prosecdef, p.proconfig,
+       pg_get_userbyid(p.proowner)                              as owner,
+       has_function_privilege('presby_app', p.oid, 'execute')      as app_exec,
+       has_function_privilege('presby_platform', p.oid, 'execute') as platform_exec
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname = 'presby_sync_derived_group';
+
+-- B. The ACL itself. Expect proacl to read {<owner>=X/<owner>} only (or be null): no presby_app,
+--    no presby_platform, and no public ("=X/") entry.
+select p.proname, p.proacl
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('presby_sync_derived_group', 'presby_org_units_guard_delete',
+                     'presby_guard_org_unit_target', 'presby_guard_seat_key_binding',
+                     'presby_guard_seat_role_shape', 'presby_guard_seat_key_grant',
+                     'presby_guard_seat_key_downward', 'presby_seat_key_group')
+ order by p.proname;
+
+-- C. FORCE ROW LEVEL SECURITY. 0068 creates no table; these are the tables it alters or
+--    reads through guards. Expect relrowsecurity = t and relforcerowsecurity = t on all ten.
+select c.relname, c.relrowsecurity, c.relforcerowsecurity
+  from pg_class c
+ where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'
+   and c.relname in ('org_units', 'households', 'officer_terms', 'groups', 'group_memberships',
+                     'app_roles', 'app_role_permissions', 'role_grants',
+                     'administrative_commissions', 'org_delegations')
+ order by c.relname;
+
+-- D. No DELETE on org_units for either application role. Expect f, f.
+select has_table_privilege('presby_app', 'org_units', 'delete')      as app_delete,
+       has_table_privilege('presby_platform', 'org_units', 'delete') as platform_delete;
+
+-- E. The eight triggers. Expect 8 rows, all tgenabled = 'O'.
+select c.relname as on_table, t.tgname, t.tgenabled
+  from pg_trigger t join pg_class c on c.oid = t.tgrelid
+ where not t.tgisinternal
+   and t.tgname in ('households_org_unit_target_guard', 'officer_terms_org_unit_target_guard',
+                    'app_role_permissions_seat_key_guard', 'app_roles_seat_role_guard',
+                    'role_grants_seat_key_guard', 'administrative_commissions_seat_key_guard',
+                    'org_delegations_seat_key_guard', 'org_units_guard_delete')
+ order by t.tgname;
+
+-- F. Constraints and indexes. Expect convalidated = t on both CHECKs, the office CHECK
+--    to mention deacons_moderator, and both indexes present.
+select conname, convalidated, (pg_get_constraintdef(oid) like '%deacons_moderator%') as names_seat
+  from pg_constraint
+ where conname in ('org_units_unit_type_check', 'org_units_name_shape', 'officer_terms_office_allowed')
+ order by conname;
+select indexname from pg_indexes
+ where indexname in ('org_units_active_name_idx', 'households_org_unit_idx') order by indexname;
+
+-- G. The backfill. Expect: seat_groups = congregations; seat_roles = seat_groups (less any
+--    org that already owned the key); role_keys = seat_roles (one parishes.assign per seat
+--    role and none elsewhere); group_grants = seat_roles; seat_members = 0 (nobody gains
+--    anything until a seat term is recorded); outside_seat_roles = 0.
+select (select count(*) from organizations where organization_type = 'congregation')       as congregations,
+       (select count(*) from groups where derived_from = 'deacons_moderator')               as seat_groups,
+       (select count(*) from app_roles where key = 'deacons_moderator')                     as seat_roles,
+       (select count(*) from app_role_permissions where permission_key = 'parishes.assign') as role_keys,
+       (select count(*) from app_role_permissions rp join app_roles r on r.id = rp.role_id
+         where rp.permission_key = 'parishes.assign' and r.key <> 'deacons_moderator')       as outside_seat_roles,
+       (select count(*) from role_grants rg join app_roles r on r.id = rg.role_id
+         where r.key = 'deacons_moderator')                                                 as group_grants,
+       (select count(*) from group_memberships gm join groups g on g.id = gm.group_id
+         where g.derived_from = 'deacons_moderator')                                        as seat_members;
+
+-- H. Nothing is switched on. Expect 0 rows: no congregation has Parish management on.
+select organization_id from organization_feature_toggles
+ where feature_key = 'org_portal.parishes' and enabled;
+
+rollback;
+```
+
+Save it as `post.sql`, run `psql "$URL" -v ON_ERROR_STOP=1 -f post.sql`, and compare:
+
+| Block | Expect in production after the apply |
+|---|---|
+| A `presby_sync_derived_group` | one row: `prosecdef = t`, `proconfig = {"search_path=public, pg_temp"}`, `owner` = the migration owner, `app_exec = f`, `platform_exec = f` |
+| B ACLs | eight rows; each `proacl` lists only the owner (`{<owner>=X/<owner>}`) or is null. Any `presby_app`, `presby_platform` or public (`=X/`) entry is a defect |
+| C FORCE RLS | ten rows, `relrowsecurity = t` and `relforcerowsecurity = t` on every one. (0068 creates no table, so there are no new tables to check; these are the ten it alters or guards through.) |
+| D delete | `app_delete = f`, `platform_delete = f` |
+| E triggers | eight rows, all `tgenabled = O` |
+| F constraints, indexes | all three `convalidated = t`; `names_seat = t` on `officer_terms_office_allowed`; both indexes listed |
+| G backfill | `seat_groups = congregations`, `seat_roles = seat_groups` (less any org the block-4 notice named), `role_keys = seat_roles`, `outside_seat_roles = 0`, `group_grants = seat_roles`, **`seat_members = 0`** (a non-zero count means someone holds the seat's ability before any term was recorded: stop and investigate) |
+| H toggles | zero rows (no congregation has Parish management on) |
+
+(On this branch, block G reads `9 / 9 / 9 / 9 / 0 / 9 / 1`: the one seat member is the dev fixture's recorded Moderator, which production does not have.)
+
+## Step 4 — deploy, then smoke
+
+1. `/pre-push`, then `/merge-pr`; the merge auto-deploys.
+2. As a platform admin, open any congregation's `/o/<slug>/directory/parishes` while signed in as someone who already held `directory.view_hidden`: the roster renders and no error appears. Open `/o/<slug>/admin/features` and confirm "Parish management" is listed and **off**.
+3. Do not turn the toggle on for any real congregation until the first one has been agreed with its administrator. When one does turn it on, publish one what's-new entry for the Moderator (Phase 6 Ruling 3), and run Step 1 block 1 again.
+
+## Rollback
+
+The migration header carries the rehearsed rollback (drop the eight triggers and guard functions, narrow the CHECKs, restore the sync function as `security definer set search_path = public, pg_temp` if 0066 has been applied, grant DELETE back). Data (archived districts, the seat groups, roles and grants, any recorded seat terms) stays in place and is inert without the application. Roll back only with the operator's say-so; the restore-point from Step 0 is the other route.

@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete (+ addendum: shared audience shape); Gaps 1–16 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete; R1–R9; DECISION-277; fail-closed default kept; bundle JSON private | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; full design (migration 0072, definer, route, 23 call sites); departures recorded; operator question: directory flags vs roster photo | Design complete, implementers named | 2026-10-25 |
-| 4 — Implementation | database-admin (Batch 1: 0072) then full-stack-developer (Batch 2: adapter, route, call sites, e2e) | Batch 1 complete: 0072 hand-written, D5 snapshot PASS, applied to the pipeline branch twice (84, then 0), section 72 24/24, 7 mechanisms proven failing-first; 5 design corrections for tech-lead (people is global; person_privacy join scope needs a RULING; journal idx 72; presby_platform NOLOGIN; D2 adapter half moves to Batch 2). Batch 2 pending | Batch 1 green | 2026-10-25 |
+| 4 — Implementation | database-admin (Batch 1: 0072) then full-stack-developer (Batch 2: adapter, route, call sites, e2e) | Batch 1 complete (0072, D5 snapshot PASS, section 72 24/24, 7 mechanisms failing-first). Batch 2 complete 2026-10-26: adapter `audience` + `resolvePublic`, the route on the door, 23 call-site literals pinned by a source scan, 3 toggle strings, U1-U5 + D1 + D2 adapter half + D4 + E1; unit 9054 passed, touched DB suites green, e2e dev lane and production-build lane green, 360px checked; 1 design miss (a merged fixture's `ON CONFLICT` target) fixed via the patch | Batch 1 + Batch 2 green | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1340,21 +1340,75 @@ None. This is a provisioning migration, per the 0057 precedent.
 
 Strings added or changed: no user-facing strings. Migration and trigger messages are as in Copy C5 (`0072: % blob(s) are both published …`, `0072: flipped % blob(s) to public_site`, `0072: the bundle of organization % is not parseable JSON …`, `blob_assets %: audience is immutable (% to %)`). Maintainer comments in `assets.ts`, `support.ts`, `giving.ts` and `check-schema-parity.ts` are updated per C7.
 
-## Batch 2 — full-stack-developer
+## Batch 2 — full-stack-developer, 2026-10-26
+
+Branch `pipeline/public-asset-allowlist`, merged `origin/main` at 0.44.0 first (0067 applied to the pipeline Neon branch `pipeline-asset-allowlist` so the merged code ran against a matching schema; 0072 re-applied whole, `flipped 0`, ACL intact, after two definer mutation experiments below). Commits: `e81287f` (the fix), `40fa74b` (the e2e spec), then the docs and this section.
 
 ### Files Created
 
-- `path/to/file` — purpose
+- `src/lib/storage/blob-key.ts`: `parseBlobKey()`, the one uuid-shape gate (pure, no `server-only`).
+- `src/lib/storage/blob-key.test.ts` (U1, 20), `blob-store-public.test.ts` (U2, 17), `audience-callsites.test.ts` (U4, 13), `public-asset.db.test.ts` (D1, 32).
+- `src/app/(public)/site/[slug]/assets/[key]/route.db.test.ts` (D4, 5).
+- `e2e/custom-domains/assets.spec.ts` (E1, 12).
+- `docs/deployment.md`: new section "Public asset audience (0072)" with the pre-deploy runbook and the V1-V6 verification.
+- `docs/work-log/public-asset-allowlist.integration.patch`: rewritten for the merged base; four diffs (journal, `test-rls.sql`, `e2e/support/custom-hosts.ts`, `e2e/support/public-calendar-fixture.ts`) plus the prose for the orchestrator.
 
 ### Files Modified
 
-- `path/to/file` — what changed
+- `src/lib/storage/blob-store.ts`: `BlobAudience`, `PublicImageType`, `PublicAsset`; `audience` required on `StoreInput`/`ResolveInput`; `store()` dedups on `(org, audience, hash)`, writes and returns `audience`, throws `BlobValidationError` for a `public_site` non-image; `resolve()`/`resolveMeta()` match only the named audience; `resolvePublic()` (key validated, one `db.execute` of the definer on the `presby_app` connection with no GUC, a second type/class check, `Buffer.from`, errors propagate). Header rewritten.
+- `src/app/(public)/site/[slug]/assets/[key]/route.ts`: rewritten (key, then site, then asset; one `notFound()` helper; per-class cache; log is `{ mode, slug, key }`).
+- 18 call-site files, one audience literal per call (7 `store`, 11 `resolve`, 5 `resolveMeta` = 23 calls), plus the route's `resolvePublic`: see `audience-callsites.test.ts`'s `ACTIVE` table for the exact file-to-literal map.
+- `render-site-page.tsx` (`MISSING_IMAGE_KEY`, comments), `sites.ts` (comment only), the three `public-listing-toggle.tsx` files and their tests.
+- Tests that assert call arguments or insert through `store()`: both statement download route tests, `person-avatar.test.tsx`, `directory-grid.test.tsx`, `sites-resolve-site.test.ts`, `branding/page.test.tsx`, `tickets/actions.test.ts`, `organizations/[id]/actions.test.ts`, `upload-attachment-action.test.ts`, `ingest/route.test.ts` (images `public_site`, bundle `private`), `tenant-branding.test.ts` (a stored logo is `public_site`), `sites.test.ts`, `read-org-brand.test.ts`, `[[...path]]/page.test.tsx` (U5), `blob-store.test.ts` (adapter half of D2, +7).
+- `scripts/public-calendar/seed-dev-bundle.sql`: `ON CONFLICT` target (see deviation 1).
+- `playwright.config.ts`: `assets` joins the `prod-custom-hosts` testMatch.
 
-### Implementer Notes
+### Endpoints and signatures
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+- `GET /site/[slug]/assets/[key]` (and `/assets/[key]` on a custom host): public, no session, gated by `sites.public_render` only (no permission, no new flag, no audit). 200 `site`: `public, max-age=31536000, immutable`; 200 `roster`: exactly `private, max-age=86400`; every miss: 404 `{"error":"Not found"}`, `no-store`, `nosniff`.
+- `getBlobStore().store({ organizationId, bytes, contentType, audience })`, `.resolve({ organizationId, key, audience })`, `.resolveMeta(...)`, `.resolvePublic({ organizationId, key })`.
+- No schema change in this batch, no new env var, no new `FEATURES` entry, no new flag.
 
-Strings added or changed: [file:line each, or "none"]
+### Deviations from the design
+
+1. **`ON CONFLICT (organization_id, content_hash)` in a merged fixture.** The design's grep ("none in src, scripts, e2e") was true at `2a25584` and false at 0.44.0: the public-events-calendar pipeline added `e2e/support/public-calendar-fixture.ts` and `scripts/public-calendar/seed-dev-bundle.sql`, both with that target, which 0072 drops. `e2e/custom-domains/public-calendar.spec.ts` failed in `beforeAll` ("no unique or exclusion constraint matching the ON CONFLICT specification"). The seed script is fixed and committed; the e2e support file is a Rule 16 file and rides in the patch (diff 4). Needs an F-number (patch item 4). Any pipeline that merges after 0072 and uses that conflict target breaks the same way.
+2. **E1's private-class assertions are ordered first** (a plain "not served" status check, then the byte-for-byte comparison), so the red run on the old route reads "private PNG must not be served, expected 404 received 200" instead of failing earlier on the missing `no-store` header.
+3. **U4's exemption list is a named constant** (`EXEMPT_METHODS`, currently `resolvePublic`), per the orchestrator's S1 ruling: every other `getBlobStore().<method>(` call needs an audience literal, so a later adapter method (`findByContentHashes`, `resolveMany`) is a table edit. The scan also has a self-test block (it is not vacuous) and two DECISION-030 assertions (no non-test file but `blob-store.ts` imports `blobAssets` or holds raw `from|join|into|update blob_assets` SQL in a string literal).
+4. **D2 adapter half lives in `blob-store.test.ts`** (the real-database adapter file) rather than `blob-audience.db.test.ts`; an out-of-vocabulary audience is refused by the database CHECK, not a new adapter error, because the only error strings allowed are in the Copy table.
+5. **Toggle dialogs at 360px.** The three toggles sit in a `hidden sm:table-cell` cell, an existing design, so on a phone the dialog is not reachable from the roster at all. The check below forces the cell visible to see the dialog's own layout at 360px and also opens it naturally at 640px.
+6. `playwright.config.ts` change (the `assets` spec joins the production lane): not in the design; a one-word testMatch edit.
+
+### Red, then green
+
+- **U1** module absent (suite failed to load) then 20/20. **U2** 17 failed (`resolvePublic is not a function`) then 17/17. **U3** 16 failed, 2 passed (the two site-miss cases) then 18/18. **U4** 2 failed, 11 passed (no audience anywhere) then 13/13. **U5** 1 failed (`/assets/missing`) then green. **Toggle copy** 3 failed (one per file) then green.
+- **E1 on the unfixed route** (`next dev` at :3600): 3 failed, 9 passed; the three failures are "private PNG (ticket-attachment-shaped) must not be served: expected 404, received 200", on the canonical host, the alias and the platform host. After the fix: 12/12.
+- **D1, D2 adapter half, D4** are green on first run after their own fixture bugs (a derived group needs `derived_from`; one `hostIs` ordering slip in D4), and their value was proven by mutating the definer on the pipeline branch (each restored from `pg_get_functiondef`, then 0072 re-applied whole with `flipped 0` and the ACL checked):
+  - mutation 1 (a photo key served whenever it is anyone's photo): D1 11 failed, 21 passed (every unlisted, ended, hidden, derived-group, exclusion and parity case);
+  - mutation 2 (a non-photo key served whatever its audience): D1 4 failed (private image, ticket image, wordmark, historical mark), 28 passed; D4's "every miss is byte-identical" failed on "private image (slug mode): status 200".
+  The statement PDF and the bundle JSON stay unserved under mutation 2 because of the definer's image-type test: that is the intended belt-and-braces layer, not a gap in D1.
+
+### Gates
+
+- `npm run typecheck`: clean. `npm run lint`: clean (`--max-warnings=0`). `npm run build`: passes. `npm run check`: 8/8 (re-run `check:secrets` with the new files staged: passes). `npm run check:schema-parity`: 0 failing.
+- `npm run test` (no `.env.local`): 596 files passed, 85 skipped; 9054 tests passed, 2578 skipped.
+- DB-backed, serial, `.env.local`: D1 32, D2 `blob-store.test.ts` 14 and `blob-audience.db.test.ts` 22, D3 8, D4 5 (the four files together: 49), and the other touched suites (`ingest/route.test`, `read-org-brand.test`, `giving-statements.db.test`, `directory.test`, `serving.db.test`, `giving/statements.db.test`, `sites.test`, `sites-render-fail-closed.test`, `tenant-branding.test`, `giving.schema.test`, `blob-audience.schema.test`): 11 files, 350 tests, all passed. The full `npm run test:db` (about 40 minutes) was not re-run; Batch 1's full run is the baseline and this batch added no schema.
+- **The five Batch 1 `test:db` failures are environmental, cause confirmed.** `src/proxy.test.ts:435`, `src/lib/auth/safe-callback.test.ts:239`, `(member)/feedback/actions.test.ts:516`, `tickets/actions.test.ts:333` and `onboarding/issue.db.test.ts:303` hard-code `http://localhost:3000` or the `localhost:3000` host, while this worktree's `.env.local` sets `NEXT_PUBLIC_APP_URL=http://localhost:3600`. Evidence: all five pass in the no-env unit run above; with `NEXT_PUBLIC_APP_URL=http://localhost:3000` exported over `.env.local`, `safe-callback`, `feedback/actions`, `issue.db` and `tickets/actions` pass; `proxy.test.ts:435` additionally needs the variable unset (its production branch expects `localhost:3000` NOT to be a platform host) and passes only in the no-env run. None touches this change.
+- **e2e, own dev server at :3600** (`next dev -p 3600`, `E2E_BASE_URL`/`AUTH_URL` `http://localhost:3600`, `RATE_LIMIT_DISABLED`, `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`, `E2E_ALLOW_SHARED_DB`; stopped by PID):
+  - `e2e/custom-domains/assets.spec.ts`: 12/12.
+  - all of `e2e/custom-domains` (`--project=custom-hosts`): 115 passed, then the one failure (`public-calendar.spec.ts`, deviation 1) and its 7 dependants re-run after the fix: 8/8.
+  - `branded-signin`, `public-sites`, `public-calendar`, `giving-statements`, `giving-public` (`--project=chromium`): 68/68.
+  - **production-build lane** (`PW_PROD_BUILD=1 PW_PROD_PORT=3600`, `--project=prod-custom-hosts`: assets, headers, lockdown, serving): 76/76. `x-content-type-options` is a single `nosniff` on the production build as well as on dev (Edge Case 15 resolved: Next replaces the route-level value, it does not append).
+- **Real-browser 360px.** E1's two browser tests run in Chromium: the custom host's home page and the WALK platform page, each with the hero image, the header logo and the footer logo (`complete` and `naturalWidth > 0`: 3, 2 and 3 px natural widths for the 3x3 mark and 2x2 hero), image right edges at 82/340/88px, `scrollWidth` at most 360 on both. Screenshot of the platform page read: logo and hero render, nothing overflows. The three toggle dialogs at 360px (cell forced visible, deviation 5) and at 640px (natural): the dialog is inside the viewport (x 22 to 337 of 360), the new sentence and "including search engines and archival crawlers" are present, both buttons are visible and inside it (the buttons measure about 35px tall, an existing size I did not change). Screenshots of staff at 360px and groups at 360px read.
+- Throwaway helper specs used for the screenshots and the dialogs were deleted, and their fixture rows (a role, three people, a group, a staff position, an officer term) removed with a confirming SELECT; the pipeline branch has no `Toggletest` people left.
+
+Strings added or changed: `src/app/(org)/o/[slug]/admin/staff/public-listing-toggle.tsx:124`, `.../officers/public-listing-toggle.tsx:113`, `.../groups/public-listing-toggle.tsx:137` (Copy C2, exactly: "This makes ${personName}'s name, role, and photo (if one is on file and they haven't hidden it) visible to anyone visiting the public website — including search engines and archival crawlers."); `src/lib/storage/blob-store.ts` `store()` (Copy C3); the route's `console.error` line (Copy C4: "[site-assets] public asset read failed; treating as not found"). Comment rewrites per C7 (route header, `render-site-page.tsx`, `sites.ts`, `blob-store.ts`). The runbook text in `docs/deployment.md` is documentation, not UI. No other string.
+
+### For the next pipelines
+
+- **site-ingest (`findByContentHashes` on this adapter):** add the method to `BlobStore` and `PostgresBlobStore`; it must take `audience` and filter on it (the dedup key is `(organization_id, audience, content_hash)`; a lookup that ignores audience is exactly F298). `audience-callsites.test.ts` already holds any `getBlobStore().findByContentHashes(` call to an `audience` literal by default; add its call sites to `ACTIVE`. If it ever must not carry one, name it in `EXEMPT_METHODS` with the reason. Ingest's `imageKeys` map must keep naming `public_site` images only (a `private` key in a bundle is a broken image, and `MISSING_IMAGE_KEY` is the nil uuid). A re-ingest of the same sha short-circuits as `already_current`: heal a private-image window with a new commit.
+- **person-photos (rewrites the roster functions in 0078):** `create or replace` of `presby_public_staff_roster` and `presby_public_committee_roster` must restate `set search_path = public, pg_temp`, `revoke all ... from public` and `grant execute ... to presby_app` (0072 does, and `public-roster-photo.db.test.ts` pins the `proconfig` and ACL), and must keep `case when coalesce(pp.hide_photo, false) then null else p.photo_key end` joined on `person_privacy.person_id` alone (F340 ruling). The door `presby_public_site_asset()` CALLS the two roster functions and matches a photo on `lower(p.photo_key)` against the canonical key, so any change to their return type, to the case of `photo_key`, or to what `photo_key` holds (a `uuid` column after the FK follow-up) needs the door re-checked: run D1, especially the parity test ("for EVERY person in the matrix, the door serves the photo IFF a roster function lists the key"), the uppercase-`photo_key` case, and `public-roster-photo.db.test.ts`. A photo writer stores the photo `private` and adds the `(photo_key, organization_id, asset_audience) -> blob_assets(id, organization_id, audience)` FK pinned to `private` (the follow-up in the TODO lines). `person-avatar.tsx` resolves a photo with `audience: "private"`; `resolveMany`, if it appears, needs the same literal. A `private` photo is served publicly only while listed, as class `roster`, never `site`.
+- **Any pipeline writing `blob_assets` with `ON CONFLICT`:** the target is `(organization_id, audience, content_hash)` since 0072.
+- **Treasury (0073):** its receipt FK must carry `asset_audience` pinned to `private` against `blob_assets_id_org_audience_key`; the catalog test in `blob-audience.db.test.ts` fails otherwise. Move the `FORWARD` row for `src/lib/reimbursement/receipts.ts` to `ACTIVE` when it merges.
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

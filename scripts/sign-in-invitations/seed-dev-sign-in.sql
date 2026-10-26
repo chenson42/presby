@@ -57,6 +57,11 @@
 --      (every limit is bounded created_at <= now()).
 -- ---------------------------------------------------------------------------
 
+-- One transaction: app.person_claim_authorized below is transaction-local
+-- (set_config(..., true)), so under psql autocommit it would be gone before
+-- the second-membership insert (CI applies seed-dev.sql without -1).
+begin;
+
 -- 1. The toggle rows for every organization.
 insert into organization_feature_toggles (organization_id, feature_key, enabled, updated_by)
 select o.id, 'org_portal.sign_in_connect', true, null
@@ -215,3 +220,5 @@ select '65000000-0000-4000-8000-000000000001', 'sign_in', 'org', v.address, v.pe
   ) v(person, address, token)
  where not exists (select 1 from account_invitations i
                     where i.token_hash = encode(sha256(convert_to(v.token, 'UTF8')), 'hex'));
+
+commit;

@@ -20,7 +20,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12; second amendment 2026-10-26 rules Batch 4's Copy gaps, X1 to X7, the queue's group filter and residual 13 | Design complete | 2026-10-25 |
 | 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). **Batch 3 complete (api-developer)**: `decisions.ts` (approve on the seat and override paths, send back / not approved), `notices.ts` + `notify.ts` (the four `person:role` notices; submit now tells approvers or pay holders), `approveRequestAction` / `returnRequestAction`, the Phase 3 amendment's Copy (tiles, `copy.ts`), ~115 new tests, decisions/notify/role-bundle DB suites; see the Batch 3 section. **Batch 4 complete (api-developer)**: `payments.ts` (record, reverse, waive, void, note; the `paid` and `closed` notices), `treasurer_list` reader, `csv-export.ts` + the export route (V4), the ten treasurer-tree actions and three team actions, residual-12 characterization, role-bundle payment half, 177 new tests, 168-file DB subset green; Copy gaps and one UI data gap reported (see the Batch 4 section). **Batch 5 complete (ux-developer)**: the member pages (list, new, edit, request, approve / send back, withdraw), the request form with the receipt slot bounded for Batch 2b, 88 + 29 + 15 new unit tests, 18 member e2e + 1 hydration spec green on :3590 and the hydration spec on the production lane :3591; see the Batch 5 section. **Batch 6 complete (ux-developer)**: the treasurer queue, request page, payment form, verb dialogs, settings and Treasury team pages, the C12 string edits and the no-chargeable-group sentence; 14 treasurer e2e + 3 hydration specs green on :3590 and :3591; see the Batch 6 section. **Batch 7 complete (full-stack-developer)**: the printed form (`print-model.ts`, `print.ts`, `GET /o/<slug>/reimbursements/<id>/print`, the Print the form button), `scripts/check-treasury-boundaries.mjs` (T1 to T5) wired into `npm run check` (nine tripwires), the additive `e2e/support/reimbursement-fixture.ts`, and the MFA deep-link, approval, CSV-bytes, role-bundle and toggle specs plus a print test and the Retire long-name check; see the Batch 7 section. **Batch 1b complete (database-admin)**: merged origin/main (0.46.1); 0073 corrected in place with `reimbursement_attachments_blob_fk` (three columns, private-pinned, NO ACTION) and the 0072 guard; test-rls-73 61 (73g new), test-rls-72 25, 9 new Vitest tests, integration patch re-cut (six hunks); see the Batch 1b section. **Batch 2b complete (api-developer, full-stack scope)**: merged origin/main (0.46.2); `sharp@0.35.5` direct and exact, `src/lib/storage/image-sanitize.ts` (the one importer, T5 now exactly one), `upload-request.ts`, `receipts.ts`, the two receipt routes, `detachReceiptAction`, the live receipt slot, F289's call-site row ACTIVE, F338 barrel and dev-docs lines committed; ~150 new unit tests, a 22-test DB suite, 5 new member e2e tests and one each in the treasurer-UI and CSV specs, all reimbursement specs green on :3590 and the hydration specs on :3591; see the Batch 2b section. Batch 2b is the last implementation batch; Phase 5 next | — | 2026-10-26 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1): F-QA-1 fixture leak; EC42 open | FAIL | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1969,3 +1969,196 @@ No string outside Copy or an existing shared constant was added. Reuses that a r
 3. A draft made by the picker stays a draft listed under "Your requests" if the person walks away; that is the same as any saved draft (the 20-draft cap applies) and no receipt orphan comes of it. The recorded orphan residual (an unreferenced private blob after a refused attach) is exercised by `receipts.db.test.ts` and is bounded by the preflight and the hourly limit.
 4. The member's `Print the form` and the receipt links share the request page's action row; unchanged.
 
+---
+
+# Phase 5 — Verification (qa)
+
+**Date:** 2026-10-26
+**Verified by:** qa (read-only; no repository file was edited, and `git status` is clean afterwards)
+**Tree:** `/Users/cshenso/git/presby-platform/presby-treasury`, `pipeline/treasury` at `8eb60b3`. Neon `pipeline-treasury`: every connection checked by host and role, values never printed.
+
+### Scope run
+- **Static checks:** typecheck, lint, `npm run build` (with the https `NEXT_PUBLIC_*` pair), `npm run check` (all nine tripwires) and `check:schema-parity`.
+- **Vitest:** the full unit suite and the **full** serial DB-backed suite (789 files).
+- **Isolation SQL:** `test-rls-73` and `test-rls-72` as `presby_app`, plus the full `scripts/test-rls.sql` in a patched scratch copy.
+- **e2e, dev lane:** the full `chromium` + `custom-hosts` projects on my own dev server at :3590.
+- **e2e, prod lane:** `prod-build` + `prod-custom-hosts` at :3591.
+- **My own work:** a real-browser walk, eleven failing-first mutations, a live-catalog probe and the copy review.
+- **Flags:** before any e2e I reset the global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, this worktree's `PLATFORM_DATABASE_URL` only). The branch was polluted: 27 flags were on that the CI baseline has off. The implementers' e2e passes ran on that polluted state; mine ran on the baseline.
+- **Not re-run:** no implementer-reported run was reused in place of my own. EC42 (whether `sharp` loads in a Vercel function) cannot be checked from here; see below.
+- **Server hygiene:** I stopped the dev server by PID (32268/32286/32287/32288). Both ports are free.
+
+## Type Check
+`npm run typecheck`: PASS. `npm run lint`: PASS. `npm run build`: PASS, and all 12 reimbursement routes are in the route table. `npm run check`: PASS, 9/9. `check:schema-parity`: 91 tables, 8 allowlisted differences, 0 failing; the receipt FK row is present.
+
+## Unit Tests
+**Pure suite:** Total 13,359 | Passed 10,377 | Failed 0 | Skipped 2,982 (DB-gated) | Files 685 passed, 104 skipped | 31.1 s.
+
+**Full serial DB-backed suite (`npm run test:db`):** 789 files | Passed 13,351 | Failed 7 | Skipped 1 | 3,021 s (50 min).
+
+Five of the seven failures were there before this branch. They pin `localhost:3000`, and this worktree's `.env.local` sets port 3590:
+- `src/app/(org)/o/[slug]/tickets/actions.test.ts:333`, `src/app/(member)/feedback/actions.test.ts:516`, `src/lib/auth/safe-callback.test.ts:239` and `src/lib/onboarding/issue.db.test.ts:303` all pass when `NEXT_PUBLIC_APP_URL` is set to `http://localhost:3000`.
+- `src/proxy.test.ts:521` fails the same way on `origin/main` (`26fd2d8`) with the same env file. The diff touches nothing in the proxy or domains code.
+
+The other two are a **defect from this pipeline** (Finding F-QA-1):
+- `src/lib/db/fixture-deletable.test.ts:199`: "no leaked stamped people row is outstanding".
+- `src/lib/db/fixture-deletable.test.ts:224`: "no stamped people row has an EXPIRED window".
+
+**Isolation SQL, all as `presby_app` (`rolbypassrls = f`):**
+- `scripts/treasury/test-rls-73.sql`: 61 pass, 0 fail. Re-run 61/61 after all the mutations.
+- `scripts/assets/test-rls-72.sql`: 25 pass, 0 fail.
+- Full `scripts/test-rls.sql` with the integration patch's test-rls hunk, from a scratch copy with the top-level `ON_ERROR_STOP` removed: 1,451 pass and 3 FAIL, and it reached "Section 73 complete". The three are the known data drift: the presbytery demo membership, Alder's `require_two_factor`, and the extra `statistics.publish` role. None involves 0072, 0073 or 0074.
+
+## End-to-End Tests
+**Dev lane, :3590.** I started the server by hand after clearing `.next/dev`, with `RATE_LIMIT_DISABLED`, the `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET` and `AUTH_URL`/`E2E_BASE_URL` set to :3590. Playwright ran with `E2E_ALLOW_SHARED_DB=true`.
+
+Total 684 | Passed 683 | Failed 1 | Skipped 0 | 33.0 min.
+- **The failure:** `e2e/custom-domains/lockdown.spec.ts:311` ("Target page, context or browser has been closed"). Re-running the file passed 30/30, so it was a one-off browser error in a spec the diff doesn't touch.
+
+**Reimbursement specs in that run** (none skipped):
+
+| Spec | Passed |
+|---|---|
+| `reimbursement-member` | 24 |
+| `reimbursement-treasurer-ui` | 16 |
+| `reimbursement-treasurer` (MFA deep link) | 9 |
+| `reimbursement-approval` | 7 |
+| `reimbursement-csv` (the 20,001-row 413 test took 1.8 min on this branch) | 6 |
+| `reimbursement-role-bundle` | 9 (also 9/9 in a solo run) |
+| `reimbursement-toggle` | 5 |
+| `hydration/reimbursement-form` | 1 |
+| `hydration/reimbursement-treasurer-forms` | 2 |
+| `totp-full-login` | 1 |
+| `invitation-existing-account` | 4 |
+| `designation-revoke` | 8 |
+
+**Login-path gate, met on my own server:**
+- The MFA-enrolled seeded treasurer goes signed out → `/signin?callbackUrl=<path>` → password → `/totp` with the real code → lands on the request.
+- The MFA chair is challenged at `/totp` and approves.
+- The role-bundle treasurer accepts a real invitation, then passes the real `/totp`.
+
+**Prod lane, :3591** (`PW_PROD_BUILD=1 PW_PROD_PORT=3591`): 97 passed in 2.8 min, including the three reimbursement hydration tests.
+
+**My own walk, 360 and 1280 px:** 4/4 passed. Screenshots and the printed PDF are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa/walk/shots/`.
+- **Member at 360 px:** filed a request with a synthetic JPEG (carrying a camera EXIF string) through the picker, plus a second one posted straight to the route. The downloaded bytes have no `QAWALK` and no `Exif` segment, and the headers are `nosniff`, a sandbox CSP and `private, no-store`.
+- **Chair:** approved through the dialog, which states "$31.75 to Tamsin Brightwater, charged to Property Committee…". Approve and Send back are at least 44 px tall and inside 360 px.
+- **Treasurer:** recorded a check payment at 360 px. The CSV holds the purpose and the check number and no receipt name.
+- **Requester:** sees "Paid on …". The printed form is the requester's view: no payment details and no history names.
+- No page scrolls sideways at either width.
+
+## Regression Tests Added
+Every one of these was **confirmed failing-first by my own mutation**. SQL mutations were applied to the branch database. After each I re-applied 0073 whole and checked a hash of functions, ACLs, constraints, triggers, table ACLs and the reimbursement bindings: it matched the pre-mutation hash every time. TS and file mutations ran in a `git archive` scratch copy, which I have since deleted by literal path.
+
+| Mechanism and mutation | Failed as it should |
+|---|---|
+| Approve SoD trigger removed | `src/lib/db/domain/reimbursement.db.test.ts:309` (EC7), `:324` (EC13) |
+| Payer ≠ approver, trigger | `reimbursement.db.test.ts:383` (EC8) |
+| Payer ≠ approver, definer | `src/lib/reimbursement/payments.db.test.ts:279` |
+| Transition table admits `approved→submitted` | `reimbursement.db.test.ts:234` (EC6, the generated matrix) |
+| Freeze: edits allowed while `submitted` | `reimbursement.db.test.ts:276` (EC4) |
+| Receipt FK dropped | `reimbursement.db.test.ts:613`, `:635`, `:647`, `:669`; `src/lib/storage/blob-audience.db.test.ts`; test-rls-73 at `:166` (73a) |
+| `needs_second_payer` removed | `src/lib/reimbursement/decisions.db.test.ts:402` (EC10) |
+| `needs_another_payer` removed | `payments.db.test.ts:298` (EC9) |
+| Downward guard (commissions/delegations), then the binding guard, neutralized | `reimbursement.db.test.ts:741` (EC30); test-rls-73 at `:444` and `:462` (73f) |
+| 0074 backfill widened, then emptied | `src/lib/db/domain/reimbursement-permissions.db.test.ts:113` (EC29), both times |
+| CSV route without `anyOf: ["view"]` | `export/route.test.ts`, `gate-coverage.test.ts` |
+| `export_rows` without the view check | `csv-export.db.test.ts:185` |
+| Export audit swallowed | `csv-export.db.test.ts:177` (EC43) |
+| Export audit removed | 3 tests in `csv-export.db.test.ts`, plus `audit-coverage.test.ts` |
+| A second runtime `sharp` importer (static, dynamic, `require`, re-export), or the sanitizer no longer importing it | `check:treasury-boundaries` T5 exits 1 each time. A type-only import is correctly allowed. `src` contains no `.js` files. |
+| `.withMetadata()` added to the sanitizer | `src/lib/storage/image-sanitize.test.ts`: "drops EXIF…", "applies the EXIF orientation…" |
+| The upload route storing the raw bytes | `receipts/route.test.ts`: "re-encodes an image as a metadata-free JPEG…" |
+
+Batches 6 and 7 say honestly that they wrote tests alongside code and proved them by mutation rather than red-first. My mutations above independently confirm the tests that matter.
+
+## Coverage on Critical Modules
+`src/lib/permissions.ts`, `src/lib/two-factor.ts` and `src/lib/flags.ts` are untouched by the diff, and I did not re-measure them.
+
+## Feature-Gate Audit
+Verified by reading each route and action body. These are tenant keys, so the check is `gateReimbursement*` → `auth()` → the Node-side 2FA check (`assertTreasurySession`) → `resolveOrgContext` → the toggle → keys read live through `presby_has_permission`. `FEATURES.*` is correctly not used (the `(org)` contract). Each definer then re-checks the actor.
+
+| Route or action | `auth()` | Key check | Key |
+|---|---|---|---|
+| GET `/o/[slug]/reimbursements`, `/new`, `/[id]`, `/[id]/edit` | yes (`cachedAuth`) | gate with no key; seat or creator checked by the definer | member surface |
+| GET `/o/[slug]/admin/reimbursements`, `/[id]` | yes | yes | `view` |
+| GET `/admin/reimbursements/settings`, `/team` | yes | yes | `manage` |
+| POST `/reimbursements/[id]/receipts` | yes | gate, then Origin, then `receipt_preflight` (creator, `draft`/`returned`) | member + creator in the definer |
+| GET `/reimbursements/[id]/receipts/[attachmentId]` | yes | `attachment_lookup` viewer relation; one 404 for every miss | member + viewer relation |
+| GET `/reimbursements/[id]/print` | yes | `detail(..., 'member')`; a treasury-level object is refused | member + viewer relation |
+| GET `/admin/reimbursements/export` | yes | yes, route and `export_rows` | `view` |
+| `saveRequestAction`, `submitRequestAction`, `withdrawRequestAction`, `detachReceiptAction` | yes | definer (`may_file`, creator) | member |
+| `searchBeneficiariesAction` | yes | `request_for_others` and `checkDirectoryView` in `pickers.ts` | `request_for_others` |
+| `approveRequestAction`, `returnRequestAction` | yes | live seat in the definer | seat |
+| `recordPaymentAction`, `reversePaymentAction`, `waiveReceiptAction`, `treasuryReturnAction`, `voidAction`, `overrideApproveAction` | yes | yes, gate and definer | `pay` |
+| `addNoteAction` | yes | yes | `view` |
+| `setChargeableAction`, `saveCategoryAction`, `endCategoryAction`, `grantTreasuryRoleAction`, `revokeTreasuryRoleAction`, `ensureTreasuryRoleAction` | yes | yes, gate and library | `manage` |
+
+There is no `loading.tsx` in either tree, no `capture` attribute and no native dialog. The only `console.error` added logs the error's class name only.
+
+## Schema/RLS Audit (live catalog, `pg_class`, `pg_policies`, `aclexplode`, `pg_trigger`)
+- **RLS:** all six tables are ENABLE + FORCE with exactly one `tenant_isolation` policy.
+- **`presby_app` grants:** SELECT on the two config tables and nothing on requests, attachments, payments or events. `presby_platform` and PUBLIC have nothing.
+- **Functions:** 30 public definers carry EXECUTE for `presby_app` only. All 29 helper and trigger functions have an owner-only ACL, and `has_function_privilege('presby_app', …)` is false for each. Every function is SECURITY DEFINER with `search_path = public, pg_temp`.
+- **Triggers:** 20 reimbursement triggers, all enabled, with the deferred pair initially deferred.
+- **FKs:** every person reference is composite to memberships, and the receipt FK is `(blob_key, organization_id, asset_audience) → blob_assets(id, organization_id, audience)`, NO ACTION, validated.
+- **0074:** four keys, tier 2, 2FA on `view`/`pay`/`manage`. The template carries seven keys, the clerk template carries `request_for_others` only, and there is one designation-minted copy with seven keys.
+- **Which layer refuses what:**
+  - On `presby_app`, the grant and the definers refuse. test-rls-73 proved this with 61 checks.
+  - On the owner connection the refusing layer is the **trigger**: SoD, transitions, freeze, payment and delete guards. This is proven by the owner-path tests in `reimbursement.db.test.ts` and by mutations M1–M7.
+- **Observation, not a regression:** owner `TRUNCATE reimbursement_events` succeeds. I probed it inside BEGIN/ROLLBACK with 0 rows, so nothing changed. No table in this database has a TRUNCATE trigger, so this is the house posture, but it is a gap in EC34's "owner included" wording. Proposed as a residual or follow-up for tech-lead.
+
+## Copy Truthfulness
+- [x] **Every added string is in the Copy table.** I checked all 309 literal Copy strings and their fragments mechanically against the source; all are present. The only two absent ones were deliberately replaced by later amendments (the S1 date sentence and the S2 grant sentence), so that is correct.
+- [x] **Rulings on the two reuses Batch 2b flagged:**
+  - **"Saving…" as the upload button label** (`reimbursements/receipt-slot.tsx:261`, viewer: the requester). It is true: the upload stores and attaches the file, and on a new form `ensureDraft()` saves the draft first. It is missing from the C4 table, so tech-lead should add it there. Not blocking.
+  - **`saveFailed` on an upload failure** (`receipt-slot.tsx:93`, `:95`, `:169`, `:202`, viewer: the requester). It is true on every path that reaches it: no attachment row exists, and the slot never resets the form, so "Your entries are still here" holds. "Try again" is futile on a 404 when the toggle is off or the request is not found, which is the same limit amendment T3 already accepted. One edge: if the reply is lost after a committed attach, "We couldn't save that" is false and the retry answers "That receipt is already on this request." That is the same lost-reply class as the ruled form save. Acceptable.
+- [x] **Queries behind claims:** "members, regular attenders and staff" equals `may_file`. The "open" count excludes drafts. The submit routes and the "Waiting for the treasurer" banner are computed live. "Paid on" reads the live payment. The duplicate flag never reaches the requester (the walk and the specs confirm).
+- [x] **Instructions vs roles:** each was traced to a viewer who can act on it. Two notes:
+  - `COPY.form.noChargeableGroup` ("Ask your treasurer…") names a person who may not exist when no one holds `manage`. The orchestrator ruled on this; I note it only.
+  - The `reimbursement.view` description says "every … request", but drafts are excluded. Minor imprecision; C9 was ruled.
+- [x] **Older strings:** the C12 edits are in place. One neighbour was missed: `src/app/(invite)/invite/invite-summary.tsx:8`, shown to the treasurer **invitee**, still lists only giving abilities even though the role now carries the reimbursement keys. It is not false (it doesn't say "only") but it is incomplete, and the platform-side dialog was updated. Proposed C12 addendum, not blocking.
+
+## Findings
+**F-QA-1 (FAIL): an e2e fixture leak stamps a permanent seeded person and turns the DB suite red.**
+- **Cause:** `e2e/reimbursement-role-bundle.spec.ts:112` adds the chair, the seeded `presbytery-nogrant` person `e2e00000-…-0000000000a6`, to the invitation-fixture organization.
+- **Mechanism:** at teardown, `e2e/support/invitation-fixture.ts:314` stamps every member of that organization with `deletable_until = now() + 1 hour`. It deletes only people with no membership left. The seeded person keeps its seeded membership, so it stays stamped.
+- **Effect:** the stamp fails `src/lib/db/fixture-deletable.test.ts:199` immediately and `:224` once the hour expires. During that hour the seeded person is also deletable.
+- **Reproduced twice:**
+  - The stamp was 14:44:51Z before my runs.
+  - After the role-bundle spec alone: 16:36:23Z.
+  - After the full run: 17:02:06Z.
+- **Isolated to this spec:** no other seeded person was stamped by the full suite, including main's invitation specs.
+- **Fix (implementer):** don't put a seeded person into the invitation-fixture organization, for example by making a chair person stamped at insert as the reimbursement fixture does. The invitation fixture is a shared Rule 16 file, so the spec is the place to fix it.
+
+**Branch cleanup the orchestrator owns** (I write nothing):
+- Clear the stamp on `e2e00000-…-0000000000a6` on `pipeline-treasury`.
+- The expired leftover `a41e5e13-…` ("Nologin …", created 07:56Z by `reimbursement-definers.db.test.ts`) also trips the same check. My full run of that suite left no new row, so it is from an interrupted earlier run, not a reproducible leak.
+- The re-run then needs a clean canary.
+
+**Not verifiable here: EC42.** Whether `sharp` loads in a Vercel function is still unverified. The branch is not pushed and has no PR, so no preview build exists. The design makes this a blocker for Batch 2b, so the orchestrator must close it on the PR's preview build before merge.
+
+**Integration note:** `origin/main` has moved to `26fd2d8` (careers #63: 0071, `blob-store.ts`, `org-features.ts`, `index.ts`, `test-rls.sql`, `_journal.json`). It adds no new FK into `blob_assets`, so the pinned set of six FKs in 72b still holds. Rule 16's post-merge `test-rls.sql` re-run applies.
+
+## Verdict
+**FAIL.** One required check is red: the full DB-backed suite, at `src/lib/db/fixture-deletable.test.ts:199` and `:224`, because of F-QA-1. Everything else in scope passed, including the stricter MFA login-path gate on a real server.
+
+**Re-run scope after the fix:**
+- Once the two stamped rows are cleared: `e2e/reimbursement-role-bundle.spec.ts` on :3590, then `src/lib/db/fixture-deletable.test.ts` serially, and the people query for stamped rows.
+- If the spec's fixture shape changes: also `e2e/reimbursement-*.spec.ts` and the hydration specs.
+- Everything else here stands.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. Gates, unit and full DB (783/789 files green, 5 known port failures, 1 defect), test-rls 73/72/full, e2e 683/684 (1 browser flake, re-run green) + prod lane 97/97, walk 4/4, 11 failing-first mutations all caught, gate/RLS/copy audits. F-QA-1 fixture leak; EC42 open | FAIL | 2026-10-26 |
+
+## Handoff
+**Next agent: full-stack-developer** (Batch 7 owns `e2e/reimbursement-role-bundle.spec.ts`), to fix F-QA-1 at `e2e/reimbursement-role-bundle.spec.ts:112` without editing the shared `e2e/support/invitation-fixture.ts`.
+
+**Orchestrator, before QA re-runs:**
+- Clear the two stamped `people` rows on `pipeline-treasury`.
+- Have tech-lead ratify "Saving…" as the C4 upload label, and decide the `invite-summary.tsx:8` addendum and the TRUNCATE residual.
+- Close EC42 on the PR's Vercel preview build before merge.
+
+Phase 6 (analyst) starts only after a PASS.

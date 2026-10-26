@@ -17,7 +17,7 @@
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete; gaps G1–G17; operator questions Q1–Q5; hard dependency on F289 0072 merging before Phase 4 | READY WITH NOTES | 2026-10-26 |
-| 2 — Architectural review | architect | Pending | — | — |
+| 2 — Architectural review | architect | Complete; R1–R12; DECISION-285–288 proposed; F330–F332; Q6 fallback consent (default attested-only); sharp approved | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
@@ -353,25 +353,368 @@ Files read (absolute):
 
 ---
 
+# Phase 2 — Architectural Review (architect), Person and household photos
+
 # Phase 2 — Architectural Review (architect)
 
 ## Verdict
 
-[Approved | Approved with suggestions | Needs revision]
+**Approved with suggestions.** The feature shape is right, and Phase 1's Increment 1 holds. The rulings R1–R12 below are binding on Phase 3.
+
+The operator's website-to-directory fallback is accepted, but I put one guard on it: **a directory photo reaches the open web only if its designation carries the website attestation** (R3). Without that guard, a later listing toggle by a different person under a different permission would publish an unattested snapshot. I've kept one decision-shaped confirmation for the operator (end of section). Phase 3 can proceed on the default.
+
+Two departures from Phase 1, each with its reason:
+- The per-org toggle **does** gate public serving (R8). Hiding only the management UI would leave website photos live with no in-app way to take them down.
+- Minors are refused at **read** time as well as write time (R4). A refusal at upload goes stale as soon as someone corrects a date of birth.
+
+I did **not** read the live database catalog, because this phase was told not to connect. Every catalog premise below comes from `drizzle/` text and the F289 Phase 2 catalog read of 2026-10-25. R12 lists what database-admin must confirm on the pipeline's Neon branch before 0078 is written.
 
 ## Placement
 
-- Directory placement: [src/...]
-- Server vs Client split: [where 'use client' is needed and why]
-- Dependencies: [new dep needed (yes/no), evaluation against criteria]
+- **Directory placement**
+  - `src/lib/db/domain/person-photos.ts` (new): Drizzle declarations for `person_photos` and `person_photo_designations`. The export from `src/lib/db/domain/index.ts` is a Rule 16 shared-file edit, done by the orchestrator at integration.
+  - `src/lib/person-photos/` (new module, modelled on `src/lib/contact-methods/`):
+    - `image.ts`: `import "server-only"`. **The only file that imports `sharp`**, pinned by a source-scan test like the giving Stripe one-importer rule. It sniffs, validates, auto-orients, strips metadata and makes the two derivatives. Pure bytes in, bytes out, no database.
+    - `store.ts`: **the only writer** of both tables. Add, remove, designate and un-designate. Each mutation runs inside `withOrgContext`, checks the toggle and `people.manage` in the same transaction, and writes its audit row with `insertAuditRow` in that transaction. It makes the only `getBlobStore().store(` calls, and both use the literal `audience: "private"`.
+    - `reader.ts`: the admin photo set, with each designation's state and the "effective on website" answer, which comes from the R3 SQL function.
+    - `copy.ts`: every user-facing string, so the copy-truthfulness check has one place to read.
+  - Pages: `src/app/(org)/o/[slug]/admin/community/[id]/edit/photos/`, a subroute like the existing `edit/guardians` and `edit/sensitive`, linked from the edit page under the same toggle-and-permission render gate. Files: `page.tsx`, `actions.ts`, the client islands, and the client downscale helper (feature-specific, so it lives here; Component Rule 3). **No `loading.tsx`**, because the page calls `notFound()` for an unknown person.
+  - Suggestion: `resolvePhotoSrc` and `PersonAvatar` gain a third caller (the photos page), so move them from `directory/person-avatar.tsx` to `src/components/org-portal/person-avatar.tsx`. They are used only in `(org)`, so `org-portal/` is the right home, not `shared/`.
+  - Migrations:
+    - `drizzle/0078_presby_person_photos.sql`: tables, RLS, grants, triggers, the R3 function, the `people.photo_key` retirement CHECK, and the roster functions and door switched over. One file, applied with `psql -1`.
+    - `drizzle/0079_…`: dropping the retired columns (R2). It ships in a release **after** Increment 1 is live, never in the same one.
+  - RLS script: `scripts/person-photos/test-rls-78.sql`, run as `presby_app`, following the `scripts/domains/` and `scripts/giving/` layout. The orchestrator folds a pointer into `scripts/test-rls.sql` at integration (Rule 16).
+  - `CLAUDE.md` → Project Layout gains a `src/lib/person-photos/` line at integration ("image.ts the only sharp importer; store.ts the only writer of person_photos/person_photo_designations").
+- **Server vs Client split**
+  - Server: the page, the photo grid (thumbnails inlined), the reader, store, image pipeline and actions.
+  - `'use client'` only for:
+    1. the upload island: a file input with camera capture, the canvas downscale, progress, and mapping any action rejection (including the framework's 413) to fixed copy. It is wrapped in `HydrationGate` whether or not it uses `useForm`, because an upload posted before hydration skips the downscale.
+    2. the designate `Dialog`, which has the attestation checkbox. Use the existing native-checkbox idiom (`branding-form.tsx:311`, `fund-form.tsx:146`). **Do not add a checkbox primitive**: that would bring in an unvetted `@radix-ui/react-checkbox`.
+    3. the remove and un-designate `AlertDialog`s.
+- **Dependencies:** one. `sharp` moves from a transitive dependency to a direct one (R6). No UI package is added.
 
 ## Invariants Touched
 
-- [Invariant, how this change respects it (or how it changes it — requires CLAUDE.md update)]
+- **Isolation Is a Database Property / Composite Tenant Keys.**
+  - Both new tables are `FORCE ROW LEVEL SECURITY` with the standard `tenant_isolation` policy.
+  - Every foreign key is composite, so a cross-person, cross-org or public blob reference cannot be represented at all (R1). That meets the adversarial pass's "unrepresentable, not just checked".
+- **Two Hierarchies Intersect Nowhere / D1.**
+  - Photos hang off `memberships (person_id, organization_id)`, the relationship, never off global `people`. A presbytery cannot see or change a congregation's photo set for a person they share. Neither can a platform admin, and the platform connection gets no grant.
+- **Never Hard-Delete / all deletes are soft.**
+  - `presby_app` gets no DELETE. Photos are removed by `removed_at` and designations end by `ended_at`. Both are one-way, and a trigger enforces that on every connection, including the owner (F44).
+  - Bytes are never erased (blob_assets has no delete path; DECISION-263, F289). This is an accepted residual and needs a runbook note.
+- **Permissions vs Flags.**
+  - The checks run in the order toggle (`org_portal.person_photos`, no platform flag), then permission (`people.manage`).
+  - Listing stays a separate gate under `staff.manage`, `officers.manage` and `groups.manage`.
+  - The attestation is a recorded fact about a designation row, not a permission and not a credential.
+- **The Brand Is a Cascade Override.** Untouched. The photos page sits in `(org)`, a brandable group. `check:brand-scope` and `check:proxy-imports` are unaffected, and `image.ts` must never enter the proxy's import graph (it is `server-only`).
+- **DECISION-040 (enumeration).** No new serving route is added. Directory surfaces inline the thumbnail as a `data:` URI, and the public path stays F289's one door with its one neutral 404. Thumbnail keys never get a public serving branch (R5).
+- **DECISION-030 (bytes in Postgres).** Photos are the first consumer with real volume. The revisit trigger ("measurable share of database size") is now live. Phase 3 must state the expected bytes per org (roughly 150–400 KB per photo, about 6–8 KB per thumbnail, at most 10 photos per person).
+- **Paper vs database** (for `/developer`):
+  - **database:** a photo blob is `private`; a website designation is attested; at most one active designation per purpose; the fallback needs an attestation; minors, `hide_photo` and toggle-off withhold the photo from the roster and the door.
+  - **paper:** the write-time minor refusal (TypeScript), and "a null date of birth with no child markers is treated as an adult" (accepted, as the operator ruled).
 
 ## Notes
 
-[Anything Phase 3 must honor.]
+### R1. Schema: two org-scoped tables
+
+**`person_photos`**
+- Columns: `id`, `organization_id`, `person_id`, `image_asset_key uuid not null`, `thumb_asset_key uuid not null`, `asset_audience text not null default 'private'` with CHECK `= 'private'`, `width`, `height`, `created_at`, `created_by` (users), `removed_at`, `removed_by`.
+- Keys and foreign keys:
+  - `unique (id, organization_id)`.
+  - `unique (id, organization_id, person_id)`, which is the designation FK target.
+  - FK `(person_id, organization_id) → memberships (person_id, organization_id)` (`memberships_person_org_key`).
+  - FK `(image_asset_key, organization_id, asset_audience) → blob_assets (id, organization_id, audience)`, and the same for `thumb_asset_key`. Both are NO ACTION, and both target F289's `blob_assets_id_org_audience_key`. This satisfies F289's FK catalog test as written.
+- Indexes:
+  - Partial unique `(organization_id, person_id, image_asset_key) where removed_at is null`. A byte-identical re-upload for the same person is refused with "already in their set". Within one org this reveals nothing about other people's photos (the dedup-oracle rule).
+  - Indexes on `(organization_id, image_asset_key)` and `(organization_id, thumb_asset_key)` for the door's lookup.
+
+**`person_photo_designations`**: end-dated history, not a current-state pointer.
+- Columns: `id`, `organization_id`, `person_id`, `photo_id`, `purpose text check in ('directory','website')`, `public_attested_at`, `public_attested_by` (users), `designated_at`, `designated_by`, `ended_at`, `ended_by`.
+- FK `(photo_id, organization_id, person_id) → person_photos (id, organization_id, person_id)`, so a designation cannot point at another person's or another org's photo.
+- Partial unique `(organization_id, person_id, purpose) where ended_at is null`. That is the operator's "one active per purpose per person per org", enforced by the database.
+- CHECK `purpose <> 'website' or public_attested_at is not null` (with `public_attested_by` paired the same way).
+- Why a history table and not pointer columns:
+  - Pointer columns on `memberships` would put photo writes on a core table that has triggers (F21).
+  - A current-state table would need DELETE to un-designate, which breaks the soft-delete rule.
+  - Who put which image on the web, and with what attestation, is worth keeping as data, not only in audit.
+- Changing the attestation or the photo ends the old row and inserts a new one. Rows are immutable apart from the end and removal columns.
+
+**Grants and triggers**
+- `presby_app`: SELECT and INSERT; UPDATE only on `(removed_at, removed_by)` and `(ended_at, ended_by)` by column grant; no DELETE.
+- `presby_platform`: nothing.
+- A BEFORE UPDATE trigger on each table refuses any change except setting the end or removal pair from null, which is one-way. It is plain plpgsql with EXECUTE revoked from `public`, `presby_app` and `presby_platform` (0072 §9 style).
+
+**Removal**
+- `store.ts` ends a photo's active designations in the same transaction that sets `removed_at`.
+- Every reader also filters `removed_at is null` and `ended_at is null`. A stale designation on a removed photo is therefore inert even if the lib order is ever wrong. That double filter is the control; the lib order is a convenience.
+
+**Households (Increment 3)** get their own `household_photos` table when they come, because they are a different kind of subject. Do not add a polymorphic subject column now.
+
+### R2. `people.photo_key` is retired, not converted
+
+This **supersedes F289's R4 follow-up** (convert to uuid and add an FK). The orchestrator closes that TODO line at integration.
+
+What reads it today:
+- `src/lib/directory.ts:481` (directory, household and person rows)
+- the two roster functions and `presby_public_site_asset` (0072)
+- 0072's pre-flip assertion and `people_photo_key_lower_idx`
+- comments in `sites.ts:1645`, `initials.ts:4`, `blob-store.ts:14` and `assets.ts:24`
+- F289's tests (F331)
+
+Nothing writes it, and 0 rows carry a value in every environment.
+
+The plan:
+- **0078** adds `people_photo_key_retired check (photo_key is null and photo_updated_at is null)`. "Written by no one" then holds on every connection. It is validated immediately, because no row has a value.
+- 0078 also moves every reader off the column: directory SQL, the roster functions and the door.
+- Remove `photoKey`/`photoUpdatedAt` from the Drizzle `people` declaration if `scripts/check-schema-parity.ts` tolerates a database column that Drizzle doesn't declare. Otherwise keep the declaration, marked RETIRED. Either way, no TypeScript reads it.
+- **0079** drops both columns and `people_photo_key_lower_idx`, and updates `test-rls-72.sql` 72a. It ships only after the Increment 1 code is live. Old code selects `people` columns by name, so dropping the column during the deploy window would break the directory. 0079 must also come after 0072 is applied to production, because 0072's re-run safety reads the column.
+- Each designated photo has its own content-addressed blob key, which is the cache-busting key fpcw needed (G9). No `photo_updated_at` equivalent is needed, and `data:` URIs have no cache at all.
+
+### R3. The effective website photo: one SQL definition
+
+- **Function:** `presby_person_public_photo(p_org uuid, p_person uuid) returns uuid`, `language sql stable`, SECURITY INVOKER, `set search_path = public, pg_temp`.
+- **What it returns:** the image key of
+  - the active, non-removed **website** designation; or, if there is none,
+  - the active, non-removed **directory** designation, **only if `public_attested_at is not null`**;
+  - and null if any of these holds: `person_privacy.hide_photo` is set (joined on `person_id` alone, as in 0072, so the stricter rule applies across orgs), the R4 minor predicate is true, or the R8 toggle is off.
+- **Who calls it:**
+  - Inside the two roster functions it runs with the definer's (owner's) rights.
+  - The admin reader calls it as `presby_app` under RLS, so the photos page's "On the website: this photo / via the directory photo / none, because…" status uses the **same** definition the public site uses. That makes page-versus-public drift impossible in the same way F289's "the door calls the roster" did.
+  - Granting it to `presby_app` reveals nothing beyond what RLS already shows, because under RLS it returns null for any org other than the current one.
+- **Consequences the copy must carry** (G3, G4 and G16 with the fallback):
+  1. Designating or replacing the directory photo can change the website photo. Its dialog says so whenever the person is listed and has no website designation.
+  2. Un-designating a website photo can bring in the attested directory photo. The dialog names which photo will show.
+  3. Removing a photo that is serving both purposes says "also their website photo".
+  4. The directory-designate dialog offers the attestation as an unchecked checkbox ("They're OK with this photo appearing on the public website if they're listed and no website photo is chosen"). The website-designate dialog requires it.
+  5. F289's three listing dialogs change to "their website photo, or their directory photo if it was cleared for the website, will appear". Phase 3 greps them.
+  6. A listed person whose directory photo isn't cleared shows "Their directory photo isn't cleared for the website" on the photos page, with both remedies named.
+- **Direction:** the fallback is one-way. The directory shows only a directory designation and never falls back to the website photo.
+
+### R4. Minors: refuse at write, and fail closed at read
+
+- **One predicate in SQL:** `presby_photo_subject_is_minor(p_org uuid, p_person uuid) returns boolean`, invoker, granted to `presby_app`. True when any of these holds:
+  - `date_of_birth > current_date - interval '18 years'` with `birth_year_only` false;
+  - `birth_year_only` with a birth year greater than `extract(year from current_date) - 19` (could be under 18, so treat as a minor);
+  - the membership's `household_role = 'child'` in that org.
+- A null date of birth with no child marker counts as an adult (operator ruling Q4, an accepted residual). This matches `children.ts:282`'s date arithmetic, so the two definitions agree on the DOB case.
+- **Where it is used:**
+  - `store.ts` calls it inside the transaction on add **and** on designate, because a date of birth can change between those steps.
+  - R3 and the directory query use it on **read**: a person who turns out to be a minor shows no photo anywhere without anyone acting.
+- Minors with consent wait for Increment 3.
+
+### R5. Roster functions and the F289 door move in 0078
+
+- **Roster functions.** `create or replace` both `presby_public_staff_roster(text,text,boolean)` and `presby_public_committee_roster(text,text,boolean)`:
+  - Keep the **same signatures and return types**. `photo_key` stays `text` and is projected as `presby_person_public_photo(o.id, p.id)::text`. Changing the type would force drop-and-recreate on functions the door calls.
+  - Carry over 0072's bodies verbatim (including the `person_privacy` join, which the helper now subsumes), apart from the photo column.
+  - **Restate** `set search_path = public, pg_temp`, `revoke all … from public` and `grant execute … to presby_app`. `create or replace` resets `proconfig`.
+  - `sites.ts` callers do not change. Only comments need updating, for copy truthfulness.
+- **The door.** `create or replace presby_public_site_asset(uuid, uuid)` with the same signature:
+  - `is_photo` becomes `exists (select 1 from person_photos ph where ph.organization_id = p_org and p_key in (ph.image_asset_key, ph.thumb_asset_key))`. That counts removed photos as well, so a removed photo never falls into the site branch.
+  - The roster branch is unchanged: it is served only while a roster function returns the key.
+  - A thumbnail key is a photo but is never returned by a roster function, so it always gets the neutral 404.
+  - The `people.photo_key` branch is deleted.
+  - With the R1 FK pin, photo blobs cannot be `public_site`, so the exclusion is now defence in depth rather than the only guard. Keep it anyway, because it routes a key to the right branch.
+- **Ordering.** 0078 is written against 0072's **final** text. If F289 corrects 0072 in place before it ships, 0078's function bodies must be re-diffed. Phase 4 must not start before F289 merges (analyst's hard dependency, confirmed).
+- **Cross-org accepted residual.** Blob dedup is per (org, audience, hash), so two people in one org with byte-identical photos share a blob. If one of them is listed, the shared key is served. The bytes are the same image, so nothing undisclosed leaks. State it.
+
+### R6. Image dependency: `sharp`, already in the tree
+
+- **Evaluation against the criteria:**
+  1. Nothing in `package.json` decodes images.
+  2. sharp 0.35.5 is already installed as `next@16.4.2`'s optional dependency (`^0.35.5`). The lockfile already carries the `@img/sharp-linux-x64` and libvips binaries, and Next externalizes it by default (it is in `server-external-packages.json`).
+  3. It does not run on Edge. It runs only in the Node action runtime, and `image.ts` is `server-only`.
+  4. It is server-only, so client bundle impact is zero. It adds roughly 8–10 MB of native libvips to the function, against Vercel's 250 MB limit.
+  5. Licence: sharp is Apache-2.0; the prebuilt libvips is LGPL-3.0, dynamically linked and not redistributed by us, which is acceptable.
+- **How to install:** `npm install sharp@0.35.5`, named explicitly (the npm `edgesOut` bug), into `dependencies`, at a version inside Next's range so the lock keeps **one** copy. deployment-engineer confirms the Vercel build log shows no second sharp.
+- **Rejected alternatives:**
+  - jimp: pure JS, slow and memory-heavy, with weak decompression-bomb guards.
+  - Squoosh or jsquash wasm codecs: Squoosh is archived.
+  - Client-side downscale only: the client is untrusted, so it cannot be the control for EXIF/GPS removal, pixel bombs or polyglots.
+  - `/_next/image`: decodes on read, needs a URL-addressable source and caches publicly.
+- **Pipeline:**
+  - Authorize first (R7).
+  - Sniff the magic bytes, reusing `src/lib/storage/sniff.ts`'s signatures, and require `sharp().metadata().format` to agree with the sniff.
+  - Refuse: `pages > 1` (animated), more than 16 MP, or either side over 6000 px. Check these from metadata **before** decoding the pixels, with `limitInputPixels` set as a backstop and `failOn: 'error'`.
+  - `.rotate()` to auto-orient. Never call `withMetadata`, so EXIF, GPS and ICC are dropped.
+  - **Master:** at most 1200 px on the long edge (`fit: 'inside'`, no enlargement), no forced crop so a portrait keeps its framing. JPEG around q82, stepping down to stay under about 400 KB.
+  - **Thumbnail:** 160 × 160, `fit: 'cover'`, `position: 'top'`, WebP. Target about 8 KB or less.
+  - Unit tests: a JPEG carrying GPS comes out with no GPS; an EXIF-rotated input comes out upright; animated WebP, a PNG pixel bomb, a polyglot, HEIC, SVG and a zero-byte file are each refused with their own error kind.
+
+### R7. Transport: a Server Action at the 1 MB default, with a mandatory client downscale
+
+- **Confirmed from the framework source:** `next@16.4.2` `action-handler.js:513` has `defaultBodySizeLimit = '1 MB'`, and `next.config.ts` sets no `serverActions.bodySizeLimit`. So the analyst's belief holds (see F330 for what that means elsewhere).
+- **The client** draws the chosen file onto a canvas:
+  - It downscales to at most 1600 px on the long edge and encodes JPEG, stepping quality down until the result is ≤ 900 KB.
+  - On iOS this also turns HEIC into JPEG for free. On a browser that cannot decode HEIC, show the fixed "convert to JPEG" message.
+  - Any rejection of the action call, including the framework's 413, maps to fixed copy. A raw error is never shown.
+- **The server** treats the downscale as a convenience: R6 re-validates and re-encodes everything.
+- **Do not raise the global limit in this pipeline.** It would widen every action's pre-authentication body. A route handler is not needed either: Server Actions get Next's Origin check for free, and the repo's upload convention is actions.
+- **Authorize before decoding.** Run auth, `resolveOrgContext`, the toggle, `people.manage`, "is the target a member of this org", "adult" and "under the cap" in a short transaction **before** `image.ts` runs, so an unauthorized caller cannot spend sharp's CPU. Then:
+  1. `image.ts`;
+  2. two `store({ audience: "private" })` calls, each in its own transaction;
+  3. a final transaction that takes an advisory lock on (org, person), repeats the checks, inserts the photo row, auto-designates it for the directory if that slot is empty (never for the website), and writes the audit rows.
+- **Accepted residual:** if step 3 fails, steps 2's private blobs are left unreferenced and unservable, the same as on the logo path.
+- **Must-test:** on a real iPhone at 360 px, a 48 MP HEIC from the camera and a 12 MP JPEG from the library. iOS Safari limits canvas area, so the downscale must draw to the small target canvas, not decode to a full-size one.
+
+### R8. Per-org toggle: `org_portal.person_photos`, gating every surface
+
+- **Catalog entry:** `category: "people"`, `flag: null`, `provisionedOn: false`, `orgTypes: null`, `operatorEnabled: false` (self-service through `org_features.manage`).
+- **Off means:** the photos page and its link are hidden; actions answer `feature_off`; directory surfaces show initials; and R3 returns null, so the roster shows no photos and the door returns 404. Data is kept, and turning the toggle back on restores everything.
+- **The anonymous read composes the toggle in SQL** inside R3, with the category-axis flag, exactly as `presby_public_events_calendar` does (0067). A `*.db.test.ts` compares the SQL with `orgFeatureEnabledInTx` across the axis × category × toggle matrix and pins the literals to the catalog entry (the `public-calendar.test.ts` pattern).
+- **Why I depart from Phase 1:** with the management UI hidden, nobody could remove a public photo. An "off" that keeps faces on the open web is not off.
+
+### R9. Directory reads
+
+- `queryDirectoryRows` swaps `p.photo_key` for the active, non-removed **directory** designation's `thumb_asset_key`. It keeps `hide_photo` winning, adds the R4 minor predicate, and is gated on the toggle.
+- The grid, the household page and the person detail page all inline the **thumbnail**.
+- Suggestion (F332): today every card's photo is resolved in its own transaction (`directory-grid.tsx:73`, 25 per page). That has never run, because no photo exists yet. Add `BlobStore.resolveMany({ organizationId, keys, audience: "private" })` as one query, and add it to F289's `audience-callsites` method list. The ingest pipeline is also editing `blob-store.ts` (`findByContentHashes`), so these merge one after the other.
+- Phase 3 measures HTML plus flight size for 25 thumbnails at 360 px and records a revisit trigger, following the public-calendar precedent.
+
+### R10. Audit
+
+- **New `AUDIT_ACTIONS` keys:** `tenant.person_photo.added`, `.removed`, `.designated` (metadata: purpose, `attested`, the photo it replaced) and `.undesignated`.
+- **Metadata always carries** organizationId, personId and photoId, and **never** bytes, hash, filename or dimensions.
+- Rows are written in-transaction by `store.ts` via `insertAuditRow`. That is the DECISION-241 pattern, not `recordAudit`.
+- `check:audit` scans only `actions.ts`, and these actions contain no `db.*` call, so it passes without checking anything. A DB-backed test per mutation must therefore assert the row and its metadata keys (2026-08-27 precedent). A source-scan test pins that `person_photos` and `person_photo_designations` are imported only by `store.ts` and `reader.ts` (plus `directory.ts`'s raw SQL by name).
+
+### R11. RLS and test plan: `scripts/person-photos/test-rls-78.sql` (run as `presby_app`)
+
+1. **Isolation:** org B sees zero rows of org A's photos or designations, and its INSERT with org A's id is refused by WITH CHECK.
+2. **Unrepresentable states**, each refused:
+   - a designation pointing at another person's photo (FK);
+   - a photo pointing at org B's blob (FK);
+   - a photo pointing at a `public_site` blob (FK plus the `asset_audience` CHECK);
+   - a second active designation for the same purpose (unique);
+   - a website designation without an attestation (CHECK).
+3. **Soft-delete enforcement:**
+   - DELETE is refused on both tables;
+   - UPDATE of an immutable column is refused for `presby_app` (column grant) and for the owner (trigger);
+   - clearing `removed_at` or `ended_at` is refused;
+   - writing a non-null `people.photo_key` is refused on the owner connection (CHECK).
+4. **The R3/R5 matrix** through `presby_public_staff_roster`, `presby_public_committee_roster` and the door:
+   - **served:** a listed adult's website designation; a listed adult's attested directory designation when there is no website designation;
+   - **null or 404:** an unattested directory photo only; `hide_photo` set; a minor by DOB, by birth year only, or by `household_role = 'child'`; a removed photo; an ended designation; the toggle off; an unlisted person; a thumbnail key; a foreign org's key;
+   - org A's designation never appears in org B's roster for a person both share.
+5. **Function privileges:** `presby_app` cannot execute the trigger functions, and `presby_platform` has no grant on the new tables.
+6. **F289's FK catalog test** passes unchanged with the two new FKs.
+
+Beyond the RLS script:
+- **Unit tests:** R6's image tests; the one-importer scan for `sharp`; the two new `store:private` rows in F289's `audience-callsites` table for `src/lib/person-photos/store.ts`.
+- **DB tests:** R10's audit tests; R8's toggle-matrix test; the R4 predicate checked against `children.ts` on DOB cases.
+- **e2e on port 3620** (its own server, `E2E_BASE_URL` set):
+  - as a `people.manage` holder in a fresh org at 360 px: upload, designate, remove;
+  - as an anonymous visitor on a custom host at 360 px: the roster photo appears, then 404s after removal;
+  - the hydration lane holds the upload island's chunks.
+
+### R12. Live catalog: database-admin confirms before writing 0078
+
+On the pipeline's Neon branch, **after** 0072 is applied:
+- `memberships_person_org_key` exists, as a unique constraint (not only an index).
+- `blob_assets_id_org_audience_key` exists.
+- `presby_app` holds no UPDATE or DELETE on `people` beyond what 0009 states. This checks for grant drift (F38).
+- The two roster functions' `proconfig` and ACL match 0072.
+- The owner role reads `FORCE RLS` tables inside definers, as the existing roster functions already assume.
+- 0 rows have `people.photo_key` set, so the CHECK validates.
+
+Record the queries and their results in Phase 4.
+
+### Increment slicing (confirmed, with two adjustments)
+
+- **Increment 1:** R1–R11.
+  - Do **not** drop the directory designation to make it smaller. Under the operator's fallback, the directory designation is the main way a photo reaches the website, so it is load-bearing.
+  - Suggested Phase 4 batches:
+    1. database-admin: 0078, the RLS script, schema tests, and the F331 rewrites of F289's tests.
+    2. api-developer: `image.ts`, store, reader, actions, the `directory.ts` swap, `resolveMany`.
+    3. ux-developer: the photos page, the islands, the dialogs, the G16 copy pass across the three listing dialogs and the directory empty states.
+  - At ship: the G12 content-repo step stays an operator decision (Q5).
+- **0079:** retire the columns, in the release after Increment 1.
+- **Increment 2:** bulk harvest, if the volume justifies it.
+- **Increment 3:** minors with consent, plus `household_photos`.
+- **Separate pipeline:** self-service, which provides the first `hide_photo` writer.
+
+### Findings (pre-assigned F330–F339)
+
+- **F330, pre-existing, out of scope.** Server Actions accept 1 MB by default, and nothing configures a higher limit. Yet the logo forms say "up to 2 MB" (`tenant-branding.ts:97`, `(admin)/admin/organizations/[id]/actions.ts:89`) and the ticket forms say "up to 10MB" (`file-ticket-form.tsx:29,253` and both reply forms), which is also above Vercel's 4.5 MB. Files between 1 MB and the stated cap probably fail with the framework's 413 rather than the friendly copy. I confirmed this from the framework source but did not reproduce it at runtime. Recommend a separate bug-fix pipeline and a `docs/TODO.md` line at integration.
+- **F331.** F289's tests seed `people.photo_key` (`src/lib/db/domain/public-roster-photo.db.test.ts:63`, the sections of `scripts/assets/test-rls-72.sql` that seed photos, and any D1 test that does the same). 0078's CHECK refuses that write. This pipeline rewrites them to seed `person_photos` plus designations. Their assertions must keep passing against 0078.
+- **F332.** The directory resolves photos with one transaction per card. That is latent until the first photo exists. See R9.
+
+### Proposed decisions (for the orchestrator to record, newest first)
+
+- **DECISION-285: Person photos are an org-scoped set keyed to the membership, with end-dated designations; `people.photo_key` is retired.**
+  - Covers the two tables of R1: composite FKs to `memberships`, and `asset_audience = 'private'` pinned into `blob_assets_id_org_audience_key`.
+  - At most one active designation per purpose per person per org (partial unique). A website designation requires an attestation (CHECK).
+  - No DELETE. Removal and ending are one-way, enforced by trigger on every connection.
+  - `people.photo_key`/`photo_updated_at` are held null by CHECK in 0078 and dropped in 0079 after the release. This supersedes F289 R4's "convert to uuid and add an FK" follow-up.
+  - Households get their own table later.
+  - **Revisit if** a photo needs to be shared across orgs, or bytes need erasing.
+- **DECISION-286: One SQL definition of a person's public photo.**
+  - `presby_person_public_photo(org, person)` returns the website designation, otherwise an **attested** directory designation. It returns null for `hide_photo`, for a minor (`presby_photo_subject_is_minor`, read-time and fail-closed), or when the toggle is off.
+  - Both roster functions project it with unchanged signatures. `search_path`, revoke and grant are restated.
+  - The door treats any `person_photos` key (image or thumbnail, removed or not) as a photo, served only while a roster lists it.
+  - The admin UI reads the same function. The directory never falls back to the website photo.
+  - `org_portal.person_photos` (toggle-only, people category, provisioned off) gates the management UI, the directory and the public path. Its SQL composition is pinned against `orgFeatureEnabledInTx`.
+- **DECISION-287: `sharp` becomes a direct dependency at Next's resolved version (0.35.5), imported only by `src/lib/person-photos/image.ts`.**
+  - Derivatives are made at upload, never on read: a master of at most 1200 px with no forced crop, and a 160 px top-biased WebP thumbnail.
+  - Sniff plus format agreement, pre-decode pixel and dimension caps, no animation, all metadata stripped.
+  - Directory surfaces inline the thumbnail as a `data:` URI. No new route.
+- **DECISION-288: Photo upload is a Server Action at the 1 MB default.**
+  - A mandatory client downscale keeps the body at or under about 900 KB. The server never trusts it.
+  - No global `bodySizeLimit` raise.
+  - Authorization, toggle, membership, adult and cap checks all run before any decode.
+  - Audit is written in-transaction by `store.ts`, and DB tests stand in for the `check:audit` blind spot.
+- DECISION-289 is unused and stays reserved for Phase 3.
+
+### Operator question (decision-shaped; Phase 3 proceeds on the default)
+
+**Q6. Fallback consent.** When a person has no website photo, the website uses their directory photo **only if whoever chose that directory photo also ticked "OK for the public website"**. Default: yes, as R3.
+
+The alternative is an unconditional fallback. A person's everyday directory snapshot would then appear on the open web as soon as anyone with a listing permission lists them, with no one ever confirming that photo is OK to publish.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 2 — Architectural review | architect | Complete; rulings R1–R12; DECISION-285–288 proposed (289 reserved); F330–F332 raised; operator Q6 (fallback consent; default attested-only); live catalog not read (no-DB instruction), so R12 checks are assigned to database-admin; `sharp` approved as a direct dependency | Approved with suggestions | 2026-10-26 |
+
+**Handoff:** tech-lead, Phase 3.
+- Carry G1–G17, the adversarial findings and R1–R12 into the Carry-forward table one by one, including the two departures from Phase 1: the toggle gates public serving (R8), and minors are refused at read time (R4).
+- Write the Copy table against R3's six consequences and the G16 grep.
+- Name the batches.
+- Draft the Rule 16 integration patches: `src/lib/db/domain/index.ts`, `drizzle/meta/_journal.json`, the `scripts/test-rls.sql` pointer, and the `docs/TODO.md` lines for F330, the 0079 retirement, closing F289 R4's follow-up, and the DECISION-030 revisit watch.
+- Phase 4 may not start until F289 has merged and 0072 is on the pipeline's Neon branch.
+
+Files read (absolute):
+- `/Users/cshenso/git/presby-platform/presby-photos/docs/work-log/2026-10-26-person-photos.md`
+- `/Users/cshenso/git/presby-platform/presby-photos/docs/work-log/_template.md`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/db/domain/people.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/db/domain/privacy.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/db/domain/assets.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/db/domain/org-features.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/org-features.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/directory.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/children.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/audit.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/storage/blob-store.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/storage/sniff.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/app/(org)/o/[slug]/directory/person-avatar.tsx`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/app/(org)/o/[slug]/directory/directory-grid.tsx`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/app/(org)/o/[slug]/tickets/file-ticket-form.tsx`
+- `/Users/cshenso/git/presby-platform/presby-photos/scripts/check-audit-coverage.mjs`
+- `/Users/cshenso/git/presby-platform/presby-photos/scripts/ui-add.mjs`
+- `/Users/cshenso/git/presby-platform/presby-photos/drizzle/0067_presby_public_events_calendar.sql`
+- `/Users/cshenso/git/presby-platform/presby-photos/docs/decisions.md` (head)
+- `/Users/cshenso/git/presby-platform/presby-assets/docs/work-log/2026-10-25-public-asset-allowlist.md` (Phases 2–3)
+- `/Users/cshenso/git/presby-platform/presby-assets/drizzle/0072_presby_blob_audience.sql`
+- `/Users/cshenso/git/presby-platform/presby-assets/src/lib/db/domain/public-roster-photo.db.test.ts`
+- `/Users/cshenso/git/presby-platform/presby-assets/scripts/assets/test-rls-72.sql`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/work-log/2026-10-26-site-ingest-size.md`
+- `/Users/cshenso/git/presby-platform/presby/node_modules/next/dist/server/app-render/action-handler.js` (the 1 MB default)
+- `/Users/cshenso/git/presby-platform/presby/package-lock.json` (sharp 0.35.5 and its linux binaries)
+
+I edited no files, made no database connection and did not use `git stash`.
 
 ---
 

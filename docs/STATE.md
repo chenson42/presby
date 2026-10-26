@@ -30,6 +30,7 @@ Parish management (0068, DECISION-242-245, F258-F265) took `2ac`; the next findi
 Developer portal Increment 1 (v0.46.0, DECISION-258/261, F283-F285 and F288, no migration) took `2ad`; the next findings subsection is `2ae`. The public asset allowlist (0072, DECISION-277, F289, F340, F341) took `2ae`; the next findings subsection is `2af`. Its numbers were pre-assigned, so the figures above are unchanged. Its numbers were pre-assigned (DECISION-259/260, F286/F287 are Increments 2 and 3), so the figures above are unchanged.
 The two-factor enrolment secret race (v0.46.2, DECISION-290, F342, no migration) took `2af`; the next findings subsection is `2ag`.
 Site ingest over the request-size limit (v0.46.3, DECISION-279, F324, no migration) took `2ag` (`2af` is the two-factor enrolment secret race, v0.46.2, F342); the next findings subsection is `2ah`. Its numbers were pre-assigned, so the figures above are unchanged.
+Careers Increment 1 (v0.47.0, migration 0071, DECISION-264/265/266 and 278, F290, F292-F295 and F311-F320; DECISION-262/263 and migration 0075 are Increment 2's) took `2ah`; the next findings subsection is `2ai`. Integration is on `pipeline/careers` (worktree `presby-careers`, Neon `pipeline-careers`, port 3580), merged with main at 0.46.3 and not yet pushed; the apply order and the production runbook are `docs/deployment.md` "Careers (0071)". F291 (the ticket forms' 10 MB claim) is queued as its own bug-fix.
 
 ---
 

@@ -149,6 +149,15 @@ src/lib/contact-methods/ — which address a person's mail uses (DECISION-216): 
                          of contact_methods (end-dated, never deleted);
                          reader.ts, the TypeScript door to presby_person_email,
                          the credential authority
+src/lib/careers/       — job postings (Track L): the pure description validator,
+                         toolbar and paste converter; postings.ts (staff reads and
+                         writes, audit in the same transaction); public.ts (the one
+                         anonymous definer read); sweep.ts (the owner-only
+                         auto-close, the only getPlatformDb() user here).
+                         Applications arrive in a later increment and are
+                         definer-only
+src/components/careers/ — the posting description, list and meta pieces shared by
+                         the public tree and the staff preview
 src/lib/site-urls.ts   — SiteUrls: the only place a same-host public URL is
                          built (a source-scan test bans hand-built /site/${…}
                          elsewhere); pure, safe for the proxy and next.config.ts
@@ -585,6 +594,13 @@ demographic, medical — pastoral notes sit *above* financial data.
 *Known violation:* the inherited `ADMIN_ROLE` in `src/lib/permissions.ts` is
 still a wildcard. It is bounded (platform shell only, and the tenant connection
 cannot bypass RLS) but not removed.
+
+*Second known violation:* the founding-administrator bundle carries
+`careers.applicants`, a tier-3 key (DECISION-265, operator ruling; the first key
+above tier 1 in that bundle). The founding administrator can read job
+applications once they exist; the key reads nothing until the applications
+increment ships, and that increment's resume-download audit row is what detects
+use. `paper`.
 
 ### Permissions vs Flags
 

@@ -1066,6 +1066,145 @@ mints a new one). The first `site-fpcw` run is the evidence; the in-process brid
 discloses; no takedown until F289 Tier 2). Re-running an older failed run after a newer
 one succeeded republishes the older content: re-run only the latest.
 
+---
+
+## Careers (0071)
+
+Added at integration (v0.47.0). Migration `0071`. Design and rulings:
+`docs/work-log/2026-10-25-careers-inc1.md` (Phase 3 and Phase 6) and the parent
+`docs/work-log/2026-10-25-careers.md`; DECISION-264, 265, 266 and 278; findings
+F290, F292 to F295 and F311 to F320 (`docs/schema-design-2.md` section 2ah).
+Increment 1 only: job postings, the staff pages, the public list and posting
+pages and the `careers` slot. **Nothing here accepts an application**; that is
+Increment 2 (migration `0075`), which has its own runbook and a stricter rule
+about production data (point 8). Confirm first, on production:
+`select count(*) from information_schema.tables where table_name = 'job_postings'`
+is 0 and `select count(*) from permissions where key like 'careers.%'` is 0.
+The journal has no idx 69 or 70 (the number is the migration's own, as for 0072);
+do not renumber.
+
+### Pre-deploy runbook: 0071, then the code
+
+1. **Order and method: `0071` first, then merge and deploy the code.** Apply it
+   as the owner, on the direct endpoint, by hand, in one transaction:
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0071_presby_careers.sql`.
+   `db:migrate` stopped tracking past idx 9, so the journal entry (idx 71) is a
+   record, not an applier. The file is idempotent (every statement is `if not
+   exists`, `on conflict do nothing`, `where not exists`, drop-then-add,
+   `create or replace` or revoke-then-grant) and was applied twice in full on the
+   pipeline branch. It shares no object with `0068` (parishes) or `0072` (asset
+   audience), so the three may be applied in either order; each has its own
+   conditions in its own section. **Snapshot `production` first** (Neon). Code
+   before schema is the wrong order: the staff and public pages and the daily
+   sweep call objects that do not exist yet. With the toggle off everywhere
+   (the default) no page is reachable, and the sweep step would only log a
+   counts-only failure, with the token pruning unaffected. Old code against the
+   new schema is safe: the schema is additive, and the one behavioural change is
+   point 2.
+2. **Re-read the live `presby_founding_administrator_permission_keys()` at merge,
+   before applying.** `0071` re-creates it with two more keys. If another
+   migration has re-created it since this branch was cut, the second `create or
+   replace` silently drops the first one's keys, and Postgres records no
+   dependency to warn you. Today the live body is `0059`'s, nine keys
+   (`people.manage`, `roles.manage`, `role_grants.manage`, `groups.manage`,
+   `officers.manage`, `org_features.manage`, `tickets.file`, `staff.manage`,
+   `domains.manage`) plus `congregation_oversight.manage` for a presbytery;
+   `0061` and `0068` say they do not touch it. Check with
+   `select pg_get_functiondef('presby_founding_administrator_permission_keys(text)'::regprocedure)`;
+   if the array is anything other than those nine, stop and merge the new keys
+   into `0071`'s array by hand (and the TypeScript plan, the designation golden
+   and `invitations.db.test.ts` with them). The test that catches a mismatch is
+   `src/lib/db/domain/invitations.db.test.ts` (the SQL-equals-TypeScript parity
+   case, around line 571).
+3. **Count the backfill, read-only, before applying, and tell the operator the
+   number.** `0071` tops up every existing org-owned `founding_administrator`
+   role with both keys, **including `careers.applicants`, a tier-3 key**, so
+   every existing founding administrator holds it from the moment the migration
+   runs. It reads nothing until Increment 2. The count:
+   `select count(*) from app_roles where key = 'founding_administrator' and organization_id is not null`
+   and, for who holds them,
+   `select count(*) from role_grants g join app_roles r on r.id = g.role_id where r.key = 'founding_administrator' and r.organization_id is not null and g.ends_on is null`.
+   Production held zero such roles on 2026-10-25; re-measure. Residual, as
+   `0057`: a re-apply re-adds a key a tenant removed from a designation-minted
+   role. The release note says "existing and new founding administrators".
+4. **Reserved-path check, read-only, immediately before deploy.** Careers
+   reserves `/careers/<anything>` on every site (the bare `/careers` stays a
+   bundle page). A live bundle with a page under it would be stored and never
+   shown. Expected 0 rows (0 on 2026-10-25; the query's syntax was verified on
+   the pipeline branch with a positive control):
+   ```sql
+   select o.slug, p->>'path' as path
+     from organization_sites s
+     join organizations o on o.id = s.organization_id
+     join blob_assets b on b.id = s.content_bundle_key
+    cross join lateral jsonb_array_elements(convert_from(b.bytes, 'UTF8')::jsonb -> 'pages') p
+    where lower(p->>'path') like '/careers/%';
+   ```
+   A row means rename that page in the site's repository before deploying. Ingest
+   refuses new ones by name (and the percent-encoded spellings) from this release.
+5. **Verify against the catalog, not the DDL, and diff against `development`.**
+   - `permissions` holds `careers.manage` at tier 1 and `careers.applicants` at
+     tier 3, module `careers`.
+   - `job_postings` has `relrowsecurity` and `relforcerowsecurity` true, one
+     `tenant_isolation` policy, and **no** `DELETE` grant to `presby_app`; its
+     column-limited `INSERT` and `UPDATE` grants omit `version`, `posted_on`,
+     `first_published_at`, `closed_at` and `updated_at`. The three guard triggers
+     (`job_postings_guard_insert`, `_update`, `_delete`) are present and enabled.
+   - `presby_public_careers(text, text)` and `presby_careers_org_today(uuid)`
+     have `prosecdef` true, `search_path=public, pg_temp`, and execute for
+     `presby_app` only; `presby_careers_sweep(integer)` and
+     `presby_founding_administrator_permission_keys(text)` are executable by
+     neither `public`, `presby_app` nor `presby_platform`
+     (`has_function_privilege` false for all three).
+   - The founding function's array now ends `…, 'domains.manage', 'careers.manage',
+     'careers.applicants'`; the template role `hiring_committee` exists with
+     `organization_id is null` and exactly those two keys; the template count is
+     seven.
+   - The founding-administrator role count from point 3 is unchanged, and each of
+     those roles now has both keys.
+6. **On `development`, after merge:** apply `0071`, then run
+   `scripts/careers/seed-dev-careers.sql` (reached through `scripts/seed-dev.sql`)
+   and the full `scripts/test-rls.sql` as `presby_app`. Section 71 is
+   `scripts/careers/test-rls-71.sql`. Two patches are needed in the shared files
+   (`scripts/careers/*.integration.patch`): the template count goes from 6 to 7
+   at `scripts/test-rls.sql` (`DECISION-152` assertion) and the seed includes the
+   careers fixture (two live sites). Known failures that are not careers: the
+   drift at `scripts/test-rls.sql` lines 217, 516 and 7927, and section 67's seed
+   missing on a pipeline branch. **Do not run the seed or the suite on
+   production** (test helpers and fixture sites).
+7. **Flag prerequisites for the committee role, then the toggle.** The toggle
+   `org_portal.careers` is per organization, off by default, with no row, and is
+   switched on by a founding administrator at `/o/<slug>/admin/features`
+   ("Job openings"). Setting up the hiring committee needs **two global flags
+   that must be on in production**: `org_portal.roles` (Roles, where the "Hiring
+   Committee" template is adopted) and `org_portal.admin_hub` (the Administration
+   hub). Without them `/admin/roles` says "Role administration isn't turned on"
+   and the hub says "Organization administration isn't turned on", and the
+   template cannot be adopted. Check both in `/admin/flags` before telling a
+   congregation to set up a committee. The committee path, as built and walked:
+   the founding administrator adopts "Hiring Committee" at Roles, New role,
+   then grants the role to the committee's group, so membership drives access.
+   Until Increment 2 the committee role grants two keys that read nothing.
+8. **Defaults, rollback, and the production-branch rule.** Defaults: the
+   toggle is off for every organization, `job_postings` is empty, and no site
+   carries the `careers` slot, so merging exposes nothing. There is no rollback
+   file and no data to roll back. The fastest way back is, in this order: the
+   toggle off for the organization (the public pages 404 and the slot shows the
+   one "unavailable" notice), then close the postings, then
+   `sites.public_render`. Do not drop `job_postings`, the function or the
+   permission rows; the code needs them, and a posting is never deleted. **Never
+   branch production for pipeline work**: this increment stores no personal data
+   of an applicant, but Increment 2 does, and a Neon branch of production would
+   be a copy of it outside the retention clock.
+
+**What to tell the operator after merging.** The Employment page for the first
+customer's site is a new content file in its private repository, not part of
+this release and not to be added until the toggle is on and a posting is
+published (otherwise the menu page shows the unavailable notice). The steps are
+the "Post-ship steps" in the Increment 1 work-log; the posting import is Track K.
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.

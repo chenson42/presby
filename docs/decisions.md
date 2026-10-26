@@ -39,6 +39,23 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-278 — Careers Increment 1 implementation shape: a trigger-bound posting state machine, a compare-and-set `version`, a database-enforced cap of 100 published postings, and one daily sweep.**
+
+**Status:** Resolved (tech-lead, Phase 3; built across three batches, deviations recorded in the work-log; QA runs 1 to 4 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-26 · **Feature:** `2026-10-25-careers-inc1` (parent `2026-10-25-careers`; migration 0071; F311 to F320; v0.47.0)
+
+- **State machine.** `draft → published`, `draft → closed` ("discard"), `published → closed`, `closed → published`, enforced by a trigger that binds the owner connection too. `first_published_at`, `posted_on`, `closed_at`, `version` and `updated_at` are trigger-owned and outside the tenant column grants, so `presby_app` cannot write them. The owner path may supply `posted_on` at first publish (the Track K import). A posting is never deleted: `delete` is not granted and a guard covers the owner (the one path is the guarded test-fixture teardown cascade, as for `organization_domains`); a draft nobody wants is "discarded", which is a close (the operator's all-deletes-soft rule).
+- **Compare-and-set on `version`.** Only content and status changes bump it; an ordering change does not. A stale save is refused with a plain message, not overwritten.
+- **Ordering and the cap.** Only published postings are ordered, newest first, by dense renumbering under a row lock. At most 100 published postings per organization, by trigger and advisory lock; the public list is capped at 100, so without the cap a 101st posting would drop silently (F320).
+- **The one anonymous read.** `presby_public_careers(slug, posting default null)` answers both the list and one posting, always returns one row, projects named keys only, and returns `slug` and `title` alone for a closed posting. A failed read is a distinct `failed` state. "Open" is derived at read time (`published` and the closing date not passed in the organization's zone); the sweep is housekeeping, not the gate.
+- **Audit.** Publish, close and reopen (and the cron's close) write one row each, in the change's transaction, ids only (`organizationId`, `postingId`, `via`). Create, edit, reorder and discard write none.
+- **The sweep.** `presby_careers_sweep(p_limit)` runs as an isolated step of the existing daily maintenance cron, on the owner connection, after the roll reconcile; its return type `(kind, organization_id, posting_id, application_id)` is fixed now so Increment 2 can extend it with `create or replace`. A null limit means 200. A failed sweep logs counts only and never stops the token pruning.
+- **The placement line** on the staff page reports what the published bundle contains and says so when it could not check.
+- **Writers.** `src/lib/careers/postings.ts` is the only module that names `job_postings` for writing; `public.ts` reaches it only through the definer and `sweep.ts` only through the sweep function. `boundaries.test.ts` pins this, and the INSERT is a column-limited raw `sql` statement because Drizzle's `.values()` names every column and `presby_app` has no grant on the trigger-owned ones. `dev-docs.ts` files the table under `T. Careers` and is the one other file that names it (F338).
+- **Accepted residuals (`paper`).** RLS enforces tenancy, not authorization: an application bug could show a draft to another member of the same organization (drafts are tier-1 content). Posting links carry no `rel="nofollow"` (D10, not producible through `<Prose>`). The renderer has no escape syntax, so a literal `*` or a line-leading `- `, `1. ` or `#` in typed text changes meaning; the paste converter neutralises `*`, typed text relies on the preview (F318). Close on a published posting saves unsaved edits first, so they are briefly live (ruled intended, QA N3).
+- **Revisit if** the 100 cap or the three employment types prove too tight, or a fifth writer of `job_postings.status` appears (it must audit).
+
+---
+
 **DECISION-277 — `blob_assets.audience` (fail-closed); the public asset route serves a `public_site` image, or the photo of a person currently listed, through one definer; private consumers pin `'private'` by composite FK.**
 
 **Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; amended at Phase 4 Batch 1 by orchestrator rulings 2026-10-26; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-asset-allowlist` (F289; F297/F298; F340; F341; migration 0072; v0.46.1)
@@ -56,6 +73,44 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 - **Accepted residuals.** Tier 1 has no takedown: a `public_site` image stays fetchable by its uuid after it drops out of a bundle (Tier 2 is a follow-up). Copies already in browsers, search engines or archives cannot be purged. Old code running between the migration and promotion can produce `private` images, which a re-ingest (a new commit) heals. `people.photo_key` has no FK until a photo writer ships.
 - **Directory-toggle residual (deferred by the operator, 2026-10-26).** A listed person's photo is fetchable by its exact uuid while `sites.public_staff_directory` / `sites.public_committee_directory` is off, because the roster functions never read those flags. Gating the roster-photo branch on them was escalated at Phase 3 (Edge Case 19); the operator answered "nah. we can test that in the future" and deferred it. It is stated in the release note and in `docs/deployment.md`, and carried as a "Deferred, not open" line in `docs/TODO.md`. `paper`.
 - **Revisit if** a non-image class needs public serving, a photo writer ships (add the `photo_key` FK), takedown is required (Tier 2), or the directory-toggle residual is reopened.
+
+---
+
+**DECISION-266 — Posting descriptions use the site-kit markdown subset, rendered by `<Prose>`.**
+
+**Status:** Resolved (architect, Phase 2; amended by tech-lead, Phase 3 D1; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-careers-inc1` (F311, F317, F318; v0.47.0)
+
+- **Decision.** A posting's description is stored as the markdown subset site-kit already renders. No editor dependency (Tiptap and ProseMirror rejected: a second content model on the public tree). Phase 2 named `renderMarkdown`; `presby-site-kit@4.0.0` does not export it (its `exports` map is `.` and `./styles.css`), so the pages render through the exported `<Prose body=…>` component, which calls the same function. The architect's intent, one renderer shared with a bundle's own `prose` blocks, holds (F311).
+- **Validator narrower than the renderer.** Server-side: `http`, `https` and a bare `mailto` links only, headings `##` and `###` only, no placeholder links, 20,000 characters. The same pure validator runs in the editor and in the action.
+- **The editor.** A textarea with a seven-button toolbar, a counter, a client preview through the same component, and a paste converter built on the browser's own `DOMParser` that flattens pasted HTML to the subset (a `javascript:` link is dropped and its text kept, a lone `*` becomes U+2217). A converted block is closed with a blank-line boundary on both sides when it would glue to text (Phase 6 finding 7, QA N1).
+- **Accepted residuals (`paper`).** No `rel="nofollow"` is producible through `<Prose>` (F317). The renderer has no escape syntax (F318). A pasted paragraph at the end of a line still merges with the next line (QA N4, in `docs/TODO.md`). A dropped link in a paste is silent (needs a Copy line, in `docs/TODO.md`).
+- **Revisit if** site-kit exports a `./markdown` subpath (v4.1.0 option, `docs/TODO.md`), or staff feedback says the toolbar is unusable.
+
+---
+
+**DECISION-265 — Careers permissions: `careers.manage` and `careers.applicants`, both in the founding-administrator bundle.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; operator ruling Q4; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-careers-inc1` (F292, F314, F315; migration 0071; v0.47.0)
+
+- **Keys.** `careers.manage` (tier 1; posting create, edit, publish, close) and `careers.applicants` (tier 3; operator-confirmed, applications and resumes). Neither implies the other. `requires_two_factor` stays at its default on both, matching the four existing tier-3 keys; it joins the tracked S2 follow-up as a member of that class.
+- **Bootstrap (F292).** Both keys join the founding-administrator bundle in `presby_founding_administrator_permission_keys()`, the TypeScript `foundingAdministratorPlan()`, the designation golden, and a 0057-style backfill onto every existing org-owned `founding_administrator` role. Without the bundle, `assertPermissionSubset()` (F111) makes a key nobody at an organization holds ungrantable there, so the template could never be adopted. A universal `hiring_committee` template carries both keys, inserted by key with no fixed id (template ids 1 to 6 are taken); the isolation suite's template count goes from six to seven (F314). A parity test pins SQL equal to TypeScript, in order, for every organization type.
+- **The residual (`paper`, operator ruling Q4).** `careers.applicants` is the first key above tier 1 in that bundle: the founding administrator can read job applications once they exist. Detected by the resume-download audit row (Increment 2), not prevented. Until Increment 2, `careers.applicants` is checked by no code and reads nothing. CLAUDE.md's No Role Carries a Wildcard section names it as a second known violation.
+- **Platform-admin confirm dialog.** The founding-administrator confirm sentence builds from `PERMISSION_LABELS`; both keys are labelled so it never renders a raw key, and the existing drift test is extended (F315). Its wording names "job applications and resumes", which do not exist yet; accepted as the planned way of naming the residual.
+- **Integration hazard.** Two `create or replace`s of the bundle function with different arrays silently drop the first one's keys. The later migration to merge must re-read the live body (`docs/deployment.md`, "Careers (0071)").
+- **Revisit if** the S2 follow-up (`requires_two_factor` on tier-3 keys) is decided; it is a one-column change.
+
+---
+
+**DECISION-264 — The careers public surface: platform pages under the site tree, one anonymous definer, descendants-only path reservation.**
+
+**Status:** Resolved (architect, Phase 2; amended by tech-lead, Phase 3 D2 to D5; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-careers-inc1` (F312, F316; migration 0071; v0.47.0)
+
+- **Routes.** `/careers` (the list) and `/careers/<posting>` are page routes under `(public)/site/[slug]`, shaped like `/give`: the church's brand colours and fonts, a "Back to {church}" link, and no site top menu or footer (D2, F312: site-kit's stylesheet is keyed on a `.presby-site` ancestor and sized to the reference site, whose prose `h2` is 4.25rem). The `careers` `liveSlot`, placed on a content page by the site's author, renders cards inside the site's chrome.
+- **Reserved paths.** The reserved-path check gains descendants-only reservation: `careers/<anything>` is refused at ingest by name (Copy I1, F316); the bare `/careers` is allowed and the bundle's own page wins. A production check (read-only) of live bundles for pages under `/careers/` returned 0 on 2026-10-25.
+- **One definer.** `presby_public_careers(slug, posting)` answers both reads (D5), always returns one row, projects named keys only, and returns `slug` and `title` alone for a closed posting (D3). A failed read is a `failed` state, distinct from `unavailable`: the slot shows one notice for both, the pages 404 for `unavailable` and show a `noindex` notice for `failed` (D4). A toggle-off or non-serving organization gets the site's one neutral 404 on the pages, never a "careers unavailable" page.
+- **Indexing.** Open pages and the list are `index, follow`; closed, failed and notice states are `noindex` (Phase 6 finding 5, fixed before release). Postings are public by design.
+- **Applying is not built here.** The apply route handler, the signed form token, the honeypot and the rate limit are Increment 2 (DECISION-262 and DECISION-263 own them).
+- **Revisit if** a church wants its site's menu on these pages (needs a site-kit change, Q-A), or the public list needs more than 100 rows.
 
 ---
 

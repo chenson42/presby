@@ -7935,7 +7935,7 @@ begin;
     1, 'DECISION-152: and that permission is statistics.publish — the same authority that files a return retracts it (no statistics.withdraw)');
   select assert_eq(
     (select count(*) from app_roles where organization_id is null),
-    6, 'DECISION-152: there are now SIX template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), and treasurer + giving_recorder (drizzle/0055)');
+    7, 'DECISION-152: there are now SEVEN template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), treasurer + giving_recorder (drizzle/0055), and hiring_committee (drizzle/0071, DECISION-265)');
   select assert_eq(
     (select count(*) from app_role_permissions rp
        join app_roles r on r.id = rp.role_id
@@ -8698,6 +8698,16 @@ rollback;
 --     the end of scripts/seed-dev.sql), so it is never run against production.
 -- ===========================================================================
 \ir parishes/test-rls-68.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/careers (integration).
+-- 71. Careers, Increment 1: job postings (drizzle/0071_presby_careers.sql).
+--     Its own file, as 46, 47, 59, 60, 61, 62, 64 and 67 above; \ir resolves
+--     relative to this script. It needs the test helpers and the seed's
+--     careers fixture (two live sites), so it is never run against
+--     production.
+-- ===========================================================================
+\ir careers/test-rls-71.sql
 
 -- ===========================================================================
 -- APPENDED SECTION - pipeline/public-asset-allowlist (integration).

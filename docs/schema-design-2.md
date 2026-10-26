@@ -2014,6 +2014,44 @@ Pipeline `2026-10-26-site-ingest-size` (v0.46.3; no migration; DECISION-279). Ph
 
 *Process note.* The defect surfaced on a real production CI run; the fix commit `7ef67b6` carries `Caught-By: agent-review`, which `CLAUDE.md` would call `production`. It was left because rewriting history mid-branch is riskier; count it correctly in the escape-rate discussion.
 
+## 2ah. Careers, Increment 1 — findings (F290, F292–F295, F311–F320)
+
+Pipeline `2026-10-25-careers` (parent) and `2026-10-25-careers-inc1` (v0.47.0; migration 0071; DECISION-264, 265, 266 and 278). Phase 6 verdict SHIP WITH NOTES. The migration adds one table (`job_postings`), two permission keys, a `hiring_committee` role template, the founding-administrator bundle's two extra keys (function and backfill), three guard triggers, three functions (one anonymous read, one helper, one owner-only sweep) and column-limited grants. F290 to F295 came from the parent's Phase 1 and Phase 2 and were disposed there; F311 to F320 are the Phase 3 findings (labelled P3-1 to P3-10 in the work-log, numbered in order at integration). F291 is not a careers finding in the end: it is its own queued bug-fix.
+
+**F290 (resolved by construction, Increment 2) — dedup versus purge.** `blob_assets` dedups by content hash, so deleting a resume's bytes could delete another applicant's identical file, or fail to delete. Applicant files will live in a careers-owned table with no dedup (DECISION-263), so the question does not arise. Nothing ships in Increment 1.
+
+**F291 (medium, queued as its own bug-fix pipeline) — the support-ticket forms say "up to 10MB" and cannot deliver it.** Confirmed by reading the source, not by running it: a server action's default body limit is 1 MB and Vercel's function body cap is 4.5 MB both ways. Careers sidesteps it (the apply route is a route handler, Increment 2). The ticket forms' claim needs a small bug-fix pipeline of its own; it is a `docs/TODO.md` line, not part of this release.
+
+**F292 (medium, applied in Increment 1) — permission bootstrap.** A key nobody at an organization holds is ungrantable there (`assertPermissionSubset()`, F111), so a committee role carrying the two new keys could never be granted by any administrator. Operator ruling Q4: both keys join the founding-administrator bundle, in the SQL function, the TypeScript plan, the designation golden and a 0057-style backfill onto every existing org-owned `founding_administrator` role. Walked as the person the path creates (Phase 6): the account created by an invitation holds both keys, adopts "Hiring Committee" and grants it. *Accepted residual (`paper`, DECISION-265):* `careers.applicants` is tier 3 and the first key above tier 1 in that bundle, so the founding administrator can read applications once they exist; detected by Increment 2's resume-download audit row, not prevented. `CLAUDE.md` names it as the second known violation of No Role Carries a Wildcard. *Integration hazard:* two `create or replace`s of `presby_founding_administrator_permission_keys()` with different arrays silently drop the first one's keys; `invitations.db.test.ts` catches it, and the production runbook says to re-read the live body at merge.
+
+**F293 (resolved in Increment 2) — audit `ip` and user agent on applicant events.** Decided in Phase 2: no submission audit row at all, staff rows carry ids only. The rate limit's existing IP row is an accepted existing residual. Nothing ships in Increment 1; the three increment-1 audit rows carry `organizationId`, `postingId` and `via` only.
+
+**F294 (resolved in Increment 2) — `email_queue` retains an applicant's address and body.** Resolved by dropping the applicant confirmation email and by a PII-free staff notice body. Nothing ships in Increment 1.
+
+**F295 (resolved in Increment 2) — no retention ceiling for a never-closed posting.** A derived ceiling, `least(closed_at + 1 year, submitted_at + 2 years)`; a reopen cannot extend past it (DECISION-262). Nothing ships in Increment 1.
+
+**F311 (design, resolved by D1) — `presby-site-kit@4.0.0` does not export `renderMarkdown`.** Phase 2 ruled the descriptions render through it; its `exports` map has only `.` and `./styles.css`. `<Prose>` is exported and calls it, so the pages render through `<Prose>` and the "one renderer" intent holds (DECISION-266). A `presby-site-kit/markdown` subpath export (site-kit v4.1.0) would let the editor preview import only the renderer; a `docs/TODO.md` line.
+
+**F312 (design, resolved by D2) — site-kit's stylesheet cannot render a posting inside the site's chrome.** It is keyed on a `.presby-site` ancestor and sized for the reference site (prose `h2` is 4.25rem, 68px), so a `##` heading in a description would render at page-title size. The platform pages use their own wrapper (brand tokens, a "Back to {church}" link, no site menu or footer), like `/give`; the slot, placed on a content page, renders cards inside the chrome. Operator question Q-A; a `docs/TODO.md` line.
+
+**F313 (test blast radius, closed) — `src/app/api/cron/maintenance/route.test.ts` pinned exactly one platform-connection `execute`.** The careers sweep adds a platform step, so the test was updated and the new step is isolated: its failure logs counts only and never stops the token pruning.
+
+**F314 (test blast radius, closed) — `scripts/test-rls.sql` asserted six template roles.** The new template makes it seven; the change is in `scripts/careers/test-rls.sql.integration.patch`.
+
+**F315 (copy, closed) — the platform admin's founding-administrator confirm dialog builds its sentence from `PERMISSION_LABELS`.** An unlabelled key would render raw (`careers.applicants`). Both keys are labelled and the existing drift test is extended.
+
+**F316 (copy, closed) — the ingest error for a reserved segment would have said `/careers` itself is reserved.** The descendants-only rule makes that false, so the ingest message for `careers/<anything>` names job openings under `/careers/` and says a page at `/careers` itself is fine. Ported onto main's `validatePages()` in `src/lib/sites-ingest.ts` at integration.
+
+**F317 (accepted, `paper`) — `rel="noopener noreferrer nofollow"` is not producible through `<Prose>`.** No link opens a new tab, and the author is staff, not an applicant, so `noopener` has nothing to protect; `nofollow` is absent until a site-kit change.
+
+**F318 (accepted residual) — the markdown renderer has no escape syntax.** A literal `*` or a line-leading `- `, `1. ` or `#` in typed text changes meaning. The paste converter neutralises `*` (U+2217); typed text relies on the live preview.
+
+**F319 (post-ship step, not platform code) — the pilot congregation's site repository has no Employment page.** Fourteen pages, none for employment, so the "public-site integration step" is a new content file, not an edit: `content/employment.json` with a hero and `{"type":"liveSlot","props":{"slot":"careers"}}`, nav group Connect, order 26. It waits until the toggle is on and a posting is published, or the nav entry would show the unavailable notice on a menu page.
+
+**F320 (closed, D13) — a public list capped at 100 with no cap on published rows would drop the 101st silently.** The database now refuses a 101st published posting per organization (trigger and advisory lock), so the cap is a rule, not a truncation.
+
+**Phase 6 findings fixed before release (no F-number).** Open postings and the list were `noindex` by inheritance (explicit `index, follow` now); the pay-unit select silently defaulted to "per hour" and published "$52,000 per hour" (now starts on "Choose…", and an amount with no unit is refused); a pasted block glued to the line before and after it (blank-line boundaries on both sides). Each has a red-first test, reproduced by QA runs 3 and 4. Phase 6 finding 8 (the committee role needs the global flags `org_portal.roles` and `org_portal.admin_hub`) is a prerequisite in the production runbook, not a defect.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

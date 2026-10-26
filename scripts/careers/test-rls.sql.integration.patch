@@ -1,5 +1,5 @@
 diff --git a/scripts/test-rls.sql b/scripts/test-rls.sql
-index a6d3701..99d2b0d 100644
+index 668a30a..a678a13 100644
 --- a/scripts/test-rls.sql
 +++ b/scripts/test-rls.sql
 @@ -7909,7 +7909,7 @@ begin;
@@ -11,15 +11,15 @@ index a6d3701..99d2b0d 100644
    select assert_eq(
      (select count(*) from app_role_permissions rp
         join app_roles r on r.id = rp.role_id
-@@ -8653,3 +8653,13 @@ rollback;
- --     fixture, so it is never run against production.
+@@ -8662,3 +8662,13 @@ rollback;
+ --     fixture (Fernwood's live site), so it is never run against production.
  -- ===========================================================================
- \ir person-emails/test-rls-64.sql
+ \ir public-calendar/test-rls-67.sql
 +
 +-- ===========================================================================
 +-- APPENDED SECTION - pipeline/careers (integration).
 +-- 71. Careers, Increment 1: job postings (drizzle/0071_presby_careers.sql).
-+--     Its own file, as 46, 47, 59, 60, 61, 62 and 64 above; \ir resolves
++--     Its own file, as 46, 47, 59, 60, 61, 62, 64 and 67 above; \ir resolves
 +--     relative to this script. It needs the test helpers and the seed's
 +--     careers fixture (two live sites), so it is never run against
 +--     production.

@@ -1,10 +1,10 @@
 diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
-index 0baf163..789cef1 100644
+index fe17dcc..e89925d 100644
 --- a/drizzle/meta/_journal.json
 +++ b/drizzle/meta/_journal.json
-@@ -449,6 +449,13 @@
-       "when": 1787446373186,
-       "tag": "0064_presby_person_emails",
+@@ -456,6 +456,13 @@
+       "when": 1787705573186,
+       "tag": "0067_presby_public_events_calendar",
        "breakpoints": true
 +    },
 +    {

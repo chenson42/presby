@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Shared; recorded in the parent | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (this file); Copy four-check, Carry-forward and e2e blast radius below; no operator answer blocks Phase 4 | Design complete | 2026-10-25 |
-| 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | Pending; starts after padmin 0.43.0 is on `main` and merged into the branch | — | — |
+| 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | In progress: Batch A (shell promotion) done and committed; Batches B (api-developer) and C (ux-developer) pending | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -546,7 +546,23 @@ For the orchestrator (not operator questions): give padmin Increments 2–4 Phas
 
 # Phase 4 — Implementation
 
-Pending (Phase 3 complete).
+## Batch A — shell promotion (ux-developer, 2026-10-25)
+
+**Step 0.** `origin/main` (0.43.0, padmin PR #55) merged into the branch; work-logs and `docs/research/` committed. Feasibility re-run: the four shell files, `admin-forbidden.tsx`, `ui/sheet.tsx`, `shared/load-error.tsx`, `shared/empty-state.tsx` and `lib/admin-portal/nav.ts` exist on main. The `admin-portal/admin-(header|nav|nav-links|mobile-menu)` grep listed only the layout and the four files themselves. **Deviation from the design's read:** there were no `admin-header` or `admin-nav` tests and `layout.test.tsx` references none of the renamed components (it needed no edit). No padmin Phase 4 in flight, so the Ruling 4 fallback did not apply: promoted to `shared/`.
+
+**Moved (git mv, history kept) and parameterised, all new props required, no defaults:**
+- `admin-portal/admin-nav-links.tsx` to `shared/console-nav-links.tsx` (`ConsoleNavLinks`, `ConsoleNavLinkItem` with optional `alsoActiveOn`, `ConsoleNavLinkGroup`, `activeNavHref`; props `groups`, `idPrefix`, `onNavigate?`). Active rule: longest matching prefix among `href` and `alsoActiveOn`; an `exact` item ignores `alsoActiveOn`.
+- `admin-nav.tsx` to `console-nav.tsx` (`ConsoleNav`: `groups`, `consoleLabel`, `idPrefix`; returns null when groups is empty).
+- `admin-mobile-menu.tsx` to `console-mobile-menu.tsx` (`ConsoleMobileMenu`: `groups`, `version`, `consoleLabel`, `idPrefix`; renders nothing when groups is empty).
+- `admin-header.tsx` to `console-header.tsx` (`ConsoleHeader`: `groups`, `consoleLabel`, `idPrefix`, `mainId`, `name`, `email`, `canAccessAdmin`, `canAccessDeveloper`).
+- Tests moved: `console-nav-links.test.tsx`, `console-mobile-menu.test.tsx` (old strings passed as props), new `console-nav.test.tsx`. Added: `alsoActiveOn` (prefix, segment boundary, exact Home, aria-current, idPrefix heading ids), Menu absent when empty, sheet title/nav label/description from `consoleLabel`, ConsoleNav label and empty.
+- `(admin)/admin/layout.tsx` passes `consoleLabel="Platform admin" idPrefix="admin-nav" mainId="admin-main" canAccessAdmin canAccessDeveloper={isPlatformAdmin}`.
+- `(admin)/admin/shell-boundaries.test.ts`: the `/o/` scan and the BrandTokens/getPlatformDb ban now also cover `shared/console-*` (asserts 4 source files).
+- `admin-forbidden.tsx`: one comment line naming the developer portal as second consumer (stays in `admin-portal/`).
+
+**Gate.** `npm run typecheck`, `npm run lint` (max-warnings 0), `npm run check` (all eight, exit 0) clean; vitest over `shared/console-*`, `(admin)/admin` and `admin-portal`: 62 files, 738 tests pass (includes `layout.test.tsx`, `shell-boundaries.test.ts`). Dev server on 3570 (own process, killed by listening PID); `e2e/admin-shell.spec.ts` 7/7 pass (desktop nav groups and aria-current, phone Menu open/navigate/close/Escape, 360px no sideways scroll). Screenshots of `/admin` at 360px and 1280px compared by eye: unchanged; `scrollWidth` 360 and 1280; heading ids still `admin-nav-<key>`. Note for running e2e against a self-started server: it needs `RATE_LIMIT_DISABLED=true`, the DOMAINS fakes, `CRON_SECRET=giving-e2e-cron-secret`, `STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret`, and `E2E_ALLOW_SHARED_DB=true` (the pipeline Neon branch is dedicated).
+
+**For Batches B and C.** Import from `@/components/shared/console-{header,nav}`; the shell-boundaries allow-list in Batch C already names `console-*`. No new copy strings were introduced. `ConsoleNav` and `ConsoleMobileMenu` return nothing for empty `groups`, so the layout may pass `[]` for a non-entitled viewer.
 
 ---
 

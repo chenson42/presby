@@ -1932,6 +1932,10 @@ Pipeline `2026-10-25-platform-admin-redesign` (Increment 1 shipped as v0.43.0; n
 
 **F281 (low, defense in depth, fixed) — `/admin/docs` was gated only by the proxy (`src/proxy.ts:42`), and `/admin/design-system` has no key at all.** The release-notes page checked nothing itself, so its protection was one rule in one file. **Closed by** a page-level `ADMIN_RELEASE_NOTES` check on `/admin/docs` with a failing-first test; the proxy already enforced the same key, so this is not a change in who can read it. `/admin/design-system` has no permission key of its own and is reachable by any holder of the admin door, including a door-only viewer; that is documented as door-level in `nav.ts` and the page header rather than gated, because it is a reference page with no tenant data (acceptable drift, Phase 6).
 
+## 2ab. TOTP auto-submit — finding (F282)
+
+**F282 (low, fixed) — clearing the code boxes after a wrong code depended on the page remounting when its URL changed, and two wrong codes in a row redirect to the identical URL.** The first failure lands on `/totp?callbackUrl=…&error=invalid`; a second lands on the same address, so anything keyed on the query string (or on Next remounting the segment) would leave the stale code in the boxes and, with auto-submit, nothing to re-arm. **Closed by** resetting on settle rather than on URL: when the form's pending state goes true then false, the input is remounted (`key={attempt}`), clearing and refocusing box 1 whether or not Next remounts. Pinned by `e2e/totp-code-entry.spec.ts` E-6/E-7 ("two wrong codes in a row") and the F-9/F-9b unit tests. DECISION-257; `docs/work-log/2026-10-25-totp-autosubmit.md`.
+
 ## 2ab. Public events calendar — findings (F250–F256)
 
 Pipeline `2026-10-25-public-events-calendar` (events Increment 4; v0.44.0; migration 0067; DECISION-238–241). F250–F253 were found at Phase 2 and F254–F256 at Phase 3; F257 was reserved and returned unused. Phase 6 verdict SHIP WITH NOTES. The migration is additive: one default-false column on `events`, one CHECK and one `SECURITY DEFINER` function. No new table, policy or table grant.

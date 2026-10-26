@@ -43,14 +43,12 @@ test.describe("Full login path with an MFA-enrolled user", () => {
 
     // (d) — a wrong code is rejected, and the challenge is not consumed.
     await enterTotpCode(page, "000000");
-    await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/totp\?.*error=invalid/, { timeout: 10_000 });
     await expect(page.getByText(/didn.t match/i)).toBeVisible();
 
     // (b) — the real code, computed from the same secret the fixture seeded.
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
     await enterTotpCode(page, code);
-    await page.getByRole("button", { name: /^verify$/i }).click();
 
     // (c) — same shape as the plain `admin` fixture (admin role, no
     // organizations): /launch's matrix lands it on /admin. Reaching it here

@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=5b57917 -->
+<!-- covers: decision=224 commit=49c4013 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,8 @@ is checked.*
 ---
 
 ## 2026-10-25
+
+- [ ] **`decision` · The two-factor code is now sent the moment the sixth digit lands, on sign-in and on the account setup screen (0.44.1; DECISION-257).** Typing, pasting or autofilling six digits checks the code with no button press; a wrong code empties the boxes and refocuses the first, and Verify stays as the fallback. A paste that drops a digit waits for the button. **What it costs:** a mistyped last digit is sent at once and spends one of the ten tries a minute, so expect more failed-attempt rows in the audit log. **One known hole:** a two-digit keyboard suggestion or drag into an already-filled box can still send a code with a wrong digit (same cost, tracked). **Owed to you:** publish the one-line what's-new post once live, and check on a real iPhone and Android phone and a screen reader; neither was possible in automated tests.
 
 - [ ] **`decision` · Your congregation's public website can show an events calendar, and nothing appears until each piece is chosen (0.44.0; DECISION-238 to DECISION-241).** An event shows only if its new per-event box is ticked, it is open to everyone, it is not cancelled, and the congregation's "Public events calendar" toggle is on. Everything starts off, and the site's maintainer must also place the calendar on a page. A database check and a read-time filter both back the members-only rule. **You must:** apply migration 0067 to production before merging (the new code reads its column), and run a real-iPhone check before turning it on anywhere. **Accepted:** anyone on the internet can read a shown event's text and archives may keep copies; there is no "add to my calendar" yet; a page carries about 0.75 MB of uncompressed HTML. **Still open (in TODO):** the FPCW site integration, the custom-host check at cutover, and the event import before DNS moves.
 

@@ -21,7 +21,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 | 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12; second amendment 2026-10-26 rules Batch 4's Copy gaps, X1 to X7, the queue's group filter and residual 13; third amendment 2026-10-26 rules Phase 5 run 1's three questions ("Saving…" ratified as C4; invite-summary string C12 addendum; owner TRUNCATE accepted as residual 14) | Design complete | 2026-10-25 |
 | 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). **Batch 3 complete (api-developer)**: `decisions.ts` (approve on the seat and override paths, send back / not approved), `notices.ts` + `notify.ts` (the four `person:role` notices; submit now tells approvers or pay holders), `approveRequestAction` / `returnRequestAction`, the Phase 3 amendment's Copy (tiles, `copy.ts`), ~115 new tests, decisions/notify/role-bundle DB suites; see the Batch 3 section. **Batch 4 complete (api-developer)**: `payments.ts` (record, reverse, waive, void, note; the `paid` and `closed` notices), `treasurer_list` reader, `csv-export.ts` + the export route (V4), the ten treasurer-tree actions and three team actions, residual-12 characterization, role-bundle payment half, 177 new tests, 168-file DB subset green; Copy gaps and one UI data gap reported (see the Batch 4 section). **Batch 5 complete (ux-developer)**: the member pages (list, new, edit, request, approve / send back, withdraw), the request form with the receipt slot bounded for Batch 2b, 88 + 29 + 15 new unit tests, 18 member e2e + 1 hydration spec green on :3590 and the hydration spec on the production lane :3591; see the Batch 5 section. **Batch 6 complete (ux-developer)**: the treasurer queue, request page, payment form, verb dialogs, settings and Treasury team pages, the C12 string edits and the no-chargeable-group sentence; 14 treasurer e2e + 3 hydration specs green on :3590 and :3591; see the Batch 6 section. **Batch 7 complete (full-stack-developer)**: the printed form (`print-model.ts`, `print.ts`, `GET /o/<slug>/reimbursements/<id>/print`, the Print the form button), `scripts/check-treasury-boundaries.mjs` (T1 to T5) wired into `npm run check` (nine tripwires), the additive `e2e/support/reimbursement-fixture.ts`, and the MFA deep-link, approval, CSV-bytes, role-bundle and toggle specs plus a print test and the Retire long-name check; see the Batch 7 section. **Batch 1b complete (database-admin)**: merged origin/main (0.46.1); 0073 corrected in place with `reimbursement_attachments_blob_fk` (three columns, private-pinned, NO ACTION) and the 0072 guard; test-rls-73 61 (73g new), test-rls-72 25, 9 new Vitest tests, integration patch re-cut (six hunks); see the Batch 1b section. **Batch 2b complete (api-developer, full-stack scope)**: merged origin/main (0.46.2); `sharp@0.35.5` direct and exact, `src/lib/storage/image-sanitize.ts` (the one importer, T5 now exactly one), `upload-request.ts`, `receipts.ts`, the two receipt routes, `detachReceiptAction`, the live receipt slot, F289's call-site row ACTIVE, F338 barrel and dev-docs lines committed; ~150 new unit tests, a 22-test DB suite, 5 new member e2e tests and one each in the treasurer-UI and CSV specs, all reimbursement specs green on :3590 and the hydration specs on :3591; see the Batch 2b section. Batch 2b is the last implementation batch; Phase 5 next. **Batch 8 complete (full-stack-developer)**: the treasurer invitation summary string (`invite-summary.tsx`, ruling 2) with `invite-summary.test.tsx`, and the comment-only residual 14 text in 0073 (ruling 3); see the Batch 8 section | — | 2026-10-26 |
 | 5 — Verification | qa | Run 1 FAIL (F-QA-1); run 2 PASS (F-QA-1 resolved); run 3 PASS (Batch 8); EC42 open for PR preview | PASS (run 3) | 2026-10-26 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete; N1 development walk, N2 no-payer notice, N3 Deacons seat; EC42 pre-merge gate | SHIP WITH NOTES | 2026-10-26 |
 
 ---
 
@@ -2549,3 +2549,234 @@ Logs and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-p
 - e2e: `e2e-set.log`, `e2e-360.log`
 - Dev server: `dev3590.log`
 - Screenshots: `invite-treasurer-360.png`, `invite-founding_administrator-360.png`
+
+---
+
+# Phase 6: Shipped vs Intent (analyst)
+
+**Slug:** `2026-10-25-treasury-inc1` · **Date:** 2026-10-26 · **Reviewer:** analyst (read-only; I edited no file and ran no server, no test and no query)
+**Tree:** worktree `presby-treasury`, `pipeline/treasury`, HEAD `abe80a8`.
+**Evidence read:**
+- Both work-logs in full: the parent's Phase 1 and 2, and the increment log's Phase 3 with its three amendments, Batches 1a to 8 and QA runs 1 to 3.
+- The diff stat of `origin/main...HEAD`, and these sources: `0073` §8a, `0064`'s acceptance function, `org-features.ts`, `tiles.ts`, `org-feature-warnings.ts`, the `audit.ts` additions and the member detail page.
+- Screenshots: QA's walk set (`…/qa/walk/shots/`, 360 and 1280 px), run 3's two invite pages, and the role-bundle spec's 360 px captures (`/Users/cshenso/git/presby-platform/presby-treasury/test-results/reimbursement-360/`).
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+Everything Phase 1 promised for Increment 1 is built, and the separation-of-duties, audit and two-factor properties hold in the evidence I read. Two conditions travel with this verdict:
+
+1. **Pre-merge gate (not a ship note): EC42.** `sharp` must load in a Vercel function on the PR preview. Receipts must not ship without the sanitizer, and a failure returns to Phase 2. This stays the orchestrator's item.
+2. **The SHIP IT walk is incomplete.** The Phase 6 rule requires the walk as the person each path creates, on `development`, at 360 px. That could not happen before merge, because 0072 to 0074 are not on `development`. What exists is the automated walk on `pipeline-treasury`, a branch copy of development with the migrations applied. It covers the real-invitation treasurer, and a chair approving through the real `/totp`. It does not cover an accepted-invitation founding administrator turning the toggle on, an accepted-invitation member filing, or the treasurer's toggle-off first day. The `development` walk is therefore note N1, to be done after integration and before any congregation's toggle is turned on in production. If you want the SHIP IT standard applied literally, hold the verdict until that walk is done.
+
+## ONE-LINE TAKE
+
+> A member can file a reimbursement from a phone with photo receipts, a chair or leader approves it, a different person records the payment, nobody can approve their own request, and the person who approved can never be the one who pays. The remaining gaps are the "who tells the church it has no treasurer" dead end, the Deacons seat, and a development-environment walk that could not be done before the migrations exist there.
+
+## What's Working
+
+- **Filing at 360 px.**
+  - The form (`360-01`) is one column, with a plain-language type choice ("Pay me back" and "Pay a vendor").
+  - The receipt hint states the real limits ("up to 4 MB, and you can add up to 5").
+  - The "I can't attach a receipt" checkbox says what happens next ("The treasurer decides whether that's okay before paying").
+  - Send request is full width, with Save draft under it.
+  - There is no `capture=` anywhere, and QA's mutation run held tripwire T3.
+- **Approval.**
+  - Approve and Send back are full width, at least 44 px tall and inside 360 px (`360-04`).
+  - The confirmation dialog states the amount, the payee and the group, as Phase 1 asked ("$31.75 to Tamsin Brightwater, charged to Property Committee…").
+  - The email carries none of that, which was the design.
+- **Treasurer.**
+  - The queue is cards at 360 px, with a status pill, a filter and an Export CSV button (`360-07`, `role-bundle-queue`).
+  - Record payment sits next to its own explanation ("PresbyPortal records the payment. It doesn't send money or ask for bank details").
+  - After payment the screen says "Payment recorded." and "This payment was already recorded." in place of the form.
+  - A reversal keeps both rows visible with the reason ("Payment corrected… Check went to the wrong payee"). That is Phase 1 Flow 4 exactly.
+- **Requester.** The requester's view says "Paid on 10/26/2026." with no payment details and no names in the history (`360-12`). The duplicate-receipt flag never reaches the requester.
+- **The treasurer role is self-sufficient.** This was the Phase 1 R6 "first-day wall".
+  - A treasurer made by accepting a real invitation, through the real sign-in and the real `/totp`, holds seven keys from that one role.
+  - They can complete every verb, and `request_for_others` shows on the new-request form.
+  - They can set up the Reimbursement Clerk role and give the Treasurer role to a second person, who then signs in through `/totp` and pays what the first approved. Whoever approves cannot also pay.
+  - The Treasury team page at 360 px shows the key badges and the "Roles to set up" guidance (`role-bundle-team-badges`).
+- **The invitation page.** At 360 px it tells the treasurer invitee what they are accepting, conditioned on "If {org} uses Reimbursements", and says "This role requires two-factor sign-in." The founding-administrator page is unchanged (run 3 screenshots).
+- **Eligibility for the accepted-invitation population.**
+  - I read `0064` §acceptance: a person created by an invitation gets a `staff` membership.
+  - `0073`'s `may_file` admits `staff`. An accepted-invitation treasurer or founding administrator can therefore file.
+  - I have not seen this confirmed in a browser (see N1).
+
+## Intent-vs-Shipped Diff
+
+| Phase 1 said | Shipped | Verdict |
+|---|---|---|
+| Flow 1: file from a phone, three types (me, someone else, vendor), committee, category, amount, date, purpose, pre-approver, receipts or "can't attach", idempotent submit, retained entries on failure | All of it. "Someone else" appears only for `request_for_others` holders. A double tap creates one request (EC1/2). Cents are built by a digit control and re-parsed on the server. | matches |
+| Flow 2: approve or return from the emailed link, with "already decided" and "changed since you opened it" | Shipped. The link is a bare path rather than `/launch?next=` (F321), because a signed-out visitor loses the query. Approve is POST only. A non-seat holder gets the same neutral 404. | acceptable drift (ruled, with evidence) |
+| Flow 3: treasurer pays, approver ≠ payer shown before the form, no receipt blocks payment | Shipped, enforced in both the definer and the trigger, with the owner connection bound too. | matches |
+| Flow 4: reverse a payment, both rows remain | Shipped; seen in the screenshot. | matches |
+| Flow 5: human statuses, "Sent back to you" opens edit-and-resubmit | Shipped, with distinct requester and staff wording. | matches |
+| Flow 6: first-time setup, with empty states naming the dead ends. Where nobody holds a pay key, "the toggle page and the queue say a treasurer must be designated". | The queue banner, the member form's "Let your church office know" and the empty-group sentence exist. The Features/toggle page says nothing about needing a treasurer, and the queue banner is visible only to a `view` holder, who by definition exists only if a treasurer does. | **partial, see N2** |
+| Flow 7: toggle off with open requests, confirm dialog with the count | Shipped (C1, EC26). Off returns HTTP 200 "isn't turned on", and nothing is deleted. | matches |
+| Flow 8: one-request PDF using `pdfkit`; CSV audited, row-capped, formula-guarded | Shipped. The print form is the requester projection. The CSV is capped at 20,000 rows (413, never truncated), includes the purpose, and is gated on `view` with 2FA. | matches |
+| Permissions: `request` key, or an engagement check (Q8) | Phase 2 replaced the key with an eligibility check (`may_file`). Orchestrator reported it to the operator. | acceptable drift (named v1 limit: an org cannot narrow who files) |
+| Permissions: `request_for_others` with no default binding | Bound to the treasurer, plus a Reimbursement Clerk template, because otherwise nobody could grant it (F322). The role-bundle test proves the grant path. | acceptable drift (better than the Phase 1 default) |
+| 2FA on `view`, `pay`, `manage` | Shipped. Every page, action and route runs the Node-side check, which closes the stale-claim window. | matches |
+| Approval is a seat, with `chair` or `leader` of a managed chargeable group | Shipped. Session and Diaconate requests go to treasurer override, which needs a second `pay` holder. | matches the operator ruling, **but see N3** |
+| Single-treasurer deadlock (R4) | A named state (`needs_second_payer`, `needs_another_payer`), the sole-holder exception stamped `self_paid`, and "Add one under Treasury team" for a `manage` holder. | matches |
+| Audit on approve, payments, waiver, return, void, override, every export, chargeable and category changes, toggle | 12 `tenant.reimbursement.*` keys, plus `RECEIPT_VIEWED`, which is more than I asked. Written in the same transaction as the transition. Metadata carries ids and counts only. | matches |
+| Receipts: EXIF handling, serve only through the request, no malware scanning stated | `sharp` re-encodes images (EXIF and GPS gone, QA confirmed on real bytes). PDFs pass through. Served with `nosniff`, a sandbox CSP and `private, no-store`. The no-scan residual is stated. | matches |
+| "The Phase 6 walk as the person the path creates, at 360 px on `development`" | Automated on the pipeline branch for the treasurer and the chair. Not on `development`, and not for a founding administrator or an accepted-invitation requester. | **partial, see verdict and N1** |
+
+## Gap closure (Phase 1 R1 to R15, Q1 to Q14)
+
+| Item | Status |
+|---|---|
+| R1 scope | Closed: six-increment program, children `-inc2` to `-inc6` exist. |
+| R2 "stops at approved" | Closed: payment is in this increment (Q1). The stale Track R line in `docs/TODO.md` must be rewritten (N8). |
+| R3 seats | Closed for `chair` and `leader`. **Deferred with a named owner:** the Deacons Moderator seat, via the parish pipeline's `deacons_moderator` (DECISION-242). That is an additive change inside `__is_seat`. See N3. |
+| R4 deadlock | Closed (above). |
+| R5 visitors | Closed by `may_file`. |
+| R6 first-day wall | Closed: 0074 bindings, the backfill, and the role-bundle DB and e2e tests. Production has 1 designation-minted copy. |
+| R7 no treasurer yet | **Partially closed, see N2.** |
+| R8 ledger-ready payment | Closed: its own insert-only table, with `unique (id, organization_id)` and no fund column. |
+| R9 explicit chargeable list | Closed. |
+| R10 categories | Closed: one managed list per organization, required once any exist. |
+| R11 CSV writer | Closed: `src/lib/csv.ts`, with giving's byte-exact test unchanged. |
+| R12 boundary tripwire | Closed: `check:treasury-boundaries` T1 to T5, wired into `npm run check`. |
+| R13 import door | Door built (`origin = 'import'`); the importer is **deferred to Track K**. |
+| R14 CPA questions | **Deferred to the CPA list**; no string claims compliance. |
+| R15 reminders | **Deferred, and the operator has not accepted the deferral.** TODO line below. |
+| Q1, Q5, Q6 | Built as ruled. |
+| Q4 | Increment 2's concern. |
+| Q8, Q12 | Amended by Phase 2 (eligibility check; 4 MB files). |
+| Q9 history import | Deferred to Track K. |
+| Q10 pledges | Increment 3. |
+| Q14 fiscal year | Increment 4. |
+| "Similar amount and date" form warning | **Deferred, never accepted**; TODO line below. |
+
+**Pass 5 (adversarial).** I found each vector addressed in design and pinned, and QA proved it failing-first by mutation:
+- Redirect targets: server-fixed.
+- Approve via GET: none.
+- State-machine shortcut: triggers on the owner connection too.
+- Self-approval, requester-pays and laundering: closed.
+- Amount tampering and frozen rows: closed.
+- Attachments: type, size, metadata and PII addressed; the no-malware-scan residual stated.
+- Enumeration: one neutral 404.
+- Input boundaries: server-side.
+- Administrator self-targeting: `paper`, detectable.
+
+## Edge Cases
+
+- **Empty state: pass, with N2.**
+  - "Nothing is waiting." and "You haven't made a request yet." are good.
+  - Settings shows "No group can receive requests yet. Choose at least one…".
+  - The form shows a no-chargeable-group sentence ("Ask your treasurer…").
+  - The "nobody can pay" state is the weak one (N2).
+- **Failure microcopy: pass.** "We couldn't save that. Your entries are still here. Try again." is human and keeps the form. Upload errors name the file and the reason. The "already decided" and "changed since you opened it" strings are present. No stack traces. Accepted edge: a lost reply after a committed attach reads "We couldn't save that" and the retry says "That receipt is already on this request" (ratified).
+- **Permission gate: pass.**
+  - Order is toggle, then key or seat, with the Node-side 2FA check on every surface, and the keys are read live.
+  - A treasury-key-only viewer on the member route is redirected to the admin route.
+  - There is no `loading.tsx` on the `[id]` segments.
+  - QA's route-by-route audit stands.
+- **Audit event: pass.** The security-sensitive mutations all write an audit row in the same transaction. Withdraw, submit, notes and receipt attach or detach are event-table-only by the tech-lead's call; Phase 1 did not require audit rows for them.
+- **Mobile (360 px): pass for what was walked.** The form, request detail for requester and approver, the approve dialog, the queue, the payment form, paid states, the team page and the invite pages show no sideways scroll. The settings page, the CSV and 360 px long-value cases rest on specs (EC39), and I did not see screenshots of them.
+
+## Known open items, ruled
+
+| Item | My ruling |
+|---|---|
+| **EC42** (`sharp` in a Vercel function) | Pre-merge gate, the orchestrator's. Not closable from this tree. A failure blocks receipts and returns to Phase 2. Record the preview URL and result in this log. |
+| **Residual 14** (owner `TRUNCATE` and `DISABLE TRIGGER`) | Accept as the tech-lead did. It is the 0055 and 0056 posture, `presby_app` and `presby_platform` cannot reach it, and a six-table guard would be a half measure. It is not a user-facing defect. Still needs operator confirmation, recorded as item 10. |
+| **Residual 12** (a team-page revoke can orphan the other module's manage key) | Also still **unconfirmed by the operator** (item 9). The tech-lead's reasoning (fail toward removing access, recoverable through the platform operator) holds. Please ask for both confirmations together. |
+| **Shared invitation-fixture hazard** | Not a product defect and not this increment's to fix. The invitation fixture's teardown stamps every member `deletable_until`, so any future spec that puts a seeded person in an invitation org repeats F-QA-1, and only the DB canary notices. TODO line below. |
+| Run 1 FAIL (F-QA-1) | Resolved and re-proven in run 2. |
+
+## Follow-Ups (SHIP WITH NOTES)
+
+**N1. The `development` walk, a required close.** After integration, with 0072 to 0074 applied to `development`, walk at 360 px as people the paths create, not seeded fixtures. List each page and what it shows:
+- The platform-designated treasurer: accept the invitation, then `/launch`, then `/totp`, then the org portal, with the toggle off and then on, then the queue, settings and team pages.
+- An accepted-invitation founding administrator turning the toggle on from Features. Confirm the platform flag `org_portal.features` is on in that environment (seeded off in `scripts/seed.ts`; the Features page is unreachable without it). Confirm the off-warning count.
+- An accepted-invitation member filing a request and then seeing it through to Paid.
+- A chair approving from the emailed link, MFA-enrolled.
+
+**N2. Close the "no one can record payments" dead end (Phase 1 R7 / Flow 6, partly open).**
+- Today the only place that says a treasurer must be designated is the treasurer queue banner (C7). A viewer who sees the queue holds `view`, which only a treasurer role carries, so the people who need the instruction never see it.
+- The member form's "route nobody" message says "Let your church office know" and the office has nothing in-app to read.
+- Smallest fix: after the org administrator turns the toggle on with no `pay` holder, show an administrator-visible line on Features (an `org_features.manage` holder, so the audience can act): "No one can record payments yet. Ask PresbyPortal support to set up a treasurer."
+- Needs a count readable without a money key, as `open_count` already is. This is copy and a read, not new schema.
+- Not urgent for production today (1 congregation has 1 designated treasurer), but real for the next congregation.
+
+**N3. The Board of Deacons seat.** FPCW added Deacons Moderators as approvers on 2026-10-19. Presby ships without it, so a Deacons-charged request waits for treasurer override, which needs a second `pay` holder. That is a cutover-parity gap, and the operator has accepted it (Q5). Link it to the parish pipeline's `deacons_moderator` seat (DECISION-242, additive inside `__is_seat`) and the Track K parity check.
+
+**N4. Operator confirmations pending.** Residual 12 (item 9), residual 14 (item 10), the R15 reminders deferral, and the "similar request" warning deferral.
+
+**N5. Release housekeeping.** CLAUDE.md "eight tripwires" becomes "nine" in two places, at integration with approval. Rules 10, 14 and 15 are drafted below.
+
+## TODO-ready lines (Rule 10; paste into `docs/TODO.md`)
+
+Replace the Track R line (it still says "Stops at `approved`") with the shipped text, and add:
+
+```
+- [ ] **Treasury Inc 1: pre-merge, EC42.** Confirm `sharp` loads in a Vercel function on the PR preview (receipt upload and a JPEG download on the preview URL). If it does not, receipts block and the pipeline returns to Phase 2. Record the result in `2026-10-25-treasury-inc1`. Orchestrator.
+- [ ] **Treasury Inc 1: the `development` walk (Phase 6 N1).** After 0072-0074 are on `development`, at 360 px as the people each path creates: designated treasurer (toggle off, then on), accepted-invitation founding admin turning the toggle on (confirm `org_portal.features` is on), accepted-invitation member filing through to Paid, MFA chair approving from the email link. List each page. Close before any congregation turns Reimbursements on in production. — `2026-10-25-treasury-inc1` Phase 6 N1
+- [ ] **Tell the church when no one can record payments (R7, partly open).** Show an `org_features.manage` holder (Features page, after the toggle is on) "No one can record payments yet. Ask PresbyPortal support to set up a treasurer." when `pay_holder_count` is 0, via a count readable without a money key (as `open_count` is). Today only the treasurer queue says so, and nobody who can see it exists in that state. — Phase 6 N2
+- [ ] **Deacons Moderator as an approving seat.** FPCW approves Deacons requests with the Moderators (2026-10-19). Map `officer_terms.office = 'deacons_moderator'` (DECISION-242) inside `presby_reimbursement__is_seat`, additively; until then Deacons-charged requests need treasurer override and a second `pay` holder. Add to the Track K parity checklist. — Phase 6 N3, Q5
+- [ ] **Operator confirmations (treasury Inc 1).** Residual 12 (a team-page revoke of the seven-key treasurer grant can leave the other module's manage key unheld; recoverable by the platform operator) and residual 14 (owner `TRUNCATE` / `DISABLE TRIGGER` on the six tables, the 0055 class); also the R15 reminders deferral and the "similar amount and date" form warning deferral. — `2026-10-25-treasury-inc1` Needs a confirmation 9 and 10
+- [ ] **Reminders for approvals aging in the queue (R15).** Age is shown and the queue sorts oldest-first; there is no nudge email (no fifth cron wanted — consider the daily maintenance job). Deferred, not yet accepted. — Phase 1 R15
+- [ ] **"Similar request" warning on the form (P4-12).** Same amount and nearby date on the requester's own recent requests. Deferred, not yet accepted.
+- [ ] **Generalize the downward-role guard (F301) and add a `group_role` vocabulary CHECK (F300)** before the ledger. The guard is keyed per module; `group_memberships.group_role` is exact-match fail-closed in the seat test but unchecked in the table.
+- [ ] **A database-wide `TRUNCATE` guard on tenant tables, if wanted** (residual 14's revisit condition; covers every module at once).
+- [ ] **Invitation fixture hazard.** `e2e/support/invitation-fixture.ts` teardown stamps every member `deletable_until`, so a spec that adds a seeded person to an invitation org leaves that person stamped (F-QA-1); only `fixture-deletable.test.ts` catches it, not the e2e run. Make the teardown stamp only people it created. Rule 16 shared file, orchestrator and tech-lead.
+- [ ] **Test-environment portability.** Five `test:db` failures pin `localhost:3000` and fail when a worktree's `.env.local` uses another port (`tickets/actions.test.ts:333`, `feedback/actions.test.ts:516`, `safe-callback.test.ts:239`, `issue.db.test.ts:303`, `proxy.test.ts:521`). Not a treasury defect.
+- [ ] **Move the statement fonts to `src/lib/treasury/fonts/`** (P3-13: the print route reads them from `src/lib/giving/statements/fonts/` by path; relocation deferred, pinned by a file-exists test).
+- [ ] **Invitation email teaser** (`src/lib/onboarding/invitation-email.ts:63`) still says only "manage the congregation's online giving"; ruled a deliberate one-line summary, revisit if the email is edited.
+- [ ] **CPA list (R14):** staff reimbursements under an accountable plan; vendor 1099 thresholds (vendor name is free text, so no aggregation). No string claims compliance.
+- [ ] **Import door (R13, Track K):** the importer for FPCW request history (`origin = 'import'`, null actors) is not built; Q9 default is paid and void history read-only, no attachments.
+- [ ] **Rewrite the Track R line** ("Stops at `approved`…") as Done with date 2026-10-26, and note Increment 2 (giving continuity) takes migration 0076.
+```
+
+## Rule 13: what's-new
+
+**Warranted, but hold the publish.** The behavior is member-visible, but it is off by default per congregation, and a what's-new entry reaches everyone on the platform. Publishing now would announce a feature most members cannot see. Publish the first time a congregation turns it on in production, with the church's own sign-off on timing. Suggested text:
+
+> **Ask to be paid back from your phone.** If your church turns on Reimbursements, you can ask to be reimbursed for something you bought for the church, or ask the church to pay a vendor. Attach photos or PDFs of the receipt, send it, and follow it until it is paid. The chair or leader of the group it is charged to approves it, and the treasurer records the payment. No one approves their own request. PresbyPortal keeps the record; it doesn't send money.
+
+## Rule 14: functionality-map bullet
+
+Add to the Index (Giving & Finance area) and the full map, next to Online giving:
+
+> - **Reimbursements** — `/o/<slug>/reimbursements` (member: new, edit, request, approve or send back, withdraw, print the form) and `/o/<slug>/admin/reimbursements` (treasurer: queue, request, settings, Treasury team, CSV export), gated by the per-org toggle `org_portal.reimbursement` (congregations and new worshiping communities, off by default; the Features page itself needs the platform flag `org_portal.features`), DECISIONS 267–271. A member who is on the roll or is a regular attender or staff files a request (a person, or a vendor) with photo or PDF receipts (up to 5, 4 MB each; images re-encoded without location data, PDFs kept as uploaded; nothing is scanned for malware); the chair or leader of the charged managed group approves or sends it back (a live seat check, not a key); the treasurer (`reimbursement.view`/`pay`/`manage`, all two-factor; `request_for_others` for on-behalf entry) records the payment, which is its own insert-only row, and can reverse it, waive a receipt, send back, void, or approve as treasurer when no seat holder exists and a second `pay` holder exists. The state machine, the approver ≠ requester and payer ≠ approver rules and the paid-iff-a-payment rule are database triggers that bind the owner connection too; the sole `pay` holder may record payment on their own request, stamped `self_paid`. Emails carry no amounts or free text. 12 `tenant.reimbursement.*` audit keys; CSV export is audited and capped at 20,000 rows. Treasury team (`src/lib/treasury/team.ts`) generalizes the giving team path, so a treasurer can grant the Treasurer or Reimbursement Clerk role. `src/lib/reimbursement/`, `src/lib/treasury/`, `check:treasury-boundaries`. **Not built:** reminders, ledger posting, importing FPCW history, a Deacons approving seat. `docs/work-log/2026-10-25-treasury-inc1.md`.
+
+Also update the Track R line in the map's TODO cross-references and the `src/lib/storage/` entry (`image-sanitize.ts`, `sharp@0.35.5` direct, the first private-blob consumer).
+
+## Rule 15: `docs/architecture.md`
+
+**Yes, one small edit, and nothing else.** The giving "authority is its own small tree" bullet (line 152) is the one statement that is now incomplete: it treats money authority as keys only. Reimbursements introduces a second authority shape and a second data-access shape that a first-time reader would ask about. Suggested replacement for that bullet's tail:
+
+> Giving keys are tier 2, require two-factor authentication, never travel the commission or delegation paths, and the first treasurer is designated by the platform operator, who can then delegate treasury-only roles inside the congregation. **Reimbursements add two patterns: approval is a live seat check (the chair or leader of the charged group, re-derived on every action), not a key, and the money-moving tables are reachable only through a closed set of database functions, with the state machine and the "no one approves their own request, and the approver never pays" rules enforced by triggers that bind even the owner connection.** A parent council sees none of a congregation's per-member giving, by the same tenancy rule as everything else.
+
+Do not record the receipt and private-blob mechanics here. That belongs to F289's own entry. The ledger increments should revisit this section when they land.
+
+## Release-note audience paragraph (non-engineer; denies no accepted residual)
+
+> **Reimbursements.** Members can now ask your church to pay them back for something they bought for it, or ask the church to pay a vendor, from a phone, with photos or PDFs of the receipt. The chair or leader of the group the cost is charged to approves the request, and the treasurer records the payment. No one can approve their own request, and the person who approved it can't also record the payment. If your church has only one person who can record payments, that person may record a payment on their own request, and the record shows that they did. PresbyPortal keeps the record; it doesn't send money or collect bank details. Photos are re-saved without their hidden location data. PDFs are kept exactly as uploaded, and PresbyPortal does not scan files for viruses. Nothing in the app deletes a request: a mistake is corrected by adding a new entry, and turning the feature off only hides the pages. Reimbursements are off until an administrator turns them on under Features. A treasurer designated through PresbyPortal now also sees and pays these requests and chooses which groups can receive them; existing treasurers are updated automatically. Requests charged to the Session or the Board of Deacons go to the treasurer for approval for now, and a church can't narrow who may file other than by turning the feature off. Not in this release: reminders for waiting approvals, importing earlier requests, and entries in a church ledger.
+
+## Handoff
+
+**Verdict closes the pipeline as SHIP WITH NOTES.** Rule 12: no originating feedback row is recorded in this work-log's Source block, so none to mark `done` unless the orchestrator knows of one.
+
+**Next agent: orchestrator**, in this order:
+1. Open the PR, close EC42 on its preview build, and record the result.
+2. Integrate the shared files (Rule 16): journal 0073/0074, `test-rls`, seed, the `docs/decisions.md` DECISION-267 to 271 entries (with the residual 14 bullet already drafted), the F-numbers (F321 to F323), `docs/TODO.md` (above), the functionality map and the one `docs/architecture.md` edit. CLAUDE.md "eight" becomes "nine" with the operator's approval. Re-run `scripts/test-rls.sql` against merged `development` (careers #63 has landed since QA).
+3. Ask the operator for the residual 12 and 14 confirmations.
+4. Do the N1 `development` walk before any production toggle is turned on.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 6 — Shipped vs intent | analyst | Complete. Phase 1 R1 to R15 closed, deferred with a named owner, or accepted; R7 partial (N2); Deacons seat deferred (N3). Walk done on the pipeline branch for the real-invitation treasurer and the MFA chair, not on `development`, and not as a founding administrator or an accepted-invitation member (N1). EC42 is a pre-merge gate; residuals 12 and 14 await the operator. | SHIP WITH NOTES | 2026-10-26 |
+
+Files: `/Users/cshenso/git/presby-platform/presby-treasury/docs/work-log/2026-10-25-treasury-inc1.md` (target for this section; I wrote nothing).
+
+## Operator rulings after Phase 6 (2026-10-26)
+
+- **Residual 14 (owner `TRUNCATE` / `DISABLE TRIGGER` on the six tables): accepted** by the operator ("Accept it"), as a recorded known limit, the same posture as giving (0055/0056). Closes "Needs a confirmation" item 10.
+- Residual 12 (item 9), the R15 reminders deferral and the "similar request" warning deferral are still awaiting the operator.

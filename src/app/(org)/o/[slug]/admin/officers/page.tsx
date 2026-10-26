@@ -7,6 +7,8 @@ import {
 } from "@/lib/authz";
 import { getOfficerFormOptions, listOfficerRoster } from "@/lib/officers";
 import { isFlagEnabled } from "@/lib/flags";
+import { getSignInMarkers } from "@/lib/onboarding/org-invite";
+import { isSessionOffice } from "./office-labels";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import {
   OfficersFlagOff,
@@ -142,6 +144,19 @@ export default async function OfficersPage({
     return <OfficersLoadError slug={slug} />;
   }
 
+  // The sign-in markers on Session rows: one reader call, only for a
+  // `people.manage` viewer (`getSignInMarkers` answers `{}` otherwise and on any
+  // failure, so chrome cannot take the page down).
+  const markers = await getSignInMarkers(
+    {
+      organizationId: resolved.org.organizationId,
+      actingPersonId: resolved.org.personId,
+      actingUserId: session.user.id,
+      actingUserEmail: session.user.email ?? null,
+    },
+    rosterResult.data.filter((e) => isSessionOffice(e.office)).map((e) => e.personId),
+  );
+
   return (
     <section className="space-y-10">
       <div>
@@ -154,7 +169,7 @@ export default async function OfficersPage({
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">Current roster</h2>
         <SessionNote />
-        <OfficerRoster entries={rosterResult.data} slug={slug} />
+        <OfficerRoster entries={rosterResult.data} slug={slug} markers={markers} />
       </div>
 
       <div className="max-w-md space-y-4">

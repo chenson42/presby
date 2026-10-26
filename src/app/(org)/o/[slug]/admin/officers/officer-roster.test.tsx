@@ -196,3 +196,34 @@ describe("OfficerRoster — Session-office markers and grouping (S2, DECISION-20
   });
 });
 
+describe("OfficerRoster - sign-in markers (Community Increment 2b)", () => {
+  const MARKER = { kind: "expired" } as const;
+
+  it("shows the marker on a Session row, in the Office cell beside the badge, linking to the person's card", () => {
+    render(
+      <OfficerRoster
+        entries={[{ ...ELDER_ENTRY, selfRecorded: true }]}
+        slug="alder-creek"
+        markers={{ [ELDER_ENTRY.personId]: MARKER }}
+      />,
+    );
+    const marker = screen.getByTestId("sign-in-marker");
+    expect(marker.textContent).toContain("Invitation expired. Send again");
+    expect(marker.textContent).toContain("Tobias Renwick");
+    expect(marker.getAttribute("href")).toBe(`/o/alder-creek/admin/community/${ELDER_ENTRY.personId}/edit#sign-in`);
+    const cell = marker.closest("td");
+    expect(cell?.textContent).toContain("Self-recorded");
+  });
+
+  it("never shows one on a deacon row, even if handed a marker for that person", () => {
+    render(
+      <OfficerRoster entries={[DEACON_ENTRY]} slug="alder-creek" markers={{ [DEACON_ENTRY.personId]: MARKER }} />,
+    );
+    expect(screen.queryByTestId("sign-in-marker")).toBeNull();
+  });
+
+  it("shows none without markers", () => {
+    render(<OfficerRoster entries={[ELDER_ENTRY]} slug="alder-creek" />);
+    expect(screen.queryByTestId("sign-in-marker")).toBeNull();
+  });
+});

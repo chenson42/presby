@@ -38,7 +38,7 @@ describe("RevokeAllInvitations", () => {
   it("confirms in an AlertDialog naming the organization before calling the action", async () => {
     mockRevokeAll.mockResolvedValue({ ok: true });
     render(<RevokeAllInvitations {...PROPS} openCount={2} />);
-    fireEvent.click(screen.getByRole("button", { name: /revoke all open invitations/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel all open designation invitations (2)" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toMatch(/alder creek presbyterian church/i);
     expect(mockRevokeAll).not.toHaveBeenCalled();
@@ -54,10 +54,15 @@ describe("RevokeAllInvitations", () => {
     expect(toastSuccess).toHaveBeenCalled();
   });
 
+  it("the button names the designation invitations it cancels, with the count (Copy, platform panel)", () => {
+    render(<RevokeAllInvitations {...PROPS} openCount={3} />);
+    expect(screen.getByRole("button", { name: "Cancel all open designation invitations (3)" })).toBeTruthy();
+  });
+
   it("announces a failure as an alert, verbatim", async () => {
     mockRevokeAll.mockResolvedValue({ ok: false, error: "We couldn't complete that just now — try again in a moment." });
     render(<RevokeAllInvitations {...PROPS} openCount={2} />);
-    fireEvent.click(screen.getByRole("button", { name: /revoke all open invitations/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel all open designation invitations (2)" }));
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /yes, revoke all/i }));
     });

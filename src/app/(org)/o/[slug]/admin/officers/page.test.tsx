@@ -67,6 +67,11 @@ vi.mock("@/lib/officers", () => ({
   getOfficerFormOptions: (...args: unknown[]) => getOfficerFormOptions(...args),
 }));
 
+const getSignInMarkers = vi.fn();
+vi.mock("@/lib/onboarding/org-invite", () => ({
+  getSignInMarkers: (...args: unknown[]) => getSignInMarkers(...args),
+}));
+
 vi.mock("./actions", () => ({
   startOfficerTermAction: vi.fn(),
   endOfficerTermAction: vi.fn(),
@@ -99,6 +104,7 @@ afterEach(() => {
   isFlagEnabled.mockReset();
   listOfficerRoster.mockReset();
   getOfficerFormOptions.mockReset();
+  getSignInMarkers.mockReset().mockResolvedValue({});
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -268,7 +274,7 @@ describe("OfficersPage — result branches", () => {
     // contradicted the Session note (found in the Increment 2 bootstrap walk).
     expect(screen.queryByText(/does not, by itself, change/i)).toBeNull();
     expect(screen.getByTestId("session-note").textContent).toBe(
-      "Members of the Session decide who is received onto the roll. Recording a ruling elder, installed pastor, co-pastor or associate pastor here seats them on the Session. They can approve only once they have a PresbyPortal account.",
+      "Members of the Session decide who is received onto the roll. Recording a ruling elder, installed pastor, co-pastor or associate pastor here seats them on the Session. They can approve only once they have connected a sign-in, either by signing in with the email address on their record or by accepting an invitation.",
     );
   });
 
@@ -339,5 +345,44 @@ describe("OfficersPage — the shared four-way miss response", () => {
     expect(
       screen.getByText(/your access to Fernwood.*has ended/i),
     ).toBeTruthy();
+  });
+});
+
+describe("OfficersPage - sign-in markers on Session rows (Community Increment 2b)", () => {
+  const ELDER = { termId: "t-1", personId: "p-elder", displayName: "Tobias Renwick", office: "ruling_elder", classYear: null, startsOn: "2023-01-08", endsOn: null, orgUnitId: null, orgUnitName: null, publicListed: false, publicDisplayOrder: null, selfRecorded: true };
+  const DEACON = { ...ELDER, termId: "t-2", personId: "p-deacon", displayName: "Marguerite Ashcombe", office: "deacon", selfRecorded: false };
+
+  function arrange() {
+    cachedAuth.mockResolvedValue({ user: { id: "u1", email: "clerk@example.invalid" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listOfficerRoster.mockResolvedValue({ kind: "ok", data: [ELDER, DEACON] });
+    getOfficerFormOptions.mockResolvedValue(EMPTY_OPTIONS);
+  }
+
+  it("asks for the markers of Session offices only, with the viewer's context", async () => {
+    arrange();
+    await OfficersPage({ params: makeParams() });
+    expect(getSignInMarkers).toHaveBeenCalledTimes(1);
+    expect(getSignInMarkers).toHaveBeenCalledWith(
+      { organizationId: "org-1", actingPersonId: "person-1", actingUserId: "u1", actingUserEmail: "clerk@example.invalid" },
+      ["p-elder"],
+    );
+  });
+
+  it("renders the marker beside Self-recorded on the elder's row, linking to the card", async () => {
+    arrange();
+    getSignInMarkers.mockResolvedValue({ "p-elder": { kind: "not_connected", noEmail: false } });
+    render(await OfficersPage({ params: makeParams() }));
+    const marker = screen.getByTestId("sign-in-marker");
+    expect(marker.getAttribute("href")).toBe("/o/alder-creek/admin/community/p-elder/edit#sign-in");
+    expect(marker.closest("tr")?.textContent).toContain("Self-recorded");
+    expect(marker.closest("tr")?.textContent).toContain("Tobias Renwick");
+  });
+
+  it("no markers (a viewer without people.manage) means none render", async () => {
+    arrange();
+    render(await OfficersPage({ params: makeParams() }));
+    expect(screen.queryByTestId("sign-in-marker")).toBeNull();
   });
 });

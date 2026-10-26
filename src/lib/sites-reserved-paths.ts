@@ -33,6 +33,17 @@
  */
 export const RESERVED_SITE_SEGMENTS = ["give", "assets", "robots.txt", "sitemap.xml"] as const;
 
+/**
+ * Segment names the platform serves itself only BENEATH - the descendants of a
+ * first segment, never the segment itself. Careers Increment 1 (DECISION-264):
+ * `/careers/<posting>` is a dynamic platform route, so a bundle page at
+ * `/careers/anything` would be ingested and never shown; but a bundle page at
+ * exactly `/careers` is allowed and WINS over PresbyPortal's own list there.
+ * Any trailing-slash, case or percent-encoded variant of the bare segment stays
+ * allowed too, because it normalises to the same one-segment path.
+ */
+export const RESERVED_SITE_DESCENDANTS = ["careers"] as const;
+
 function decodeOnce(path: string): string {
   try {
     return decodeURIComponent(path);
@@ -48,6 +59,13 @@ export function reservedSitePath(path: string): { reserved: true; segment: strin
   const segments = normalized.split("/").filter((s) => s !== "" && s !== ".");
   const first = segments[0];
   if (first && (RESERVED_SITE_SEGMENTS as readonly string[]).includes(first)) {
+    return { reserved: true, segment: first };
+  }
+  if (
+    first &&
+    segments.length > 1 &&
+    (RESERVED_SITE_DESCENDANTS as readonly string[]).includes(first)
+  ) {
     return { reserved: true, segment: first };
   }
   return { reserved: false };

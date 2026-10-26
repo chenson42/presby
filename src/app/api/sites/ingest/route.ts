@@ -114,7 +114,11 @@ function validateBundle(
         error:
           reserved.segment === "give"
             ? `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} page for online giving. Rename or remove it.`
-            : `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} path (on a custom domain too). Rename or remove it.`,
+            : reserved.segment === "careers"
+              ? // Copy I1. Descendants only: the bare /careers is allowed, so this
+                // message must never say /careers ITSELF is reserved.
+                `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own pages for job openings under /careers/ (on a custom domain too). A page at /careers itself is fine. Rename or remove it.`
+              : `Page "${pagePath.slice(0, 120)}" is reserved: PresbyPortal serves its own /${reserved.segment} path (on a custom domain too). Rename or remove it.`,
       };
     }
   }

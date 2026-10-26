@@ -265,6 +265,9 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   USER_CREATED_VIA_INVITATION: "user.created_via_invitation",
   EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
   EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  CAREERS_POSTING_PUBLISHED: "careers.posting.published",
+  CAREERS_POSTING_CLOSED: "careers.posting.closed",
+  CAREERS_POSTING_REOPENED: "careers.posting.reopened",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

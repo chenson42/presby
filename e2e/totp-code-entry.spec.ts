@@ -250,6 +250,33 @@ test.describe("/totp digit boxes", () => {
     expect(posts.requests).toHaveLength(1);
   });
 
+  test("E-8b: three typed digits plus a four-digit paste into box 4 fills six, drops one, and does not submit — regression for O-1", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.setViewportSize({ width: 360, height: 740 });
+    await openChallenge(page);
+    const posts = watchPosts(page);
+    for (const [i, d] of ["1", "2", "3"].entries()) await totpBox(page, i + 1).pressSequentially(d);
+    await page.evaluate(() => navigator.clipboard.writeText("4567"));
+    await totpBox(page, 4).click();
+    await page.keyboard.press("ControlOrMeta+V");
+    await expect(page.locator('input[name="token"]')).toHaveValue("123456");
+    expect(await boxValues(page)).toEqual(["1", "2", "3", "4", "5", "6"]);
+    await expect(verifyButton(page)).toBeEnabled();
+    await page.waitForTimeout(750);
+    expect(posts.requests).toHaveLength(0);
+    expect(new URL(page.url()).pathname).toBe("/totp");
+    expect(page.url()).not.toContain("error");
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    await verifyButton(page).click();
+    await page.waitForURL(/\/totp\?.*error=invalid/, { timeout: 15_000 });
+    expect(posts.requests).toHaveLength(1);
+  });
+
   test("the recovery toggle leaves exactly one `token` field in either mode", async ({ page }) => {
     await openChallenge(page);
     await expect(page.locator('[name="token"]')).toHaveCount(1);

@@ -168,7 +168,7 @@ export function TotpChallengeForm({ callbackUrl, error }: TotpChallengeFormProps
             invalid={Boolean(error)}
             describedBy={errorId}
             onComplete={(c, { exact }) => {
-              // Arms only. An over-long paste fills the boxes and waits for Verify.
+              // Arms only. A paste that drops a digit fills the boxes and waits for Verify.
               armed.current = exact ? c : null;
             }}
           />

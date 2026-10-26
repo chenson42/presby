@@ -143,6 +143,21 @@ describe("TotpChallengeForm", () => {
       expect(lastFormData(0).getAll("token")).toEqual(["123456"]);
     });
 
+    it("F-5b: three typed digits plus a four-digit paste into box 4 fills six, drops one, does not submit — regression for O-1", async () => {
+      render(<TotpChallengeForm callbackUrl="/admin" />);
+      "123".split("").forEach((d, i) => fireEvent.change(boxes()[i]!, { target: { value: d } }));
+      paste(boxes()[3]!, "4567");
+      await act(async () => {});
+      expect(verifyTotpAction).not.toHaveBeenCalled();
+      expect(boxes().map((b) => b.value).join("")).toBe("123456");
+      expect(verify().disabled).toBe(false);
+      await act(async () => {
+        fireEvent.click(verify());
+      });
+      expect(verifyTotpAction).toHaveBeenCalledTimes(1);
+      expect(lastFormData(0).getAll("token")).toEqual(["123456"]);
+    });
+
     it("F-6: nothing submits before hydration, and a mount with no edit submits nothing", async () => {
       hydrated.value = false;
       const { unmount } = render(<TotpChallengeForm callbackUrl="/admin" />);

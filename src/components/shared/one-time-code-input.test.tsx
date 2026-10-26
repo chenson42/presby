@@ -424,6 +424,35 @@ describe("OneTimeCodeInput — onComplete", () => {
     expect(onComplete).toHaveBeenCalledWith("987654", { exact: false });
   });
 
+  // Decision 3 is about the property "a truncated input waits for the button":
+  // exact is false whenever a delivered digit was dropped, not only for a run
+  // longer than the code (QA O-1).
+  it("C-4: a short paste that overflows the remaining boxes fills to six, drops a digit, and reports not-exact", () => {
+    const onComplete = vi.fn();
+    render(<Harness onComplete={onComplete} />);
+    "123".split("").forEach((d, i) => type(boxes()[i]!, d));
+    paste(boxes()[3]!, "4567");
+    expect(values()).toEqual(["1", "2", "3", "4", "5", "6"]);
+    expect(hidden().value).toBe("123456");
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith("123456", { exact: false });
+  });
+
+  it("C-4b: a paste that exactly fills the remaining boxes reports exact; a full code pasted into a later box replaces the whole code and reports exact", () => {
+    const onFit = vi.fn();
+    const { unmount } = render(<Harness onComplete={onFit} />);
+    "123".split("").forEach((d, i) => type(boxes()[i]!, d));
+    paste(boxes()[3]!, "456");
+    expect(onFit).toHaveBeenCalledWith("123456", { exact: true });
+    unmount();
+
+    const onFull = vi.fn();
+    render(<Harness initial="123" onComplete={onFull} />);
+    paste(boxes()[3]!, "654321");
+    expect(values()).toEqual(["6", "5", "4", "3", "2", "1"]);
+    expect(onFull).toHaveBeenCalledWith("654321", { exact: true });
+  });
+
   it("C-3: a spaced paste and a whole-code fill on box 1 report exact", () => {
     const onPaste = vi.fn();
     const { unmount } = render(<Harness onComplete={onPaste} />);

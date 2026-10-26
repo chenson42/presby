@@ -120,6 +120,20 @@ describe("TotpEnrollForm — auto-submit (DECISION-257)", () => {
     expect(completeEnrollment).toHaveBeenCalledWith({ code: "123456" });
   });
 
+  it("N-3b: three typed digits plus a four-digit paste into box 4 does not submit — regression for O-1", async () => {
+    completeEnrollment.mockResolvedValue({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"] } });
+    renderForm();
+    "123".split("").forEach((d, i) => fireEvent.change(boxes()[i]!, { target: { value: d } }));
+    fireEvent.paste(boxes()[3]!, { clipboardData: { getData: () => "4567" } });
+    await act(async () => {});
+    expect(boxes().map((b) => b.value).join("")).toBe("123456");
+    expect(completeEnrollment).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /confirm enrollment/i }));
+    });
+    expect(completeEnrollment).toHaveBeenCalledWith({ code: "123456" });
+  });
+
   it("N-4: after { ok: false } the toast shows, the boxes are cleared and re-enabled with box 1 focused, and a new code submits once", async () => {
     completeEnrollment.mockResolvedValue({ ok: false, error: "That code did not match. Try again." });
     renderForm();

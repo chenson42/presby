@@ -54,9 +54,11 @@ export interface OneTimeCodeInputProps {
    * only when `exact` is true (DECISION-257), and must not do it from inside
    * this callback if it reads the hidden value, which has not committed yet.
    *
-   * `exact` is false when a paste or autofill delivered MORE than `length`
-   * digits and was truncated (a phone number, an order number): the boxes fill,
-   * but the caller should wait for its own button rather than spend an attempt.
+   * `exact` is false when a paste or autofill delivered a digit that was
+   * dropped: more than `length` digits (a phone number, an order number), or a
+   * shorter run that overflowed the boxes after its starting box. The boxes
+   * fill, but the caller should wait for its own button rather than spend an
+   * attempt.
    */
   onComplete?: (code: string, info: { exact: boolean }) => void;
   /** Base id; defaults to a generated one. */
@@ -120,7 +122,7 @@ export function OneTimeCodeInput({
 
   /**
    * Applies an edit: stores the slots, reports the joined value, reports
-   * completion. `exact` is false only for a truncated over-length run.
+   * completion. `exact` is false when a delivered digit was dropped.
    */
   function commit(next: string[], exact = true) {
     const before = slots.join("");
@@ -136,7 +138,14 @@ export function OneTimeCodeInput({
     const next = [...slots];
     let from = start;
     let run = digits;
-    const exact = digits.length <= length;
+    // Exact means no delivered digit is dropped (DECISION-257, Decision 3: a
+    // truncated input waits for the button). A run of at least `length` digits
+    // restarts at box 1 and drops only what exceeds the code; a shorter run
+    // from box `start` is truncated when it overflows the remaining boxes.
+    const exact =
+      digits.length >= length
+        ? digits.length === length
+        : start + digits.length <= length;
     if (run.length >= length) {
       run = run.slice(0, length);
       from = 0;

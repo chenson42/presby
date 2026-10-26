@@ -1,0 +1,84 @@
+public-asset-allowlist (F289, DECISION-277, migration 0072) - Rule 16 integration patch, Batch 1
+Work-log: docs/work-log/2026-10-25-public-asset-allowlist.md (Phase 4, Batch 1)
+
+Everything above the first `diff --git` line is prose; `git apply` skips it.
+
+1. scripts/test-rls.sql - design patch P2, applied VERBATIM (one banner block
+   and one `\ir assets/test-rls-72.sql` line appended after section 64).
+
+2. drizzle/meta/_journal.json - design patch P3, applied with ONE CORRECTION:
+   P3 says `"idx": <next>`. The journal's house rule is idx == the
+   migration's own number (0058 is absent, so idx 58 is absent too; every
+   entry 0013..0064 has idx == its number), so the entry is `"idx": 72`.
+   `when` is 1788137573186 (0064's value plus eight days at the journal's
+   recent one-day spacing), which leaves room for 0065-0071 to sort before
+   it. At integration, keep the array ordered by idx: insert 0065-0071's
+   entries BEFORE this one.
+
+3. docs/decisions.md - DECISION-277 (P4 text), amend the "Serving" and
+   "Implementation" bullets for two Phase 4 corrections (work-log Phase 4,
+   "Design claims found wrong"):
+   - people is GLOBAL (D1) and has no organization_id. The door's photo test,
+     the pre-flip assertion and the index match a person's photo on the
+     globally unique key alone; the index is
+     `people_photo_key_lower_idx on people (lower(photo_key)) where photo_key is not null`
+     (not `people_org_photo_key_idx (organization_id, lower(photo_key))`).
+   - person_privacy's primary key is person_id alone. Both roster functions
+     join it on person_id alone, so a hidden photo is withheld on EVERY
+     org's public list, including an org other than the one where the
+     privacy row was set (fail closed; the authenticated member directory
+     still scopes the row to the viewing org). PENDING tech-lead ruling.
+   - presby_platform is NOLOGIN and the owner's membership has no SET
+     option, so "presby_platform cannot flip audience" is proven
+     structurally (it holds UPDATE; the trigger fires in origin mode; it is
+     not the owner and cannot set session_replication_role), not by a
+     session acting as it.
+
+4. docs/TODO.md - one line in addition to the P4 follow-ups:
+   - [ ] drizzle/0053 line 833 cites `assets.ts:63-78`; 0072's audience
+     comments moved that block to `assets.ts:87-101`. 0053 has shipped and is
+     not edited; the live references (check-schema-parity.ts, imports.ts,
+     returns.ts) were updated in Batch 1. Cosmetic; close when anyone next
+     regenerates the review export.
+
+5. F-number for the orchestrator to assign (Phase 3 design defect caught in
+   Phase 4 by the D5 snapshot run): the design's DDL referenced
+   people.organization_id in four places; `column p.organization_id does not
+   exist`. Caught-By: automated-test (scripts/assets/test-0072-migration.sh),
+   Discovered-In: Phase-4.
+
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index 0baf163..e91b0ce 100644
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -449,6 +449,13 @@
+       "when": 1787446373186,
+       "tag": "0064_presby_person_emails",
+       "breakpoints": true
++    },
++    {
++      "idx": 72,
++      "version": "7",
++      "when": 1788137573186,
++      "tag": "0072_presby_blob_audience",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/scripts/test-rls.sql b/scripts/test-rls.sql
+index a6d3701..3216c5c 100644
+--- a/scripts/test-rls.sql
++++ b/scripts/test-rls.sql
+@@ -8653,3 +8653,12 @@ rollback;
+ --     fixture, so it is never run against production.
+ -- ===========================================================================
+ \ir person-emails/test-rls-64.sql
++
++-- ===========================================================================
++-- APPENDED SECTION - pipeline/public-asset-allowlist (integration).
++-- 72. Public asset audience (drizzle/0072_presby_blob_audience.sql). Its own
++--     file, as 46, 47 and 59-64 above; \ir resolves relative to this script.
++--     It needs the test helpers and scripts/seed-dev.sql's Alder Creek
++--     fixture (no seed change), so it is never run against production.
++-- ===========================================================================
++\ir assets/test-rls-72.sql

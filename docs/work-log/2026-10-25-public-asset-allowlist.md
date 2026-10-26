@@ -17,7 +17,7 @@
 | 1 — Functional refinement | analyst | Complete (+ addendum: shared audience shape); Gaps 1–16 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete; R1–R9; DECISION-277; fail-closed default kept; bundle JSON private | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; full design (migration 0072, definer, route, 23 call sites); departures recorded; operator question: directory flags vs roster photo | Design complete, implementers named | 2026-10-25 |
-| 4 — Implementation | database-admin (Batch 1: 0072) then full-stack-developer (Batch 2: adapter, route, call sites, e2e) | Pending | — | — |
+| 4 — Implementation | database-admin (Batch 1: 0072) then full-stack-developer (Batch 2: adapter, route, call sites, e2e) | Batch 1 complete: 0072 hand-written, D5 snapshot PASS, applied to the pipeline branch twice (84, then 0), section 72 24/24, 7 mechanisms proven failing-first; 5 design corrections for tech-lead (people is global; person_privacy join scope needs a RULING; journal idx 72; presby_platform NOLOGIN; D2 adapter half moves to Batch 2). Batch 2 pending | Batch 1 green | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1184,24 +1184,173 @@ Photo upload or management UI; purging CDN, browser or archive copies of anythin
 
 # Phase 4 — Implementation
 
-## Files Created
+## Batch 1 — database-admin (migration 0072), 2026-10-25
+
+**Migration mode: hand-written.** `drizzle/0072_presby_blob_audience.sql`, applied to the pipeline Neon branch only (`pipeline-asset-allowlist`, endpoint `ep-dry-dream`; never development or production) with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0072_presby_blob_audience.sql`. `_journal.json` entry `{ idx: 72, tag: 0072_presby_blob_audience }` is applied in the working tree but **not committed** (Rule 16; see "Shared files").
+
+### Files Created
+
+- `drizzle/0072_presby_blob_audience.sql`: R1 steps 1-12 in order, plus comments. Corrections to the design text are listed below.
+- `scripts/assets/test-rls-72.sql`: RLS section 72, 24 assertions, run as `presby_app`.
+- `scripts/assets/test-0072-migration.sh`, `0072-preimage.sql`, `0072-preimage-issue.sql`, `0072-crossref.sql`, `0072-postimage.sql`: the D5 snapshot harness.
+- `src/lib/db/domain/blob-audience.schema.test.ts`: U7, static. Pins step order, idempotence markers, consumer FKs, function hardening, Drizzle mirrors, and the `people.organization_id` regression.
+- `src/lib/storage/blob-audience.db.test.ts`: D2, the database half (22 tests).
+- `src/lib/db/domain/public-roster-photo.db.test.ts`: D3 (8 tests). Includes one positive through the door as `presby_app`, which proves the definer reaches both roster helpers (0046 B-M1 rule).
+- `docs/work-log/public-asset-allowlist.integration.patch`: the Rule 16 shared-file diff plus prose amendments for the orchestrator.
+
+### Files Modified
+
+- `src/lib/db/domain/assets.ts`:
+  - adds `audience` (not null, default `'private'`);
+  - adds `blob_assets_id_org_audience_key` and `blob_assets_org_audience_hash_key`, replacing `blob_assets_org_hash_key`;
+  - adds the `blob_assets_audience_allowed` and `blob_assets_public_site_is_image` CHECKs;
+  - updates the header and the dedup comment (Copy C7).
+- `src/lib/db/domain/support.ts` (`ticketMessages`) and `src/lib/db/domain/giving.ts` (`givingStatements`): add `assetAudience` (not null, default `'private'`) and the `*_asset_audience_private` CHECK. The FKs stay DDL-only, and their comments now give the three-column form (the comment at `giving.ts:859` included).
+- `scripts/check-schema-parity.ts`: the two rows carry the design's exact signatures, the header says "(5 rows)", and the `reason` strings are rewritten. The `assets.ts:63-78` references now point to `:87-101`, here and in `imports.ts` and `returns.ts`.
+- `scripts/giving/test-rls-46.sql`: 46o arrays now take the three-column form, and the label is updated.
+- `src/lib/db/domain/giving.schema.test.ts`: reads 0072 as well. It adds a parallel 0072 assertion and moves `BLOB_FK_SIGNATURE` to the three-column string. The 0056 assertions are unchanged.
+
+### Schema Changes
+
+- `blob_assets.audience text not null default 'private'`:
+  - CHECK `in ('public_site','private')`;
+  - CHECK `audience = 'private' or content_type in (png, jpeg, webp)`;
+  - unique `(organization_id, audience, content_hash)` replaces `(organization_id, content_hash)`;
+  - unique `(id, organization_id, audience)` is the FK target;
+  - `blob_assets_id_org_key` kept;
+  - trigger `blob_assets_audience_immutable` (BEFORE UPDATE OF audience, WHEN changed, SECURITY INVOKER function, EXECUTE owner-only).
+- `ticket_messages.asset_audience` and `giving_statements.asset_audience`: `text not null default 'private'`, with a CHECK `= 'private'`. Both FKs keep their names and are re-keyed three-column to `blob_assets (id, organization_id, audience)`. `giving_statements_blob_fk` is NO ACTION on delete and update.
+- `presby_public_staff_roster` / `presby_public_committee_roster`:
+  - same signatures and result rows;
+  - `hide_photo` withholds the photo; the person stays listed;
+  - `search_path = public, pg_temp`, revoke and grant restated.
+- `people_photo_key_lower_idx on people (lower(photo_key)) where photo_key is not null`.
+- `presby_public_site_asset(p_org uuid, p_key uuid) returns table (content_type text, bytes bytea, cache_class text)`: SECURITY DEFINER, pinned, EXECUTE owner + `presby_app` only.
+- `people.photo_key` FK: none (R4).
+
+### Audit Events
+
+None. This is a provisioning migration, per the 0057 precedent.
+
+### Design claims found wrong (loop-back candidates for tech-lead)
+
+1. **`people.organization_id` does not exist** (D1: `people` is global). The design used it in four places: the pre-flip assertion, both roster joins, the door's photo test, and the index `people (organization_id, lower(photo_key))`. The D5 snapshot run failed with `column p.organization_id does not exist`. The corrections preserve intent:
+   - A photo is matched on the globally unique key alone, which is stricter.
+   - The index is renamed `people_photo_key_lower_idx on people (lower(photo_key))`.
+   - The U7 regression is "never reads people.organization_id".
+   - Proposed F-number: the orchestrator assigns one.
+2. **The `person_privacy` join scope needs a ruling.** `person_privacy`'s primary key is `person_id` alone, so a person has at most one privacy row, tagged with the org it was set in.
+   - I join on `person_id` alone. A hidden photo is then withheld on every org's public list, including one other than where the flag was set. This fails closed and keeps the release-note sentence "People who have chosen to hide their photo … no longer have it shown on public lists" true for a person on two orgs' lists.
+   - D3 pins this ("a photo hidden at ANOTHER org …").
+   - The alternative mirrors the member directory: `pp.organization_id = o.id` (`directory.ts` scopes to the viewing org). It is a one-line change in three joins, but it would publish such a person's photo at the other org.
+3. **P3 "`idx: <next>`".** The journal's rule is `idx` equals the migration's number (0058 is absent, so idx 58 is absent too). The entry is `idx: 72`, with `when` = 0064's value + 8 days, so 0065-0071 can sort before it.
+4. **D2 says "presby_platform UPDATE of audience is refused" through `set role`.** That cannot be built: `presby_platform` is NOLOGIN, and `neondb_owner`'s membership has `set_option = f`. So no session can act as `presby_platform`. It is proven structurally instead:
+   - it holds UPDATE, so the trigger is its only barrier;
+   - the trigger fires in origin mode (`'O'`);
+   - it is not the owner;
+   - it has no SET on `session_replication_role`.
+
+   Similarly, D5's "set the GUCs and `\ir` the issue harness" as `presby_app` cannot run under `set role`. The statement is issued on a real `presby_app` login to the scratch database, so the harness takes two URLs.
+5. **D2's adapter cases belong to Batch 2.** These are: `store()` dedup per audience, `resolve`/`resolveMeta` refusing the other audience, and `BlobValidationError`. They test code Batch 2 writes. Batch 1's D2 proves the database half of each:
+   - two rows per audience; dedup within an audience;
+   - the CHECKs;
+   - the FK refusal.
+
+### Red, then green
+
+**Red (pre-0072 branch):**
+- U7, D2 and D3 together: 24 failed, 4 passed. The 4 that passed are pre-existing invariants: the PDF delete refusal, the two roster-hardening checks, and the `hide_photo` toggle.
+- U7 failed on the absent file.
+- `test-rls-72.sql` stopped at 72a, line 62.
+
+**D5 snapshot** (`scripts/assets/test-0072-migration.sh`, scratch database `scratch_0072` on the pipeline branch's compute, dropped afterwards). PASS:
+1. 64 migrations from empty via `drizzle-kit migrate`, then `seed-dev.sql`.
+2. Pre-image: 11 classes plus one statement issued and committed as `presby_app`.
+3. Cross-reference: refused with `0072: 1 blob(s) are both published …`, rolled back whole (no `audience` column, ticket message gone).
+4. First apply: `flipped 3`. The Bramblewood garbage bundle produced a notice, not an abort.
+5. Postimage: all classes correct. The statement PDF's md5 and content_hash are unchanged. DELETE, UPDATE of bytes and UPDATE of audience are each refused by the named mechanism. Both FKs are three-column with action `a`/`a`. An old-code insert lands `private`.
+6. Re-apply: `flipped 0`.
+7. Heal: an old-code private mark gives `flipped 1`, for 4 public rows.
+
+**Pipeline branch:**
+- Expected flip computed beforehand: 84 (marks plus `imageKeys` images, 0 dangling).
+- Apply 1 flipped 84.
+- Apply 2 (whole file) flipped 0, exit 0.
+- Blob count (111) and the `id||content_hash` fingerprint are identical before, after apply 1 and after apply 2.
+- Result: 84 `public_site` (79 jpeg, 2 png, 3 webp) and 27 `private` (26 JSON, 1 png).
+- Re-applied twice more after the `person_privacy` join change: exit 0, `flipped 0` both times, and the `id||content_hash||audience` fingerprint over 111 rows is identical before and after each. Both roster bodies read `left join person_privacy pp on pp.person_id = p.id` with no `pp.organization_id`.
+- Final D5 on the final file: PASS (47 pass lines). Scratch databases dropped (0 `scratch%` databases remain).
+
+**Failing-first, per mechanism** (each removed on the pipeline branch, observed red, restored, observed green):
+
+| Mechanism removed | Red where |
+|---|---|
+| `blob_assets_audience_immutable` disabled | `test-rls-72.sql:86` (72a); D2: owner immutability, `presby_platform` pin, statement-PDF audience |
+| `presby_public_site_asset` granted to PUBLIC | `test-rls-72.sql:93` (72a ACL) |
+| `ticket_messages_asset_audience_private` dropped | `test-rls-72.sql:74` (72a CHECKs), 72b catalog rule line 19; D2 "constant cannot be set", "catalog rule" |
+| Roster functions reverted to the 0042 bodies | D3: staff/officer, `p_kind`, committee, door-as-`presby_app` (4 red) |
+| Staff roster re-created without `set search_path` | `test-rls-72.sql:93`; D3 hardening (`proconfig` was empty) |
+| Staff roster `person_privacy` join scoped to the listing org (the claim-2 alternative) | D3 "a photo hidden at ANOTHER org …" (1 red, 7 green) |
+| Pre-flip assertion block removed | D5 step 5 red. 0072 still failed, at step 8's FK validation (the backstop), but without the designed refusal |
+
+**Green:**
+- U7, D2, D3, `giving.schema.test.ts` and `giving-statements.db.test.ts`: 102/102.
+- `test-rls-72.sql` as `presby_app`: 24/24.
+- Full `scripts/test-rls.sql` as `presby_app` on a fresh scratch database, built in CI's order (migrate through 0072 with the local journal, `check:schema-parity` 0 failing, `db:seed`, `seed-dev.sql`, helpers): exit 0, 1273 passes, including 24 in section 72 and the three-column 46o.
+- On the shared pipeline branch the full file stops at `test-rls.sql:217`, the documented pre-existing drift (an untracked third presbytery membership; the file's own comment says so). It is unrelated to 0072.
+- `npm run check:schema-parity` (pipeline branch): 0 failing.
+- `npm run typecheck`: clean. `npm run lint`: clean. `npm run check`: 8/8.
+- Full `npm run test:db` (667 files, serial, 2426 s): 11342 passed, 1 skipped, 5 failed. All 5 failures hard-code `http://localhost:3000` against this worktree's `.env.local` `NEXT_PUBLIC_APP_URL=http://localhost:3600`, and none touches 0072:
+  - `src/proxy.test.ts:435`
+  - `src/lib/auth/safe-callback.test.ts:239`
+  - `src/app/(member)/feedback/actions.test.ts:516`
+  - `src/app/(org)/o/[slug]/tickets/actions.test.ts:333`
+  - `src/lib/onboarding/issue.db.test.ts:303`
+
+  The four unit files pass 146/146 without `.env.local`. They are pre-existing worktree artifacts (port 3600 is Rule 16's per-pipeline port).
+- Final re-run after the D3 two-org fixture fix: D3 8/8.
+
+### Shared files (Rule 16)
+
+- `scripts/test-rls.sql`: P2 applied verbatim, uncommitted.
+- `drizzle/meta/_journal.json`: P3 applied with the `idx: 72` correction, uncommitted.
+- Both are reproducible from `docs/work-log/public-asset-allowlist.integration.patch`, which reverse-applies cleanly against the working tree.
+- That file also carries: the DECISION-277 amendments (items 1, 2 and 4 above), one TODO line (`drizzle/0053:833` still cites `assets.ts:63-78`; it has shipped and is not edited), and the F-number request.
+- P1 (`e2e/support/custom-hosts.ts`) and P4 are Batch 2's and the orchestrator's; untouched.
+
+### Handoff to Batch 2 (full-stack-developer)
+
+- **The pipeline branch is migrated.** Do not re-run 0072 except whole-file with `-1`; it is idempotent.
+- **The door:** `select content_type, bytes, cache_class from presby_public_site_asset($org::uuid, $key::uuid)`.
+  - Call it on `db` (`presby_app`) with no org GUC.
+  - `cache_class` is `'site' | 'roster'`.
+  - It returns zero rows for every miss.
+  - A person's photo is matched on the key alone (global), and only while a roster lists it for that org.
+- **Columns:** `blobAssets.audience`, `ticketMessages.assetAudience`, `givingStatements.assetAudience`. Never write the two `asset_audience` constants.
+- **Until `store()` changes,** every insert lands `private`, so local ingest and logo uploads produce private rows. The old route still serves them through `resolve()`.
+- **After the change:**
+  - dedup must filter on `audience`; the unique key is `(organization_id, audience, content_hash)`, so `store(public_site)` of bytes already held as private creates a new row;
+  - a `public_site` JSON or PDF insert is refused by `blob_assets_public_site_is_image`.
+- **Write the adapter half of D2** (claim 5 above). D1 should add:
+  - the "hidden at another org" case;
+  - a stored-uppercase `photo_key`;
+  - the parity property.
+- **The R6 catalog test already exists** in D2 ("the catalog rule") and in 72b. U4 needs only its source-scan half.
+- **Three unit tests fail under this worktree's `.env.local` and pass without it:** `src/proxy.test.ts`, `feedback/actions.test.ts` and `src/lib/auth/safe-callback.test.ts`. The cause is `NEXT_PUBLIC_APP_URL=http://localhost:3600`. They are pre-existing and their sources are untouched.
+
+Strings added or changed: no user-facing strings. Migration and trigger messages are as in Copy C5 (`0072: % blob(s) are both published …`, `0072: flipped % blob(s) to public_site`, `0072: the bundle of organization % is not parseable JSON …`, `blob_assets %: audience is immutable (% to %)`). Maintainer comments in `assets.ts`, `support.ts`, `giving.ts` and `check-schema-parity.ts` are updated per C7.
+
+## Batch 2 — full-stack-developer
+
+### Files Created
 
 - `path/to/file` — purpose
 
-## Files Modified
+### Files Modified
 
 - `path/to/file` — what changed
 
-## Schema Changes
-
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
-
-## Audit Events
-
-- [Action key written when the security-sensitive mutation fires]
-
-## Implementer Notes
+### Implementer Notes
 
 [Tradeoffs taken, anything that diverged from the design and why.]
 

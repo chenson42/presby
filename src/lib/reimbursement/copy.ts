@@ -92,6 +92,8 @@ export const COPY = {
     },
     groupLabel: "Charge to",
     groupPlaceholder: "Choose a group",
+    /** In place of the Charge to select when the organization has no chargeable group (orchestrator ruling on Batch 5). */
+    noChargeableGroup: "No groups can be charged yet. Ask your treasurer to set them up.",
     categoryLabel: "Category",
     categoryPlaceholder: "Choose a category",
     beneficiaryLabel: "Who are we paying back?",
@@ -463,6 +465,43 @@ export const COPY = {
     templateUnavailable: "That role isn't available to set up. Contact support.", // REUSED
     ensureEscalation: (keys: string) =>
       `You can't set up a role with permissions you don't hold yourself: ${keys}.`, // REUSED
+    /**
+     * The chrome of the team page that Copy C9 names no sentence for (Batch 6 Copy gaps, reported
+     * for a ruling). REUSED = borrowed verbatim from the giving team page
+     * (`admin/giving/team/{page,team-list,grant-form,setup-role-button}.tsx`), none of which names
+     * a module. ADAPTED = the giving sentence with its module-specific words replaced.
+     */
+    panel: {
+      since: "since", // REUSED
+      groupSuffix: "(group)", // REUSED
+      endButton: "End this role", // REUSED
+      endTitle: (who: string, role: string) => `End ${who}'s ${role} role?`, // REUSED
+      // ADAPTED: giving's says "the giving permissions above"; this page lists no keys.
+      endBody:
+        "They will lose this role's permissions right away. Anything they have already recorded stays. You can give the role again later.",
+      keepRole: "Keep the role", // REUSED
+      endConfirm: "End role", // REUSED
+      roleEnded: (who: string) => `${who} no longer has this role.`, // REUSED
+      managedUnderRoles:
+        "This one is managed under Roles, because it is given to a group or includes permissions outside Giving and Reimbursements.", // REUSED (as amended by C12)
+      setupIntroOne: "This role isn't set up for your church yet, so it can't be given to anyone.", // REUSED
+      // ADAPTED: giving's plural keeps "so it can't", which does not agree with "These roles".
+      setupIntroMany: "These roles aren't set up for your church yet, so they can't be given to anyone.",
+      settingUp: "Setting up…", // REUSED
+      roleSetUp: "Role set up.", // REUSED
+      roleSetUpWithout: (keys: string, many: boolean) =>
+        `Role set up, without ${keys} (you don't hold ${many ? "them" : "it"} yourself).`, // REUSED
+      giveHeading: "Give a role", // REUSED
+      roleLabel: "Role", // REUSED
+      personLabel: "Person", // REUSED
+      chooseRole: "Choose a role", // REUSED
+      choosePerson: "Choose a person", // REUSED
+      giveButton: "Give role", // REUSED
+      roleGiven: "Role given.", // REUSED
+      noMembers: "Nobody has a current membership here yet.", // REUSED
+      // ADAPTED: giving's names Giving.
+      noRoleToGive: "There is no role to hand out yet. Set one up above, then come back.",
+    },
   },
 
   /** Permission descriptions as migration 0074 writes them (C9); `copy.test.ts` parses 0074 against these. */

@@ -49,12 +49,15 @@ export function ReimbursementStatePage({
   slug,
   heading = COPY.page.heading,
   retryHref,
+  loadErrorMessage = COPY.page.loadError,
 }: {
   state: ReimbursementGateState;
   slug: string;
   heading?: string;
   /** Where "Try again" goes for `load_error`; defaults to the member list. */
   retryHref?: string;
+  /** The `load_error` sentence; the treasurer pages say "requests", not "your requests". */
+  loadErrorMessage?: string;
 }) {
   switch (state.kind) {
     case "org_forbidden":
@@ -86,7 +89,7 @@ export function ReimbursementStatePage({
         </section>
       );
     case "load_error":
-      return <ReimbursementLoadError heading={heading} message={COPY.page.loadError} href={retryHref ?? `/o/${slug}/reimbursements`} />;
+      return <ReimbursementLoadError heading={heading} message={loadErrorMessage} href={retryHref ?? `/o/${slug}/reimbursements`} />;
   }
 }
 
@@ -114,10 +117,19 @@ export function ReimbursementLoadError({
 }
 
 /** The plain back link at the top of every sub-page (docs/ui-standards.md: a link, not a Button). */
-export function BackToReimbursements({ slug, label = COPY.detail.back }: { slug: string; label?: string }) {
+export function BackToReimbursements({
+  slug,
+  label = COPY.detail.back,
+  href = `/o/${slug}/reimbursements`,
+}: {
+  slug: string;
+  label?: string;
+  /** Where the link goes; the treasurer pages point it at the queue. */
+  href?: string;
+}) {
   return (
     <Link
-      href={`/o/${slug}/reimbursements`}
+      href={href}
       className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       <ArrowLeft className="mr-1 h-4 w-4" aria-hidden />

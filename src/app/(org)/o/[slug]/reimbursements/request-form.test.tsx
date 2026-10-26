@@ -81,6 +81,17 @@ describe("RequestForm - structure", () => {
     expect(screen.getByRole("radio", { name: "Pay someone else back" })).toBeTruthy();
   });
 
+  it("with no chargeable group, says so in place of the Charge to select and keeps Send disabled (orchestrator ruling on Batch 5)", () => {
+    render(<RequestForm {...props({ groups: [] })} />);
+    expect(screen.queryByLabelText("Charge to")).toBeNull();
+    expect(screen.getByTestId("no-chargeable-group").textContent).toBe(
+      "No groups can be charged yet. Ask your treasurer to set them up.",
+    );
+    expect(send().disabled).toBe(true);
+    // A draft can still be saved: the sentence blocks Send, not the member's work.
+    expect(draft().disabled).toBe(false);
+  });
+
   it("asks for a category only when the organization has one", () => {
     render(<RequestForm {...props({ categories: [] })} />);
     expect(screen.queryByLabelText("Category")).toBeNull();

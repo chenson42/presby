@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { formatMoney } from "@/lib/reimbursement/amount-input";
 import { COPY } from "@/lib/reimbursement/copy";
 import type { MemberDetail } from "@/lib/reimbursement/detail-shape";
-import { DateSentence } from "./date-sentence";
 import { DecisionPanel } from "./decision-panel";
+import { Field, HistoryList, ReceiptsField, RequestBanner, WRAP } from "./request-parts";
 import { StatusBadge } from "./status-badge";
 import { WithdrawDialog } from "./withdraw-dialog";
 
@@ -29,53 +29,6 @@ import { WithdrawDialog } from "./withdraw-dialog";
  * and is not offered yet. Opening this page changes nothing (EC24).
  */
 
-const WRAP = "[overflow-wrap:anywhere]";
-
-function Field({ label, children, testId }: { label: string; children: React.ReactNode; testId?: string }) {
-  return (
-    <div data-testid={testId}>
-      <dt className="text-sm font-medium text-muted-foreground">{label}</dt>
-      <dd className={`mt-0.5 text-base ${WRAP}`}>{children}</dd>
-    </div>
-  );
-}
-
-function Banner({ detail, audience }: { detail: MemberDetail; audience: "requester" | "staff" }) {
-  const reason = detail.latestReason ?? "";
-  let body: React.ReactNode;
-  switch (detail.status) {
-    case "draft":
-      body = COPY.detail.banner.draft;
-      break;
-    case "submitted":
-      body = COPY.detail.banner.submitted[detail.route ?? "seat"];
-      break;
-    case "returned":
-      body = COPY.detail.banner.returned(reason, audience);
-      break;
-    case "not_approved":
-      body = COPY.detail.banner.notApproved(reason);
-      break;
-    case "approved":
-      body = <DateSentence make={COPY.detail.banner.approved} date={detail.approvedOn} />;
-      break;
-    case "paid":
-      body = <DateSentence make={COPY.detail.banner.paid} date={detail.paidOn} />;
-      break;
-    case "withdrawn":
-      body = COPY.detail.banner.withdrawn;
-      break;
-    case "voided":
-      body = COPY.detail.banner.voided;
-      break;
-  }
-  return (
-    <p role="status" data-testid="request-banner" className={`rounded-lg border border-border bg-muted p-3 text-base ${WRAP}`}>
-      {body}
-    </p>
-  );
-}
-
 export function RequestDetail({ slug, detail }: { slug: string; detail: MemberDetail }) {
   const relation = detail.viewer.relation;
   const audience = relation === "creator" || relation === "beneficiary" ? "requester" : "staff";
@@ -94,7 +47,7 @@ export function RequestDetail({ slug, detail }: { slug: string; detail: MemberDe
         </div>
       </div>
 
-      <Banner detail={detail} audience={audience} />
+      <RequestBanner detail={detail} audience={audience} />
 
       {relation === "beneficiary" && detail.enteredOnBehalf && (
         <p className="text-base" data-testid="flag-entered-for-you">
@@ -137,28 +90,7 @@ export function RequestDetail({ slug, detail }: { slug: string; detail: MemberDe
         {payee && <Field label={COPY.detail.labels.payTo}>{payee}</Field>}
         {detail.preApprovedByName && <Field label={COPY.detail.labels.preApprover}>{detail.preApprovedByName}</Field>}
         {detail.purpose && <Field label={COPY.detail.labels.purpose}>{detail.purpose}</Field>}
-        <Field label={COPY.detail.labels.receipts} testId="request-receipts">
-          {detail.receipts.length === 0 ? (
-            COPY.receipts.none
-          ) : (
-            <ul className="space-y-1">
-              {detail.receipts.map((receipt) => (
-                <li key={receipt.id}>
-                  <a
-                    href={`/o/${slug}/reimbursements/${detail.id}/receipts/${receipt.id}`}
-                    className="inline-flex min-h-11 items-center underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                  >
-                    {receipt.displayName}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-          {approverSide && detail.noReceiptClaimed && (
-            <span className="mt-1 block text-sm text-muted-foreground">{COPY.detail.noReceiptClaimed}</span>
-          )}
-          {detail.receiptWaived && <span className="mt-1 block text-sm text-muted-foreground">{COPY.detail.receiptWaived}</span>}
-        </Field>
+        <ReceiptsField slug={slug} detail={detail} showClaim={approverSide} />
       </dl>
 
       {canDecide && (
@@ -172,24 +104,7 @@ export function RequestDetail({ slug, detail }: { slug: string; detail: MemberDe
         />
       )}
 
-      {detail.history.length > 0 && (
-        <section aria-labelledby="history-heading" data-testid="request-history">
-          <h2 id="history-heading" className="text-xl font-semibold">
-            {COPY.detail.labels.history}
-          </h2>
-          <ol className="mt-2 space-y-3">
-            {detail.history.map((event, index) => (
-              <li key={`${event.at}-${index}`} className="text-base">
-                <span className="font-medium">{COPY.detail.history[event.kind]}</span>{" "}
-                <span className="text-muted-foreground">
-                  <FormattedDate value={event.on} mode="date" />
-                </span>
-                {event.note && <span className={`mt-0.5 block text-sm text-muted-foreground ${WRAP}`}>{event.note}</span>}
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
+      <HistoryList detail={detail} />
     </div>
   );
 }

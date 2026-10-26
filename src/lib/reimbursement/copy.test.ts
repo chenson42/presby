@@ -59,6 +59,7 @@ describe("C3 the request form", () => {
     expect(COPY.form.kindOptions).toEqual({ reimburse: "Pay me back", reimburseOther: "Pay someone else back", vendor: "Pay a vendor" });
     expect(COPY.form.groupLabel).toBe("Charge to");
     expect(COPY.form.groupPlaceholder).toBe("Choose a group");
+    expect(COPY.form.noChargeableGroup).toBe("No groups can be charged yet. Ask your treasurer to set them up.");
     expect(COPY.form.categoryLabel).toBe("Category");
     expect(COPY.form.categoryPlaceholder).toBe("Choose a category");
     expect(COPY.form.beneficiaryLabel).toBe("Who are we paying back?");
@@ -382,6 +383,50 @@ describe("C7 to C9 treasurer queue, detail, settings and team", () => {
     expect(t.alreadyGranted).toBe("That person already has this role.");
     expect(t.notAMember).toBe("That person doesn't have a current membership here.");
     expect(t.forbidden).toBe("You don't have permission to manage the treasury team.");
+  });
+});
+
+describe("the team page chrome (Batch 6 Copy gaps: REUSED from the giving team page, two ADAPTED)", () => {
+  it("is pinned byte for byte", () => {
+    const p = COPY.team.panel;
+    expect(p.since).toBe("since");
+    expect(p.groupSuffix).toBe("(group)");
+    expect(p.endButton).toBe("End this role");
+    expect(p.endTitle("Pat Quill", "Treasurer")).toBe("End Pat Quill's Treasurer role?");
+    expect(p.endBody).toBe(
+      "They will lose this role's permissions right away. Anything they have already recorded stays. You can give the role again later.",
+    );
+    expect(p.keepRole).toBe("Keep the role");
+    expect(p.endConfirm).toBe("End role");
+    expect(p.roleEnded("Pat Quill")).toBe("Pat Quill no longer has this role.");
+    expect(p.managedUnderRoles).toBe(
+      "This one is managed under Roles, because it is given to a group or includes permissions outside Giving and Reimbursements.",
+    );
+    expect(p.setupIntroOne).toBe("This role isn't set up for your church yet, so it can't be given to anyone.");
+    expect(p.setupIntroMany).toBe("These roles aren't set up for your church yet, so they can't be given to anyone.");
+    expect(p.settingUp).toBe("Setting up…");
+    expect(p.roleSetUp).toBe("Role set up.");
+    expect(p.roleSetUpWithout("reimbursement.pay", false)).toBe("Role set up, without reimbursement.pay (you don't hold it yourself).");
+    expect(p.roleSetUpWithout("a, b", true)).toBe("Role set up, without a, b (you don't hold them yourself).");
+    expect(p.giveHeading).toBe("Give a role");
+    expect(p.roleLabel).toBe("Role");
+    expect(p.personLabel).toBe("Person");
+    expect(p.chooseRole).toBe("Choose a role");
+    expect(p.choosePerson).toBe("Choose a person");
+    expect(p.giveButton).toBe("Give role");
+    expect(p.roleGiven).toBe("Role given.");
+    expect(p.noMembers).toBe("Nobody has a current membership here yet.");
+    expect(p.noRoleToGive).toBe("There is no role to hand out yet. Set one up above, then come back.");
+  });
+
+  it("the plain-text REUSED ones still appear on the giving team page they are borrowed from", () => {
+    const dir = path.resolve(__dirname, "../../app/(org)/o/[slug]/admin/giving/team");
+    const source = ["team-list.tsx", "grant-form.tsx", "setup-role-button.tsx", "page.tsx"]
+      .map((file) => readFileSync(path.join(dir, file), "utf8"))
+      .join("\n");
+    for (const text of ["End this role", "Keep the role", "End role", "Setting up…", "Role set up.", "Give a role", "Choose a role", "Choose a person", "Give role", "Role given.", "Nobody has a current membership here yet."]) {
+      expect(source, text).toContain(text);
+    }
   });
 });
 

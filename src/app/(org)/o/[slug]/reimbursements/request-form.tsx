@@ -258,6 +258,9 @@ export function RequestForm({
 
   const id = (name: string) => `rf-${name}`;
   const disabled = pending !== null;
+  // No chargeable group (and a request still open to a choice): the select is replaced by a sentence
+  // and Send waits for the treasurer to set a group up. Save draft stays available.
+  const noChargeableGroup = !frozen && groups.length === 0;
   const modeError = errors.mode?.message;
   const groupError = errors.groupId?.message;
   const categoryError = errors.categoryId?.message;
@@ -325,16 +328,22 @@ export function RequestForm({
                 )}
               </div>
 
-              <FormField id={id("group")} label={COPY.form.groupLabel} error={groupError}>
-                <NativeSelect {...fieldA11y(id("group"), groupError)} {...reg("groupId")} className="min-h-11">
-                  <option value="">{COPY.form.groupPlaceholder}</option>
-                  {groups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </FormField>
+              {noChargeableGroup ? (
+                <p className="text-base" data-testid="no-chargeable-group">
+                  {COPY.form.noChargeableGroup}
+                </p>
+              ) : (
+                <FormField id={id("group")} label={COPY.form.groupLabel} error={groupError}>
+                  <NativeSelect {...fieldA11y(id("group"), groupError)} {...reg("groupId")} className="min-h-11">
+                    <option value="">{COPY.form.groupPlaceholder}</option>
+                    {groups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </FormField>
+              )}
             </>
           )}
 
@@ -483,7 +492,7 @@ export function RequestForm({
           </section>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Button type="button" className="min-h-11" disabled={disabled} onClick={send} data-testid="request-send">
+            <Button type="button" className="min-h-11" disabled={disabled || noChargeableGroup} onClick={send} data-testid="request-send">
               {pending === "send" ? COPY.form.sending : COPY.form.send}
             </Button>
             <Button

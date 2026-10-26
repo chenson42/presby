@@ -1,30 +1,30 @@
 import { CONSEQUENCE_COPY as C } from "./copy";
+import { afterIntent, applyIntent, mayShow, outcomesOf, shiftOf, sourceOf, type WebsiteGate } from "./outcome";
 
 /**
  * The consequence sentences a designate, un-designate or remove dialog shows
  * (docs/work-log/2026-10-26-person-photos-inc1.md, Phase 3 "Library" and Copy
- * C4/C5; the six consequences of Phase 2 R3). PURE: a snapshot of the person's
- * state plus the intended action in, an ordered list of sentences out. No
- * database, no clock.
+ * C4/C5; Phase 5 run 3, R-e2). PURE: a snapshot of the person's state plus the intended
+ * action in, an ordered list of sentences out. No database, no clock.
  *
- * The snapshot is what the page already holds from SQL (`PhotoSetView`): which
- * photo is the active directory and website designation, whether the directory
- * designation carries the website attestation, and whether the person is
- * listed on any public list. Nothing is recomputed here beyond ONE derived
- * fact, the one the SQL core also derives: **the directory photo is standing in
- * on the website** exactly when it is attested, no website photo is chosen, and
- * the person is listed (`presby_person_public_photo`, DECISION-286). It is a
- * description of the SQL, never a second authority: the page's status lines come
- * from the SQL wrapper itself.
+ * THE SENTENCES ARE CHOSEN BY COMPARING OUTCOMES, never by a per-state rule written by hand. The page
+ * computes what the public surfaces select BEFORE the click and AFTER it, from a pure mirror of the
+ * SQL (`outcome.ts`), and each row below picks its sentences from that comparison (did the selected
+ * website photo begin, end, move, stay?). Three Phase 5 runs failed copy truthfulness because each
+ * sentence was a hand-written prediction guarded by a hand-written predicate that covered only the
+ * state dimensions its author remembered. Now every sentence key carries a declared truth condition
+ * (`consequences.claims.test.ts`), checked over the full product of the dimensions the SQL reads, and
+ * the mirror is pinned to the SQL and to the store by `outcome-parity.db.test.ts`.
  *
- * A sentence about what a surface WILL show is allowed only where the queries behind the snapshot
- * establish it (Phase 5 run 1 rulings, R-a): the snapshot carries `minor`, `directoryWithheld` and
- * `websiteWithheld`, and a sentence that cannot be established says "can ... unless something
- * withholds it". The site's publication status and the platform `sites.*` flags are NOT read.
+ * The snapshot is what the page already holds from SQL (`PhotoSetView`): which photo is the active
+ * directory and website designation, whether the directory designation carries the website
+ * attestation, whether the person is listed, and the withheld answers the SQL reported. What the page
+ * cannot read (hide or merged with no designation, whether the site is published) is treated as clear,
+ * so a sentence about what a surface will show is only ever a selection statement, a negative, or
+ * hedged ("can ... unless something withholds it"). See `outcome.ts`'s header for that asymmetry.
  *
- * Each dialog's title, confirm and cancel labels, and the attestation
- * checkboxes are UI strings Batch 3 owns; this file returns only the sentences
- * whose truth depends on state.
+ * Each dialog's title, confirm and cancel labels, and the attestation checkboxes are UI strings
+ * Batch 3 owns; this file returns only the sentences whose truth depends on state.
  */
 
 export interface PhotoStateSnapshot {
@@ -60,59 +60,45 @@ export type PhotoIntent =
   | { kind: "remove"; photoId: string };
 
 /**
- * Does anything the snapshot knows withhold this person's photo from the website? `hide_photo` is a
- * person-level setting, so a directory answer of `hide_photo` withholds the website photo too.
- */
-function websiteIsWithheld(state: PhotoStateSnapshot): boolean {
-  return state.minor || state.websiteWithheld !== null || state.directoryWithheld !== null;
-}
-
-/**
- * Is the website not showing this person's photo, for a reason the snapshot can establish? Everything
- * `websiteIsWithheld` knows, plus NOT LISTED: listing is a roster-function gate the SQL core
- * (`presby_person_public_photo`) does not apply, so an unlisted person's website photo is returned by
- * the core and shown by no roster. Site publication is NOT read, so a sentence that depends on it must
- * not claim a visible result (Phase 5 run 2, R-d1).
- */
-function websiteNotShowing(state: PhotoStateSnapshot): boolean {
-  return websiteIsWithheld(state) || !state.listed;
-}
-
-/**
- * Is the CURRENT directory photo what the public website is showing for this person right now?
- * A description of the SQL (a withheld person's photo is not shown), never a second authority.
+ * Is the CURRENT directory photo what the public website is selecting for this person, with nothing the
+ * page knows withholding it? A description of the SQL (a withheld person's photo is not shown), never a
+ * second authority; kept for the page and the tests.
  */
 export function directoryPhotoServesWebsite(state: PhotoStateSnapshot): boolean {
-  return state.directory?.attested === true && state.website === null && state.listed && !websiteIsWithheld(state);
+  const { website } = outcomesOf(state);
+  return sourceOf(website) === "directory_attested" && mayShow(website);
 }
 
-/**
- * The sentence for a withheld website, by reason. Only called when `websiteWithheld` or
- * `directoryWithheld` is set: `merged` wins (as in the SQL), otherwise the hide is known, because
- * `hide_photo` is person-level and a directory answer of it is one the website core would give too.
- */
-function websiteWithheldLine(state: PhotoStateSnapshot): string {
-  return state.websiteWithheld === "merged" ? C.websiteMerged : C.websiteHidden(state.first);
-}
+const isWithheld = (gate: WebsiteGate): boolean => gate === "merged" || gate === "hide_photo" || gate === "minor";
 
 export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent): string[] {
   const { first } = state;
+
+  // The store refuses a minor, so the dialog says so before the click and says nothing else.
+  if (state.minor && (intent.kind === "designate_directory" || intent.kind === "designate_website")) return [C.minorBlocked(first)];
+
+  const before = outcomesOf(state);
+  const next = applyIntent(state, intent);
+  const after = outcomesOf(next);
+  const shift = shiftOf(before.website, after.website);
   const lines: string[] = [];
+
+  /** The sentence for a withheld website, by reason; only called when the gate is `merged` or `hide_photo`. */
+  const withheldLine = (gate: WebsiteGate): string => (gate === "merged" ? C.websiteMerged : C.websiteHidden(first));
+  const websiteGate = after.website.photoId === null ? null : after.website.gate;
+  const hiddenOrMerged = websiteGate === "merged" || websiteGate === "hide_photo";
 
   switch (intent.kind) {
     case "designate_directory": {
-      // The store refuses a minor, so the dialog says so before the click and says nothing else.
-      if (state.minor) return [C.minorBlocked(first)];
-      if (state.directoryWithheld !== null) lines.push(C.directoryHidden(first));
+      if (after.directory.photoId !== null && after.directory.gate === "hide_photo") lines.push(C.directoryHidden(first));
       if (intent.attested) {
-        if (state.websiteWithheld !== null || state.directoryWithheld !== null) lines.push(websiteWithheldLine(state));
-        else
-          lines.push(
-            state.listed && state.website === null
-              ? C.directoryAlsoOnWebsite(first)
-              : C.directoryWebsiteConditional(first),
-          );
-      } else if (directoryPhotoServesWebsite(state)) {
+        // Gate first: a withheld website photo says so. Then WHICH photo the designations pick.
+        if (websiteGate !== null && hiddenOrMerged) lines.push(withheldLine(websiteGate));
+        else if (after.website.photoId !== intent.photoId) lines.push(C.websiteKeepsOther(first));
+        else if (before.website.photoId === intent.photoId && sourceOf(before.website) === "website") lines.push(C.websiteAlreadyUses(first));
+        else if (websiteGate === "not_listed") lines.push(C.websiteNotListed(first));
+        else lines.push(C.directoryAlsoOnWebsite(first));
+      } else if (shift === "ends" && mayShow(before.website)) {
         // Replacing a photo that the website is using with one that is not cleared for it.
         lines.push(C.directoryWebsiteWillStop(first));
       }
@@ -120,37 +106,46 @@ export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent):
     }
 
     case "designate_website": {
-      if (state.minor) return [C.minorBlocked(first)];
-      if (state.websiteWithheld !== null || state.directoryWithheld !== null) lines.push(websiteWithheldLine(state));
-      else lines.push(state.listed ? C.websiteListed(first) : C.websiteNotListed(first));
-      if (state.website !== null && state.website.photoId !== intent.photoId) lines.push(C.websiteReplaces);
+      if (websiteGate !== null && hiddenOrMerged) lines.push(withheldLine(websiteGate));
+      else lines.push(websiteGate === "not_listed" ? C.websiteNotListed(first) : C.websiteListed(first));
+      if (sourceOf(before.website) === "website" && before.website.photoId !== intent.photoId) lines.push(C.websiteReplaces);
       return lines;
     }
 
     case "undesignate_directory": {
-      lines.push(C.directoryInitials(first));
-      if (directoryPhotoServesWebsite(state)) lines.push(C.directoryAlsoOnWebsiteEnds);
+      if (before.directory.photoId !== null) lines.push(C.directoryInitials(first));
+      if (shift === "ends" && mayShow(before.website)) lines.push(C.directoryAlsoOnWebsiteEnds);
       return lines;
     }
 
     case "undesignate_website": {
+      // No website designation: the click changes nothing (a stale page; the page offers no button then).
+      if (sourceOf(before.website) !== "website") return lines;
+      if (shift === "unchanged") {
+        // The same photo stays selected, as the cleared directory photo (R-e5): say so, and name the control
+        // that does take it off, but only when applying it is verified to leave no photo selected.
+        lines.push(C.websiteUnchangedCleared(first));
+        if (afterIntent(next, { kind: "undesignate_directory" }).website.photoId === null) lines.push(C.websiteTakeOffTip);
+        return lines;
+      }
       lines.push(C.websiteStops);
-      lines.push(
-        state.directory?.attested === true && !websiteIsWithheld(state) ? C.websiteFallsBack(first) : C.websiteShowsNone(first),
-      );
+      lines.push(shift === "moves" && websiteGate !== null && !isWithheld(websiteGate) ? C.websiteFallsBack(first) : C.websiteShowsNone(first));
       lines.push(C.websiteCaches);
       return lines;
     }
 
     case "remove": {
       lines.push(C.removeBase);
-      const isDirectory = state.directory?.photoId === intent.photoId;
-      const isWebsite = state.website?.photoId === intent.photoId;
-      const isFallback = isDirectory && directoryPhotoServesWebsite(state);
-      if (isDirectory) lines.push(C.removeIsDirectory(first));
-      if (isWebsite) lines.push(websiteNotShowing(state) ? C.removeIsWebsiteWithheld : C.removeIsWebsite);
-      if (isFallback) lines.push(C.removeIsFallback);
-      if (isWebsite || isFallback) lines.push(C.removeCaches);
+      if (before.directory.photoId === intent.photoId) lines.push(C.removeIsDirectory(first));
+      if (before.website.photoId === intent.photoId) {
+        const source = sourceOf(before.website);
+        const shown = mayShow(before.website);
+        if (source === "website") lines.push(shown ? C.removeIsWebsite : C.removeIsWebsiteWithheld);
+        else if (shown) lines.push(C.removeIsFallback);
+        if (source === "website" || shown) lines.push(C.removeCaches);
+        // Removing the website photo hands the website to the cleared directory photo, if there is one.
+        if (shift === "moves" && websiteGate !== null && !isWithheld(websiteGate)) lines.push(C.websiteFallsBack(first));
+      }
       return lines;
     }
   }

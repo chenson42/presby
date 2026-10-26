@@ -230,7 +230,7 @@ describe("the Phase 5 run 1 copy rulings (exact text)", () => {
 
   it("the directory dialog body names who sees it and carries the unless-clause (R-a5)", () => {
     expect(DESIGNATE_COPY.directory.body("Ada Lovelace", "Ada")).toBe(
-      "Members who can see Ada Lovelace in the directory will see this photo instead of their initials, unless Ada has hidden their photo or appears to be under 18.",
+      "Members who can see Ada Lovelace in the directory will see this photo, unless Ada has hidden their photo or appears to be under 18.",
     );
   });
 
@@ -301,5 +301,49 @@ describe("the Phase 5 run 1 copy rulings (exact text)", () => {
     ];
     for (const old of OLD) expect(everything, old).not.toContain(old);
     expect(everything).not.toMatch(/will (also )?appear/);
+  });
+});
+
+/**
+ * T24 (Phase 5 run 3, R-e6, R-e7, R-e8): the four new sentences, the two reworded strings and the
+ * retired key, verbatim; the old text asserted ABSENT.
+ */
+describe("the Phase 5 run 3 copy rulings (exact text)", () => {
+  it("the four new consequence sentences (R-e8)", () => {
+    expect(CONSEQUENCE_COPY.websiteAlreadyUses("Ada")).toBe("This is already Ada's website photo, so this changes nothing on the website.");
+    expect(CONSEQUENCE_COPY.websiteKeepsOther("Ada")).toBe(
+      "Ada has a different website photo, so the website keeps using that one instead of this photo.",
+    );
+    expect(CONSEQUENCE_COPY.websiteUnchangedCleared("Ada")).toBe(
+      "This photo is also Ada's directory photo, and it was cleared for the website, so this changes nothing on the website.",
+    );
+    expect(CONSEQUENCE_COPY.websiteTakeOffTip).toBe('To take it off the website, use "Stop using in directory" on this photo as well.');
+  });
+
+  it("the tip names the control by its label: the words are the label of the directory tile's stop button", () => {
+    expect(CONSEQUENCE_COPY.websiteTakeOffTip).toContain(`"${PAGE_COPY.stopInDirectory}"`);
+  });
+
+  it("the directory dialog body no longer claims a comparison with initials (QA note 1)", () => {
+    expect(DESIGNATE_COPY.directory.body("Ada Lovelace", "Ada")).toBe(
+      "Members who can see Ada Lovelace in the directory will see this photo, unless Ada has hidden their photo or appears to be under 18.",
+    );
+    expect(DESIGNATE_COPY.directory.body("Ada Lovelace", "Ada")).not.toContain("instead of their initials");
+  });
+
+  it("the under-18 notice scopes where existing photos are not shown (QA note 3)", () => {
+    expect(PAGE_COPY.minorNotice("Ada")).toBe(
+      "Ada appears to be under 18. Photos of children can't be added yet, and any existing photos are not shown in the directory or on the website.",
+    );
+    expect(PAGE_COPY.minorNotice("Ada")).not.toContain("not shown.");
+  });
+
+  it("websiteStops is unchanged (it is now emitted only where the selection moves)", () => {
+    expect(CONSEQUENCE_COPY.websiteStops).toBe("The website will no longer use this photo.");
+  });
+
+  it("directoryWebsiteConditional is retired, and its text is nowhere", () => {
+    expect(Object.keys(CONSEQUENCE_COPY)).not.toContain("directoryWebsiteConditional");
+    expect(allStrings().join("\n")).not.toContain("will be used on the website only if");
   });
 });

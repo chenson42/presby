@@ -55,7 +55,7 @@ describe("DesignateDialog — directory", () => {
     dialog("directory");
     expect(
       screen.getByText(
-        "Members who can see Nora Ashgrove in the directory will see this photo instead of their initials, unless Nora has hidden their photo or appears to be under 18.",
+        "Members who can see Nora Ashgrove in the directory will see this photo, unless Nora has hidden their photo or appears to be under 18.",
       ),
     ).toBeTruthy();
   });
@@ -94,6 +94,30 @@ describe("DesignateDialog — directory", () => {
     dialog("directory", snap({ directoryWithheld: "hide_photo" }));
     expect(screen.getByText(CONSEQUENCE_COPY.directoryHidden("Nora"))).toBeTruthy();
     expect(screen.getByText(/Nora has hidden their photo, so the directory won't show this photo while that is so\./)).toBeTruthy();
+  });
+
+  it("T26 ticked on the photo that IS the website photo: it changes nothing on the website (QA run 3 (f)); never 'only if listed'", () => {
+    dialog("directory", snap({ website: { photoId: "ph-1" } }));
+    fireEvent.click(screen.getByLabelText(DESIGNATE_COPY.directory.checkbox("Nora")));
+    expect(screen.getByText("This is already Nora's website photo, so this changes nothing on the website.")).toBeTruthy();
+    expect(screen.queryByText(/only if/)).toBeNull();
+    expect(screen.queryByText(/will be used on the website/)).toBeNull();
+  });
+
+  it("T26 ticked when a DIFFERENT photo is the website photo: the website keeps that one", () => {
+    dialog("directory", snap({ website: { photoId: "ph-9" } }));
+    fireEvent.click(screen.getByLabelText(DESIGNATE_COPY.directory.checkbox("Nora")));
+    expect(
+      screen.getByText("Nora has a different website photo, so the website keeps using that one instead of this photo."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/only if/)).toBeNull();
+  });
+
+  it("T26 ticked for an unlisted person with no website photo: 'won't appear there while that is so', never 'only if listed'", () => {
+    dialog("directory", snap({ listed: false }));
+    fireEvent.click(screen.getByLabelText(DESIGNATE_COPY.directory.checkbox("Nora")));
+    expect(screen.getByText("Nora isn't listed on the public website, so this photo won't appear there while that is so.")).toBeTruthy();
+    expect(screen.queryByText(/only if/)).toBeNull();
   });
 
   it("posts attested false when unticked and true when ticked", async () => {

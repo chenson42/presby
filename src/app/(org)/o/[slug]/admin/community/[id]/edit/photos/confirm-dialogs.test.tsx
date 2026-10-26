@@ -108,6 +108,33 @@ describe("ConfirmDialog", () => {
     expect(screen.queryByText("It is also their website photo, which the website isn't showing at the moment.")).toBeNull();
   });
 
+  // T25 (Phase 5 run 3): the same-photo state, where the website designation and the cleared directory
+  // designation name ONE photo, so stopping the website designation moves nothing.
+  const SAME_PHOTO = (over: Partial<PhotoStateSnapshot> = {}) =>
+    snap({ website: { photoId: "ph-1" }, directory: { photoId: "ph-1", attested: true }, ...over });
+  const UNCHANGED = "This photo is also Nora's directory photo, and it was cleared for the website, so this changes nothing on the website.";
+  const TIP = 'To take it off the website, use "Stop using in directory" on this photo as well.';
+
+  it.each([
+    ["listed", SAME_PHOTO()],
+    ["unlisted", SAME_PHOTO({ listed: false })],
+  ])("T25 stop using on the website, the photo is also the cleared directory photo (%s): says nothing changes and names the way off; never 'will no longer use' nor the cache sentence (QA run 3 (e))", (_name, state) => {
+    show({ kind: "stop_website" }, state);
+    expect(screen.getByText(UNCHANGED)).toBeTruthy();
+    expect(screen.getByText(TIP)).toBeTruthy();
+    expect(screen.queryByText(CONSEQUENCE_COPY.websiteStops)).toBeNull();
+    expect(screen.queryByText(/will no longer use this photo/)).toBeNull();
+    expect(screen.queryByText(CONSEQUENCE_COPY.websiteCaches)).toBeNull();
+    expect(screen.queryByText(CONSEQUENCE_COPY.websiteShowsNone("Nora"))).toBeNull();
+  });
+
+  it("T25 remove the website photo while a cleared directory photo exists: the cache sentence, then the line naming what the website uses instead", () => {
+    show({ kind: "remove", photoId: "ph-2" }, snap({ website: { photoId: "ph-2" }, directory: { photoId: "ph-1", attested: true } }));
+    const cache = screen.getByText(CONSEQUENCE_COPY.removeCaches);
+    const fallback = screen.getByText(CONSEQUENCE_COPY.websiteFallsBack("Nora"));
+    expect(cache.compareDocumentPosition(fallback) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("confirming remove calls the remove action with the photo id, then closes", async () => {
     mockRemove.mockResolvedValue({ ok: true });
     const onOpenChange = show({ kind: "remove", photoId: "ph-1" });

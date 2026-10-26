@@ -17,7 +17,7 @@ import {
   worldKey,
   type World,
 } from "@/lib/testing/person-photo-world";
-import type { PhotoIntent, PhotoStateSnapshot } from "./consequences";
+import { directoryPhotoServesWebsite, type PhotoIntent, type PhotoStateSnapshot } from "./consequences";
 import {
   afterIntent,
   applyIntent,
@@ -279,5 +279,27 @@ describe("T21 the world and what the page can know of it", () => {
         expect(selectedId(viaMirror.website), `${worldKey(w)} ${JSON.stringify(i)}`).toBe(selectedId(viaWorld.website));
         expect(selectedId(viaMirror.directory), `${worldKey(w)} ${JSON.stringify(i)}`).toBe(selectedId(viaWorld.directory));
       }
+  });
+});
+
+describe("T20 directoryPhotoServesWebsite is the mirror's own fact", () => {
+  it("is true exactly when the page-known website selection is the attested directory photo and nothing known withholds it, over all 720 worlds", () => {
+    for (const w of WORLDS) {
+      const s = snapshotOfWorld(w);
+      const website = outcomesOf(s).website;
+      const expected = website.photoId !== null && website.source === "directory_attested" && mayShow(website);
+      expect(directoryPhotoServesWebsite(s), worldKey(w)).toBe(expected);
+    }
+  });
+
+  it("keeps the hand table of run 1: stands in only with no website photo, listed, cleared and nothing withheld", () => {
+    const base = { listed: true, website: null, directory: { photoId: A, attested: true } } as const;
+    expect(directoryPhotoServesWebsite(snap({ ...base }))).toBe(true);
+    expect(directoryPhotoServesWebsite(snap({ ...base, listed: false }))).toBe(false);
+    expect(directoryPhotoServesWebsite(snap({ ...base, website: { photoId: B } }))).toBe(false);
+    expect(directoryPhotoServesWebsite(snap({ ...base, directory: { photoId: A, attested: false } }))).toBe(false);
+    expect(directoryPhotoServesWebsite(snap({ ...base, minor: true }))).toBe(false);
+    expect(directoryPhotoServesWebsite(snap({ ...base, websiteWithheld: "merged" }))).toBe(false);
+    expect(directoryPhotoServesWebsite(snap({ ...base, directoryWithheld: "hide_photo" }))).toBe(false);
   });
 });

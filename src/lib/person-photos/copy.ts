@@ -24,6 +24,11 @@
  *     only when a designation exists (the SQL functions start from it), `minor` always; site
  *     status and the platform `sites.*` flags are not read. So "will appear" is never said
  *     (Phase 5 run 1 rulings).
+ *   - SELECTION VERBS AND EFFECT VERBS (Phase 5 run 3, R-e6): a consequence sentence may use a selection
+ *     verb ("uses", "keeps using", "no longer use") only to say which photo the designations PICK, and
+ *     may state a visible effect only as a negative, hedged with "can ... unless something withholds
+ *     it", or as "can no longer show". `consequences.claims.test.ts` checks every sentence against a
+ *     ground-truth model of the SQL (a truth condition per key); a sentence cannot be added without one.
  *   - "who can see {first} in the directory": `presby_person_directory_photo` does not read
  *     `directory_hidden` or membership status; the directory's own eligibility is the directory's.
  *   - "listed": an open `public_listed` row in staff, officers or committees,
@@ -150,8 +155,11 @@ export const CONSEQUENCE_COPY = {
     `Because ${first} is listed on the public website and has no website photo, this photo can also appear there while the website is published, unless something withholds it, such as ${first} hiding their photo or appearing to be under 18.`,
   directoryWebsiteWillStop: (first: string) =>
     `The website is using the current directory photo. After this it will show no photo for ${first}.`,
-  directoryWebsiteConditional: (first: string) =>
-    `This photo will be used on the website only if ${first} is listed and has no website photo.`,
+  // Phase 5 run 3 (R-e6, R-e8): chosen by comparing the website's outcome before and after the click
+  // (`outcome.ts`), never by "a website photo exists". They replace `directoryWebsiteConditional`.
+  websiteAlreadyUses: (first: string) => `This is already ${first}'s website photo, so this changes nothing on the website.`,
+  websiteKeepsOther: (first: string) =>
+    `${first} has a different website photo, so the website keeps using that one instead of this photo.`,
   // C4, website dialog
   websiteListed: (first: string) =>
     `${first} is listed, so this photo can appear on the website while the website is published, unless something withholds it, such as ${first} hiding their photo or appearing to be under 18.`,
@@ -173,6 +181,11 @@ export const CONSEQUENCE_COPY = {
   websiteFallsBack: (first: string) =>
     `If ${first} is listed, the website will use their directory photo instead, because it was cleared for the website.`,
   websiteShowsNone: (first: string) => `The website will show no photo for ${first}.`,
+  // Phase 5 run 3 (R-e5): the website designation and the cleared directory designation name ONE photo, so
+  // stopping the first moves nothing; the dialog says so and names the control that does take it off.
+  websiteUnchangedCleared: (first: string) =>
+    `This photo is also ${first}'s directory photo, and it was cleared for the website, so this changes nothing on the website.`,
+  websiteTakeOffTip: 'To take it off the website, use "Stop using in directory" on this photo as well.',
   websiteCaches:
     "Browsers that already saved it can keep showing it for up to a day, and copies kept by search engines or web archives can't be recalled.",
   // C5, remove
@@ -201,7 +214,7 @@ export const PAGE_COPY = {
   emptyTitle: "No photos yet",
   emptyBody: "Add the first photo below.",
   minorNotice: (first: string) =>
-    `${first} appears to be under 18. Photos of children can't be added yet, and any existing photos are not shown.`,
+    `${first} appears to be under 18. Photos of children can't be added yet, and any existing photos are not shown in the directory or on the website.`,
   subheading: (name: string, org: string) => `${name} · ${org}`,
   tileAlt: (name: string, n: number) => `${name}, photo ${n}`,
   chipDirectory: "Directory",
@@ -234,7 +247,7 @@ export const DESIGNATE_COPY = {
   directory: {
     title: "Use this photo in the directory?",
     body: (name: string, first: string) =>
-      `Members who can see ${name} in the directory will see this photo instead of their initials, unless ${first} has hidden their photo or appears to be under 18.`,
+      `Members who can see ${name} in the directory will see this photo, unless ${first} has hidden their photo or appears to be under 18.`,
     checkbox: (first: string) =>
       `I have ${first}'s permission to also use this photo on the public website if they are listed there and no website photo is chosen.`,
     confirm: "Use in directory",

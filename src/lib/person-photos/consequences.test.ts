@@ -45,6 +45,14 @@ const S = {
   websiteNotListed: "Ada isn't listed on the public website, so this photo won't appear there while that is so.",
   directoryInitials: "Wherever Ada appears in the directory, their initials will show instead.",
   removeIsDirectory: "It is Ada's directory photo, so wherever Ada appears in the directory it will show initials instead.",
+  // Phase 5 run 3 (R-e8), literal.
+  websiteAlreadyUses: "This is already Ada's website photo, so this changes nothing on the website.",
+  websiteKeepsOther: "Ada has a different website photo, so the website keeps using that one instead of this photo.",
+  websiteUnchangedCleared:
+    "This photo is also Ada's directory photo, and it was cleared for the website, so this changes nothing on the website.",
+  websiteTakeOffTip: 'To take it off the website, use "Stop using in directory" on this photo as well.',
+  websiteStops: "The website will no longer use this photo.",
+  websiteFallsBack: "If Ada is listed, the website will use their directory photo instead, because it was cleared for the website.",
 } as const;
 
 interface Row {
@@ -63,16 +71,40 @@ const rows: Row[] = [
     expected: [S.directoryAlsoOnWebsite],
   },
   {
-    name: "directory, cleared, but not listed: used on the website only if listed and no website photo",
+    name: "T22 directory, cleared, but not listed, no website photo: not listed, so it won't appear (was the 'only if listed' conditional; true under both readings)",
     state: state({ listed: false }),
     intent: { kind: "designate_directory", photoId: A, attested: true },
-    expected: [C.directoryWebsiteConditional(first)],
+    expected: [S.websiteNotListed],
   },
   {
-    name: "directory, cleared, listed, but a website photo exists: the conditional line, never the 'also appear' one",
+    name: "T22 directory, cleared, listed, but a DIFFERENT website photo exists: the website keeps that one, never the 'also appear' line",
     state: state({ listed: true, website: { photoId: B } }),
     intent: { kind: "designate_directory", photoId: A, attested: true },
-    expected: [C.directoryWebsiteConditional(first)],
+    expected: [S.websiteKeepsOther],
+  },
+  {
+    name: "T22 directory, cleared, on the photo that IS the website photo, listed: it changes nothing on the website (QA run 3 (f))",
+    state: state({ listed: true, website: { photoId: A } }),
+    intent: { kind: "designate_directory", photoId: A, attested: true },
+    expected: [S.websiteAlreadyUses],
+  },
+  {
+    name: "T22 directory, NOT cleared, on the photo that is the website photo: no sentence",
+    state: state({ listed: true, website: { photoId: A } }),
+    intent: { kind: "designate_directory", photoId: A, attested: false },
+    expected: [],
+  },
+  {
+    name: "T22 directory, cleared, on the website photo while a hide is known: the website-hidden sentence only",
+    state: state({ listed: true, website: { photoId: A }, websiteWithheld: "hide_photo" }),
+    intent: { kind: "designate_directory", photoId: A, attested: true },
+    expected: [S.websiteHidden],
+  },
+  {
+    name: "T22 directory, cleared, a different website photo, merged: the merged sentence, not 'keeps using that one'",
+    state: state({ listed: true, website: { photoId: B }, websiteWithheld: "merged" }),
+    intent: { kind: "designate_directory", photoId: A, attested: true },
+    expected: [S.websiteMerged],
   },
   {
     name: "directory, NOT cleared, nothing on the website depends on it: no consequence line",
@@ -197,10 +229,10 @@ const rows: Row[] = [
     expected: [C.removeBase, S.removeIsDirectory, S.removeIsWebsite, C.removeCaches],
   },
   {
-    name: "remove the website photo only",
+    name: "T22 remove the website photo while another, cleared directory photo exists: the website then uses that one (was missing)",
     state: state({ listed: true, website: { photoId: A }, directory: { photoId: B, attested: true } }),
     intent: { kind: "remove", photoId: A },
-    expected: [C.removeBase, S.removeIsWebsite, C.removeCaches],
+    expected: [C.removeBase, S.removeIsWebsite, C.removeCaches, S.websiteFallsBack],
   },
   {
     name: "remove a cleared directory photo the website is using as the fall-back",
@@ -366,6 +398,74 @@ const rows: Row[] = [
     state: state({ listed: true, directoryWithheld: "hide_photo", websiteWithheld: "merged" }),
     intent: { kind: "designate_directory", photoId: A, attested: true },
     expected: [S.directoryHidden, S.websiteMerged],
+  },
+
+  // --- Phase 5 run 3 (R-e2, R-e5, R-e6): T22. The same-photo state, stale pages, hidden and unlisted remove.
+  {
+    name: "T22 (e) stop the website designation of the photo that is also the cleared directory photo, listed: nothing changes, and the way to take it off",
+    state: state({ listed: true, website: { photoId: A }, directory: { photoId: A, attested: true } }),
+    intent: { kind: "undesignate_website" },
+    expected: [S.websiteUnchangedCleared, S.websiteTakeOffTip],
+  },
+  {
+    name: "T22 (e) the same state, UNLISTED: the same two sentences",
+    state: state({ listed: false, website: { photoId: A }, directory: { photoId: A, attested: true } }),
+    intent: { kind: "undesignate_website" },
+    expected: [S.websiteUnchangedCleared, S.websiteTakeOffTip],
+  },
+  {
+    name: "T22 (e) the same state, minor: the same two sentences (the store allows un-designating a minor)",
+    state: state({ listed: true, minor: true, website: { photoId: A }, directory: { photoId: A, attested: true } }),
+    intent: { kind: "undesignate_website" },
+    expected: [S.websiteUnchangedCleared, S.websiteTakeOffTip],
+  },
+  {
+    name: "T22 (e) the same state, hide known: the same two sentences",
+    state: state({ listed: true, websiteWithheld: "hide_photo", website: { photoId: A }, directory: { photoId: A, attested: true } }),
+    intent: { kind: "undesignate_website" },
+    expected: [S.websiteUnchangedCleared, S.websiteTakeOffTip],
+  },
+  {
+    name: "T22 stop the website photo, a DIFFERENT cleared directory photo: unchanged from run 2",
+    state: state({ listed: true, website: { photoId: A }, directory: { photoId: B, attested: true } }),
+    intent: { kind: "undesignate_website" },
+    expected: [S.websiteStops, S.websiteFallsBack, C.websiteCaches],
+  },
+  {
+    name: "T22 stop the website photo when the directory photo is the same photo but NOT cleared: the website then shows none",
+    state: state({ listed: true, website: { photoId: A }, directory: { photoId: A, attested: false } }),
+    intent: { kind: "undesignate_website" },
+    expected: [S.websiteStops, C.websiteShowsNone(first), C.websiteCaches],
+  },
+  {
+    name: "T22 stop the website designation when there is none (a stale page): nothing to say, the store writes nothing",
+    state: state({ listed: true, directory: { photoId: A, attested: true } }),
+    intent: { kind: "undesignate_website" },
+    expected: [],
+  },
+  {
+    name: "T22 stop the directory photo when there is none (a stale page): nothing to say",
+    state: state({ listed: true, website: { photoId: A } }),
+    intent: { kind: "undesignate_directory" },
+    expected: [],
+  },
+  {
+    name: "T22 remove the website photo of an UNLISTED person with a cleared directory photo: withheld wording, then the fall-back selection line",
+    state: state({ listed: false, website: { photoId: A }, directory: { photoId: B, attested: true } }),
+    intent: { kind: "remove", photoId: A },
+    expected: [C.removeBase, S.removeIsWebsiteWithheld, C.removeCaches, S.websiteFallsBack],
+  },
+  {
+    name: "T22 remove the website photo of a person with a hidden photo and a cleared directory photo: no fall-back line (it would be withheld too)",
+    state: state({ listed: true, websiteWithheld: "hide_photo", website: { photoId: A }, directory: { photoId: B, attested: true } }),
+    intent: { kind: "remove", photoId: A },
+    expected: [C.removeBase, S.removeIsWebsiteWithheld, C.removeCaches],
+  },
+  {
+    name: "T22 remove the photo that is both website and cleared directory photo: both designations end, so no fall-back line",
+    state: state({ listed: true, website: { photoId: A }, directory: { photoId: A, attested: true } }),
+    intent: { kind: "remove", photoId: A },
+    expected: [C.removeBase, S.removeIsDirectory, S.removeIsWebsite, C.removeCaches],
   },
 ];
 

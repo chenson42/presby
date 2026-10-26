@@ -8822,3 +8822,273 @@ Nothing was touched: no migration, grant, policy or trigger. Run 1's live-catalo
 - **Integration (Rule 16):** merge `origin/main`, apply both staged patches, and re-run `scripts/test-rls.sql` on merged `development`.
 
 Logs, walk screenshots and the walk spec are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa2b-r2/`. The screenshots are under `walk/shots/`, the e2e log is `e2e.log`, and the walk log is `walk/walk.log`.
+
+---
+
+# Phase 6: Shipped vs Intent (analyst), Community Increment 2b
+
+*Returned as text for the orchestrator to record verbatim. I wrote and edited no repository file. My own files are under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/an2b/`: `walk/walk.spec.ts`, `walk2.spec.ts`, `walk4.spec.ts`, `walk.log`, `walk2.log`, `walk3.log`, `walk4.log`, `walk/shots/`, `counts-before.txt` and `counts-after.txt`.*
+
+**Worktree and branch.** `/Users/cshenso/git/presby-platform/presby-2b`, `pipeline/signin-invites` at `eb54c16`. Neon `ep-delicate-tree`.
+
+**How the walk ran.** I started my own dev server on :3540 by hand, with `.next/dev` cleared and the env you listed. I stopped it by PID, and :3540 is confirmed free. Playwright ran from my own config with `globalSetup` removed, so I did not apply or revert the `e2e-global-setup` patch. `git status` is clean.
+
+**Cleanup.** The table counts before and after are identical except `audit_events` (+31, append-only by design). There are 0 `e2e-invite-*` users, organizations or queue rows. No trigger is left disabled. The three flags I touched (`org_portal.members_create`, `org_portal.officers`, `auth.require_2fa`) are restored.
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+- Every Phase 1 verb works for the right person, in the order intended, at 360px.
+- Nothing regressed, and I found no defect that sends the pipeline back.
+- The notes are one release gate, one integration risk and a small set of follow-ups.
+- **Release gate: F166.** Every new-account invitee enrols two-factor sign-in on the way in, and F166 still loses their recovery codes and landing page. TODO line 167 already says it is HIGH "before the first non-operator invitee", and this feature is that invitee.
+- **Integration risk: main is 79 commits ahead.** QA never ran against a merged tree. See conditions 1 to 3.
+
+## ONE-LINE TAKE
+
+> A founding administrator can invite a person they already recorded, and that person can accept as a new account or in place on the site. A member whose proven address sits on exactly one eligible record is connected at sign-in. An elder is connected after confirming two-factor sign-in, and then approves roll actions. The walk found nothing false, but the new-account path strands the person on the enrolment page and drops their recovery codes (F166).
+
+## What's Working
+
+Ordered as the person on each path sees it, at 360px.
+
+**1. The founding administrator, created by accepting a platform designation as a brand-new account.**
+- `/invite?token=…` shows "A PresbyPortal administrator invited you to be the founding administrator at E2E Invitation Church." It shows the masked address "e***@example.invalid".
+- The page offers first name, last name, password and confirm, and "Create account".
+- `/invite/accepted` reads "Your account is ready".
+- Sign-in sends them to `/account/2fa` (enrol), then through the `/totp` challenge, and they land at `/o/<slug>` as "Good evening, Rosalind."
+- Their Community page has "Pending approvals" and "Add person". That is the original production symptom, and it is fixed.
+
+**2. The founding administrator sends a sign-in invitation.**
+- On a person's edit page, the card is headed "Sign in to PresbyPortal".
+- The card reads: "Invite {Name} to sign in. We'll email {address} with a link that works once. Accepting lets them sign in as themselves, and any role or seat they hold here then takes effect." Below it: "When {Name} signs in with {address}, PresbyPortal connects them to this record if it can. An invitation also connects them."
+- The dialog reads: "We'll email {address}. The link works once and expires on 11/2/2026. Only send it if that address belongs to {Name}: whoever opens the link becomes {Name} on PresbyPortal."
+- After the send, the card reads "Invitation sent to {address} on 10/26/2026. It expires 11/2/2026.", with Sent, a five-minute cooldown line, a disabled Send again, and Cancel invitation. It also says: "While this invitation is open, signing in does not connect {Name} by itself. They accept the invitation instead."
+- The rows in `invitation.created`, `invitations` and `email_queue` are right:
+  - One `sign_in`/`org` invitation row.
+  - One `account_sign_in_invitation` queue row with the subject "E2E Invitation Church has invited you to sign in to PresbyPortal".
+  - One `invitation.created` audit row carrying ids only, with no address.
+  - The queue body is redacted after delivery.
+- The Community list shows "Invitation sent 10/26/2026" on that person's row and "Not connected yet" on a seated elder's row.
+- The elder's card says: "{Name} holds a role or a seat here. When they sign in with {address}, PresbyPortal connects them once they have confirmed two-factor sign-in."
+- The Session hand-off on Pending approvals reads: "1 member of the Session is recorded, but none has connected a sign-in yet, so no one can approve." Below that is the elder's row, "Not invited yet", with an Invite link.
+- A clerk who holds only `people.manage` sees "Ask an administrator to invite your Session members to sign in", with no names.
+
+**3. A brand-new account accepts a sign-in invitation.**
+- I could not recover the real emailed token, because the body is redacted after delivery. I seeded a row with a known token, as the e2e specs do. Everything from the link onward is the real path.
+- `/invite` says "{Congregation} invited you to sign in…". It shows the masked address and **no name pre-fill** (first and last name came back empty).
+- Accepting creates the account, then `/invite/accepted`, then `/account/2fa` (forced enrolment), then `/totp`, then `/o/<slug>` as "Good evening, Cordelia."
+- The administrator's card for her then reads "Connected through an invitation on 10/26/2026. To change who signs in as this person, send us a support ticket."
+- Reach as a baseline member:
+  - `/directory` says "isn't available … yet".
+  - Officers says "You don't have permission to manage officer terms".
+  - Roles says "isn't turned on".
+  - Another person's edit page says "You don't have permission to do that".
+  - Pending approvals says "You don't have permission to do that".
+
+**4. Connect at sign-in.**
+- An existing account with a proven address, on an authority-free record, signs in and lands directly in the congregation. The audit row is `via: sign_in`, `proof: account`, `secondFactor: false`, with an empty authority snapshot and no address. The administrator's card reads "Connected through sign-in on 10/26/2026."
+- An existing account with an open invitation is not auto-connected. `/no-organization` shows "You're invited to {Congregation}" and "Accepting connects this sign-in to your record there as Tamsin Rook." Accept goes straight into the congregation. The audit row is `invitation.accepted`, `via: in_place`, `mode: existing_account`.
+
+**5. The elder, and the hand-off.**
+- Password sign-in leads to the `/totp` challenge, then `/no-organization` ("You're not connected to a congregation yet").
+- Check again connects them and lands them at `/o/<slug>`. The audit row is `via: check_again`, `secondFactor: true`, `authority.sessionSeat: true`.
+- The administrator's banner and hand-off rows disappear.
+- The elder finds the queue by clicking only: Community tile, then the "Pending approvals / 1 waiting" link, then Pending approvals in decide mode. Approve opens a dialog. The result is "Marigold Hartwell's roll action approved.", the roll action is approved, and `decided_by` is the elder's account.
+
+**Overflow and tap targets.**
+- There was no horizontal overflow on any page.
+- Every new surface has controls at 44px or taller, and the send dialog fits inside the viewport. The `/no-organization` Check again and Accept buttons measure 44px or more.
+- The only small targets are pre-existing: the "PresbyPortal" and "Back to portal" header links (20px), the "← Home" link on `/account/2fa` (17px) and the `/account/2fa` header buttons (32 to 36px).
+
+## Intent-vs-Shipped Diff
+
+| Phase 1 said | Shipped | Verdict |
+|---|---|---|
+| Founding administrator can invite a person already recorded, one at a time, to the address on file | Card, dialog, send, send again, cancel, cooldown, chain cap, visitor acknowledgement, `officers.manage` rule. A `people.manage`-only clerk sees Send on an elder's card and is refused in the dialog: "Only someone who can manage officers can invite them." | matches; the clerk learns after the click (polish follow-up 10) |
+| The invitee is not named before sign-in (G5) | Verified live: masked address only, no name pre-fill | matches |
+| Accepting grants nothing | The card now says any role or seat "then takes effect" (amendment 4). The email still says "Accepting doesn't change your role", which is true as written | matches after the QA fix |
+| Marker "Can't sign in yet" | Replaced by "Not connected yet", "Invitation sent {date}" and "Invitation couldn't be completed" | acceptable drift, ruled |
+| Session hand-off per elder (Flow 7) | Seen live. "Invitations sent to {n} of the {m}" counts bounced rows as out; the row below says "Email bounced" | matches |
+| Auto-connect: member signs in and is connected | Authority-free: yes, at sign-in. An elder is not connected at sign-in; they need Check again after confirming two-factor sign-in. An enrolled elder lands on the generic "You're not connected" page after the challenge | acceptable drift (R42, operator Q1); see follow-up 5 |
+| `proof` recorded in the connect audit row (analyst Pass 3 and R42) | `proof` is null on every Check-again row, and every authority-bearing connect is one | acceptable drift, but it blunts the F232 review chain on the rows it matters for; follow-up 6 |
+| Accept in place for sign-in, founding administrator and treasurer | `/no-organization` card, the two-factor notice, dead and blocked copy, audit `via: in_place`. The designation card now names "A PresbyPortal administrator" | matches |
+| Disconnect after accept: not in 2b | Not shipped. The card says "send us a support ticket" | matches (operator ruling) |
+| Platform org-sent panel and scoped revoke | Walked by QA; the designation takedown now names its scope | matches |
+| Members reach only baseline access | Baseline members see Community and Officers tiles with administrator wording, and Community lists every person's name and address; the Add a person wizard renders and its search silently does nothing | acceptable drift, already in the Phase 3 hand-off list; follow-ups 8 and 9 |
+| New invitee enrols two-factor and lands connected | Lands connected, but `/account/2fa` strands them: "You enrolled on…", "10 unused codes remaining", no codes shown, no Continue. They must find "← Home" | **F166, not 2b's defect; release gate** |
+
+## Edge Cases
+
+- **Empty state:** pass. `/no-organization` N0, N1 and "Nothing new yet" are distinct. Pending approvals says "No one can approve yet" with a per-viewer hand-off. The Community list shows no marker when there is none.
+- **Failure microcopy:** pass. The refusals I provoked (clerk on an elder, baseline member on edit and Pending approvals) are human sentences. QA covered the dead-link, blocked, rate-limited and database-error strings in unit and e2e tests. I could not take the database down.
+- **Permission gate:** pass. `people.manage` is required for the card. `officers.manage` is enforced server-side for a seat holder. A baseline member is refused on edit, Pending approvals, Officers and Roles. The only soft spot is the Add a person wizard (follow-up 9).
+- **Audit event:** pass. I read `invitation.created` (ids only), `tenant.person.sign_in_connected` (two rows, no address), `invitation.accepted` (in place and new account) and `tenant.roll_action.approved`. The Google proof row cannot be exercised without Google and rests on QA's mutation M1.
+- **Mobile (360px):** pass on every page above. No overflow, no new control under 44px.
+
+## The F342 caveat
+
+I did not hit the enrolment-secret race in five enrolments (three founding-administrator and new-account runs, plus the elder's already-enrolled path). F342 ships ahead of this release (0.46.2), so nothing here depends on it.
+
+## Rulings
+
+### QA run 2's three follow-ups
+
+1. **RevokeAllControl's vanishing inline result: follow-up, not a defect.**
+   - I agree with QA. The toast and the page's new state carry the result.
+   - The one sentence lost is "Sign-in invitations sent by the congregation were not changed."
+   - Recommended fix, for the tech-lead to rule: put that sentence in the designation toast and drop the inline success line for both scopes. That avoids a page-level status that survives revalidation. If the inline line is kept instead, add an e2e assertion that it is still on screen.
+2. **"the congregation" becomes "the organization": follow-up, widened.**
+   - Founding-administrator designations apply to every organization type. QA named four strings (`DESIGNATION_TAKEDOWN_COPY` explanation and dialog body, `REVOKE_ALL_RESULT_COPY.designations.message`, `ORG_SENT_PANEL_COPY.revokeAllConfirm`).
+   - Add the sign-in email lead ("the website your congregation uses to keep its records") for the same reason.
+   - Leave the `/no-organization` H1 alone. It is pinned by tests and e2e, and Group A deliberately words the rest as "the office that keeps your records".
+3. **"you choose a password": accept the operator's rewording.**
+   - **Recommendation to the operator: accept** "Accepting takes about a minute: you sign in, or choose a password if you are new."
+   - The current sentence is now false for anyone who accepts in place, which is every existing account. The footnote ("If you already have a PresbyPortal account, sign in with this email address") only partly covers it.
+   - It is member-visible and cheap, and it needs the email test updated. It should go out before the first real sign-in invitation is sent.
+   - I did not apply it, because the operator approved the string.
+   - A related line to read in the same pass: the footnote "Nothing happens unless you accept" holds while the link is open (open invitations take precedence over auto-connect). After the link expires or is revoked, a sign-in with that address can connect.
+
+### Batch C and D deviations
+
+**Batch C**
+
+- **1 (`NAME_FALLBACK = "you"`), 2 (platform dialog and panel borrows), 5 (joined marker text):** accepted. QA ruled 1, 2 and 5 acceptable.
+- **3 ("Ask the office" body omitted with no address):** accepted. A credentials sign-in always has an address.
+- **4 ("Sign in with a different account" also on N1):** accepted, and I recommend keeping it. I saw it on N1, and the wrong account is the commonest failure.
+- **6 (`invitationsOut` counts sent and bounced):** accepted. The row below corrects it ("Email bounced").
+- **7 (accessible-name span), 8 (hydration fixture person ids 195 and 196):** accepted.
+
+**Batch D**
+
+- **1 (the flake is a real race):** accepted. It is F342, fixed on another branch and queued ahead of this release.
+- **2 (design text "no admin tiles" does not hold):** confirmed live. A baseline member sees Community and Officers tiles ("Add people, record participants and roll actions…" and "Record officer terms…"). Community opens and lists everyone with addresses, within each person's privacy settings. The Add a person wizard also opens (follow-ups 8 and 9).
+- **3 (a two-factor-required account is walked to `/account/2fa` before `/no-organization`):** accepted, and I saw it.
+- **4 (blast radius missed two e2e specs):** accepted as a process note for the retrospective.
+- **5 (queue hygiene):** accepted.
+
+**Earlier batches**
+
+- A1, A2, B1 and B2 findings were ruled at the time. Two stay open: A2's finding 2, where the listing shows a `sign_in` invitation whose address has since left the record and so accepts as "dead" (follow-up 11); and A2's finding 3, a development-database organization whose name looks real, which the orchestrator should confirm (follow-up 12).
+
+## The integration list
+
+**Main moved.** `origin/main` is 49ea633, version **0.46.1**. It is 79 commits ahead of this branch, with migrations 0067, 0068 and 0072. QA ran against a branch behind main, so nothing has run on the merged tree.
+
+1. **Merge `origin/main` first.**
+   - A dry `git merge-tree` shows one textual conflict, in `src/lib/org-feature-catalog.test.ts` (both sides added a toggle-only key).
+   - Fourteen more files changed on both sides and merged cleanly by text. They are: `docs/schema-design.md`, `scripts/giving/test-rls-46.sql`, `organizations/[id]/actions.ts`, `actions.test.ts` and `page.tsx`, `officer-roster.tsx`, its test, and `officers/page.tsx` and its test, `src/lib/audit.ts` and its test, `src/lib/db/domain/people.ts`, `src/lib/org-features.ts`, and `src/lib/org-provisioning.test.ts`. Read each for a semantic clash.
+   - Main also changed `src/proxy.ts` (16 lines) and the `/totp` challenge form (0.44.1 auto-submit). 2b's specs use `submitTotp`, which clicks Verify. Take main's version of `e2e/support/invitation-ui.ts` and check the specs still pass.
+2. **Re-run the Phase 5 evidence on the merged tree.** At minimum: typecheck, lint, `npm run check`, the unit suite, the serial DB lane, `test-rls-65.sql`, the full `test-rls.sql` with both patches, the chromium project, and the auth-gate specs (`totp-full-login`, `totp-callback-bypass`, `session-claim-integrity`, `branded-signin`) on a real server with an MFA-enrolled user. Run `npm run docs:erd` after merging `schema-design.md`.
+3. **The two staged patches.**
+   - `e2e-global-setup.integration.patch` applies cleanly to main's `global-setup.ts` (checked). CI needs it, because since 0065 the seed must run on the owner connection. Apply it for real.
+   - `test-rls.sql.integration.patch` **fails again** against main: hunk 3, the append, collides with the new `\ir parishes/test-rls-68.sql` and `\ir assets/test-rls-72.sql`. Hunks 1 and 2 (the section 44 conversions) apply. Apply them, then append `\ir sign-in-invitations/test-rls-65.sql` by hand after the section-72 include with its banner. Do not re-stage the append hunk a third time.
+4. **`drizzle/meta/_journal.json`:** add idx 65, `0065_presby_sign_in_and_connect`, with `when` 1787532773186 (idx 64 plus one day, matching the existing spacing). Idx 66 stays reserved for 3a, and 67, 68 and 72 are already there.
+5. **`scripts/seed-dev.sql`:** append `\ir sign-in-invitations/seed-dev-sign-in.sql` with a banner, after the parishes include. It seeds the toggle rows for every organization and needs the earlier fixtures. `test-rls-46.sql` also needs those toggle rows.
+6. **`docs/decisions.md`:** insert DECISION-225, 226, 227 and 228, and the amended 207 and 208 (text in the log at amendment 2 §11.2 and Phase 3). All are free on main. Main's latest are 261, 270 and 277.
+7. **`docs/schema-design-2.md`:** a new lettered subsection after "2ae. Public asset allowlist" (call it **2af**) for F186, F187, F192 to F198 and F230 to F233. Name F199 as closed in v0.42.0 (DECISION-219) so the number is not reused. F232 is an open `paper` residual. None of these numbers collide with main. Fix the two "reserved" notes at lines 1831 and 1851.
+8. **`CLAUDE.md`:** all three operator-approved edits.
+   - Edit 1: Permissions vs Flags, replace the last sentence of the credential paragraph with DECISION-227's text.
+   - Edit 2: Two Hierarchies, the platform-admin sentence, extended with the proven-address route (DECISION-226).
+   - Edit 3: the tenant-administrator paragraph, after the DECISION-194 residual.
+   - Anchors verified against the current text. `AGENTS.md` is a shim and needs nothing.
+   - Main now has `src/lib/dev-docs.ts` `INVARIANTS` and a test that fails on a Key Invariants **heading** change only, not wording. The edits change no heading, so the test will pass. Still re-read those entries (the "Two hierarchies" `paper` entry, and "A submission grant is a credential") and add F232 where it lists residuals.
+9. **`docs/TODO.md`:**
+   - Move to Done: line 136 (auto-connect), line 139 (credential reader), line 303 (Session-state copy pass), line 305 (the Increment 2 constraints), line 312 (bootstrap e2e) and line 317 (what's-new hold). Reword line 299 and line 300 (F177 stays open, now with the standing-visitor decline).
+   - Add the follow-ups below and the design's own list (disconnect after accept; S11 conditional; E-35 enrolment should verify the session; G17 `/home` card for a later designation; Staff-page markers; the older actor helpers; the F232 detection query).
+10. **`docs/STATE.md`:** it says "email authenticates nothing" at line 183; update it and the RESUME block.
+11. **`docs/product/functionality-map.md` (Rule 14):** lines 50 and 63 (the `/no-organization` description still says "open the link in your invitation email"), the Community line (line 70), the Auth lines (32 and 37), and the platform organization page. Update the Index too.
+12. **`docs/architecture.md` (Rule 15): yes, one short addition.** Sign-in can now write the identity binding, which is a changed data flow. Suggested text under the authorization paragraph:
+    > A login is bound to a person record in exactly two ways: by accepting an invitation, by link or in place, or by signing in with an address the account has proven that sits on exactly one eligible record. Both are owner-path functions, and address proof is a database fact bound to the account's current address. A record that carries authority connects only after a confirmed second factor.
+    The "first administrator" paragraph already there stays true.
+
+## The production runbook for 0065
+
+**None exists.** `docs/deployment.md` mentions 0065 only in forward references (lines 680 and 824). The design assigned it to integration as an unwritten hand-off. Write a section "Sign-in invitations and connect at sign-in (0065)" modelled on the 0064 one. It needs the following.
+
+- **Confirm first.**
+  - `to_regprocedure('presby_person_email(uuid,text)')` is non-null (0064 applied).
+  - `to_regprocedure('presby_connect_signed_in_account(uuid,boolean)')` is null.
+  - `to_regclass('public.user_totp')` is non-null.
+  - The shipped code is at least v0.42.3 and v0.42.4 (DECISION-230 and 246), which main already has.
+- **Order:** snapshot production, apply 0065, then merge and deploy. Every merge to `main` auto-deploys. New code before 0065 calls missing functions. Old code against 0065 keeps working (the migration header and design §4 say so).
+- **Pre-reads, counts only, re-run just before apply.**
+  - **P1** case-duplicate `lower(users.email)` groups. The file stops on any.
+  - **P2** stamped users with a `user.email_changed` audit row. The file clears those stamps and prints a count. Expect 0. If non-zero, those people lose proof until they sign in with Google.
+  - **P6** open invitations. The `account_invitations` CHECKs and indexes are dropped and re-added.
+  - **P8** the deploy-day wave: proven, unlinked, active users with exactly one candidate. Expect 0, so the release note needs no wave line. If non-zero, say so in the note.
+  - The count of `organization_feature_toggles` rows and of organizations. Section 8 seeds one `org_portal.sign_in_connect` row per organization.
+  - The Google-account count (it was 0 on 2026-10-25).
+- **Apply:** `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0065_presby_sign_in_and_connect.sql`, as the owner on the direct endpoint. It is idempotent, and a second run changes nothing.
+- **Verify (from QA's catalog probes).**
+  - Both guard triggers present and enabled (`users_guard_email_proof`, `people_guard_user_link`).
+  - Indexes present: `users_email_lower_uq`, `account_invitations_open_sign_in_person_uq`, the re-predicated `account_invitations_open_address_uq`, `audit_events_sign_in_connected_ix`.
+  - `presby_app` has no privilege on `account_invitations`.
+  - `presby_app` holds EXECUTE on exactly the 15 callables, and none on the five internals.
+  - `presby_platform` holds none.
+  - Every definer is owned by the owner and has `search_path = public, pg_temp`.
+  - Toggle rows equal the organization count.
+  - Row counts unchanged apart from the section-2 clean-up and the toggle seed.
+- **Down-path.** There is no rollback file. A code rollback is safe. The widened vocabulary CHECKs cannot be narrowed once a `sign_in` row exists. Production has none before this file.
+- **After deploy.**
+  - The operator walks the real path on a congregation made for testing, with plus-addresses (3 invitations per address per day). Send an invitation, accept as a new account, and enrol.
+  - The operator does the one-time Google check. This is the only path no test exercises. Sign in with Google on an address on exactly one eligible record, then confirm the connection and the proof audit row.
+- **Do not run** `seed-dev-sign-in.sql` or `test-rls-65.sql` on production.
+
+## Rules 12 to 15
+
+- **Rule 12:** not applicable. The source was the operator in production, with no feedback row (same as Increment 2).
+- **Rule 13:** member-visible, so publish one what's-new entry at SHIP IT (this closes TODO 317). Do it only after the F166 gate, since it invites people into that flow. Suggested text, within the "do not write" list:
+  - Title: "Invite a person to sign in, and sign-in can connect you to your record."
+  - Body: "A congregation's office can now invite someone it has recorded to sign in. If you sign in with the email address on your record, PresbyPortal can connect you to it without an invitation, though not for visitors, shared addresses or people at more than one congregation. A member of the Session can approve once they have connected a sign-in, either that way or by accepting an invitation. If you hold a role or a seat, you confirm two-factor sign-in first."
+  - Do not write "no one can be connected without an invitation", "two-factor sign-in prevents misuse of a typed address", "you can undo a connection", or "connecting never gives you more access".
+- **Rule 14:** see integration item 11.
+- **Rule 15:** see integration item 12.
+- **Release note:** use the design's §14 lines and the "do not write" list. Add the F232 residual line as drafted. The P8 line is not needed if P8 is 0 at deploy.
+
+## Version
+
+Confirmed: **0.48.0**, a minor. That follows 0.46.2 (F342), 0.46.3 (ingest) and 0.47.0 (careers) in the queue. If F342 ships first, the e2e helper retry is harmless. Main is already 0.46.1, so renumber if the queue changed.
+
+## Follow-Ups (SHIP WITH NOTES), TODO-ready
+
+1. `- [ ] **F166 is a release gate for Community 2b (HIGH).** Walked live 2026-10-26 on development at 360px: a new-account invitee enrols on /account/2fa and is left on "You enrolled on … 10 unused codes remaining" with no recovery codes shown, no Continue link and the callbackUrl gone; they must find "← Home" (17px tall). Fix before 0.48.0 ships or before any non-operator is told to use sign-in invitations. — docs/work-log/2026-10-22-founding-admin-directory.md Increment 2b Phase 6`
+2. `- [ ] **Merge origin/main into the 2b branch and re-run Phase 5 on the merged tree (Rule 16).** Main is at 0.46.1 (79 commits ahead; 0067, 0068, 0072). One textual conflict (org-feature-catalog.test.ts) and fourteen same-file merges; take main's invitation-ui.ts (0.44.1 auto-submit). Apply the e2e global-setup patch; apply test-rls patch hunks 1 and 2 and append the section-65 \ir by hand. — Increment 2b Phase 6`
+3. `- [ ] **Write the 0065 production runbook in docs/deployment.md.** None exists. Pre-reads P1/P2/P6/P8 and toggle and org counts; snapshot; apply with -1 on the direct endpoint, then deploy; verify the 15 grants, both triggers and the indexes; operator walk and the one-time Google check. — Increment 2b Phase 6`
+4. `- [ ] **RevokeAllControl's inline success line disappears on revalidation (both levers).** Move the "sign-in invitations were not changed" sentence into the designation toast and drop the inline line, or render the result outside the conditional section and add an e2e assertion. — Increment 2b Phase 5 run 2 / Phase 6`
+5. `- [ ] **An enrolled elder lands on the generic "You're not connected" page after the two-factor challenge.** Connect at sign-in cannot run with a verified factor (R42), so they must press Check again, and the page does not say so. Consider a sentence for an account with a two-factor enrolment ("If you hold a role or a seat, select Check again"), or run the check on return from /totp?callbackUrl=/no-organization. Needs a Copy ruling. — Increment 2b Phase 6`
+6. `- [ ] **The sign_in_connected audit row has proof: null on every Check-again connect, which is every authority-bearing connect.** The F232 review chain loses the google-or-account fact on exactly the rows it targets. Record the proof source at Check again (or write "unknown"). Also build the F232 detection query (tenant.person_email.added then tenant.person.sign_in_connected, joined on personId). — Increment 2b Phase 6`
+7. `- [ ] **Say "organization" where the noun is "congregation" on non-congregation pages:** DESIGNATION_TAKEDOWN_COPY, REVOKE_ALL_RESULT_COPY.designations, ORG_SENT_PANEL_COPY.revokeAllConfirm, and the sign-in email lead. Leave the /no-organization H1. — Increment 2b Phase 5 run 2 / Phase 6`
+8. `- [ ] **Operator decision: the sign-in email's "you choose a password" is false for an existing-account recipient.** Recommended: "Accepting takes about a minute: you sign in, or choose a password if you are new." Change the email and its test; do it before the first real invitation. — Increment 2b Phase 5 run 2 / Phase 6`
+9. `- [ ] **A baseline member sees administrator tiles and wizard.** The Community and Officers tiles describe administrator actions to every connected member; Community lists everyone with their addresses (privacy-filtered); /admin/community/new renders the Add a person wizard and its search silently does nothing. Gate the wizard page like the edit page, and make the tile wording permission-aware. — Increment 2b Phase 6 (walked 2026-10-26; Batch D finding 2)`
+10. `- [ ] **A people.manage-only clerk is offered Send on an elder's card and is refused in the dialog.** The refusal is clear ("Only someone who can manage officers can invite them") but the card could say so up front. — Increment 2b Phase 6`
+11. `- [ ] **The sign-in invitation listing shows an invitation whose address has left the person's record; accepting answers dead.** Filter the listing by the currency check, or leave it (one wasted click). — Increment 2b Batch A2 finding 2`
+12. `- [ ] **Confirm the development database holds no organization whose name looks like a real congregation (A2 finding 3).** No Real Data covers the repository, but the row was inherited from development. — Increment 2b Batch A2 finding 3`
+13. `- [ ] **Officer roster at 360px, still open:** the table scrolls sideways, the long surname overruns "Since", the name links are 17 to 37px tall. — Increment 2 manual bootstrap walk, re-observed in 2b Batch D`
+14. `- [ ] **Disconnect after accept** (first follow-up; needs a definer because the F186 trigger forbids clearing the link), plus the design's other follow-ups listed in the log: S11, E-35, the G17 `/home` card for a later designation, Staff-page markers, the older actor helpers. — Increment 2b design §16`
+
+## Red Flags
+
+None. The pipeline does not reopen.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 6 — Shipped vs intent | analyst | Complete. Walked as the people the path creates, on my own :3540 at 360px: an accepted-designation founding administrator (new account, forced enrolment, landing, Community with Add person), the send from the card (rows, queue and audit read back), a new account accepting a sign-in invitation (no name pre-fill, enrolment, landing, baseline-only reach), connect at sign-in (authority-free), accept in place, and an elder connecting through Check again and approving a roll action by clicking only. QA run 2's three follow-ups ruled; Batch C and D deviations ruled; integration list checked against main 0.46.1. No defect found; F166 named as a release gate; 14 follow-ups; 12 integration items; the 0065 runbook does not exist and is specified. Version 0.48.0. Test data removed; audit rows remain by design. | **SHIP WITH NOTES** | 2026-10-26 |
+
+## Handoff
+
+**Next agent: orchestrator.**
+
+1. Record this section.
+2. Merge `origin/main` into the branch and run integration items 1 to 12.
+3. Write the 0065 runbook.
+4. Re-run Phase 5 on the merged tree, scoped as in item 2. This is the one place a scoped QA run is needed.
+5. Put to the operator:
+   - Follow-up 8 (email wording).
+   - Whether F166 ships before 0.48.0 or the first invitations wait for it. I recommend it first.
+   - Whether to publish the what's-new entry at release or after F166.
+
+After that, **deployment-engineer** carries the runbook, and the operator does the production walk and the one-time Google check. Nothing is committed or pushed without the operator's say-so.

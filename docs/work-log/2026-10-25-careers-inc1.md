@@ -1459,3 +1459,232 @@ Findings 1–4 of run 1 are closed. The notes below do not block:
 **Next:** analyst (Phase 6). Carry N1–N3 into the shipped-vs-intent review; N1 and N2 are candidate follow-ups for `docs/TODO.md`.
 
 Logs, walk output and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-careers-r2/`.
+
+---
+
+## Phase 6 — Shipped vs Intent (analyst), Careers Increment 1
+
+**Tree:** `pipeline/careers` at `fc3612a`, worktree `/Users/cshenso/git/presby-platform/presby-careers`. I changed no files and used no `git stash`. The worktree is clean and HEAD is unchanged.
+
+**What I ran:** my own dev server on :3580 (`.next/dev` cleared, test fakes in its environment, `E2E_BASE_URL` and `AUTH_URL` on :3580). The server is stopped by PID, the port is free, and :3000 was never touched. I drove two Playwright walks from the scratchpad, against the `pipeline-careers` Neon branch only.
+- **Walk 1:** the `mfa-enrolled` user as administrator, at 360px and 1280px, plus anonymous visitors on the platform host.
+- **Walk 2:** a newly designated founding administrator, at 360px.
+- Fixture rows are gone: 0 `e2e-careers-*` and 0 `e2e-invite-*` organizations, and 0 `e2e-invite-` users. The flags I moved were captured and restored, and the restore read each one back. Audit rows stay, because that table is append-only.
+- Screenshots and logs are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/analyst-walk/`. The logs are `out/walk1.log` and `out/walk2.log`.
+- **Credential slip:** one psql error of mine echoed the `pipeline-careers` branch connection string into my tool output. It is a dev-branch credential and nothing was written to a file. The operator may want to rotate it.
+
+## VERDICT
+
+**SHIP WITH NOTES.** Everything promised for Increment 1 works at 360px and 1280px. The walk found four things the earlier phases missed:
+- open postings are `noindex`;
+- the pay-unit select defaults to "per hour";
+- a pasted block merges into the previous line;
+- the Hiring Committee setup depends on a flag the design never mentioned.
+
+None of them can hurt anyone while the toggle is off everywhere, which is the default. The pay-unit default and the robots setting must land before any congregation, including the pilot, turns the toggle on.
+
+## ONE-LINE TAKE
+
+> An administrator can turn on "Job openings", write an opening (pasting from Word or Docs), publish, close and reopen it, and anonymous visitors read it on the church's address; the founding administrator that an invitation creates holds both new keys and can set up the committee role. Two defaults still need fixing before a real church publishes.
+
+## The walk
+
+### Does the "walk as the person the path creates" rule apply?
+
+**Yes.** This feature changes the founding-administrator permission bundle in SQL, TypeScript, the parity golden and a backfill. That changes what a newly created account can reach and how a role is granted.
+
+I walked it on the `pipeline-careers` branch, not literally `development`, because `development` does not have 0071 yet. The branch is a copy of `development`. I used a seeded invitation with a known token, so the sender is a roster admin and no email was sent.
+
+Walk 2 as that person (all at 360px, no horizontal scroll on any page):
+
+| # | Page | What it shows |
+|---|---|---|
+| 1 | `/invite?token=…` | "You're invited"; create-account form |
+| 2 | `/invite/accepted` | "Your account is ready" |
+| 3 | `/signin` | standard sign-in |
+| 4 | `/account/2fa` | forced enrolment (the secret is on the page; I typed the computed code) |
+| 5 | `/totp` | challenge |
+| 6 | `/o/<slug>` | Home: "Good evening, Rosalind.", no "Job openings" tile yet |
+| 7 | `/o/<slug>/admin/careers` (toggle off) | "Job openings aren't turned on for … yet. Turn them on under Features" |
+| 8 | `/admin` | the hub, once `org_portal.admin_hub` is on |
+| 9 | `/admin/features` | toggle on gives "Job openings turned on." |
+| 10 | Home again | "Job openings" tile appears under "Community" |
+| 11 | `/admin/careers` | empty state, "Create your first job opening", and the placement line |
+| 12 | `/admin/roles/new` | the template dropdown lists Hiring Committee |
+| 13 | after "Adopt template" | "Role adopted from template."; catalog shows Founding Administrator (11 permissions), Hiring Committee (2), Stated Clerk (3) |
+| 14 | create, save, publish "Office Administrator" | "Draft saved." then "Published."; it appears on the list |
+
+**Database checks:**
+- The account holds `founding_administrator` and `congregation_stated_clerk`, with `careers.applicants` and `careers.manage` through the former.
+- The adopted role holds exactly those two keys.
+- Adopting works because the subset rule passes. The F111 trap that the bundle change exists to avoid does not occur.
+
+Anonymous `/careers`, `/careers/office-administrator` and `/employment` (slot) all returned 200.
+
+**Prerequisite the design never named.** With the branch's baseline flags, `/admin/roles` and the `/admin` hub say "Role administration isn't turned on" and "Organization administration isn't turned on". They are gated by the global flags `org_portal.roles` and `org_portal.admin_hub`, not by a per-organization toggle. So the Hiring Committee setup works only if those two flags are on in production. This is not a careers defect, but Increment 3's runbook must state it.
+
+### Walk 1: administrator and anonymous visitor
+
+- **Toggle off (360 and 1280):** the staff page shows S1 with the Features link. Anonymous `/careers` is 404. The `/employment` page that carries the slot stays 200 (the slot shows P1 per the Phase 3 design; I did not read that text in this run). There is no Home tile.
+- **Turn on:** `/admin/features`, one switch, toast "Job openings turned on." The database row was `true`.
+- **Empty state:** the staff list shows the S5 placement line plus "You haven't created any job openings yet." with a "Create your first job opening" button.
+- **Editor, pasted text:**
+  - I pasted a Google-Docs-style fragment as a synthetic paste event carrying `text/html`. A real clipboard keystroke and a real Word clipboard are not automatable, and I did not test them.
+  - Headings, bold, italic, links, a nested list and a lone `*` came through correctly (`*` became U+2217, as designed).
+  - The `javascript:` link was dropped and its text kept.
+  - The editor showed no errors, and the live preview matched the result.
+- **Publish:**
+  - The dialog reads `Publish "Youth Director"?`.
+  - A draft is a 404 for anonymous visitors.
+  - After publishing, the posting page returns 200 with `Cache-Control: no-store`.
+  - It renders the description, "How to apply" with the profile phone, and "Back to …".
+  - The list and the `/employment` slot both carry it, and the card links through.
+- **Close and reopen:**
+  - Closed gives the P6 page ("This position is no longer accepting applications." with a link to other openings).
+  - The list drops the posting, and reopen restores it.
+  - The audit rows are `careers.posting.published`, `.closed` and `.reopened`, with only `organizationId`, `postingId` and `via` as keys.
+- **Widths:** no horizontal scroll on any page at either width.
+
+**Not walked:**
+- A custom host. I rely on QA run 1's walk and the 9/9 `custom-domains/careers.spec.ts` pass, plus the unchanged fix pass.
+- The `failed` read state. It is unit-tested only.
+- A real iPhone or Android keyboard.
+- A "1 Issue" Next dev-overlay badge appeared in walk 1 screenshots from the Home page onward. It did not appear in walk 2's Home, and I captured no console errors. I could not reproduce or explain it. Treat it as an unexplained dev-only artefact.
+
+## What's Working
+
+- **Gate order is right and consistent.** The toggle comes before permission on every staff surface. A founding administrator with the toggle off gets the honest S1 state, not a 404.
+- **Public surface follows the design.** The draft 404 is neutral, and a closed posting exposes only its title. Audit rows carry ids only. The slot renders inside the church's own menu and footer, and the standalone pages carry the "Back to {church}" link.
+- **Setup path works for the person it creates.** The bundle change reaches the founding administrator, the template is adoptable, and the committee can be granted.
+- **The editor is genuinely usable at 360px.** The toolbar wraps, the counter and preview are present, and the textarea is large.
+
+## Intent-vs-Shipped Diff
+
+- **Operator rulings.**
+  - Redact in place and destroy the file, and PDF plus `.docx` at 4 MB, belong to Increments 2 and 3. Nothing about them ships here, and nothing in the copy claims it.
+  - "Founding administrator gets both keys" ships in the SQL function, the TypeScript plan, the parity golden and the backfill. Verified by walk and by QA's mutation tests. Matches.
+- **Phase 1 said** open postings are public pages. **Shipped:** they are `noindex, nofollow` (finding 5 below). Regression against intent, small.
+- **Phase 1 Pass 4** wanted validation to fail visibly, with "Choose per hour or per year." among the field errors. **Shipped:** the select always has a value, so that error can never appear. Drift that the walk showed produces a wrong public statement (finding 6).
+- **Phase 1 G6** said paste normalisation keeps headings and lists. **Shipped:** it does, but the converted block is inserted without a block boundary, and dropped links are silent. Acceptable drift with follow-ups.
+- **G10 placement line, G8 reserved paths, G11 mobile, G12 2FA, G4 bootstrap:** matches. **G3, G5, G7, G14 (apply form):** deferred to Increment 2 by the architect.
+- **Phase 3 design deviations D1–D13** were accepted at Phase 3. I confirm D2 in the browser: the `/careers` pages have no site menu, and the church's slot does.
+
+## Edge Cases
+
+- **Empty state:** pass. The staff empty state helps and the public P2 reads fine.
+- **Failure microcopy:** pass. Stale, blank-title and failed-save toasts are human. N1 covers the blank-title dialog.
+- **Permission gate:** pass. Toggle then `careers.manage`, in the database and the app. QA ran the live-catalog probes.
+- **Audit event:** pass for publish, close and reopen. None for create, edit, reorder or discard, as designed.
+- **Mobile (360px):** pass.
+
+## Findings from my walk
+
+5. **Open postings and the list are `noindex, nofollow`.** Confirmed on `/careers` and `/careers/<posting>` (`robots: { index: false }` is set only for closed, failed and notice states). The open states set nothing, so they inherit the pre-release noindex in `src/app/layout.tsx:41`. The same walk showed bundle pages (`/employment`, `/`) as `index, follow`. This is QA run 1's finding 5.
+6. **Pay unit silently defaults to "per hour".**
+   - I typed `$52,000` to `60000` and left the unit, and the public page said "$52,000 to $60,000 per hour". The editor preview shows only the description, so nothing in the form warns. The S6 error "Choose per hour or per year." is unreachable. It is Batch 3 deviation 3, which QA accepted without noting the default.
+   - This is a wrong public statement about pay, so I treat it as a real defect.
+7. **A pasted block merges into the previous line.** A heading pasted at the end of "bad link" produced `bad link## How we work`. The heading is lost and the preview shows it, but no validator error fires. `handlePaste` (`description-editor.tsx:89-102`) inserts at the caret with no block boundary. It also ignores `droppedLinks`, so a link that is not kept drops silently.
+8. **Roles setup depends on `org_portal.roles` and `org_portal.admin_hub` being on.** Not a defect, but the runbook must say it.
+9. **Release-note truth check.** Line 5 says the founding administrator's second key "will allow reading job applications once online applying arrives". That is true. The backfill also gives existing founding administrators the tier-3 key, so the note should say "existing and new". The platform-admin confirm dialog (D1) says "job applications and resumes", which do not exist yet. Accepted as the planned way of naming the residual.
+
+## Rulings on QA's notes
+
+- **N1 (blank-title dialog `Close ""?`): follow-up, polish.** Nothing false is said, and the save fails with an inline error. Fall back to the stored title, or validate before opening the dialog. Fold in N4.
+- **N2 (remount race drops text typed right after a save): follow-up, medium priority, not a blocker.** It is data loss, but the window is 0.1 to 0.8 s after a toast. The fix is to key the form on `id` only, or reset it in place.
+- **N3 (Close on a published posting makes unsaved edits briefly live): accept as intended.**
+  - It follows the orchestrator's ruling that Close saves first, which avoids QA's silent-drop finding 2.
+  - The edits are being made on a posting that is already public, and the manager chose to save them.
+  - If the close fails, the manager is told, and the posting stays open with its edits.
+  - Record it in the TODO line for N2, so nobody re-opens it as a bug.
+- **N4 (weak assertion in the malformed-id test): follow-up.** Pair it with the N1 test change.
+- **N5 (Turbopack font flake on first dev start): no action.** `docs/testing.md` already covers it. My own start did not hit it.
+- **QA finding 5 (robots): ruling.**
+  - **Yes, open postings and the list should be indexable at launch.** Job openings exist to be found, and the old site's careers page was indexed. The Phase 3 design only carves out `noindex` for closed, failed and notice states, which implies open ones are indexable.
+  - The fix is small: set explicit `robots: { index: true, follow: true }` on the open states of both pages. It should land before Increment 3's cutover and before any congregation turns the toggle on. It is not a ship blocker because the toggle is off by default.
+
+## Public-site integration (operator rule)
+
+For FPCW, the site repo has no Employment page at all (P3-9 confirmed). So the "placement step" is a new file, not an edit.
+
+**Step.** Create `content/employment.json` in `site-fpcw`.
+- `frontMatter`: `title` "Employment", `navLabel` "Employment", `navGroup` "Connect", `navOrder` 26. That sits between Contact (25) and Give (40); I checked both values.
+- `blocks`: a `hero` with heading "Employment", optional church-written `prose`, then `{"type":"liveSlot","props":{"slot":"careers"}}`.
+- Push to `main`, and the ingest workflow does the rest.
+- It follows the `upcoming-events.json` pattern already in that repo.
+
+**When.** Wait. Do it after the toggle is on, at least one posting is published, and Increment 3's cutover check says to. If the page ships earlier, the nav entry would show P1 ("Our job openings aren't available right now") on a menu page. The platform `/careers` page works without this step, so nothing waits on it.
+
+**Slot name.** The slot name is a free string. The site's ingest accepts it and the `careers` slot rendered correctly in both my walks.
+
+## Rules 10–15, integration list, version
+
+None of these are done in the branch. The branch changes only the work-logs, migration 0071, `scripts/careers/*`, code and tests. There are no edits to `docs/TODO.md`, `docs/decisions.md`, `docs/schema-design-2.md`, `docs/product/functionality-map.md`, `CLAUDE.md` or `docs/release-notes`. All of that is the orchestrator's integration cluster.
+
+- **Rule 10 (TODO):**
+  - The Track L line needs amending: Increment 1 shipped, 2 and 3 open.
+  - Add the five lines drafted in the Increment 1 log (sitemap and Google for Jobs, site chrome, `renderMarkdown` export, legacy redirects, widening types and units).
+  - Add the follow-ups below.
+  - Record F291 (ticket-form 10 MB claim) as its own queued bug-fix.
+- **Rule 12 (feedback row):** the work-log has no Source block naming a feedback row UUID. The origin is the operator's own Track L request, so nothing to mark `done`. The orchestrator should confirm.
+- **Rule 13 (what's-new):** advisory only. It is staff-visible new behaviour for administrators, not members. A short what's-new entry for administrators is optional. I would skip it until Increment 2, when members get the tile badge. Release-note text N already exists; apply finding 9's wording fix.
+- **Rule 14 (functionality map):** add a careers bullet (postings, editor, public routes and slot, `job_postings` 0071, `org_portal.careers`, the two keys, the bundle and template, DECISION-264–266) and an index line.
+- **Rule 15 (`docs/architecture.md`):** not at this increment, per D11. Increment 2 (second binary store, retention subsystem) meets the bar.
+- **Decisions:**
+  - Record the DECISION-264/265/266 amendments and the implementation entry (assigned DECISION-278).
+  - Increment 2 owns DECISION-262/263.
+  - None of 262–266 or 278 exists on main yet.
+- **F-numbers:**
+  - Phase 3's P3-1 to P3-10 were assigned F311–F320. Fold them into `docs/schema-design-2.md`.
+  - F289 shipped as the asset-allowlist fix (0.46.1). F290 and F292–F295 (Phase 1/2 findings) need recording. F292 is applied in Increment 1 (the bundle), and F290, F293, F294 and F295 resolve in Increment 2.
+  - F291 is queued separately.
+  - I did not recheck numbering against main's current highest F. `docs/schema-design-2.md` on main tops out at F282 in my read.
+- **`CLAUDE.md`:** add the two Project Layout lines (`src/lib/careers/`, `src/components/careers/`) and the "Second known violation" sentence under No Role Carries a Wildcard. The Never-Hard-Delete applicant exception waits for Increment 2.
+- **Integration patches:** the four `scripts/careers/*.integration.patch` files pass `git apply --check` at this HEAD per QA run 2. Re-check them against the orchestrator's integrated head (parish, devportal, assets and ingest land first).
+- **Version:** 0.47.0 is right for a new feature. It follows the sequence parish 0.45.0, developer portal 0.46.0, F289 0.46.1 and ingest 0.46.2.
+
+### Migration 0071 production runbook: none exists
+
+`docs/deployment.md` has nothing on careers. The runbook needs:
+
+1. **Order:** apply 0071 as the owner on the direct endpoint, by hand (`db:migrate` stopped tracking past idx 9). It is idempotent, proven by two full applies. Add the journal entry from the patch. Apply it before the app deploys. If it is not applied, the cron step only logs a counts-only failure and token pruning is unaffected.
+2. **Re-read the live `presby_founding_administrator_permission_keys()` at merge.** If another pipeline re-created it, the second `create or replace` silently drops the first one's keys. `invitations.db.test.ts:571` catches this.
+3. **Backfill consequence:** every existing org-owned `founding_administrator` role gains both keys, including `careers.applicants` (tier 3). Count them first, read-only. It reads nothing until Increment 2. Tell the operator in the note.
+4. **Reserved-path pre-deploy check:** the orchestrator already reported 0 live bundles with `/careers/<x>`. Re-run it immediately before deploy.
+5. **Tests on `development` after merge:** `scripts/test-rls.sql` with the template count patch (6 to 7), the seed patch (0071's fixture sites), and the known drift at lines 217, 516 and 7927. Section 67's seed on the branch is also missing, and that is branch state, not careers.
+6. **Flag prerequisite:** `org_portal.roles` and `org_portal.admin_hub` must be on, or the committee role cannot be adopted (finding 8). Check production.
+7. **Defaults and rollback:** the toggle is off by default with no rows. Rollback order is the toggle, then close the postings, then `sites.public_render`. No data rollback.
+8. **Never branch production for pipeline work** (the applicant-data residual starts at Increment 2).
+
+## Follow-Ups (TODO-ready)
+
+```text
+- [ ] **Careers: open postings and the list are `noindex` (inherited pre-release robots).** Set explicit `robots: { index: true, follow: true }` on the open states of `careers/page.tsx` and `careers/[posting]/page.tsx` (keep `index: false` for closed, failed and notice); add a metadata test per state. Land before Increment 3 cutover and before any congregation turns the toggle on. — careers Inc 1 Phase 6 (QA finding 5)
+- [ ] **Careers: the pay-unit select silently defaults to "per hour".** A manager typing 52,000 and not touching the unit publishes "$52,000 per hour". Start the select on a "Choose…" placeholder so the existing Copy S6 error "Choose per hour or per year." becomes reachable, and/or warn when an hourly amount looks like a salary. Land before any congregation turns the toggle on. — careers Inc 1 Phase 6 finding 6
+- [ ] **Careers editor: a converted paste glues onto the previous line, and dropped links are silent.** `handlePaste` (`description-editor.tsx:89-102`) inserts at the caret with no block boundary; `droppedLinks` is ignored. Insert a blank-line boundary when the caret is mid-line, and tell the author when links were not kept (needs a Copy line). — careers Inc 1 Phase 6 finding 7
+- [ ] **Careers: the form remounts after every save and drops text typed in the next 0.1–0.8 s (N2).** Key the form on the posting id only, or reset in place. Note: Close on a published posting saves unsaved edits first, so they are briefly live (N3); ruled intended, do not re-open. — careers Inc 1 QA run 2 N2/N3
+- [ ] **Careers: the status dialogs name an empty title when the title field is blank (N1), and one assertion is weak (N4).** Fall back to the stored title or validate first; assert `careers-feature-off` is present in the malformed-id toggle-off test. — careers Inc 1 QA run 2 N1/N4
+- [ ] **Careers Increment 3 runbook must state the setup prerequisites.** `org_portal.roles` and `org_portal.admin_hub` on in production (else the Hiring Committee template cannot be adopted); the committee-role steps; the Employment page placement after the toggle is on and a posting is published; the 0071 production steps above. — careers Inc 1 Phase 6 finding 8
+- [ ] **Careers release note: say "existing and new founding administrators" receive the two keys (the 0071 backfill), and name the reserved `/careers/<x>` rule.** — careers Inc 1 Phase 6 finding 9
+- [ ] **Careers: re-read the DECISION-262/263/264–266/278 drafts and F290, F292–F295, F311–F320 into `docs/decisions.md` and `docs/schema-design-2.md` at integration; record F291 as its own queued pipeline.** — careers Inc 1 Phase 6
+```
+
+## Red Flags
+
+None that return this to Phase 3 or 4. Findings 5 and 6 are SHIP WITH NOTES items because nothing is publicly exposed until an administrator turns the toggle on, but both should be fixed before the first congregation does.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent (Increment 1) | analyst | Complete; own 360/1280 walks as an administrator, an anonymous visitor and an invitation-created founding administrator; N1–N5 and finding 5 ruled; integration list and 0071 runbook gaps listed | SHIP WITH NOTES | 2026-10-26 |
+
+**Handoff:** the orchestrator takes Rules 10, 14 and 15, the decision and F-number integration, the release notes and version 0.47.0, and the TODO lines above. The next pipeline work is **tech-lead for Increment 2's Phase 3**, which must also design the fix for the pay-unit default and the robots setting, since both touch files Increment 2 changes. Phase 6 for the whole feature is still pending the Increment 2 and 3 walks.
+
+## Orchestrator rulings on Phase 6 (2026-10-26)
+
+Fix before release (not deferred to Increment 2), as one small Phase 4 pass with a scoped QA re-check:
+- **Finding 5:** open postings and the list get explicit `robots: { index: true, follow: true }`; closed, failed and notice states keep `index: false`. Metadata test per state.
+- **Finding 6:** the pay-unit select starts on an empty "Choose…" option when an amount is entered, so Copy S6 "Choose per hour or per year." is reachable; the existing default stays only when no amount is entered. Test that a typed amount with no unit is refused with S6.
+- **Finding 7 (first half):** a converted paste inserted mid-line gets a blank-line block boundary. The dropped-link notice needs a Copy line and stays a follow-up.
+- "Choose…" is the only new string; it is the placeholder option of a select whose label already exists (accepted as Copy).
+Everything else in Phase 6 is a tracked follow-up at integration.

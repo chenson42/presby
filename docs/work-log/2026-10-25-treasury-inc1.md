@@ -944,3 +944,12 @@ Every public definer: `security definer`, `search_path = public, pg_temp`, EXECU
 - **Fixture prefixes `e2e96000-…` / `e2e96001-…` confirmed.**
 - **Sequencing:** Batch 1a may start; 1b (receipt FK verification) waits for F289's 0072 file; Batch 2b waits for F289 to merge. F289's source-scan table gains treasury's two `receipts.ts` call sites (`store`/`resolve`, literal `private`) — relayed to the F289 pipeline.
 - **Worktree setup** (Neon branch, `.env.local` with `NEXT_PUBLIC_APP_URL=http://localhost:3590`) is done at Phase 4 kickoff.
+
+## Orchestrator rulings on Phase 4 Batch 1a (2026-10-26)
+
+1. **`src/lib/giving/team.db.test.ts` (2 of 24 fail after 0074):** the refusal is correct — taking the treasurer template now needs all seven keys, and "you can only hand out keys you hold" must not be weakened. The design's "must pass unchanged" is amended: Batch 2a updates the two cases' fixture so the acting user holds the full treasurer key set (or asserts the refusal where that is the intent), with a one-line note citing this ruling. No change to the rule.
+2. **D2 (approvers and payment-role holders need an active login):** confirmed.
+3. **D8 (0074's closing check ignores custom roles):** confirmed; the check covers the platform templates and designation-minted treasurer roles only, so it stays re-runnable after a treasurer edits their team.
+4. **Date filter:** the treasurer list and CSV filter on the org-local date the request was submitted — accepted; Copy must say "submitted".
+5. **Detail shape:** `presby_reimbursement_detail`'s fields are frozen as built; Batch 2a pins them.
+6. **Environmental:** the five `test:db` failures expecting `localhost:3000` are caused by the worktree's `NEXT_PUBLIC_APP_URL` port (seen in F289 too); not a treasury defect. Tracked as a test-environment TODO at integration.

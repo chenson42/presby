@@ -18,7 +18,7 @@
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Shared; recorded in the parent | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
-| 3 — Technical design | tech-lead | Complete (this file); Copy four-check, Carry-forward and e2e blast radius below; no operator answer blocks Phase 4 | Design complete | 2026-10-25 |
+| 3 — Technical design | tech-lead | Complete (this file); Copy four-check, Carry-forward and e2e blast radius below; no operator answer blocks Phase 4. Amendment 1 (2026-10-25): Copy loop-back from QA run 1 ruled (S1-S6, after C12); ux-developer lands it | Design complete | 2026-10-25 |
 | 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | In progress: Batch A (shell promotion) and Batch B (gate, proxy, schema.json, registries; MFA e2e smoke green) done and committed; Batch C (portal pages, registries, e2e; ux-developer) done and committed, awaiting Phase 5 | — | 2026-10-25 |
 | 5 — Verification | qa | Run 1: all suites in scope green; MFA e2e green; failing-first reproduced (F283/F284/F285/F288); copy truthfulness FAIL on the data-model rules-note sentence (design C4) and the metadata description; calendar failures environmental (0067 missing on branch) | FAIL | 2026-10-25 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
@@ -424,6 +424,78 @@ Six new entries (title / detail / provisional enforcement / `source`) and one ch
 2. *Source of truth.* Each entry restates the CLAUDE.md paragraph named in `source`, read at lines 459–677 on 2026-10-25; `dev-docs.test.ts` pins the heading, not the wording (which is why the section is labelled `Written by hand`). "A test fails on an unclassified [token]" is `src/lib/brand/contract.ts`'s own claim, which the implementer confirms by opening the contract test before keeping the sentence.
 3. *Audience.* The entitled viewer. No instruction.
 4. *Neighbours.* The 15 existing entries are unchanged in wording except the `source` field; the page note in C4 replaces `Rules marked paper are the ones to watch: the schema permits a violation …`. `docs/schema-design.md` §1 is not edited.
+
+### Phase 3 — amendment 1 (Copy loop-back, 2026-10-25, tech-lead)
+
+**Cause.** Phase 5 run 1 failed copy truthfulness on C4's rules-note sentence. C4's check 2 ("Source of truth") named `dev-docs.test.ts` for the claim but did not read what that test checks: `dev-docs.test.ts:157` accepts an entry **or** a `NOT_LISTED` reason, and C12 itself ruled two of CLAUDE.md's 14 Key Invariants headings (`No Real Data`, `Verify in a Browser`) into `NOT_LISTED`. The sentence was therefore false against the design's own C12. This is the F285 class (a list claiming to match CLAUDE.md), and I made it in the same table that fixed F285. Rule applied retroactively: every other "a test checks / fails …" claim in the Copy section was re-read against its test. Result: C4 standfirst "a test fails if a table is missing from it" is `dev-docs.test.ts:83` (checks every table is classified: true as written); C10 `Tested list` is unused in Increment 1; C2 and C5 make no test claim. No other string changes beyond those below.
+
+**Ruling.** Reword **and** render `NOT_LISTED` (the page shows what it omits, from the same constant the test reads, so the sentence and the data cannot drift apart). The rules note, the new paragraph, the metadata description, the masthead scoping and C11 are superseded as follows; everything else in C4, C11 and C12 stands.
+
+**Strings (exact).**
+
+*S1 — rules note (`data-model/page.tsx:171-177`).* Sentences 1 and 2 are unchanged; sentences 3 and 4 are replaced.
+`Rules marked paper are the ones to watch: nothing in the database stops a violation, so review catches it. Some also have a source-scan check, which the rule's text names. A test checks that every heading under Key Invariants in CLAUDE.md has an entry here or a recorded reason for leaving it out. The wording of each entry is written by hand.`
+(`paper` stays the existing tag span; "CLAUDE.md" is plain text as today.)
+
+*S2 — new paragraph directly after the note, before the rules list.* Rendered only when `Object.keys(NOT_LISTED).length > 0`. A `<p className="reg__note">`:
+`Left out of this list, with the reason recorded in <code>src/lib/dev-docs.ts</code>:`
+then one `<p className="reg__note">` per `Object.entries(NOT_LISTED)`, in object order: `<strong>{heading}.</strong> {reason}` (heading and reason are the constant's own strings; nothing is typed into the page).
+
+*S3 — `NOT_LISTED` values (`src/lib/dev-docs.ts:622-628`), now user-facing.*
+- `No Real Data`: `A rule about what may be committed to the repository, not a property of the running system. npm run check:secrets checks the shapes it can.`
+- `Verify in a Browser`: `A working practice for people changing the code, not a property of the system.` (unchanged)
+
+The old `No Real Data` text said "the portal obeys it", a claim nothing verifies; it is dropped rather than carried onto a page. C12's `NOT_LISTED` bullet is superseded by S3.
+
+*S4 — metadata description (`data-model/page.tsx:20`).* `Tables, columns and keys in the PresbyPortal schema, read from the code.` (replaces `Generated technical reference for the PresbyPortal schema.`; the title `Data model` is unchanged.)
+
+*S5 — masthead scoping (`data-model/page.tsx:93-95`).* The label's line renders `Tables:` then the existing `Generated` label, with a literal space between so the text content is `Tables: Generated`. Implementation: `<div className="reg__provenance"><span>Tables:</span>{" "}<ProvenanceLabel kind="generated" /></div>`; CSS may make `.reg__provenance` a wrapping flex row with a small gap and the counts-line text size (`0.8125rem`, `var(--iron)`), the implementer's choice, no new colour. The rules and permissions heads keep their own labels unchanged.
+
+*S6 — C11 release-note line, rules sentence (supersedes the third and fourth sentences of the Fixes paragraph).* Replace
+`The list of rules the system relies on was missing six of the project's principles and still carried a note that is no longer true; it now matches the project's own list, and a test keeps it matching.`
+with
+`The list of rules the system relies on was missing six of the project's principles and still carried a note that is no longer true. It now includes all six, and a test fails if one of the project's listed principles has neither an entry nor a recorded reason for being left out. Two working practices, No Real Data and Verify in a Browser, are deliberately left off, and the page says so. The wording of each entry is written by hand and is not checked.`
+Step Z must not ship the old sentence; the implementer confirms "six" and "two" from `dev-docs.test.ts` and `NOT_LISTED` before the note is written.
+
+**The four checks.**
+
+*A — S1, S2, S3 (rules note and the omitted rules).*
+1. *Residuals.* Consistent with them. S1 now states the weaker, true claim; S2 discloses the two omissions instead of denying them; "written by hand" is kept (the Q9/F285 residual that wording is unchecked). The accepted `No Real Data` reading (a repository rule, `check:secrets` partial) is the C12 ruling, unchanged in substance.
+2. *Source of truth.* "A test checks … has an entry here or a recorded reason": `dev-docs.test.ts:157` (`!sources.has(h) && !Object.hasOwn(NOT_LISTED, h)`), read this pass; "every heading under Key Invariants": the test reads `###` headings under that section of CLAUDE.md (`dev-docs.test.ts:9`). S2's entries are `Object.entries(NOT_LISTED)`, the same object the test reads and `:174` validates (every key a real heading, every reason non-empty), so S2 cannot name a heading that does not exist or omit one the test excuses. "recorded in `src/lib/dev-docs.ts`": `NOT_LISTED` is exported there. `check:secrets` "checks the shapes it can": its documented scope (CLAUDE.md Common Commands), partial, and worded as partial.
+3. *Audience.* The entitled viewer (`users.is_platform_admin`), a developer. No instruction in S1 or S2; the path in S2 is a pointer a developer can open. A non-entitled viewer sees the forbidden state, not these strings.
+4. *Neighbours.* `grep -rn "A test checks\|has an entry here\|obeys it" src docs` (live tree, 2026-10-25): `data-model/page.tsx:174-175` (modified, S1) and `src/lib/dev-docs.ts:624` (modified, S3). C12's `NOT_LISTED` bullet (this file, line 421) and C4's rules-note string (line 338) are superseded here. `dev-docs.test.ts:161` failure message and the comment at `dev-docs.ts:621-625` stay true. C11's sentence is S6. `CLAUDE.md:465` ("`/developer` marks each one") is the QA-listed stale string, an integration item, below.
+
+*B — S4 (metadata description).*
+1. *Residuals.* Denies none; drops the word "Generated" because the page's rules and module map are hand-kept.
+2. *Source of truth.* "read from the code": `buildSchemaDocs` over the Drizzle exports; says nothing of descriptions (which come from the database) because a description of the page need not enumerate sources.
+3. *Audience.* Page metadata is static and rendered in the document head for every viewer who reaches the route, including a non-entitled one who gets the forbidden state. It states only that a data-model page of the schema exists, which the nav label and the `/home` card already say to entitled users and the 403 does not reveal as new information; it contains no table name, count or instruction.
+4. *Neighbours.* `grep -rn "technical reference"`: only `data-model/page.tsx:20` remains (modified). The C2 grep claim "no other string says technical reference except the eyebrow rewritten in C4" missed this one; it is closed here.
+
+*C — S5 (masthead "Tables:").*
+1. *Residuals.* Consistent: scopes "Generated" to the tables, which is where it is true; the counts line still carries `rules rely on review` (a hand-list count) beside it, which "Tables:" now prevents reading as generated.
+2. *Source of truth.* The label means C10's `Generated` (computed from the code and the database on open), true of the tables, columns, keys and descriptions; the module grouping is hand-kept and the standfirst says so.
+3. *Audience.* The entitled viewer; no instruction.
+4. *Neighbours.* `page.test.tsx:114` asserts text content `Generated` (modified to `Tables: Generated`). The home card badge `Generated` (C2) for the whole Data model card is left as is: its description is "Built from the schema in the code and the database's own comments", which is the generated part; flagged as accepted, not changed.
+
+*D — S6 (release note).*
+1. *Residuals.* States the wording is hand-written and unchecked, and names the two omissions.
+2. *Source of truth.* "six": the six C12 entries, pinned by `dev-docs.test.ts:157`; "a test fails if …": `:157`; "Two working practices … left off": `NOT_LISTED` has two keys; "the page says so": S2.
+3. *Audience.* The operator and any entitled developer. No instruction.
+4. *Neighbours.* C11 as originally drafted (this file, line 403) is superseded. No release note carrying the old line exists: `docs/release-notes/v0.44.md` is the public events calendar's and does not contain it (grep, 2026-10-25), and the portal's own note is written after Phase 6. The version number for the portal's note is the orchestrator's at Step Z (C11's `v0.44.0` file name predates the calendar release taking 0.44.0).
+
+**Test the implementer adds (Phase 4).** In `src/app/(admin)/developer/data-model/page.test.tsx`; every row fails on the current code.
+1. *Exact sentence.* The `.reg__note` that follows the rules heading has whitespace-normalised text content that contains, exactly, `A test checks that every heading under Key Invariants in CLAUDE.md has an entry here or a recorded reason for leaving it out. The wording of each entry is written by hand.` and does **not** contain `has an entry here; the wording`. (Fails now: the current sentence is the old text.)
+2. *NOT_LISTED is rendered from the constant.* Import `NOT_LISTED` from `@/lib/dev-docs`; for every `[heading, reason]` of `Object.entries(NOT_LISTED)`, the page text contains `heading` and `reason`, and the text contains `Left out of this list, with the reason recorded in src/lib/dev-docs.ts:`. (Fails now: neither is rendered.) Also assert `Object.keys(NOT_LISTED)` equals `["No Real Data", "Verify in a Browser"]` so that adding a third omission forces someone to re-read S6's "Two".
+3. *S3 text.* `NOT_LISTED["No Real Data"]` equals the S3 string exactly and contains no "obeys". (Fails now.)
+4. *Metadata.* `metadata.description` equals `Tables, columns and keys in the PresbyPortal schema, read from the code.` and does not match `/generated/i`. (Fails now.)
+5. *Masthead.* `.reg__provenance` text content is `Tables: Generated` (the existing `:114` assertion is changed to this; it fails against the old markup).
+Gate for re-run: the unit file above, `npm run typecheck`, `npm run lint`, `npm run check`, and the unit suite; the e2e set is unaffected: `grep` under `e2e/` for `has an entry`, `technical reference` and `Generated` (2026-10-25) finds only `e2e/developer-portal.spec.ts:125`, which matches the `/developer` home card's `Generated` badge (C2), not the masthead label S5 changes.
+
+**Carry-forward for this amendment.** QA run 1's Copy defect (rules-note sentence): addressed (S1-S3). QA's `:20` metadata finding: addressed (S4). QA's "Tables:" suggestion: adopted (S5). QA's C11 note: addressed (S6). Deferred, accepted by QA as non-blocking: ERD tab title shows the slug rather than the module name; Platform shell has no Diagram link on the index (tracked for Increment 2/3 follow-ups in TODO); `shell-boundaries.test.ts` relative-import blind spot (Increment 3). No operator question arises.
+
+**Stale strings for Phase 6 QA and the orchestrator (integration items, Workflow Rules 10, 14; not edited here).** `CLAUDE.md:153` ("generated schema reference"); `CLAUDE.md:465` ("`/developer` marks each one `database`, `trigger`, or `paper`": the marks now live on `/developer/data-model`, and the two `NOT_LISTED` headings carry no mark); `docs/product/functionality-map.md:20` (Rule 14); `docs/TODO.md:359` (close with lines 72 and 216, C-3). Phase 6 QA's stale-string list is these four plus `docs/testing.md:184-186` (C3 lists it as modified in this pipeline; QA confirms it was) and the `dev-docs.ts` header (reworded per C9; QA confirms).
+
+**Implementer.** ux-developer, one small commit on this branch (S1-S6 apply to `data-model/page.tsx`, `src/lib/dev-docs.ts` and `page.test.tsx`; S6 is held for Step Z). Then QA re-runs per its verdict.
 
 ## Carry-forward
 

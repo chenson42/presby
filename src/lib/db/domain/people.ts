@@ -205,12 +205,19 @@ export const households = pgTable(
   },
   (t) => [
     index("households_org_name_idx").on(t.organizationId, t.name),
+    // Households per district and the Unassigned query (F263, drizzle/0068
+    // section 3).
+    index("households_org_unit_idx").on(t.organizationId, t.orgUnitId),
     unique("households_id_org_key").on(t.id, t.organizationId),
     foreignKey({
       columns: [t.orgUnitId, t.organizationId],
       foreignColumns: [orgUnits.id, orgUnits.organizationId],
       name: "households_org_unit_fk",
     }),
+    // NOT EXPRESSIBLE HERE: trigger households_org_unit_target_guard
+    // (drizzle/0068 section 6) refuses a newly set archived, campus or
+    // missing district. org_unit_id means deacon district only
+    // (DECISION-243) and is written only by src/lib/parishes.ts.
   ],
 );
 

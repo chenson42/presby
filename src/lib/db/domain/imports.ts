@@ -35,7 +35,7 @@ import { users } from "../schema";
  * declared in the MIGRATION only and carries an `architectural` row in
  * `scripts/check-schema-parity.ts` — declaring it in `returns.ts` would make
  * `returns.ts` import this file and cycle the graph, the same `blobAssets`
- * shape `assets.ts:63-78` already documents. The FK in the OTHER direction
+ * shape `assets.ts:87-101` already documents. The FK in the OTHER direction
  * (`resultingReturnId`, below) is declared here, normally, because this
  * direction is the permitted one.
  *

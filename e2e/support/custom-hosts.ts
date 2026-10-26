@@ -359,19 +359,46 @@ async function insertBundle(sql: Sql, orgId: string, bundle: { pages: unknown[] 
   return rows[0]!.id;
 }
 
-/** Stores a tiny PNG as a blob and returns its id (for the asset route). */
-export async function insertImage(sql: Sql, orgId: string): Promise<string> {
-  // A 1x1 transparent PNG.
-  const png = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-    "base64",
-  );
-  const hash = createHash("sha256").update(png).digest("hex");
+export type BlobAudience = "public_site" | "private";
+
+// 1x1 (the original fixture), 2x2 and 3x3 solid-colour PNGs: valid, CRC-checked, byte-distinct so dedup never merges them.
+const PNG_ONE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+export const PNG_HERO = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGOokteuktdmgFAAFroDEeT5vQgAAAAASUVORK5CYII=", "base64");
+export const PNG_MARK = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAMAAAADCAIAAADZSiLoAAAAEElEQVR4nGOQj6qCIAYsLAB9EAiMe72hyQAAAABJRU5ErkJggg==", "base64");
+
+/** Inserts a blob of the given audience (F289: `audience` is explicit here; the column default is `private`) and returns its id. */
+export async function insertBlob(
+  sql: Sql,
+  orgId: string,
+  o: { contentType: "image/png" | "application/pdf" | "application/json"; bytes: Buffer; audience: BlobAudience },
+): Promise<string> {
+  const hash = createHash("sha256").update(o.bytes).digest("hex");
   const rows = (await sql`
-    insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes)
-    values (${orgId}::uuid, ${hash}, 'image/png', ${png.byteLength}, decode(${png.toString("hex")}, 'hex'))
+    insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes, audience)
+    values (${orgId}::uuid, ${hash}, ${o.contentType}, ${o.bytes.byteLength}, decode(${o.bytes.toString("hex")}, 'hex'), ${o.audience})
     returning id`) as { id: string }[];
   return rows[0]!.id;
+}
+
+/** The fixture image a published site references: `public_site`, which is what ingest and the logo actions store. */
+export async function insertImage(sql: Sql, orgId: string): Promise<string> {
+  return insertBlob(sql, orgId, { contentType: "image/png", bytes: PNG_ONE, audience: "public_site" });
+}
+
+/** A new private bundle blob whose imageKeys maps "hero-img" to imageId, with the home hero naming it; the site is pointed at it. */
+export async function restageBundleWithHero(sql: Sql, org: SiteOrg, bundle: { pages: unknown[] }, imageId: string): Promise<void> {
+  const pages = structuredClone(bundle.pages) as Array<{ path: string; mdxAst: { blocks: Array<{ type: string; props: Record<string, unknown> }> } }>;
+  const hero = pages.find((p) => p.path === "/")!.mdxAst.blocks.find((b) => b.type === "hero")!;
+  hero.props.image = "hero-img";
+  hero.props.imageAlt = "";
+  const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, pages, imageKeys: { "hero-img": imageId } }), "utf-8");
+  const blobId = await insertBlob(sql, org.orgId, { contentType: "application/json", bytes, audience: "private" });
+  await withDbRetry("restage bundle", () => sql`update organization_sites set content_bundle_key = ${blobId}::uuid where organization_id = ${org.orgId}::uuid`);
+}
+
+/** Points the org's brand mark at a blob (the brand row must exist: call setBrand first). */
+export async function setMark(sql: Sql, orgId: string, markId: string): Promise<void> {
+  await withDbRetry("set mark", () => sql`update organization_brands set mark_asset_key = ${markId}::uuid where organization_id = ${orgId}::uuid`);
 }
 
 /** A throwaway congregation (`deletable_until`), a live site with a bundle, and the domains toggle ON. */

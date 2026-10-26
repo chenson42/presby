@@ -29,7 +29,6 @@ export async function signInOnPage(page: Page, email: string, password: string) 
 export async function submitTotp(page: Page, secret: string) {
   for (let attempt = 0; attempt < 2; attempt++) {
     await enterTotpCode(page, generateSync({ secret }));
-    await page.getByRole("button", { name: /^verify$/i }).click();
     await Promise.race([
       page.waitForURL((url) => url.pathname !== "/totp", { timeout: 15_000 }),
       page.waitForURL(/error=invalid/, { timeout: 15_000 }),

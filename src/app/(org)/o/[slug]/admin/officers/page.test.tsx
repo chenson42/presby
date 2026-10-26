@@ -267,7 +267,7 @@ describe("OfficersPage — result branches", () => {
     ).toBeTruthy();
     expect(
       screen.getByText(
-        "This records who holds the office. Apart from seating the Session (see above), recording someone here does not change what they can do in the app. Other access is granted under Administration → Roles.",
+        "This records who holds the office. Apart from seating the Session (see above) and the Moderator of the Board of Deacons, who can assign households to districts where Parish management is turned on, recording someone here does not change what they can do in the app. Other access is granted under Administration → Roles.",
       ),
     ).toBeTruthy();
     // Regression: the old hint said recording never changes access, which

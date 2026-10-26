@@ -876,14 +876,345 @@ branches merge. The journal skips idx 65 and 66 on purpose; do not renumber.
 
 ---
 
+## Public asset audience (0072)
+
+Added by the public-asset allowlist pipeline (F289; DECISION-277; F297 and F298
+closed). Migration `0072`. Design and rulings:
+`docs/work-log/2026-10-25-public-asset-allowlist.md`. The public asset route
+(`/site/<slug>/assets/<key>`, and `/assets/<key>` on a church's own domain)
+used to serve ANY `blob_assets` row of the organization by uuid. It now serves a
+key only through one database function, `presby_public_site_asset()`: a
+`public_site` image, or the photo of a person a public roster currently lists.
+Everything else, including a statement PDF, a ticket screenshot and the content
+bundle, answers the one neutral 404. **`0072` must be live in production before
+`GIVING_STATEMENTS_ENABLED` is set** (before January), and treasury's `0073`
+targets the constraint `blob_assets_id_org_audience_key` that `0072` creates.
+
+### Pre-deploy runbook: 0072, then the code, in ONE release
+
+Apply `0072` and promote the code together, in this order, then verify.
+`GIVING_STATEMENTS_ENABLED` stays unset until step 6 is complete.
+
+0. **Preconditions (read-only, on production).**
+   `select to_regclass('giving_statements'), to_regclass('ticket_messages'), to_regclass('person_privacy'), to_regclass('organization_sites'), to_regprocedure('presby_public_staff_roster(text,text,boolean)'), to_regprocedure('presby_public_committee_roster(text,text,boolean)')`
+   returns six non-null values. Re-read the counts that justify the flip set
+   (the 2026-10-25 read was: blobs 107 / images 82 / json 25 / pdf 0; tickets
+   with an attachment 0; statements 0; people with a `photo_key` 0; brand marks
+   1; wordmarks 0; sites with a bundle 1, live 1) and compute the expected flip
+   with the V1 query below run BEFORE the migration (it returns the same rows
+   with `public_ok = 0`). A non-zero ticket, statement or photo count that
+   overlaps the flip set makes the migration raise, by design.
+1. **Snapshot** the Neon `production` branch (`pre-0072-<date>`).
+2. **No site-repo push, no logo upload and no ticket attachment between steps 3
+   and 4.**
+3. **Apply with `-1`, as the owner, on the direct endpoint:**
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0072_presby_blob_audience.sql`.
+   `-1` is mandatory: the file has no transaction of its own and uses a temp
+   table. It is idempotent, so a failed run can be repeated whole. Record the
+   `0072: flipped N blob(s) to public_site` notice. Expected: `N` = the brand
+   mark plus the live bundle's distinct images (one less if the mark is also a
+   bundle image). The one designed failure is the pre-flip assertion
+   (`0072: N blob(s) are both published ... and used by a private consumer`);
+   it rolls back whole and names the count.
+   Rehearsed 2026-10-26 on a throwaway Neon branch created from `production`:
+   exit 0, `0072: flipped 81 blob(s) to public_site` (80 distinct bundle images
+   plus the mark), and V1 to V4 below all as expected. Re-run the rehearsal if
+   production changes before the apply.
+4. **Promote the code** (merge; Vercel builds). Old code and the new schema
+   coexist briefly: an old `store()` insert omits `audience` and lands
+   `private` (the column default is permanent and fails closed), so an image
+   ingested by old code shows as a broken image until the next ingest, a logo
+   uploaded by old code is a `private` mark, and an old dedup lookup ignores
+   audience, so a ticket upload byte-identical to a `public_site` image fails
+   the new foreign key (rare, and loud). If a site-repo push did happen in the
+   window, push a NEW commit: a repeat of the same sha short-circuits ingest as
+   `already_current` and heals nothing. A logo uploaded in the window is
+   uploaded again after this step. Statements cannot be affected
+   (`GIVING_STATEMENTS_ENABLED` is off).
+5. **Verify** (all six):
+   - **V1.** Every current mark and every `imageKeys` value of every bundle
+     resolves to a `public_site` image row. Expect `kind = 'mark'`
+     `expected = 1 public_ok = 1 dangling = 0`, and `kind = 'bundle_image'`
+     `expected = N public_ok = N dangling = 0`.
+
+     ```sql
+     with marks as (
+       select ob.organization_id, ob.mark_asset_key as id, 'mark' as kind
+         from organization_brands ob where ob.mark_asset_key is not null),
+     bundles as (
+       select s.organization_id, convert_from(b.bytes, 'UTF8')::jsonb as j
+         from organization_sites s
+         join blob_assets b on b.id = s.content_bundle_key and b.organization_id = s.organization_id
+        where b.content_type = 'application/json'),
+     imgs as (
+       select bu.organization_id, k.value::uuid as id, 'bundle_image' as kind
+         from bundles bu, jsonb_each_text(bu.j -> 'imageKeys') k),
+     want as (select * from marks union select * from imgs)
+     select w.kind, count(*) as expected,
+            count(*) filter (where b.audience = 'public_site' and b.content_type in ('image/png','image/jpeg','image/webp')) as public_ok,
+            count(*) filter (where b.id is null) as dangling
+       from want w left join blob_assets b on b.id = w.id and b.organization_id = w.organization_id
+      group by w.kind;
+     ```
+   - **V2.** `select audience, content_type, count(*) from blob_assets group by 1, 2 order by 1, 2;`
+     The `public_site` rows are images only and total the flip notice count;
+     every `application/json` row is `private`.
+   - **V3.** `select conname, convalidated, confdeltype, confupdtype, pg_get_constraintdef(oid) from pg_constraint where conname in ('ticket_messages_attachment_fk','giving_statements_blob_fk')`:
+     three columns each, `confdeltype` and `confupdtype` both `a` (NO ACTION),
+     validated.
+   - **V4.** `select proname, prosecdef, proconfig, proacl from pg_proc where proname in ('presby_public_site_asset','presby_public_staff_roster','presby_public_committee_roster')`:
+     all three `prosecdef`, `search_path=public, pg_temp`, and an ACL naming
+     only the owner and `presby_app`.
+   - **V5.** On the live site, `curl -sI https://<platform-host>/site/<slug>/assets/<an imageKeys value>`
+     returns 200, `cache-control: public, max-age=31536000, immutable` and
+     `x-content-type-options: nosniff` (once, not doubled). **Record the
+     `x-vercel-cache` header** (F297's "must be checked": Vercel's docs say a
+     function response is held at the edge only with `s-maxage`, so expect no
+     `HIT`). Then `curl -s` the bundle JSON's own id, a random uuid and
+     `not-a-uuid`: all three are an identical `404`, body
+     `{"error":"Not found"}`, `cache-control: no-store`.
+   - **V6.** The live home page on a phone: the logo and the page images load
+     (a natural width above zero), and nothing scrolls sideways.
+6. **Then, and only then,** `GIVING_STATEMENTS_ENABLED` may be set.
+7. **Rollback.** Revert the code and redeploy. The schema is additive and
+   compatible with old code, so no schema rollback is needed (fix forward). A
+   code revert restores the old route, that is the original gap, not an outage.
+   If the migration itself fails it rolls back whole (`-1`).
+
+**Known residuals (DECISION-277).** There is no takedown: a `public_site` image
+stays fetchable by its uuid after it drops out of a bundle (a tracked
+follow-up). Copies already in a browser, search engine or web archive cannot be
+recalled. A listed person's photo is served under `private, max-age=86400` and
+is fetchable by its exact uuid while the directory flag is off. A person who
+hides their photo in the directory is withheld from every public roster.
+
+---
+
+## Site ingest: the staged transport (DECISION-279, F324)
+
+A content repo's CI publishes through presby-site-kit's `ingest.yml`. Vercel refuses
+any function request body over 4.5 MB before route code runs (a plain-text 413), so
+the ingest has two transports and the client chooses:
+
+- **Legacy, one request:** `POST /api/sites/ingest` with the whole bundle (pages and
+  base64 images). Used when the exact serialized body is at most **4,000,000 bytes**.
+  Unchanged apart from the limit and an added `code` on errors.
+- **Staged:** `POST /api/sites/ingest/plan` (which image sha256 digests the platform
+  still lacks), `/images` (one image's raw bytes per request) and `/commit` (the pages
+  plus `{ manifestKey, sha256 }` per image). Every request carries its own fresh GitHub
+  OIDC token and the header `x-presby-ingest-protocol: 1`. The server derives every blob
+  key itself, and the site changes only at the commit.
+
+The app enforces the 4,000,000-byte per-request limit itself on all four routes (413
+`request_too_large`, after authentication), so a local server behaves like production.
+There are no new environment variables, flags or migrations. The routes need
+`sites.public_render` on and 0072 applied, like the legacy one.
+
+**Rollout order is fixed: the server before the client.**
+
+1. Apply 0072 and promote F289 (see "Public asset audience (0072)"), then promote the
+   release carrying this change. Verify with an unauthenticated `POST` to each of
+   `/api/sites/ingest/plan`, `/images` and `/commit` on the production platform host:
+   each answers **401 with the JSON body** (`{"status":"error","code":"unauthorized",...}`).
+   A 404 means the route did not deploy.
+2. Read-only prediction for `fpcw` (counts only): after 0072, count its `blob_assets`
+   rows with `audience = 'public_site'` and compare the distinct hashes of
+   `site-fpcw/images/`. A hash held only as `private` is reported missing, so the first
+   publish uploads exactly the ones not held as site images; do not promise it uploads
+   nothing. Also confirm in `/admin` that `sites.public_render` is on in production and
+   that `fpcw`'s site is not `suspended` (a suspended site is ingested but never shown).
+3. Merge presby-site-kit's `fix/staged-ingest` (v4.1.0) to its `main` and tag `v4.1.0`
+   on the branch tip `ea9e78a` (not `ad109b1`: that commit still prints "Published commit").
+   This takes effect for every site's next push (the workflow file comes from `@main`;
+   the scripts come from `site_kit_ref`). A site that pins `site_kit_ref` to a tag older
+   than v4.1.0 is unsupported by the new workflow and fails with a readable line.
+4. Not a gate (Phase 6 ruling: FPCW's own run proves the same in the same sitting, and this
+   site has no images; it costs two publishes of a live customer's site). Only if a real
+   need appears, and the operator's call, on a live customer repository: add `transport: staged`
+   to `site-pasturechurch`'s calling workflow for one push and read the log (Built,
+   "Staged ingest was requested", "This site has no images to send.", Publishing,
+   "Sent commit ...; the platform has ingested it."), then remove it. It proves OIDC, the three routes and Vercel's real
+   behavior; it does **not** prove an upload (that site has no images).
+5. The first real `site-fpcw` ingest (see "Deferred by operator decision"). Trigger it with a
+   push to `site-fpcw` `main`; do not re-run the old failed run 40251133138 (a re-run may
+   resolve the old workflow reference; unverified). Expected log
+   shape: `Built 14 page(s) and 81 image(s): 80 distinct, 28.3 MB.` · `The site is 37.8 MB
+   as one request, over the 4.0 MB limit, so images are sent one at a time.` ·
+   `Checking which of the 80 distinct image(s) the platform still needs.` ·
+   `<R> already on the platform; <M> to upload.` (or `All 80 image(s) are already on the
+   platform; nothing to upload.`) · one `Uploaded i of M` line per image · `Publishing ...`
+   · `Sent commit <sha7> to "<slug>" (<n> page(s)); the platform has ingested it.` · `Sent <M> new image(s); <R> already on the
+   platform.` A previously masked failure is possible (the 413 hid everything after it):
+   the client prints a named cause and hint for each (401 variable mismatch, 404
+   unprovisioned repository, 503 flag off or unreadable); fix it and re-run, every step is
+   safe to repeat and a repeat of an ingested sha says so.
+
+**Rollback.** Client: revert the v4.1.0 change on presby-site-kit `main` (both commits, or
+the merge commit with `git revert -m 1`; large sites then fail as before; small ones are
+unaffected). Server: revert the presby release; a staged
+client then gets a non-JSON 404 on `/plan` and prints "the platform does not support
+staged ingest yet". Neither needs a database action.
+
+**Unverified until production.** The plan and commit on Vercel's real stack; whether
+`getIDToken` tolerates about 80 calls in a run; the timing of one upload on a cold
+function; the actual `exp` of a GitHub OIDC token (irrelevant by design, every request
+mints a new one). The first `site-fpcw` run is the evidence; the in-process bridge run
+(real client, real handlers) is the pre-production proxy.
+
+**Accepted residuals.** Images uploaded by a run that never published remain as
+`public_site` rows no bundle uses (fetchable only by uuid, which no ingest response
+discloses; no takedown until F289 Tier 2). Re-running an older failed run after a newer
+one succeeded republishes the older content: re-run only the latest.
+
+---
+
+## Careers (0071)
+
+Added at integration (v0.47.0). Migration `0071`. Design and rulings:
+`docs/work-log/2026-10-25-careers-inc1.md` (Phase 3 and Phase 6) and the parent
+`docs/work-log/2026-10-25-careers.md`; DECISION-264, 265, 266 and 278; findings
+F290, F292 to F295 and F311 to F320 (`docs/schema-design-2.md` section 2ah).
+Increment 1 only: job postings, the staff pages, the public list and posting
+pages and the `careers` slot. **Nothing here accepts an application**; that is
+Increment 2 (migration `0075`), which has its own runbook and a stricter rule
+about production data (point 8). Confirm first, on production:
+`select count(*) from information_schema.tables where table_name = 'job_postings'`
+is 0 and `select count(*) from permissions where key like 'careers.%'` is 0.
+The journal has no idx 69 or 70 (the number is the migration's own, as for 0072);
+do not renumber.
+
+### Pre-deploy runbook: 0071, then the code
+
+1. **Order and method: `0071` first, then merge and deploy the code.** Apply it
+   as the owner, on the direct endpoint, by hand, in one transaction:
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0071_presby_careers.sql`.
+   `db:migrate` stopped tracking past idx 9, so the journal entry (idx 71) is a
+   record, not an applier. The file is idempotent (every statement is `if not
+   exists`, `on conflict do nothing`, `where not exists`, drop-then-add,
+   `create or replace` or revoke-then-grant) and was applied twice in full on the
+   pipeline branch. It shares no object with `0068` (parishes) or `0072` (asset
+   audience), so the three may be applied in either order; each has its own
+   conditions in its own section. **Snapshot `production` first** (Neon). Code
+   before schema is the wrong order: the staff and public pages and the daily
+   sweep call objects that do not exist yet. With the toggle off everywhere
+   (the default) no page is reachable, and the sweep step would only log a
+   counts-only failure, with the token pruning unaffected. Old code against the
+   new schema is safe: the schema is additive, and the one behavioural change is
+   point 2.
+2. **Re-read the live `presby_founding_administrator_permission_keys()` at merge,
+   before applying.** `0071` re-creates it with two more keys. If another
+   migration has re-created it since this branch was cut, the second `create or
+   replace` silently drops the first one's keys, and Postgres records no
+   dependency to warn you. Today the live body is `0059`'s, nine keys
+   (`people.manage`, `roles.manage`, `role_grants.manage`, `groups.manage`,
+   `officers.manage`, `org_features.manage`, `tickets.file`, `staff.manage`,
+   `domains.manage`) plus `congregation_oversight.manage` for a presbytery;
+   `0061` and `0068` say they do not touch it. Check with
+   `select pg_get_functiondef('presby_founding_administrator_permission_keys(text)'::regprocedure)`;
+   if the array is anything other than those nine, stop and merge the new keys
+   into `0071`'s array by hand (and the TypeScript plan, the designation golden
+   and `invitations.db.test.ts` with them). The test that catches a mismatch is
+   `src/lib/db/domain/invitations.db.test.ts` (the SQL-equals-TypeScript parity
+   case, around line 571).
+3. **Count the backfill, read-only, before applying, and tell the operator the
+   number.** `0071` tops up every existing org-owned `founding_administrator`
+   role with both keys, **including `careers.applicants`, a tier-3 key**, so
+   every existing founding administrator holds it from the moment the migration
+   runs. It reads nothing until Increment 2. The count:
+   `select count(*) from app_roles where key = 'founding_administrator' and organization_id is not null`
+   and, for who holds them,
+   `select count(*) from role_grants g join app_roles r on r.id = g.role_id where r.key = 'founding_administrator' and r.organization_id is not null and g.ends_on is null`.
+   Production held zero such roles on 2026-10-25; re-measure. Residual, as
+   `0057`: a re-apply re-adds a key a tenant removed from a designation-minted
+   role. The release note says "existing and new founding administrators".
+4. **Reserved-path check, read-only, immediately before deploy.** Careers
+   reserves `/careers/<anything>` on every site (the bare `/careers` stays a
+   bundle page). A live bundle with a page under it would be stored and never
+   shown. Expected 0 rows (0 on 2026-10-25; the query's syntax was verified on
+   the pipeline branch with a positive control):
+   ```sql
+   select o.slug, p->>'path' as path
+     from organization_sites s
+     join organizations o on o.id = s.organization_id
+     join blob_assets b on b.id = s.content_bundle_key
+    cross join lateral jsonb_array_elements(convert_from(b.bytes, 'UTF8')::jsonb -> 'pages') p
+    where lower(p->>'path') like '/careers/%';
+   ```
+   A row means rename that page in the site's repository before deploying. Ingest
+   refuses new ones by name (and the percent-encoded spellings) from this release.
+5. **Verify against the catalog, not the DDL, and diff against `development`.**
+   - `permissions` holds `careers.manage` at tier 1 and `careers.applicants` at
+     tier 3, module `careers`.
+   - `job_postings` has `relrowsecurity` and `relforcerowsecurity` true, one
+     `tenant_isolation` policy, and **no** `DELETE` grant to `presby_app`; its
+     column-limited `INSERT` and `UPDATE` grants omit `version`, `posted_on`,
+     `first_published_at`, `closed_at` and `updated_at`. The three guard triggers
+     (`job_postings_guard_insert`, `_update`, `_delete`) are present and enabled.
+   - `presby_public_careers(text, text)` and `presby_careers_org_today(uuid)`
+     have `prosecdef` true, `search_path=public, pg_temp`, and execute for
+     `presby_app` only; `presby_careers_sweep(integer)` and
+     `presby_founding_administrator_permission_keys(text)` are executable by
+     neither `public`, `presby_app` nor `presby_platform`
+     (`has_function_privilege` false for all three).
+   - The founding function's array now ends `…, 'domains.manage', 'careers.manage',
+     'careers.applicants'`; the template role `hiring_committee` exists with
+     `organization_id is null` and exactly those two keys; the template count is
+     seven.
+   - The founding-administrator role count from point 3 is unchanged, and each of
+     those roles now has both keys.
+6. **On `development`, after merge:** apply `0071`, then run
+   `scripts/careers/seed-dev-careers.sql` (reached through `scripts/seed-dev.sql`)
+   and the full `scripts/test-rls.sql` as `presby_app`. Section 71 is
+   `scripts/careers/test-rls-71.sql`. Two patches are needed in the shared files
+   (`scripts/careers/*.integration.patch`): the template count goes from 6 to 7
+   at `scripts/test-rls.sql` (`DECISION-152` assertion) and the seed includes the
+   careers fixture (two live sites). Known failures that are not careers: the
+   drift at `scripts/test-rls.sql` lines 217, 516 and 7927, and section 67's seed
+   missing on a pipeline branch. **Do not run the seed or the suite on
+   production** (test helpers and fixture sites).
+7. **Flag prerequisites for the committee role, then the toggle.** The toggle
+   `org_portal.careers` is per organization, off by default, with no row, and is
+   switched on by a founding administrator at `/o/<slug>/admin/features`
+   ("Job openings"). Setting up the hiring committee needs **two global flags
+   that must be on in production**: `org_portal.roles` (Roles, where the "Hiring
+   Committee" template is adopted) and `org_portal.admin_hub` (the Administration
+   hub). Without them `/admin/roles` says "Role administration isn't turned on"
+   and the hub says "Organization administration isn't turned on", and the
+   template cannot be adopted. Check both in `/admin/flags` before telling a
+   congregation to set up a committee. The committee path, as built and walked:
+   the founding administrator adopts "Hiring Committee" at Roles, New role,
+   then grants the role to the committee's group, so membership drives access.
+   Until Increment 2 the committee role grants two keys that read nothing.
+8. **Defaults, rollback, and the production-branch rule.** Defaults: the
+   toggle is off for every organization, `job_postings` is empty, and no site
+   carries the `careers` slot, so merging exposes nothing. There is no rollback
+   file and no data to roll back. The fastest way back is, in this order: the
+   toggle off for the organization (the public pages 404 and the slot shows the
+   one "unavailable" notice), then close the postings, then
+   `sites.public_render`. Do not drop `job_postings`, the function or the
+   permission rows; the code needs them, and a posting is never deleted. **Never
+   branch production for pipeline work**: this increment stores no personal data
+   of an applicant, but Increment 2 does, and a Neon branch of production would
+   be a copy of it outside the retention clock.
+
+**What to tell the operator after merging.** The Employment page for the first
+customer's site is a new content file in its private repository, not part of
+this release and not to be added until the toggle is on and a posting is
+published (otherwise the menu page shows the unavailable notice). The steps are
+the "Post-ship steps" in the Increment 1 work-log; the posting import is Track K.
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.
 
 - **Google OAuth** — presby will support it, but it is not a priority. Until
   `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are set, and with the credentials-login
-  bypass deliberately unseeded, **nobody can sign in to production, including the
-  operator.** Accepted for now; production serves public pages only. Redirect URI
+  bypass deliberately unseeded, Google sign-in is unavailable. Accepted for now.
+  *(Corrected 2026-10-26: this used to say nobody can sign in to production, including
+  the operator. The operator does sign in, with an MFA-enrolled account (the 0.42.3 smoke
+  passed 2026-10-25), and is `fpcw`'s founding administrator.)* Redirect URI
   when it happens: `https://<canonical host>/api/auth/callback/google`.
 - **First real `site-fpcw` ingest** — `organization_sites.last_ingested_commit_sha`
   for `fpcw` is still a scratch placeholder. The two Production OIDC variables

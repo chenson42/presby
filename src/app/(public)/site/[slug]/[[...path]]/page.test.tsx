@@ -57,6 +57,8 @@ vi.mock("@/lib/giving/public-config", () => ({ readPublicGivingConfig: vi.fn() }
 // The `eventsCalendar` slot's reader is database-backed and server-only; the resolver
 // closure is what this orchestration test exercises, never the read.
 vi.mock("@/lib/public-calendar", () => ({ readPublicCalendar: vi.fn() }));
+// The `careers` slot's reader is database-backed and server-only; only its closure is exercised here.
+vi.mock("@/lib/careers/public", () => ({ readPublicCareers: vi.fn() }));
 
 // resolveLogoUrl()'s dynamically-imported getPlatformDb() chain — mocked
 // the same way @/lib/sites is mocked above, and for the identical reason:
@@ -94,6 +96,7 @@ import { PublicStaffDirectory } from "../staff-directory";
 import { PublicCommitteeDirectory } from "../committee-directory";
 import { PublicGivingSlot } from "../public-giving-slot";
 import { PublicEventsCalendarSlot } from "../public-events-calendar-slot";
+import { PublicCareersSlot } from "../careers-slot";
 
 afterEach(() => {
   cleanup();
@@ -402,11 +405,20 @@ describe("PublicSitePage — the ok path", () => {
     expect(call.imageUrl("hero")).toBe(
       "/site/alder-creek/assets/blob-key-1",
     );
-    // An unmapped manifestKey falls back to itself rather than throwing —
-    // the asset route then fails to resolve it as a blob id (a broken
-    // image, never a crash).
+    // An unmapped manifestKey must NEVER reach the asset route as an
+    // author-chosen key (F289, U5): it becomes the nil uuid, which never
+    // exists, so the route answers its neutral 404 (a broken image, never a
+    // crash, never an author-named blob). The allowlist, not the renderer,
+    // is the control; this just keeps the URL space closed.
     expect(call.imageUrl("missing")).toBe(
-      "/site/alder-creek/assets/missing",
+      "/site/alder-creek/assets/00000000-0000-0000-0000-000000000000",
+    );
+    expect(call.imageUrl("missing")).not.toContain("missing");
+    // A manifest key that is itself a real-looking blob uuid is still unmapped:
+    // it gets the nil uuid too, never itself.
+    const named = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    expect(call.imageUrl(named)).toBe(
+      "/site/alder-creek/assets/00000000-0000-0000-0000-000000000000",
     );
   });
 
@@ -642,7 +654,7 @@ describe("PublicSitePage — the ok path", () => {
     });
   });
 
-  it("exposes exactly staffDirectory, committeeDirectory, giving and eventsCalendar — no other named slot", async () => {
+  it("exposes exactly careers, staffDirectory, committeeDirectory, giving and eventsCalendar — no other named slot", async () => {
     mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
@@ -652,6 +664,7 @@ describe("PublicSitePage — the ok path", () => {
       liveSlots?: Record<string, unknown>;
     };
     expect(Object.keys(call.liveSlots ?? {}).sort()).toEqual([
+      "careers",
       "committeeDirectory",
       "eventsCalendar",
       "giving",
@@ -839,6 +852,24 @@ describe("PublicSitePage - host mode: clean URLs, the DB slug, nothing the visit
     // The staff photo builder is the host-mode one.
     const staff = call.liveSlots.staffDirectory!({}).props as { urls: { asset: (k: string) => string } };
     expect(staff.urls.asset("photo-1")).toBe("/assets/photo-1");
+  });
+
+  it("closes the careers slot over the DATABASE slug and the urls ONLY - never the host key, a request or the marker's filter (DECISION-132)", async () => {
+    mockHostSite();
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await renderPage({ params: makeParams(HOST) });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots: Record<string, (filter: Record<string, unknown>) => { type: unknown; props: Record<string, unknown> }>;
+    };
+    // An author-supplied filter is ignored: the resolver is called with it and the element carries none.
+    const resolved = call.liveSlots.careers!({ slug: "attacker", evil: true });
+    expect(resolved.type).toBe(PublicCareersSlot);
+    expect(Object.keys(resolved.props).sort()).toEqual(["slug", "urls"]);
+    expect(resolved.props.slug).toBe(DB_SLUG);
+    // Host mode: the card links are clean paths.
+    expect((resolved.props.urls as { careersPosting: (s: string) => string }).careersPosting("custodian")).toBe("/careers/custodian");
   });
 
   it("binds the contact form's action to the SITE KEY on the server (the client __slug field is gone)", async () => {

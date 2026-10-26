@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,11 @@ export function TotpEnrollForm({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [pending, setPending] = useState(false);
+  // Bumped after a failed attempt; remounts the boxes so they come back cleared
+  // and focused (the disabled-while-pending boxes dropped focus).
+  const [attempt, setAttempt] = useState(0);
+  const inFlight = useRef(false);
+  const submitted = useRef<string | null>(null);
   const [enrolled, setEnrolled] = useState(false);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
@@ -40,21 +45,46 @@ export function TotpEnrollForm({
     };
   }, [uri]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  /**
+   * The one way a code reaches the server, from the button or from the sixth
+   * digit (DECISION-257). Takes the code it was handed, so it needs no committed
+   * state; one call in flight at a time, and never the same code twice in a row.
+   */
+  async function confirm(c: string) {
+    if (inFlight.current || submitted.current === c) return;
+    inFlight.current = true;
+    submitted.current = c;
+    setPending(true);
+    try {
+      const result = await completeEnrollment({ code: c });
+      if (result.ok && result.data) {
+        setEnrolled(true);
+        setRecoveryCodes(result.data.recoveryCodes);
+      } else if (!result.ok) {
+        toast.error(result.error);
+        submitted.current = null;
+        setCode("");
+        setAttempt((a) => a + 1);
+      }
+    } catch {
+      // A rejected call (network, server error) must not strand the guard or
+      // become an unhandled rejection from the fire-and-forget auto path. The
+      // design adds no copy for it; the boxes re-enable and the same code can
+      // be sent again with the button.
+      submitted.current = null;
+    } finally {
+      inFlight.current = false;
+      setPending(false);
+    }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!/^\d{6}$/.test(code)) {
       toast.error("Enter the 6-digit code from your authenticator app.");
       return;
     }
-    setPending(true);
-    const result = await completeEnrollment({ code });
-    setPending(false);
-    if (result.ok && result.data) {
-      setEnrolled(true);
-      setRecoveryCodes(result.data.recoveryCodes);
-    } else if (!result.ok) {
-      toast.error(result.error);
-    }
+    void confirm(code);
   }
 
   if (enrolled) {
@@ -128,12 +158,22 @@ export function TotpEnrollForm({
               grabbing focus on a phone would scroll past them and put the keyboard
               over the QR code (Phase 2 R2.2). */}
           <OneTimeCodeInput
+            key={attempt}
             name="code"
             label="Enter the 6-digit code from your app"
             value={code}
             onValueChange={setCode}
+            // Only the remount after a failure takes focus; the first mount
+            // must not (see above).
+            autoFocus={attempt > 0}
             disabled={pending}
+            onComplete={(c, { exact }) => {
+              if (exact) void confirm(c);
+            }}
           />
+          <p role="status" className="sr-only">
+            {pending ? "Verifying your code." : ""}
+          </p>
           <Button type="submit" disabled={pending}>
             {pending ? "Verifying…" : "Confirm enrollment"}
           </Button>

@@ -172,9 +172,11 @@ describe.skipIf(!hasDb)(
         "tickets.file",
         "staff.manage",
         "domains.manage",
+        "careers.manage",
+        "careers.applicants",
       ];
 
-      it("congregation: the base nine keys (F118 — staff.manage joins the bundle; F150 — domains.manage joins it), congregation_stated_clerk office, no congregation_oversight.manage", () => {
+      it("congregation: the base eleven keys (F118 — staff.manage joins the bundle; F150 — domains.manage joins it; F292 — careers.manage and careers.applicants join it), congregation_stated_clerk office, no congregation_oversight.manage", () => {
         const plan = foundingAdministratorPlan("congregation");
         expect(plan.administration.key).toBe("founding_administrator");
         expect(plan.administration.permissionKeys.sort()).toEqual(
@@ -186,7 +188,7 @@ describe.skipIf(!hasDb)(
         expect(plan.officeTemplateKey).toBe("congregation_stated_clerk");
       });
 
-      it("presbytery: base nine PLUS congregation_oversight.manage (10 total), presbytery_stated_clerk office", () => {
+      it("presbytery: base eleven PLUS congregation_oversight.manage (12 total), presbytery_stated_clerk office", () => {
         const plan = foundingAdministratorPlan("presbytery");
         expect(plan.administration.permissionKeys.sort()).toEqual(
           [...BASE, "congregation_oversight.manage"].sort(),
@@ -205,7 +207,7 @@ describe.skipIf(!hasDb)(
         },
       );
 
-      it("never carries a tier-3 or excluded tier-2 key (F111's enumerated-not-wildcard ceiling; staff.manage is CARRIED as of F118, so it is deliberately absent from this list)", () => {
+      it("never carries an excluded tier-2 or tier-3 key (F111's enumerated-not-wildcard ceiling; staff.manage is CARRIED as of F118 and careers.applicants, tier 3, as of F292 / DECISION-265, so both are deliberately absent from this list)", () => {
         const excluded = [
           "roll.propose",
           "roll.approve",
@@ -262,6 +264,47 @@ describe.skipIf(!hasDb)(
         expect(plan.administration.key).toBe("founding_administrator");
         expect(plan.officeTemplateKey).toBe("congregation_stated_clerk");
         expect(plan.administration.permissionKeys.filter((k) => k === "domains.manage")).toHaveLength(1);
+      });
+    });
+
+    // careers Inc 1 (T7; F292, DECISION-265, operator ruling Q4): both careers
+    // keys join the bundle in SQL (drizzle/0071), here, the designation golden
+    // and the backfill together. invitations.db.test.ts pins this array EQUAL,
+    // in order, to presby_founding_administrator_permission_keys().
+    describe("foundingAdministratorPlan() — careers.manage and careers.applicants (careers, F292)", () => {
+      const ALL_TYPES = [
+        "congregation",
+        "presbytery",
+        "synod",
+        "general_assembly",
+        "new_worshiping_community",
+      ] as const;
+
+      it.each(ALL_TYPES)(
+        "%s: the administration half carries both careers keys, each exactly once (under assertPermissionSubset a key nobody at the org holds is ungrantable, so the hiring_committee template needs the bundle)",
+        (organizationType) => {
+          const keys = foundingAdministratorPlan(organizationType).administration.permissionKeys;
+          expect(keys.filter((k) => k === "careers.manage")).toHaveLength(1);
+          expect(keys.filter((k) => k === "careers.applicants")).toHaveLength(1);
+        },
+      );
+
+      it.each(ALL_TYPES)(
+        "%s: the careers keys follow domains.manage, manage before applicants (the order the SQL function's array uses; invitations.db.test.ts compares arrays in order)",
+        (organizationType) => {
+          const keys = foundingAdministratorPlan(organizationType).administration.permissionKeys;
+          const at = keys.indexOf("domains.manage");
+          expect(keys.slice(at, at + 3)).toEqual(["domains.manage", "careers.manage", "careers.applicants"]);
+        },
+      );
+
+      it("neither careers key is bound to a stated-clerk office template (DECISION-078: hiring is no PC(USA) office's duty) - they live on the enumerated administration role only", () => {
+        for (const organizationType of ["congregation", "presbytery"] as const) {
+          const plan = foundingAdministratorPlan(organizationType);
+          expect(plan.administration.key).toBe("founding_administrator");
+          expect(plan.officeTemplateKey).not.toBeNull();
+          expect(plan.administration.permissionKeys).toContain("careers.applicants");
+        }
       });
     });
   },

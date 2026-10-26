@@ -62,13 +62,15 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar, org_portal.giving, org_portal.public_calendar, org_portal.sign_in_connect and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
+  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.public_calendar, org_portal.sign_in_connect and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
+      "org_portal.careers",
       "org_portal.domains",
       "org_portal.giving",
       "org_portal.mail_domain",
+      "org_portal.parishes",
       "org_portal.public_calendar",
       "org_portal.sign_in_connect",
     ]);
@@ -116,9 +118,20 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(giving!.provisionedOn).toBe(false);
     expect(giving!.category).toBe("giving");
     for (const entry of ORG_FEATURE_CATALOG) {
-      if (entry.key === "org_portal.giving") continue;
+      if (entry.key === "org_portal.giving" || entry.key === "org_portal.parishes") continue;
       expect(entry.orgTypes, entry.key).toBeNull();
     }
+  });
+
+  it("scopes org_portal.parishes to congregations only, provisioned OFF, toggle-only (no new platform flag pre-live), operator-enabled false", () => {
+    const parishes = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.parishes");
+    expect(parishes).toBeDefined();
+    expect([...(parishes!.orgTypes ?? [])]).toEqual(["congregation"]);
+    expect(parishes!.flag).toBeNull();
+    expect(parishes!.provisionedOn).toBe(false);
+    expect(parishes!.operatorEnabled).toBe(false);
+    expect(parishes!.category).toBe("people");
+    expect(parishes!.name).toBe("Parish management");
   });
 
   it("operatorEnabled is a boolean on every entry and true for EXACTLY org_portal.domains and org_portal.mail_domain (Q1: platform admin only, for now)", () => {
@@ -166,6 +179,20 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(entry!.description).toMatch(/Turning this off stops new connections only/);
     expect(entry!.description).toMatch(/people already connected stay connected/);
     expect(entry!.description).not.toMatch(/\bsafe\b|secure|prevent/i);
+  });
+
+  it("org_portal.careers is toggle-only, provisioned OFF, SELF-SERVICE, people category, unscoped by organization type (the SQL definer repeats exactly these)", () => {
+    const entry = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.careers");
+    expect(entry).toBeDefined();
+    expect(entry!.name).toBe("Job openings");
+    expect(entry!.description).toBe(
+      "Lets your congregation post job openings on its public website. People are asked to contact the church to apply. Whoever maintains your website can also place the openings on a page.",
+    );
+    expect(entry!.flag).toBeNull();
+    expect(entry!.provisionedOn).toBe(false);
+    expect(entry!.operatorEnabled).toBe(false);
+    expect(entry!.orgTypes).toBeNull();
+    expect(entry!.category).toBe("people");
   });
 
   it("orgTypeAdmitted is an ALLOW-LIST: null admits everything, a list admits only its members, an unknown organization is never admitted by a list", () => {

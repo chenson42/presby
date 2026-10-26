@@ -107,6 +107,16 @@ describe("PublicListingToggle (groups) — clicking the switch stages, never fli
     expect(screen.getByText(/search engines/i)).toBeTruthy();
   });
 
+  it("says the photo is shown only if one is on file AND the person has not hidden it (F289: hide_photo wins)", () => {
+    renderToggle(false);
+    fireEvent.click(screen.getByRole("switch"));
+    expect(
+      screen.getByText(
+        "This makes Marisol Windham's name, role, and photo (if one is on file and they haven't hidden it) visible to anyone visiting the public website — including search engines and archival crawlers.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("names both person and group, and the no-retraction caveat, when turning an existing listing OFF", () => {
     renderToggle(true);
     fireEvent.click(screen.getByRole("switch"));

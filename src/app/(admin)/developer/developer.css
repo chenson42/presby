@@ -27,9 +27,11 @@
   --measure: 74rem;
   --margin-col: 8.5rem;
 
-  background: var(--paper);
+  /* No panel of its own: the shell's <main> supplies the page and the gutter, so
+     a paper-coloured block here would float inside it with text flush to its
+     edge. --paper stays declared for the palette follow-up (Q8). */
+  background: transparent;
   color: var(--ink);
-  min-height: 100vh;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 15px;
   line-height: 1.55;
@@ -58,7 +60,13 @@
 .reg__inner {
   max-width: var(--measure);
   margin: 0 auto;
-  padding: 3.5rem 1.5rem 6rem;
+  padding: 0 0 3rem;
+}
+
+@media (min-width: 40rem) {
+  .reg__inner {
+    padding: 1rem 0 4rem;
+  }
 }
 
 /* ── Masthead ─────────────────────────────────────────────────────────── */
@@ -71,7 +79,7 @@
 
 .reg__eyebrow {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--iron);
@@ -122,6 +130,10 @@
 /* ── Breadcrumbs ──────────────────────────────────────────────────────── */
 
 .reg__crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.75rem;
   color: var(--iron);
@@ -129,6 +141,9 @@
 }
 
 .reg__crumbs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   color: var(--verdigris);
   text-decoration: none;
   border-bottom: 1px solid transparent;
@@ -139,7 +154,8 @@
 }
 
 .reg__crumbs span {
-  margin: 0 0.5rem;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .reg__title--mono {
@@ -162,13 +178,15 @@
 
 .reg__moduleHead {
   display: flex;
-  align-items: baseline;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.85rem;
   border-bottom: 1px solid var(--rule-strong);
   padding-bottom: 0.4rem;
 }
 
 .reg__moduleTitle {
+  overflow-wrap: anywhere;
   font-family: ui-serif, Georgia, "Times New Roman", serif;
   font-size: 1.2rem;
   font-weight: 400;
@@ -177,15 +195,18 @@
 
 .reg__moduleMeta {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--iron);
   letter-spacing: 0.06em;
 }
 
 .reg__diagramLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   margin-left: auto;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   letter-spacing: 0.08em;
   color: var(--verdigris);
   text-decoration: none;
@@ -198,6 +219,7 @@
 }
 
 .reg__note {
+  overflow-wrap: anywhere;
   margin: 0.85rem 0 0;
   color: var(--iron);
   font-size: 0.9rem;
@@ -249,6 +271,7 @@ a.reg__row:hover .reg__rowName {
 }
 
 .reg__rowName {
+  overflow-wrap: anywhere;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.88rem;
   font-weight: 600;
@@ -261,6 +284,7 @@ a.reg__row:hover .reg__rowName {
 }
 
 .reg__rowSummary {
+  overflow-wrap: anywhere;
   color: var(--iron);
   font-size: 0.88rem;
 }
@@ -270,7 +294,7 @@ a.reg__row:hover .reg__rowName {
   align-items: center;
   gap: 0.5rem;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   color: var(--iron);
   letter-spacing: 0.05em;
   white-space: nowrap;
@@ -297,7 +321,7 @@ a.reg__row:hover .reg__rowName {
 
 .reg__tag {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   padding: 0.12rem 0.4rem;
@@ -325,7 +349,7 @@ a.reg__row:hover .reg__rowName {
 
 .reg__callout b {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--oxblood);
@@ -349,7 +373,7 @@ a.reg__row:hover .reg__rowName {
 .reg__cols th {
   text-align: left;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.62rem;
+  font-size: 0.75rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--iron);
@@ -417,7 +441,7 @@ a.reg__row:hover .reg__rowName {
   border: 1px solid var(--rule);
   overflow-x: auto;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   line-height: 1.6;
   color: var(--iron);
 }
@@ -425,6 +449,7 @@ a.reg__row:hover .reg__rowName {
 /* ── Filter ───────────────────────────────────────────────────────────── */
 
 .reg__filter {
+  min-height: 44px;
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 1rem;
@@ -435,13 +460,14 @@ a.reg__row:hover .reg__rowName {
 
 .reg__filterLabel {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--iron);
 }
 
 .reg__filterInput {
+  min-height: 44px;
   width: 100%;
   background: transparent;
   border: none;
@@ -460,9 +486,38 @@ a.reg__row:hover .reg__rowName {
   outline: none;
 }
 
+.reg__empty {
+  margin: 1.5rem 0 0;
+  color: var(--iron);
+  font-size: 0.9rem;
+}
+
+.reg__provenance {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--iron);
+  font-size: 0.8125rem;
+}
+
+.reg__legend {
+  margin-top: 0.75rem;
+  max-width: 44rem;
+  color: var(--iron);
+  font-size: 0.8125rem;
+}
+
+.reg__legend code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+  color: var(--ink);
+}
+
 .reg__filterCount {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--iron);
   white-space: nowrap;
 }
@@ -470,6 +525,15 @@ a.reg__row:hover .reg__rowName {
 /* ── Responsive ───────────────────────────────────────────────────────── */
 
 @media (max-width: 52rem) {
+  .reg__filter {
+    grid-template-columns: 1fr auto;
+    gap: 0 1rem;
+  }
+
+  .reg__filterLabel {
+    grid-column: 1 / -1;
+  }
+
   .reg__row {
     grid-template-columns: 1fr auto;
     gap: 0.3rem 1rem;

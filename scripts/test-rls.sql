@@ -147,7 +147,9 @@ begin;
   -- carries no officer_terms row by design (no PC(USA) office corresponds to it).
   -- Portal home + directory v2, Increment 4: +2 district-scoped deacon terms
   -- for Priya Balakrishnan (one ended/South, one active/North) = 9.
-  select assert_eq((select count(*) from officer_terms), 9, 'alder: sees own officer terms');
+  -- Parish management (drizzle/0068, scripts/parishes/seed-dev-parishes.sql):
+  -- +1 Moderator of the Board of Deacons seat for Wren Thackeray = 10.
+  select assert_eq((select count(*) from officer_terms), 10, 'alder: sees own officer terms');
 commit;
 
 begin;
@@ -1091,8 +1093,10 @@ commit;
 -- ---------------------------------------------------------------------------
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  select assert_eq((select count(*) from org_units), 2,
-                   'alder: sees its own two districts');
+  -- Parish management (drizzle/0068, scripts/parishes/seed-dev-parishes.sql):
+  -- +1 archived district (East District) = 3.
+  select assert_eq((select count(*) from org_units), 3,
+                   'alder: sees its own three districts (one archived)');
 commit;
 
 begin;
@@ -1123,14 +1127,25 @@ rollback;
 
 -- Composite FK (F2): a deacon term at Alder Creek must not reference a
 -- district that belongs to another org, even one that genuinely exists.
+--
+-- F262 (drizzle/0068, R2): DELETE on org_units is revoked from presby_app
+-- (districts are archived, never deleted), so the fixture district can no
+-- longer be created in one transaction and deleted in another. ONE
+-- transaction now inserts it under Bramblewood's context, switches to Alder
+-- Creek's, asserts the refusals (each do-block's exception handler is its own
+-- savepoint), and rolls everything back: nothing is ever deleted.
+--
+-- Two assertions where there was one: since 0068 an OPEN term naming a
+-- district is checked first by officer_terms_org_unit_target_guard, which
+-- (looking the district up by Alder Creek's organization_id) refuses it as
+-- missing with the same foreign_key_violation. A CLOSED term is history the
+-- guard deliberately skips, so it reaches the composite FK itself, and that
+-- is the case that still proves F2 by the constraint's own name.
 begin;
   select set_config('app.current_org_id', :BRAMBLE, true);
   insert into org_units (id, organization_id, unit_type, name)
   values ('a2000000-0000-0000-0000-0000000000ff', '33333333-3333-3333-3333-333333333333',
           'district', 'Bramblewood Fixture District');
-commit;
-
-begin;
   select set_config('app.current_org_id', :ALDER, true);
   do $$
   begin
@@ -1141,14 +1156,25 @@ begin;
             '2026-01-01');
     raise exception 'FAIL F2 — an alder-creek officer term referenced another org''s district';
   exception when foreign_key_violation then
+    raise notice 'pass  open term: cross-org district reference rejected (target guard or FK, F2)';
+  end $$;
+  do $$
+  declare v_c text;
+  begin
+    insert into officer_terms (organization_id, person_id, office, org_unit_id, starts_on, ends_on)
+    values ('22222222-2222-2222-2222-222222222222',
+            'c0000000-0000-0000-0000-000000000002', -- Tobias Renwick
+            'deacon', 'a2000000-0000-0000-0000-0000000000ff', -- Bramblewood's district
+            '2019-01-01', '2020-01-01');
+    raise exception 'FAIL F2 — a closed alder-creek officer term referenced another org''s district';
+  exception when foreign_key_violation then
+    get stacked diagnostics v_c = constraint_name;
+    if v_c is distinct from 'officer_terms_org_unit_fk' then
+      raise exception 'FAIL F2 — expected officer_terms_org_unit_fk, got %', v_c;
+    end if;
     raise notice 'pass  officer_terms_org_unit_fk: cross-org district reference rejected (F2)';
   end $$;
 rollback;
-
-begin;
-  select set_config('app.current_org_id', :BRAMBLE, true);
-  delete from org_units where id = 'a2000000-0000-0000-0000-0000000000ff';
-commit;
 
 -- The derivation itself: North District has an open ('vacant'-free) deacon
 -- term; South District's term ENDED with no successor recorded, so the same
@@ -7909,7 +7935,7 @@ begin;
     1, 'DECISION-152: and that permission is statistics.publish — the same authority that files a return retracts it (no statistics.withdraw)');
   select assert_eq(
     (select count(*) from app_roles where organization_id is null),
-    6, 'DECISION-152: there are now SIX template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), and treasurer + giving_recorder (drizzle/0055)');
+    7, 'DECISION-152: there are now SEVEN template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), treasurer + giving_recorder (drizzle/0055), and hiring_committee (drizzle/0071, DECISION-265)');
   select assert_eq(
     (select count(*) from app_role_permissions rp
        join app_roles r on r.id = rp.role_id
@@ -8662,3 +8688,32 @@ rollback;
 --     fixture (Fernwood's live site), so it is never run against production.
 -- ===========================================================================
 \ir public-calendar/test-rls-67.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/parish-management (integration).
+-- 68. Parish (deacon-district) management (drizzle/0068_presby_parishes.sql).
+--     Its own file, as 46, 47, 59, 60, 61, 62 and 64 above; \ir resolves
+--     relative to this script. It needs the test helpers and the seed's
+--     parishes fixture (scripts/parishes/seed-dev-parishes.sql, included at
+--     the end of scripts/seed-dev.sql), so it is never run against production.
+-- ===========================================================================
+\ir parishes/test-rls-68.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/careers (integration).
+-- 71. Careers, Increment 1: job postings (drizzle/0071_presby_careers.sql).
+--     Its own file, as 46, 47, 59, 60, 61, 62, 64 and 67 above; \ir resolves
+--     relative to this script. It needs the test helpers and the seed's
+--     careers fixture (two live sites), so it is never run against
+--     production.
+-- ===========================================================================
+\ir careers/test-rls-71.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/public-asset-allowlist (integration).
+-- 72. Public asset audience (drizzle/0072_presby_blob_audience.sql). Its own
+--     file, as 46, 47 and 59-64 above; \ir resolves relative to this script.
+--     It needs the test helpers and scripts/seed-dev.sql's Alder Creek
+--     fixture (no seed change), so it is never run against production.
+-- ===========================================================================
+\ir assets/test-rls-72.sql

@@ -165,6 +165,33 @@ export const ORG_FEATURE_CATALOG = [
     orgTypes: null,
     operatorEnabled: false as const,
   },
+  // Job openings (docs/work-log/2026-10-25-careers-inc1.md, Phase 3
+  // "Permissions & Flags"; DECISION-264/265). TOGGLE-ONLY (`flag: null`), no
+  // platform flag (operator: per-org toggles, not new global flags, pre-live).
+  // Provisioned OFF: a missing row is off, `createOrganization()` writes nothing
+  // for it and 0071 backfills no rows. SELF-SERVICE (`operatorEnabled: false`):
+  // the congregation's `org_features.manage` holder turns it on. `orgTypes: null`
+  // because presbyteries and synods hire too. Category `people` (Community).
+  //
+  // THE ANONYMOUS READ COMPOSES THIS ENTRY IN SQL. `presby_public_careers`
+  // (drizzle/0071) repeats this entry's key, its `category` and its `orgTypes`
+  // (null) and the category axis flag, because an anonymous request has no
+  // `personId` and cannot call `orgFeatureEnabledInTx`. `public.test.ts` pins
+  // every one of those literals to this entry and `public.db.test.ts` compares
+  // the SQL with `orgFeatureEnabledInTx` over the axis x category x toggle
+  // matrix. Changing the key, category or `orgTypes` here without the migration
+  // fails those tests, on purpose.
+  {
+    key: "org_portal.careers",
+    name: "Job openings",
+    description:
+      "Lets your congregation post job openings on its public website. People are asked to contact the church to apply. Whoever maintains your website can also place the openings on a page.",
+    category: "people" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: null,
+    operatorEnabled: false as const,
+  },
   // Online giving (docs/work-log/2026-10-15-online-giving.md, Phase 3
   // "Permissions & Flags"; R11 / DECISION-172). TOGGLE-ONLY: there is NO
   // platform flag (`flag: null`) — drizzle/0055 deleted the old
@@ -189,6 +216,24 @@ export const ORG_FEATURE_CATALOG = [
     flag: null,
     provisionedOn: false as const,
     orgTypes: ["congregation", "new_worshiping_community"] as const,
+    operatorEnabled: false as const,
+  },
+  // Parish management (docs/work-log/2026-10-25-parish-management.md, Phase 3
+  // "Permissions & Flags"; DECISION-242 to 245). TOGGLE-ONLY (`flag: null`):
+  // the operator's standing rule is a per-org toggle, not a new global flag,
+  // before go-live. Provisioned OFF: a congregation's `org_features.manage`
+  // holder turns it on. Congregations only - presbyteries and synods have no
+  // Board of Deacons. Turning it off hides the new pages and refuses the
+  // actions; data are untouched, and the legacy Parishes read is unchanged.
+  {
+    key: "org_portal.parishes",
+    name: "Parish management",
+    description:
+      "Deacon districts for this congregation: set them up, put households in them, and let the Moderator of the Board of Deacons (once recorded as an officer) assign households. Administrators can assign too. Turning this off hides the pages and refuses changes; nothing already assigned is removed.",
+    category: "people" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: ["congregation"] as const,
     operatorEnabled: false as const,
   },
   // Custom domains (docs/work-log/2026-10-19-custom-domains.md, Phase 3

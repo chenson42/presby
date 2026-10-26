@@ -66,6 +66,8 @@ const BASE_PROPS = {
     "tickets.file",
     "staff.manage",
     "domains.manage",
+    "careers.manage",
+    "careers.applicants",
   ],
   officeTemplateName: "Congregation Stated Clerk" as string | null,
   invitations: [] as InvitationListRow[],
@@ -252,6 +254,12 @@ describe("FoundingAdministratorSection — confirm dialog copy", () => {
     // rendering verbatim is a FAIL.
     expect(body).toMatch(/website domains/i);
     expect(body).not.toMatch(/domains\.manage/i);
+    // careers Inc 1 (Copy D1, F292): both careers keys join the bundle; the
+    // second label names the accepted residual (DECISION-265) in plain words.
+    // A raw key rendering verbatim is a FAIL.
+    expect(body).toMatch(/job openings, and job applications and resumes/i);
+    expect(body).not.toMatch(/careers\.manage/i);
+    expect(body).not.toMatch(/careers\.applicants/i);
     expect(body).toMatch(/congregation stated clerk/i);
     expect(body).toMatch(/nobody holds this role until it is accepted/i);
   });

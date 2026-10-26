@@ -528,6 +528,29 @@ export const AUDIT_ACTIONS = {
   ORG_FOUNDING_ADMINISTRATOR_REVOKED: "org.founding_administrator.revoked",
   ORG_TREASURER_REVOKED: "org.treasurer.revoked",
   // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/parish-management, 2026-10-25 (DECISION-245).
+  // Deacon districts. Written by src/lib/parishes.ts with insertAuditRow(tx, ...)
+  // in the SAME transaction as the change (a failed audit insert undoes it); the
+  // route actions.ts files under directory/parishes/ carry no recordAudit() of
+  // their own. The `tenant.*` axis. District assignment is overwritten, not kept
+  // as dated history, so these rows ARE the history; no household or person name
+  // is ever written (ids and district names only).
+  // Metadata by key:
+  //   DISTRICT_CREATED   { organizationId, name }
+  //   DISTRICT_RENAMED   { organizationId, from, to }
+  //   DISTRICT_ARCHIVED  { organizationId, householdCount, hadOpenDeacon }
+  //   DISTRICT_RESTORED  { organizationId }
+  //   HOUSEHOLD_DISTRICT_CHANGED { organizationId, fromOrgUnitId, toOrgUnitId,
+  //                                viaSeat, undo?, batchId? }
+  //   HOUSEHOLD_DISTRICT_BULK_MOVED (resource: the SOURCE district)
+  //                      { organizationId, batchId, toOrgUnitId, movedCount,
+  //                        skippedCount }
+  DISTRICT_CREATED: "tenant.district.created",
+  DISTRICT_RENAMED: "tenant.district.renamed",
+  DISTRICT_ARCHIVED: "tenant.district.archived",
+  DISTRICT_RESTORED: "tenant.district.restored",
+  HOUSEHOLD_DISTRICT_CHANGED: "tenant.household.district_changed",
+  HOUSEHOLD_DISTRICT_BULK_MOVED: "tenant.household.district_bulk_moved",
   // APPENDED - pipeline/public-events-calendar, 2026-10-25 (DECISION-240).
   // An event going onto, or coming off, the congregation's PUBLIC website is a
   // disclosure change, so `events.website_listed` changing writes one row, on
@@ -566,6 +589,21 @@ export const AUDIT_ACTIONS = {
   //     resourceId = the user. Metadata: { source: 'google' }.
   TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected",
   USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded",
+  // Careers, Increment 1 (docs/work-log/2026-10-25-careers-inc1.md, Phase 3
+  // "Audit"; DECISION-264/265). One row per status change that changes what the
+  // PUBLIC can read: publish, close, reopen, and the cron's close of a posting
+  // past its closing date. Written with `insertAuditRow(tx, ...)` in the SAME
+  // transaction as the change (src/lib/careers/postings.ts and sweep.ts), so a
+  // failed audit insert fails the change. NOT written for create, edit, reorder
+  // or discarding a draft (nothing was ever public). `check:audit` scans only
+  // actions.ts, which delegate to those lib functions.
+  // resourceType 'job_posting'; resourceId = the posting id. Metadata is ids
+  // and an enum only - never a title, a slug or any text:
+  // { organizationId, postingId, via: 'staff' | 'closing_date' }; the cron's
+  // rows have a null actor.
+  CAREERS_POSTING_PUBLISHED: "careers.posting.published",
+  CAREERS_POSTING_CLOSED: "careers.posting.closed",
+  CAREERS_POSTING_REOPENED: "careers.posting.reopened",
   // ---------------------------------------------------------------------------
 } as const;
 

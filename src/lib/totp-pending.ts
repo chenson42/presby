@@ -1,23 +1,46 @@
 /**
  * getOrCreatePendingEnrollment
  *
- * Shared helper used by the admin /admin/2fa and account /account/2fa pages
- * when an unenrolled user lands on either enrollment page.
+ * Returns the pending two-factor enrolment secret for a user who is not yet
+ * enrolled. Its only caller is the account page,
+ * `src/app/(account)/account/2fa/page.tsx`. (`/admin/2fa` is a policy and
+ * stranded-users page and does not call it.)
  *
- * Behaviour:
- *  - If a non-expired pending row exists for the user, decrypt the ciphertext
- *    and reuse that secret.  The QR code presented to the user stays stable
- *    across page reloads within the TTL window — the user's authenticator
- *    app keeps working because the secret never changes mid-session.
- *  - If no row exists, or the row is expired, mint a fresh secret, upsert the
- *    pending row, and return the new values.
+ * Contract:
+ *  - One stored secret per pending enrolment (`user_id` is the primary key).
+ *  - The page always shows what the database holds: every return value is
+ *    decrypted from a ciphertext read back from the table, never from a secret
+ *    this call minted and did not see stored.
+ *  - A fresh row is never overwritten. Within the TTL a reload, a second tab or
+ *    a second concurrent render gets the same secret, so the QR code an
+ *    authenticator app already scanned keeps working.
+ *  - An absent or expired row is replaced atomically, so concurrent renders
+ *    converge on one new secret.
  *
- * This logic was previously duplicated (correctly) in account/2fa/page.tsx and
- * (incorrectly, always-mint path) in admin/2fa/page.tsx.  Centralising it here
- * ensures both surfaces behave identically.
+ * How (F342): the connection is autocommit READ COMMITTED, so the safety lives
+ * in a single statement. `INSERT ... ON CONFLICT (user_id) DO UPDATE ... WHERE
+ * expires_at <= now() RETURNING` writes only when there is no row or the row is
+ * expired; a concurrent loser re-evaluates the WHERE against the winner's
+ * committed row, finds it fresh, writes nothing and returns nothing. It then
+ * reads the winner's secret on its next pass. The earlier find-then-upsert had
+ * an unconditional `do update`, so two concurrent first renders each minted a
+ * secret, the last write won, and one page showed a secret the database no
+ * longer held (a correct code for it was refused).
+ *
+ * Bounded: a row can vanish between the two statements (admin reset, the
+ * maintenance cron's expired-row sweep), so a pass that finds nothing to read
+ * and loses the write goes round again, at most MAX_ATTEMPTS times, then throws
+ * a constant error. It never returns a secret it did not see stored, and it
+ * logs nothing: no secret, ciphertext, URI or user id leaves this function.
+ *
+ * Freshness and the TTL use the database clock (`now()`) so the test and the
+ * write that follows it cannot disagree across two machines.
+ *
+ * Tested against the real database (`totp-pending.test.ts`) and with a scripted
+ * one for the bounded paths (`totp-pending.exhaustion.test.ts`).
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { userTotpPendingEnrollments } from "@/lib/db/schema";
 import {
@@ -29,6 +52,9 @@ import {
 
 export const PENDING_TTL_MINUTES = 10;
 
+/** Passes before giving up; only sustained concurrent deletes can use more than one. */
+const MAX_ATTEMPTS = 3;
+
 export interface PendingEnrollmentResult {
   /** Base-32 plaintext secret — shown once for manual entry */
   secret: string;
@@ -36,42 +62,50 @@ export interface PendingEnrollmentResult {
   uri: string;
 }
 
-/**
- * Returns the active pending enrollment for `userId`, creating (or replacing
- * an expired) pending row when necessary.
- *
- * This is a pure DB + crypto function with no Next.js dependencies, which
- * makes it straightforward to unit-test by mocking the DB.
- */
 export async function getOrCreatePendingEnrollment(
   userId: string,
   email: string,
 ): Promise<PendingEnrollmentResult> {
-  const existing = await db.query.userTotpPendingEnrollments.findFirst({
-    where: eq(userTotpPendingEnrollments.userId, userId),
-  });
+  const table = userTotpPendingEnrollments;
 
-  if (existing && existing.expiresAt > new Date()) {
-    // Reuse — decrypt the ciphertext to recover the plaintext secret so we
-    // can regenerate the QR URI without storing it.
-    const secret = decryptSecret(existing.secretCiphertext);
-    const uri = otpauthUrl(email, secret);
-    return { secret, uri };
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    // 1. A fresh row: the reload path, and where a concurrent loser finds the
+    //    winner's secret. Writes nothing.
+    const [fresh] = await db
+      .select({ secretCiphertext: table.secretCiphertext })
+      .from(table)
+      .where(and(eq(table.userId, userId), gt(table.expiresAt, sql`now()`)))
+      .limit(1);
+    if (fresh) {
+      const secret = decryptSecret(fresh.secretCiphertext);
+      return { secret, uri: otpauthUrl(email, secret) };
+    }
+
+    // 2. Absent or expired: insert, or replace only an expired row, in one
+    //    statement. A row coming back means this call wrote it. The ciphertext
+    //    minted here is discarded if another caller wins.
+    const [written] = await db
+      .insert(table)
+      .values({
+        userId,
+        secretCiphertext: encryptSecret(generateSecret()),
+        expiresAt: sql`now() + make_interval(mins => ${PENDING_TTL_MINUTES})`,
+      })
+      .onConflictDoUpdate({
+        target: table.userId,
+        set: {
+          secretCiphertext: sql`excluded.secret_ciphertext`,
+          expiresAt: sql`excluded.expires_at`,
+          createdAt: sql`now()`,
+        },
+        setWhere: sql`${table.expiresAt} <= now()`,
+      })
+      .returning({ secretCiphertext: table.secretCiphertext });
+    if (written) {
+      const secret = decryptSecret(written.secretCiphertext);
+      return { secret, uri: otpauthUrl(email, secret) };
+    }
   }
 
-  // Expired or absent — mint fresh.
-  const secret = generateSecret();
-  const ciphertext = encryptSecret(secret);
-  const expiresAt = new Date(Date.now() + PENDING_TTL_MINUTES * 60 * 1000);
-
-  await db
-    .insert(userTotpPendingEnrollments)
-    .values({ userId, secretCiphertext: ciphertext, expiresAt })
-    .onConflictDoUpdate({
-      target: userTotpPendingEnrollments.userId,
-      set: { secretCiphertext: ciphertext, expiresAt, createdAt: new Date() },
-    });
-
-  const uri = otpauthUrl(email, secret);
-  return { secret, uri };
+  throw new Error("Pending two-factor enrolment could not be established");
 }

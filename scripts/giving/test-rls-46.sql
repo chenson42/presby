@@ -1349,10 +1349,10 @@ begin;
         and t.relname = 'giving_statements' and c.confrelid = 'blob_assets'::regclass
         and c.confdeltype = 'a' and c.confupdtype = 'a'
         and (select array_agg(a.attname::text order by k.ord) from unnest(c.conkey) with ordinality k(attnum, ord)
-               join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum) = array['blob_asset_id', 'organization_id']
+               join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum) = array['blob_asset_id', 'organization_id', 'asset_audience']
         and (select array_agg(a.attname::text order by k.ord) from unnest(c.confkey) with ordinality k(attnum, ord)
-               join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.attnum) = array['id', 'organization_id']),
-    1, '46o: the PDF is referenced by a COMPOSITE, NO ACTION FK into blob_assets (undeletable while referenced, F44)');
+               join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.attnum) = array['id', 'organization_id', 'audience']),
+    1, '46o: the PDF is referenced by a three-column COMPOSITE, NO ACTION FK into blob_assets, pinned to audience private (undeletable while referenced, F44; drizzle/0072)');
   select assert_eq(
     (select count(*) from pg_constraint c
       where c.conname = 'giving_statements_version_key' and c.contype = 'u'

@@ -26,6 +26,9 @@ import { useHydrated } from "./use-hydrated";
  *    box 1, and no `maxLength`, so an autofill or paste that delivers several
  *    characters can land in the first box and be spread across the rest.
  *  - Nothing is validated only here. The server action stays the authority.
+ *  - `onComplete(code, { exact })` is the only completion signal. The component
+ *    never submits; a consumer submits from it (DECISION-257) only when `exact`
+ *    is true, and from an effect rather than the handler (see the prop doc).
  *
  * The group is a `role="group"` named by the visible label, never a
  * `<fieldset>`/`<legend>` (HydrationGate forbids a legend).
@@ -45,8 +48,19 @@ export interface OneTimeCodeInputProps {
   invalid?: boolean;
   /** Id of the error or hint element, set as `aria-describedby` on every box. */
   describedBy?: string;
-  /** Fires on a user edit that leaves the code complete and changed. Never on mount; never submits. */
-  onComplete?: (code: string) => void;
+  /**
+   * Fires on a user edit that leaves the code complete and changed. Never on
+   * mount. The component itself never submits; a consumer that does must do so
+   * only when `exact` is true (DECISION-257), and must not do it from inside
+   * this callback if it reads the hidden value, which has not committed yet.
+   *
+   * `exact` is false when a paste or autofill delivered a digit that was
+   * dropped: more than `length` digits (a phone number, an order number), or a
+   * shorter run that overflowed the boxes after its starting box. The boxes
+   * fill, but the caller should wait for its own button rather than spend an
+   * attempt.
+   */
+  onComplete?: (code: string, info: { exact: boolean }) => void;
   /** Base id; defaults to a generated one. */
   id?: string;
   className?: string;
@@ -106,14 +120,17 @@ export function OneTimeCodeInput({
     boxes.current[clamped]?.focus();
   }
 
-  /** Applies an edit: stores the slots, reports the joined value, reports completion. */
-  function commit(next: string[]) {
+  /**
+   * Applies an edit: stores the slots, reports the joined value, reports
+   * completion. `exact` is false when a delivered digit was dropped.
+   */
+  function commit(next: string[], exact = true) {
     const before = slots.join("");
     const joined = next.join("");
     setSlots(next);
     if (joined === before) return;
     onValueChange(joined);
-    if (joined.length === length) onComplete?.(joined);
+    if (joined.length === length) onComplete?.(joined, { exact });
   }
 
   /** Writes `digits` from box `start`, advancing; a full-length run always starts at box 1. */
@@ -121,6 +138,14 @@ export function OneTimeCodeInput({
     const next = [...slots];
     let from = start;
     let run = digits;
+    // Exact means no delivered digit is dropped (DECISION-257, Decision 3: a
+    // truncated input waits for the button). A run of at least `length` digits
+    // restarts at box 1 and drops only what exceeds the code; a shorter run
+    // from box `start` is truncated when it overflows the remaining boxes.
+    const exact =
+      digits.length >= length
+        ? digits.length === length
+        : start + digits.length <= length;
     if (run.length >= length) {
       run = run.slice(0, length);
       from = 0;
@@ -128,7 +153,7 @@ export function OneTimeCodeInput({
     for (let k = 0; k < run.length && from + k < length; k++) {
       next[from + k] = run[k]!;
     }
-    commit(next);
+    commit(next, exact);
     const firstEmpty = next.findIndex((s) => s === "");
     focusBox(firstEmpty === -1 ? length - 1 : firstEmpty);
   }

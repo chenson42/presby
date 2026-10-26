@@ -55,7 +55,6 @@ test.describe("Session claim integrity", () => {
     // The real code, through the server action, still completes the sign-in.
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
     await enterTotpCode(page, code);
-    await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
     await expect(page.getByTestId("greeting-band")).toContainText(USER.name);
     const after = (await (await page.request.get("/api/auth/session")).json()) as {

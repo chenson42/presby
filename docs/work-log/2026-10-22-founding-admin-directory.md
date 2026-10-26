@@ -8050,3 +8050,121 @@ Unit suite: **607 files passed, 93 skipped; 9,360 passed, 2,803 skipped, 0 faile
 - **`/invite` for `sign_in`:** `invite-summary.tsx` and the no-pre-fill guard are done and tested; the remaining states (mismatch, confirm, blocked via `inviteeBlockedCopy`) and their tests are C's.
 - **The eight derived strings above need the orchestrator's ruling before C ships copy** (items 1 to 8); C should treat them as provisional.
 - **To run any Playwright spec in this worktree, apply `scripts/sign-in-invitations/e2e-global-setup.integration.patch` first** (revert after; never commit it), or set `E2E_DATABASE_URL` to the owner URL; do not run the DB lane and the e2e lane at once.
+
+## 2b Phase 3 — amendment 3 (Copy for B2's derived strings)
+
+**Date:** 2026-10-25 · **Author:** tech-lead · **Class:** Copy amendment inside the 2b Feature (no schema, route, permission, flag or audit change) · **Inputs:** Batch B2's "Strings not in the Copy" (items 1 to 8, above) and the live tree at `06d4198` on `pipeline/signin-invites` (`labels.ts`, `sign-in-copy.ts`, `sign-in-types.ts`, `no-organization-copy.ts`, `invitation-email.ts`, `src/app/no-organization/actions.ts`, the platform `actions.ts`, `drizzle/0065`). Nothing outside this work-log was edited. The operator's Copy read (kickoff step 5) covered §10 as written; this amendment adds strings §10 did not contain and amends one §10 row (Group E, below), which the operator may overturn.
+
+### Rulings at a glance
+
+| # | B2's item | Ruling | B2 code |
+|---|---|---|---|
+| 1 | `BLOCKED_REASON_OPERATOR_COPY.person_deceased` | **Stands** | none |
+| 2 | `INVITEE_BLOCKED_COPY.person_deceased` | **Stands** | none |
+| 3a | sign_in email preheader (reuses "Accept your invitation for {organization}.") | **Stands** | none |
+| 3b | blank-sender lead ("{Congregation} has set up a place for you...") | **Stands** | none |
+| 4 | "Invalid scope." | **Stands** | none |
+| 5 | Check again database error (reuses the sender table's sentence) | **Changes**: its own sentence | `NO_ORG_COPY.checkFailed`; `actions.ts:108` |
+| 6 | blocked marker "Not connected yet" | **Changes**: "Invitation couldn't be completed", as its own marker kind. The same source-of-truth defect is in the Session row ("Not invited yet" over a blocked invitation); fixed the same way | `sign-in-types.ts`, `sign-in-copy.ts` |
+| 7 | revoked marker, Group E vs Phase 3 | **Phase 3's rule wins; Group E's row is amended** (revoked shows a marker only when the person holds inert authority) | none (code already does this) |
+| 8 | `PURPOSE_LABEL.sign_in` = "sign-in" | **Stands**, with a constraint on Batch C | none |
+
+Also checked, no change: Check again's rate-limit sentence is Group C's `Too many attempts. Try again in {n} minutes.` (`no-organization-copy.ts:95`), reused verbatim; it was not on B2's list and stands. A lapsed session on Check again redirects to `/signin?callbackUrl=%2Fno-organization` and shows no sentence; that stands.
+
+### What B2's author must change before Batch C starts (api-developer, one small commit; Batch C wires from the modules and must not retype)
+
+1. `src/lib/onboarding/no-organization-copy.ts`: add to `NO_ORG_COPY` `checkFailed: "We couldn't check just now. Try again."`. `src/app/no-organization/actions.ts:108`: `failure("db_error", NO_ORG_COPY.checkFailed)` in place of `signInRefusalMessage("db_error")`. The accept action's `NO_ORG_INVITATION_COPY.dbError` ("Your invitation is still good. Try again.") is unchanged.
+2. `src/lib/onboarding/sign-in-types.ts`: `SignInMarker` gains `{ kind: "blocked" }`; `deriveSignInMarker` returns it for `facts.state === "blocked"` (unlinked) in place of `not_connected`; update the doc comment at `:259-260`. `SESSION_ROW_STATES` gains `"blocked"`; `deriveSessionRowState` returns `"blocked"` for `facts.state === "blocked"` **before** the address test (a blocked invitation shows as blocked whether or not an address is on file now); `sessionRowAction("blocked")` is already `"open"`.
+3. `src/lib/onboarding/sign-in-copy.ts`: `signInMarkerLabel` -> `"Invitation couldn't be completed"` for `blocked` (no "No email on file" is appended to it; only `not_connected` carries that); `sessionRowStateLabel("blocked", ...)` -> `"Invitation couldn't be completed"`.
+4. Tests (modify, with the blast radius below): the two B2 cases that pinned the old reading, and add `blocked` to the reachable-states case.
+
+Nothing else in B2 changes. `org-invite.ts:650` may keep `blocked` in the probe set (harmless, one wasted lookup for a state that always shows a marker); do not churn it.
+
+### The strings, exact, with the four checks (one paragraph per group)
+
+**Group 1: `person_deceased` (items 1 and 2).**
+
+| Where | String |
+|---|---|
+| Platform panel, `BLOCKED_REASON_OPERATOR_COPY.person_deceased` (`labels.ts:61`) | This person's record can't be invited. Nothing was changed. |
+| Designation invitee, `INVITEE_BLOCKED_COPY.person_deceased` (`labels.ts:83`, `= SIGN_IN_INVITE_COPY.blockedOther`) | This invitation can't be completed. Contact the person who invited you. |
+| `sign_in` invitee (`inviteeBlockedCopy`, `labels.ts:107`; unchanged from Phase 3) | This invitation can't be completed. Contact {Congregation}'s office. |
+| Sender card line (`blockedCardLine`, `sign-in-copy.ts:156`) and refusal (`SIGN_IN_REFUSAL_COPY.person_deceased`, `:69`; unchanged) | This person's record can't be invited. |
+
+**R.** No string says "deceased", "dead" or gives a date: a person who proved an address, or who mistyped one, learns nothing about the record's state (G6's neutrality). Nothing says a sender confirmed an address or that an invitation is the only way in (F232). **S.** The only fact asserted is "can't be invited / completed", which is the core's `person_deceased` refusal (`people.date_of_death is not null`, `drizzle/0065` section 11d, refusal order person_merged > person_deceased > membership_ended) stored as the row's `blocked_reason` or returned as the send outcome; the strings never name the cause. "Nothing was changed" parallels the other eight operator rows (no role or link was applied). **A.** Row 1 is read by a platform operator (`ADMIN_ORGANIZATIONS`) only if a designation row ever carried this reason; it cannot (the platform panel never lists a `sign_in` row, and the designation branches of the accept core never assign `person_deceased`: `drizzle/0065:1758-1874`, against the `sign_in` branch's `v_block := v_st.refusal` at `:1908`), so it is present to keep the table total, and it gives no instruction. Row 2 is read by the proven holder of the link; "contact the person who invited you" is knowable (the platform operator for a designation; the `sign_in` path names the office instead). The sender's lines are read by a `people.manage` holder and give no instruction. **N.** Grepped `person_deceased` and "deceased": `participant-copy.ts:33` and `pending/decision-copy.ts:40` say "recorded as deceased" to roll actors; a different surface and audience (they act on the roll, where the date is already visible), left. No string made stale.
+
+**Group 2: the `sign_in` email preheader and blank-sender lead (item 3).**
+
+| Where | String |
+|---|---|
+| Preheader, every purpose (`invitation-email.ts:121`) | Accept your invitation for {organization}. |
+| Lead paragraph when the sender's name is blank (`invitation-email.ts:164-169`) | {Congregation} has set up a place for you on PresbyPortal, the website your congregation uses to keep its records and do its work. Accepting takes about a minute: you choose a password, and then you can sign in whenever you need to. |
+
+(With a sender name, the lead stays Phase 3's "{Sender} at {Congregation} has set up a place for you...".)
+
+**R.** The preheader promises only what the button does; it does not say who confirmed the address. "You choose a password" is Phase 3's sentence, already flagged for the operator in Group I, and is unchanged. **S.** {organization} is the definer's `organization_name` (`organizations.name`, `NOT NULL`, `src/lib/db/domain/org.ts:41`); the sender is the definer's `sender_name` (the acting person's preferred-or-first name and last name, `drizzle/0065:1170`), read from the definer's return and never from the client. A blank sender needs a person record with blank names, so the fallback is a degenerate-record path, not a normal one. **A.** The person at the address on file; the preheader's verb is the email's own button. **N.** The same preheader serves the two designation emails (`invitation-email.ts:121`) and is true there; `invitation-email.test.ts` pins both. If `organizationName` were blank the preheader would read "Accept your invitation for your congregation." and the `sign_in` subject would start in lower case; unreachable (the column is `NOT NULL`), so no code. No string made stale.
+
+**Group 3: the platform scope refusal (item 4).**
+
+| Where | String |
+|---|---|
+| `revokeAllInvitationsAction`, missing or unknown `scope` (`organizations/[id]/actions.ts:1048`) | Invalid scope. |
+
+**R.** None. **S.** `scope` is not in `REVOKE_ALL_SCOPES` (`:1046-1047`); the library is not called, so "invalid" claims nothing about what was or was not revoked. **A.** A platform operator; reachable only from a stale or forged post (both controls post a scope), and it gives no instruction. **N.** Its siblings in the same file are developer-shaped too ("Invalid organization." at `:230, :407, :464, :510, :583, :639, :865, :912, :1045`); one friendlier outlier among eleven would be less consistent, not more helpful. No string made stale.
+
+**Group 4: Check again, database error (item 5).**
+
+| Where | String |
+|---|---|
+| `NO_ORG_COPY.checkFailed`, returned by `checkAgainAction` as `{ status: "error", code: "db_error" }` | We couldn't check just now. Try again. |
+| Check again, rate limited (unchanged; Group C's `rateLimited`) | Too many attempts. Try again in {n} minutes. |
+
+**R.** The sentence does not say "your invitation is still good" (B2 was right that it would be false here: there may be no invitation) and says nothing about connection state, accounts or two-factor sign-in; "couldn't check" is true whether or not a connection exists. **S.** `connectSignedInAccount` returned `kind: "error"`, a caught database failure whose transaction rolled back; the sentence claims exactly that and no more. **A.** The signed-in, unconnected person (the page's only audience); "Try again" is pressing the same button, which is within their power, and the rate-limit sentence covers the case where they cannot yet. **N.** `NO_ORG_COPY.listingFailed` (`no-organization-copy.ts:48`, "We couldn't check for invitations just now. Reload the page.") is the page-load failure and says reload; this one is the button's failure and says try again. Different action, different instruction, deliberately not merged. Stale: `src/app/no-organization/actions.test.ts:185` pins the old sentence (modify). The sender table's `db_error` (`sign-in-copy.ts:91`) is unchanged and still serves the sender.
+
+**Group 5: markers and Session rows when an invitation was blocked (items 6 and 7).**
+
+Group E (§10), as amended by this section. It replaces §10 Group E's table, with these changes: a `blocked` row is added; the last row is split.
+
+| State | String (icon plus word, never colour alone; accessible name includes the person's name) |
+|---|---|
+| `pending` | Invitation sent {date} (amber) |
+| `expired` | Invitation expired. Send again (amber) |
+| bounced | Email bounced. Check the address (amber) |
+| **`blocked`** (the person's newest `sign_in` invitation was blocked and none is open; unlinked) | **Invitation couldn't be completed (amber)** |
+| `none` or `revoked`, and the person holds authority that is inert while unconnected (an open officer term, staff position or direct role grant) | Not connected yet (neutral); "No email on file" appended when true |
+| `none` or `revoked`, no such authority | no marker |
+
+Group F's Session hand-off row states, as amended: No email on file · Not invited yet · Invitation sent {date} · Invitation expired · Email bounced · **Invitation couldn't be completed**. The link for the new state is **Open** (the card explains and offers the next step).
+
+**R.** "Invitation couldn't be completed" says nothing about why (membership ended, record merged, deceased, or "needs support") and does not say a sign-in is impossible. It replaces B2's "Not connected yet" for blocked, whose "yet" promised a connection that, for a blocked invitation, may never come. Nothing here denies F232. **S.** `blocked`: `account_invitations.blocked_at` is set on the person's newest `sign_in` row and no newer open row exists (`presby_sign_in_invitation_states`, `drizzle/0065` section 12e, `st = 'blocked'`), and `people.user_id` is null (a linked person never gets a marker). "Not connected yet": `people.user_id` is null plus the TypeScript authority probe (display only). Session rows: the same reader state. **A.** `people.manage` holders; the marker and the Session "Open" link both go to the card, whose `blockedCardLine` states the cause and, for `needs_support`, says to send a support ticket, which a `people.manage` holder can do. The Session rows are shown only to a viewer with both `people.manage` and `officers.manage` (Group F); others see the no-names line. **N.** `INVITATION_STATUS_LABEL.blocked` = "Couldn't be completed" (`labels.ts:22`, the platform list) is the same phrase for the same fact; `blockedCardLine` (`sign-in-copy.ts:150`) reads "This invitation couldn't be completed because ..." and agrees. Modified: `sign-in-types.ts:259-260` (doc comment says a blocked invitation reads "Not connected yet"), `:273-274` and `:291-294`; `sign-in-types.test.ts:279-282` and `:298-301`; `sign-in-copy.test.ts:221-228` area and `:265-270` (add the two `blocked` labels; `SESSION_ROW_STATES` is looped at `:270`). Checked and left: a `revoked` seat reading "Not invited yet" with the **Invite** link: it says no invitation is out and names the next step, which the reader supports (`revoked_at` set, nothing open).
+
+Item 7, plainly: §10 Group E's last row ("not connected, holds inert authority, or `revoked`") can be read as "a cancelled invitation always shows a marker". Phase 3's rule, and the code, is the narrower one: none or revoked shows a marker only when the person holds inert authority, because a marker on every ordinary member whose invitation was ever cancelled is noise and says "Not connected yet" about a person the administrator chose not to connect. The row is amended accordingly (above). **For the operator:** if you meant the wider reading, it is one line in `deriveSignInMarker`, and nothing else changes.
+
+**Group 6: `PURPOSE_LABEL.sign_in` (item 8).**
+
+| Where | String |
+|---|---|
+| `PURPOSE_LABEL.sign_in` (`labels.ts:35-40`) | sign-in |
+
+**R.** None. **S.** No claim; it is a type-totality filler. **A.** No surface renders it: its only reader is `invite-summary.tsx:39`, whose `role` is used only in the non-`sign_in` branch (`:52`). **N.** Constraint for Batch C: never interpolate `PURPOSE_LABEL` into a sentence for a `sign_in` invitation (it would read "invited you to be the sign-in"); `sign_in` strings come from `SIGN_IN_INVITE_COPY` and `sign-in-copy.ts`. `labels.test.ts:28` pins totality. No new test.
+
+### Blast radius
+
+Existing tests this amendment alters (modify, not only add): `src/app/no-organization/actions.test.ts:185`; `src/lib/onboarding/sign-in-types.test.ts:279-282` (blocked marker), `:283-295` (every Session row state is reachable, now including `blocked`), `:298-301` (blocked seat); `src/lib/onboarding/sign-in-copy.test.ts:221-228`, `:265-270`. Existing e2e specs asserting any of these strings: none (grepped `e2e/`). Flags: none of the strings is behind a platform flag; Batch D's specs that assert markers and Session rows depend on the org toggle `org_portal.sign_in_connect` as B1 seeded it (default on) and set whatever they need through `e2e/support/flags.ts`; nothing here adds a key to `e2e-baseline-flags.sql`.
+
+### Carry-forward
+
+| Item | Addressed or deferred |
+|---|---|
+| Amendment 2 §10 Group E | Amended above (row split, `blocked` row); operator may overturn item 7 |
+| Amendment 2 §10 Group F (Session row states) | One state added (`blocked`) |
+| G6 neutral invitee strings; DECISION-040-style non-variance | Group 1: no string names a death or a reason; the `sign_in` invitee string is unchanged |
+| F232 and R42 (no claim of prevention; no claim a sender confirmed an address) | Checked on every group; none breached |
+| R46 (the card shows own-organization facts only) | Unchanged; the blocked marker reads the own-organization reader row |
+| Phase 3 Test Plan and §8.3 | Modified tests listed in the blast radius |
+| Group I (the "you choose a password" sentence for a Google user) | Still left for the operator's read; Group 2 does not touch it |
+| Anything deferred | Nothing new |
+
+### Implementer and status
+
+**Implementer:** api-developer (B2's author owns the pure files; one small commit before Batch C). Batch C (ux-developer) consumes the strings from the modules. The Per-Phase Status row for this amendment: tech-lead, Complete, Copy amendment recorded, 2026-10-25; item 7 awaits the operator's confirmation only if the wider reading was intended.

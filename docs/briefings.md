@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=7e54e8c -->
+<!-- covers: decision=224 commit=451d186 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,8 @@ is checked.*
 ---
 
 ## 2026-10-26
+
+- [ ] **`defect` · First-time two-factor setup could show a key that was not the one saved, so a correct authenticator code was refused about 1 time in 20; fixed (0.46.2; DECISION-290).** The browser asks for the setup page twice at once on the redirect from `/totp`; each request made its own secret and the last write won, so the page could show the loser (F342). One database statement now writes a secret only if there is none or it has expired, and the page always shows what the database holds. Reloading and a second tab show the same key. **Accepted residuals:** the helper reads the database clock while the final check reads the app clock (sub-second against a 10-minute window); a delete of the row by an admin reset between the two statements is covered only by a scripted test; and the error shown if three attempts all lose has not been looked at in a browser. **Not fixed, still open:** F166 (the recovery codes vanish after the sixth digit on first setup; HIGH before the first non-operator invitee, and the next thing a new invitee hits), the missing rate limit on setup, and two tabs finishing at once can interleave recovery codes. **You must:** nothing to apply (no migration).
 
 - [ ] **`decision` · A congregation's public website now serves only the images it published; every other stored file answers "not found" (0.46.1; DECISION-277).** Before this, any file stored for a congregation (a ticket screenshot, a contribution statement, the website's content file, a person's photo) could be fetched from the public website by anyone who held its exact random address while the site was live (F289). Production held no ticket attachments, statements or person photos on 2026-10-26, so only the content file could have been fetched. The fix is a new `audience` on every stored file (private unless a caller says otherwise, and it cannot be changed afterwards) and one database function that is the only door. A person who hid their photo in the directory now has it withheld on every congregation's public list. **Accepted residuals:** an image removed from a website stays fetchable by its exact link until a follow-up (takedown by reference); copies already in browsers, search engines or archives cannot be recalled; and a listed person's photo is fetchable by its exact link while the staff or committee switch is off, which you deferred on 2026-10-26 ("nah. we can test that in the future"). **You must apply migration 0072 to production BEFORE merging**: the new code calls a function that does not exist until it runs, and every public image would answer "not found" in between. The runbook is `docs/deployment.md`, "Public asset audience (0072)"; it was rehearsed on a copy of production on 2026-10-26 (81 files marked public, none left dangling). Between the apply and the merge, do not push to a site repository, upload a logo or attach a file to a ticket, and keep `GIVING_STATEMENTS_ENABLED` unset until the checks pass.
 

@@ -46,7 +46,6 @@ export default async function UsersPage({
       email: users.email,
       isActive: users.isActive,
       lastLoginAt: users.lastLoginAt,
-      twoFactorRequired: users.twoFactorRequired,
       lockedUntil: users.lockedUntil,
     })
     .from(users)
@@ -135,14 +134,6 @@ export default async function UsersPage({
                     <div className="font-medium">{u.name ?? "—"}</div>
                     <div className="text-xs text-muted-foreground">{u.email}</div>
                   </Link>
-                  {!u.twoFactorRequired && (
-                    <Badge
-                      variant="outline"
-                      className="mt-1 bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                    >
-                      2FA exempt
-                    </Badge>
-                  )}
                   {u.lockedUntil && u.lockedUntil > new Date() && (
                     <>
                       <Badge

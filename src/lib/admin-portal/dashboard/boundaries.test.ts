@@ -869,6 +869,16 @@ describe("E20: the 2FA exception stays one module", () => {
     expect(code).not.toMatch(/count\(m\./);
   });
 
+  it("two-factor-stranded.ts resolves 'required' through presby_two_factor_required and names no other presby_* function (F343, DECISION-291)", () => {
+    // The predicate must not drift back to a hand copy of arm B: the one
+    // per-account boolean is the whole of the exception's reach into member data.
+    const code = read(path.join(SRC, "lib", "admin", "two-factor-stranded.ts"))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const fns = new Set(code.match(/\bpresby_[a-z0-9_]+\s*\(/g)?.map((m) => m.replace(/\s*\($/, "")) ?? []);
+    expect([...fns]).toEqual(["presby_two_factor_required"]);
+  });
+
   it("the dashboard directory never names people or memberships itself", () => {
     const offenders = FILES.filter((f) => /\b(?:people|memberships|roll_actions|giving_gifts)\b/.test(read(f))).map(rel);
     expect(offenders).toEqual([]);

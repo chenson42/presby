@@ -55,12 +55,25 @@ const PORTAL_LABEL = "Our Portal";
 const PORTAL_NAV_ORDER = 23;
 
 /**
+ * What `imageUrl` returns for a manifest key the site's `imageKeys` map does
+ * not hold (F289, Gap 7): the NIL uuid, which never exists, so the asset route
+ * answers its neutral 404. Before F289 this fell back to the manifest key
+ * itself, which let an MDX author name any uuid at the asset route. It is a
+ * constant (not "no image") because `presby-site-kit`'s `imageUrl` is typed
+ * `(key) => string` and its Hero renders an `<img>` whenever the author named
+ * an image; a site-kit change so an unmapped key renders nothing is a tracked
+ * follow-up. The allowlist in the database, not this renderer, is the control.
+ */
+const MISSING_IMAGE_KEY = "00000000-0000-0000-0000-000000000000";
+
+/**
  * Resolves the organization's brand mark to a same-origin, content-
  * addressed URL through the existing `assets/[key]` route (`urls.asset()`:
  * `/site/<slug>/assets/<key>` on a platform host, `/assets/<key>` on a custom
- * one) — that route is generic (resolves any blob key for the org, not scoped
- * to the content bundle's own `imageKeys` map), so no new asset route is
- * needed. `organizationBrands` has no public grant of its own, but
+ * one) — that route serves a key only if the database says it is public (a
+ * `public_site` image, which is what the logo actions store the mark as, or a
+ * listed person's photo; F289), so no new asset route is needed.
+ * `organizationBrands` has no public grant of its own, but
  * `markAssetKey` itself carries no sensitive information (the same
  * platform-set mark already renders on `(org)`'s own admin-facing pages)
  * — reading it via `getPlatformDb()` here is a narrow, read-only lookup of
@@ -191,9 +204,10 @@ export async function siteBundleHasPage(
  * (`assets/[key]/route.ts`). `site.imageKeys` is the manifestKey -> blobKey
  * map `recordSiteIngest()` stores (see `src/lib/sites.ts`'s own doc comment
  * on `PublishedSite.imageKeys` for why this field exists beyond Phase 3's
- * literal interface). A manifestKey with no entry in that map falls back to
- * the manifestKey itself, which the asset route then fails to resolve as a
- * blob id — a broken image, never a crash.
+ * literal interface). A manifestKey with no entry in that map becomes
+ * `MISSING_IMAGE_KEY` (the nil uuid), which the asset route answers with its
+ * neutral 404 — a broken image, never a crash, and never an author-named blob
+ * key reaching the route (F289).
  *
  * `pageUrl` is the same closure discipline as `imageUrl` — `site-kit`'s
  * `Nav` never assumes a URL prefix, `SiteUrls` (src/lib/site-urls.ts) is the
@@ -312,7 +326,7 @@ export async function renderSitePage(
   // so a custom host gets clean `/assets/<k>` and `/about` paths and a platform
   // host gets today's `/site/<slug>/...` ones (DECISION-181).
   const imageUrl = (manifestKey: string): string =>
-    urls.asset(site.imageKeys[manifestKey] ?? manifestKey);
+    urls.asset(site.imageKeys[manifestKey] ?? MISSING_IMAGE_KEY);
 
   const logoUrl = await resolveLogoUrl(site.organizationId, urls).catch(
     () => {

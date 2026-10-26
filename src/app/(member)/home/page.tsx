@@ -175,7 +175,7 @@ export default async function HomePage() {
                     href="/developer"
                     title="Developer"
                     badge="Platform"
-                    description="Schema reference, tables, and entity diagrams."
+                    description="Data model, diagrams and where the engineering docs live."
                   />
                 )}
               </div>

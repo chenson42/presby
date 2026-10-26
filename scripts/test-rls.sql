@@ -8698,3 +8698,12 @@ rollback;
 --     the end of scripts/seed-dev.sql), so it is never run against production.
 -- ===========================================================================
 \ir parishes/test-rls-68.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/public-asset-allowlist (integration).
+-- 72. Public asset audience (drizzle/0072_presby_blob_audience.sql). Its own
+--     file, as 46, 47 and 59-64 above; \ir resolves relative to this script.
+--     It needs the test helpers and scripts/seed-dev.sql's Alder Creek
+--     fixture (no seed change), so it is never run against production.
+-- ===========================================================================
+\ir assets/test-rls-72.sql

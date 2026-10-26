@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=790a931 -->
+<!-- covers: decision=224 commit=7e54e8c -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -24,6 +24,12 @@ marker when you write new entries — that is the one piece of discipline this f
 is checked.*
 
 ---
+
+## 2026-10-26
+
+- [ ] **`decision` · A congregation's public website now serves only the images it published; every other stored file answers "not found" (0.46.1; DECISION-277).** Before this, any file stored for a congregation (a ticket screenshot, a contribution statement, the website's content file, a person's photo) could be fetched from the public website by anyone who held its exact random address while the site was live (F289). Production held no ticket attachments, statements or person photos on 2026-10-26, so only the content file could have been fetched. The fix is a new `audience` on every stored file (private unless a caller says otherwise, and it cannot be changed afterwards) and one database function that is the only door. A person who hid their photo in the directory now has it withheld on every congregation's public list. **Accepted residuals:** an image removed from a website stays fetchable by its exact link until a follow-up (takedown by reference); copies already in browsers, search engines or archives cannot be recalled; and a listed person's photo is fetchable by its exact link while the staff or committee switch is off, which you deferred on 2026-10-26 ("nah. we can test that in the future"). **You must apply migration 0072 to production BEFORE merging**: the new code calls a function that does not exist until it runs, and every public image would answer "not found" in between. The runbook is `docs/deployment.md`, "Public asset audience (0072)"; it was rehearsed on a copy of production on 2026-10-26 (81 files marked public, none left dangling). Between the apply and the merge, do not push to a site repository, upload a logo or attach a file to a ticket, and keep `GIVING_STATEMENTS_ENABLED` unset until the checks pass.
+
+- [ ] **`decision` · The Developer pages now ask for your two-step code, have a header, home and menu, and list every table under its real heading; who can open them has NOT changed (0.46.0; DECISION-258 and DECISION-261).** This is Increment 1 of 4. Only a platform administrator flagged by hand in the database can enter, and there is no screen or audit for that flag. **Not delivered yet, in your own words:** "someone with the role of developer, could be part of any organization" is Increment 2, and the API page is Increment 3, which you ruled on 2026-10-26 is an internal inventory that says PresbyPortal has no public API (kept in step with the code by a test; a public API is not planned). **A gap fixed:** until now a platform administrator whose account requires two-step sign-in could read the schema, the permission catalog and the rules without entering a code (F284); the proxy and the page now both challenge it, and `/developer/schema.json` answers with a JSON error. **Accepted:** reading the Developer pages is not recorded in the audit log; the rules list is still written by hand (a test checks only that every Key Invariants heading is listed or excused, and two, No Real Data and Verify in a Browser, are excused and the page says so); the data-model pages keep their old colours until a tracked follow-up. **You must:** nothing to apply (no migration). The CI end-to-end job limit was raised from 50 to 75 minutes after it timed out on the parish PR.
 
 ## 2026-10-25
 

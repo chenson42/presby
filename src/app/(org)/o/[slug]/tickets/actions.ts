@@ -105,7 +105,7 @@ async function storeAttachmentIfPresent(
   }
 
   try {
-    const ref = await getBlobStore().store({ organizationId, bytes, contentType: sniffed });
+    const ref = await getBlobStore().store({ organizationId, bytes, contentType: sniffed, audience: "private" });
     return { ok: true, key: ref.key };
   } catch (err) {
     return {

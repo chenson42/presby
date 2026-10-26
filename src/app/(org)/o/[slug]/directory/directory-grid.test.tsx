@@ -137,6 +137,7 @@ describe("DirectoryGrid — card content", () => {
     expect(resolve).toHaveBeenCalledWith({
       organizationId: "org-42",
       key: "photo-key-1",
+      audience: "private",
     });
   });
 

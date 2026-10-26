@@ -65,6 +65,7 @@ describe("resolvePhotoSrc", () => {
     expect(resolve).toHaveBeenCalledWith({
       organizationId: "org-1",
       key: "key-1",
+      audience: "private",
     });
   });
 });

@@ -23,6 +23,24 @@ import { organizations } from "./org";
  *
  * The logo is the first real consumer (DECISION-055) — not `people.photo_key`,
  * which stays untouched. No photo migration happens here.
+ *
+ * AUDIENCE (drizzle/0072_presby_blob_audience.sql, F289, DECISION-277). Every
+ * row is `public_site` (a brand mark or a site-bundle image: what the public
+ * asset route may serve) or `private` (everything else: ticket attachments,
+ * statement PDFs, the bundle JSON itself, wordmarks, replaced marks). The
+ * column defaults to 'private' permanently, so a writer that forgets it fails
+ * closed; store() still takes it as a required argument. What the table
+ * builder below cannot express, and where it is enforced instead:
+ *   - immutability on every connection, the owner included: the
+ *     blob_assets_audience_immutable trigger (0072 section 9);
+ *   - private consumers pin 'private' by a three-column composite FK into
+ *     blob_assets_id_org_audience_key (0072 section 8; the consumer side
+ *     declares its asset_audience column, the FK itself is DDL-only, see
+ *     below);
+ *   - presby_public_site_asset() (0072 section 12) is the public asset
+ *     route's only door: a SECURITY DEFINER that serves a public_site image,
+ *     or a listed person's photo by the roster functions' own definition,
+ *     and nothing else.
  */
 
 // drizzle-orm/pg-core has no bytea primitive.
@@ -39,9 +57,11 @@ export const blobAssets = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    // sha256 hex digest of `bytes`. Dedup key alongside organizationId: two
-    // uploads of byte-identical content within one org resolve to the same
-    // row instead of storing the image twice (E-c6).
+    // sha256 hex digest of `bytes`. Dedup key alongside organizationId and
+    // audience: two uploads of byte-identical content within one org AND one
+    // audience resolve to the same row instead of storing the image twice
+    // (E-c6). Across audiences they are two rows (F298, drizzle/0072), so a
+    // private upload never resolves to a public_site row.
     contentHash: text("content_hash").notNull(),
     // Raster only, plus PDF (DECISION-071/073, ticket attachments) and
     // structured JSON (DECISION-088, the normalized site content bundle).
@@ -56,6 +76,9 @@ export const blobAssets = pgTable(
     // live constraint; see blob_assets_byte_size_bounds below).
     byteSize: integer("byte_size").notNull(),
     bytes: bytea("bytes").notNull(),
+    // 'public_site' | 'private'. See the header; immutable by trigger (0072
+    // section 9), never by anything this builder can say.
+    audience: text("audience").notNull().default("private"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -77,8 +100,21 @@ export const blobAssets = pgTable(
     // finished initializing). The constraint is enforced at the database
     // level in the migration instead, where it has no import graph to honor.
     unique("blob_assets_id_org_key").on(t.id, t.organizationId),
-    // The dedup key store() checks before inserting.
-    unique("blob_assets_org_hash_key").on(t.organizationId, t.contentHash),
+    // The target of the PRIVATE consumers' three-column FKs
+    // (ticket_messages_attachment_fk, giving_statements_blob_fk, and from
+    // 0073 treasury's receipts): (x, organization_id, asset_audience ==
+    // 'private') -> (id, organization_id, audience). Name fixed (0073 targets
+    // it). The brand and site FKs keep targeting blob_assets_id_org_key above.
+    unique("blob_assets_id_org_audience_key").on(t.id, t.organizationId, t.audience),
+    // The dedup key store() checks before inserting: per audience (F298), so
+    // a private upload byte-identical to a public image is its own row.
+    unique("blob_assets_org_audience_hash_key").on(t.organizationId, t.audience, t.contentHash),
+    check("blob_assets_audience_allowed", sql`${t.audience} in ('public_site','private')`),
+    // A public_site row is an image, as a database property.
+    check(
+      "blob_assets_public_site_is_image",
+      sql`${t.audience} = 'private' or ${t.contentType} in ('image/png','image/jpeg','image/webp')`,
+    ),
     check(
       "blob_assets_content_type_allowed",
       sql`${t.contentType} in ('image/png','image/jpeg','image/webp','application/pdf','application/json')`,

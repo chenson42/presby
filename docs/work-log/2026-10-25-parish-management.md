@@ -19,7 +19,7 @@
 | 3 — Technical design | tech-lead | Complete; migration 0068 designed in order; `src/lib/parishes.ts` is the only writer; explicit-button picker (F261); S1 declined; F265 raised; staged files and pre-ship reads listed; CLAUDE.md sentence awaits operator approval | Design complete, implementer named | 2026-10-25 |
 | 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batches B, C); loop-back 1 done (see its section at the end) | Batch A complete: 0068 hand-written, applied twice (idempotent), rollback rehearsed, journal idx 68; test-rls-68 64/64 as presby_app; parishes.db.test.ts 25/25; staged seed + two integration patches. Batches B and C complete: library, actions, pages, components, Officers UI, e2e (parishes 10/10, hydration 3/3 on :3510 incl. the MFA-enrolled seat holder), 360px walk, global-setup patch staged; typecheck, lint, `npm run check`, `npm test` (8551), build and the parish DB suites green. Eight items for Phase 5/6 attention (see Implementer Notes) | Batches A, B, C done | 2026-10-25 |
 | 5 — Verification | qa | Run 1 FAIL (copy, NFC, seat-group injection). Run 2: unit 8578/8578, test:db 11115 (2 accepted canaries), test-rls-68 65/65, e2e 425/425, prod 79/79, failing-first re-proved for F2–F5 and the 0068 definer pin, 360px clean, copy PASS | PASS | 2026-10-25 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Founding-administrator walk at 360px done; F245 clause for DECISION-242; release 0.45.0; notes N1–N5 | SHIP WITH NOTES | 2026-10-25 |
 
 ---
 
@@ -1977,3 +1977,201 @@ Files referenced:
 - `/Users/cshenso/git/presby-platform/presby-parish/src/app/(org)/o/[slug]/directory/parishes/[orgUnitId]/page.tsx`
 - Logs: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/r2-testdb.log`, `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/r2-e2e-full.log`, `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/r2-e2e-prod.log`, `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/r2-rls-full.out`
 - Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa5r2/qa5r2-shots/`
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst)
+
+**Tree:** `/Users/cshenso/git/presby-platform/presby-parish`, branch `pipeline/parish-management`, HEAD `f7496ae`. I edited no files. The tree is clean after the one permitted `git checkout -- AGENTS.md`.
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+The feature does what Phase 1 asked for. I did the founding-administrator walk myself in a real browser at 360px, and every step worked. Nothing is a rework item. The notes are four small gaps found in the walk (first-day discoverability and touch targets), plus the integration items and a doc-wording ruling. Each becomes a tracked follow-up below.
+
+## ONE-LINE TAKE
+
+> A newly accepted founding administrator can switch on Parish management, create districts, record the Moderator seat, assign and move households with Undo, archive a district and empty it in one confirmed action, and every step is audited. Nothing on their first-day screens points them to the feature.
+
+## The walk (as the person the path creates, 360px)
+
+**Environment.**
+- I ran my own dev server on :3510 (`RATE_LIMIT_DISABLED=true`, `AUTH_URL=http://localhost:3510`). I stopped it by PID 72374.
+- The database was the `pipeline-parish-management` Neon branch (host `ep-summer-truth-…`, a different host from the development branch in the primary checkout's `.env.local`). I never touched development or production, and I did not use `git stash`.
+- A fresh Chromium context emulated a 360x780 phone (touch, 2x).
+
+**Why this branch and not `development` itself.**
+- The brief barred touching development.
+- QA had left the branch's global flags at the CI baseline (directory, officers, features and others off). I temporarily set them to QA's saved development-like snapshot, then restored the baseline byte-for-byte (verified by diff).
+
+**Not a seeded fixture.**
+1. The platform `admin` created a congregation through `/admin/organizations/new`.
+2. The platform `admin` sent a founding-administrator invitation through the admin UI.
+   - The dev mail path scrubs the link after delivery, so I could not read the token. I revoked that row and inserted an identical open invitation with a token I knew. This is what the repo's own invitation specs do.
+   - So the send was real, and the link was seeded from my own known token.
+3. The invitee opened the link on a phone and created an account (new user, 2FA required).
+4. They signed in and were walked into 2FA enrolment (enrolled with a real TOTP secret).
+5. They answered the `/totp` challenge and landed on `/o/<slug>`.
+
+**Pages the founding administrator saw, in order.**
+
+| Page | What it showed | 360px |
+|---|---|---|
+| `/invite`, `/invite/accepted`, `/signin`, `/account/2fa`, `/totp` | The normal onboarding flow | n/a |
+| `/o/<slug>` (portal home) | Tiles for Community, Directory, Groups, Staff, Calendar, Officers, and so on. **No tile or link mentions Parish management.** | 0px overflow |
+| `/admin` (hub) | Roles, Tickets, Features, Branding, Manage events. Nothing about parishes. | 0px overflow |
+| `/admin/features` | "Parish management, currently off", with the C9 description | 0px overflow |
+| `/directory/parishes` with the toggle **off** | "You don't have permission to view the directory… ask an administrator at {org}" | 0px overflow |
+| `/admin/community` and `/new` | "Member management isn't turned on… yet" (an existing toggle) | n/a |
+
+**Parish steps after the toggle was switched on.**
+
+1. **Toggle on.** The switch on `/admin/features` gave "Parish management turned on."
+   - `/directory/parishes` now opened, even though this administrator holds no `directory.view_hidden`. G4 is closed.
+   - Empty state: "No districts yet. Add your first district…". The seat callout "No one is recorded in the Moderator seat… Record it in Officers…" showed.
+2. **Create districts.**
+   - An empty submit gave "Enter a name for the district."
+   - "North Ridge" and "Hollow Creek" were added with the toast "District added."
+   - "north ridge" gave "A district with that name already exists."
+3. **Record the seat.** Officers form, office "Moderator of the Board of Deacons".
+   - The seat helper copy and the self note ("You're recording yourself… self-recorded") both showed.
+   - After saving, the roster row showed "Self-recorded", and the Parishes seat callout disappeared.
+   - The audit row `tenant.officer_term.started` carried `selfRecorded: true`.
+   - The seat group's roster held 1 member.
+4. **Get households in.** Households do not exist on day one.
+   - I had to turn on a second toggle, Community, then add three people through the six-step wizard (two participants, one visitor), each with a new household.
+   - Parishes then showed "No district yet / 3 households aren't in a district."
+5. **Unassigned page.**
+   - Pills: Members (0), Participants (2), Visitors (1), Others (0). The bucket hint text showed.
+   - Assign with nothing chosen gave no commit.
+   - Selecting a district and pressing **Assign** gave the toast "Assigned to North Ridge." with **Undo**. Undo gave "Undone." and the household was back in the list.
+   - After I assigned the three households, the page said "Every household is in a district."
+6. **District page.**
+   - Counts matched the overview ("2 households" in the badge and on the page).
+   - The picker offers "Remove from district" and the other active district.
+   - Two ArrowDown presses on the focused closed select committed nothing. The explicit **Move** gave "Moved to Hollow Creek."
+7. **Archive.**
+   - The dialog read: "1 household is still in it. It stays there until it is moved… You can restore it later."
+   - After archiving, the overview showed an "Archived districts" section with a "Restore" control.
+   - The archived page showed "This district is archived. No households can be moved into it. Move households out one at a time, or all at once below." and a "Move all 1 household to…" control.
+   - Step 1 picker, then the confirmation. At 360px the confirmation buttons stacked with the primary first.
+   - Result: "Moved 1 household to Hollow Creek." The district then read "0 households… It has no households." with no bulk control, which is the right "none" state.
+8. **Audit, read from the database.**
+   - `tenant.district.created` x2, `tenant.district.archived`, `tenant.household.district_bulk_moved` (moved count 1, with a batch id), and six `tenant.household.district_changed` rows.
+   - The Undo row carries `undo: true`. The bulk's per-household row shares the batch id. Every move row carries `viaSeat: true`.
+   - No household or person name appears in any audit row (regex-checked).
+   - The Parish-specific audit rows contain no email or token.
+9. **360px results.** Every parish screen, dialog and toast screen had `scrollWidth == clientWidth == 360` (0px overflow). I looked at the screenshots of the district list, the confirmation and the archived page.
+   - Targets under 44px that I measured:
+     - toast **Undo** (24px) and "Close toast" (20px)
+     - the district-name input (36px)
+     - the callout link "Record it in Officers" (37px)
+     - the Features switch (32x18)
+     - the Officers form's older controls
+   - The 44px set that the amendment required (selects, "Move all…", "Back to Parishes", "Show all groups", dialog buttons) all measured at or above 44.
+
+**Cleanup.**
+- The throwaway congregation, its account, its four people and its roll actions are removed (`deletable_until` stamped, with the repo's usual trigger-bypass idiom, re-enabled and verified). Remaining rows are 0 orgs, 0 users, 0 people and 0 roll actions.
+- The cascade through `org_units` succeeded, which confirms the 0068 fixture-teardown exemption.
+- Audit rows remain, as they are append-only.
+- Flags were restored to the CI baseline (diff clean). The server is stopped, with nothing left on :3510. `AGENTS.md` was restored.
+
+## What's Working
+
+- The first-day wall is closed. The founding administrator reaches Parishes without `directory.view_hidden` once the toggle is on.
+- One count everywhere. The overview badge, the district page header, the archive dialog and the bulk dialog agree.
+- Self-recorded authority is stated honestly in three places: the form note, the roster badge and the audit stamp.
+- The failure and empty copy is human and accurate in every state I reached. A refusal never reads as "no districts".
+
+## Intent-vs-Shipped Diff
+
+- **G1 (no way to create a district).** Shipped: define, rename, archive and restore. I walked create and archive. Verdict: matches.
+- **G2 (no archived state).** Shipped: `archived_at`, with the target refused at the database. Verdict: matches (QA proved the race).
+- **G3 (the seat).** Shipped: office, derived group and seat-only role. No existing `moderator` or `deacon` row gains authority. Verdict: matches.
+- **G4 (first-day wall).** Shipped: verified in the walk. Verdict: matches, with one note (N1).
+- **G5 (counts).** Shipped: one helper. Verdict: matches. It is a stated behaviour change for existing roster viewers (P3-10).
+- **G6 (privacy of names).** Shipped: server-side masking. "Private" was seen by QA at 360px. I saw names as `people.manage`, as designed. Verdict: matches.
+- **G7 to G9 (unit types, Unassigned definition, 100 cap).** Shipped: the four buckets with live counts, and `too_many` refused and never truncated. Verdict: matches. One drift: Phase 1 copy "No deacon yet" became "No district yet" (P3-5). Verdict: acceptable drift, more truthful.
+- **G10 (history).** Shipped: overwrite plus audit, with no history view promised. Verdict: matches. The TODO line is not yet written (integration).
+- **G11 (self-recorded authority, `paper`).** Shipped: the stamp, the badge and the helper copy are verified. No string claims "only the Moderator". The CLAUDE.md sentence is approved but not yet in CLAUDE.md. Verdict: matches in code, pending integration.
+- **G12 (confirmation model).** Shipped: an explicit button, because the native select cannot commit on change (F261), with a 10-second Undo and a bulk confirm with no bulk Undo. Verdict: acceptable drift, ruled.
+- **G13 to G15 (concurrency, audit, edge cases).** Shipped: expected-value updates, lock order and one audit row per change in the same transaction. The walk and QA both confirm it. Verdict: matches.
+- **Phase 1 handoff walk (create a district, record the seat, move a household).** Done. Verdict: matches.
+
+## Edge Cases
+
+- Empty state: **pass** (district empty state, seat callout, Unassigned empty).
+- Failure microcopy: **pass** (human strings; QA verified the not-found and conflict mappings; none is a stack trace).
+- Permission gate: **pass** (toggle off refuses; the platform admin with no seat is refused; the seat holder without admin keys is allowed, proven by QA and e2e).
+- Audit event: **pass** (every mutation I made wrote its row in the transaction).
+- Mobile (360px): **pass with note** (0px overflow everywhere; the touch-target gaps are in N2).
+
+## Rulings
+
+**1. QA's suggestion to name the F245 `membership_source` re-label in DECISION-242's rule sentence: accept.**
+- QA re-ran the probe. A direct derived-row insert still succeeds, and `update groups set membership_source='managed'` still updates one row.
+- The tech-lead's corrected text (amendment 1.5) names only the first path.
+- The decision text must not deny a residual the technical record admits.
+- Add this clause after "...is not refused by the database": "**or a re-labelling of that group's own `membership_source` or `derived_from` (F245)**".
+- The release note must not say "seat-only is enforced in the database" without the roster-write exception.
+
+**2. Integration items: accept the plan, with these checks.** None was found in the worktree, which is correct under Rule 16.
+- **DECISION-242 to 245 text** (with the 242 correction above).
+- **CLAUDE.md sentence:** operator-approved, lands with the integration commit.
+- **Four TODO lines** (amendment 1.6), plus the lines in the Follow-ups below. `docs/TODO.md` line 51 (Track C) and line 393 (per-parish detail page) move to Done on `main`. `main` TODO line 242, the e2e gap for the directory flags, is closed by this e2e.
+- **3a kind-list widening:** the five values must be amended in 3a's design before its Phase 4. `0066` is not on `main` yet, so the order is open.
+- **Global-setup patch:** apply `scripts/parishes/global-setup.integration.patch` with the two RLS and seed patches, then re-run `test-rls.sql` and `test-rls-68.sql` on merged `development`.
+- **Journal:** `drizzle/meta/_journal.json` already carries idx 68.
+- **One stale number found at integration.** `main` is now 0.44.0 and its migration 0067 is merged (no overlap with 0068; I checked it does not touch `presby_sync_derived_group` or `officer_terms_office_allowed`). The design's "release `v0.43.0`" is now taken. The Parish release should be **0.45.0**. The tech-lead should rebase the release-note name before writing it.
+
+**3. What's-new entry (Rule 13): not warranted now.**
+- It is admin and moderator tooling, off by default behind a per-org toggle, and no congregation has it on.
+- When the first real congregation turns the toggle on, publish one entry then. A Moderator, not a member, is the audience.
+- The directory-count change belongs in the release note only.
+
+**4. Functionality map (Rule 14): required, at ship time.**
+- Update the Directory bullet at `docs/product/functionality-map.md:69`. Its "`directory.view_hidden`-gated parishes/deacon-roster view" clause is now wrong, and the Parishes tab is also the management surface.
+- Add the Parish management bullet. Suggested text: "**Parish management** (`/o/<slug>/directory/parishes[/<id>|/unassigned]`, per-org toggle `org_portal.parishes`, congregations, off by default; DECISIONS 242–245): define, rename, archive and restore deacon districts (`officers.manage`); assign or move a household with a 10-second Undo; an Unassigned triage list in four exclusive buckets; empty an archived district in one confirmed action (cap 100). Moves need the Moderator-of-the-Board-of-Deacons seat (`parishes.assign`, a dated officer term; self-recording is allowed, stamped and `paper`) or `people.manage`. Overwrite plus audit, with no in-app history view. `src/lib/parishes.ts`, `docs/work-log/2026-10-25-parish-management.md`."
+- Also update the one-line Index entry for the Directory area.
+
+**5. Rule 12 and `docs/architecture.md` (Rule 15).** The work-log has no originating feedback row, so Rule 12 is not applicable. Nothing here is a new subsystem or data flow, so no update to `docs/architecture.md`.
+
+## Follow-Ups (SHIP WITH NOTES)
+
+- [ ] **N1. First-day discoverability.** A founding administrator's first screens (portal home, `/admin` hub) never mention Parish management. It is a per-org toggle that is off by default, and nothing links to it. With the toggle off, `/directory/parishes` tells the administrator "You don't have permission to view the directory… ask an administrator at {org}", although they are the administrator. Fix, either: when the viewer holds `org_features.manage` and Parish management is off, show a panel pointing to Features, or add an admin-hub card. Tech-lead to choose.
+- [ ] **N2. Touch targets on the new surfaces.** At 360px:
+  - the **Undo** toast action is 24px and "Close toast" is 20px (an Undo with a 10-second window should be a 44px target);
+  - the district-name input is 36px;
+  - the seat-callout link "Record it in Officers" is 37px.
+  - Raise these to 44px. The Features switch (32x18) and the Officers form controls are app-wide older patterns; keep them on the existing TODO line.
+- [ ] **N3. Households do not exist on day one.** A new congregation needs a second toggle (Community) and the six-step wizard before there is anything to assign. The Unassigned empty state on a brand-new install says "Every household is in a district.", which reads as the work being finished rather than not started. Consider "No households need a district yet." when the org has zero households. This is a copy ruling for the tech-lead.
+- [ ] **N4. Integration and release items.**
+  - DECISION-242 to 245 (with the F245 clause), the CLAUDE.md sentence, the TODO lines from amendment 1.6, and the TODO move-to-Done for lines 51 and 393.
+  - The 3a kind-list widening to five values.
+  - The release-note and version number change (0.45.0, not 0.43.0).
+  - The functionality-map update (Ruling 4).
+  - Apply the three staged patches and re-run `scripts/test-rls.sql` and `scripts/parishes/test-rls-68.sql` on merged `development`.
+- [ ] **N5. Pre-ship production reads before turning the toggle on for any real congregation (Phase 3 SQL).** `org_portal.directory` and `directory_v2` must be on in production, and the stop-block counts must be 0 before the 0068 apply.
+
+Accepted residuals and existing TODOs, as ruled by the operator or tech-lead (not new):
+- the seat-group roster write until 0066 (F240/F245);
+- permanently unreachable dormant households (P3-11);
+- the `moderator` relabel declined (P3-4);
+- the single-move missing-target string;
+- the three leaked fixture rows on this pipeline branch, which are environmental;
+- the `AGENTS.md` dev-server rewrite.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 6 — Shipped vs intent | analyst | Founding-administrator walk done at 360px on the pipeline Neon branch (invited, accepted, enrolled, toggle on, 2 districts, self-recorded seat, 3 households through the Community wizard, assign + Undo, move, archive, bulk move, audit read from DB, no names in audit); fixture org, account and people removed, flags restored, server stopped by PID, `AGENTS.md` restored. F245 clause accepted for DECISION-242; integration items confirmed (release number now 0.45.0); no what's-new entry; functionality-map update required. Notes N1 to N5 | SHIP WITH NOTES | 2026-10-25 |
+
+**Handoff:** next is the **orchestrator** (integration, Rule 16: decisions, CLAUDE.md sentence, TODO reconciliation incl. N1–N5, the three patches, journal and RLS re-run on merged `development`) and then **tech-lead** for the release note (0.45.0) and the functionality-map line. The N1 and N3 copy choices need tech-lead rulings. I did not write any files.
+
+Files referenced:
+- `/Users/cshenso/git/presby-platform/presby-parish/docs/work-log/2026-10-25-parish-management.md`
+- `/Users/cshenso/git/presby-platform/presby-parish/docs/product/functionality-map.md` (lines 18 and 69)
+- `/Users/cshenso/git/presby-platform/presby-parish/docs/TODO.md` (lines 51, 242 and 393 on `main`)
+- Walk screenshots and scripts, in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6/` (the screenshots are in `shots/`)

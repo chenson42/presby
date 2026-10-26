@@ -7,6 +7,8 @@
  * missing keys absent from the map, the audience and organization carried into
  * the query, and a driver error propagating to the caller.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
@@ -144,5 +146,12 @@ describe("getBlobStore().resolveMany()", () => {
   it("a driver error propagates (the caller decides)", async () => {
     select.mockImplementation(() => ({ from: () => ({ where: () => Promise.reject(new Error("connection reset")) }) }));
     await expect(getBlobStore().resolveMany({ organizationId: ORG, keys: [uuid(1)], audience: "private" })).rejects.toThrow("connection reset");
+  });
+});
+
+describe("the directory's chunk size is the adapter's cap", () => {
+  it("person-avatar.tsx holds RESOLVE_MANY_MAX as a local literal (it must stay importable under a partial mock of this adapter) and this pins the two", () => {
+    const source = readFileSync(join(process.cwd(), "src/components/org-portal/person-avatar.tsx"), "utf8");
+    expect(source).toContain(`const RESOLVE_CHUNK = ${RESOLVE_MANY_MAX};`);
   });
 });

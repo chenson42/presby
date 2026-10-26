@@ -7,8 +7,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-// `PersonCard` pulls in `./person-avatar`, which imports the `server-only`
-// `@/lib/storage/blob-store` — same mock `person-avatar.test.tsx` and
+// `PersonCard` pulls in `@/components/org-portal/person-avatar`, which imports the `server-only`
+// `@/lib/storage/blob-store` — same mock `components/org-portal/person-avatar.test.tsx` and
 // `directory-grid.test.tsx` already use to keep this a jsdom-safe unit test.
 vi.mock("@/lib/storage/blob-store", () => ({
   getBlobStore: () => ({ resolve: vi.fn(), resolveMeta: vi.fn(), store: vi.fn() }),
@@ -28,7 +28,7 @@ const ENTRY: DirectoryEntry = {
   phone: "555-0100",
   address: { city: "Alder Creek", region: "OH", line1: null, postalCode: null },
   dateOfBirth: null,
-  photoKey: null,
+  photoThumbKey: null,
 };
 
 describe("PersonCard — chevron affordance (L1)", () => {

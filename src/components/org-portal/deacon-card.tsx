@@ -1,6 +1,6 @@
 import { UserRound } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { PersonAvatar } from "@/app/(org)/o/[slug]/directory/person-avatar";
+import { PersonAvatar } from "@/components/org-portal/person-avatar";
 
 /**
  * The deacon block — rendered LAST and identically on both the household and

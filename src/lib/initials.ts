@@ -1,10 +1,10 @@
 /**
  * The avatar's letters.
  *
- * presby has no image upload and `people.photo_key` is a CONGREGATION's photo of
- * a person, not the platform user's avatar — different table, different
- * hierarchy, different privacy tier. So the avatar is initials, and this is the
- * whole of it.
+ * A person's photo is a CONGREGATION's photo of them (`person_photos`, per
+ * membership), not the platform user's avatar — different table, different
+ * hierarchy, different privacy tier. So the avatar menu is initials, and this
+ * is the whole of it.
  *
  * NOT `server-only` and no database import: the avatar menu is a client
  * component, and this has to be callable from it.

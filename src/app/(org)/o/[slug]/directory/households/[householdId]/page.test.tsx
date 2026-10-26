@@ -102,7 +102,7 @@ function member(overrides: Record<string, unknown> = {}) {
     phone: null,
     address: null,
     dateOfBirth: null,
-    photoKey: null,
+    photoThumbKey: null,
     middleName: null,
     suffix: null,
     householdId: "h1",

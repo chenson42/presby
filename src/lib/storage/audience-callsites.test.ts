@@ -21,9 +21,9 @@
  *     hide a call from this scan) fails;
  *   - the calls, in source order, must equal the checked-in table below.
  *
- * A LATER ADAPTER METHOD (the site-ingest pipeline's `findByContentHashes`, the
- * person-photos pipeline's `resolveMany`) needs only a table edit here, never a
- * change to the scan logic: it is held to "audience literal required" by
+ * A LATER ADAPTER METHOD (the site-ingest pipeline's `findByContentHashes`;
+ * the person-photos pipeline's `resolveMany` is the one that arrived) needs only
+ * a table edit here, never a change to the scan logic: it is held to "audience literal required" by
  * default, or added to EXEMPT_METHODS with the reason.
  *
  * THE TABLE IS THE ONLY THING A LATER PIPELINE EDITS. ACTIVE holds every file
@@ -61,13 +61,14 @@ const ACTIVE: Record<string, string[]> = {
   "src/app/(admin)/admin/tickets/upload-attachment-action.ts": ["store:private"],
   "src/app/(org)/o/[slug]/admin/branding/page.tsx": ["resolve:public_site"], // the mark preview
   "src/app/(org)/o/[slug]/admin/giving/statements/[statementId]/download/route.ts": ["resolve:private"],
-  "src/app/(org)/o/[slug]/directory/person-avatar.tsx": ["resolve:private"],
   "src/app/(org)/o/[slug]/giving/statements/[statementId]/download/route.ts": ["resolve:private"],
   "src/app/(org)/o/[slug]/tickets/[id]/attachments/[key]/route.ts": ["resolve:private"],
   "src/app/(org)/o/[slug]/tickets/actions.ts": ["store:private"],
   "src/app/(public)/site/[slug]/assets/[key]/route.ts": ["resolvePublic"],
   // images first, then the bundle JSON (R2: the bundle is private, only a server-side reader uses it)
   "src/app/api/sites/ingest/route.ts": ["store:public_site", "store:private"],
+  // person photos (DECISION-285): the thumbnails of a directory page, in one read (F332)
+  "src/components/org-portal/person-avatar.tsx": ["resolveMany:private"],
   "src/lib/brand/read-org-brand.ts": ["resolve:public_site"], // the mark, inlined as data:
   "src/lib/giving/statements.ts": ["store:private"], // the statement PDF
   "src/lib/sites.ts": ["resolve:private"], // the content bundle (hydratePublishedSite)
@@ -251,6 +252,15 @@ describe("the scan itself can fail (it is not vacuous)", () => {
     expect(scanText(`getBlobStore().store({ audience: "private" })`)).toMatchObject({ calls: ["store:private"], violations: [] });
     expect(scanText(`getBlobStore().resolvePublic({ organizationId, key })`)).toMatchObject({ calls: ["resolvePublic"], violations: [] });
     expect(scanText(`getBlobStore().resolvePublic({ organizationId, key, audience: "public_site" })`).violations).toHaveLength(1);
+  });
+
+  it("resolveMany (person photos, F332) is held to the literal rule like resolve(): no audience, a variable or a conditional all fail", () => {
+    expect(scanText(`getBlobStore().resolveMany({ organizationId, keys })`).violations).toHaveLength(1);
+    expect(scanText(`getBlobStore().resolveMany({ organizationId, keys, audience: aud })`).violations).toHaveLength(1);
+    expect(scanText(`getBlobStore().resolveMany({ organizationId, keys, audience: "private" })`)).toMatchObject({
+      calls: ["resolveMany:private"],
+      violations: [],
+    });
   });
 
   it("a method added later is held to the literal rule by default (no scan-logic change needed)", () => {

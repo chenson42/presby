@@ -205,6 +205,9 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
     await derivedGroup(orgA, rosterTypeId, "active_membership", "Active Membership");
     await derivedGroup(orgA, courtTypeId, "session", "Session");
     await derivedGroup(orgA, courtTypeId, "diaconate", "Board of Deacons");
+    // The Moderator of the Board of Deacons seat's derived roster group
+    // (drizzle/0068, DECISION-242): a `roster`, not a `court`.
+    await derivedGroup(orgA, rosterTypeId, "deacons_moderator", "Board of Deacons Moderator");
     await derivedGroup(orgB, rosterTypeId, "active_membership", "Active Membership");
 
     // Permission catalog — already seeded by drizzle/0029 in a real dev
@@ -1450,6 +1453,19 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
           orgUnitId: outsideOrgUnit,
         }),
       ).toEqual({ kind: "invalid_office_for_org", officeLabel: "Deacon" });
+      // The seat needs its derived group too (a presbytery has none): typed,
+      // not the trigger's raw foreign-key error (DECISION-242).
+      expect(
+        await startOfficerTerm(bClerk, orgB, grantingUserId, {
+          personId: bTarget,
+          office: "deacons_moderator",
+          startsOn: "2024-01-01",
+        }),
+      ).toEqual({
+        kind: "invalid_office_for_org",
+        officeLabel: "Moderator of the Board of Deacons",
+      });
+      expect(await termRowsFor(bTarget, "deacons_moderator")).toHaveLength(0);
       expect(
         (
           await startOfficerTerm(bClerk, orgB, grantingUserId, {
@@ -1503,6 +1519,169 @@ describe.skipIf(!hasDb)("officers.ts (Postgres-backed, real dev database)", () =
       if (onlyPastors.kind !== "ok") throw new Error("expected ok");
       expect(onlyPastors.data.every((e) => e.office === "installed_pastor")).toBe(true);
       expect(onlyPastors.data.some((e) => e.termId === pastor.data.termId)).toBe(true);
+    });
+
+    // -------------------------------------------------------------------
+    // Parish management (DECISION-242, F264): the Moderator of the Board of
+    // Deacons seat and archived districts
+    // -------------------------------------------------------------------
+
+    it("the Moderator seat is recorded, seated on its own derived group (not Session, not the diaconate), and stamped selfRecorded when the person is the actor", async () => {
+      const platform = getPlatformDb();
+      const sessionBefore = (await sessionRowsFor(selfPerson)).length;
+      const started = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: selfPerson,
+        office: "deacons_moderator",
+        startsOn: "2026-03-01",
+      });
+      if (started.kind !== "ok") throw new Error(`expected ok, got ${started.kind}`);
+      const [audit] = await auditRows(started.data.termId);
+      expect(audit!.metadata).toMatchObject({ office: "deacons_moderator", selfRecorded: true });
+
+      const seated = await platform.execute(sql`
+        select g.derived_from from group_memberships gm
+          join groups g on g.id = gm.group_id
+         where gm.officer_term_id = ${started.data.termId}::uuid
+      `);
+      expect((seated as unknown as { rows: Array<{ derived_from: string }> }).rows.map((r) => r.derived_from)).toEqual([
+        "deacons_moderator",
+      ]);
+      // The seat term seats the holder in exactly one derived group - its own.
+      // (selfPerson holds earlier Session terms from other tests; this term
+      // adds nothing to Session or the diaconate.)
+      expect(await sessionRowsFor(selfPerson)).toHaveLength(sessionBefore);
+    });
+
+    it("listOfficerRoster stamps selfRecorded on the Moderator seat (an authority office, F264) but not on a treasurer, and reports orgUnitArchived", async () => {
+      const roster = await listOfficerRoster(clerkPerson, orgA);
+      if (roster.kind !== "ok") throw new Error("expected ok");
+      const seat = roster.data.find((e) => e.office === "deacons_moderator" && e.personId === selfPerson);
+      expect(seat).toMatchObject({ selfRecorded: true, orgUnitArchived: false });
+      const treasurer = roster.data.find((e) => e.office === "treasurer" && e.personId === selfPerson);
+      if (treasurer) expect(treasurer.selfRecorded).toBe(false);
+    });
+
+    it("a deacons_moderator term takes no district (the iff rule is unchanged)", async () => {
+      const result = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+        personId: targetPerson,
+        office: "deacons_moderator",
+        startsOn: "2026-03-02",
+        orgUnitId: orgUnitA,
+      });
+      expect(result.kind).toBe("invalid_input");
+    });
+
+    describe("archived and campus districts", () => {
+      let archivedUnit: string;
+      let campusUnit: string;
+
+      beforeAll(async () => {
+        const platform = getPlatformDb();
+        const [a] = await platform
+          .insert(orgUnits)
+          .values({ organizationId: orgA, unitType: "district", name: "Archived District (test)" })
+          .returning({ id: orgUnits.id });
+        archivedUnit = a!.id;
+        await platform.execute(sql`update org_units set archived_at = now() where id = ${archivedUnit}::uuid`);
+        const [c] = await platform
+          .insert(orgUnits)
+          .values({ organizationId: orgA, unitType: "campus", name: "Campus (test)" })
+          .returning({ id: orgUnits.id });
+        campusUnit = c!.id;
+      });
+
+      it("getOfficerFormOptions offers ACTIVE districts only: no archived district and no campus", async () => {
+        const result = await getOfficerFormOptions(clerkPerson, orgA);
+        if (result.kind !== "ok") throw new Error("expected ok");
+        const ids = result.data.orgUnits.map((u) => u.orgUnitId);
+        expect(ids).toContain(orgUnitA);
+        expect(ids).not.toContain(archivedUnit);
+        expect(ids).not.toContain(campusUnit);
+      });
+
+      it("getOfficerFormOptions reports parishesEnabled from the per-org toggle (a missing row is off)", async () => {
+        const platform = getPlatformDb();
+        const before = await getOfficerFormOptions(clerkPerson, orgA);
+        if (before.kind !== "ok") throw new Error("expected ok");
+        expect(before.data.parishesEnabled).toBe(false);
+        await platform.execute(sql`
+          insert into organization_feature_toggles (organization_id, feature_key, enabled)
+          values (${orgA}::uuid, 'org_portal.parishes', true)
+        `);
+        const after = await getOfficerFormOptions(clerkPerson, orgA);
+        if (after.kind !== "ok") throw new Error("expected ok");
+        expect(after.data.parishesEnabled).toBe(true);
+      });
+
+      it("a NEW deacon term in an archived district or a campus is district_unavailable, and nothing is written", async () => {
+        for (const orgUnitId of [archivedUnit, campusUnit]) {
+          const result = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+            personId: targetPerson,
+            office: "deacon",
+            startsOn: "2026-04-01",
+            orgUnitId,
+          });
+          expect(result, orgUnitId).toEqual({ kind: "district_unavailable" });
+        }
+        const platform = getPlatformDb();
+        const rows = await platform.execute(sql`
+          select 1 from officer_terms
+           where person_id = ${targetPerson}::uuid and org_unit_id in (${archivedUnit}::uuid, ${campusUnit}::uuid)
+        `);
+        expect((rows as unknown as { rows: unknown[] }).rows).toHaveLength(0);
+      });
+
+      it("the database trigger is the backstop: a raw insert into an archived district is refused under the constraint name startOfficerTerm maps to district_unavailable", async () => {
+        const platform = getPlatformDb();
+        const [racy] = await platform
+          .insert(orgUnits)
+          .values({ organizationId: orgA, unitType: "district", name: "Racy District (test)" })
+          .returning({ id: orgUnits.id });
+        await platform.execute(sql`update org_units set archived_at = now() where id = ${racy!.id}::uuid`);
+        let caught: unknown;
+        try {
+          await platform.execute(sql`
+            insert into officer_terms (organization_id, person_id, office, starts_on, org_unit_id)
+            values (${orgA}::uuid, ${targetPerson}::uuid, 'deacon', '2026-04-02', ${racy!.id}::uuid)
+          `);
+        } catch (err) {
+          caught = err;
+        }
+        const { pgErrorField } = await import("@/lib/db/errors");
+        expect(pgErrorField(caught, "constraint")).toBe("org_unit_target_archived");
+        expect(pgErrorField(caught, "code")).toBe("23514");
+      });
+
+      it("an open deacon term already in a district that is later archived still lists with orgUnitArchived true, and can be ended", async () => {
+        const platform = getPlatformDb();
+        const [late] = await platform
+          .insert(orgUnits)
+          .values({ organizationId: orgA, unitType: "district", name: "Late-archived District (test)" })
+          .returning({ id: orgUnits.id });
+        const deacon = await mkPersonAt(orgA, "Latedeacon");
+        const started = await startOfficerTerm(clerkPerson, orgA, grantingUserId, {
+          personId: deacon,
+          office: "deacon",
+          startsOn: "2026-04-03",
+          orgUnitId: late!.id,
+        });
+        if (started.kind !== "ok") throw new Error(`expected ok, got ${started.kind}`);
+        await platform.execute(sql`update org_units set archived_at = now() where id = ${late!.id}::uuid`);
+
+        const roster = await listOfficerRoster(clerkPerson, orgA, "deacon");
+        if (roster.kind !== "ok") throw new Error("expected ok");
+        expect(roster.data.find((e) => e.termId === started.data.termId)).toMatchObject({
+          orgUnitName: "Late-archived District (test)",
+          orgUnitArchived: true,
+        });
+
+        const ended = await endOfficerTerm(clerkPerson, orgA, grantingUserId, {
+          termId: started.data.termId,
+          endsOn: "2026-05-01",
+          endReason: "completed",
+        });
+        expect(ended.kind).toBe("ok");
+      });
     });
 
     it("the term's own people-and-office are the audit source: ending someone else's term cannot be mislabelled by the caller", async () => {

@@ -33,7 +33,9 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
   let getHouseholds: typeof import("./directory").getHouseholds;
   let getHouseholdDetail: typeof import("./directory").getHouseholdDetail;
   let getPersonDetail: typeof import("./directory").getPersonDetail;
-  let getParishRoster: typeof import("./directory").getParishRoster;
+  let deriveDeaconsByOrgUnit: typeof import("./directory").deriveDeaconsByOrgUnit;
+  let orgUnitFutureEnd: string; // F265: district whose deacon term has a FUTURE end date
+  let orgUnitNotStarted: string; // F265: district whose deacon term has not STARTED yet
   let countHouseholdDirectoryMembers: typeof import("./directory").countHouseholdDirectoryMembers;
   let withOrgContext: typeof import("@/lib/authz").withOrgContext;
   let getPlatformDb: typeof import("@/lib/db").getPlatformDb;
@@ -109,7 +111,7 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       getHouseholds,
       getHouseholdDetail,
       getPersonDetail,
-      getParishRoster,
+      deriveDeaconsByOrgUnit,
       countHouseholdDirectoryMembers,
     } = await import("./directory"));
     ({ withOrgContext } = await import("@/lib/authz"));
@@ -517,6 +519,21 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       .returning({ id: orgUnits.id });
     orgUnitOrgB = unitOrgB!.id;
 
+    // F265 fixtures: two districts, each with ONE deacon term whose dates make
+    // the old `ends_on is null` test wrong in opposite directions. The people
+    // are existing fixture people (endedMember's membership has ended, so they
+    // add no directory row); the terms are inserted with the others below.
+    const [unitFutureEnd] = await platform
+      .insert(orgUnits)
+      .values({ organizationId: orgA, unitType: "district", name: "Fixture F265 Future-End District" })
+      .returning({ id: orgUnits.id });
+    orgUnitFutureEnd = unitFutureEnd!.id;
+    const [unitNotStarted] = await platform
+      .insert(orgUnits)
+      .values({ organizationId: orgA, unitType: "district", name: "Fixture F265 Not-Started District" })
+      .returning({ id: orgUnits.id });
+    orgUnitNotStarted = unitNotStarted!.id;
+
     const [hhDeacon] = await platform
       .insert(households)
       .values({
@@ -609,6 +626,25 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
         startsOn: "2015-01-01",
         endsOn: "2019-12-31",
         endReason: "completed",
+      },
+      // F265: a term that is OPEN today but has a future end date (the old
+      // `ends_on is null` test dropped this deacon) ...
+      {
+        organizationId: orgA,
+        personId: elevatedPerson,
+        office: "deacon",
+        orgUnitId: orgUnitFutureEnd,
+        startsOn: "2020-01-01",
+        endsOn: "2099-12-31",
+      },
+      // ... and a term that has NOT STARTED yet (the old test counted it).
+      {
+        organizationId: orgA,
+        personId: deaconEnded,
+        office: "deacon",
+        orgUnitId: orgUnitNotStarted,
+        startsOn: "2099-01-01",
+        endsOn: null,
       },
       // orgUnitOrgB: its own active deacon, in a DIFFERENT organization —
       // the cross-org-isolation fixture.
@@ -1339,8 +1375,8 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     });
 
     it("includeHidden does not resurrect an ended member", async () => {
-      // getParishRoster exposes only household counts, not member ids, so the
-      // id-level check is getDirectory; the household-level one is getHouseholds.
+      // The id-level check is getDirectory; the household-level one is
+      // getHouseholds.
       const directory = await getDirectory(elevatedPerson, orgA, {
         includeHidden: true,
       });
@@ -1414,69 +1450,38 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     });
   });
 
-  describe("getParishRoster (Increment 4)", () => {
-    it("forbidden for a caller without directory.view_hidden — even one who holds plain directory.view", async () => {
-      const result = await getParishRoster(control, orgA);
-      expect(result).toEqual({ kind: "forbidden" });
-    });
-
-    it("forbidden for a caller whose directory.view_hidden grant has ENDED", async () => {
-      const result = await getParishRoster(revokedGrantPerson, orgA);
-      expect(result).toEqual({ kind: "forbidden" });
-    });
-
-    it("lists the active district with its deacon and household count", async () => {
-      const result = await getParishRoster(elevatedPerson, orgA);
-      expect(result.kind).toBe("ok");
-      if (result.kind !== "ok") return;
-      const active = result.parishes.find(
-        (p) => p.orgUnitId === orgUnitActive,
+  // The roster read moved to src/lib/parishes.ts (`getParishesOverview`,
+  // parishes.test.ts); the deacon derivation it shares stays here, exported.
+  describe("deriveDeaconsByOrgUnit - the half-open rule (F265)", () => {
+    async function derive(unitIds: string[]) {
+      return withOrgContext(elevatedPerson, orgA, (tx) =>
+        deriveDeaconsByOrgUnit(tx, orgA, unitIds),
       );
-      expect(active?.orgUnitName).toBe("Fixture North District");
-      expect(active?.deaconName).toBe("Thaddeus Okonkwo");
-      expect(active?.householdCount).toBe(1);
+    }
+
+    it("a deacon whose term is open today but has a FUTURE end date IS the district's deacon - regression for F265 (the old `ends_on is null` dropped them)", async () => {
+      const map = await derive([orgUnitFutureEnd]);
+      expect(map.get(orgUnitFutureEnd)).toBe("Esperanza Villareal");
     });
 
-    it("lists a vacant district with deaconName null but a correct household count", async () => {
-      const result = await getParishRoster(elevatedPerson, orgA);
-      if (result.kind !== "ok") throw new Error("expected ok");
-      const vacant = result.parishes.find(
-        (p) => p.orgUnitId === orgUnitVacant,
-      );
-      expect(vacant?.orgUnitName).toBe("Fixture South District");
-      expect(vacant?.deaconName).toBeNull();
-      expect(vacant?.householdCount).toBe(1);
+    it("a term that has NOT STARTED yet is not the district's deacon - regression for F265 (the old test counted it)", async () => {
+      const map = await derive([orgUnitNotStarted]);
+      expect(map.has(orgUnitNotStarted)).toBe(false);
     });
 
-    it("household counts never drift from getHouseholds()'s own count for the same district", async () => {
-      const rosterResult = await getParishRoster(elevatedPerson, orgA);
-      const householdsResult = await getHouseholds(elevatedPerson, orgA, {
-        includeHidden: true,
-      });
-      if (rosterResult.kind !== "ok" || householdsResult.kind !== "ok") {
-        throw new Error("expected ok");
-      }
-      const fromRoster = rosterResult.parishes.find(
-        (p) => p.orgUnitId === orgUnitActive,
-      )?.householdCount;
-      const fromHouseholds = householdsResult.households.filter(
-        (h) => h.householdId === householdWithDeacon,
-      ).length;
-      expect(fromRoster).toBe(fromHouseholds);
+    it("an open-ended current term still resolves, and an ended-only district is vacant (unchanged)", async () => {
+      const map = await derive([orgUnitActive, orgUnitVacant]);
+      expect(map.get(orgUnitActive)).toBe("Thaddeus Okonkwo");
+      expect(map.has(orgUnitVacant)).toBe(false);
     });
 
-    it("never surfaces another organization's district", async () => {
-      const result = await getParishRoster(elevatedPerson, orgA);
-      if (result.kind !== "ok") throw new Error("expected ok");
-      expect(
-        result.parishes.some((p) => p.orgUnitId === orgUnitOrgB),
-      ).toBe(false);
+    it("never resolves another organization's district", async () => {
+      const map = await derive([orgUnitOrgB]);
+      expect(map.size).toBe(0);
     });
 
-    it("does not swallow OrgAccessError into a result variant", async () => {
-      await expect(
-        getParishRoster(randomUUID(), orgA),
-      ).rejects.toMatchObject({ name: "OrgAccessError" });
+    it("an empty id list is an empty map, not an error", async () => {
+      expect((await derive([])).size).toBe(0);
     });
   });
 });
@@ -1486,7 +1491,7 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
  * status filter, pagination, and the two regressions that matter most: the
  * RLS boundary must still hold under a filtered/paginated query, and the
  * three narrower `queryDirectoryRows()` callers (`getHouseholdDetail`,
- * `getPersonDetail`, `getParishRoster`) must be completely unaffected when
+ * `getPersonDetail`) must be completely unaffected when
  * they don't ask for either option. A SEPARATE, self-contained fixture
  * (own org, own people) rather than extending the shared one above —
  * `org-features.test.ts`'s own precedent for exactly this reason: isolating

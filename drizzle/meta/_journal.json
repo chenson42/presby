@@ -456,6 +456,13 @@
       "when": 1787705573186,
       "tag": "0067_presby_public_events_calendar",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787791973186,
+      "tag": "0068_presby_parishes",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,7 @@ remove the worktree and Neon branch. Platform admin redesign Increment 2 Phase 3
 
 **Next free numbers:** DECISION-**262**, F**289**, migration **0071** (these are the platform-admin handoff's figures and already count this
 pipeline's DECISION-238-241, F250-F256 and 0067). Findings subsection `2ab` is now taken (public events calendar); the next is `2ac`.
+Parish management (0068, DECISION-242-245, F258-F265) took `2ac`; the next findings subsection is `2ad`. Its numbers were pre-assigned, so the figures above are unchanged.
 
 ---
 
@@ -52,9 +53,9 @@ deferred R1a, R1b, R1e, R1f, R7c and R7d).
 | Platform admin redesign, Increment 1 (`2026-10-25-platform-admin-redesign-inc1`) | `presby-padmin` | Integrated on its branch as **0.43.0** (Phase 6 SHIP WITH NOTES) | DECISION-251/252/253/255; F274/F276/F281; no migration; port 3530 | `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
 | Platform admin redesign, Increments 2 to 4 (`-inc2`, `-inc3`, `-inc4`) | `presby-padmin` | Not started | DECISION-254, 256; F277-F280; migration 0070 only if S3 is adopted | Increment 2 Phase 3 |
 | Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Phase 5, QA run 2 | migration 0067; DECISION-238-241; F250-F257; port 3500 | QA run 2 |
-| Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Phase 5, QA | migration 0068; DECISION-242-245; F258-F265; port 3510 | QA |
+| Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Integrated on its branch as **0.45.0** (Phase 6 SHIP WITH NOTES; merged `main` 0.44.1) | migration 0068; DECISION-242-245; F258-F265 (`docs/schema-design-2.md` section 2ac); port 3510 | Production runbook for 0068 (work-log), `/pre-push`, `/merge-pr`, then remove the worktree and Neon branch |
 | Community Increment 2b, sign-in invitations (`2026-10-22-founding-admin-directory`) | `presby-2b` | Phase 4, Batch A1 | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Batch A1 |
-| TOTP auto-submit | not recorded here | Phase 3 | see its work-log | Phase 3 |
+| TOTP auto-submit (`2026-10-25-totp-autosubmit`) | `presby-otp` | Integrated on its branch as **0.44.1** (Phase 6 SHIP WITH NOTES) | no migration; DECISION-257; F282; port 3560 | `/pre-push`, `/merge-pr`, then remove the worktree and Neon branch |
 | Developer portal | not recorded here | Phase 1 | see its work-log | Phase 1 |
 | Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Waits on 2b | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | after 2b |
 

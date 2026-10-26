@@ -181,9 +181,12 @@ menu is P1.
 - `/account/2fa` — TOTP enrolment, recovery codes
 - `/admin` — users and roles, feature flags, audit log, feedback triage,
   what's-new, email queue, **2FA policy** (per-congregation, DECISION-033)
-- `/developer` — generated schema reference. Requires
-  `users.is_platform_admin`, which **nothing currently seeds** — so it is
-  unreachable by every fixture above until you set that column by hand.
+- `/developer` — the developer portal (home, data model, documentation).
+  Requires `users.is_platform_admin`, which **nothing currently seeds** — so it
+  is unreachable by every fixture above until you set that column by hand.
+  `e2e/developer-portal.spec.ts` and `e2e/developer-2fa-gate.spec.ts` create
+  their own throwaway administrators (`example.invalid`) and remove them
+  afterwards.
 
 ---
 

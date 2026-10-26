@@ -5,7 +5,8 @@ import {
   loadDescriptions,
   moduleSlug,
 } from "@/lib/dev-docs";
-import { requirePlatformAdmin } from "../../guard";
+import { requireDeveloper } from "../../guard";
+import { GateState } from "../../gate-state";
 import "../../developer.css";
 
 export async function generateMetadata({
@@ -28,7 +29,17 @@ export default async function TableDetail({
   params: Promise<{ table: string }>;
 }) {
   const { table } = await params;
-  await requirePlatformAdmin(`/developer/tables/${table}`);
+  const gate = await requireDeveloper(
+    `/developer/tables/${encodeURIComponent(table)}`,
+  );
+  if (gate !== "ok") {
+    return (
+      <GateState
+        gate={gate}
+        retryHref={`/developer/tables/${encodeURIComponent(table)}`}
+      />
+    );
+  }
 
   const tables = buildSchemaDocs(await loadDescriptions());
   const t = tables.find((x) => x.name === table);
@@ -45,14 +56,14 @@ export default async function TableDetail({
     <div className="reg">
       <div className="reg__inner">
         <nav className="reg__crumbs">
-          <Link href="/developer">Data model</Link>
+          <Link href="/developer/data-model">Data model</Link>
           <span aria-hidden>/</span>
           <Link href={`/developer/erd/${moduleSlug(t.module)}`}>{t.module}</Link>
         </nav>
 
         <header className="reg__masthead">
           <p className="reg__eyebrow">
-            {t.tenantScoped ? "tenant-scoped · rls enforced" : "global · not tenant-isolated"}
+            {t.tenantScoped ? "has organization_id" : "no organization_id"}
           </p>
           <h1 className="reg__title reg__title--mono">{t.name}</h1>
           {t.description ? (
@@ -62,8 +73,9 @@ export default async function TableDetail({
           ) : (
             <p className="reg__standfirst">
               <em>
-                No description. Add one with{" "}
-                <code>COMMENT ON TABLE {t.name} IS &apos;…&apos;</code>.
+                No description yet. Add one with{" "}
+                <code>COMMENT ON TABLE {t.name} IS &apos;…&apos;</code> in the
+                migration.
               </em>
             </p>
           )}

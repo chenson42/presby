@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import { cachedIsPlatformAdmin } from "@/lib/nav-data";
-import { AdminHeader } from "@/components/admin-portal/admin-header";
-import { AdminNav } from "@/components/admin-portal/admin-nav";
+import { ConsoleHeader } from "@/components/shared/console-header";
+import { ConsoleNav } from "@/components/shared/console-nav";
 import { visibleAdminNav } from "./visible-nav";
 
 /**
@@ -48,14 +48,22 @@ export default async function AdminLayout({
 
   return (
     <div className="min-h-screen">
-      <AdminHeader
+      <ConsoleHeader
         groups={groups}
+        consoleLabel="Platform admin"
+        idPrefix="admin-nav"
+        mainId="admin-main"
         name={session.user.name}
         email={session.user.email}
-        isPlatformAdmin={isPlatformAdmin}
+        canAccessAdmin
+        canAccessDeveloper={isPlatformAdmin}
       />
       <div className="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)]">
-        <AdminNav groups={groups} />
+        <ConsoleNav
+          groups={groups}
+          consoleLabel="Platform admin"
+          idPrefix="admin-nav"
+        />
         <main id="admin-main" tabIndex={-1} className="min-w-0 p-4 outline-none sm:p-8">
           {children}
         </main>

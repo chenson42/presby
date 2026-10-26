@@ -4,6 +4,35 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-261 — The second-consumer trigger of DECISION-253 fires: the collapsing console nav and header move to `src/components/shared/` with required props.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-developer-portal-inc1` (v0.46.0, no migration)
+
+- **Promotion.** `AdminNavLinks`, `AdminNav`, `AdminMobileMenu` and `AdminHeader` become `ConsoleNavLinks`, `ConsoleNav`, `ConsoleMobileMenu` and `ConsoleHeader`. The console label, the id prefix, the main-landmark id and `canAccessAdmin` are required props with no defaults, so each caller states them; `/admin` passes the strings it used to hard-code. The Menu button does not render when `groups` is empty. A nav item may carry `alsoActiveOn` prefixes so a section whose pages live under other paths still lights.
+- **`AdminForbidden`** stays in `admin-portal/` (DECISION-040: it must not become the `(org)` miss response) and is reused by import; its doc comment names the second platform consumer. A scan pins that `(org)` and `(public)` never import `admin-portal/`.
+- **Nav registry.** The developer registry is pure data in `src/lib/developer-portal/nav.ts` and is unfiltered. The portal never appears in the admin left nav (DECISION-044); the way back to `/admin` is the avatar menu, gated on `canAccessAdmin`.
+- **`.reg` palette.** It stays on the data-model pages with a tracked follow-up (Q8).
+- **Pre-approved fallback.** If a padmin Phase 4 holds the files, parameterise in place with the same required props and record the promotion in `docs/TODO.md`.
+- **Revisit if** a third console needs a different shell shape (then lift the layout composition, not just the pieces).
+
+---
+
+**DECISION-258 — The developer portal is an internal engineering portal in the existing `(admin)/developer` tree, with stable URLs, provenance labels, one gate, two-layer 2FA and no `loading.tsx`.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-developer-portal-inc1` (v0.46.0, no migration)
+
+- **Information architecture.** Home, Data model, API, Rules, Access and Documentation, each carrying a provenance label in text and icon: `Generated`, `Tested list`, `Written by hand`, `Planned`. Increment 1 ships Home, Data model and Documentation; the rest arrive with their pages. The nav registry is pure data in `src/lib/developer-portal/nav.ts`.
+- **Stable URLs.** `/developer/tables/[table]`, `/developer/erd/[module]` and `/developer/schema.json` keep their URLs; the former index moves to `/developer/data-model`, and `/developer` is the home.
+- **Placeholders.** One Documentation placeholder page of labelled rows, each naming where the material lives today. No empty routes and no status route.
+- **One gate, three outcomes.** `requireDeveloper` (pages) and `checkDeveloperApiRequest` (the route handler) both call the pure `decideDeveloperAccess`, which yields `ok`, `forbidden` or `unavailable` (plus signed-out and two-factor redirects). Every page and handler gates before it parses params or calls `notFound()`, so a non-entitled viewer gets one answer for every URL. A read failure is `unavailable` and fails closed; there is no silent redirect to `/home`. `forbidden` and `unavailable` render with HTTP 200 (a platform page has no enumeration surface).
+- **Layout is chrome only.** It never gates; it renders the nav only when its own live read is true and always renders `children`. It renders bare children for a viewer with no session or an unverified required second factor.
+- **2FA in two layers.** The proxy gates `/developer` by segment-boundary prefix (`/developer` and `/developer/…`, not `/developerx`), before the `ADMIN_ROLE` shortcut; the page gate repeats the check; `schema.json` answers JSON `401`, `403 two_factor_required`, `403 forbidden` and `503 unavailable` itself, all `no-store`.
+- **No `loading.tsx` anywhere under `(admin)/developer`**, which applies DECISION-251: `tables/[table]` and `erd/[module]` call `notFound()`. `error.tsx` and `not-found.tsx` render calm copy and never `error.message`. Pinned by `shell-boundaries.test.ts`.
+- **Internal for good.** `/developer` is never made public. A future public developer surface is a separate public route on a platform host, never this tree made public.
+- **Revisit if** a section needs streaming badly enough to justify a route group whose descendants never call `notFound()`.
+
+---
+
 **DECISION-245 — District assignment is overwritten and audited, not kept as dated history; concurrency, lock order and audit keys.**
 
 **Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)

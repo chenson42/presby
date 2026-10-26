@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * Filter for 57 tables. A reviewer arrives looking for one thing — "where does
+ * Filter for the whole data model. A reviewer arrives looking for one thing — "where does
  * roll status live", "what touches consent" — and scrolling the whole register
  * to find it is the difference between a page you read and one you skim past.
  *
@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 export function TableFilter({ total }: { total: number }) {
   const [q, setQ] = useState("");
   const countRef = useRef<HTMLSpanElement>(null);
+  const emptyRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     const needle = q.trim().toLowerCase();
@@ -42,25 +43,35 @@ export function TableFilter({ total }: { total: number }) {
         ? `${visible} of ${total}`
         : `${total} tables`;
     }
+
+    // Filtered to nothing: say so, rather than leave a blank page.
+    if (emptyRef.current) {
+      emptyRef.current.hidden = visible !== 0;
+    }
   }, [q, total]);
 
   return (
-    <div className="reg__filter">
-      <label className="reg__filterLabel" htmlFor="reg-filter">
-        Find
-      </label>
-      <input
-        id="reg-filter"
-        type="search"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="table, column, or anything in a description"
-        className="reg__filterInput"
-        autoComplete="off"
-      />
-      <span className="reg__filterCount" aria-live="polite" ref={countRef}>
-        {total} tables
-      </span>
-    </div>
+    <>
+      <div className="reg__filter">
+        <label className="reg__filterLabel" htmlFor="reg-filter">
+          Find
+        </label>
+        <input
+          id="reg-filter"
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="table, column, or anything in a description"
+          className="reg__filterInput"
+          autoComplete="off"
+        />
+        <span className="reg__filterCount" aria-live="polite" ref={countRef}>
+          {total} tables
+        </span>
+      </div>
+      <p className="reg__empty" role="status" ref={emptyRef} hidden>
+        No table matches that. Clear the search to see all {total}.
+      </p>
+    </>
   );
 }

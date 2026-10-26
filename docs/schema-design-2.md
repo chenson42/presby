@@ -1932,6 +1932,24 @@ Pipeline `2026-10-25-platform-admin-redesign` (Increment 1 shipped as v0.43.0; n
 
 **F281 (low, defense in depth, fixed) — `/admin/docs` was gated only by the proxy (`src/proxy.ts:42`), and `/admin/design-system` has no key at all.** The release-notes page checked nothing itself, so its protection was one rule in one file. **Closed by** a page-level `ADMIN_RELEASE_NOTES` check on `/admin/docs` with a failing-first test; the proxy already enforced the same key, so this is not a change in who can read it. `/admin/design-system` has no permission key of its own and is reachable by any holder of the admin door, including a door-only viewer; that is documented as door-level in `nav.ts` and the page header rather than gated, because it is a reference page with no tenant data (acceptable drift, Phase 6).
 
+## 2ab. Public events calendar — findings (F250–F256)
+
+Pipeline `2026-10-25-public-events-calendar` (events Increment 4; v0.44.0; migration 0067; DECISION-238–241). F250–F253 were found at Phase 2 and F254–F256 at Phase 3; F257 was reserved and returned unused. Phase 6 verdict SHIP WITH NOTES. The migration is additive: one default-false column on `events`, one CHECK and one `SECURITY DEFINER` function. No new table, policy or table grant.
+
+**F250 (open, tracked as a bug-fix pipeline) — `presby_public_giving_config` (0055) checks the `org_portal.giving` toggle row but not the category axis.** `/o/<slug>/admin/features` tells an administrator "Turn on Giving above to enable this" when the Giving category is off, while the public give page keeps serving. Latent while `org_portal.feature_categories` is off. DECISION-238 keeps `presby_public_events_calendar` from repeating it by reading the axis inside the function; the giving function stays as it is. Fix: compose the axis inside the giving function the same way and add a differential test against `orgFeatureEnabledInTx`. Recorded in `docs/TODO.md`.
+
+**F251 (closed) — `updateEvent` wrote `isPublic` straight from input.** Once the CHECK exists, unticking "open to everyone" on a listed event would have raised a constraint error on a routine edit. The UPDATE now derives `website_listed := website_listed and is_public` (`deriveListed`). Pinned by a red-then-green regression test (T13).
+
+**F252 (closed) — `extendSeriesPattern` copied `isPublic` from the series parent.** Copying the website column the same way would have re-listed occurrences after a "this and all later" unlisting, because the parent row is usually in the past and still listed. New occurrences now inherit from the latest non-cancelled occurrence AND the parent's `is_public` (`inheritedListing`). Pinned red-then-green (T13).
+
+**F253 (open, `paper`) — `presby_app` and `presby_platform` hold DELETE on `events`.** This contradicts the all-deletes-are-soft rule: a hard delete would remove a website-listed event with no unlisting audit row. No code path deletes events today. Fix: revoke DELETE and add a grant-shape assertion to `scripts/test-rls.sql`, or record why check-in needs it. Recorded in `docs/TODO.md`.
+
+**F254 (accepted, `paper`) — cancelling an event leaves `website_listed` true.** The read filters `cancelled_at is null` and no code path clears `cancelled_at`, so nothing can reappear. If an "uncancel" is ever added it must re-decide the flag. Pinned by T1 (a cancelled event is absent).
+
+**F255 (accepted, tracked) — marking is allowed while the organization toggle is off, and turning the toggle on shows every marked event at once with no confirmation.** Mitigated by the form hint and the release note. Closing it needs a count read by an `org_features.manage` holder (a definer bare count, as `presby_giving_active_schedule_count` does) and an on-direction dialog, which the off-warning mechanism does not support today. Recorded in `docs/TODO.md`.
+
+**F256 (accepted, `paper`) — the title, description and location length limits (200, 2000, 200) are enforced only in `src/lib/events.ts`.** The table has no length CHECK. The definer clips to the same limits, so a direct writer cannot inflate the public payload. Pinned by T1 (clip).
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

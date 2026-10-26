@@ -105,4 +105,35 @@ describe("ExtendSeriesForm", () => {
       "A series can have at most 52 occurrences in total (this series already has 50).",
     );
   });
+  it("says nothing about the website unless new events would be put on it", () => {
+    render(<ExtendSeriesForm slug="alder-creek" parentEventId="parent-1" currentPattern="weekly" />);
+    expect(screen.queryByText(/marked for the website/i)).toBeNull();
+  });
+
+  it("when new events would be marked for the website, says so - generic first, then with the typed count, singular and plural", () => {
+    render(
+      <ExtendSeriesForm
+        slug="alder-creek"
+        parentEventId="parent-1"
+        currentPattern="weekly"
+        inheritsOnExtend
+      />,
+    );
+    expect(
+      screen.getByText("New events will be marked for the website, like the latest one in this series."),
+    ).toBeTruthy();
+    const count = screen.getByLabelText(/additional occurrences to add/i);
+    fireEvent.change(count, { target: { value: "4" } });
+    expect(
+      screen.getByText("4 new events will be marked for the website, like the latest one in this series."),
+    ).toBeTruthy();
+    fireEvent.change(count, { target: { value: "1" } });
+    expect(
+      screen.getByText("1 new event will be marked for the website, like the latest one in this series."),
+    ).toBeTruthy();
+    fireEvent.change(count, { target: { value: "abc" } });
+    expect(
+      screen.getByText("New events will be marked for the website, like the latest one in this series."),
+    ).toBeTruthy();
+  });
 });

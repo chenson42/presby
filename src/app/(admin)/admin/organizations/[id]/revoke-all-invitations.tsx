@@ -1,6 +1,6 @@
 "use client";
 
-import { ORG_SENT_PANEL_COPY } from "@/lib/onboarding/sign-in-copy";
+import { DESIGNATION_TAKEDOWN_COPY, ORG_SENT_PANEL_COPY } from "@/lib/onboarding/sign-in-copy";
 import { RevokeAllControl } from "./revoke-all-control";
 
 /**
@@ -15,7 +15,9 @@ import { RevokeAllControl } from "./revoke-all-control";
  * Community Increment 2b: the button now says which invitations it means,
  * "Cancel all open designation invitations ({n})" (Copy, platform panel), because
  * a second lever, in `org-sent-invitations.tsx`, cancels the sign-in invitations
- * the congregation sent. The dialog's explanation is unchanged.
+ * the congregation sent. QA run 1 (c): the heading, count line, explanation, dialog
+ * title and body all name the designation scope too (`DESIGNATION_TAKEDOWN_COPY`),
+ * since the congregation's own sign-in invitations survive this takedown.
  */
 export function RevokeAllInvitations({
   organizationId,
@@ -32,20 +34,17 @@ export function RevokeAllInvitations({
       className="mt-8 rounded-lg border border-border bg-card p-4 text-card-foreground"
     >
       <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-        Open invitations
+        {DESIGNATION_TAKEDOWN_COPY.heading}
       </h2>
       <p className="mt-1 text-sm">
-        {openCount === 1
-          ? "This organization has 1 open invitation."
-          : `This organization has ${openCount} open invitations.`}{" "}
-        Revoke them all at once if something looks wrong.
+        {DESIGNATION_TAKEDOWN_COPY.countLine(openCount)} {DESIGNATION_TAKEDOWN_COPY.explanation}
       </p>
       <RevokeAllControl
         organizationId={organizationId}
         scope="designations"
         buttonLabel={ORG_SENT_PANEL_COPY.designationsButton(openCount)}
-        dialogTitle="Revoke every open invitation?"
-        dialogDescription={`Every open invitation for ${organizationName} stops working immediately, whoever it was sent to. This cannot be undone; you can send new invitations afterwards.`}
+        dialogTitle={DESIGNATION_TAKEDOWN_COPY.dialogTitle}
+        dialogDescription={DESIGNATION_TAKEDOWN_COPY.dialogBody(organizationName)}
       />
     </section>
   );

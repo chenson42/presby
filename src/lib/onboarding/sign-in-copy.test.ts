@@ -10,7 +10,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CONNECT_OUTLOOK_COPY,
+  DESIGNATION_TAKEDOWN_COPY,
   ORG_SENT_PANEL_COPY,
+  REVOKE_ALL_RESULT_COPY,
   SESSION_BANNER_COPY,
   SIGN_IN_ACTION_CODES,
   SIGN_IN_CARD_COPY,
@@ -108,7 +110,7 @@ describe("the card (heading 'Sign in to PresbyPortal')", () => {
     expect(SIGN_IN_CARD_COPY.connectedUnknown("Wendeline")).toBe("Wendeline is connected to a sign-in.");
     expect(SIGN_IN_CARD_COPY.connectedSupport).toBe("To change who signs in as this person, send us a support ticket.");
     expect(SIGN_IN_CARD_COPY.none("Wendeline", "w@example.invalid")).toBe(
-      "Invite Wendeline to sign in. We'll email w@example.invalid with a link that works once. Accepting lets them sign in as themselves. It doesn't change what they can do here.",
+      "Invite Wendeline to sign in. We'll email w@example.invalid with a link that works once. Accepting lets them sign in as themselves, and any role or seat they hold here then takes effect.",
     );
     expect(SIGN_IN_CARD_COPY.noAddress("Wendeline")).toBe(
       "Wendeline has no email address on file. Add one under Contact & address, then come back.",
@@ -297,6 +299,35 @@ describe("the /invite page for a sign_in invitation, and the platform panel", ()
     );
     expect(ORG_SENT_PANEL_COPY.designationsButton(2)).toBe("Cancel all open designation invitations (2)");
   });
+
+  it("the designation takedown (QA run 1 (c)): every string names its scope", () => {
+    const c = DESIGNATION_TAKEDOWN_COPY;
+    expect(c.heading).toBe("Open designation invitations");
+    expect(c.countLine(1)).toBe("This organization has 1 open designation invitation.");
+    expect(c.countLine(3)).toBe("This organization has 3 open designation invitations.");
+    expect(c.explanation).toBe(
+      'These are the founding-administrator and treasurer invitations a PresbyPortal administrator sent. Revoke them all at once if something looks wrong. Sign-in invitations the congregation sent are not affected; they are handled under "Sign-in invitations sent by this organization."',
+    );
+    expect(c.dialogTitle).toBe("Revoke every open designation invitation?");
+    expect(c.dialogBody("Alder Creek Presbyterian Church")).toBe(
+      "Every open founding-administrator and treasurer invitation for Alder Creek Presbyterian Church stops working immediately. Sign-in invitations the congregation sent are not affected. This cannot be undone; you can send new invitations afterwards.",
+    );
+    // The pointer is the panel's own heading, interpolated, so the two cannot drift.
+    expect(c.explanation).toContain(ORG_SENT_PANEL_COPY.heading);
+  });
+
+  it("the revoke-all result, per scope (a copy of one into the other fails)", () => {
+    expect(REVOKE_ALL_RESULT_COPY.designations).toEqual({
+      message: "All open designation invitations were revoked. Sign-in invitations sent by the congregation were not changed.",
+      toast: "All open designation invitations revoked.",
+    });
+    expect(REVOKE_ALL_RESULT_COPY.org_sent).toEqual({
+      message: "All open sign-in invitations were revoked.",
+      toast: "All open sign-in invitations revoked.",
+    });
+    expect(REVOKE_ALL_RESULT_COPY.org_sent.message).not.toContain("designation");
+    expect(REVOKE_ALL_RESULT_COPY.org_sent.toast).not.toContain("designation");
+  });
 });
 
 describe("what the copy never claims", () => {
@@ -313,7 +344,7 @@ describe("what the copy never claims", () => {
         }
       } else if (v && typeof v === "object") Object.values(v).forEach(walk);
     };
-    [SIGN_IN_CARD_COPY, CONNECT_OUTLOOK_COPY, SIGN_IN_DIALOG_COPY, SESSION_BANNER_COPY, SIGN_IN_INVITE_COPY, ORG_SENT_PANEL_COPY].forEach(walk);
+    [SIGN_IN_CARD_COPY, CONNECT_OUTLOOK_COPY, SIGN_IN_DIALOG_COPY, SESSION_BANNER_COPY, SIGN_IN_INVITE_COPY, ORG_SENT_PANEL_COPY, DESIGNATION_TAKEDOWN_COPY, REVOKE_ALL_RESULT_COPY].forEach(walk);
     for (const code of Object.keys(SIGN_IN_REFUSAL_COPY)) out.push(signInRefusalMessage(code as keyof typeof SIGN_IN_REFUSAL_COPY, { name: "N", congregation: "C", minutes: 2 }));
     return out;
   };

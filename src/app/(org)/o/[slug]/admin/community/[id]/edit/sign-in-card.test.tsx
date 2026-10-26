@@ -118,6 +118,9 @@ describe("SignInCard - the states", () => {
   it("none, with an address: the invite line, the hedged connect line and Send invitation", () => {
     renderCard(card());
     expect(text()).toContain(SIGN_IN_CARD_COPY.none(NAME, ADDRESS));
+    // Literals, not the constant: connecting activates whatever the record carries (QA run 1 (b)).
+    expect(text()).toContain("any role or seat they hold here then takes effect");
+    expect(text()).not.toContain("doesn't change what they can do");
     expect(text()).toContain(CONNECT_OUTLOOK_COPY.by_sign_in(NAME, ADDRESS));
     expect(button("Send invitation")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /cancel invitation/i })).toBeNull();
@@ -126,6 +129,8 @@ describe("SignInCard - the states", () => {
   it("revoked reads like none", () => {
     renderCard(card({ state: "revoked" }));
     expect(text()).toContain(SIGN_IN_CARD_COPY.none(NAME, ADDRESS));
+    expect(text()).toContain("any role or seat they hold here then takes effect");
+    expect(text()).not.toContain("doesn't change what they can do");
     expect(button("Send invitation")).toBeTruthy();
   });
 

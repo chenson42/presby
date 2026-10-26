@@ -10,7 +10,8 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 
 const mockRevokeAll = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({ revokeAllInvitationsAction: (fd: FormData) => mockRevokeAll(fd) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toastSuccess = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { success: (...a: unknown[]) => toastSuccess(...a), error: vi.fn() } }));
 
 import type { OrgSentSummary } from "@/lib/onboarding/issue";
 import { ORG_SENT_PANEL_COPY, SIGN_IN_CARD_COPY } from "@/lib/onboarding/sign-in-copy";
@@ -19,6 +20,7 @@ import { OrgSentInvitations } from "./org-sent-invitations";
 afterEach(() => {
   cleanup();
   mockRevokeAll.mockReset();
+  toastSuccess.mockReset();
 });
 
 function summary(over: Partial<OrgSentSummary> = {}): OrgSentSummary {
@@ -59,7 +61,9 @@ describe("OrgSentInvitations", () => {
     const fd = mockRevokeAll.mock.calls[0][0] as FormData;
     expect(fd.get("organizationId")).toBe("org-1");
     expect(fd.get("scope")).toBe("org_sent");
-    expect(screen.getByRole("status").textContent).toMatch(/all open invitations were revoked/i);
+    expect(screen.getByRole("status").textContent).toBe("All open sign-in invitations were revoked.");
+    expect(screen.getByRole("status").textContent).not.toContain("designation");
+    expect(toastSuccess).toHaveBeenCalledWith("All open sign-in invitations revoked.");
   });
 
   it("offers no takedown when nothing is revocable", () => {

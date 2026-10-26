@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { REVOKE_ALL_RESULT_COPY } from "@/lib/onboarding/sign-in-copy";
 import type { RevokeAllScope } from "@/lib/onboarding/sign-in-types";
 import { revokeAllInvitationsAction } from "./actions";
 
@@ -50,8 +51,9 @@ export function RevokeAllControl({
       fd.set("scope", scope);
       const outcome = await revokeAllInvitationsAction(fd);
       if (outcome.ok) {
-        setMessage({ ok: true, text: "All open invitations were revoked." });
-        toast.success("All open invitations revoked.");
+        // Per scope: the message names what was and was not revoked (QA run 1 (c)).
+        setMessage({ ok: true, text: REVOKE_ALL_RESULT_COPY[scope].message });
+        toast.success(REVOKE_ALL_RESULT_COPY[scope].toast);
       } else {
         setMessage({ ok: false, text: outcome.error });
         toast.error(outcome.error);

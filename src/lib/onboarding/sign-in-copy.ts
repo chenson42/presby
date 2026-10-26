@@ -18,6 +18,7 @@
  */
 import type { DeliveryState } from "./status";
 import {
+  type RevokeAllScope,
   type SessionRowState,
   type SignInBlockOutcome,
   type SignInMarker,
@@ -117,7 +118,7 @@ export const SIGN_IN_CARD_COPY = {
   connectedThroughSignIn: (date: string) => `Connected through sign-in on ${date}.`,
   connectedThroughInvitation: (date: string) => `Connected through an invitation on ${date}.`,
   none: (name: string, address: string) =>
-    `Invite ${name} to sign in. We'll email ${address} with a link that works once. Accepting lets them sign in as themselves. It doesn't change what they can do here.`,
+    `Invite ${name} to sign in. We'll email ${address} with a link that works once. Accepting lets them sign in as themselves, and any role or seat they hold here then takes effect.`,
   noAddress: (name: string) =>
     `${name} has no email address on file. Add one under Contact & address, then come back.`,
   pending: (address: string, sent: string, expires: string) =>
@@ -314,3 +315,36 @@ export const ORG_SENT_PANEL_COPY = {
     "This stops every open sign-in link this congregation has sent. People who already accepted keep their access. The congregation can send new ones.",
   designationsButton: (n: number) => `Cancel all open designation invitations (${n})`,
 } as const;
+
+/**
+ * The designation takedown on the platform organization page (QA run 1 (c)):
+ * every string names its scope, because the control posts `scope=designations`
+ * and the congregation's own sign-in invitations survive it. The pointer to the
+ * other panel is interpolated from `ORG_SENT_PANEL_COPY.heading` so the two
+ * cannot drift.
+ */
+export const DESIGNATION_TAKEDOWN_COPY = {
+  heading: "Open designation invitations",
+  countLine: (n: number) =>
+    n === 1 ? "This organization has 1 open designation invitation." : `This organization has ${n} open designation invitations.`,
+  explanation: `These are the founding-administrator and treasurer invitations a PresbyPortal administrator sent. Revoke them all at once if something looks wrong. Sign-in invitations the congregation sent are not affected; they are handled under "${ORG_SENT_PANEL_COPY.heading}."`,
+  dialogTitle: "Revoke every open designation invitation?",
+  dialogBody: (organizationName: string) =>
+    `Every open founding-administrator and treasurer invitation for ${organizationName} stops working immediately. Sign-in invitations the congregation sent are not affected. This cannot be undone; you can send new invitations afterwards.`,
+} as const;
+
+/**
+ * What the shared revoke-all control reports on success, per scope. Typed on
+ * `RevokeAllScope`, so a third scope is a compile error rather than a message
+ * borrowed from the wrong lever.
+ */
+export const REVOKE_ALL_RESULT_COPY: Record<RevokeAllScope, { message: string; toast: string }> = {
+  designations: {
+    message: "All open designation invitations were revoked. Sign-in invitations sent by the congregation were not changed.",
+    toast: "All open designation invitations revoked.",
+  },
+  org_sent: {
+    message: "All open sign-in invitations were revoked.",
+    toast: "All open sign-in invitations revoked.",
+  },
+};

@@ -38,11 +38,12 @@ import { setPostingStatusAction } from "./actions";
  * disabled and the note says what to do instead (Copy S6), rather than letting the person
  * walk into the refusal.
  *
- * `prepare` lets the form save unsaved edits first, for the two changes that make the
- * posting public (Publish, Reopen), and hands back the version to publish: otherwise a
- * person who typed a change and clicked Publish would publish the SAVED text and lose
- * the rest on refresh. It returns null when the save failed (it has already said why).
- * Close and Discard never save.
+ * `prepare` lets the form save unsaved edits first, for Publish, Reopen and Close, and
+ * hands back the version to change: otherwise a person who typed a change and clicked
+ * one of them would lose it on the refresh that follows. It returns null when the save
+ * failed (it has already said why), and then nothing changes status. Discard never saves:
+ * the edits go with the discarded draft. `title` is the form's LIVE title, the one the
+ * save-first step will write, so the dialog names what will actually be published.
  *
  * `disabled` until the page has hydrated (DECISION-159): a pre-hydration click does
  * nothing and reads as a broken button. A stale version (somebody else changed the
@@ -124,12 +125,12 @@ function ChangeDialog({
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState(false);
   const copy = describe(change, title);
-  const makesPublic = copy.to === "published";
+  const savesFirst = change !== "discard";
 
   async function applyChange() {
     setPending(true);
     let useVersion = version;
-    if (makesPublic && prepare) {
+    if (savesFirst && prepare) {
       const prepared = await prepare();
       if (prepared === null) {
         setPending(false);

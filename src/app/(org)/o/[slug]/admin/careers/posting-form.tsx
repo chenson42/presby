@@ -89,8 +89,8 @@ function defaultsFor(posting: PostingRow | undefined): PostingFormValues {
  * the title on the server; the field's placeholder shows the one it will use.
  *
  * Status changes (Publish, Close, Reopen, Discard) live in `StatusControls`, rendered
- * under the form. `prepare` hands it a save-first step for the two changes that make the
- * posting public.
+ * under the form. `prepare` hands it a save-first step for every change but Discard (the
+ * edits of a discarded draft go with it), and the dialogs name the title as typed.
  */
 export function PostingForm({
   slug,
@@ -169,7 +169,7 @@ export function PostingForm({
     }
   }
 
-  /** For Publish and Reopen: save any unsaved edits first, then hand back the version to change. */
+  /** For Publish, Reopen and Close: save any unsaved edits first, then hand back the version to change. */
   async function prepare(): Promise<number | null> {
     if (!posting) return null;
     if (!isDirty) return posting.version;
@@ -368,7 +368,7 @@ export function PostingForm({
           <StatusControls
             slug={slug}
             postingId={posting.id}
-            title={posting.title}
+            title={title}
             version={posting.version}
             status={posting.status}
             neverPublished={posting.status === "closed" && posting.firstPublishedAt === null}

@@ -14,13 +14,14 @@ import { PostingStatusBadge } from "../postings-list";
  * badge, "View on your website" while the public can read it, and the status controls
  * (inside the form component, which saves unsaved edits before a Publish or Reopen).
  *
- * `postingId` comes from the URL and is validated as a GUID before any query; a
- * malformed one is the same "couldn't be found" state as an id in another organization
+ * `postingId` comes from the URL and is validated as a GUID before any query (a malformed
+ * one is replaced by the nil GUID, after the gate has run); the result is the same "couldn't be found" state as an id in another organization
  * (RLS keeps that organization's rows out, so the lib returns `not_found` for both).
  * The form is keyed on `id-version`: a save or status change re-renders this page and
  * REMOUNTS the form on the new version with fresh defaults.
  */
 const guid = z.guid();
+const NIL_GUID = "00000000-0000-0000-0000-000000000000";
 
 export default async function EditPostingPage({
   params,
@@ -35,10 +36,14 @@ export default async function EditPostingPage({
 
   let result;
   try {
-    // A malformed id never reaches the database; the gate still runs on the list read below.
-    result = guid.safeParse(postingId).success
-      ? await getPosting(org.personId, org.organizationId, postingId)
-      : ({ kind: "not_found" } as const);
+    // The gate (toggle, then permission) runs first for EVERY id, so a member who may not see
+    // careers gets S1/S2 rather than "couldn't be found". A malformed id is swapped for the nil
+    // GUID, which no row has: the database never sees the raw text and the answer is not_found.
+    result = await getPosting(
+      org.personId,
+      org.organizationId,
+      guid.safeParse(postingId).success ? postingId : NIL_GUID,
+    );
   } catch (err) {
     if (err instanceof OrgAccessError) throw err;
     return <CareersLoadError slug={slug} />;

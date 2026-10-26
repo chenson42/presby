@@ -129,7 +129,7 @@ describe("StatusControls - T21", () => {
     expect(toastError).toHaveBeenCalledWith(STALE_MESSAGE, expect.objectContaining({ action: expect.objectContaining({ label: "Reload" }) }));
   });
 
-  it("Publish and Reopen save unsaved edits first (prepare), and publish the version it returns; Close does not", async () => {
+  it("Publish, Reopen and Close save unsaved edits first (prepare) and change the version it returns; Discard does not", async () => {
     const prepare = vi.fn().mockResolvedValue(9);
     mockSetStatus.mockResolvedValue({ ok: true, data: { status: "published", version: 10 } });
     render(<StatusControls {...base} prepare={prepare} />);
@@ -145,6 +145,15 @@ describe("StatusControls - T21", () => {
     render(<StatusControls {...base} status="published" prepare={prepare} />);
     fireEvent.click(screen.getByRole("button", { name: "Close this opening" }));
     await confirm("Yes, close it");
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(mockSetStatus).toHaveBeenCalledWith("alder-creek", { id: "id-1", version: 9, to: "closed" });
+    cleanup();
+
+    prepare.mockClear();
+    mockSetStatus.mockClear();
+    render(<StatusControls {...base} prepare={prepare} />);
+    fireEvent.click(screen.getByRole("button", { name: "Discard this draft" }));
+    await confirm("Yes, discard it");
     expect(prepare).not.toHaveBeenCalled();
     expect(mockSetStatus).toHaveBeenCalledWith("alder-creek", { id: "id-1", version: 4, to: "closed" });
   });

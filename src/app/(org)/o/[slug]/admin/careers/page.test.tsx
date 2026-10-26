@@ -210,11 +210,25 @@ describe("NewPostingPage - T20", () => {
 describe("EditPostingPage - T20", () => {
   const editParams = (postingId: string) => Promise.resolve({ slug: "alder-creek", postingId });
 
-  it("a malformed id is the not-found state and never reaches the database", async () => {
+  it("a malformed id is the not-found state and the database never sees it", async () => {
     signedIn();
+    getPosting.mockResolvedValue({ kind: "not_found" });
     render(await EditPostingPage({ params: editParams("not-a-guid") }));
     expect(screen.getByTestId("careers-not-found")).toBeTruthy();
-    expect(getPosting).not.toHaveBeenCalled();
+    for (const call of getPosting.mock.calls) expect(call[2]).not.toBe("not-a-guid");
+  });
+
+  it("a malformed id still runs the gate: toggle off is S1 and no permission is S2, not not-found - regression for the skipped gate", async () => {
+    signedIn();
+    getPosting.mockResolvedValue({ kind: "feature_off", canManageFeatures: false });
+    render(await EditPostingPage({ params: editParams("not-a-guid") }));
+    expect(getPosting).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("careers-not-found")).toBeNull();
+    cleanup();
+    getPosting.mockResolvedValue({ kind: "forbidden" });
+    render(await EditPostingPage({ params: editParams("not-a-guid") }));
+    expect(screen.getByTestId("careers-forbidden")).toBeTruthy();
+    expect(screen.queryByTestId("careers-not-found")).toBeNull();
   });
 
   it("an unknown or other-organization id is the not-found state", async () => {

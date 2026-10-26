@@ -257,6 +257,76 @@ describe("PostingForm - T21", () => {
     expect(toastError).toHaveBeenCalledWith("We couldn't save that. Try again.");
   });
 
+  it("Publish names the title being typed, not the stored one - regression for the stale dialog title", () => {
+    render(<PostingForm slug="alder-creek" orgToday="2026-11-03" posting={posting()} />);
+    fireEvent.change(field(/^Title/), { target: { value: "Head Custodian" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    expect(screen.getByText('Publish "Head Custodian"?')).toBeTruthy();
+    expect(screen.queryByText('Publish "Custodian"?')).toBeNull();
+  });
+
+  it("Reopen names the title being typed, not the stored one - regression for the stale dialog title", () => {
+    const closed = posting({ status: "closed", firstPublishedAt: "2026-10-01T00:00:00Z", closedAt: "2026-11-02T00:00:00Z" });
+    render(<PostingForm slug="alder-creek" orgToday="2026-11-03" posting={closed} />);
+    fireEvent.change(field(/^Title/), { target: { value: "Head Custodian" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(screen.getByText('Reopen "Head Custodian"?')).toBeTruthy();
+    expect(screen.queryByText('Reopen "Custodian"?')).toBeNull();
+  });
+
+  const published = () => posting({ status: "published", firstPublishedAt: "2026-10-30T00:00:00Z", postedOn: "2026-10-30", visibleToPublic: true });
+
+  it("Close saves unsaved edits first, then closes the new version - regression for dropped edits", async () => {
+    mockUpdate.mockResolvedValue({ ok: true, data: { version: 4 } });
+    mockSetStatus.mockResolvedValue({ ok: true, data: { status: "closed", version: 5 } });
+    render(<PostingForm slug="alder-creek" orgToday="2026-11-03" posting={published()} />);
+    fireEvent.change(field("Short summary"), { target: { value: "A typed summary." } });
+    fireEvent.click(screen.getByRole("button", { name: "Close this opening" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Yes, close it" }));
+    });
+    await waitFor(() => expect(mockSetStatus).toHaveBeenCalled());
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect((mockUpdate.mock.calls[0] as [string, Record<string, unknown>])[1]).toMatchObject({ summary: "A typed summary." });
+    expect(mockSetStatus).toHaveBeenCalledWith("alder-creek", { id: "11111111-1111-4111-8111-111111111111", version: 4, to: "closed" });
+  });
+
+  it("Close with a failed save leaves the posting open", async () => {
+    mockUpdate.mockResolvedValue({ ok: false, error: "Nope." });
+    render(<PostingForm slug="alder-creek" orgToday="2026-11-03" posting={published()} />);
+    fireEvent.change(field("Short summary"), { target: { value: "A typed summary." } });
+    fireEvent.click(screen.getByRole("button", { name: "Close this opening" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Yes, close it" }));
+    });
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockSetStatus).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("Nope.");
+  });
+
+  it("Close with nothing unsaved goes straight to the loaded version", async () => {
+    mockSetStatus.mockResolvedValue({ ok: true, data: { status: "closed", version: 4 } });
+    render(<PostingForm slug="alder-creek" orgToday="2026-11-03" posting={published()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Close this opening" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Yes, close it" }));
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockSetStatus).toHaveBeenCalledWith("alder-creek", { id: "11111111-1111-4111-8111-111111111111", version: 3, to: "closed" });
+  });
+
+  it("Discard does not save: the edits go with the discarded draft", async () => {
+    mockSetStatus.mockResolvedValue({ ok: true, data: { status: "closed", version: 4 } });
+    render(<PostingForm slug="alder-creek" orgToday="2026-11-03" posting={posting()} />);
+    fireEvent.change(field(/^Title/), { target: { value: "Head Custodian" } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard this draft" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Yes, discard it" }));
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockSetStatus).toHaveBeenCalledWith("alder-creek", { id: "11111111-1111-4111-8111-111111111111", version: 3, to: "closed" });
+  });
+
   it("a closed posting whose closing date passed gets the Reopen note", () => {
     render(
       <PostingForm

@@ -64,8 +64,8 @@ describe("InvitationCards", () => {
   });
 
   it.each([
-    ["founding_administrator", "Alder invited you to be its founding administrator. Accepting gives you that role."],
-    ["treasurer", "Alder invited you to be its treasurer. Accepting gives you that access."],
+    ["founding_administrator", "A PresbyPortal administrator invited you to be the founding administrator at Alder. Accepting gives you that role."],
+    ["treasurer", "A PresbyPortal administrator invited you to be the treasurer at Alder. Accepting gives you that access."],
   ] as const)("%s reads the designation sentence built from the role words", (purpose, sentence) => {
     render(
       <InvitationCards
@@ -74,6 +74,8 @@ describe("InvitationCards", () => {
       />,
     );
     expect(screen.getByTestId("invitation-card").textContent).toContain(sentence);
+    // The congregation is not the sender of a designation (platform origin by CHECK).
+    expect(screen.getByTestId("invitation-card").textContent).not.toMatch(/^Alder invited you/);
     // A designation needs two-factor sign-in before the click.
     expect(screen.getByRole("link", { name: "Continue to verification" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Accept the invitation" })).toBeNull();

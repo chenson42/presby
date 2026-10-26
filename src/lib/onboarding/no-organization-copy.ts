@@ -74,9 +74,13 @@ export const NO_ORG_INVITATION_COPY = {
   /** `sign_in`. */
   cardSignIn: (congregation: string, name: string) =>
     `${congregation} invited you to sign in. Accepting connects this sign-in to your record there as ${name}. What you can do depends on your role at ${congregation}.`,
-  /** `founding_administrator` / `treasurer`. Built from the existing role words. */
+  /**
+   * `founding_administrator` / `treasurer`. Built from the existing role words. The sender is a
+   * PresbyPortal administrator, never the congregation: a designation row is `origin = 'platform'`
+   * by CHECK (`account_invitations_purpose_origin_tie`), and the email and `/invite` say the same.
+   */
   cardDesignation: (congregation: string, purpose: "founding_administrator" | "treasurer") =>
-    `${congregation} invited you to be its ${DESIGNATION_NAME[purpose]}. Accepting gives you that ${INVITATION_ROLE_WORD[purpose]}.`,
+    `A PresbyPortal administrator invited you to be the ${DESIGNATION_NAME[purpose]} at ${congregation}. Accepting gives you that ${INVITATION_ROLE_WORD[purpose]}.`,
   expires: (date: string) => `This invitation expires ${date}.`,
   accept: "Accept the invitation",
   /** The card before or after the click, account enrolled / not enrolled. */

@@ -69,10 +69,10 @@ describe("group C: open invitations and accepting in place", () => {
       "Quillhaven Fellowship invited you to sign in. Accepting connects this sign-in to your record there as Wendeline Ashgrove. What you can do depends on your role at Quillhaven Fellowship.",
     );
     expect(c.cardDesignation("Quillhaven Fellowship", "founding_administrator")).toBe(
-      "Quillhaven Fellowship invited you to be its founding administrator. Accepting gives you that role.",
+      "A PresbyPortal administrator invited you to be the founding administrator at Quillhaven Fellowship. Accepting gives you that role.",
     );
     expect(c.cardDesignation("Quillhaven Fellowship", "treasurer")).toBe(
-      "Quillhaven Fellowship invited you to be its treasurer. Accepting gives you that access.",
+      "A PresbyPortal administrator invited you to be the treasurer at Quillhaven Fellowship. Accepting gives you that access.",
     );
     expect(c.expires("October 27, 2026")).toBe("This invitation expires October 27, 2026.");
     expect(c.accept).toBe("Accept the invitation");

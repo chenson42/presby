@@ -364,7 +364,7 @@ test.describe("Sign-in connect and /no-organization", () => {
         await signInAs(page, account, /\/no-organization/);
         await expect(page.getByRole("heading", { level: 1, name: `You're invited to ${o.name}` })).toBeVisible();
         const card = page.getByTestId("invitation-card");
-        await expect(card).toContainText(`${o.name} invited you to be its founding administrator.`);
+        await expect(card).toContainText(`A PresbyPortal administrator invited you to be the founding administrator at ${o.name}.`);
         await expect(card.getByTestId("second-factor-notice")).toContainText(
           "Accepting this invitation needs two-factor sign-in. Finish verification, then accept.",
         );

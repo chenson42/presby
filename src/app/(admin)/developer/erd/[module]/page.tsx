@@ -7,7 +7,8 @@ import {
   moduleSlug,
   summarize,
 } from "@/lib/dev-docs";
-import { requirePlatformAdmin } from "../../guard";
+import { requireDeveloper } from "../../guard";
+import { GateState } from "../../gate-state";
 import { Erd } from "../../erd";
 import "../../developer.css";
 
@@ -32,7 +33,17 @@ export default async function ErdPage({
   params: Promise<{ module: string }>;
 }) {
   const { module: slug } = await params;
-  await requirePlatformAdmin(`/developer/erd/${slug}`);
+  const gate = await requireDeveloper(
+    `/developer/erd/${encodeURIComponent(slug)}`,
+  );
+  if (gate !== "ok") {
+    return (
+      <GateState
+        gate={gate}
+        retryHref={`/developer/erd/${encodeURIComponent(slug)}`}
+      />
+    );
+  }
 
   const tables = buildSchemaDocs(await loadDescriptions());
   const moduleName = [...new Set(tables.map((t) => t.module))].find(
@@ -46,7 +57,7 @@ export default async function ErdPage({
     <div className="reg">
       <div className="reg__inner">
         <nav className="reg__crumbs">
-          <Link href="/developer">Data model</Link>
+          <Link href="/developer/data-model">Data model</Link>
           <span aria-hidden>/</span>
           <span>{moduleName}</span>
         </nav>
@@ -75,7 +86,7 @@ export default async function ErdPage({
                 <Link className="reg__row" href={`/developer/tables/${t.name}`}>
                   <span className="reg__rowName">{t.name}</span>
                   <span className="reg__rowSummary">
-                    {summarize(t.description) || <em>No description</em>}
+                    {summarize(t.description) || <em>No description yet</em>}
                   </span>
                   <span className="reg__rowMeta">{t.columns.length} col</span>
                 </Link>

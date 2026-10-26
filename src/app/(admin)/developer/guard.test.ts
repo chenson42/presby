@@ -23,7 +23,6 @@ import {
   readEntitled,
   readEntitledUncached,
   requireDeveloper,
-  requirePlatformAdmin,
   safeReturnTo,
 } from "./guard";
 
@@ -154,25 +153,5 @@ describe("checkDeveloperApiRequest", () => {
     await expect(checkDeveloperApiRequest()).resolves.toBe("unavailable");
 
     expect(redirectMock).not.toHaveBeenCalled();
-  });
-});
-
-describe("requirePlatformAdmin (transitional, removed by Batch C)", () => {
-  it("keeps the old behaviour for the not-yet-migrated pages while gaining the 2FA redirect", async () => {
-    cachedAuthMock.mockResolvedValue(
-      user({ twoFactorRequired: true, twoFactorVerified: false }),
-    );
-    await expect(requirePlatformAdmin("/developer")).rejects.toThrow(
-      "NEXT_REDIRECT:/totp?callbackUrl=%2Fdeveloper",
-    );
-
-    cachedAuthMock.mockResolvedValue(user());
-    cachedReadMock.mockResolvedValue(false);
-    await expect(requirePlatformAdmin("/developer")).rejects.toThrow(
-      "NEXT_REDIRECT:/home",
-    );
-
-    cachedReadMock.mockResolvedValue(true);
-    await expect(requirePlatformAdmin("/developer")).resolves.toBeUndefined();
   });
 });

@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Shared; recorded in the parent | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (this file); Copy four-check, Carry-forward and e2e blast radius below; no operator answer blocks Phase 4 | Design complete | 2026-10-25 |
-| 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | In progress: Batch A (shell promotion) and Batch B (gate, proxy, schema.json, registries; MFA e2e smoke green) done and committed; Batch C (ux-developer) pending | — | 2026-10-25 |
+| 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | In progress: Batch A (shell promotion) and Batch B (gate, proxy, schema.json, registries; MFA e2e smoke green) done and committed; Batch C (portal pages, registries, e2e; ux-developer) done and committed, awaiting Phase 5 | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -643,6 +643,49 @@ Result: **5 of 5 pass.** Existing auth set run in the same session on the same s
 - The `lockdown.spec.ts` three-path addition is still Batch C's; the existing spec passes as is.
 - `GateState` for `unavailable` links Try again to the page's own literal path: use the same string you pass to `requireDeveloper`.
 - `docs/TODO.md` lines 72, 216 (C-3) and 359 (the module-map omission, added at v0.34.0 integration, not named in the design) are all closed by F283/F285; the orchestrator should close 359 as well at integration (Rule 16 file, not edited here).
+
+## Batch C: portal pages, registries, e2e (ux-developer, 2026-10-25)
+
+**Commit:** `feat(developer): portal home, shell, data model section and documentation placeholder` (Work-Log trailer; hash in the git log).
+
+**Built.** Registries `nav.ts`, `provenance.ts`, `docs-registry.ts` (+ `nav.test.ts`, `docs-registry.test.ts`); `layout.tsx` (chrome only), `error.tsx`, `not-found.tsx`, `gate-state.tsx`, `provenance-label.tsx`; the home rewrite (`page.tsx`, `git mv` of the old index to `data-model/page.tsx`), `docs/page.tsx`; the table and ERD pages now call `requireDeveloper` with a literal encoded path and render `GateState`; `table-filter.tsx` empty state; `developer.css`; `developer-css.test.ts`; `shell-boundaries.test.ts` (all eight pins); the `/home` card text and its test; `docs/testing.md`; `e2e/developer-portal.spec.ts`; two paths added to `lockdown.spec.ts` (`/developer` was already listed, so `/developer/tables/roll_actions` and `/developer/schema.json` are the additions). `requirePlatformAdmin` and its `describe` are deleted (Batch B note 1). No `loading.tsx` anywhere under the tree.
+
+**Tests (mine).** New unit files: `nav.test` (7), `docs-registry.test` (7), `layout.test` (8), `gate-state.test` (2), `error.test` (3), `not-found.test` (1), `provenance-label.test` (5), `table-filter.test` (3), `developer-css.test` (5), `shell-boundaries.test` (8), page tests for home (6), data-model (7), docs (5), `tables/[table]` (6), `erd/[module]` (5), plus a Developer-card description row in `(member)/home/page.test.tsx`. Full unit suite: **612 files passed, 81 skipped, 9133 tests passed** (was 597 / 9056 after Batch B). New e2e spec: **14 tests**.
+
+**Gate.**
+- `npm run typecheck`, `npm run lint` (max-warnings 0), `npm run check` (all eight tripwires; `check:hydration-gate` still clean, `table-filter` is not a `useForm` root), `npm run build`: clean.
+- e2e on own dev server, port 3570 (own PID, stopped by `kill <pid>`; env per Batch A note plus `AUTH_URL`, `E2E_BASE_URL`, `E2E_ALLOW_SHARED_DB=true`): chromium project, **99 of 99 passed** across `developer-portal` (14), `developer-2fa-gate` (5), `admin-shell`, `totp-full-login`, `totp-callback-bypass`, `totp-code-entry`, `totp-recovery-code`, `session-claim-integrity`, `admin-login`, `post-login-routing`, `header-controls`, `member-home`, `role-boundaries`; custom-hosts project `custom-domains/lockdown`: **30 of 30**. After the last CSS change `developer-portal` + `developer-2fa-gate` + `admin-shell` re-ran: 26 of 26. Zero `e2e-dev*@example.invalid` rows left (queried).
+
+**Real-browser walk (Chromium, signed in as a throwaway platform administrator, plus the roster `member` for the forbidden state).**
+
+| Page | 360px `scrollWidth` | 1280px `scrollWidth` | Status |
+|---|---|---|---|
+| `/developer` | 360 | 1280 | 200 |
+| `/developer/data-model` | 360 | 1280 | 200 |
+| `/developer/tables/roll_actions` (wide table) | 360 | 1280 | 200 |
+| `/developer/tables/giving_funds` | 360 | 1280 | 200 |
+| `/developer/erd/d-rolls` (SVG rendered) | 360 | 1280 | 200 |
+| `/developer/docs` | 360 | 1280 | 200 |
+| `/developer/tables/nope` (404 inside the chrome) | 360 | 1280 | 404 |
+| `/developer` as `member` (forbidden, header, no nav, no Menu) | 360 | n/a | 200 |
+
+Phone nav sheet: opened from the 44px Menu button, titled "Developer portal", Home highlighted by fill (and `aria-current`), group headings Reference and Guides, `Version 0.44.0` foot; three links, each at least 44px (asserted in e2e); clicking Documentation navigates and closes it. Desktop: 220px left nav, Data model lit on the table and diagram pages. Long module headings and table names wrap; the column table scrolls inside its own container. By eye: no clipping, no double padding. The mermaid diagram on a phone is small (the SVG shrinks to 328px; it is the existing `Erd` component and was not in scope), the raw source below it scrolls in its own box.
+
+**Design claims that proved wrong or needed a call.**
+1. **`.reg` painted its own paper panel.** With the shell supplying the gutter and `.reg__inner` padding removed (design CSS), the `--paper` background became a floating rectangle with text flush to its edge at 360px and 1280px. Fixed by `background: transparent` on `.reg` (pinned in `developer-css.test.ts`); `--paper` stays declared for the Q8 palette follow-up. E26 is now verified by the walk, not unverified.
+2. **Fixture location.** The design put `developer-fixture.ts` in `e2e/support/`, a Rule 16 shared path. Instead the fixture is inline in `developer-portal.spec.ts` (a throwaway `e2e-devui-<stamp>@example.invalid` platform admin, storage state cached in a temp file, deleted behind a prefix and suffix guard, stale ones swept). It reuses `platformSql`/`withDbRetry` and the roster `member`/`admin` states, and edits nothing under `e2e/support/`. **No integration patch is needed**, so `docs/work-log/developer-portal-inc1.integration.patch` was not created. (The design's separate `developer-fixture.ts` is dropped from the file list.) The prefix differs from `developer-2fa-gate.spec.ts`'s `e2e-devportal-` so neither spec's stale sweep can delete the other's user.
+3. **A glob that matched a sign-in URL.** `waitForURL("**/developer")` also matches `/signin?callbackUrl=/developer`, so a sign-in that had not completed looked like success. The spec waits on `u.pathname === "/developer"`. (`developer-2fa-gate.spec.ts` waits on `/totp` and is unaffected.)
+4. **Docs rows.** The design's "security" row names "the Key Invariants section of `CLAUDE.md`, and `docs/schema-design.md`"; the Copy template renders `{files}` as paths only, so the page says `CLAUDE.md and docs/schema-design.md`. Truthful, shorter than the design's gloss; no new string.
+5. **Home legend and the data-model "Generated" label.** C4 says "provenance labels on the three section heads: tables Generated". The table list is many per-module sections, so one `Generated` label sits under the counts line rather than on twenty module heads; rules (`Written by hand`) and permissions (`Generated`) are on their section heads as designed. A reviewer who wants it per module can say so.
+6. **Copy.** Every string is from the design's Copy (C1, C2, C4 through C8, C10). No string was invented. One structural add outside Copy: the empty-state paragraph reuses the C4 sentence verbatim.
+
+**Not changed, noted for Phase 5.** The table-page module crumb for a Platform shell table links to `/developer/erd/platform-shell`, which renders (the design says the Platform shell has "no diagram"; the existing ERD page draws one for any module name). Pre-existing behavior, left alone.
+
+**Integration text for the orchestrator (Rule 16 files, not edited here).**
+- `docs/TODO.md`: add the Q8 follow-up (`.reg` palette to platform tokens, paper/database icon, `.dark .reg`, mermaid theme following `.dark`, and the phone-size diagram), and close lines 72, 216 (C-3) and 359 by F283/F285 (Batch B's note).
+- No `e2e/support/*` change and no patch file are needed for this batch.
+- `CLAUDE.md` Project Layout (Phase 6, orchestrator): `src/app/(admin)/developer/` is now the developer portal; `src/lib/developer-portal/` and the shared `console-*` shell are new lines.
+- Release note C11 may say "58 of the 105 tables" (confirmed in Batch B); CLAUDE.md has 14 Key Invariants headings, not 13.
 
 ---
 

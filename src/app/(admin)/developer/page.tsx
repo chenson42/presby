@@ -1,208 +1,100 @@
 import Link from "next/link";
-import {
-  buildSchemaDocs,
-  buildPermissionDocs,
-  loadDescriptions,
-  moduleSlug,
-  summarize,
-  INVARIANTS,
-  PLATFORM_MODULE,
-  type TableDoc,
-} from "@/lib/dev-docs";
-import { requirePlatformAdmin } from "./guard";
-import { TableFilter } from "./table-filter";
-import "./developer.css";
+import { Card, CardHeader } from "@/components/ui/card";
+import { PROVENANCE, type ProvenanceKey } from "@/lib/developer-portal/provenance";
+import { requireDeveloper } from "./guard";
+import { GateState } from "./gate-state";
+import { ProvenanceLabel } from "./provenance-label";
 
-export const metadata = {
-  title: "Data model",
-  description: "Generated technical reference for the presby schema.",
-};
+export const metadata = { title: { absolute: "Developer portal" } };
+
+const SECTIONS: ReadonlyArray<{
+  href: string;
+  title: string;
+  provenance: ProvenanceKey;
+  description: string;
+}> = [
+  {
+    href: "/developer/data-model",
+    title: "Data model",
+    provenance: "generated",
+    description:
+      "Every table, its columns and its links, with a diagram for each module. Built from the schema in the code and the database's own comments.",
+  },
+  {
+    href: "/developer/docs",
+    title: "Documentation",
+    provenance: "planned",
+    description:
+      "What documentation exists, where it lives today, and what is planned.",
+  },
+];
 
 /**
- * /developer — an index, not a document.
- *
- * The first version buried everything behind disclosures and led with long
- * descriptions, which made it something to read rather than something to
- * navigate. The job is finding a table or a diagram to review, so this is a
- * dense scannable list where every row is a link. Detail lives at
- * /developer/tables/<name>, diagrams at /developer/erd/<module>.
- *
- * No <details> anywhere. Disclosure widgets failed to toggle twice on the phone
- * this gets reviewed from, and real routes are linkable, shareable, and cannot
- * silently refuse to open.
+ * /developer: the portal's start page. It makes no database call (E20), so its
+ * only failure state is the gate's.
  */
-export default async function DeveloperIndex() {
-  await requirePlatformAdmin("/developer");
+export default async function DeveloperHome() {
+  const gate = await requireDeveloper("/developer");
+  if (gate !== "ok") return <GateState gate={gate} retryHref="/developer" />;
 
-  const tables = buildSchemaDocs(await loadDescriptions());
-  const permissions = buildPermissionDocs();
-
-  const modules = tables.reduce<Record<string, TableDoc[]>>((acc, t) => {
-    (acc[t.module] ??= []).push(t);
-    return acc;
-  }, {});
-
-  const tenantCount = tables.filter((t) => t.tenantScoped).length;
-  const undocumented = tables.filter(
-    (t) => !t.description && t.module !== PLATFORM_MODULE,
-  ).length;
-  const onPaper = INVARIANTS.filter(
-    (i) => i.enforcement === "paper",
-  ).length;
+  const inUse = [...new Set(SECTIONS.map((s) => s.provenance))];
 
   return (
-    <div className="reg">
-      <div className="reg__inner">
-        <header className="reg__masthead">
-          <p className="reg__eyebrow">presby · technical reference</p>
-          <h1 className="reg__title">The data model</h1>
-          <p className="reg__standfirst">
-            Generated on each request from <code>src/lib/db/schema</code> and
-            Postgres <code>COMMENT ON</code>, so it cannot drift from what is
-            deployed. Rationale and the review-findings log live in{" "}
-            <code>docs/schema-design.md</code>.
-          </p>
-          <p className="reg__counts">
-            <span>
-              <b>{tables.length}</b> tables
-            </span>
-            <span>
-              <b>{tenantCount}</b> tenant-scoped
-            </span>
-            <span>
-              <b>{onPaper}</b> rules unenforced
-            </span>
-            {undocumented > 0 && (
-              <span>
-                <b>{undocumented}</b> undescribed
-              </span>
-            )}
-            <span>
-              <a href="/developer/schema.json">schema.json</a>
-            </span>
-          </p>
-        </header>
+    <div className="mx-auto max-w-4xl">
+      <h1 className="text-2xl font-semibold">Developer portal</h1>
+      <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
+        Engineering reference for PresbyPortal. It describes how the platform is
+        built and does not read congregation records.
+      </p>
 
-        <TableFilter total={tables.length} />
+      <section className="mt-8" aria-labelledby="developer-sections">
+        <h2 id="developer-sections" className="text-lg font-semibold">
+          Sections
+        </h2>
+        <ul className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {SECTIONS.map((s) => (
+            <li key={s.href}>
+              <Link
+                href={s.href}
+                className="group block h-full rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <Card className="h-full gap-3 py-5 transition-colors group-hover:border-ring group-hover:bg-accent group-active:bg-accent/70">
+                  <CardHeader className="gap-2">
+                    <h3 className="text-base font-semibold leading-snug text-foreground">
+                      {s.title}
+                    </h3>
+                    <ProvenanceLabel kind={s.provenance} />
+                    <p className="text-sm text-muted-foreground">
+                      {s.description}
+                    </p>
+                  </CardHeader>
+                </Card>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
 
-        {Object.entries(modules).map(([module, moduleTables]) => {
-          const slug = moduleSlug(module);
-          const isPlatform = module === PLATFORM_MODULE;
-          return (
-            <section className="reg__module" data-section key={module}>
-              <div className="reg__moduleHead">
-                <h2 className="reg__moduleTitle">{module}</h2>
-                <span className="reg__moduleMeta">
-                  {moduleTables.length} tables
-                </span>
-                {!isPlatform && (
-                  <Link
-                    className="reg__diagramLink"
-                    href={`/developer/erd/${slug}`}
-                  >
-                    Diagram →
-                  </Link>
-                )}
-              </div>
-
-              <ul className="reg__list">
-                {moduleTables.map((t) => (
-                  <li
-                    key={t.name}
-                    data-haystack={`${t.name} ${t.description ?? ""} ${t.columns
-                      .map((c) => `${c.name} ${c.description ?? ""}`)
-                      .join(" ")}`.toLowerCase()}
-                  >
-                    <Link
-                      className="reg__row"
-                      href={`/developer/tables/${t.name}`}
-                    >
-                      <span className="reg__rowName">{t.name}</span>
-                      <span className="reg__rowSummary">
-                        {summarize(t.description) || <em>No description</em>}
-                      </span>
-                      <span className="reg__rowMeta">
-                        {t.columns.length} col
-                        <span
-                          className={`reg__dot ${
-                            t.tenantScoped
-                              ? "reg__dot--rls"
-                              : "reg__dot--global"
-                          }`}
-                          title={
-                            t.tenantScoped
-                              ? "Tenant-scoped: row-level security applies"
-                              : "Global: not tenant-isolated"
-                          }
-                        />
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          );
-        })}
-
-        <section className="reg__module">
-          <div className="reg__moduleHead">
-            <h2 className="reg__moduleTitle">What the schema guarantees</h2>
-            <span className="reg__moduleMeta">{INVARIANTS.length} rules</span>
-          </div>
-          <p className="reg__note">
-            Rules marked <span className="reg__tag reg__tag--paper">paper</span>{" "}
-            are the ones to watch: the schema permits a violation and only
-            review will catch it.
-          </p>
-          <ul className="reg__list">
-            {INVARIANTS.map((inv) => (
-              <li key={inv.title}>
-                <div className="reg__row reg__row--static">
-                  <span className="reg__rowName reg__rowName--prose">
-                    {inv.title}
-                  </span>
-                  <span className="reg__rowSummary">{inv.detail}</span>
-                  <span className="reg__rowMeta">
-                    <span
-                      className={`reg__tag ${
-                        inv.enforcement === "paper"
-                          ? "reg__tag--paper"
-                          : "reg__tag--machine"
-                      }`}
-                    >
-                      {inv.enforcement}
-                    </span>
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="reg__module">
-          <div className="reg__moduleHead">
-            <h2 className="reg__moduleTitle">Platform permissions</h2>
-            <span className="reg__moduleMeta">{permissions.length} keys</span>
-          </div>
-          <p className="reg__note">
-            Governs the <code>/admin</code> shell only, and is frozen.
-            Church-facing authorization is a separate scope, resolved per
-            organization and per date by{" "}
-            <code>presby_effective_permissions()</code>.
-          </p>
-          <ul className="reg__list">
-            {permissions.map((p) => (
-              <li key={p.key}>
-                <div className="reg__row reg__row--static">
-                  <span className="reg__rowName">{p.key}</span>
-                  <span className="reg__rowSummary">{p.description}</span>
-                  <span className="reg__rowMeta">{p.category}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      </div>
+      <section className="mt-10" aria-labelledby="developer-legend">
+        <h2 id="developer-legend" className="text-lg font-semibold">
+          What the labels mean
+        </h2>
+        <dl className="mt-4 space-y-3">
+          {inUse.map((key) => (
+            <div
+              key={key}
+              className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-4"
+            >
+              <dt className="sm:w-40 sm:shrink-0">
+                <ProvenanceLabel kind={key} />
+              </dt>
+              <dd className="text-sm text-muted-foreground">
+                {PROVENANCE[key].meaning}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
     </div>
   );
 }

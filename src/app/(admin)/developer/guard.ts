@@ -113,15 +113,3 @@ export async function checkDeveloperApiRequest(): Promise<AccessVerdict> {
     readEntitled: readEntitledUncached,
   });
 }
-
-/**
- * TRANSITIONAL: the three pre-portal pages still call this until Batch C
- * replaces each call with `requireDeveloper` and `GateState`. It keeps their
- * old behaviour (non-entitled to /home, a failed read throws) while gaining the
- * 2FA and signed-out redirects. Batch C deletes it.
- */
-export async function requirePlatformAdmin(returnTo: string): Promise<void> {
-  const gate = await requireDeveloper(returnTo);
-  if (gate === "forbidden") redirect("/home");
-  if (gate === "unavailable") throw new Error("developer gate unavailable");
-}

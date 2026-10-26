@@ -2,15 +2,21 @@
 
 import { revalidatePath } from "next/cache";
 import { COPY } from "@/lib/reimbursement/copy";
+import { approveRequest, returnRequest } from "@/lib/reimbursement/decisions";
 import { gateReimbursementAction } from "@/lib/reimbursement/gate";
 import {
+  approveRequestSchema,
+  returnRequestSchema,
   searchBeneficiariesSchema,
   saveRequestSchema,
   submitRequestSchema,
   withdrawRequestSchema,
 } from "@/lib/reimbursement/input";
 import {
+  alreadyDecidedFailure,
+  decisionRefusal,
   incompleteRefusal,
+  returnedMessage,
   saveRefusal,
   sentMessage,
   submitRefusal,
@@ -28,8 +34,8 @@ import type { SubmitRoute } from "@/lib/reimbursement/outcomes";
 /**
  * Server Actions for the member reimbursement pages `/o/<slug>/reimbursements/**`
  * - docs/work-log/2026-10-25-treasury-inc1.md, Phase 3 API Contract Layer 3
- * (Batch 2a: the actions that need no receipt; approve and send back are
- * Batch 3, the receipt upload and detach Batch 2b, the treasurer tree Batch 4).
+ * (Batch 2a: the actions that need no receipt; Batch 3: approve and send back;
+ * the receipt upload and detach are Batch 2b, the treasurer tree Batch 4).
  *
  * Every action takes the URL SLUG (never an organization id, never a person id),
  * begins with `gateReimbursementAction` (sign-in, the Node-side 2FA check, the
@@ -50,6 +56,13 @@ function invalid(error: import("zod").ZodError): ReimbursementActionFailure {
 function revalidate(slug: string, requestId?: string) {
   revalidatePath(`/o/${slug}/reimbursements`);
   if (requestId) revalidatePath(`/o/${slug}/reimbursements/${requestId}`);
+}
+
+/** A decision also moves the treasurer's queue and the request's treasury page. */
+function revalidateDecision(slug: string, requestId: string) {
+  revalidate(slug, requestId);
+  revalidatePath(`/o/${slug}/admin/reimbursements`);
+  revalidatePath(`/o/${slug}/admin/reimbursements/${requestId}`);
 }
 
 /** `saveRequestAction(slug, input)` - create-or-find by the form's `clientKey`, or edit by `requestId`. */
@@ -156,4 +169,61 @@ export async function searchBeneficiariesAction(
 
   const candidates = await searchBeneficiaries(gate, parsed.data.query);
   return { ok: true, data: { candidates } };
+}
+
+/**
+ * `approveRequestAction(slug, input)` - an eligible approver of the request's group
+ * approves it on the revision they were looking at. `already_decided` carries the
+ * date (org-local) and the status, never who decided it.
+ */
+export async function approveRequestAction(
+  slug: string,
+  input: unknown,
+): Promise<ReimbursementActionResult<{ message: string }>> {
+  const gate = await gateReimbursementAction(slug);
+  if (!gate.ok) return gate;
+  const parsed = approveRequestSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+
+  const result = await approveRequest(gate, { ...parsed.data, path: "seat" });
+  switch (result.kind) {
+    case "denied":
+      return { ok: false, error: COPY.gate.notPermitted };
+    case "already_decided":
+      return alreadyDecidedFailure(result.status, result.decidedOn);
+    case "refused":
+      return decisionRefusal(result.outcome);
+    case "ok":
+      break;
+  }
+  revalidateDecision(slug, parsed.data.requestId);
+  return { ok: true, data: { message: COPY.decision.approved } };
+}
+
+/**
+ * `returnRequestAction(slug, input)` - send back for changes, or mark not approved,
+ * with the reason the requester will read. The reason is required.
+ */
+export async function returnRequestAction(
+  slug: string,
+  input: unknown,
+): Promise<ReimbursementActionResult<{ message: string }>> {
+  const gate = await gateReimbursementAction(slug);
+  if (!gate.ok) return gate;
+  const parsed = returnRequestSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+
+  const result = await returnRequest(gate, parsed.data);
+  switch (result.kind) {
+    case "denied":
+      return { ok: false, error: COPY.gate.notPermitted };
+    case "already_decided":
+      return alreadyDecidedFailure(result.status, result.decidedOn);
+    case "refused":
+      return decisionRefusal(result.outcome);
+    case "ok":
+      break;
+  }
+  revalidateDecision(slug, parsed.data.requestId);
+  return { ok: true, data: { message: returnedMessage(result.returnedKind) } };
 }

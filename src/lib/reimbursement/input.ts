@@ -34,6 +34,16 @@ const optionalGuid = (message: string) =>
     .transform((value) => (value === undefined || value === null || value === "" ? null : value))
     .refine((value) => value === null || z.guid().safeParse(value).success, { message });
 
+/** Required free text: cleaned first, then judged, so a blank or control-only value is "missing", not "short". */
+const requiredText = (max: number, requiredMessage: string) =>
+  z
+    .string()
+    .nullish()
+    .transform((value) => cleanText(value ?? null))
+    .refine((value) => value !== null, { message: requiredMessage })
+    .refine((value) => value === null || textLength(value) <= max, { message: COPY.fieldErrors.tooLong(max) })
+    .transform((value) => value as string);
+
 const REQUEST_KINDS = ["reimburse", "vendor"] as const;
 export type RequestKind = (typeof REQUEST_KINDS)[number];
 
@@ -108,3 +118,28 @@ export const searchBeneficiariesSchema = z.object({
     }),
 });
 export type SearchBeneficiariesInput = z.input<typeof searchBeneficiariesSchema>;
+
+/**
+ * `approveRequestAction(slug, input)` (the member tree: an approver's SEAT). The
+ * path is NOT an input - this action always approves on the seat path; the
+ * treasurer's override is its own action in the treasurer tree, so a posted
+ * `path` can never choose it.
+ */
+export const approveRequestSchema = z.object({
+  requestId: z.guid({ error: COPY.detail.unavailable }),
+  expectedRevision: z.number({ error: COPY.form.saveFailed }).int().min(1, { error: COPY.form.saveFailed }),
+});
+export type ApproveRequestInput = z.input<typeof approveRequestSchema>;
+
+/** What an approver can do with a request they will not approve (Copy C6: "Needs changes" / "Not approved"). */
+export const RETURN_KINDS = ["needs_info", "not_approved"] as const;
+export type ReturnKind = (typeof RETURN_KINDS)[number];
+
+/** `returnRequestAction(slug, input)`: the reason is required (the requester reads it) and at most 300 characters. */
+export const returnRequestSchema = z.object({
+  requestId: z.guid({ error: COPY.detail.unavailable }),
+  expectedRevision: z.number({ error: COPY.form.saveFailed }).int().min(1, { error: COPY.form.saveFailed }),
+  kind: z.enum(RETURN_KINDS, { error: COPY.detail.unavailable }),
+  reason: requiredText(MAX_LENGTH.reason, COPY.decision.reasonRequired),
+});
+export type ReturnRequestInput = z.input<typeof returnRequestSchema>;

@@ -4,7 +4,8 @@
  * validated before the library is touched, the slug (never an organization id
  * or a person id from the client) is what is gated, outcomes map to Copy
  * strings, and nothing here writes an audit row (save, submit and withdraw are
- * recorded in reimbursement_events, Phase 3 "Not audited"). Batch 2a.
+ * recorded in reimbursement_events, Phase 3 "Not audited"). Batch 2a; approve and
+ * send back (audited and notified inside `decisions.ts`) are Batch 3.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   saveRequest: vi.fn(),
   submitRequest: vi.fn(),
   withdrawRequest: vi.fn(),
+  approveRequest: vi.fn(),
+  returnRequest: vi.fn(),
   searchBeneficiaries: vi.fn(),
   revalidatePath: vi.fn(),
 }));
@@ -26,9 +29,15 @@ vi.mock("@/lib/reimbursement/requests", () => ({
   submitRequest: mocks.submitRequest,
   withdrawRequest: mocks.withdrawRequest,
 }));
+vi.mock("@/lib/reimbursement/decisions", () => ({
+  approveRequest: mocks.approveRequest,
+  returnRequest: mocks.returnRequest,
+}));
 vi.mock("@/lib/reimbursement/pickers", () => ({ searchBeneficiaries: mocks.searchBeneficiaries }));
 
 import {
+  approveRequestAction,
+  returnRequestAction,
   saveRequestAction,
   searchBeneficiariesAction,
   submitRequestAction,
@@ -63,10 +72,12 @@ describe("every action gates first and short-circuits on a refusal", () => {
     ["submitRequestAction", () => submitRequestAction("alder", { requestId: REQ, expectedRevision: 1 })],
     ["withdrawRequestAction", () => withdrawRequestAction("alder", { requestId: REQ })],
     ["searchBeneficiariesAction", () => searchBeneficiariesAction("alder", { query: "Quill" })],
+    ["approveRequestAction", () => approveRequestAction("alder", { requestId: REQ, expectedRevision: 1 })],
+    ["returnRequestAction", () => returnRequestAction("alder", { requestId: REQ, expectedRevision: 1, kind: "needs_info", reason: "Why" })],
   ])("%s returns the gate's failure untouched and calls nothing else", async (_name, run) => {
     mocks.gate.mockResolvedValue(refusal);
     expect(await run()).toEqual(refusal);
-    for (const fn of [mocks.saveRequest, mocks.submitRequest, mocks.withdrawRequest, mocks.searchBeneficiaries, mocks.revalidatePath]) {
+    for (const fn of [mocks.saveRequest, mocks.submitRequest, mocks.withdrawRequest, mocks.approveRequest, mocks.returnRequest, mocks.searchBeneficiaries, mocks.revalidatePath]) {
       expect(fn).not.toHaveBeenCalled();
     }
   });
@@ -228,5 +239,113 @@ describe("no audit row from these actions (the events table is their record)", (
     const { readFileSync } = await import("node:fs");
     const source = readFileSync(__dirname + "/actions.ts", "utf8");
     expect(source).not.toMatch(/recordAudit|insertAuditRow|auditEvents|@\/lib\/audit/);
+  });
+});
+
+describe("approveRequestAction", () => {
+  const ask = { requestId: REQ, expectedRevision: 3 };
+
+  it("approves on the SEAT path - a posted path, person or organization is never read - and refreshes both trees", async () => {
+    mocks.approveRequest.mockResolvedValue({ kind: "ok", path: "seat", decidedOn: "2026-10-25" });
+    expect(await approveRequestAction("alder", { ...ask, path: "override", personId: "evil", organizationId: "org-evil" })).toEqual({
+      ok: true,
+      data: { message: "Approved." },
+    });
+    expect(mocks.gate).toHaveBeenCalledWith("alder");
+    const [actor, values] = mocks.approveRequest.mock.calls[0]!;
+    expect(actor.organizationId).toBe("org-1");
+    expect(actor.userId).toBe("user-1");
+    expect(values).toEqual({ requestId: REQ, expectedRevision: 3, path: "seat" });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/o/alder/reimbursements/${REQ}`);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/o/alder/admin/reimbursements");
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/o/alder/admin/reimbursements/${REQ}`);
+  });
+
+  it("already decided: the date in words, the raw date and the status, and no actor", async () => {
+    mocks.approveRequest.mockResolvedValue({ kind: "already_decided", decidedOn: "2026-10-25", status: "approved" });
+    const result = await approveRequestAction("alder", ask);
+    expect(result).toEqual({
+      ok: false,
+      error: "This was already approved on October 25, 2026.",
+      kind: "already_decided",
+      decidedOn: "2026-10-25",
+      status: "approved",
+    });
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("a stale revision tells the approver to review again; every other dead end is the neutral string", async () => {
+    mocks.approveRequest.mockResolvedValue({ kind: "refused", outcome: "changed_since_viewed" });
+    expect(await approveRequestAction("alder", ask)).toEqual({
+      ok: false,
+      error: "This request changed after you opened it. Review it again.",
+      kind: "changed_since_viewed",
+    });
+    for (const outcome of ["not_found", "not_approvable"]) {
+      mocks.approveRequest.mockResolvedValue({ kind: "refused", outcome });
+      expect(await approveRequestAction("alder", ask)).toEqual({ ok: false, error: "This request isn't available.", kind: "not_found" });
+    }
+  });
+
+  it("an identity refusal is a plain 'not permitted'; a database failure propagates, never 'not allowed'", async () => {
+    mocks.approveRequest.mockResolvedValue({ kind: "denied" });
+    expect(await approveRequestAction("alder", ask)).toEqual({ ok: false, error: "You don't have permission to do that." });
+    mocks.approveRequest.mockRejectedValue(new Error("connection reset"));
+    await expect(approveRequestAction("alder", ask)).rejects.toThrow("connection reset");
+  });
+
+  it("rejects a malformed id or revision before the library", async () => {
+    expect(await approveRequestAction("alder", { requestId: "nope", expectedRevision: 1 })).toMatchObject({ ok: false });
+    expect(await approveRequestAction("alder", { requestId: REQ })).toMatchObject({ ok: false });
+    expect(await approveRequestAction("alder", null)).toMatchObject({ ok: false });
+    expect(mocks.approveRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("returnRequestAction", () => {
+  const ask = { requestId: REQ, expectedRevision: 2, kind: "needs_info", reason: "  Please add the invoice  " };
+
+  it("sends back with the cleaned reason and says so; not approved says that", async () => {
+    mocks.returnRequest.mockResolvedValue({ kind: "ok", returnedKind: "needs_info", decidedOn: "2026-10-25" });
+    expect(await returnRequestAction("alder", ask)).toEqual({ ok: true, data: { message: "Sent back." } });
+    expect(mocks.returnRequest.mock.calls[0]![1]).toEqual({
+      requestId: REQ, expectedRevision: 2, kind: "needs_info", reason: "Please add the invoice",
+    });
+    mocks.returnRequest.mockResolvedValue({ kind: "ok", returnedKind: "not_approved", decidedOn: "2026-10-25" });
+    expect(await returnRequestAction("alder", { ...ask, kind: "not_approved" })).toEqual({ ok: true, data: { message: "Marked not approved." } });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/o/alder/admin/reimbursements");
+  });
+
+  it("a missing reason is 'Give a reason.' next to the field, before the library is touched", async () => {
+    for (const reason of ["", "   ", undefined]) {
+      expect(await returnRequestAction("alder", { ...ask, reason })).toMatchObject({
+        ok: false,
+        error: "Give a reason.",
+        fieldErrors: { reason: "Give a reason." },
+      });
+    }
+    expect(await returnRequestAction("alder", { ...ask, reason: "x".repeat(301) })).toMatchObject({
+      fieldErrors: { reason: "Use 300 characters or fewer." },
+    });
+    expect(mocks.returnRequest).not.toHaveBeenCalled();
+  });
+
+  it("an unknown kind never reaches the library", async () => {
+    expect(await returnRequestAction("alder", { ...ask, kind: "voided" })).toMatchObject({ ok: false });
+    expect(mocks.returnRequest).not.toHaveBeenCalled();
+  });
+
+  it("already sent back reads 'already sent back on <date>'; a stale revision and the neutral dead end map as for approve", async () => {
+    mocks.returnRequest.mockResolvedValue({ kind: "already_decided", decidedOn: "2026-01-02", status: "returned" });
+    expect(await returnRequestAction("alder", ask)).toMatchObject({
+      error: "This was already sent back on January 2, 2026.",
+      kind: "already_decided",
+    });
+    mocks.returnRequest.mockResolvedValue({ kind: "refused", outcome: "changed_since_viewed" });
+    expect(await returnRequestAction("alder", ask)).toMatchObject({ kind: "changed_since_viewed" });
+    mocks.returnRequest.mockResolvedValue({ kind: "refused", outcome: "not_returnable" });
+    expect(await returnRequestAction("alder", ask)).toEqual({ ok: false, error: "This request isn't available.", kind: "not_found" });
+    mocks.returnRequest.mockResolvedValue({ kind: "denied" });
+    expect(await returnRequestAction("alder", ask)).toEqual({ ok: false, error: "You don't have permission to do that." });
   });
 });

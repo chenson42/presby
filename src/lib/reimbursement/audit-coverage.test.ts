@@ -12,8 +12,8 @@
  *   - nothing here uses `recordAudit()` (it opens its own connection and swallows
  *     failures, so a transition could commit with no audit row).
  *
- * Grows with each batch: Batch 3 adds approve/return, Batch 4 payments, Batch 2b
- * receipts. A definer called by NO function yet is fine; a definer called by a
+ * Grows with each batch: Batch 3 added approve/return (decisions.ts), Batch 4 adds
+ * payments, Batch 2b receipts. A definer called by NO function yet is fine; a definer called by a
  * function that does not audit it, when it is on the audited list, fails.
  */
 import { readdirSync, readFileSync } from "node:fs";
@@ -75,7 +75,7 @@ const DEFINER_CALL = /presby_reimbursement_[a-z_]+(?=\s*\()/g;
 
 describe("audit coverage of src/lib/reimbursement (EC43)", () => {
   it("finds the module's functions (the scan is not vacuous)", () => {
-    expect(FUNCTIONS.map((f) => f.name)).toEqual(expect.arrayContaining(["saveRequest", "submitRequest", "withdrawRequest", "setChargeable", "saveCategory", "endCategory"]));
+    expect(FUNCTIONS.map((f) => f.name)).toEqual(expect.arrayContaining(["saveRequest", "submitRequest", "withdrawRequest", "approveRequest", "returnRequest", "setChargeable", "saveCategory", "endCategory"]));
   });
 
   it("every write definer the module calls is classified as audited or deliberately unaudited", () => {
@@ -115,7 +115,7 @@ describe("audit coverage of src/lib/reimbursement (EC43)", () => {
         ).toBe(true);
       }
     }
-    expect(checked).toBeGreaterThanOrEqual(3); // set_chargeable, save_category, end_category today
+    expect(checked).toBeGreaterThanOrEqual(5); // approve, return, set_chargeable, save_category, end_category today
   });
 
   it("the audit call passes the same transaction (never a second connection) and no free-text metadata", () => {

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { zodFieldErrors } from "./action-result";
 import { COPY } from "./copy";
 import {
+  approveRequestSchema,
+  returnRequestSchema,
   saveRequestSchema,
   searchBeneficiariesSchema,
   submitRequestSchema,
@@ -133,5 +135,50 @@ describe("searchBeneficiariesSchema", () => {
     expect(searchBeneficiariesSchema.safeParse({ query: "  \n " }).success).toBe(false);
     expect(searchBeneficiariesSchema.safeParse({ query: "q".repeat(81) }).success).toBe(false);
     expect(searchBeneficiariesSchema.safeParse({ query: 7 }).success).toBe(false);
+  });
+});
+
+describe("approveRequestSchema", () => {
+  it("takes the request and the revision the approver saw - and nothing about the path, a person or an organization", () => {
+    const parsed = approveRequestSchema.parse({ requestId: REQ, expectedRevision: 3, path: "override", personId: PERSON, organizationId: GROUP });
+    expect(parsed).toEqual({ requestId: REQ, expectedRevision: 3 });
+  });
+
+  it("rejects a malformed id and a missing or non-integer revision with a Copy string", () => {
+    expect(zodFieldErrors(approveRequestSchema.safeParse({ requestId: "nope", expectedRevision: 1 }).error!)).toEqual({
+      requestId: COPY.detail.unavailable,
+    });
+    expect(approveRequestSchema.safeParse({ requestId: REQ }).success).toBe(false);
+    expect(approveRequestSchema.safeParse({ requestId: REQ, expectedRevision: 1.5 }).success).toBe(false);
+    expect(approveRequestSchema.safeParse({ requestId: REQ, expectedRevision: 0 }).success).toBe(false);
+  });
+});
+
+describe("returnRequestSchema", () => {
+  const base = { requestId: REQ, expectedRevision: 2, kind: "needs_info", reason: "Please add the receipt" } as const;
+
+  it("accepts both kinds and cleans the reason", () => {
+    expect(returnRequestSchema.parse({ ...base, reason: "  Please\tadd\nit  " }).reason).toBe("Please add it");
+    expect(returnRequestSchema.parse({ ...base, kind: "not_approved" }).kind).toBe("not_approved");
+  });
+
+  it("requires a reason: blank, whitespace-only, control-only and missing are all 'Give a reason.'", () => {
+    for (const reason of ["", "   ", "\u0000\u200b", undefined, null]) {
+      const result = returnRequestSchema.safeParse({ ...base, reason });
+      expect(result.success, String(reason)).toBe(false);
+      expect(zodFieldErrors(result.error!)).toEqual({ reason: COPY.decision.reasonRequired });
+    }
+  });
+
+  it("names the limit when the reason is over 300 characters, measured after cleaning, and never truncates", () => {
+    expect(returnRequestSchema.safeParse({ ...base, reason: "x".repeat(300) }).success).toBe(true);
+    const over = returnRequestSchema.safeParse({ ...base, reason: "x".repeat(301) });
+    expect(zodFieldErrors(over.error!)).toEqual({ reason: "Use 300 characters or fewer." });
+  });
+
+  it("refuses a kind that is not needs_info or not_approved", () => {
+    for (const kind of ["approved", "voided", "", undefined]) {
+      expect(returnRequestSchema.safeParse({ ...base, kind }).success, String(kind)).toBe(false);
+    }
   });
 });

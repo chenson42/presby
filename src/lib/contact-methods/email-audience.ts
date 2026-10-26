@@ -19,8 +19,10 @@
  *                      `giving_statements.delivery_email`). Giving is NOT wired
  *                      to a person's contact addresses in this pipeline (D7).
  *   person:<purpose>   a person's address chosen by `chooseEmail()` /
- *                      `presby_person_email()` for that purpose (ER12). No
- *                      sender uses these yet; Community Increment 2b adds
+ *                      `presby_person_email()` for that purpose (ER12). The
+ *                      four reimbursement notices (approver, treasurer and
+ *                      requester; Treasury Increment 1, P3-11) use
+ *                      `person:role`; Community Increment 2b adds
  *                      `account_sign_in_invitation` as `person:credential`.
  */
 export type Audience =
@@ -48,6 +50,13 @@ export const EMAIL_AUDIENCE: Readonly<Record<string, Audience>> = {
   statistics_submission_grant: "typed",
   // donor
   "giving.statement.notice": "donor",
+  // person:role - an approver, a treasurer or a requester is often staff with only
+  // a work address, and all three notices reach a recipient at the same address
+  // (src/lib/reimbursement/notices.ts, P3-11). No amount, name or free text in any.
+  "reimbursement.notice.needs_approval": "person:role",
+  "reimbursement.notice.needs_treasurer": "person:role",
+  "reimbursement.notice.ready_to_pay": "person:role",
+  "reimbursement.notice.requester_update": "person:role",
 };
 
 export function audienceFor(templateKey: string): Audience | null {

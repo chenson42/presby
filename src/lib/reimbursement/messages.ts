@@ -1,6 +1,8 @@
 import type { ReimbursementActionFailure } from "./action-result";
 import { COPY } from "./copy";
 import { MAX_LENGTH } from "./limits";
+import { formatCalendarDate } from "./dates";
+import type { ReturnKind } from "./input";
 import type { SubmitMissing } from "./outcomes";
 
 /**
@@ -105,4 +107,60 @@ export function sentMessage(route: "seat" | "treasurer" | "nobody" | null, group
   if (route === "treasurer") return COPY.form.sent.treasurer(group);
   if (route === "nobody") return COPY.form.sent.nobody(group);
   return COPY.form.sent.seat(group);
+}
+
+// ---------------------------------------------------------------------------
+// Approve and send back (Copy C6)
+// ---------------------------------------------------------------------------
+
+/**
+ * The failure for a refused approve or send back (every outcome but `ok` and
+ * `already_decided`, which carries a date: see `alreadyDecidedFailure`).
+ *
+ * `not_found`, `not_approvable`, `not_returnable` and `kind_invalid` are ONE
+ * neutral answer: a request that does not exist, one the caller may not decide
+ * and one that is no longer in a decidable state (withdrawn, closed) read the
+ * same, so the text cannot be used to probe ids or seats (EC16). The two
+ * override refusals (`seat_holder_exists`, `needs_second_payer`) cannot come
+ * back from the member tree's seat path; they take the same neutral string here,
+ * and the treasurer tree maps them to their own Copy C8 sentences, which need
+ * the group name and whether the viewer holds `manage`.
+ */
+export function decisionRefusal(outcome: string): ReimbursementActionFailure {
+  switch (outcome) {
+    case "changed_since_viewed":
+      return { ok: false, error: COPY.decision.changedAfterOpened, kind: "changed_since_viewed" };
+    case "reason_required":
+      return withFields({ reason: COPY.decision.reasonRequired });
+    case "reason_too_long":
+      return withFields({ reason: COPY.fieldErrors.tooLong(MAX_LENGTH.reason) });
+    case "not_found":
+    case "not_approvable":
+    case "not_returnable":
+    case "kind_invalid":
+    default:
+      return { ok: false, error: COPY.detail.unavailable, kind: "not_found" };
+  }
+}
+
+/**
+ * "This was already approved on <date>" / "already sent back on <date>". The
+ * date is the org-local day of the deciding event and NO ACTOR is named, to
+ * anyone (the treasury team reads who in the request's history, not here).
+ * `approved` and `paid` read as approved; `returned` and `not_approved` read as
+ * sent back (Copy C6 has these two sentences). With no date or an unknown
+ * status the neutral string is shown rather than a made-up one.
+ */
+export function alreadyDecidedFailure(status: string | null, decidedOn: string | null): ReimbursementActionFailure {
+  const base = { ok: false as const, kind: "already_decided" as const, decidedOn, status: status ?? undefined };
+  if (!decidedOn) return { ...base, error: COPY.detail.unavailable };
+  const date = formatCalendarDate(decidedOn);
+  if (status === "approved" || status === "paid") return { ...base, error: COPY.decision.alreadyApproved(date) };
+  if (status === "returned" || status === "not_approved") return { ...base, error: COPY.decision.alreadySentBack(date) };
+  return { ...base, error: COPY.detail.unavailable };
+}
+
+/** The success text after a send back: "Sent back." or "Marked not approved.". */
+export function returnedMessage(kind: ReturnKind): string {
+  return kind === "not_approved" ? COPY.decision.markedNotApproved : COPY.decision.sentBack;
 }

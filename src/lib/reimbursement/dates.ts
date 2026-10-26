@@ -48,3 +48,21 @@ export function isExpenseDateInWindow(expenseDate: string, today: string): boole
   if (!isRealIsoDate(expenseDate)) return false;
   return expenseDate >= expenseDateFloor(today) && expenseDate <= expenseDateCeiling(today);
 }
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const;
+
+/**
+ * A calendar date in words ("October 25, 2026"), for the one place a date sits
+ * inside a message the SERVER writes (an action's `already decided on <date>`
+ * text). Built from the digits alone: no `Date`, no locale, no server time zone,
+ * so the day it names is the day the database stamped. A page renders dates
+ * with `<FormattedDate>` instead; the action also returns the raw `YYYY-MM-DD`.
+ */
+export function formatCalendarDate(ymd: string): string {
+  if (!isRealIsoDate(ymd)) throw new RangeError(`formatCalendarDate: not a date: ${ymd}`);
+  const [year, month, day] = ymd.split("-").map(Number) as [number, number, number];
+  return `${MONTHS[month - 1]} ${day}, ${year}`;
+}

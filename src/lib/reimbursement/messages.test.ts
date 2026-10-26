@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COPY } from "./copy";
 import { OUTCOMES } from "./outcomes";
-import { incompleteRefusal, saveRefusal, sentMessage, submitRefusal } from "./messages";
+import { alreadyDecidedFailure, decisionRefusal, incompleteRefusal, returnedMessage, saveRefusal, sentMessage, submitRefusal } from "./messages";
 
 const ctx = { organizationName: "Alder Creek Church" };
 
@@ -84,5 +84,77 @@ describe("sentMessage (C3, by the route the definer computed live)", () => {
     );
     expect(sentMessage("nobody", "Property Committee")).toContain("Let your church office know.");
     expect(sentMessage(null, "Property Committee")).toBe("Sent to Property Committee for approval.");
+  });
+});
+
+describe("decisionRefusal (approve and send back, Copy C6)", () => {
+  it("covers every refusal outcome of both doors with a Copy string", () => {
+    const all = new Set([...OUTCOMES.approve, ...OUTCOMES.return].filter((o) => o !== "ok" && o !== "already_decided"));
+    for (const outcome of all) {
+      const failure = decisionRefusal(outcome);
+      expect(failure.ok).toBe(false);
+      expect(failure.error.length, outcome).toBeGreaterThan(0);
+    }
+  });
+
+  it("a stale revision says the request changed after it was opened, and is a distinct kind", () => {
+    expect(decisionRefusal("changed_since_viewed")).toEqual({
+      ok: false,
+      error: "This request changed after you opened it. Review it again.",
+      kind: "changed_since_viewed",
+    });
+  });
+
+  it("missing, forbidden, not in a decidable state and not yours to decide are ONE neutral answer (EC16)", () => {
+    const neutral = { ok: false, error: "This request isn't available.", kind: "not_found" };
+    for (const outcome of ["not_found", "not_approvable", "not_returnable", "kind_invalid", "seat_holder_exists", "needs_second_payer", "something_new"]) {
+      expect(decisionRefusal(outcome), outcome).toEqual(neutral);
+    }
+  });
+
+  it("a missing reason sits next to the reason field; an over-long one names the limit", () => {
+    expect(decisionRefusal("reason_required")).toMatchObject({ ok: false, error: "Give a reason.", fieldErrors: { reason: "Give a reason." } });
+    expect(decisionRefusal("reason_too_long")).toMatchObject({ fieldErrors: { reason: "Use 300 characters or fewer." } });
+  });
+});
+
+describe("alreadyDecidedFailure (the date of the deciding event, never the actor)", () => {
+  it("an approved or paid request reads 'already approved on <date>'", () => {
+    for (const status of ["approved", "paid"]) {
+      expect(alreadyDecidedFailure(status, "2026-10-25")).toEqual({
+        ok: false,
+        error: "This was already approved on October 25, 2026.",
+        kind: "already_decided",
+        decidedOn: "2026-10-25",
+        status,
+      });
+    }
+  });
+
+  it("a returned or not-approved request reads 'already sent back on <date>'", () => {
+    for (const status of ["returned", "not_approved"]) {
+      expect(alreadyDecidedFailure(status, "2026-01-02")).toMatchObject({
+        error: "This was already sent back on January 2, 2026.",
+        kind: "already_decided",
+        decidedOn: "2026-01-02",
+        status,
+      });
+    }
+  });
+
+  it("names no person: the result has no actor field", () => {
+    expect(Object.keys(alreadyDecidedFailure("approved", "2026-10-25")).sort()).toEqual(["decidedOn", "error", "kind", "ok", "status"]);
+  });
+
+  it("without a date or a known status it falls back to the neutral string rather than inventing one", () => {
+    expect(alreadyDecidedFailure("approved", null)).toMatchObject({ error: "This request isn't available.", kind: "already_decided" });
+    expect(alreadyDecidedFailure(null, "2026-10-25")).toMatchObject({ error: "This request isn't available.", kind: "already_decided" });
+  });
+});
+
+describe("returnedMessage", () => {
+  it("is 'Sent back.' for needs-changes and 'Marked not approved.' for not-approved", () => {
+    expect(returnedMessage("needs_info")).toBe("Sent back.");
+    expect(returnedMessage("not_approved")).toBe("Marked not approved.");
   });
 });

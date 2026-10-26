@@ -71,6 +71,7 @@ export async function createReimbursementFixture(label: string) {
   const orgIds: string[] = [];
   const personIds: string[] = [];
   const userIds: string[] = [];
+  const mailAddresses: string[] = [];
 
   async function q(query: SQL): Promise<Row[]> {
     return rowsOf(await platform.execute(query));
@@ -218,6 +219,40 @@ export async function createReimbursementFixture(label: string) {
     return { id: String(row!.id), sha, size: 3 };
   }
 
+  /**
+   * An active email address for a person (owner connection). The first address a
+   * person gets is their MAIN one (the deferred "active main" constraint needs
+   * one); `subtype` is `work` | `personal` | `other` | null; `doNotContact` marks
+   * it unusable for mail. Returns the address, which `queued()` reads back by.
+   */
+  async function email(
+    personId: string,
+    tag: string,
+    opts: { subtype?: string | null; doNotContact?: boolean; main?: boolean; address?: string } = {},
+  ): Promise<string> {
+    counter += 1;
+    const address = (opts.address ?? `rmb-${label}-${tag}-${stamp}-${counter}@example.invalid`).toLowerCase();
+    mailAddresses.push(address);
+    const [{ n }] = (await q(sql`
+      select count(*)::int as n from contact_methods
+       where person_id = ${personId} and kind = 'email' and ended_at is null and is_primary`)) as Array<{ n: number }>;
+    const main = opts.main ?? n === 0;
+    await q(sql`
+      insert into contact_methods (person_id, kind, value, subtype, is_primary, do_not_contact)
+      values (${personId}, 'email', ${address}, ${opts.subtype ?? null}, ${main}, ${opts.doNotContact ?? false})`);
+    return address;
+  }
+
+  /** The `email_queue` rows addressed to any of `addresses` (owner connection), oldest first. */
+  async function queued(addresses: readonly string[]): Promise<Row[]> {
+    if (addresses.length === 0) return [];
+    return q(sql`
+      select id, to_email, template_key, subject, html_body, text_body, status
+        from email_queue
+       where to_email in (${sql.join(addresses.map((a) => sql`${a}`), sql`, `)})
+       order by created_at, id`);
+  }
+
   /** A presby_app transaction with the org GUC set (null: no GUC). Commits unless fn throws. */
   async function asApp<T>(org: string | null, fn: (tx: Tx) => Promise<T>): Promise<T> {
     return appDb.transaction(async (tx) => {
@@ -232,6 +267,11 @@ export async function createReimbursementFixture(label: string) {
   }
 
   async function cleanup() {
+    if (mailAddresses.length > 0) {
+      await platform.execute(
+        sql`delete from email_queue where to_email in (${sql.join(mailAddresses.map((a) => sql`${a}`), sql`, `)})`,
+      );
+    }
     await platform.execute(sql`alter table group_memberships disable trigger group_memberships_reject_derived`);
     try {
       for (const id of orgIds) {
@@ -274,6 +314,8 @@ export async function createReimbursementFixture(label: string) {
     chargeable,
     category,
     blob,
+    email,
+    queued,
     cleanup,
   };
 }

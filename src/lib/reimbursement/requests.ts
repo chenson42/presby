@@ -5,6 +5,7 @@ import { isDirectoryListedPerson } from "@/lib/directory";
 import { holdsPermissions } from "@/lib/treasury/keys";
 import { isNotPermitted, rowsOf } from "./db-util";
 import { memberDetailSchema, type MemberDetail } from "./detail-shape";
+import { queueNotices, sendQueuedNotices } from "./notify";
 import type { SaveRequestValues } from "./input";
 import { REIMBURSEMENT_KEYS } from "./keys";
 import type { OutcomeOf, SubmitMissing, SubmitRoute } from "./outcomes";
@@ -29,6 +30,13 @@ import type { OutcomeOf, SubmitMissing, SubmitRoute } from "./outcomes";
  *
  * NOT AUDITED, by design (the events table is the record): save, submit,
  * resubmit, withdraw. Receipts (attach, detach) belong to Batch 2b.
+ *
+ * SUBMIT TELLS THE PEOPLE WHO MUST ACT (Batch 3, `notify.ts`): the eligible
+ * approvers when the route is `seat`, every effective `pay` holder who is not the
+ * requester or payee when it is `treasurer`; nobody when it is `nobody` or the
+ * request was already in (`already_submitted` is a second tap, not a second
+ * event, so it sends nothing). The `email_queue` rows are written in the same
+ * transaction as the submission; the inline send happens after the commit.
  */
 
 export interface RequestActor {
@@ -172,9 +180,10 @@ export type SubmitRequestResult =
       /** True for `already_submitted`: a second tap on a request that is already in. Success, no second event. */
       already: boolean;
       /**
-       * The people to tell (Batch 3 wires the notice into this same transaction):
-       * the eligible approvers for route `seat`, every effective `pay` holder who
-       * is not the requester or payee for route `treasurer`, empty otherwise.
+       * The people the notice goes to (queued in this same transaction, see the
+       * header): the eligible approvers for route `seat`, every effective `pay`
+       * holder who is not the requester or payee for route `treasurer`, empty
+       * otherwise. Empty for `already_submitted`.
        */
       notifyPersonIds: string[];
     }
@@ -187,8 +196,10 @@ export async function submitRequest(
   actor: RequestActor,
   input: { requestId: string; expectedRevision: number },
 ): Promise<SubmitRequestResult> {
+  let queued: string[] = [];
+  let result: SubmitRequestResult;
   try {
-    return await withOrgContext(actor.personId, actor.organizationId, async (tx): Promise<SubmitRequestResult> => {
+    result = await withOrgContext(actor.personId, actor.organizationId, async (tx): Promise<SubmitRequestResult> => {
       const out = rowsOf(
         await tx.execute(sql`
           select * from presby_reimbursement_submit(
@@ -206,13 +217,21 @@ export async function submitRequest(
           const detail = await memberDetailInTx(tx, input.requestId, actor.userId);
           route = detail?.route ?? null;
         }
+        const notifyPersonIds = ((out.notify_person_ids as string[] | null) ?? []).map(String);
+        if (!already && (route === "seat" || route === "treasurer")) {
+          queued = await queueNotices(tx, {
+            organizationId: actor.organizationId,
+            requestId: input.requestId,
+            batches: [{ spec: { kind: route === "seat" ? "needs_approval" : "needs_treasurer" }, personIds: notifyPersonIds }],
+          });
+        }
         return {
           kind: "ok",
           route,
           groupName: (out.group_name as string | null) ?? null,
           revision: Number(out.revision),
           already,
-          notifyPersonIds: ((out.notify_person_ids as string[] | null) ?? []).map(String),
+          notifyPersonIds: already ? [] : notifyPersonIds,
         };
       }
       return { kind: "refused", outcome: outcome as SubmitOutcome };
@@ -221,6 +240,8 @@ export async function submitRequest(
     if (isNotPermitted(err)) return { kind: "denied" };
     throw err;
   }
+  if (result.kind === "ok") await sendQueuedNotices(queued);
+  return result;
 }
 
 // ---------------------------------------------------------------------------

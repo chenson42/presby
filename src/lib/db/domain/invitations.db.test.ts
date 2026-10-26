@@ -752,7 +752,12 @@ describe.skipIf(!hasDb)("drizzle/0059 account_invitations (Postgres-backed)", ()
         administration_role_key: "founding_administrator", office_role_key: "congregation_stated_clerk",
       });
       const [u] = await q(sql`select email, email_verified is not null as verified, name, password, two_factor_required from users where id = ${String(r.user_id)}`);
-      expect(u).toEqual({ email: s.address, verified: true, name: "Marisol Quenby", password: FAKE_BCRYPT, two_factor_required: true });
+      // The account's own column takes the default, false since 0080 (DECISION-291);
+      // a founding administrator is required through the ROLE: the bundle carries
+      // roles.manage, role_grants.manage and domains.manage, which 0080 flags.
+      expect(u).toEqual({ email: s.address, verified: true, name: "Marisol Quenby", password: FAKE_BCRYPT, two_factor_required: false });
+      const [req] = await q(sql`select presby_two_factor_required(${String(r.user_id)}::uuid) as required`);
+      expect(req!.required).toBe(true);
       const [p] = await q(sql`select first_name, last_name, user_id from people where id = ${String(r.person_id)}`);
       expect(p).toEqual({ first_name: "Marisol", last_name: "Quenby", user_id: r.user_id });
       const [m] = await q(sql`select engagement_status, current_roll, ended_on from memberships where person_id = ${String(r.person_id)} and organization_id = ${s.org}`);

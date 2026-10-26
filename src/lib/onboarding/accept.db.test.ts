@@ -146,7 +146,11 @@ describe.skipIf(!hasDb)("src/lib/onboarding/accept.ts (Postgres-backed)", { time
 
       // The account: the invitation's address (never client input), verified, the password hashed with bcrypt.
       const [user] = await q(sql`select email, name, password, email_verified, two_factor_required from users where id = ${userId!}`);
-      expect(user).toMatchObject({ email: s.address, name: "Marisol Quenby", two_factor_required: true });
+      // Own column false since 0080 (DECISION-291); required through the founding
+      // bundle's flagged keys (roles.manage, role_grants.manage, domains.manage).
+      expect(user).toMatchObject({ email: s.address, name: "Marisol Quenby", two_factor_required: false });
+      const [req] = await q(sql`select presby_two_factor_required(${userId!}::uuid) as required`);
+      expect(req!.required).toBe(true);
       expect(user!.email_verified).not.toBeNull();
       expect(String(user!.password)).toMatch(/^\$2[aby]\$10\$/);
       expect(await compare(PASSWORD, String(user!.password))).toBe(true);

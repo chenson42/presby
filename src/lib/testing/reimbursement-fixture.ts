@@ -92,7 +92,10 @@ export async function createReimbursementFixture(label: string) {
   }
 
   /** A congregation with the derived Session, Board of Deacons and Active Membership groups. */
-  async function makeOrg(tag: string, opts: { timeZone?: string; type?: string } = {}): Promise<string> {
+  async function makeOrg(
+    tag: string,
+    opts: { timeZone?: string; type?: string; toggle?: boolean } = {},
+  ): Promise<string> {
     counter += 1;
     const slug = `rmb-${label}-${tag}-${stamp}-${counter}`.toLowerCase().slice(0, 63).replace(/-+$/, "");
     const [row] = await q(sql`
@@ -110,7 +113,16 @@ export async function createReimbursementFixture(label: string) {
     if (opts.timeZone) {
       await q(sql`insert into organization_settings (organization_id, time_zone) values (${id}, ${opts.timeZone})`);
     }
+    if (opts.toggle) await setToggle(id, true);
     return id;
+  }
+
+  /** The per-organization `org_portal.reimbursement` toggle row (a missing row is OFF). */
+  async function setToggle(org: string, enabled: boolean): Promise<void> {
+    await q(sql`
+      insert into organization_feature_toggles (organization_id, feature_key, enabled, updated_by)
+      values (${org}, 'org_portal.reimbursement', ${enabled}, null)
+      on conflict (organization_id, feature_key) do update set enabled = excluded.enabled`);
   }
 
   async function derivedGroup(org: string, derivedFrom: string): Promise<string> {
@@ -250,6 +262,7 @@ export async function createReimbursementFixture(label: string) {
     asApp,
     makeUser,
     makeOrg,
+    setToggle,
     derivedGroup,
     makeGroup,
     makePerson,

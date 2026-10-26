@@ -1,0 +1,343 @@
+{
+  "memberAsRequester": {
+    "id": "<id:1>",
+    "status": "paid",
+    "kind": "reimburse",
+    "origin": "app",
+    "revision": 2,
+    "amountCents": 4150,
+    "currency": "usd",
+    "expenseDate": "<date>",
+    "purpose": "Paint for the fellowship hall",
+    "preApprovedByName": "Pat",
+    "noReceiptClaimed": false,
+    "createdAt": "<timestamp>",
+    "firstSubmittedAt": "<timestamp>",
+    "submittedAt": "<timestamp>",
+    "updatedAt": "<timestamp>",
+    "group": {
+      "id": "<id:2>",
+      "name": "Property Committee"
+    },
+    "category": {
+      "id": "<id:3>",
+      "name": "Supplies",
+      "retired": false
+    },
+    "payee": {
+      "kind": "person",
+      "name": "Requester Quillfeather<n>",
+      "personId": "<id:4>"
+    },
+    "enteredOnBehalf": false,
+    "receipts": [
+      {
+        "id": "<id:5>",
+        "displayName": "receipt.jpg",
+        "contentType": "image/jpeg",
+        "byteSize": 3,
+        "createdAt": "<timestamp>"
+      }
+    ],
+    "receiptWaived": false,
+    "approvedOn": "<date>",
+    "decidedOn": "<date>",
+    "latestReason": null,
+    "route": null,
+    "paidOn": "<date>",
+    "duplicateReceipt": null,
+    "viewer": {
+      "relation": "creator",
+      "canEdit": false,
+      "canWithdraw": false,
+      "canDecide": false
+    },
+    "history": [
+      {
+        "kind": "created",
+        "toStatus": "draft",
+        "on": "<date>",
+        "at": "<timestamp>"
+      },
+      {
+        "kind": "submitted",
+        "fromStatus": "draft",
+        "toStatus": "submitted",
+        "on": "<date>",
+        "at": "<timestamp>"
+      },
+      {
+        "kind": "approved",
+        "fromStatus": "submitted",
+        "toStatus": "approved",
+        "on": "<date>",
+        "at": "<timestamp>"
+      },
+      {
+        "kind": "payment_recorded",
+        "fromStatus": "approved",
+        "toStatus": "paid",
+        "on": "<date>",
+        "at": "<timestamp>"
+      },
+      {
+        "kind": "payment_reversed",
+        "fromStatus": "paid",
+        "toStatus": "approved",
+        "on": "<date>",
+        "at": "<timestamp>"
+      },
+      {
+        "kind": "payment_recorded",
+        "fromStatus": "approved",
+        "toStatus": "paid",
+        "on": "<date>",
+        "at": "<timestamp>"
+      }
+    ],
+    "level": "member"
+  },
+  "memberAsSeatWhileSubmitted": {
+    "id": "<id:1>",
+    "status": "submitted",
+    "kind": "reimburse",
+    "origin": "app",
+    "revision": 2,
+    "amountCents": 4150,
+    "currency": "usd",
+    "expenseDate": "<date>",
+    "purpose": "Paint for the fellowship hall",
+    "preApprovedByName": "Pat",
+    "noReceiptClaimed": false,
+    "createdAt": "<timestamp>",
+    "firstSubmittedAt": "<timestamp>",
+    "submittedAt": "<timestamp>",
+    "updatedAt": "<timestamp>",
+    "group": {
+      "id": "<id:2>",
+      "name": "Property Committee"
+    },
+    "category": {
+      "id": "<id:3>",
+      "name": "Supplies",
+      "retired": false
+    },
+    "payee": {
+      "kind": "person",
+      "name": "Requester Quillfeather<n>",
+      "personId": null
+    },
+    "enteredOnBehalf": false,
+    "receipts": [
+      {
+        "id": "<id:5>",
+        "displayName": "receipt.jpg",
+        "contentType": "image/jpeg",
+        "byteSize": 3,
+        "createdAt": "<timestamp>"
+      }
+    ],
+    "receiptWaived": false,
+    "approvedOn": null,
+    "decidedOn": "<date>",
+    "latestReason": null,
+    "route": "seat",
+    "paidOn": null,
+    "duplicateReceipt": false,
+    "viewer": {
+      "relation": "seat",
+      "canEdit": false,
+      "canWithdraw": false,
+      "canDecide": true
+    },
+    "history": [
+      {
+        "kind": "created",
+        "toStatus": "draft",
+        "on": "<date>",
+        "at": "<timestamp>"
+      },
+      {
+        "kind": "submitted",
+        "fromStatus": "draft",
+        "toStatus": "submitted",
+        "on": "<date>",
+        "at": "<timestamp>"
+      }
+    ],
+    "level": "member"
+  },
+  "treasuryAsPayer": {
+    "id": "<id:1>",
+    "status": "paid",
+    "kind": "reimburse",
+    "origin": "app",
+    "revision": 2,
+    "amountCents": 4150,
+    "currency": "usd",
+    "expenseDate": "<date>",
+    "purpose": "Paint for the fellowship hall",
+    "preApprovedByName": "Pat",
+    "noReceiptClaimed": false,
+    "createdAt": "<timestamp>",
+    "firstSubmittedAt": "<timestamp>",
+    "submittedAt": "<timestamp>",
+    "updatedAt": "<timestamp>",
+    "group": {
+      "id": "<id:2>",
+      "name": "Property Committee"
+    },
+    "category": {
+      "id": "<id:3>",
+      "name": "Supplies",
+      "retired": false
+    },
+    "payee": {
+      "kind": "person",
+      "name": "Requester Quillfeather<n>",
+      "personId": "<id:4>"
+    },
+    "enteredOnBehalf": false,
+    "receipts": [
+      {
+        "id": "<id:5>",
+        "displayName": "receipt.jpg",
+        "contentType": "image/jpeg",
+        "byteSize": 3,
+        "createdAt": "<timestamp>"
+      }
+    ],
+    "receiptWaived": false,
+    "approvedOn": "<date>",
+    "decidedOn": "<date>",
+    "latestReason": null,
+    "route": null,
+    "paidOn": "<date>",
+    "duplicateReceipt": false,
+    "viewer": {
+      "relation": "treasury",
+      "canEdit": false,
+      "canWithdraw": false,
+      "canDecide": false
+    },
+    "history": [
+      {
+        "kind": "created",
+        "toStatus": "draft",
+        "on": "<date>",
+        "at": "<timestamp>",
+        "actorName": "Requester Quillfeather<n>"
+      },
+      {
+        "kind": "submitted",
+        "fromStatus": "draft",
+        "toStatus": "submitted",
+        "on": "<date>",
+        "at": "<timestamp>",
+        "actorName": "Requester Quillfeather<n>"
+      },
+      {
+        "kind": "approved",
+        "fromStatus": "submitted",
+        "toStatus": "approved",
+        "on": "<date>",
+        "at": "<timestamp>",
+        "actorName": "Chair Quillfeather<n>"
+      },
+      {
+        "kind": "payment_recorded",
+        "fromStatus": "approved",
+        "toStatus": "paid",
+        "on": "<date>",
+        "at": "<timestamp>",
+        "actorName": "PayerOne Quillfeather<n>",
+        "paymentId": "<id:6>"
+      },
+      {
+        "kind": "payment_reversed",
+        "fromStatus": "paid",
+        "toStatus": "approved",
+        "on": "<date>",
+        "at": "<timestamp>",
+        "note": "Check was voided",
+        "actorName": "PayerOne Quillfeather<n>",
+        "paymentId": "<id:7>"
+      },
+      {
+        "kind": "payment_recorded",
+        "fromStatus": "approved",
+        "toStatus": "paid",
+        "on": "<date>",
+        "at": "<timestamp>",
+        "actorName": "PayerTwo Quillfeather<n>",
+        "paymentId": "<id:8>"
+      }
+    ],
+    "level": "treasury",
+    "creatorName": "Requester Quillfeather<n>",
+    "approval": {
+      "path": "seat",
+      "byName": "Chair Quillfeather<n>",
+      "revision": 2,
+      "at": "<timestamp>"
+    },
+    "waiver": null,
+    "duplicateRequestIds": [],
+    "payments": [
+      {
+        "id": "<id:6>",
+        "kind": "payment",
+        "method": "check",
+        "reference": "3001",
+        "paidOn": "<date>",
+        "amountCents": 4150,
+        "byName": "PayerOne Quillfeather<n>",
+        "selfPaid": false,
+        "note": "First try",
+        "offsetsPaymentId": null,
+        "reason": null,
+        "createdAt": "<timestamp>",
+        "reversed": true
+      },
+      {
+        "id": "<id:7>",
+        "kind": "reversal",
+        "method": null,
+        "reference": null,
+        "paidOn": null,
+        "amountCents": 4150,
+        "byName": "PayerOne Quillfeather<n>",
+        "selfPaid": false,
+        "note": null,
+        "offsetsPaymentId": "<id:6>",
+        "reason": "Check was voided",
+        "createdAt": "<timestamp>",
+        "reversed": false
+      },
+      {
+        "id": "<id:8>",
+        "kind": "payment",
+        "method": "ach",
+        "reference": "ACH-77",
+        "paidOn": "<date>",
+        "amountCents": 4150,
+        "byName": "PayerTwo Quillfeather<n>",
+        "selfPaid": false,
+        "note": null,
+        "offsetsPaymentId": null,
+        "reason": null,
+        "createdAt": "<timestamp>",
+        "reversed": false
+      }
+    ],
+    "treasuryViewer": {
+      "holdsPay": true,
+      "holdsManage": true,
+      "isApprover": false,
+      "isRequesterSide": false,
+      "seatHolderExists": true,
+      "secondPayerExists": true,
+      "anotherPayerExists": true
+    }
+  }
+}

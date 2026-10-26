@@ -8,6 +8,7 @@ import {
   overrideRefusal,
   paymentRefusal,
   reasonVerbRefusal,
+  treasuryReturnRefusal,
   waiveRefusal,
 } from "./treasury-messages";
 
@@ -33,7 +34,7 @@ describe("paymentRefusal maps every record_payment outcome to Copy", () => {
   it("field outcomes sit next to their field", () => {
     expect(paymentRefusal("reference_required").fieldErrors).toEqual({ reference: "Enter a check number." });
     expect(paymentRefusal("reference_too_long").fieldErrors).toEqual({ reference: "Use 40 characters or fewer." });
-    expect(paymentRefusal("date_out_of_range").fieldErrors).toEqual({ paidOn: "Choose a date that isn't in the future." });
+    expect(paymentRefusal("date_out_of_range").fieldErrors).toEqual({ paidOn: "Choose a date between the day of the expense and today." });
     expect(paymentRefusal("note_too_long").fieldErrors).toEqual({ note: "Use 300 characters or fewer." });
   });
 
@@ -49,21 +50,33 @@ describe("the state verbs: void, reverse, waive, send back", () => {
     expect(reasonVerbRefusal("reason_too_long").fieldErrors).toEqual({ reason: "Use 300 characters or fewer." });
   });
 
-  it("not_found, not_voidable and not_reversible are ONE neutral answer (EC16: no probing for state)", () => {
-    for (const o of ["not_found", "not_voidable", "not_reversible"]) expect(reasonVerbRefusal(o)).toEqual(NEUTRAL);
+  it("not_found stays the one neutral answer; each state outcome is its own treasurer sentence (amendment S3)", () => {
+    expect(reasonVerbRefusal("not_found")).toEqual(NEUTRAL);
+    expect(reasonVerbRefusal("not_voidable")).toEqual({ ok: false, error: COPY.treasury.refusals.notVoidable });
+    expect(reasonVerbRefusal("not_reversible")).toEqual({ ok: false, error: COPY.treasury.refusals.notReversible });
     for (const o of OUTCOMES.void.filter((x) => x !== "ok")) expect(reasonVerbRefusal(o).error.length).toBeGreaterThan(0);
     for (const o of OUTCOMES.reversePayment.filter((x) => x !== "ok")) expect(reasonVerbRefusal(o).error.length).toBeGreaterThan(0);
   });
 
-  it("waive: the note limit is a field error, everything else the neutral answer", () => {
+  it("waive: the note limit is a field error; not_found is neutral; the two state outcomes are their sentences", () => {
     expect(waiveRefusal("note_too_long").fieldErrors).toEqual({ note: "Use 300 characters or fewer." });
-    for (const o of ["not_found", "not_waivable", "receipt_present"]) expect(waiveRefusal(o)).toEqual(NEUTRAL);
+    expect(waiveRefusal("not_found")).toEqual(NEUTRAL);
+    expect(waiveRefusal("not_waivable")).toEqual({ ok: false, error: COPY.treasury.refusals.notWaivable });
+    expect(waiveRefusal("receipt_present")).toEqual({ ok: false, error: COPY.treasury.refusals.receiptPresent });
     for (const o of OUTCOMES.waiveReceipt.filter((x) => x !== "ok")) expect(waiveRefusal(o).error.length).toBeGreaterThan(0);
   });
 
-  it("note: too long is a field error; missing is the Copy-less gap sentence; not_found is neutral", () => {
+  it("send back (treasurer tree): not_returnable is the treasurer sentence; every other outcome is the member tree's", () => {
+    expect(treasuryReturnRefusal("not_returnable")).toEqual({ ok: false, error: COPY.treasury.refusals.notReturnable });
+    expect(treasuryReturnRefusal("not_found")).toEqual(NEUTRAL);
+    expect(treasuryReturnRefusal("changed_since_viewed")).toMatchObject({ kind: "changed_since_viewed" });
+    expect(treasuryReturnRefusal("reason_required").fieldErrors).toEqual({ reason: COPY.decision.reasonRequired });
+    expect(treasuryReturnRefusal("kind_invalid")).toEqual(NEUTRAL);
+  });
+
+  it("note: too long is a field error; missing is 'Write a note.'; not_found is neutral", () => {
     expect(addNoteRefusal("note_too_long").fieldErrors).toEqual({ note: "Use 500 characters or fewer." });
-    expect(addNoteRefusal("note_required").fieldErrors).toEqual({ note: COPY.form.saveFailed });
+    expect(addNoteRefusal("note_required").fieldErrors).toEqual({ note: "Write a note." });
     expect(addNoteRefusal("not_found")).toEqual(NEUTRAL);
   });
 });
@@ -88,11 +101,13 @@ describe("overrideRefusal (C8: the group is named, the team link is for a manage
     expect(payOnly.suggestTeam).toBeUndefined();
   });
 
-  it("changed_since_viewed carries its kind; everything else is the neutral answer", () => {
+  it("changed_since_viewed carries its kind; not_approvable is its sentence; not_found is neutral", () => {
     expect(overrideRefusal("changed_since_viewed", { groupName: null, holdsManage: false })).toMatchObject({
       error: COPY.decision.changedAfterOpened, kind: "changed_since_viewed",
     });
-    expect(overrideRefusal("not_approvable", { groupName: null, holdsManage: false })).toEqual(NEUTRAL);
+    expect(overrideRefusal("not_approvable", { groupName: null, holdsManage: false })).toEqual({
+      ok: false, error: COPY.treasury.refusals.notApprovable,
+    });
     expect(overrideRefusal("not_found", { groupName: null, holdsManage: false })).toEqual(NEUTRAL);
   });
 });
@@ -102,6 +117,6 @@ describe("settings refusals", () => {
     expect(chargeableRefusal("group_unavailable").error).toBe(COPY.fieldErrors.groupUnavailable);
     expect(categoryRefusal("name_invalid").fieldErrors).toEqual({ name: COPY.settings.categoryNameInvalid });
     expect(categoryRefusal("name_taken").fieldErrors).toEqual({ name: COPY.settings.categoryNameTaken });
-    expect(categoryRefusal("not_found").error).toBe(COPY.form.saveFailed);
+    expect(categoryRefusal("not_found")).toEqual({ ok: false, error: COPY.settings.categoryGone });
   });
 });

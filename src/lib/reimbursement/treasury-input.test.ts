@@ -39,8 +39,8 @@ describe("recordPaymentSchema", () => {
 
   it("a method outside the four, and a date that is not a real date, are refused with Copy text", () => {
     expect(messages(recordPaymentSchema.safeParse({ ...ok, method: "wire" }))).toEqual([`method: ${COPY.form.saveFailed}`]);
-    expect(messages(recordPaymentSchema.safeParse({ ...ok, paidOn: "2026-02-30" }))).toEqual([`paidOn: ${COPY.treasury.results.dateNotFuture}`]);
-    expect(messages(recordPaymentSchema.safeParse({ ...ok, paidOn: "" }))).toEqual([`paidOn: ${COPY.treasury.results.dateNotFuture}`]);
+    expect(messages(recordPaymentSchema.safeParse({ ...ok, paidOn: "2026-02-30" }))).toEqual([`paidOn: ${COPY.treasury.results.dateOutOfRange}`]);
+    expect(messages(recordPaymentSchema.safeParse({ ...ok, paidOn: "" }))).toEqual([`paidOn: ${COPY.treasury.results.dateOutOfRange}`]);
   });
 
   it("over-length reference (40) and note (300) are named field errors, never truncated", () => {
@@ -90,7 +90,7 @@ describe("waive and note", () => {
 
   it("a treasury note is required and at most 500", () => {
     expect(addNoteSchema.parse({ requestId: ID, note: " Check mailed Monday " })).toEqual({ requestId: ID, note: "Check mailed Monday" });
-    expect(messages(addNoteSchema.safeParse({ requestId: ID, note: "  " }))).toEqual([`note: ${COPY.form.saveFailed}`]);
+    expect(messages(addNoteSchema.safeParse({ requestId: ID, note: "  " }))).toEqual([`note: ${COPY.treasury.results.noteRequired}`]);
     expect(messages(addNoteSchema.safeParse({ requestId: ID, note: "n".repeat(501) }))).toEqual(["note: Use 500 characters or fewer."]);
     expect(addNoteSchema.safeParse({ requestId: ID, note: "n".repeat(500) }).success).toBe(true);
   });

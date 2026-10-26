@@ -85,7 +85,7 @@ describe("grantTreasuryRoleAction", () => {
     [{ kind: "forbidden" }, "You don't have permission to manage the treasury team."],
     [{ kind: "invalid_role" }, "That role isn't available at this organization."],
     [{ kind: "invalid_target" }, "That person doesn't have a current membership here."],
-    [{ kind: "not_treasury_only" }, "That role includes permissions outside Giving and Reimbursements. Grant it from Roles instead."],
+    [{ kind: "not_treasury_only" }, "That role includes permissions outside Giving and Reimbursements. An administrator can grant it from Roles."],
     [{ kind: "escalation_denied", missingPermissions: ["reimbursement.pay", "reimbursement.view"] }, "You can't grant permissions you don't hold yourself: reimbursement.pay, reimbursement.view."],
     [{ kind: "already_granted" }, "That person already has this role."],
   ])("maps %j to its Copy sentence, with no audit", async (libResult, error) => {
@@ -153,7 +153,7 @@ describe("ensureTreasuryRoleAction", () => {
   it.each([
     [{ kind: "forbidden" }, "You don't have permission to manage the treasury team."],
     [{ kind: "template_not_found" }, "That role isn't available to set up. Contact support."],
-    [{ kind: "not_treasury_only" }, "That role includes permissions outside Giving and Reimbursements. Grant it from Roles instead."],
+    [{ kind: "not_treasury_only" }, "That role already exists with permissions outside Giving and Reimbursements. An administrator can fix it under Roles."],
     [{ kind: "escalation_denied", missingPermissions: ["reimbursement.manage"] }, "You can't set up a role with permissions you don't hold yourself: reimbursement.manage."],
   ])("maps %j to its sentence", async (libResult, error) => {
     gate.mockResolvedValue(IDENTITY);

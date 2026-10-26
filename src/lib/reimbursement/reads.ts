@@ -381,6 +381,71 @@ export async function listTreasurerRequests(
   }
 }
 
+// ---------------------------------------------------------------------------
+// The queue's "Charged to" options (Phase 3 amendment S7)
+// ---------------------------------------------------------------------------
+
+/** `presby_reimbursement_treasurer_list` clamps a page to 200 rows (drizzle/0073). */
+export const GROUP_SCAN_PAGE_SIZE = 200;
+/** The most requests `listTreasurerGroups` reads: 10 pages of 200. */
+export const GROUP_SCAN_MAX_ROWS = 2_000;
+
+export type TreasurerGroupsResult =
+  | {
+      kind: "ok";
+      /** Distinct groups named by the requests read, by name, under their CURRENT names. */
+      groups: Array<{ id: string; name: string }>;
+      /** The organization has more requests than the bound, so a group whose only requests are older is missing. */
+      truncated: boolean;
+    }
+  | { kind: "denied" };
+
+/**
+ * The groups behind the queue's "Charged to" filter: the distinct groups
+ * present in the requests the viewer can already see (orchestrator ruling
+ * 2026-10-26; no definer, no schema). It pages the existing `all` tab, newest
+ * first, in ONE transaction (a stable view of the order) until it has read every
+ * row or `maxRows` of them, and says whether the bound was hit so the page can
+ * show `COPY.queue.filter.groupsTruncated` instead of a silently wrong list.
+ * The same `view` gate as the queue: a caller without it is `denied`.
+ *
+ * `bounds` exists so a test can lower the cap; `pageSize` above the definer's
+ * clamp of 200 would skip rows, so it is held to it.
+ */
+export async function listTreasurerGroups(
+  identity: ReadIdentity,
+  bounds: { pageSize?: number; maxRows?: number } = {},
+): Promise<TreasurerGroupsResult> {
+  const pageSize = Math.min(Math.max(Math.trunc(bounds.pageSize ?? GROUP_SCAN_PAGE_SIZE), 1), GROUP_SCAN_PAGE_SIZE);
+  const maxRows = Math.max(Math.trunc(bounds.maxRows ?? GROUP_SCAN_MAX_ROWS), 1);
+  try {
+    return await withOrgContext(identity.personId, identity.organizationId, async (tx) => {
+      const found = new Map<string, string>();
+      let total = 0;
+      for (let offset = 0; offset < maxRows; offset += pageSize) {
+        const limit = Math.min(pageSize, maxRows - offset);
+        const rows = rowsOf(
+          await tx.execute(sql`
+            select group_id, group_name, total_count::integer as total_count
+              from presby_reimbursement_treasurer_list(
+                ${identity.userId}::uuid, 'all'::text, null::uuid, null::date, null::date,
+                ${limit}::integer, ${offset}::integer)`),
+        );
+        if (rows.length === 0) break;
+        total = Number(rows[0]!.total_count);
+        for (const r of rows) found.set(String(r.group_id), String(r.group_name));
+        if (offset + rows.length >= total) break;
+      }
+      const groups = [...found].map(([id, name]) => ({ id, name }));
+      groups.sort((a, b) => a.name.localeCompare(b.name, "en") || a.id.localeCompare(b.id));
+      return { kind: "ok" as const, groups, truncated: total > maxRows };
+    });
+  } catch (err) {
+    if (isNotPermitted(err)) return { kind: "denied" };
+    throw err;
+  }
+}
+
 /**
  * Effective holders of `reimbursement.pay` (the queue's "No one can record
  * payments yet" banner when it is zero). A bare count of the organization: it

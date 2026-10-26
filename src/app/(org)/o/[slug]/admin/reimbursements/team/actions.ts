@@ -147,7 +147,7 @@ export async function ensureTreasuryRoleAction(
     case "template_not_found":
       return { ok: false, error: COPY.team.templateUnavailable };
     case "not_treasury_only":
-      return { ok: false, error: COPY.team.notTreasuryOnly };
+      return { ok: false, error: COPY.team.ensureNotTreasuryOnly };
     case "escalation_denied":
       return { ok: false, error: COPY.team.ensureEscalation(result.missingPermissions.join(", ")) };
     case "ok":

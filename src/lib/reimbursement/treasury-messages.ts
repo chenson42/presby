@@ -1,6 +1,7 @@
 import type { ReimbursementActionFailure } from "./action-result";
 import { COPY } from "./copy";
 import { MAX_LENGTH } from "./limits";
+import { decisionRefusal } from "./messages";
 
 /**
  * Definer outcome -> the failure a treasurer form shows. PURE; every string is a
@@ -9,15 +10,16 @@ import { MAX_LENGTH } from "./limits";
  * are `treasury-input.ts` input names: `reference`, `paidOn`, `note`, `reason`,
  * `name`.
  *
- * ONE NEUTRAL ANSWER (EC16). A request that does not exist, one the caller may
- * not see, and one that is in the wrong state for the verb (not voidable, not
- * reversible, not waivable) all read `This request isn't available.`, so the
- * text cannot be used to probe ids or states. The treasury pages hide a verb the
- * request cannot take, so a person only reaches the neutral answer from a stale
- * page or a hand-posted request. The exceptions are the C8 "pre-form blocks"
- * (`payer_is_approver`, `needs_another_payer`, `receipt_missing`, `not_payable`,
- * `already_paid`): the viewer has already proved the right to see the request,
- * and each tells them what to do.
+ * NEUTRAL ONLY FOR "NOT FOUND" (EC16, amended by Phase 3 amendment S3). A request
+ * that does not exist and one the caller may not see read `This request isn't
+ * available.`, so the text cannot be used to probe ids. A request that is in the
+ * wrong state for the verb (not voidable, not reversible, not waivable, not
+ * approvable, not returnable) reads its own short sentence in `treasury.refusals`,
+ * worded so it is true for every cause of that outcome (it names no cause, so it
+ * neither confirms nor denies a separation-of-duties check). The member tree
+ * (`messages.ts`) is unchanged and stays on the neutral answer. The C8 "pre-form
+ * blocks" (`payer_is_approver`, `needs_another_payer`, `receipt_missing`,
+ * `not_payable`, `already_paid`) tell the viewer what to do.
  */
 
 const NEUTRAL: ReimbursementActionFailure = { ok: false, error: COPY.detail.unavailable, kind: "not_found" };
@@ -47,7 +49,7 @@ export function paymentRefusal(outcome: string): ReimbursementActionFailure {
     case "reference_too_long":
       return withFields({ reference: COPY.fieldErrors.tooLong(MAX_LENGTH.reference) });
     case "date_out_of_range":
-      return withFields({ paidOn: COPY.treasury.results.dateNotFuture });
+      return withFields({ paidOn: COPY.treasury.results.dateOutOfRange });
     case "note_too_long":
       return withFields({ note: COPY.fieldErrors.tooLong(MAX_LENGTH.paymentNote) });
     case "method_invalid":
@@ -65,9 +67,11 @@ export function reasonVerbRefusal(outcome: string): ReimbursementActionFailure {
       return withFields({ reason: COPY.treasury.results.reasonRequired });
     case "reason_too_long":
       return withFields({ reason: COPY.fieldErrors.tooLong(MAX_LENGTH.reason) });
-    case "not_found":
     case "not_voidable":
+      return { ok: false, error: COPY.treasury.refusals.notVoidable };
     case "not_reversible":
+      return { ok: false, error: COPY.treasury.refusals.notReversible };
+    case "not_found":
     default:
       return neutral();
   }
@@ -78,19 +82,21 @@ export function waiveRefusal(outcome: string): ReimbursementActionFailure {
   switch (outcome) {
     case "note_too_long":
       return withFields({ note: COPY.fieldErrors.tooLong(MAX_LENGTH.waiverNote) });
-    case "not_found":
     case "not_waivable":
+      return { ok: false, error: COPY.treasury.refusals.notWaivable };
     case "receipt_present":
+      return { ok: false, error: COPY.treasury.refusals.receiptPresent };
+    case "not_found":
     default:
       return neutral();
   }
 }
 
-/** The failure for a refused treasury note. `note_required` has no Copy sentence of its own (a reported gap). */
+/** The failure for a refused treasury note. */
 export function addNoteRefusal(outcome: string): ReimbursementActionFailure {
   switch (outcome) {
     case "note_required":
-      return withFields({ note: COPY.form.saveFailed });
+      return withFields({ note: COPY.treasury.results.noteRequired });
     case "note_too_long":
       return withFields({ note: COPY.fieldErrors.tooLong(MAX_LENGTH.note) });
     case "not_found":
@@ -125,11 +131,23 @@ export function overrideRefusal(
       };
     case "changed_since_viewed":
       return { ok: false, error: COPY.decision.changedAfterOpened, kind: "changed_since_viewed" };
-    case "not_found":
     case "not_approvable":
+      return { ok: false, error: COPY.treasury.refusals.notApprovable };
+    case "not_found":
     default:
       return neutral();
   }
+}
+
+/**
+ * The failure for a refused treasurer send back. `not_returnable` is the
+ * treasurer sentence (amendment S3); every other outcome (`changed_since_viewed`,
+ * the reason field errors, `not_found`, `kind_invalid`) is the member tree's own
+ * mapping, which this delegates to, so the two trees cannot drift on them.
+ */
+export function treasuryReturnRefusal(outcome: string): ReimbursementActionFailure {
+  if (outcome === "not_returnable") return { ok: false, error: COPY.treasury.refusals.notReturnable };
+  return decisionRefusal(outcome);
 }
 
 /** The failure for a refused chargeable-group change. */
@@ -147,7 +165,6 @@ export function categoryRefusal(outcome: string): ReimbursementActionFailure {
       return withFields({ name: COPY.settings.categoryNameTaken });
     case "not_found":
     default:
-      // No Copy sentence for a category that has vanished; the house save-failed text, reported as a gap.
-      return { ok: false, error: COPY.form.saveFailed };
+      return { ok: false, error: COPY.settings.categoryGone };
   }
 }

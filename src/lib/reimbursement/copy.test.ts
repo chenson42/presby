@@ -275,6 +275,26 @@ describe("C7 to C9 treasurer queue, detail, settings and team", () => {
       "This page is for the people who handle reimbursements at Alder Creek Church. If you think you should be one of them, ask your treasurer or another administrator there.",
     );
     expect(q.loadError).toBe("We couldn't load the requests. Try again in a moment.");
+    // Amendment S7: nothingWaiting is gone (wrong on Paid, All and under a filter).
+    expect("nothingWaiting" in q).toBe(false);
+    expect(q.empty).toEqual({
+      pay: "Nothing is waiting for payment.",
+      override: "Nothing needs a treasurer's approval.",
+      progress: "Nothing is in progress.",
+      paid: "Nothing has been paid yet.",
+      all: "No one has sent in a request yet.",
+      filtered: "No requests match those filters.",
+    });
+    expect(q.filter).toEqual({
+      groupAll: "All groups",
+      groupSelected: "This group",
+      submittedFrom: "Submitted from",
+      submittedTo: "Submitted to",
+      datesHint: "Dates are the day each request was last submitted.",
+      apply: "Filter",
+      clear: "Clear",
+      groupsTruncated: "Only groups with one of the 2,000 most recent requests are listed.",
+    });
   });
 
   it("treasury verbs", () => {
@@ -310,6 +330,23 @@ describe("C7 to C9 treasurer queue, detail, settings and team", () => {
       "This needs a second person who can record payments before you can approve it. Whoever approves can't also pay. Add one under Treasury team.",
     );
     expect(t.note.hint).toBe("Only the treasury team can see notes.");
+    // Amendment S1, S3, S4.
+    expect(t.results.noteRequired).toBe("Write a note.");
+    expect(t.results.dateOutOfRange).toBe("Choose a date between the day of the expense and today.");
+    expect("dateNotFuture" in t.results).toBe(false);
+    expect(t.refusals).toEqual({
+      notWaivable: "A receipt can't be waived on this request. Reload the page to see where it stands.",
+      receiptPresent: "This request already has a receipt, so there is nothing to waive.",
+      notVoidable: "This request can't be voided. Reload the page to see where it stands.",
+      notReversible: "This request has no payment that can be reversed. Reload the page to see where it stands.",
+      notApprovable: "You can't approve this request as treasurer. Reload the page to see where it stands.",
+      notReturnable: "You can't send this request back. Reload the page to see where it stands.",
+    });
+    expect(t.sendBack).toEqual({
+      title: "Send this request back?",
+      body: "The requester can fix it and send it again.",
+      bodyApproved: "The requester can fix it and send it again. It will need approval again.",
+    });
     expect(t.extras.approvedBy("Pat Quill", "Oct 25", false)).toBe("Approved by Pat Quill on Oct 25");
     expect(t.extras.approvedBy("Pat Quill", "Oct 25", true)).toBe("Approved by Pat Quill on Oct 25 as treasurer");
     expect(t.extras.selfPaid).toBe("Marked as paid by the person who entered or is paid by the request.");
@@ -326,6 +363,7 @@ describe("C7 to C9 treasurer queue, detail, settings and team", () => {
     expect(s.categoriesHint).toBe("Retired categories stay on old requests.");
     expect(s.categoryNameInvalid).toBe("Use 1 to 60 characters.");
     expect(s.categoryNameTaken).toBe("You already have a category with that name.");
+    expect(s.categoryGone).toBe("That category isn't in the list any more. Reload the page to see the current list.");
     const t = COPY.team;
     expect(t.heading).toBe("Treasury team");
     expect(t.intro("Alder Creek Church")).toBe(
@@ -333,7 +371,12 @@ describe("C7 to C9 treasurer queue, detail, settings and team", () => {
     );
     expect([t.setUpTreasurer, t.setUpClerk]).toEqual(["Set up the Treasurer role", "Set up the Reimbursement Clerk role"]);
     expect(t.clerkDescription).toBe("Can enter requests on behalf of members who don't use the portal.");
-    expect(t.notTreasuryOnly).toBe("That role includes permissions outside Giving and Reimbursements. Grant it from Roles instead.");
+    expect(t.notTreasuryOnly).toBe(
+      "That role includes permissions outside Giving and Reimbursements. An administrator can grant it from Roles.",
+    );
+    expect(t.ensureNotTreasuryOnly).toBe(
+      "That role already exists with permissions outside Giving and Reimbursements. An administrator can fix it under Roles.",
+    );
     expect(t.lastManager).toBe("That would leave no one able to manage reimbursements. Give the role to someone else first.");
     expect(t.escalation("a, b")).toBe("You can't grant permissions you don't hold yourself: a, b.");
     expect(t.alreadyGranted).toBe("That person already has this role.");

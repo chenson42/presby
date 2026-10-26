@@ -55,8 +55,8 @@ export const recordPaymentSchema = z
     method: z.enum(PAYMENT_METHODS, { error: COPY.form.saveFailed }),
     reference: optionalText(MAX_LENGTH.reference),
     paidOn: z
-      .string({ error: COPY.treasury.results.dateNotFuture })
-      .refine((value) => isRealIsoDate(value), { message: COPY.treasury.results.dateNotFuture }),
+      .string({ error: COPY.treasury.results.dateOutOfRange })
+      .refine((value) => isRealIsoDate(value), { message: COPY.treasury.results.dateOutOfRange }),
     note: optionalText(MAX_LENGTH.paymentNote),
   })
   .superRefine((value, ctx) => {
@@ -97,7 +97,7 @@ export type OverrideApproveInput = z.input<typeof overrideApproveSchema>;
 /** `addNoteAction(slug, input)`: an internal note, up to 500 characters. */
 export const addNoteSchema = z.object({
   requestId,
-  note: requiredText(MAX_LENGTH.note, COPY.form.saveFailed),
+  note: requiredText(MAX_LENGTH.note, COPY.treasury.results.noteRequired),
 });
 export type AddNoteInput = z.input<typeof addNoteSchema>;
 

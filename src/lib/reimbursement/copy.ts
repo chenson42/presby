@@ -288,7 +288,25 @@ export const COPY = {
     approvedOn: (date: string) => `Approved ${date}`,
     sentOn: (date: string) => `Sent ${date}`,
     enteredOnBehalfBadge: "Entered on someone's behalf",
-    nothingWaiting: "Nothing is waiting.",
+    /** Empty states by tab, with no filter set; `filtered` when any of group, from or to is set (amendment S7). */
+    empty: {
+      pay: "Nothing is waiting for payment.",
+      override: "Nothing needs a treasurer's approval.",
+      progress: "Nothing is in progress.",
+      paid: "Nothing has been paid yet.",
+      all: "No one has sent in a request yet.",
+      filtered: "No requests match those filters.",
+    },
+    filter: {
+      groupAll: "All groups",
+      groupSelected: "This group",
+      submittedFrom: "Submitted from",
+      submittedTo: "Submitted to",
+      datesHint: "Dates are the day each request was last submitted.",
+      apply: "Filter",
+      clear: "Clear",
+      groupsTruncated: "Only groups with one of the 2,000 most recent requests are listed.",
+    },
     noPayHolder:
       "No one can record payments yet. Your church office can ask PresbyPortal support to set up a treasurer.",
     exportCsv: "Export CSV",
@@ -353,6 +371,25 @@ export const COPY = {
         "This needs a second person who can record payments before you can approve it. Whoever approves can't also pay.",
       addOneUnderTeam: " Add one under Treasury team.",
     },
+    /** Send back, treasurer tree: the kind is fixed to "needs changes", so there is no radio (amendment S4). */
+    sendBack: {
+      title: "Send this request back?",
+      body: "The requester can fix it and send it again.",
+      bodyApproved: "The requester can fix it and send it again. It will need approval again.",
+    },
+    /**
+     * A refused verb in the treasurer tree (amendment S3): one sentence per outcome, each true for
+     * every cause the outcome can have, so none names a cause. `not_found` and the whole member
+     * tree stay on `COPY.detail.unavailable`.
+     */
+    refusals: {
+      notWaivable: "A receipt can't be waived on this request. Reload the page to see where it stands.",
+      receiptPresent: "This request already has a receipt, so there is nothing to waive.",
+      notVoidable: "This request can't be voided. Reload the page to see where it stands.",
+      notReversible: "This request has no payment that can be reversed. Reload the page to see where it stands.",
+      notApprovable: "You can't approve this request as treasurer. Reload the page to see where it stands.",
+      notReturnable: "You can't send this request back. Reload the page to see where it stands.",
+    },
     note: { field: "Note", hint: "Only the treasury team can see notes." },
     results: {
       paymentRecorded: "Payment recorded.",
@@ -363,7 +400,8 @@ export const COPY = {
       approved: "Approved.",
       noteAdded: "Note added.",
       checkNumberRequired: "Enter a check number.",
-      dateNotFuture: "Choose a date that isn't in the future.",
+      noteRequired: "Write a note.",
+      dateOutOfRange: "Choose a date between the day of the expense and today.",
       reasonRequired: "Give a reason.",
     },
     extras: {
@@ -393,6 +431,7 @@ export const COPY = {
     categoriesHint: "Retired categories stay on old requests.",
     categoryNameInvalid: `Use 1 to ${MAX_LENGTH.category} characters.`,
     categoryNameTaken: "You already have a category with that name.",
+    categoryGone: "That category isn't in the list any more. Reload the page to see the current list.",
   },
 
   team: {
@@ -404,7 +443,12 @@ export const COPY = {
     setUpTreasurer: "Set up the Treasurer role",
     setUpClerk: "Set up the Reimbursement Clerk role",
     clerkDescription: "Can enter requests on behalf of members who don't use the portal.",
-    notTreasuryOnly: "That role includes permissions outside Giving and Reimbursements. Grant it from Roles instead.",
+    // Grant: the viewer holds reimbursement.manage, not roles.manage, so the instruction names
+    // someone who can (amendment S2). Giving's twin takes the same sentence in Batch 6.
+    notTreasuryOnly:
+      "That role includes permissions outside Giving and Reimbursements. An administrator can grant it from Roles.",
+    ensureNotTreasuryOnly:
+      "That role already exists with permissions outside Giving and Reimbursements. An administrator can fix it under Roles.",
     lastManager: "That would leave no one able to manage reimbursements. Give the role to someone else first.",
     escalation: (keys: string) => `You can't grant permissions you don't hold yourself: ${keys}.`,
     alreadyGranted: "That person already has this role.",

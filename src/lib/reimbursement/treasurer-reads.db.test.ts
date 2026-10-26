@@ -231,6 +231,45 @@ describe.skipIf(!hasDb)("listTreasurerRequests and getPayHolderCount (Postgres-b
     expect(await reads.listTreasurerRequests(ident(t1), { ...QUERY, page: 2 })).toEqual({ kind: "ok", items: [], total: 0 });
   });
 
+  describe("listTreasurerGroups (the queue's Charged to options, amendment S7)", () => {
+    it("is the distinct groups of the requests the viewer can see, sorted by name, under their current names", async () => {
+      const r = await reads.listTreasurerGroups(ident(t1));
+      if (r.kind !== "ok") throw new Error("denied");
+      expect(r.truncated).toBe(false);
+      expect(r.groups.map((g) => g.id).sort()).toEqual([committee, session].sort());
+      expect(r.groups.find((g) => g.id === committee)!.name).toBe("Property Committee");
+      const names = r.groups.map((g) => g.name);
+      expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+    });
+
+    it("pages the `all` tab: a small page size reads every row and gives the same list as one big page", async () => {
+      const whole = await reads.listTreasurerGroups(ident(t1));
+      const paged = await reads.listTreasurerGroups(ident(t1), { pageSize: 2, maxRows: 2_000 });
+      expect(paged).toEqual(whole);
+    });
+
+    it("the bound: only the newest `maxRows` requests are read, and the result says the bound was hit", async () => {
+      // The session group's only request ('Override one') is older than the three newest rows.
+      const cut = await reads.listTreasurerGroups(ident(t1), { pageSize: 2, maxRows: 3 });
+      expect(cut).toEqual({ kind: "ok", truncated: true, groups: [{ id: committee, name: "Property Committee" }] });
+      const total = await reads.listTreasurerRequests(ident(t1), QUERY);
+      if (total.kind !== "ok") throw new Error("denied");
+      // A bound exactly at the row count is NOT truncated.
+      const exact = await reads.listTreasurerGroups(ident(t1), { pageSize: 3, maxRows: total.total });
+      expect(exact).toMatchObject({ kind: "ok", truncated: false });
+      if (exact.kind === "ok") expect(exact.groups).toHaveLength(2);
+    });
+
+    it("the key is `view`, as for the queue; another organization's groups never appear", async () => {
+      for (const who of [payOnly, clerk, chair, requester, plain]) {
+        expect(await reads.listTreasurerGroups(ident(who)), who.userId).toEqual({ kind: "denied" });
+      }
+      const r = await reads.listTreasurerGroups(ident(t1));
+      if (r.kind !== "ok") throw new Error("denied");
+      expect(r.groups.map((g) => g.name)).not.toContain("Elsewhere");
+    });
+  });
+
   it("the key is `view`: a pay-only holder, a clerk, a chair, a requester and a plain member are denied", async () => {
     for (const who of [payOnly, clerk, chair, requester, plain]) {
       expect(await reads.listTreasurerRequests(ident(who), QUERY), who.userId).toEqual({ kind: "denied" });

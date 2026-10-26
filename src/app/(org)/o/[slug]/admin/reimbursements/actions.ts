@@ -11,7 +11,7 @@ import { COPY } from "@/lib/reimbursement/copy";
 import { endCategory, saveCategory, setChargeable } from "@/lib/reimbursement/config";
 import { approveRequest, returnRequest } from "@/lib/reimbursement/decisions";
 import { gateReimbursementAction } from "@/lib/reimbursement/gate";
-import { alreadyDecidedFailure, decisionRefusal } from "@/lib/reimbursement/messages";
+import { alreadyDecidedFailure } from "@/lib/reimbursement/messages";
 import { addNote, recordPayment, reversePayment, voidRequest, waiveReceipt } from "@/lib/reimbursement/payments";
 import { getRequestDetail } from "@/lib/reimbursement/reads";
 import {
@@ -21,6 +21,7 @@ import {
   overrideRefusal,
   paymentRefusal,
   reasonVerbRefusal,
+  treasuryReturnRefusal,
   waiveRefusal,
 } from "@/lib/reimbursement/treasury-messages";
 import {
@@ -182,7 +183,7 @@ export async function treasuryReturnAction(
     case "already_decided":
       return alreadyDecidedFailure(result.status, result.decidedOn);
     case "refused":
-      return decisionRefusal(result.outcome);
+      return treasuryReturnRefusal(result.outcome);
     case "ok":
       break;
   }

@@ -180,18 +180,30 @@ describe("the reason verbs", () => {
     expect(mocks.reversePayment).toHaveBeenCalledTimes(1);
   });
 
-  it("void: succeeds with the C8 text; a request that cannot be voided is the neutral string", async () => {
+  it("void: succeeds with the C8 text; a request that cannot be voided is the treasurer sentence; a missing one is neutral", async () => {
     mocks.voidRequest.mockResolvedValue({ kind: "ok" });
     expect(await voidAction("alder", { requestId: REQ, reason: "Duplicate" })).toEqual({ ok: true, data: { message: "Request voided." } });
     mocks.voidRequest.mockResolvedValue({ kind: "refused", outcome: "not_voidable" });
+    expect(await voidAction("alder", { requestId: REQ, reason: "Duplicate" })).toEqual({
+      ok: false, error: "This request can't be voided. Reload the page to see where it stands.",
+    });
+    mocks.voidRequest.mockResolvedValue({ kind: "refused", outcome: "not_found" });
     expect(await voidAction("alder", { requestId: REQ, reason: "Duplicate" })).toEqual({ ok: false, error: "This request isn't available.", kind: "not_found" });
   });
 
-  it("waive: the note is optional; a request that cannot take a waiver is the neutral string", async () => {
+  it("waive: the note is optional; a request that cannot take a waiver is the treasurer sentence", async () => {
     mocks.waiveReceipt.mockResolvedValue({ kind: "ok" });
     expect(await waiveReceiptAction("alder", { requestId: REQ })).toEqual({ ok: true, data: { message: "Receipt waived." } });
     expect(mocks.waiveReceipt.mock.calls[0]![1]).toEqual({ requestId: REQ, note: null });
     mocks.waiveReceipt.mockResolvedValue({ kind: "refused", outcome: "receipt_present" });
+    expect(await waiveReceiptAction("alder", { requestId: REQ })).toEqual({
+      ok: false, error: "This request already has a receipt, so there is nothing to waive.",
+    });
+    mocks.waiveReceipt.mockResolvedValue({ kind: "refused", outcome: "not_waivable" });
+    expect(await waiveReceiptAction("alder", { requestId: REQ })).toEqual({
+      ok: false, error: "A receipt can't be waived on this request. Reload the page to see where it stands.",
+    });
+    mocks.waiveReceipt.mockResolvedValue({ kind: "refused", outcome: "not_found" });
     expect(await waiveReceiptAction("alder", { requestId: REQ })).toMatchObject({ kind: "not_found" });
   });
 
@@ -202,6 +214,9 @@ describe("the reason verbs", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith(`/o/alder/admin/reimbursements/${REQ}`);
     mocks.addNote.mockResolvedValue({ kind: "refused", outcome: "note_too_long" });
     expect(await addNoteAction("alder", { requestId: REQ, note: "x" })).toMatchObject({ fieldErrors: { note: "Use 500 characters or fewer." } });
+    expect(await addNoteAction("alder", { requestId: REQ, note: "  " })).toMatchObject({ fieldErrors: { note: "Write a note." } });
+    mocks.addNote.mockResolvedValue({ kind: "refused", outcome: "note_required" });
+    expect(await addNoteAction("alder", { requestId: REQ, note: "x" })).toMatchObject({ fieldErrors: { note: "Write a note." } });
   });
 });
 
@@ -222,6 +237,10 @@ describe("treasuryReturnAction", () => {
     mocks.returnRequest.mockResolvedValue({ kind: "refused", outcome: "changed_since_viewed" });
     expect(await treasuryReturnAction("alder", { requestId: REQ, expectedRevision: 2, reason: "Why" })).toMatchObject({ kind: "changed_since_viewed" });
     mocks.returnRequest.mockResolvedValue({ kind: "refused", outcome: "not_returnable" });
+    expect(await treasuryReturnAction("alder", { requestId: REQ, expectedRevision: 2, reason: "Why" })).toEqual({
+      ok: false, error: "You can't send this request back. Reload the page to see where it stands.",
+    });
+    mocks.returnRequest.mockResolvedValue({ kind: "refused", outcome: "not_found" });
     expect(await treasuryReturnAction("alder", { requestId: REQ, expectedRevision: 2, reason: "Why" })).toMatchObject({ kind: "not_found" });
   });
 });
@@ -263,7 +282,7 @@ describe("overrideApproveAction", () => {
     });
   });
 
-  it("already decided, stale revision and the neutral dead end", async () => {
+  it("already decided, stale revision, the treasurer sentence and the neutral dead end", async () => {
     mocks.approveRequest.mockResolvedValue({ kind: "already_decided", decidedOn: "2026-10-25", status: "approved" });
     expect(await overrideApproveAction("alder", { requestId: REQ, expectedRevision: 3 })).toMatchObject({
       kind: "already_decided", error: "This was already approved on October 25, 2026.",
@@ -271,6 +290,10 @@ describe("overrideApproveAction", () => {
     mocks.approveRequest.mockResolvedValue({ kind: "refused", outcome: "changed_since_viewed" });
     expect(await overrideApproveAction("alder", { requestId: REQ, expectedRevision: 3 })).toMatchObject({ kind: "changed_since_viewed" });
     mocks.approveRequest.mockResolvedValue({ kind: "refused", outcome: "not_approvable" });
+    expect(await overrideApproveAction("alder", { requestId: REQ, expectedRevision: 3 })).toEqual({
+      ok: false, error: "You can't approve this request as treasurer. Reload the page to see where it stands.",
+    });
+    mocks.approveRequest.mockResolvedValue({ kind: "refused", outcome: "not_found" });
     expect(await overrideApproveAction("alder", { requestId: REQ, expectedRevision: 3 })).toMatchObject({ kind: "not_found" });
   });
 

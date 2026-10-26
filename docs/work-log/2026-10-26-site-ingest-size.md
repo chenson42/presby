@@ -1737,3 +1737,203 @@ Files read or run:
 
 - **L6 `Publishing {P} page(s) and {N} image reference(s).` stays.** It names the operation being sent (the vocabulary throughout README, E12–E15, workflow comments), and the very next line (L7) now reports the outcome truthfully. The L7 ruling covers outcome claims, not the operation's name.
 - The two required text edits are applied: the integration patch's runbook steps 4–5 now quote the new L7, and the Copy table's L7 and S3 rows are amended.
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst), bug-fix variant
+
+**Date:** 2026-10-26
+**Slug:** `2026-10-26-site-ingest-size` (F324, DECISION-279)
+**Trees read:**
+- presby `/Users/cshenso/git/presby-platform/presby-ingest` at `61e8793`. It is clean except F289's four uncommitted Rule 16 files.
+- site-kit `/Users/cshenso/git/presby-platform/presby-site-kit-ingest` at `ea9e78a` (v4.1.0), clean.
+
+I re-read my Phase 1 and the whole work-log, including both QA runs and the orchestrator rulings. I then re-ran BR-1 myself on the pipeline's Neon branch. I read no site-fpcw content, and the bridge uses synthetic bytes only.
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+The bug no longer manifests in every environment I can reach from here. Three things keep this from SHIP IT:
+1. Nothing here can show the Vercel stack accepting the new requests. Only the first real `site-fpcw` run can.
+2. The integration patch carries four stale or missing items that must be fixed before the integration commit.
+3. The operator's goal ("the FPCW calendar page published") will be only partly met after the run (see Intent-vs-Shipped Diff).
+
+## ONE-LINE TAKE
+
+> A site over the 4.5 MB request cap now publishes: images go one at a time and only the ones the platform lacks, a small commit flips the live site, and a failed run leaves the site unchanged and converges on re-run. The first real proof on Vercel is FPCW's own run.
+
+## Bug no longer manifests (BR-1 re-run, 2026-10-26)
+
+Command: `dotenv -e .env.local -- vitest run --config scratch/bridge/vitest.config.ts --no-file-parallelism`. The real site-kit client `ingest.mjs@ea9e78a` ran against the real presby handlers `@61e8793` and real Postgres, with a freshly signed token per request. **5 of 5 passed.**
+
+- **Reproduction of the defect shape.** A synthetic site with 5 distinct images, 6.0 MB raw. The client reports "The site is 8.0 MB as one request, over the 4.0 MB limit". The old transport would have sent that 8.0 MB body, which is over 4.5 MB.
+- **Staged result.**
+  - Requests: `/plan:477`, `/images:1200000` ×5, `/commit:779`.
+  - 7 requests and 7 tokens minted. The largest body is 1,200,000 bytes, well under 4,000,000.
+  - Client log: `Sent commit sha-big to "…" (2 page(s)); the platform has ingested it.` then `Sent 5 new image(s); 0 already on the platform.`
+- **Small site.** One legacy request of 67,075 bytes, 1 token.
+- **Re-runs.**
+  - The same sha: one `/plan`, `already_current`, nothing written.
+  - A new sha with the same images: `/plan` plus `/commit` only, 0 uploads.
+  - A failure at the 4th upload: the site is unchanged. The re-run prints "3 already on the platform; 2 to upload" and publishes.
+- **State.** No fixtures remain (0 `br1-` organizations after the run). The presby worktree is unchanged apart from F289's four files.
+
+This corroborates QA's runs:
+- QA's 8 MB bridge over a real socket (real `fetch` into a local HTTP server wrapping the handlers).
+- The unauthenticated 401 JSON probes on all four routes.
+- LG-2: a body over 4,000,000 bytes gets a JSON 413 locally, never the platform's plain-text one.
+
+**Unverified, and not verifiable from here:**
+- Vercel's real behavior for the new routes.
+- `getIDToken` across about 80 calls.
+- Cold-function upload timing.
+- Whether github-script's real wrapper behaves like the loader check's `AsyncFunction` stand-in.
+
+## What's Working
+
+- **The root cause was fixed at the transport, not worked around.** The stored bundle shape, renderer, `recordSiteIngest` and the audit event are unchanged. Visitors see nothing different.
+- **sha-last holds on every path.** Plan and upload never touch `organization_sites`. A refused commit changes nothing, and a lost commit reply retries into `already_current`.
+- **The trust boundary is where Phase 1 wanted it.**
+  - The server recomputes every hash and sniffs every upload.
+  - It derives `imageKeys` itself from `public_site` rows in the caller's organization.
+  - No response carries a uuid (PL-10, UP-9, CM-12, all scanned by QA).
+  - The gate order (401, 503, 404, `already_current`) is identical on all four routes.
+- **Failure microcopy is human.** Messages name the step and the image, give a next action, and end with "Nothing was sent" only when that is true. The L7 suspended-site defect that QA found was fixed red-then-green.
+- **The legacy POST stayed**, so deploy order cannot break `site-pasturechurch`.
+
+## Intent-vs-Shipped Diff
+
+- **Phase 1 said: a push of any size must publish; no 413 reaches the operator.** Shipped: the app enforces its own 4,000,000-byte limit as JSON on all four routes. The client sends at most that, and fails early, naming the image, above it. Verdict: **matches.**
+- **Phase 1 said: all-or-nothing publication, commit sha written last.** Shipped: confirmed by CM-4, the BR-1 failure case and QA's Q5. Verdict: **matches.**
+- **Phase 1 said (Gap 5): serialize concurrent pushes.** Shipped: a job-level concurrency group with `cancel-in-progress: false`. Re-running an old run still republishes old content, which is an accepted residual. Verdict: **matches, residual recorded.**
+- **Phase 1 said (Gap 12): audit counts of uploaded versus reused.** Shipped: `transport` in the audit metadata. Uploaded and reused counts appear only in the run log. Verdict: **acceptable drift**, accepted in Phase 3.
+- **Open Question 3: "first publish is one small request."** Shipped: Phase 3 and the architect correctly refused to promise it. The orchestrator measured that all 80 distinct hashes are present among production's 82. That proves presence, not audience: 0072 marks a row `public_site` only if the current bundle's `imageKeys` names it. The plan reports exactly what is missing as a site image, so the run will show the truth.
+- **The operator's intent, "put the FPCW calendar page on now."** Shipped: the run publishes the entire migrated FPCW site. `recordSiteIngest` promotes `provisioning` to `live` on first success, so `/site/fpcw` becomes public in full. The calendar slot will show "Our events calendar isn't available right now. Please check back soon." Verdict: **partial.**
+  - The calendar itself needs `org_portal.public_calendar` on for `fpcw`.
+  - Only an FPCW administrator holding `org_features.manage` can turn it on.
+  - `docs/TODO.md:99` records that production has no way to sign in at all (Google OAuth and Resend deferred).
+  - So the notice is not "until an administrator gets to it". It lasts until production sign-in exists.
+  - This is honest copy, not a defect, but the operator should hear it plainly before the go.
+  - Recommend an explicit acknowledgement. The Google Calendar link stays below the notice, per the operator's edit.
+
+## Edge Cases
+
+- **Empty state:** pass. An empty `images` array plans and commits (PL-6, CM-9, KI-5). A site with no images is told "This site has no images to send."
+- **Failure microcopy:** pass.
+  - Covered: 401, JSON 404, 503, 422 variants, 5xx retries, a lost reply, a redirect, and a platform without staged routes (E12).
+  - QA confirmed E12 against a stand-in for a rolled-back server.
+- **Permission gate:** pass. OIDC repository identity on every request, the `sites.public_render` 503 on every route, org and sha only from verified claims. The feature-gate audit and the custom-host neutral 404 (`lockdown.spec.ts`, 76 of 76) stand.
+- **Audit event:** pass. `SITE_CONTENT_INGESTED` is written once per publish with `transport` (CM-2, LG-1). Uploads and plans write none (UP-9, PL-9). **Residual:** a commit whose reply is lost after `recordSiteIngest` is retried and reported as success, and if the lost reply hid an audit-write failure, that publish has no audit row. This is recorded in the rulings but not yet in the DECISION text or the TODO lines (see Required edits).
+- **Mobile (360px):** not applicable to the ingest. The visitor-side image check at 360 px and 1280 px is owed after the FPCW publish (follow-up 1).
+- **Walk as the person the path creates:** not applicable. This change does not alter how an account connects to an organization, how a role is granted, or what a new account can reach. The relevant walks were done: as the repo-identity caller (BR-1 and QA's bridge), and as the anonymous visitor (owed after the FPCW publish).
+
+## Required edits before the integration commit (orchestrator; text only)
+
+Checked against `docs/work-log/site-ingest-size.integration.patch`. It still applies cleanly against this HEAD (`git apply --check`). Use `--3way` onto the current `main`.
+
+1. **Patch header line 29** names `ad109b1`. The branch tip, and the commit the `v4.1.0` tag must sit on, is `ea9e78a`.
+   - The branch is two commits on top of site-kit `8ca982a` (`ad109b1`, then the L7 fix `ea9e78a`).
+   - Tagging `ad109b1` would ship the "Published commit …" wording.
+   - Tag the merged tip.
+2. **"Revert the one commit" is stale.** It appears in `deployment.md` Rollback and in Phase 3 runbook step 7. Rollback of the client is now a revert of the v4.1.0 change: both commits, or the merge commit with `git revert -m 1`. Say that.
+3. **DECISION-279** (patch line 79) still says "an unauthenticated caller sees a 401, not a 413". Replace it with the ruled wording: the app's own 413 is answered only to an authenticated caller; above Vercel's 4.5 MB cap the platform answers first.
+4. **DECISION-279 residuals and the rollout note** are missing two ruled items:
+   - The retried-commit-audit residual.
+   - The note that a site on a pre-v4.1.0 client whose legacy body is 4.0 to 4.5 MB would get a 413 after the server deploys. No real site is in that band.
+5. **The release note** must say the site "can now be published". The work-log draft at line 940 still reads "can be published **again**". The orchestrator's ruling stands and applies at `/release-notes`. The residual statements already there (orphan photos, re-running an old run, the 4 MB image limit) stay.
+6. **Phase 3 runbook step 5** (work-log line 733) still shows the old `Published commit …` line. It is a historical record, so annotate it "superseded by the L7 ruling" rather than rewriting it. The patch's `deployment.md` text is the operative copy and is correct.
+
+## Rulings
+
+**Production rollout.** The order is right: R14 stands. Two additions.
+
+0. Gate: F289's PR is merged, 0072 is applied to production by F289's runbook, and F289 is promoted. This branch does not merge before that.
+1. Promote the server. Probe an unauthenticated `POST` to `/api/sites/ingest`, `/plan`, `/images` and `/commit` on the production platform host. Each must answer 401 with the JSON body. A 404 means the route did not deploy. The probe cannot see the flag, because OIDC runs first.
+2. **Read-only prediction, now required and not optional.** After 0072, count `fpcw`'s `public_site` rows and compare them with the 80 distinct hashes. Also confirm in `/admin` that `sites.public_render` is on in production and that `organization_sites` for `fpcw` is not `suspended`. A suspended site would be ingested but never shown.
+3. Merge `fix/staged-ingest` to site-kit `main`, then tag `v4.1.0` on `ea9e78a`.
+   - This takes effect immediately for every site's next push.
+   - Neither site pins `site_kit_ref`; both call `ingest.yml@main`.
+   - presby's own site-kit dependency pin does not move, because `dist/` is unchanged.
+   - Site-kit has no CI, so the 235 passing tests are the only gate. Push to `main` deliberately.
+4. FPCW's first real ingest. The operator's go is on record ("lets put it on now"). Acknowledge the calendar caveat above first.
+   - Trigger it with a push to `site-fpcw` `main`, or a dispatch if the workflow offers one.
+   - Do not re-run failed run 40251133138. I believe a re-run may resolve the old workflow reference, but I did not verify that.
+   - Log expectations and the repository-variable preconditions are as in the runbook and `docs/TODO.md:100`. The `site-fpcw` variable lines are probably stale and the operator should check them.
+   - Expect that a masked second failure may surface (Gap 10). Every step is safe to repeat.
+   - **Rollback after a successful run:** suspend the site from `/admin/sites`, which is a status change and not a delete. Content stays current while suspended.
+5. Verify `/site/fpcw` at 360 px and 1280 px (images render; `/upcoming-events` shows the notice with the Google Calendar link below it). Also check `/admin/organizations/<id>` for the new commit and time.
+
+**`site-pasturechurch` `transport: staged` proof run: not worth doing as a gate. Skip it.**
+- It proves only auth plus plan and commit on Vercel, and FPCW's run proves the same in the same sitting.
+- It has zero images, so it cannot prove an upload.
+- It costs two production publishes of a live customer's site (add the input, then remove it).
+- That site's next ordinary push already exercises the new client's legacy path. The `transport` input remains available if a real need appears.
+- Honest note: if the plan reports zero missing for FPCW, the upload path first runs in production on some later site's first new photo. That is the architect's accepted residual. It is mitigated by BR-1, QA's real-socket bridge and the unit and DB suites.
+
+**Merge dependency on F289.**
+- This branch contains F289's commits through the `5fbb90f` merge. It must merge after F289's PR, and F289 should land as a merge commit, as PR #57 did. A squash would make this merge re-apply identical content.
+- F289's four Rule 16 files are uncommitted in this worktree (`drizzle/meta/_journal.json`, `e2e/support/custom-hosts.ts`, `e2e/support/public-calendar-fixture.ts`, `scripts/test-rls.sql`).
+  - Never stage them on this branch.
+  - Before merging `main` in, discard those working-tree edits by explicit path (`git checkout -- <file>` for the four files) so F289's own integration owns them. This is destructive but reproducible from F289's patch.
+  - Never use `git stash`. Say so before running it.
+- After the merge, `audience-callsites.test.ts` must still pass. Its row for `src/lib/sites-ingest.ts` is already committed.
+
+**Integration list.**
+- **DECISION-279** with its addendum, plus edits 3 and 4 above.
+- **`docs/TODO.md`:** the patch's two operator lines and the "Site ingest follow-ups" subsection, plus the new lines below.
+  - Rule 10 requires the Done entry in the same commit.
+  - `site-pasturechurch/README.md` is the operator's repo.
+- **`docs/deployment.md`:** the patch's section, with edits 1 and 2.
+- **`docs/product/functionality-map.md`:** the Ingest line at `:100`. The patch's text is accurate and says "single request stays for small sites". No index change.
+- **Release-note text:** "can now be published", not "again". The value is: a church site with many photos can now be published; photos go one at a time and only the ones the platform lacks; a stopped publish resumes on re-run; updates pushed close together publish one at a time; a photo over 4 MB (4,000,000 bytes) cannot be published yet; re-running an older failed publish after a newer success puts the older content back.
+- **Version: 0.46.2**, after parish 0.45.0, developer portal 0.46.0 and F289 0.46.1. The number is assigned by merge order. Main currently reads 0.44.1, and the new routes make this a patch within the 0.46 series. If F289 does not land as 0.46.1, take the next patch after whatever precedes it.
+
+**Rules 12–15.**
+- **Rule 12:** not applicable. The Source block records a CI failure (`site-fpcw` run 40251133138), not an in-app feedback row, so there is no `feedback` row to mark `done`.
+- **Rule 13:** no what's-new entry. This is internal publishing tooling. The member-visible event, FPCW's site going live, is the operator's separate act.
+- **Rule 14:** done by the patch's Ingest line. Confirm at integration that it merges next to F289's edits on adjacent lines.
+- **Rule 15:** no `docs/architecture.md` change. The architect ruled this below its level, and I agree.
+
+## Follow-Ups (TODO-ready, for `docs/TODO.md` in the integration commit)
+
+Done line:
+- [x] **Site ingest over the request-size limit (F324, DECISION-279, v0.46.2).** A site over the 4.5 MB request cap now publishes through a staged, content-addressed transport. Phase 6 SHIP WITH NOTES 2026-10-26. `docs/work-log/2026-10-26-site-ingest-size.md`
+
+Open follow-ups, in addition to the patch's backlog lines:
+- [ ] **Record the first real `site-fpcw` ingest as an addendum to `2026-10-26-site-ingest-size`.** Capture the log shape, `<R>` and `<M>`, `getIDToken` behavior across the run, per-upload timing, and the 360 px and 1280 px image check. If `<M>` is 0, keep an "upload path unproven in production" line open until a site first uploads. `site-pasturechurch` cannot prove it (zero images).
+- [ ] **`fpcw` calendar slot shows "Our events calendar isn't available right now" until an FPCW administrator can turn on `org_portal.public_calendar`, and production has no sign-in.** Tie this to the existing sign-in deferral at `docs/TODO.md:99` and the public events calendar line under "Blocking a flag flip". Closes when the toggle is on and the Google Calendar fallback is reviewed.
+- [ ] **presby-site-kit has no CI, and a merge to `main` changes every site's next publish immediately.** Add a workflow that runs `npm test`, `npm run typecheck` and `actionlint`, and consider an optional per-site ref pin for `ingest.yml`.
+- [ ] **Audit-on-retry residual.** A commit retried after a lost reply reports success; if the lost reply hid an audit-write failure, that publish has no audit row. Fix by putting the `recordSiteIngest` UPDATE and the audit write in one transaction, or accept again at the next security review.
+- [ ] **Retrospective note.** Commit `7ef67b6` reads `Caught-By: agent-review` although the defect surfaced on a real production CI run (`Caught-By: production` by CLAUDE.md). It was left because rewriting mid-branch history is riskier. Count it correctly in `npm run stats:escape` discussion.
+- [ ] **The 4.0 to 4.5 MB legacy-body band on a pre-v4.1.0 client.** Carry the DECISION-279 rollout note. No real site is in the band. Drop once every site runs v4.1.0.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. BR-1 re-run 5/5 (8.0 MB synthetic site staged, every body ≤ 1.2 MB, resume converges). Gaps 1–14 addressed or deferred with tracked lines. Six text edits owed in the integration patch. Rollout order and caveats ruled. First-run Vercel behavior unverified until the FPCW ingest. | SHIP WITH NOTES | 2026-10-26 |
+
+## Handoff
+
+**Orchestrator, next:**
+1. Apply the six required edits to the patch and the work-log text.
+2. Wait for F289's PR to merge as a merge commit, with 0072 applied to production.
+3. Discard F289's four working-tree files by explicit path, then merge `main` into this branch (no stash).
+4. Re-run `npm run check`, typecheck and `audience-callsites.test.ts`.
+5. Apply the patch with `--3way`.
+6. `/release-notes` for 0.46.2, then `/pre-push` and `/merge-pr`.
+7. Hand the operator the rollout checklist (steps 1 to 5 above) and the calendar caveat before their go. The site-kit merge and the `v4.1.0` tag on `ea9e78a` are the operator's actions.
+
+The pipeline closes only on this SHIP WITH NOTES, with the follow-ups landed in `docs/TODO.md` in the same commit (Rule 10).
+
+Files read:
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/work-log/2026-10-26-site-ingest-size.md`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/work-log/site-ingest-size.integration.patch`
+- `/Users/cshenso/git/presby-platform/presby-ingest/scratch/bridge/br1.test.ts` (run)
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/sites.ts` (`recordSiteIngest`)
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/TODO.md`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/deployment.md` (heading check)
+- the calling workflows of `site-fpcw` and `site-pasturechurch` (`uses:` and input lines only; nothing quoted)
+
+**Orchestrator note on the Phase 6 calendar caveat (2026-10-26):** `docs/TODO.md:99`'s "production has no way to sign in" is stale — the operator signs in to production (0.42.3 smoke, 2026-10-24) and is FPCW's founding administrator (2b Source block), so the operator can turn on `org_portal.public_calendar` at `/o/fpcw/admin/features` themselves. Correct that TODO line at integration.

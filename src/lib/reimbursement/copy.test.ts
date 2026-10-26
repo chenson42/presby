@@ -222,6 +222,14 @@ describe("C5 request detail", () => {
   });
 });
 
+describe("C11 printed form", () => {
+  it("title and footer, byte for byte", () => {
+    expect(COPY.print.title).toBe("Reimbursement request");
+    expect(COPY.print.footer).toBe("Printed from PresbyPortal.");
+    expect(COPY.detail.buttons.print).toBe("Print the form");
+  });
+});
+
 describe("C6 decide and withdraw", () => {
   it("strings", () => {
     const d = COPY.decision;

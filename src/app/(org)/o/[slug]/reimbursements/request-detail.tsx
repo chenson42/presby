@@ -25,8 +25,9 @@ import { WithdrawDialog } from "./withdraw-dialog";
  *
  * Which buttons: `viewer.canEdit` (Edit draft / Edit and send again),
  * `viewer.canWithdraw`, `viewer.canDecide` - the database's answers at the moment
- * the page was read; each action re-checks. "Print the form" is Batch 7's route
- * and is not offered yet. Opening this page changes nothing (EC24).
+ * the page was read; each action re-checks. "Print the form" is offered to every
+ * viewer of the request (the print route applies the same viewer rule and prints
+ * the requester projection only; Copy C11). Opening this page changes nothing (EC24).
  */
 
 export function RequestDetail({ slug, detail }: { slug: string; detail: MemberDetail }) {
@@ -65,18 +66,22 @@ export function RequestDetail({ slug, detail }: { slug: string; detail: MemberDe
         </p>
       )}
 
-      {(canEdit || canWithdraw) && (
-        <div className="flex flex-col gap-2 sm:flex-row" data-testid="requester-actions">
-          {canEdit && (
-            <Button asChild className="min-h-11">
-              <Link href={`/o/${slug}/reimbursements/${detail.id}/edit`}>
-                {detail.status === "draft" ? COPY.detail.buttons.editDraft : COPY.detail.buttons.editAndSendAgain}
-              </Link>
-            </Button>
-          )}
-          {canWithdraw && <WithdrawDialog slug={slug} requestId={detail.id} />}
-        </div>
-      )}
+      <div className="flex flex-col gap-2 sm:flex-row" data-testid="requester-actions">
+        {canEdit && (
+          <Button asChild className="min-h-11">
+            <Link href={`/o/${slug}/reimbursements/${detail.id}/edit`}>
+              {detail.status === "draft" ? COPY.detail.buttons.editDraft : COPY.detail.buttons.editAndSendAgain}
+            </Link>
+          </Button>
+        )}
+        {canWithdraw && <WithdrawDialog slug={slug} requestId={detail.id} />}
+        {/* A plain <a>, never <Link>: the print address is a route handler (a download), and a Link would prefetch it. */}
+        <Button asChild variant="outline" className="min-h-11">
+          <a href={`/o/${slug}/reimbursements/${detail.id}/print`} data-testid="request-print">
+            {COPY.detail.buttons.print}
+          </a>
+        </Button>
+      </div>
 
       <dl className="space-y-4" data-testid="request-fields">
         {amount && <Field label={COPY.detail.labels.amount}>{amount}</Field>}

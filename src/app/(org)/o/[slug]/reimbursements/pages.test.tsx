@@ -232,6 +232,23 @@ describe("the request page", () => {
     expect(screen.queryByTestId("withdraw-open")).toBeNull();
   });
 
+  it("offers 'Print the form' to every viewer, as a plain link to the print route (never a prefetching Link)", async () => {
+    for (const viewer of [
+      { relation: "creator" as const, canEdit: true },
+      { relation: "beneficiary" as const, canWithdraw: false },
+      { relation: "seat" as const, canWithdraw: false, canDecide: true },
+    ]) {
+      arrange({ kind: "ok", detail: detail({}, viewer) });
+      render(<>{(await call(() => DetailPage({ params: idParams }))).node}</>);
+      const print = screen.getByTestId("request-print");
+      expect(print.textContent).toBe(COPY.detail.buttons.print);
+      expect(print.tagName).toBe("A");
+      expect(print.getAttribute("href")).toBe(`/o/alder/reimbursements/${ID}/print`);
+      expect(print.getAttribute("data-prefetch")).toBeNull();
+      cleanup();
+    }
+  });
+
   it.each([
     [{ status: "draft", route: null }, "This is a draft. Only you can see it."],
     [{ status: "submitted", route: "treasurer" }, "Waiting for the treasurer to approve it."],

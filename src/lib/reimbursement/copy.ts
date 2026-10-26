@@ -531,6 +531,14 @@ export const COPY = {
     },
   },
 
+  // ---------------------------------------------------------------------------
+  // C11. Printed form (`print-model.ts` draws these with the C5 labels)
+  // ---------------------------------------------------------------------------
+  print: {
+    title: "Reimbursement request",
+    footer: "Printed from PresbyPortal.",
+  },
+
   /** Permission descriptions as migration 0074 writes them (C9); `copy.test.ts` parses 0074 against these. */
   permissionDescriptions: {
     "reimbursement.request_for_others": "Enter a reimbursement request on behalf of another member",

@@ -36,18 +36,24 @@ async function setFreshRecoveryCodesCookie(codes: string[]) {
   });
 }
 
-async function replaceRecoveryCodes(userId: string): Promise<string[]> {
-  const codes = generateRecoveryCodes();
-  await db
+/** The pool or an open transaction: both expose the same delete/insert. */
+type Executor = Pick<typeof db, "delete" | "insert">;
+
+/** Replaces every recovery-code hash for the user with hashes of `codes`. */
+async function replaceRecoveryCodes(
+  executor: Executor,
+  userId: string,
+  codes: string[],
+): Promise<void> {
+  await executor
     .delete(userTotpRecoveryCodes)
     .where(eq(userTotpRecoveryCodes.userId, userId));
-  await db.insert(userTotpRecoveryCodes).values(
+  await executor.insert(userTotpRecoveryCodes).values(
     codes.map((c) => ({
       userId,
       codeHash: hashRecoveryCode(c),
     })),
   );
-  return codes;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +126,8 @@ export async function completeEnrollment(input: {
     .delete(userTotpPendingEnrollments)
     .where(eq(userTotpPendingEnrollments.userId, session.user.id));
 
-  const freshCodes = await replaceRecoveryCodes(session.user.id);
+  const freshCodes = generateRecoveryCodes();
+  await replaceRecoveryCodes(db, session.user.id, freshCodes);
   await setFreshRecoveryCodesCookie(freshCodes);
 
   await recordAudit({
@@ -154,7 +161,30 @@ export async function regenerateRecoveryCodes(): Promise<
     };
   }
 
-  const freshCodes = await replaceRecoveryCodes(session.user.id);
+  // F344: only a session that has passed the second factor may mint codes that
+  // themselves pass the second factor. Whether or not 2FA is required of this
+  // account: an enrolled account that is not required today becomes required the
+  // moment a congregation or designation turns the requirement on. No lockout:
+  // /totp accepts any signed-in enrolled user, with a code or a recovery code.
+  if (!session.user.twoFactorVerified) {
+    await recordAudit({
+      action: AUDIT_ACTIONS.TOTP_RECOVERY_CODES_REGENERATE_REFUSED,
+      resourceType: "user",
+      resourceId: session.user.id,
+      metadata: { twoFactorRequired: session.user.twoFactorRequired },
+    });
+    return {
+      ok: false,
+      error:
+        "Confirm it's you with your authenticator app or a recovery code first. Reload this page to see how.",
+    };
+  }
+
+  const freshCodes = generateRecoveryCodes();
+  const userId = session.user.id;
+  await db.transaction(async (tx) => {
+    await replaceRecoveryCodes(tx, userId, freshCodes);
+  });
   await setFreshRecoveryCodesCookie(freshCodes);
 
   await recordAudit({

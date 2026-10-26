@@ -9,46 +9,92 @@ import { resolve } from "node:path";
 //   - next/headers, @/auth from triggering server-only runtime checks
 // ---------------------------------------------------------------------------
 
+vi.mock("server-only", () => ({}));
+
+const jar = vi.hoisted(() => ({ set: vi.fn(), delete: vi.fn() }));
 vi.mock("next/headers", () => ({
-  cookies: vi.fn(),
+  cookies: vi.fn(async () => jar),
 }));
 
+const mockRevalidate = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({
-  revalidatePath: vi.fn(),
+  revalidatePath: mockRevalidate,
 }));
 
+const mockAuth = vi.hoisted(() => vi.fn());
+const mockUpdate = vi.hoisted(() => vi.fn());
 vi.mock("@/auth", () => ({
-  auth: vi.fn(),
-  unstable_update: vi.fn(),
+  auth: mockAuth,
+  unstable_update: mockUpdate,
 }));
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(),
 }));
 
+// A scripted database: every write is logged in order, tagged with the executor
+// it ran on ("db" or "tx"), so a test can say "the replacement ran inside the
+// transaction" and "nothing was written".
+const dbh = vi.hoisted(() => {
+  const state = {
+    log: [] as string[],
+    inserted: [] as { exec: string; table: string; values: unknown }[],
+    enrolment: undefined as unknown,
+    pending: undefined as unknown,
+    conflictRows: [{ userId: "u" }] as unknown[],
+    txCalls: 0,
+  };
+  function exec(name: "db" | "tx") {
+    return {
+      insert: (table: { _: string }) => ({
+        values: (values: unknown) => {
+          state.log.push(`${name}.insert:${table._}`);
+          state.inserted.push({ exec: name, table: table._, values });
+          const p = Promise.resolve(undefined) as Promise<undefined> & Record<string, unknown>;
+          p.onConflictDoNothing = () => ({
+            returning: async () => {
+              state.log.push(`${name}.insert-conflict-nothing:${table._}`);
+              return state.conflictRows;
+            },
+          });
+          p.onConflictDoUpdate = () => Promise.resolve(undefined);
+          return p;
+        },
+      }),
+      delete: (table: { _: string }) => ({
+        where: async () => {
+          state.log.push(`${name}.delete:${table._}`);
+        },
+      }),
+    };
+  }
+  return { state, exec };
+});
+
 vi.mock("@/lib/db", () => ({
   db: {
     query: {
-      userTotp: { findFirst: vi.fn() },
-      userTotpPendingEnrollments: { findFirst: vi.fn() },
+      userTotp: { findFirst: vi.fn(async () => dbh.state.enrolment) },
+      userTotpPendingEnrollments: { findFirst: vi.fn(async () => dbh.state.pending) },
     },
-    insert: vi.fn(() => ({
-      values: vi.fn(() => ({ onConflictDoUpdate: vi.fn() })),
-    })),
-    delete: vi.fn(() => ({ where: vi.fn() })),
+    ...dbh.exec("db"),
+    transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
+      dbh.state.txCalls += 1;
+      return cb(dbh.exec("tx"));
+    }),
   },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
   auditEvents: { _: "audit_events" },
-  userTotp: { _: "user_totp" },
+  userTotp: { _: "user_totp", userId: "user_totp.user_id" },
   userTotpPendingEnrollments: { _: "user_totp_pending" },
   userTotpRecoveryCodes: { _: "user_totp_recovery_codes" },
 }));
 
 vi.mock("@/lib/two-factor", () => ({
   FRESH_RECOVERY_CODES_COOKIE: "claudecode_fresh_recovery_codes",
-  decryptSecret: vi.fn(),
+  decryptSecret: vi.fn(() => "PLAIN-SECRET"),
   encryptSecret: vi.fn(),
   generateRecoveryCodes: vi.fn(() => ["CODE-0001"]),
   hashRecoveryCode: vi.fn((c: string) => `hash(${c})`),
@@ -57,11 +103,14 @@ vi.mock("@/lib/two-factor", () => ({
   generateSecret: vi.fn(() => "FAKESECRET"),
 }));
 
+const mockAudit = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/audit", () => ({
   AUDIT_ACTIONS: {
     TOTP_ENROLLED: "totp.enrolled",
     TOTP_RECOVERY_CODES_REGENERATED: "totp.recovery_codes.regenerated",
+    TOTP_RECOVERY_CODES_REGENERATE_REFUSED: "totp.recovery_codes.regenerate_refused",
   },
+  recordAudit: mockAudit,
 }));
 
 // ---------------------------------------------------------------------------
@@ -71,7 +120,7 @@ vi.mock("@/lib/audit", () => ({
 
 import { cookies } from "next/headers";
 import { FRESH_RECOVERY_CODES_COOKIE } from "@/lib/two-factor";
-import { clearFreshCodesCookieAction } from "./actions";
+import { clearFreshCodesCookieAction, regenerateRecoveryCodes } from "./actions";
 
 // ---------------------------------------------------------------------------
 // clearFreshCodesCookieAction — regression for BUG-2
@@ -177,3 +226,119 @@ describe(
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// regenerateRecoveryCodes — F344: minting new codes needs a verified session.
+//
+// Bug: the action checked only auth() and that an enrolment row existed. A
+// person holding only the first factor (a password) could open /account/2fa,
+// press Regenerate, read ten fresh codes and use one at /totp. The refusal is
+// in the action; the page notice is UX only.
+// ---------------------------------------------------------------------------
+
+const USER_ID = "00000000-0000-4000-8000-0000000000f3";
+
+function sessionWith(over: { twoFactorRequired?: boolean; twoFactorVerified?: boolean } = {}) {
+  return {
+    user: {
+      id: USER_ID,
+      email: "t@example.invalid",
+      twoFactorRequired: true,
+      twoFactorVerified: false,
+      ...over,
+    },
+  };
+}
+
+const recoveryWrites = () =>
+  dbh.state.log.filter((l) => l.endsWith(":user_totp_recovery_codes"));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  dbh.state.log = [];
+  dbh.state.inserted = [];
+  dbh.state.txCalls = 0;
+  dbh.state.enrolment = { userId: USER_ID };
+  dbh.state.pending = undefined;
+  dbh.state.conflictRows = [{ userId: USER_ID }];
+  mockAuth.mockResolvedValue(sessionWith());
+  vi.mocked(cookies).mockResolvedValue(jar as unknown as Awaited<ReturnType<typeof cookies>>);
+});
+
+describe("regenerateRecoveryCodes — F344 refuses an unverified session", () => {
+  it("R1: enrolled, 2FA required, session unverified -> refused; nothing deleted or inserted; refusal audited — regression for F344 regenerate bypass", async () => {
+    mockAuth.mockResolvedValue(sessionWith({ twoFactorRequired: true, twoFactorVerified: false }));
+    const r = await regenerateRecoveryCodes();
+    expect(r).toEqual({
+      ok: false,
+      error: "Confirm it's you with your authenticator app or a recovery code first. Reload this page to see how.",
+    });
+    expect(recoveryWrites()).toEqual([]);
+    expect(dbh.state.txCalls).toBe(0);
+    expect(mockRevalidate).not.toHaveBeenCalled();
+    expect(mockAudit).toHaveBeenCalledTimes(1);
+    expect(mockAudit).toHaveBeenCalledWith({
+      action: "totp.recovery_codes.regenerate_refused",
+      resourceType: "user",
+      resourceId: USER_ID,
+      metadata: { twoFactorRequired: true },
+    });
+  });
+
+  it("R2: enrolled, 2FA not required, session unverified -> refused as well; audit says not required — regression for F344", async () => {
+    mockAuth.mockResolvedValue(sessionWith({ twoFactorRequired: false, twoFactorVerified: false }));
+    const r = await regenerateRecoveryCodes();
+    expect(r.ok).toBe(false);
+    expect(recoveryWrites()).toEqual([]);
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "totp.recovery_codes.regenerate_refused",
+        metadata: { twoFactorRequired: false },
+      }),
+    );
+  });
+
+  it("R3: a verified session regenerates; the regenerated audit fires and the refusal does not", async () => {
+    mockAuth.mockResolvedValue(sessionWith({ twoFactorVerified: true }));
+    const r = await regenerateRecoveryCodes();
+    expect(r).toEqual({ ok: true, data: { recoveryCodes: ["CODE-0001"] } });
+    expect(mockAudit).toHaveBeenCalledTimes(1);
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "totp.recovery_codes.regenerated" }),
+    );
+  });
+
+  it("R4: not enrolled -> the existing message and NO refusal audit (nothing to escalate)", async () => {
+    dbh.state.enrolment = undefined;
+    const r = await regenerateRecoveryCodes();
+    expect(r).toEqual({ ok: false, error: "Enroll in 2FA before regenerating recovery codes." });
+    expect(mockAudit).not.toHaveBeenCalled();
+    expect(recoveryWrites()).toEqual([]);
+  });
+
+  it("R5: no session -> Unauthorized., nothing touched", async () => {
+    mockAuth.mockResolvedValue(null);
+    const r = await regenerateRecoveryCodes();
+    expect(r).toEqual({ ok: false, error: "Unauthorized." });
+    expect(dbh.state.log).toEqual([]);
+    expect(mockAudit).not.toHaveBeenCalled();
+  });
+
+  it("R6: the replacement runs inside one db.transaction (delete then insert on the tx, none on the pool)", async () => {
+    mockAuth.mockResolvedValue(sessionWith({ twoFactorVerified: true }));
+    await regenerateRecoveryCodes();
+    expect(dbh.state.txCalls).toBe(1);
+    expect(recoveryWrites()).toEqual([
+      "tx.delete:user_totp_recovery_codes",
+      "tx.insert:user_totp_recovery_codes",
+    ]);
+  });
+
+  it("R6b: only hashes are stored, never the plaintext codes", async () => {
+    mockAuth.mockResolvedValue(sessionWith({ twoFactorVerified: true }));
+    await regenerateRecoveryCodes();
+    const ins = dbh.state.inserted.find((i) => i.table === "user_totp_recovery_codes");
+    expect(JSON.stringify(ins?.values)).toContain("hash(CODE-0001)");
+    expect(JSON.stringify(ins?.values)).not.toContain('"CODE-0001"');
+  });
+});

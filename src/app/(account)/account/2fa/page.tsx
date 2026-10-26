@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -22,6 +23,39 @@ import { RegenerateCodesForm } from "./regenerate-codes-form";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { FreshRecoveryCodes } from "@/components/shared/fresh-recovery-codes";
 
+/**
+ * F344: an enrolled person whose session has not passed the second factor
+ * cannot make new recovery codes (the action refuses; this is the way back).
+ * `/totp` accepts any signed-in enrolled user, with an app code or a recovery
+ * code, and returns to `returnTo`. `callbackUrl` is the sanitized value.
+ */
+function ConfirmItsYou({
+  callbackUrl,
+  hasCallback,
+}: {
+  callbackUrl: string;
+  hasCallback: boolean;
+}) {
+  const returnTo = hasCallback
+    ? `/account/2fa?${new URLSearchParams({ callbackUrl }).toString()}`
+    : "/account/2fa";
+  const href = `/totp?${new URLSearchParams({ callbackUrl: returnTo }).toString()}`;
+  return (
+    <div className="mt-3">
+      <p className="text-sm text-muted-foreground">
+        To make new recovery codes, first confirm it&apos;s you with your
+        authenticator app or a recovery code.
+      </p>
+      <Link
+        href={href}
+        className="mt-3 inline-flex min-h-11 items-center text-sm underline underline-offset-2"
+      >
+        Confirm it&apos;s you
+      </Link>
+    </div>
+  );
+}
+
 export default async function AccountTwoFactorPage({
   searchParams,
 }: {
@@ -32,6 +66,8 @@ export default async function AccountTwoFactorPage({
 
   const sp = await searchParams;
   const callbackUrl = sanitizeCallbackUrl(sp.callbackUrl);
+  const hasCallback =
+    typeof sp.callbackUrl === "string" && sp.callbackUrl.length > 0;
 
   const jar = await cookies();
   const rawFreshCodes = jar.get(FRESH_RECOVERY_CODES_COOKIE)?.value ?? null;
@@ -83,7 +119,11 @@ export default async function AccountTwoFactorPage({
             {unusedCount} unused code{unusedCount === 1 ? "" : "s"} remaining
             (of {totalCodes} total).
           </p>
-          <RegenerateCodesForm />
+          {session.user.twoFactorVerified ? (
+            <RegenerateCodesForm />
+          ) : (
+            <ConfirmItsYou callbackUrl={callbackUrl} hasCallback={hasCallback} />
+          )}
         </div>
       </div>
     );

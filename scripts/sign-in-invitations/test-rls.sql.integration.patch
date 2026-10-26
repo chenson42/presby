@@ -1,5 +1,5 @@
---- a/scripts/test-rls.sql	2026-10-25 20:34:35
-+++ b/scripts/test-rls.sql	2026-10-25 20:34:45
+--- a/scripts/test-rls.sql
++++ b/scripts/test-rls.sql
 @@ -8033,8 +8033,15 @@
    -- 'staff', current_roll null, NO roll_actions row — the platform must not
    -- fabricate a roll fact, and a pending roll action at an org with no
@@ -72,16 +72,16 @@
  rollback;
  
  -- 44e. The blocker, pinned. The suite cannot take a global inventory of
-@@ -8653,3 +8669,15 @@
- --     fixture, so it is never run against production.
+@@ -8662,3 +8678,15 @@
+ --     fixture (Fernwood's live site), so it is never run against production.
  -- ===========================================================================
- \ir person-emails/test-rls-64.sql
+ \ir public-calendar/test-rls-67.sql
 +
 +-- ===========================================================================
 +-- APPENDED SECTION - pipeline/signin-invites (integration).
 +-- 65. Sign-in invitations, address proof, accept in place and auto-connect
 +--     (drizzle/0065_presby_sign_in_and_connect.sql). Its own file, as 46, 47,
-+--     59, 60, 61, 62 and 64 above; \ir resolves relative to this script. It
++--     59-62, 64 and 67 above; \ir resolves relative to this script. It
 +--     needs the test helpers and the seed's sign-in fixture
 +--     (scripts/sign-in-invitations/seed-dev-sign-in.sql), so it is never run
 +--     against production. Section 44's presby_app link writes were converted

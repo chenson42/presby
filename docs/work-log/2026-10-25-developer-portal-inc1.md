@@ -21,7 +21,7 @@
 | 3 — Technical design | tech-lead | Complete (this file); Copy four-check, Carry-forward and e2e blast radius below; no operator answer blocks Phase 4. Amendment 1 (2026-10-25): Copy loop-back from QA run 1 ruled (S1-S6, after C12); ux-developer lands it | Design complete | 2026-10-25 |
 | 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | In progress: Batch A (shell promotion) and Batch B (gate, proxy, schema.json, registries; MFA e2e smoke green) done and committed; Batch C (portal pages, registries, e2e; ux-developer) done and committed, awaiting Phase 5 | — | 2026-10-25 |
 | 5 — Verification | qa | Run 1: all suites in scope green; MFA e2e green; failing-first reproduced (F283/F284/F285/F288); copy truthfulness FAIL on the data-model rules-note sentence (design C4) and the metadata description; calendar failures environmental (0067 missing on branch) | FAIL | 2026-10-25 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Walked as 2FA-required platform admin and non-entitled member at 360/1280; Increment 1 scope met; developer role (Inc 2) and API page (Inc 3, meaning to confirm) outstanding; integration list + six TODO lines | SHIP WITH NOTES | 2026-10-25 |
 
 ---
 
@@ -1134,3 +1134,223 @@ copy truthfulness: PASS.
 - Logs: `logs/r2-tc.log`, `logs/r2-lint.log`, `logs/r2-check.log`, `logs/r2-unit.log`, `logs/r2-flags.log`, `logs/r2-e2e-devportal.log`, `logs/r2-e2e-cal.log`, `logs/r2-e2e-calhosts.log`, `logs/r2-e2e-etf.log`, `logs/r2-dev3570.log`
 - Screenshots: `shots-dp-r2/`
 - Walk scripts: `walk-dp-r2.cjs` through `walk-dp-r2d.cjs`
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst)
+
+**Slug:** `2026-10-25-developer-portal-inc1` · branch `pipeline/developer-portal` at fc8ab4d, worktree `/Users/cshenso/git/presby-platform/presby-devportal`
+**Date:** 2026-10-25 · Read-only. Nothing in the repo was written. The orchestrator records this section.
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+- Increment 1 delivers every Increment 1 line of the Phase 1 and Phase 2 split.
+- It is not the whole of what the operator asked for. The `developer` role and the API page are Increments 2 and 3, and the operator has not yet confirmed what "API page" means (see the diff).
+- The notes are the tracked follow-ups below. The integration edits (stale strings, TODO closures, release note) must land with the merge.
+- **The "walk as the person the path creates" requirement is not triggered.** Increment 1 changes no account-to-organization connection, no role grant and nothing a new account can reach. The predicate is still `users.is_platform_admin`, read live. I walked it anyway as the two people who exist today (below). That walk becomes mandatory in Increment 2.
+
+## ONE-LINE TAKE
+
+> `/developer` is now a framed, 2FA-gated internal portal with a home, a Data model section, a labelled documentation placeholder, and two tested lists that fail CI when they drift. Only a hand-flagged platform admin can enter it. The operator's "someone with the role of developer, in any organization" and "an API page" are not here yet.
+
+## Evidence for the walk
+
+- I started my own dev server on :3570 from a `git archive` copy of HEAD, with the pipeline branch's env. This avoids the stale `.next` that QA run 1 found in the worktree.
+- `AUTH_URL` and `E2E_BASE_URL` were `http://localhost:3570`, and I never used :3000.
+- I drove Chromium through a throwaway spec in the scratch copy, as:
+  - a platform admin with `two_factor_required` and a real TOTP enrolment
+  - a signed-in user with no roles, no organizations and no 2FA
+- Both users and the copy are deleted (0 `e2e-qa-p6-` rows remain), the server was stopped by PID, and the worktree is clean.
+- Screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/shots-p6/`.
+
+**Platform admin who requires 2FA** (360px and 1280px)
+
+| Check | Result |
+|---|---|
+| Sign in with callback `/developer/tables/roll_actions` | `/totp?callbackUrl=%2Fdeveloper%2Ftables%2Froll_actions`, no portal text on the page |
+| Direct `/developer` while unverified | `/totp?callbackUrl=%2Fdeveloper` |
+| `/developer/schema.json` while unverified | 307 to `/totp?callbackUrl=%2Fdeveloper%2Fschema.json` |
+| After a real code | Back on `/developer/tables/roll_actions` |
+| `schema.json` after verifying | 200, `no-store` |
+
+Every page returned the expected status and no horizontal overflow. The `/developer/tables/nope` row is a genuine 404 inside the chrome.
+
+| Page | Status | `scrollWidth` at 360px | `scrollWidth` at 1280px |
+|---|---|---|---|
+| `/developer` | 200 | 360 | 1280 |
+| `/developer/data-model` | 200 | 360 | 1280 |
+| `/developer/docs` | 200 | 360 | 1280 |
+| `/developer/tables/roll_actions` | 200 | 360 | 1280 |
+| `/developer/erd/d-rolls` | 200 | 360 | 1280 |
+| `/developer/tables/nope` | 404 | 360 | 1280 |
+
+- **Phone Menu sheet:** titled "Developer portal", shows Home, Data model, Documentation and `Version 0.44.0`, and every link is 44px.
+- **Desktop:** a 220px left nav, with Data model lit on table and diagram pages (QA run 1 and the e2e spec confirm `aria-current`).
+
+**Non-entitled signed-in user** (360px and 1280px)
+
+- Sign-in with callback `/developer` lands on `/developer`, which is HTTP 200 with no redirect to `/home`.
+  - It shows the header, the "← PresbyPortal" link and the avatar.
+  - It shows "Your account doesn't include the developer portal. Ask a platform administrator if you need it."
+  - There is no nav and no Menu button.
+- A real table and a nonexistent table give the identical answer, status 200 with the same `h1`.
+- `schema.json` gives `403 {"error":"forbidden"}` with `no-store`.
+
+**Evidence I did not generate myself** (relying on QA run 1 and run 2 and the unit tests)
+
+- The "unavailable" state when the predicate read throws.
+- An `ADMIN_ROLE` holder without the column being forbidden (QA run 1 walked it).
+- Dark mode (QA run 1 and run 2).
+- The 404 HTTP status on a missing diagram (QA run 1).
+
+## What's Working
+
+- **F284 is closed and I reproduced it end to end.** A required-but-unverified administrator is challenged on every `/developer` path, including `schema.json`, and returns to the same path after the code. No portal text appeared before verification.
+- **The forbidden state is calm and enumeration-safe.** There is no silent bounce to `/home`, the existing and missing tables answer identically, and the header and avatar stay so the person can leave.
+- **The frame does what Phase 1 said.** The home carries provenance-labelled cards plus a legend of what each label means. The text-and-icon labels are never colour-only.
+- **The Documentation page keeps its promise.**
+  - It is one placeholder page, not six dead routes.
+  - Each of seven rows says what it will contain and where the material lives today.
+  - It excludes rate limits, SDKs and webhooks, so it implies no public API.
+- **F283 and F285 are real tripwires.** QA reproduced them red on the old data (58 tables; 5 headings). The page now discloses its own omissions (No Real Data, Verify in a Browser) from the same constant the test reads. The "cannot drift" claim is gone.
+- **The shell was promoted, not forked** (DECISION-261), and `/admin` is unchanged in QA's before-and-after.
+
+## Intent-vs-Shipped Diff
+
+**Increment 1 against its own Phase 1 and Phase 2 scope**
+
+| Phase 1 said | Shipped | Verdict |
+|---|---|---|
+| G1: add a 2FA gate on `/developer`, both layers | Proxy segment-boundary line, page gate, JSON 403 from `schema.json`; walked above | matches |
+| G2: a shell with header, avatar, sign-out, route back, phone sheet | Walked at both widths | matches |
+| G3: module map complete, header copy honest | 85 classified plus 20 platform-shell tables; `dev-docs.test.ts` fails on drift | matches |
+| G4: invariants checked against CLAUDE.md | Six entries added; the stale wildcard note replaced; coverage test; the two omissions disclosed on the page | matches |
+| G9, G12: calm forbidden and unavailable states | Forbidden walked. Unavailable is unit-tested only. | matches (unavailable not walked by me) |
+| G13: 44px targets and 360px | One miss: the inline `schema.json` link in the data-model counts line measures 16px tall | acceptable drift |
+| G14: drop the "AI support worker" claim | Removed | matches |
+| Home with the section cards, labelled | Two cards (Data model, Documentation) | matches the Increment 1 scope |
+| Q8: tokens and 44px now, palette later | `.reg` keeps its hex palette and the oxblood/verdigris pair; the mermaid theme still follows the OS | acceptable drift, to be tracked |
+
+**What the operator's request still lacks**
+
+| Operator asked for | Status after Increment 1 | Owner |
+|---|---|---|
+| "its own portal home" | **Delivered** | Increment 1 |
+| "placeholders for future developer documentation" | **Delivered** (one page, seven labelled rows) | Increment 1 |
+| "i think it goes directly to the database schema" | **Delivered**: Data model keeps every URL; the page claims only what is true | Increment 1 |
+| "do some research on other developer features" | **Delivered** (`docs/research/2026-10-25-developer-portal-survey.md`, reconciled in Phase 2 Ruling 9) | done |
+| "same thought and care with the ux as the org portal" | **Mostly**: shell, states, targets, no loading trap. The data-model pages keep the `.reg` palette and a 16px inline link. | Increment 1, remainder tracked (Q8) |
+| **"we need an api page"** | **Not delivered. The home does not mention an API.** | **Increment 3** (`/developer/api`) |
+| **"accessible by someone with the role of developer, could be part of any organization"** | **Not delivered.** Today the only way in is `users.is_platform_admin`, set by hand in SQL with no UI and no audit. The "Ask a platform administrator" line is truthful but not executable in a UI. A person in an organization who is not a platform admin cannot get in. | **Increment 2** |
+
+Two things the operator should know plainly:
+
+1. **The "developer" audience request is entirely in Increment 2.** Increment 1 widened nothing, by design. It only closed the 2FA hole before the audience widens.
+2. **"API page" has not been confirmed with the operator.**
+   - Phase 1 interpreted it as an inventory of the 19 internal route handlers plus the cron schedules, with the sentence "PresbyPortal has no public API". Phase 1 listed a public API under Out of Scope "(confirm with user)".
+   - No question to the operator on this is recorded. The orchestrator ruling only adopted Q1–Q14 defaults, and Q13 is about Server Actions only.
+   - If the operator pictured a public API reference, Increment 3 will disappoint. Ask before Increment 3's Phase 3.
+
+**Phase 1 gaps and where they stand**
+
+- G1, G2, G3, G4, G9, G12, G13 and G14 are closed here.
+- G5, G6, G7, G10 and G11 (role seeding, `/launch`, JWT staleness, `/admin/users` copy, self-grant marking) are Increment 2.
+- G8 is accepted, with no UI for the column.
+- Increment 3 owns Q11 and Q13. Increment 4 owns Q12 and Ruling 8.
+- All of these are named in the child's Carry-forward table. They are not yet in `docs/TODO.md`; that is follow-up 1 below.
+
+## Edge Cases
+
+- **Empty state:** pass. A brand-new install lists every table. The documentation rows are all `Planned`.
+- **Failure microcopy:** pass for forbidden (walked). Unavailable, the error boundary and the 404 are unit-tested and reviewed, and I did not force a database failure.
+- **Permission gate:** pass. Forbidden, 2FA and signed-out were each walked, plus `schema.json` 401/403 (unit-tested; unreachable through the Edge).
+- **Audit event:** not applicable, because there is no mutation. The audit story is recorded as Increment 2's (Q9 residual: portal reads are unaudited).
+- **Mobile (360px):** pass on every page I walked. The one miss is the 16px inline `schema.json` link.
+- **Adversarial:**
+  - The open-redirect surface is closed by a literal `/developer` prefix, the `returnTo` allow-list (25 test rows) and `/signin`'s own sanitizer.
+  - `/developerx` is not gated and is a 404 (e2e).
+  - I did not independently probe encoded `callbackUrl` variants beyond QA's rows.
+
+## Rulings on the carried items
+
+1. **ERD tab title shows the slug (`d-rolls diagram`).** Cosmetic, an entitled-viewer-only surface. It is a small drift from the C1 intent (`{module} diagram`), so I rule a follow-up in Increment 3. The 404 tab title also echoes the missing table name (`nope · Developer portal`), which is harmless for an entitled viewer; fold it into the same fix.
+2. **Platform shell has no "Diagram →" on the index, but table-page crumbs link to `/developer/erd/platform-shell`.**
+   - That is an inconsistency, not a defect, and it renders. Pick one: add the link or drop the crumb.
+   - Follow-up in Increment 3.
+   - It is also the open design question of whether the "Platform shell" diagram is meaningful.
+3. **`shell-boundaries.test.ts` relative-import blind spot.**
+   - Accept for Increment 1: the tree has no tenant or db import today, and the alias scan holds.
+   - **Make it a blocking item for Increment 3's Phase 3.** The readers module and the tenant-data boundary scan arrive in Increment 3, and Ruling 7 says the import allow-list is the pre-approved fallback.
+   - The scan must resolve relative imports before it can claim "allow-only".
+4. **Calendar-fixture leftover check** (`e2e/support/calendar-fixture.ts:236-242`). Not this pipeline's. It counts `E2E %` event types across all organizations but deletes only inside its own organization, so one fixture's leak fails an unrelated spec's teardown. File it in the Backlog as test infrastructure. It must not block this merge.
+5. **Rule 13 (what's-new): not required.**
+   - The surface is visible only to a hand-flagged platform administrator. The Developer avatar item and `/home` card are gated on the same live read.
+   - Nothing is member-visible. Revisit at Increment 2 only if the operator wants to announce the role.
+6. **Rule 14 (functionality map line 20): required now.**
+   - Replace "`/developer` index … Generated from the schema + Postgres `COMMENT ON`" with the portal as built. Suggested text:
+     > **presby: developer portal** — `/developer` home (provenance-labelled section cards), `/developer/data-model` (the schema index), `/developer/tables/<name>`, `/developer/erd/<module>`, `/developer/schema.json`, `/developer/docs` (labelled placeholders). Shell is shared `console-*`; section data in `src/lib/developer-portal/`. Gate: `users.is_platform_admin`, read live, 2FA challenged at the proxy and the page; `ok`/`forbidden`/`unavailable`. Not yet: the `developer` role, API, Rules and Access pages.
+   - Also update the version stamp.
+   - Line 140 (the proxy, "2FA on `/admin/*` and `/o/*`") is stale now: add `/developer`.
+7. **Rule 15 (`docs/architecture.md`): not now.** Increment 1 adds no subsystem; the shell promotion and the extra 2FA path are not architectural. `architecture.md` does not mention the developer portal at all. Add the one sentence (a platform-axis capability, read live, outside `FEATURES`) in Increment 2, as the architect scheduled.
+
+## Integration list
+
+Edits go at integration, to the shared files, by the orchestrator (Rule 16). The branch is behind `main`, so merge `main` (0.44.1) first.
+
+- **CLAUDE.md:153:** replace "`src/app/(admin)/developer/ — generated schema reference`" with "the developer portal: home, data model, documentation placeholders (platform-admin only until the developer role lands)".
+- **CLAUDE.md:465:** replace "`/developer` marks each one `database`, `trigger`, or `paper`" with "`/developer/data-model` marks each one…". Add that two headings (No Real Data, Verify in a Browser) are deliberately left off and disclosed there.
+- **Project Layout, new `src/lib/developer-portal/` line:** pure data (nav, provenance, docs registry, the access decision); no db or session imports.
+- **Project Layout, `src/components/shared/` line (~101):** add the promoted `console-header/nav/nav-links/mobile-menu` with required props (label, id prefix, main id, `canAccessAdmin`).
+- **Project Layout, `src/components/admin-portal/` line (112-116):** this one is not on the orchestrator's list, but it is now false. It still says it holds the nav, phone menu and header. Only `AdminForbidden` and its siblings remain, and the developer portal imports `AdminForbidden` from there.
+- **Project Layout, `src/proxy.ts` line (CLAUDE.md:122):** "admin + 2FA on /admin and /o/*" becomes "…on `/admin`, `/developer` and `/o/*`".
+- **Also correct:** the docs mention that CLAUDE.md has 14 Key Invariants headings, not 13 (Batch B). Any quoted count should say fourteen.
+- **TODO closures, all by F283/F285:**
+  - line 72
+  - the C-3 half of the code-review item at line 217 (the design said 216; in this tree the C-3 text is on 217, so check the line before editing)
+  - line 359
+- **Q8 CSS follow-up:** add the line below.
+- **S6 release-note sentence:** the Fixes paragraph must carry S6 verbatim ("…It now includes all six, and a test fails if one of the project's listed principles has neither an entry nor a recorded reason for being left out. Two working practices, No Real Data and Verify in a Browser, are deliberately left off, and the page says so. The wording of each entry is written by hand and is not checked."). C11's original "it now matches the project's own list" must not ship.
+- **Release note rest:** the "58 of the 105 tables", the 2FA sentence and the unavailable-state sentence are true as drafted.
+- **Version:** main is 0.44.1. If parish lands first at 0.45.0, this is **0.46.0** (file `docs/release-notes/v0.46.md`). If parish does not land first, 0.45.0 is correct. The orchestrator numbers it at integration; I found nothing that contradicts 0.46.0.
+- **Doc edits owned by Increment 2** (not now): the Post-Login Landing table and the "two platform predicates" paragraph, the Permissions vs Flags paragraph, the `.claude/agents/architect.md` route-group line, and the `architecture.md` sentence.
+- **Orchestrator housekeeping from QA:** give padmin Increments 2–4 Phase 3 the promoted shell paths (Ruling 4). Increment 3's number list loses F288 (it closed here). The worktree's stale `.next` needs clearing before the next dev-server run there.
+
+## Follow-Ups (SHIP WITH NOTES): TODO-ready lines
+
+Source for each: `docs/work-log/2026-10-25-developer-portal-inc1.md` Phase 6.
+
+- [ ] **Developer portal Increment 2: the `developer` role** (`docs/work-log/2026-10-25-developer-portal-inc2.md`). Role `developer` bound to `developer.portal` outside `FEATURES`, `readCanAccessDeveloper` (live, throws, admin role not included), `/launch` matrix rename, avatar menu and `/home` card, production seeding runbook (no migration), `selfTargeted` and `roleName` audit metadata, `/admin/users` copy, DECISION-259, F286, F287 (A1). Auth-touching, so the MFA e2e gate applies. **The Phase 6 walk must be as the person the grant creates**: a developer-role user with zero organizations and with one, at 360px on `development`, plus a revoke mid-session. This delivers the operator's "accessible by someone with the role of developer, could be part of any organization". — `docs/work-log/2026-10-25-developer-portal.md` (operator quote 3)
+- [ ] **Developer portal Increment 3: the API page, Rules and Access** (`-inc3`). `/developer/api` (tested route and cron registry with set-equality including exported methods, redaction rules, the "no public API" statement), `/developer/rules`, `/developer/access`, the readers module, the final `/home` card line, DECISION-260. **Before its Phase 3, confirm with the operator what "API page" means** (internal endpoint inventory with an explicit "no public API", per Phase 1; or something else). — same
+- [ ] **Developer portal Increment 3, blocking prerequisite: make `shell-boundaries.test.ts` resolve relative imports** (it only inspects `@/` aliases, so `../../../../lib/db` would bypass the allow-list), then extend it for the readers module. Also in Increment 3: fix the ERD (and 404) tab title to use the module name, and reconcile the Platform shell "Diagram →" link against the table-page crumb that already links `/developer/erd/platform-shell`. — QA run 1 and run 2 carry-forward
+- [ ] **Developer portal Increment 4: real documentation** (`-inc4`). Render decisions, runbooks, changelog and the architecture overview from a closed file list with an explicit `outputFileTracingIncludes` entry (Ruling 8), no `rehype-raw`, verified on a Vercel preview. Also confirms `/admin/docs` works in production. No new markdown dependency. — same
+- [ ] **`.reg` palette follow-up on `/developer` data-model pages (Q8, DECISION-261):** move the hex-literal palette to platform tokens (U9); give the paper/database pair an icon, not colour alone; make `.dark .reg` and the mermaid theme follow the app's `.dark` class rather than the OS; improve the phone-size diagram, which shrinks to about 328px; raise the inline `schema.json` link in the counts line to a 44px target. — Q8, inc1 Phase 5
+- [ ] **E2E infrastructure: `removeCalendarFixture`'s leftover check counts `E2E %` event types across every organization but deletes only inside its own** (`e2e/support/calendar-fixture.ts:236-242`), so another fixture's leak fails an unrelated spec's `afterAll` (seen in QA run 1's prod lane and run 2's first calendar pass). Scope the check to `CAL_ORG`. — inc1 Phase 5 run 2
+
+## Red Flags
+
+None that block. The two items I would not let slide silently are:
+
+- **The operator's "developer role" request is not satisfied by this increment.** Do not describe 0.46.0 in the release note or to the operator as "the developer portal is done". The note should say the first step is shipped and access is still limited to hand-flagged platform administrators.
+- **The "API page" meaning is unconfirmed** (above).
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent (Increment 1) | analyst | Walked as a 2FA-required platform admin (challenge verified, every page at 360px and 1280px) and as a non-entitled member (forbidden, `schema.json` 403) on a self-started :3570 server from a clean `git archive` of fc8ab4d; throwaway users and copy removed. Increment 1 scope met. Operator's developer-role and API-page requests remain Increments 2 and 3; "API page" meaning to be confirmed. Carried items ruled; Rule 13 not required; Rule 14 required; Rule 15 deferred to Increment 2; integration list and six TODO lines supplied. | SHIP WITH NOTES | 2026-10-25 |
+
+## Handoff
+
+**Next agent: none for this increment; the orchestrator closes it.**
+
+1. Land the integration list and the six TODO lines above at integration (Rule 16 shared files).
+2. Write the release note with S6's sentence and the honest scoping, at 0.46.0 if parish takes 0.45.0.
+3. Rule 12 does not apply, because no feedback row originated this work.
+4. **Next pipeline step:** Increment 2 starts at Phase 3 (tech-lead), because Phases 1 and 2 are shared and its rulings are already recorded. Increment 3's Phase 3 waits on the operator's answer about the API page.
+
+**Files:**
+- `/Users/cshenso/git/presby-platform/presby-devportal/docs/work-log/2026-10-25-developer-portal.md`
+- `/Users/cshenso/git/presby-platform/presby-devportal/docs/work-log/2026-10-25-developer-portal-inc1.md`
+- Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/shots-p6/`

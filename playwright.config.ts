@@ -191,11 +191,13 @@ export default defineConfig({
         },
         // The custom-domain specs that must hold on a PRODUCTION build too: the HSTS host split
         // (`headers()` is baked into the routes manifest at build time), the lockdown / no-cookie
-        // matrix and the serving matrix. `npm run test:e2e:prod` runs both projects.
+        // matrix, the serving matrix and the public asset allowlist (F289: an exact single
+        // `x-content-type-options: nosniff` is a property of the built server, not the dev one).
+        // `npm run test:e2e:prod` runs both projects.
         {
           name: "prod-custom-hosts",
           use: { ...devices["Desktop Chrome"], launchOptions: { args: HOST_RESOLVER_ARGS } },
-          testMatch: /custom-domains\/(headers|lockdown|serving)\.spec\.ts$/,
+          testMatch: /custom-domains\/(assets|headers|lockdown|serving)\.spec\.ts$/,
         },
       ]
     : [

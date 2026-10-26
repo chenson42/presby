@@ -129,6 +129,7 @@ export default async function AdminTicketDetailPage({
         const meta = await getBlobStore().resolveMeta({
           organizationId: ticket.organizationId,
           key: row.attachmentAssetKey,
+          audience: "private",
         });
         if (meta) {
           attachment = { key: row.attachmentAssetKey, contentType: meta.contentType };

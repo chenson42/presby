@@ -60,6 +60,7 @@ export async function GET(
     const blob = await getBlobStore().resolve({
       organizationId: resolved.org.organizationId,
       key,
+      audience: "private",
     });
     if (!blob) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });

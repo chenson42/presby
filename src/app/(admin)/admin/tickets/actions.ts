@@ -347,6 +347,7 @@ export async function replyToTicketAsOperatorAction(
     const meta = await getBlobStore().resolveMeta({
       organizationId: row.organizationId,
       key: attachmentKey,
+      audience: "private",
     });
     if (!meta) {
       return {

@@ -289,6 +289,7 @@ export async function setOrganizationBrandAction(
             organizationId,
             bytes: logoBytes,
             contentType: sniffed,
+            audience: "public_site",
           });
           newMarkAssetKey = ref.key;
         } catch (err) {

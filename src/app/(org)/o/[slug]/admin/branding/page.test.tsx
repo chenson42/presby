@@ -202,6 +202,7 @@ describe("BrandingPage — result branches", () => {
     expect(blobResolve).toHaveBeenCalledWith({
       organizationId: "org-1",
       key: "mark-1",
+      audience: "public_site",
     });
     expect(screen.getByRole("heading", { name: /^branding$/i })).toBeTruthy();
     const hexInput = screen.getByLabelText(/brand colour/i) as HTMLInputElement;

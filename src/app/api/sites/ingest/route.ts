@@ -213,6 +213,7 @@ export async function POST(req: Request): Promise<NextResponse> {
         organizationId: org.organizationId,
         bytes,
         contentType: sniffed,
+        audience: "public_site",
       });
       imageKeys[image.manifestKey] = ref.key;
     } catch (err) {
@@ -240,6 +241,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       organizationId: org.organizationId,
       bytes: bundleBytes,
       contentType: "application/json",
+      audience: "private",
     });
   } catch (err) {
     if (err instanceof BlobValidationError) {

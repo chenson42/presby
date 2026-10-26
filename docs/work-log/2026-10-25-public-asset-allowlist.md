@@ -2117,3 +2117,7 @@ Files and artifacts:
 - 360px screenshot of the live site (scratchpad): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6-360.png`
 
 I edited no tracked files and used no `git stash`. The worktree has the same four uncommitted files as before. My run regenerated `.next/dev`, wrote to the ignored `test-results/` folder and left the usual E1 fixture traffic on the pipeline branch, which the spec tears down itself.
+
+## Production rehearsal of 0072 (orchestrator, 2026-10-26 ~04:00 UTC)
+
+On a throwaway Neon branch created from `production` (`rehearsal-0072-from-prod`, deleted afterwards): preconditions six non-null; `psql -1 -v ON_ERROR_STOP=1 -f drizzle/0072_presby_blob_audience.sql` exit 0 with `0072: flipped 81 blob(s) to public_site` (80 distinct bundle images + the brand mark). V1 after: `bundle_image expected 80 public_ok 80 dangling 0`, `mark 1/1/0`. V2: `private application/json 25`, `private image/png 1`, `public_site image/jpeg 76, image/png 2, image/webp 3` (81). V3: both consumer FKs validated, NO ACTION both ways. V4: all three functions `prosecdef`, pinned `search_path`, ACL owner + `presby_app`. (Runbook step 0's count query names `ticket_messages.attachment_key`, which does not exist — the column name in the runbook needs correcting before release day.)

@@ -276,29 +276,45 @@ describe("deriveSignInMarker", () => {
     }
   });
 
-  it("blocked reads 'not connected yet': the person is unconnected and the card says why", () => {
-    expect(deriveSignInMarker(facts("blocked"), quiet)).toEqual({ kind: "not_connected", noEmail: false });
-    expect(deriveSignInMarker(facts("blocked"), { holdsInertAuthority: false, hasAddress: false })).toEqual({ kind: "not_connected", noEmail: true });
+  it("blocked is its own marker kind, whether or not the person holds authority or has an address (the card says why)", () => {
+    expect(deriveSignInMarker(facts("blocked"), quiet)).toEqual({ kind: "blocked" });
+    expect(deriveSignInMarker(facts("blocked"), { holdsInertAuthority: false, hasAddress: false })).toEqual({ kind: "blocked" });
+    expect(deriveSignInMarker(facts("blocked"), { holdsInertAuthority: true, hasAddress: false })).toEqual({ kind: "blocked" });
+  });
+
+  it("a connected person has no blocked marker — regression for a blocked invitation read as 'Not connected yet'", () => {
+    expect(deriveSignInMarker(facts("blocked", { linked: true }), quiet)).toBeNull();
+  });
+
+  it("revoked with no inert authority has no marker, with it reads 'not connected' (Group E, amended)", () => {
+    expect(deriveSignInMarker(facts("revoked"), quiet)).toBeNull();
+    expect(deriveSignInMarker(facts("revoked"), authority)).toEqual({ kind: "not_connected", noEmail: false });
   });
 });
 
 describe("deriveSessionRowState / sessionRowAction", () => {
-  it("covers each of the five states the hand-off names", () => {
+  it("covers each of the six states the hand-off names", () => {
     const rows = [
       deriveSessionRowState(facts("none"), { hasAddress: false }),
       deriveSessionRowState(facts("none"), { hasAddress: true }),
       deriveSessionRowState(facts("pending"), { hasAddress: true }),
       deriveSessionRowState(facts("expired"), { hasAddress: true }),
       deriveSessionRowState(facts("pending", { delivery: "bounced" }), { hasAddress: true }),
+      deriveSessionRowState(facts("blocked"), { hasAddress: true }),
     ];
-    expect(rows).toEqual(["no_email", "not_invited", "sent", "expired", "bounced"]);
+    expect(rows).toEqual(["no_email", "not_invited", "sent", "expired", "bounced", "blocked"]);
     expect([...new Set(rows)].sort()).toEqual([...SESSION_ROW_STATES].sort());
   });
 
-  it("a revoked or blocked seat reads as not invited (or no email) and offers the card", () => {
+  it("a revoked seat reads as not invited (or no email) and offers the Invite link", () => {
     expect(deriveSessionRowState(facts("revoked"), { hasAddress: true })).toBe("not_invited");
-    expect(deriveSessionRowState(facts("blocked"), { hasAddress: true })).toBe("not_invited");
     expect(deriveSessionRowState(facts("revoked"), { hasAddress: false })).toBe("no_email");
+  });
+
+  it("a blocked seat reads as blocked with or without an address on file, and offers Open — regression for 'Not invited yet' over a blocked invitation", () => {
+    expect(deriveSessionRowState(facts("blocked"), { hasAddress: true })).toBe("blocked");
+    expect(deriveSessionRowState(facts("blocked"), { hasAddress: false })).toBe("blocked");
+    expect(sessionRowAction("blocked")).toBe("open");
   });
 
   it("'Invite' only when nothing is out and there is an address; 'Open' everywhere else", () => {

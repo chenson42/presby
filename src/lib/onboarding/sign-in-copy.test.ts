@@ -220,6 +220,7 @@ describe("markers (group E): icon and word, never colour alone", () => {
     expect(signInMarkerLabel({ kind: "bounced" }, fmt)).toBe("Email bounced. Check the address");
     expect(signInMarkerLabel({ kind: "not_connected", noEmail: false }, fmt)).toBe("Not connected yet");
     expect(signInMarkerLabel({ kind: "not_connected", noEmail: true }, fmt)).toBe("Not connected yet");
+    expect(signInMarkerLabel({ kind: "blocked" }, fmt)).toBe("Invitation couldn't be completed");
     expect(SIGN_IN_MARKER_NO_EMAIL).toBe("No email on file");
   });
 
@@ -227,6 +228,7 @@ describe("markers (group E): icon and word, never colour alone", () => {
     const all = [
       signInMarkerLabel({ kind: "not_connected", noEmail: true }, fmt),
       signInMarkerLabel({ kind: "expired" }, fmt),
+      signInMarkerLabel({ kind: "blocked" }, fmt),
     ].join(" ");
     expect(all).not.toMatch(/can't sign in/i);
   });
@@ -267,6 +269,7 @@ describe("the Session banner and hand-off (group F)", () => {
     expect(sessionRowStateLabel("sent", fmt, sent)).toBe("Invitation sent 2026-10-20");
     expect(sessionRowStateLabel("expired", fmt, sent)).toBe("Invitation expired");
     expect(sessionRowStateLabel("bounced", fmt, sent)).toBe("Email bounced");
+    expect(sessionRowStateLabel("blocked", fmt, sent)).toBe("Invitation couldn't be completed");
     for (const s of SESSION_ROW_STATES) expect(sessionRowStateLabel(s, fmt, sent).length).toBeGreaterThan(0);
   });
 });

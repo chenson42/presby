@@ -232,6 +232,8 @@ export function signInMarkerLabel(marker: SignInMarker, formatDate: (date: Date)
       return "Invitation expired. Send again";
     case "bounced":
       return "Email bounced. Check the address";
+    case "blocked":
+      return "Invitation couldn't be completed";
     case "not_connected":
       return "Not connected yet";
     default: {
@@ -275,6 +277,8 @@ export function sessionRowStateLabel(state: SessionRowState, formatDate: (date: 
       return "Invitation expired";
     case "bounced":
       return "Email bounced";
+    case "blocked":
+      return "Invitation couldn't be completed";
     default: {
       const _exhaustive: never = state;
       throw new Error(`Unhandled Session row state: ${String(_exhaustive)}`);

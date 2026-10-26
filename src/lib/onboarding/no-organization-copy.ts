@@ -43,6 +43,8 @@ export const NO_ORG_COPY = {
   nothingNew: "Nothing new yet.",
   /** N5: shown above whichever block renders; never replaces the page. */
   listingFailed: "We couldn't check for invitations just now. Reload the page.",
+  /** Check again's database error: the button's failure, so "try again", not the page-load "reload". */
+  checkFailed: "We couldn't check just now. Try again.",
 } as const;
 
 // ---------------------------------------------------------------------------

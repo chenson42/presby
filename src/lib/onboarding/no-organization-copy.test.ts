@@ -28,6 +28,7 @@ describe("group A: nothing connected, no open invitation (N0)", () => {
     expect(NO_ORG_COPY.buttons).toEqual({ checkAgain: "Check again", switchAccount: "Sign in with a different account" });
     expect(NO_ORG_COPY.nothingNew).toBe("Nothing new yet.");
     expect(NO_ORG_COPY.listingFailed).toBe("We couldn't check for invitations just now. Reload the page.");
+    expect(NO_ORG_COPY.checkFailed).toBe("We couldn't check just now. Try again.");
   });
 
   it("the stale lines are gone: 'Only an invitation link does' (false once auto-connect exists) and 'ask your church administrator'", () => {

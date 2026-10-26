@@ -177,12 +177,12 @@ describe("checkAgainAction", () => {
     expect(await checkAgainAction(IDLE, form({}))).toEqual({ status: "needs_second_factor" });
   });
 
-  it("an error is a db_error state with the generic sentence, never a raw message", async () => {
+  it("an error is a db_error state with Check again's own sentence, never a raw message or the sender table's", async () => {
     mockConnect.mockResolvedValue({ kind: "error" });
     expect(await checkAgainAction(IDLE, form({}))).toEqual({
       status: "error",
       code: "db_error",
-      message: "We couldn't complete that just now. Try again.",
+      message: "We couldn't check just now. Try again.",
     });
   });
 });

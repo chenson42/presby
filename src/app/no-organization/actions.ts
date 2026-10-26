@@ -8,8 +8,7 @@ import { acceptInvitationInPlace } from "@/lib/onboarding/accept";
 import { connectSignedInAccount } from "@/lib/onboarding/connect";
 import { UUID_RE } from "@/lib/onboarding/input";
 import { INVITATION_DEAD_IN_PLACE_COPY, inviteeBlockedCopy } from "@/lib/onboarding/labels";
-import { NO_ORG_INVITATION_COPY } from "@/lib/onboarding/no-organization-copy";
-import { signInRefusalMessage } from "@/lib/onboarding/sign-in-copy";
+import { NO_ORG_COPY, NO_ORG_INVITATION_COPY } from "@/lib/onboarding/no-organization-copy";
 
 /**
  * `/no-organization`'s Server Actions (Community Increment 2b, Batch B2;
@@ -105,7 +104,7 @@ export async function checkAgainAction(
     case "declined":
       return { status: "nothing_new" };
     case "error":
-      return failure("db_error", signInRefusalMessage("db_error"));
+      return failure("db_error", NO_ORG_COPY.checkFailed);
   }
 }
 

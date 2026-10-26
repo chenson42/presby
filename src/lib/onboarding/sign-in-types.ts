@@ -225,9 +225,10 @@ export type SignInMarker =
   | { kind: "pending"; sentAt: Date }
   | { kind: "expired" }
   | { kind: "bounced" }
+  | { kind: "blocked" }
   | { kind: "not_connected"; noEmail: boolean };
 
-export const SESSION_ROW_STATES = ["no_email", "not_invited", "sent", "expired", "bounced"] as const;
+export const SESSION_ROW_STATES = ["no_email", "not_invited", "sent", "expired", "bounced", "blocked"] as const;
 export type SessionRowState = (typeof SESSION_ROW_STATES)[number];
 
 /** One Session seat without a connected sign-in, for the hand-off under the banner. */
@@ -256,8 +257,9 @@ const BOUNCED_DELIVERIES: ReadonlySet<DeliveryState> = new Set(["bounced", "fail
  * pending, expired or blocked, or when the state is none or revoked and the
  * person holds authority that is inert while unconnected (Phase 3; a marker on
  * every ordinary member of a 400-person congregation is noise). Never for a
- * person who is connected. A blocked invitation reads as "Not connected yet":
- * the person is unconnected and the card says why.
+ * person who is connected. A blocked invitation is its own marker ("Invitation
+ * couldn't be completed"), not "Not connected yet": that "yet" promises a
+ * connection a blocked invitation may never bring. The card says why.
  */
 export function deriveSignInMarker(
   facts: SignInStateFacts,
@@ -271,7 +273,7 @@ export function deriveSignInMarker(
     case "expired":
       return { kind: "expired" };
     case "blocked":
-      return { kind: "not_connected", noEmail: !extras.hasAddress };
+      return { kind: "blocked" };
     case "none":
     case "revoked":
       return extras.holdsInertAuthority ? { kind: "not_connected", noEmail: !extras.hasAddress } : null;
@@ -280,15 +282,20 @@ export function deriveSignInMarker(
   }
 }
 
-/** The row state for a Session seat: "No email on file · Not invited yet · Invitation sent · expired · bounced". */
+/**
+ * The row state for a Session seat: "No email on file · Not invited yet ·
+ * Invitation sent · expired · bounced · Invitation couldn't be completed".
+ * A blocked invitation shows as blocked whether or not an address is on file now.
+ */
 export function deriveSessionRowState(facts: SignInStateFacts, extras: { hasAddress: boolean }): SessionRowState {
   switch (facts.state) {
     case "pending":
       return BOUNCED_DELIVERIES.has(facts.delivery) ? "bounced" : "sent";
     case "expired":
       return "expired";
-    case "signs_in":
     case "blocked":
+      return "blocked";
+    case "signs_in":
     case "revoked":
     case "none":
       return extras.hasAddress ? "not_invited" : "no_email";

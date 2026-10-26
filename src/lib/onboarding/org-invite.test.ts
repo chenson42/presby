@@ -637,6 +637,15 @@ describe("getSignInMarkers", () => {
     expect(markers[f!]).toBeUndefined();
   });
 
+  it("a blocked invitation reads 'blocked' for an ordinary member and for one with authority, not 'not connected' — regression for blocked read as Not connected yet", async () => {
+    const [p1, p2] = ["9100000a-0000-4000-8000-000000000000", "9100000b-0000-4000-8000-000000000000"];
+    script.states = [state(p1!, { state: "blocked" }), state(p2!, { state: "blocked" })];
+    script.probe = [{ id: p2! }];
+    const markers = await org.getSignInMarkers(ctx, [p1!, p2!]);
+    expect(markers[p1!]).toEqual({ kind: "blocked" });
+    expect(markers[p2!]).toEqual({ kind: "blocked" });
+  });
+
   it("probes only the unconnected people whose state could show an inert-authority marker (a pending person is never probed)", async () => {
     script.states = [state(PERSON, { state: "pending", sent_at: new Date(), queue_status: "sent" }), state(OTHER, { state: "signs_in", linked: true })];
     await org.getSignInMarkers(ctx, [PERSON, OTHER]);
@@ -690,6 +699,14 @@ describe("listSessionSignInRows", () => {
     h.personIdsWithCredentialEmail.mockResolvedValue(new Set([OTHER]));
     const result = (await org.listSessionSignInRows(ctx)) as { rows: import("./sign-in-types").SessionSignInRow[] };
     expect(result.rows.map((r) => [r.state, r.action])).toEqual([["no_email", "open"], ["expired", "open"]]);
+  });
+
+  it("a seat whose invitation was blocked reads 'blocked' with Open, with or without an address — regression for 'Not invited yet' over a blocked invitation", async () => {
+    script.seats = [seat(PERSON, "A B"), seat(OTHER, "C D")];
+    script.states = [state(PERSON, { state: "blocked" }), state(OTHER, { state: "blocked" })];
+    h.personIdsWithCredentialEmail.mockResolvedValue(new Set([PERSON]));
+    const result = (await org.listSessionSignInRows(ctx)) as { rows: import("./sign-in-types").SessionSignInRow[] };
+    expect(result.rows.map((r) => [r.state, r.action])).toEqual([["blocked", "open"], ["blocked", "open"]]);
   });
 
   it("no seats without a login is ok with no rows, and no reader call (the reader raises on an empty list)", async () => {

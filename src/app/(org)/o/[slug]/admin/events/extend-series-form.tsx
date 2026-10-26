@@ -22,6 +22,7 @@ import type { ExtendSeriesInput } from "@/lib/events";
 import { extendSeriesSchema, type ExtendSeriesFormValues } from "./event-schema";
 import { extendSeriesPatternAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
+import { extendWebsiteLine } from "./website-listing-copy";
 
 const SELECT_CLASSES =
   "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
@@ -41,10 +42,13 @@ export function ExtendSeriesForm({
   slug,
   parentEventId,
   currentPattern,
+  inheritsOnExtend = false,
 }: {
   slug: string;
   parentEventId: string;
   currentPattern: string;
+  /** True when new occurrences would go on the public website (inherited from the latest one). */
+  inheritsOnExtend?: boolean;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -81,6 +85,10 @@ export function ExtendSeriesForm({
     formState: { errors },
   } = form;
   const patternType = useWatch({ control: form.control, name: "patternType" });
+  const additionalCountText = useWatch({ control: form.control, name: "additionalCount" });
+  const typedCount = Number(additionalCountText);
+  const websiteLineCount =
+    Number.isInteger(typedCount) && typedCount >= 1 ? typedCount : null;
 
   async function onSubmit(values: ExtendSeriesFormValues) {
     const pattern =
@@ -199,6 +207,10 @@ export function ExtendSeriesForm({
             <p className="mt-1 text-sm text-destructive">{errors.additionalCount.message}</p>
           )}
         </div>
+
+        {inheritsOnExtend && (
+          <p className="text-sm text-muted-foreground">{extendWebsiteLine(websiteLineCount)}</p>
+        )}
 
         <Button type="submit" disabled={submitting} className="min-h-11">
           {submitting ? "Extending…" : "Extend series"}

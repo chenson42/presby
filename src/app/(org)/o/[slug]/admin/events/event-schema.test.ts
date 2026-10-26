@@ -7,6 +7,7 @@ const baseCreate = {
   startsAt: "2027-03-01T19:00",
   endsAt: "",
   isPublic: true,
+  websiteListed: false,
   allowsCheckin: false,
   eventTypeId: "none",
   repeats: false,
@@ -149,6 +150,7 @@ describe("editEventSchema", () => {
     startsAt: "2027-03-01T19:00",
     endsAt: "",
     isPublic: true,
+    websiteListed: false,
     allowsCheckin: false,
     eventTypeId: "none",
   };

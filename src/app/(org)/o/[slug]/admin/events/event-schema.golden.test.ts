@@ -17,6 +17,7 @@ const base = {
   startsAt: "2026-06-07T18:00",
   endsAt: "",
   isPublic: true,
+  websiteListed: false,
   allowsCheckin: false,
   eventTypeId: "none",
   repeats: false,
@@ -147,6 +148,7 @@ describe("editEventSchema", () => {
     startsAt: "2026-06-07T18:00",
     endsAt: "",
     isPublic: false,
+    websiteListed: false,
     allowsCheckin: true,
     eventTypeId: "none",
   };

@@ -8653,3 +8653,12 @@ rollback;
 --     fixture, so it is never run against production.
 -- ===========================================================================
 \ir person-emails/test-rls-64.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/public-events-calendar (integration).
+-- 67. Public events calendar (drizzle/0067_presby_public_events_calendar.sql).
+--     Its own file, as 46, 47, 59-62 and 64 above; \ir resolves relative to
+--     this script. It needs the test helpers and the seed's public-calendar
+--     fixture (Fernwood's live site), so it is never run against production.
+-- ===========================================================================
+\ir public-calendar/test-rls-67.sql

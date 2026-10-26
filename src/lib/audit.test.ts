@@ -263,6 +263,8 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   INVITATION_ACCEPTED: "invitation.accepted",
   INVITATION_ACCEPT_BLOCKED: "invitation.accept_blocked",
   USER_CREATED_VIA_INVITATION: "user.created_via_invitation",
+  EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
+  EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

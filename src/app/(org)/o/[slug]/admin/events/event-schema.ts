@@ -35,7 +35,13 @@ const baseFields = {
   /** 'YYYY-MM-DDTHH:mm', a native <input type="datetime-local">'s own shape. */
   startsAt: z.string().min(1, "Start date and time are required"),
   endsAt: z.string().optional(),
+  /** "Open to everyone, not only members". The veto for `websiteListed`. */
   isPublic: z.boolean(),
+  /**
+   * "Show on our website's public calendar". A wish only: `src/lib/events.ts`
+   * stores `websiteListed && isPublic`, whatever the form posts.
+   */
+  websiteListed: z.boolean(),
   allowsCheckin: z.boolean(),
   /** An event type id, or "none" (no type - shown as the default type). */
   eventTypeId: z.string(),

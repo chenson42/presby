@@ -45,9 +45,15 @@ const ENROL_ACTIONS = "src/app/(account)/account/2fa/actions.ts";
 describe("two-factor grant allow-list (DECISION-292)", () => {
   it("G1: the importers of the grant module, and the names each takes, are exactly the three allowed", () => {
     const found: Record<string, string[]> = {};
+    const specifiers: Record<string, number> = {};
     for (const f of files) {
       if (f.path === GRANT_FILE) continue;
-      const re = /(?:import|export)\s+(?:type\s+)?(?:\{([^}]*)\}|\*\s+as\s+\w+|\w+)\s+from\s+["'][^"']*two-factor-grant["']/g;
+      // Every way a module can be named as the grant module: import, re-export
+      // (`export { x } from`, `export * from`, `export * as ns from`), a default or
+      // namespace import. A `*` re-export is a barrel: it hands the grant to whoever
+      // imports the barrel, so it takes the name "*" and fails the set below.
+      const re =
+        /(?:import|export)\s+(?:type\s+)?(?:\{([^}]*)\}|\*(?:\s+as\s+\w+)?|\w+)\s+from\s+["'][^"']*two-factor-grant["']/g;
       for (const m of f.src.matchAll(re)) {
         const names = (m[1] ?? "*")
           .split(",")
@@ -56,31 +62,58 @@ describe("two-factor grant allow-list (DECISION-292)", () => {
         found[f.path] = [...(found[f.path] ?? []), ...names].sort();
       }
       if (/import\(\s*["'][^"']*two-factor-grant["']\s*\)/.test(f.src)) found[f.path] = [...(found[f.path] ?? []), "dynamic"];
+      // Catch-all for any form the parse above does not model (require, a
+      // side-effect import, `import x = require`): the module specifier may appear
+      // once in each allowed file and nowhere else.
+      const n = (f.src.match(/["'][^"']*two-factor-grant["']/g) ?? []).length;
+      if (n > 0) specifiers[f.path] = n;
     }
     expect(found).toEqual({
       "src/auth.ts": ["takeTwoFactorGrant"],
       [TOTP_ACTIONS]: ["withTwoFactorGrant"],
       [ENROL_ACTIONS]: ["withTwoFactorGrant"],
     });
+    expect(specifiers).toEqual({ "src/auth.ts": 1, [TOTP_ACTIONS]: 1, [ENROL_ACTIONS]: 1 });
   });
 
-  it("G2: withTwoFactorGrant( is called exactly twice in the totp actions and once in the enrolment actions, each in the one allowed shape", () => {
-    const counts: Record<string, number> = {};
+  it("G2: every mention of withTwoFactorGrant is the import or one allowed call (two in the totp actions, one in the enrolment actions), each in the one allowed shape", () => {
+    // Count the NAME, not the call syntax: an alias (`const g = withTwoFactorGrant`),
+    // `.call` / `.apply`, an aliased import from a barrel, a `typeof`, a namespace
+    // member access all still spell the identifier, and none is one of the calls
+    // below. Outside the grant module the name appears only in the two allowed files.
+    const tokens: Record<string, number> = {};
     for (const f of files) {
       if (f.path === GRANT_FILE) continue;
-      const n = (f.src.match(/withTwoFactorGrant\s*\(/g) ?? []).length;
-      if (n > 0) counts[f.path] = n;
+      const n = (f.src.match(/\bwithTwoFactorGrant\b/g) ?? []).length;
+      if (n > 0) tokens[f.path] = n;
     }
-    // The import line mentions the name without a call: only calls were counted above.
-    expect(counts).toEqual({ [TOTP_ACTIONS]: 2, [ENROL_ACTIONS]: 1 });
+    // One mention for the import, plus one per allowed call.
+    expect(tokens).toEqual({ [TOTP_ACTIONS]: 1 + 2, [ENROL_ACTIONS]: 1 + 1 });
 
     const shape =
       /(?:^|\n)\s*(?:(?:const|let)\s+\w+\s*=\s*|\w+\s*=\s*)?await\s+withTwoFactorGrant\(\s*session\.user\.id,\s*"(?:totp|recovery)",\s*\(\)\s*=>\s*unstable_update\(\{\}\),?\s*\)/g;
     for (const path of [TOTP_ACTIONS, ENROL_ACTIONS]) {
       const src = files.find((f) => f.path === path)!.src;
       const shaped = [...src.matchAll(shape)].length;
-      expect(shaped, `${path}: every call is awaited, for session.user.id, with an empty-payload update`).toBe(counts[path]);
+      expect(shaped, `${path}: every mention but the import is an awaited call, for session.user.id, with an empty-payload update`).toBe(
+        tokens[path]! - 1,
+      );
     }
+  });
+
+  it("G2b: every mention of takeTwoFactorGrant is the import or the one consume site in the jwt callback's update branch", () => {
+    const tokens: Record<string, number> = {};
+    for (const f of files) {
+      if (f.path === GRANT_FILE) continue;
+      const n = (f.src.match(/\btakeTwoFactorGrant\b/g) ?? []).length;
+      if (n > 0) tokens[f.path] = n;
+    }
+    expect(tokens).toEqual({ "src/auth.ts": 2 });
+    const src = files.find((f) => f.path === "src/auth.ts")!.src;
+    expect(
+      [...src.matchAll(/trigger\s*===\s*"update"\s*&&\s*takeTwoFactorGrant\(userId\)/g)].length,
+      "the single call is gated on trigger === update and reads the token's own user id",
+    ).toBe(1);
   });
 
   it("G3: the two 'use server' files export exactly their endpoints (no exported wrapper around the grant)", () => {

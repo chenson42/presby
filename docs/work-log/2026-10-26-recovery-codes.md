@@ -1116,3 +1116,31 @@ Evidence is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presb
 - **F344** fixed here (see the orchestrator ruling above).
 
 **Orchestrator (2026-10-26):** F166 fix commit reworded to `Discovered-In: Phase-4` (now `9e48cf8`; was `0b43c04`), per QA's trailer note.
+
+## Phase 4 — QA run 1 fix (R4 test)
+
+Test-only; `src/lib/auth/two-factor-grant.boundaries.test.ts` is the one file changed, no production code.
+
+- **G1** also catches `export *` and `export * as ns` (a `*` re-export takes the name `*` and fails the set), and a catch-all: the string `…two-factor-grant` may appear exactly once in each of `src/auth.ts` and the two allowed action files and nowhere else, so `require`, a side-effect import or any form the parse does not model fails too.
+- **G2** counts the identifier, not the call syntax: every `\bwithTwoFactorGrant\b` per non-test `src` file outside the grant module. The two allowed files must hold exactly 1 (the import) plus their shaped calls (3 in the totp actions, 2 in the enrolment actions); every other file must hold 0. The number of shaped calls must equal the count minus one, so an alias, `.call`/`.apply`, `typeof`, or an aliased import from a barrel (all still spell the name) can no longer hide.
+- **G2b (new)** does the same for `takeTwoFactorGrant`: only `src/auth.ts`, exactly twice (import plus the one `trigger === "update" && takeTwoFactorGrant(userId)` site).
+- Known limit, unchanged: comments are stripped by regex before scanning, so a string literal containing `/*` could swallow code up to the next `*/`; this is not a shape any current file has.
+
+Mutation matrix (one mutation at a time on the worktree, each restored; the old test is `git show HEAD:` of the pre-fix file run under a temporary name, deleted afterward). Red-first: the old test stayed green on d, e, g, h (and on k and m); the new one goes red on all of them.
+
+| Probe | Old test | New test |
+|---|---|---|
+| HEAD, no mutation | green | green |
+| a: new importer file calling the grant | red | red (G1, G2) |
+| b: second shaped call in `2fa/actions.ts` | red | red (G2) |
+| c: extra export in `2fa/actions.ts` | red | red (G3) |
+| d: `export * from` the grant module in a new file | green | red (G1) |
+| e: that barrel plus an aliased import and call | green | red (G1, G2) |
+| f: `'use server'` named re-export | red | red (G2, G3) |
+| g: `const g = withTwoFactorGrant` in an allowed file | green | red (G2) |
+| h: `withTwoFactorGrant.call(null, …)` | green | red (G2) |
+| i: `'use client'` file under `2fa/` importing `@/auth` | red | red (G4) |
+| j: `export * as ns from` the grant module | red | red (G1) |
+| k: extra `takeTwoFactorGrant` mention in `src/auth.ts` | green | red (G2b) |
+| l: `takeTwoFactorGrant` imported in a new file | red | red (G1, G2b) |
+| m: `require("./two-factor-grant")` | green | red (G1) |

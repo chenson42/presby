@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Shared; recorded in the parent | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (this file); Copy four-check, Carry-forward and e2e blast radius below; no operator answer blocks Phase 4 | Design complete | 2026-10-25 |
-| 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | In progress: Batch A (shell promotion) done and committed; Batches B (api-developer) and C (ux-developer) pending | — | 2026-10-25 |
+| 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | In progress: Batch A (shell promotion) and Batch B (gate, proxy, schema.json, registries; MFA e2e smoke green) done and committed; Batch C (ux-developer) pending | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -563,6 +563,86 @@ For the orchestrator (not operator questions): give padmin Increments 2–4 Phas
 **Gate.** `npm run typecheck`, `npm run lint` (max-warnings 0), `npm run check` (all eight, exit 0) clean; vitest over `shared/console-*`, `(admin)/admin` and `admin-portal`: 62 files, 738 tests pass (includes `layout.test.tsx`, `shell-boundaries.test.ts`). Dev server on 3570 (own process, killed by listening PID); `e2e/admin-shell.spec.ts` 7/7 pass (desktop nav groups and aria-current, phone Menu open/navigate/close/Escape, 360px no sideways scroll). Screenshots of `/admin` at 360px and 1280px compared by eye: unchanged; `scrollWidth` 360 and 1280; heading ids still `admin-nav-<key>`. Note for running e2e against a self-started server: it needs `RATE_LIMIT_DISABLED=true`, the DOMAINS fakes, `CRON_SECRET=giving-e2e-cron-secret`, `STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret`, and `E2E_ALLOW_SHARED_DB=true` (the pipeline Neon branch is dedicated).
 
 **For Batches B and C.** Import from `@/components/shared/console-{header,nav}`; the shell-boundaries allow-list in Batch C already names `console-*`. No new copy strings were introduced. `ConsoleNav` and `ConsoleMobileMenu` return nothing for empty `groups`, so the layout may pass `[]` for a non-entitled viewer.
+
+## Batch B — gate, proxy, `schema.json`, registries (api-developer, 2026-10-25)
+
+**Step 0.** `git fetch && git merge origin/main` (0.44.0, public events calendar): clean, no conflicts.
+
+**Commits** (each `fix:`, `Caught-By: agent-review`, `Discovered-In: Phase-1`, `Work-Log` trailer):
+- `694da68` `fix(developer): challenge a required second factor on /developer, in the proxy and in the page gate (F284, F288)`
+- `017e0b6` `fix(developer): classify every table and every Key Invariant, with tests that fail on drift (F283, F285)`
+
+### Contract for Batch C
+
+- **`src/proxy.ts`**: `isTwoFactorGated` gains `pathname === "/developer" || pathname.startsWith("/developer/")` (segment boundary; `/developerx`, `/developer-x` not gated). Comment block and the fall-through "Auth-only routes" list updated. No `PROTECTION_RULES` entry, no new import (`check:proxy-imports` passes).
+- **`src/lib/developer-portal/access.ts`**: `AccessVerdict` and `decideDeveloperAccess({ user, readEntitled })`, as designed (no imports; the `try` wraps only the `await readEntitled(...)`, so a synchronous or async throw is `unavailable`).
+- **`src/app/(admin)/developer/guard.ts`** exports:
+  - `type DeveloperGate = "ok" | "forbidden" | "unavailable"`
+  - `readEntitled` (= `cachedIsPlatformAdmin` from `@/lib/nav-data`, so layout, page and avatar menu share one read) and `readEntitledUncached` (= `readIsPlatformAdmin`)
+  - `requireDeveloper(returnTo): Promise<DeveloperGate>`: redirects `/signin?callbackUrl=` (signed out) or `/totp?callbackUrl=` (required, unverified) with the sanitised path, `redirect()` outside any try
+  - `checkDeveloperApiRequest(): Promise<AccessVerdict>` (uses `auth()`, not `cachedAuth()`)
+  - `safeReturnTo(returnTo): string` (exported so Batch C can test its own literals; implements the `^/developer(/[A-Za-z0-9_~%.-]+)*$` allow-list plus the decoded `.`/`..`/`/`/`\` refusal)
+  - **`requirePlatformAdmin(returnTo): Promise<void>` is TRANSITIONAL.** I kept it so the three untouched pages (`page.tsx`, `tables/[table]/page.tsx`, `erd/[module]/page.tsx`) still compile and behave as before (non-entitled to `/home`, a failed read throws) while gaining the 2FA and signed-out redirects. **Batch C: replace each call with `requireDeveloper(...)` plus `GateState`, then delete `requirePlatformAdmin` and its `describe` in `guard.test.ts`.** The design said guard.ts "replaces" it; this is the one place I deviated, to keep commit 1 green on typecheck without pre-empting Batch C's page work.
+- **`schema.json/route.ts`**: status table implemented exactly as the API Contract (401 / 403 two_factor_required / 503 predicate / 403 forbidden / 503 schema read / 200), every response `cache-control: no-store`, errors carry only the four codes (no message, no stack). The "AI support worker" comment is deleted (C9). The schema read (`loadDescriptions` + `buildSchemaDocs`) is wrapped in a `try` that yields 503 `unavailable`.
+- **`src/lib/dev-docs.ts`** new exports: `MODULES`, `PLATFORM_TABLES` (table to reason), `PLATFORM_MODULE = "Platform shell"`, `UNCLASSIFIED_MODULE = "Unclassified"`, `INVARIANTS` (type `Invariant`, with `source: string | null`, `enforcement: "database" | "trigger" | "paper"`), `NOT_LISTED`. Unlisted tables render under "Unclassified" in production. Header comment rewritten (C4 residuals); "AI support worker" lines removed. `buildErd`'s default scope and `scripts/generate-erd.ts` use `PLATFORM_MODULE`.
+- **`(admin)/developer/page.tsx`** got the minimum edit to keep compiling (it still lives until Batch C rewrites it): the two `"platform (from starter)"` literals became `PLATFORM_MODULE`, and `"documented"` comparisons became `"paper"`. The paper tag display now prints `inv.enforcement` directly. Batch C's rewrite supersedes all of it.
+- **`docs/schema-design.md`**: regenerated by `npm run docs:erd` (needs `dotenv -e .env.local --`, as the script imports `@/lib/db` through `dev-docs.ts`; true before this change). 18 diagrams from 105 tables (was 11); the new headings are M to S.
+
+### F283 counts, confirmed from the live tree after the calendar merge
+
+| | Count |
+|---|---|
+| `pgTable` exports, via `getTableConfig` (`dev-docs.test.ts`) | **105** (the test also asserts the exports equal the `pgTable("…")` declarations in `schema.ts` and `domain/*.ts`, so a table file left out of `domain/index.ts` fails) |
+| Previously classified (`MODULES`) | 47 |
+| Unclassified before this batch | **58** (matches G3, F283, and the C11 release-note line "58 of the 105") |
+| `MODULES` after (47 + 38) | 85 |
+| `PLATFORM_TABLES` | 20 (the module split in the design held exactly; nothing moved) |
+| `INVARIANTS` | 20 (14 existing, 6 new), of which `paper`: 10; `NOT_LISTED`: 2 |
+
+The calendar merge (0.44.0) added no tables, so the numbers did not move.
+
+**Design claim that proved wrong: CLAUDE.md has 14 Key Invariants headings, not 13** (the design's "13 `### ` headings, lines 459–677" is stale; the test reads the live file). 14 = 12 listed + the 2 in `NOT_LISTED`, which is consistent with "six omitted plus six already covered". Nothing in the C11 release-note copy or the C12 wording depends on 13, but anyone quoting "thirteen" should say fourteen. All 14 are accounted for.
+
+### Invariants: tags and sources
+
+All six new entries are `paper`, exactly the design's floors. **No tag was raised above `paper`, so no enforcing trigger/constraint/test needs a file:line.** The existing entries (14 in the live file, not the design's 15; 14 + 6 = 20) keep their enforcement (`documented` renamed `paper`) and gained a `source`: Two Hierarchies Intersect Nowhere (hierarchies, publication-up, parent_id/path, publication-as-event), Isolation Is a Database Property, The Roll Is the System of Record (roll action, SASR projection), The Court Is Not a Group, No Role Carries a Wildcard, Never Hard-Delete a Person (person, organization), Permissions vs Flags (the submission-grant credential). Two are `null` (schema-level, in `docs/schema-design.md`): "A record ABOUT another organization must be affiliated with it" (drizzle/0045) and the event-type fallback (drizzle/0054). The wildcard entry now carries C12's text. C12's check, "a test fails on an unclassified [brand token]", was confirmed by opening the contract test: `src/lib/brand/contract.test.ts:289-293` ("globals.css declares properties TOKEN_POLICY does not classify"), so the sentence stays. The 14 `source` mappings are judgement calls on which CLAUDE.md section elaborates the older entries; the test pins only that each names a real heading.
+
+### Tests (all mine; the regression rows were run against the unfixed code)
+
+| File | Tests | Notes |
+|---|---|---|
+| `src/lib/developer-portal/access.test.ts` | 9 | order, "a throwing reader is unavailable, not forbidden" (async and sync), reader not called for signed-out or challenged |
+| `src/app/(admin)/developer/guard.test.ts` | 35 | redirects carry the literal path; verdicts; `returnTo` allow-list (25 table-driven rows: `../../admin`, `%2e%2e`, encoded slash and backslash, `//evil`, `/developerx`, trailing slash, query, fragment, malformed `%zz`); `checkDeveloperApiRequest` uses `auth()` and the uncached read |
+| `src/app/(admin)/developer/schema.json/route.test.ts` | 8 | six statuses, `no-store` on every one, gate before any schema read, no message leak |
+| `src/proxy.test.ts` | +10 rows in `describe("proxy - /developer (F284)")`, plus 3 paths on the custom-host rewrite list | the E3 set (deep link; challenged on `/developer`, `/developer/`, `/developer/tables/x`, `/developer/schema.json`; `ADMIN_ROLE` holder challenged; verified no-role user passes with no `/access-pending`; no-2FA user passes; `/developerx` and `/developer-x` not gated). **Regression-for-F284 check: with the `src/proxy.ts` line reverted, 5 of these fail; restored, all pass** |
+| `src/lib/dev-docs.test.ts` | 15 | classification complete, no stale entry, none in both, reasons non-empty, module letters distinct, `buildSchemaDocs` yields zero `Unclassified` and exactly the platform list; CLAUDE.md headings accounted for, rename detection, `NOT_LISTED` reasons, vocabulary, unique titles, wildcard wording. **Drift check run by hand: removing `events` from `MODULES`, renaming a heading in CLAUDE.md and adding a new one each failed the right test with the instructive message; CLAUDE.md and `dev-docs.ts` restored afterwards** |
+| `src/lib/db/domain/events.schema.test.ts:175` | edited | `"documented"` to `"paper"` (title and assertion) |
+
+Full suite: 597 files passed, 81 skipped (the DB-backed ones), 9056 tests passed.
+
+### Gate
+
+`npm run typecheck`, `npm run lint` (max-warnings 0), `npm run check` (all eight tripwires, exit 0) and `npm run check:proxy-imports` specifically: clean.
+
+### MFA e2e smoke (own dev server, port 3570, PID stopped by `kill <pid>`; env per Batch A notes plus `AUTH_URL=http://localhost:3570`)
+
+New spec **`e2e/developer-2fa-gate.spec.ts`** (5 tests, committed with the proxy commit). Written as a self-contained spec because `e2e/support/developer-fixture.ts` and `e2e/developer-portal.spec.ts` are Batch C's and `e2e/support/*` is a Rule 16 file. It creates two throwaway users (`e2e-devportal-<stamp>-mfa@example.invalid`: platform admin, `two_factor_required`, a real TOTP enrolment through the existing `seedTotpEnrollment`; and `-plain@`: not an administrator, no 2FA), guards deletion on the `e2e-devportal-` prefix and `@example.invalid` suffix, sweeps stale ones in `beforeAll`, and leaves zero rows (verified by query after the run). No person rows, no flags, no shared-file edit.
+
+1. design case 1: sign in with `callbackUrl=/developer/tables/roll_actions`, assert `/totp?callbackUrl=…`, assert no portal text, `goto` the path again (still `/totp`), enter a real code, land on `/developer/tables/roll_actions` with the `roll_actions` heading.
+2. design case 2: `schema.json` from the unverified user is a 307 to `/totp?callbackUrl=%2Fdeveloper%2Fschema.json` (raw request, redirects off) and no JSON in the browser; after the real code the JSON renders, `200`, `no-store`, `invariants[].enforcement` in the three-word vocabulary with a `source` property, more than 100 tables, none `Unclassified`.
+3. `/developerx` as the unverified user is a 404, not `/totp` (segment boundary, end to end).
+4. signed-out deep link goes to `/signin?callbackUrl=/developer/tables/roll_actions`.
+5. a signed-in non-administrator gets `403 {"error":"forbidden"}` with `no-store` from `schema.json`.
+
+Result: **5 of 5 pass.** Existing auth set run in the same session on the same server: `totp-full-login`, `totp-callback-bypass` (7), `totp-code-entry`, `totp-recovery-code`, `session-claim-integrity`, `admin-login`, `post-login-routing` (12), `header-controls`, `member-home`, `role-boundaries` plus the new spec: **78 of 78 passed** (chromium project); `custom-domains/lockdown.spec.ts` (custom-hosts project): **30 of 30 passed**. This satisfies the CLAUDE.md Phase 4 MFA-e2e gate for the `src/proxy.ts` edit; Phase 5 still has to re-run it.
+
+### Notes for Batch C and the orchestrator
+
+- Batch C's `developer-portal.spec.ts` need not repeat cases 1 and 2 verbatim; the design lists them there, and this spec covers them. Either merge `developer-2fa-gate.spec.ts` into it or keep both (it is self-contained and cheap).
+- Batch C's `shell-boundaries.test.ts` check 8 (`src/proxy.ts` names `developer` only in the 2FA condition) holds as written: the word now also appears in the new comment block, so scan the `PROTECTION_RULES` array region only (as the design says) and not the whole file.
+- The `lockdown.spec.ts` three-path addition is still Batch C's; the existing spec passes as is.
+- `GateState` for `unavailable` links Try again to the page's own literal path: use the same string you pass to `requireDeveloper`.
+- `docs/TODO.md` lines 72, 216 (C-3) and 359 (the module-map omission, added at v0.34.0 integration, not named in the design) are all closed by F283/F285; the orchestrator should close 359 as well at integration (Rule 16 file, not edited here).
 
 ---
 

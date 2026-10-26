@@ -17,7 +17,7 @@
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete; Gaps 1–14; Open Questions 1–4 | READY WITH NOTES | 2026-10-26 |
-| 2 — Architectural review | architect | Pending | — | — |
+| 2 — Architectural review | architect | Complete; R1–R14, S1–S3; DECISION-279 proposed; no migration (0077 unused) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Pending | — | — |
 | 4 — Implementation | TBD by tech-lead | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
@@ -250,21 +250,246 @@ Files read (all absolute):
 
 ## Verdict
 
-[Approved | Approved with suggestions | Needs revision]
+**Approved with suggestions.**
+
+The staged, content-addressed transport (Phase 1 shape A) fits the starter's structure. It needs:
+- no schema change, so migration 0077 is not used;
+- no new dependency in either repository;
+- no change to the proxy;
+- no change to `docs/architecture.md`.
+
+The suggestions are listed under Notes. Phase 3 must carry R1–R14 forward.
+
+Code was read at `presby-ingest` 35df45d (`main` 21beebc), F289's `presby-assets` at 225de07 plus its uncommitted Batch 1, and `presby-site-kit` at 8ca982a. As instructed, I opened no database connection. Step 5 of my review process (reading the live catalog) applies to changes in schema, RLS or grants. This pipeline makes none: the new lookup is an organization-scoped SELECT on `blob_assets` through `presby_app`, which `resolve()` and `store()` already run. The coverage that replaces the catalog read is a DB-backed test of the new method under `presby_app` on this pipeline's Neon branch, after 0072 is applied (R13).
 
 ## Placement
 
-- Directory placement: [src/...]
-- Server vs Client split: [where 'use client' is needed and why]
-- Dependencies: [new dep needed (yes/no), evaluation against criteria]
+- **Routes: three separate routes, not one route with a phase field.** Each is POST, at a fixed path with no dynamic segment, under the existing endpoint:
+  - `src/app/api/sites/ingest/plan/route.ts`: a JSON manifest goes up; the server answers `already_current`, or the list of hashes it is missing.
+  - `src/app/api/sites/ingest/images/route.ts`: the raw bytes of one image per request. The declared sha256 and the manifest key travel in request headers, never in the path.
+  - `src/app/api/sites/ingest/commit/route.ts`: JSON with the pages plus `images: [{ manifestKey, sha256 }]`.
+  - `src/app/api/sites/ingest/route.ts`: the legacy single POST stays (orchestrator ruling OQ1). Its request body does not change.
+
+  Why separate routes:
+  - The upload body is binary and the other two are JSON. One handler would have to branch on the body type.
+  - Each route gets its own small validator, its own size limit and its own test file.
+  - Vercel's logs show which step failed.
+  - **The client builds all three URLs from the `presby_ingest_url` input it already has** (it appends `/plan`, `/images`, `/commit`). No site repository needs a new variable.
+  - Next allows a `route.ts` in a folder and more `route.ts` files in its subfolders.
+
+- **Shared server module: `src/lib/sites-ingest.ts`** (`server-only`). It is a flat file next to `sites-ingest-auth.ts`, not a new folder, and is not a new top-level module. It holds:
+  - **`authorizeIngest(req)`**, the gate every request passes through, in the existing order: OIDC check, then the 503 when `sites.public_render` is off, then the 404 when no site is provisioned for the repo, then `already_current` when the commit sha is already ingested. It returns `{ org, claims }` or a ready-made response. **All four routes call it, the legacy route included.**
+  - **The page validator** (the reserved-path checks), moved out of the legacy route so the legacy route and commit validate pages the same way.
+  - **`storeSiteImage(org, bytes)`**: magic-byte sniff, then `store({ audience: "public_site" })`. Used by legacy and upload.
+  - **`publishSiteBundle({ org, claims, pages, imageKeys, imageCount, transport })`**, the tail end of a publish: store the bundle with `audience: "private"`, then `recordSiteIngest`, then the audit row, then `revalidatePath`. **Used by both legacy and commit, so the two ways of publishing cannot drift apart.**
+
+  Because of this, **the routes call no `getBlobStore()` method directly.** Every audience literal lives in `src/lib/sites-ingest.ts`.
+
+- **Lookup placement: a new method on the blob adapter in `src/lib/storage/blob-store.ts`** (DECISION-030):
+  ```ts
+  findByContentHashes(input: {
+    organizationId: string;
+    audience: BlobAudience;                 // required; a string literal at the call site
+    contentHashes: readonly string[];       // each /^[0-9a-f]{64}$/, de-duplicated, length 1..MAX
+  }): Promise<Map<string, BlobRef>>         // keyed by lowercase hex hash; absent = not held
+  ```
+  - It runs inside `withTrustedOrgContext`, with `where organization_id = $ and audience = $ and content_hash = any($)`.
+  - It never selects `bytes`.
+  - It throws `BlobValidationError` for a malformed or over-limit hash list. The route checks the same things first; this is a second guard.
+  - 0072's `blob_assets_org_audience_hash_key (organization_id, audience, content_hash)` already provides the index it needs, so **no migration**.
+
+- **How it builds on F289:**
+  - The method uses F289's `BlobAudience` and `BlobRef` types (R6).
+  - Its `audience` argument follows F289's rule: required, and a string literal at the call site.
+  - F289's source scan (`audience-callsites.test.ts`, U4) needs two edits when this pipeline merges:
+    - **(a)** Add `findByContentHashes` to the scan's list of methods that must carry an audience.
+    - **(b)** Remove the table row for `src/app/api/sites/ingest/route.ts`, which will have no calls left, and add a row for `src/lib/sites-ingest.ts`. That row lists its calls in source order: `store:public_site`, `findByContentHashes:public_site`, `store:private` (the order is fixed when the file is written).
+
+  Edit (a) changes the scan's logic once. That is justified because the adapter itself gained a method. See suggestion S1 for a way to avoid even that.
+
+- **Server vs Client split:** no React. Route handlers only. `'use client'` does not apply.
+
+- **Dependencies:** none, in either repository.
+  - presby: sha256 comes from `node:crypto`; the sniff reuses `sniff.ts`.
+  - presby-site-kit: no `@actions/core` dependency. The token getter is passed in from `actions/github-script` (R10).
 
 ## Invariants Touched
 
-- [Invariant, how this change respects it (or how it changes it — requires CLAUDE.md update)]
+- **Proxy and the custom-host lockdown: no change, confirmed by reading `src/proxy.ts:58–100`.**
+  - On a platform host, the `/api/*` pass-through at `:100` covers the three new paths.
+  - On a custom host, the first branch sends every path except the four exact cron paths to `/site/<host>/…`. That gives the same neutral 404 for `/api/sites/ingest/*`.
+  - `CRON_PATHS` and `check:proxy-imports` are untouched.
+  - **One constraint this rests on:** the proxy's matcher skips any path that ends in `.png`, `.jpg` and similar (F151), so such a path never reaches the custom-host branch.
+    - The new routes must be **fixed paths with no dynamic segment.** The hash and the manifest key go in headers or the body, never in the path.
+    - Otherwise `/api/sites/ingest/images/<key>.jpg` would bypass the proxy and answer on a church's domain.
+- **The proxy does not reach the database:** unaffected. The proxy is not edited.
+- **A custom host is a key, not an identity:** unaffected. The ingest is a platform-host-only machine route.
+- **Permissions vs flags:**
+  - No `FEATURES.*` key is involved.
+  - Authorization is the OIDC repository identity, verified **on every request** by the shared gate. Organization and sha come only from the verified claims, never the body (DECISION-087).
+  - `sites.public_render` returns 503 on every step.
+- **DECISION-030:** the one new `blob_assets` read is in `blob-store.ts`. F289's second U4 check (raw SQL on `blob_assets` appears nowhere else) stays satisfied.
+- **F289 / DECISION-277 audiences:**
+  - Images: `store` with `public_site`, and the lookup asks for `public_site`.
+  - Bundle JSON: `store` with `private`.
+  - All three are literals in `sites-ingest.ts`.
+  - A hash held only as `private`, or only by another organization, counts as missing. Asking only for `public_site` is what prevents publishing a bundle the public asset route cannot serve.
+- **Isolation / RLS:** the lookup filters `organization_id` and runs with the trusted organization setting on the RLS-enforced connection, the same way the other three methods do. RLS and grants are unchanged.
+- **Audit:**
+  - `SITE_CONTENT_INGESTED` is written once per publish, on both the legacy and commit paths, through the shared publish function. Actor and the existing fields (`repo`, `commitSha`, `pageCount`, `imageCount`) are unchanged, with `imageCount` counted as manifest entries on both paths.
+  - Add `transport: "legacy" | "staged"` as a metadata field.
+  - Uploads write no audit row. Uploading only stages content inside the caller's own organization; nothing is published until commit. That matches today, where each image store is unaudited.
+  - `check:audit` does not scan route files (DECISION-084), so the route tests must assert the audit row.
+- **Never hard-delete:** a failed or abandoned run leaves image rows that no bundle uses, and nothing is collected. This is an accepted residual (Notes).
+- **No Real Data:**
+  - Fixtures in both repositories are synthetic generated bytes (a valid PNG or JPEG header plus filler).
+  - presby-site-kit is public (MIT, `private: false`).
+  - No site-fpcw file, name or image enters either repository, the work-log or any commit message. Counts only, as Phase 1 did.
+- **`docs/architecture.md` (Rule 15): no change.** §8 says content is converted and "handed to the platform". This change is below that level: no new subsystem, no change to how data flows into storage, no change to runtime shape.
 
 ## Notes
 
-[Anything Phase 3 must honor.]
+**Rulings Phase 3 must honor**
+
+- **R1 — Who decides how images are keyed.**
+  - The client never sends, and never receives, a blob uuid.
+  - Commit maps each `{ manifestKey, sha256 }` through `findByContentHashes(public_site)` and builds `imageKeys` itself.
+  - Any hash that is not held fails the commit with a 422 that names the manifest keys.
+  - Content type comes from the stored row. Even so, require it to be one of the three image types, as a second check.
+  - Plan and upload responses carry hashes only. **A test asserts that no plan, upload or commit response contains a uuid-shaped string.** An uploaded-but-uncommitted `public_site` image can only be fetched by its uuid, so never disclosing that uuid is what keeps those rows unreachable.
+- **R2 — Upload integrity.**
+  - The server computes sha256 of the received bytes itself and rejects a mismatch with the declared hash (422).
+  - It sniffs magic bytes and passes the sniffed type to `store()`.
+  - It never hands the declared hash or declared type to the store.
+  - `store()`'s de-duplication uses the hash the server computed.
+- **R3 — Request size limits.**
+  - Use one app-enforced limit, `4,000,000` bytes per request body (about 11% under Vercel's 4.5 MB cap). It applies to all four routes, the legacy route included.
+  - The server checks `Content-Length` and the number of bytes actually read, and answers over-limit bodies with the JSON error format, status 413.
+  - **This makes the app's own limit the binding one.** A local dev server, which has no platform cap, then behaves the same as production, so tests can exercise the limit, and an operator never again sees Vercel's plain-text 413.
+  - The client has the same constant, pinned by a test in presby-site-kit.
+  - Images between 4,000,000 bytes and the 10 MB store cap fail the run early, on the client, with a line naming the image and the limit (OQ4). Chunked upload is a tracked follow-up.
+  - Also cap the number of manifest entries (Phase 3 picks the value; about 2,000 is enough), manifest-key length and allowed characters, and the hash format. All checked on the server.
+- **R4 — `already_current` on every step.** It comes from the shared gate, so a re-run of an already-ingested sha writes nothing on any route. The client treats it as success and stops.
+- **R5 — The stored bundle keeps its current format** (`{ schemaVersion: 1, pages, imageKeys }`), so the renderer, `hydratePublishedSite` and F289's public route do not change. The commit request is a new wire format on a new route; its version field is separate from the stored bundle's.
+- **R6 — When the commit sha is written, and that publishing is all-or-nothing.**
+  - `recordSiteIngest` stays a single UPDATE.
+  - It runs only after every hash is confirmed held and the bundle JSON is stored.
+  - Plan and upload never write `organization_sites`.
+- **R7 — Duplicate hashes.** The client uploads each distinct hash once.
+  - FPCW has two byte-identical files.
+  - F289 Edge Case 17 notes that two simultaneous `store()` calls for identical bytes can race and hit a unique-key violation. Parallel uploads of the same hash would trigger it.
+  - Commit maps both manifest keys to one blob.
+  - Test both on each side.
+- **R8 — Manifest-key collisions** (`a.jpg` and `a.png` both becoming key `a`) fail in `build-bundle.mjs` with a readable line, for both transports.
+- **R9 — No `maxDuration` and no runtime override.** Each request handles at most one image or one manifest lookup. Leave the default and state it in the design (Gap 14).
+- **R10 — Where the site-kit client lives.**
+  - The client goes in **`presby-site-kit/scripts/ingest.mjs`**, an ES module next to `build-bundle.mjs`. Its main function, `runIngest({ getToken, fetch, log, fail, ... })`, has everything passed in.
+  - `ingest.yml` keeps `actions/github-script@v7`. The inline script shrinks to: load `.site-kit/scripts/ingest.mjs` and call it with `getToken: () => core.getIDToken(audience)`. That keeps GitHub's own token call and adds no dependency.
+  - `build-bundle.mjs` gains a manifest output (file path, `manifestKey`, sha256, byte size and sniffed type for each image; no base64). The legacy bundle can still be produced from it.
+  - **Choosing the transport** (OQ1): if the serialized legacy bundle is at most 4,000,000 bytes, use legacy; otherwise use staged.
+  - **Fresh OIDC token for every request**: plan, each upload, commit. The test checks that `getToken` is called exactly as many times as `fetch`.
+  - Error lines name the step and the manifest key.
+  - If the staged plan URL returns a 404 whose body is not the JSON error format, the line reads "the platform does not support staged ingest yet". That covers a site-kit release that reaches `main` before the server does.
+- **R11 — Concurrency.**
+  - Add `concurrency: { group: presby-site-ingest-${{ github.repository }}, cancel-in-progress: false }` at **job level** in `ingest.yml`. Inside a called workflow, `github.repository` is the calling site's repository.
+  - Runs for one repository are then strictly serialized, and GitHub collapses pending runs to the newest.
+  - `cancel-in-progress: false` is deliberate. It avoids a cancelled run's in-flight commit landing after its successor's.
+- **R12 — Where the tests go.**
+  - **presby:**
+    - A DB-backed test of `findByContentHashes`: it asks for the right audience, rejects other organizations, and never selects bytes.
+    - A unit test for `sites-ingest.ts`: validators, limits, and a table-driven gate test across all four handlers showing the same 401 / 503 / 404 / `already_current` order.
+    - A DB-backed `route.test.ts` next to each new route.
+    - One DB-backed run in-process through plan, upload and commit with synthetic images that total more than 4.5 MB. It asserts every request is within the limit and that the published `imageKeys` resolve through `resolvePublic`.
+    - The F289 U4 table edits.
+  - **presby-site-kit:**
+    - `test/ingest.test.ts`, with `// @vitest-environment node` because the default environment is jsdom, using a fake `fetch` and token getter.
+    - An extended `test/build-bundle.test.ts` (manifest output, collisions).
+  - **Do not add any test-only JWKS or token override to production code.** A local end-to-end run with the real client against `next dev` is therefore not available. The coverage that stands in for it is the in-process run above.
+- **R13 — Build order against F289** (OQ2).
+  - The presby-site-kit work has no dependency on F289 and can start now.
+  - The server work in Phase 4 builds on F289 once F289 Batch 2 is committed. Merge F289's branch into `pipeline/site-ingest-size`. Use no rebase across worktrees and never `git stash`.
+  - This pipeline's Neon branch needs 0072 applied before its DB-backed tests run.
+  - The merge to `main` is serialized after F289 (Rule 16).
+- **R14 — Release and rollout order.**
+  1. Apply 0072 to production, then promote F289 (its runbook).
+  2. Promote this pipeline's server. The new routes sit unused and the legacy route is unchanged.
+  3. Merge the presby-site-kit change to `main`. That takes effect for every site immediately; bump presby-site-kit's minor version and note that only the workflow and scripts changed.
+  4. Run FPCW's first real ingest only with the operator's explicit go (Gap 10).
+
+  Notes on the order:
+  - site-pasturechurch stays on the legacy path no matter the order.
+  - Rollback is a revert on presby-site-kit `main`. Large bundles then go back to failing, as today; small ones are unaffected.
+  - The workflow file comes from `@main`, but the scripts come from `inputs.site_kit_ref`. A site that pins `site_kit_ref` to a tag older than this release is unsupported. The workflow should fail with a readable line if `ingest.mjs` is missing.
+  - `docs/deployment.md` records the order and the rollback.
+
+**Accepted residuals** (record in the decision and `docs/TODO.md` at integration)
+
+- **Uploaded but never published images.** A failed or abandoned run leaves `public_site` rows that no bundle uses. They can only be fetched by uuid, which no ingest response discloses. Nothing collects them, and they have no takedown until F289's Tier 2. The class already exists (the legacy route can fail partway through its loop); it becomes more frequent.
+- **Re-running an old run.** Manually re-running an older failed run after a newer run succeeded republishes the older content. The server cannot order commit shas, and the concurrency group only serializes runs; it does not order them.
+- **The upload path may first run in production well after release.**
+  - Production has no preview deployments (`docs/deployment.md:50–57`), so the only real test against Vercel's cap is production itself.
+  - If OQ3 holds, FPCW's first run is plan plus commit only.
+  - **One caveat on OQ3:** the 80 hashes are present, but 0072 marks rows `public_site` only when the current bundle's `imageKeys` names them. Any of the 80 not named there stays `private`, and the plan will correctly report it missing.
+  - So Phase 3 copy and release notes must not promise "the first publish uploads nothing".
+
+**Suggestions** (not blocking)
+
+- **S1:** Route through the orchestrator to F289's Batch 2. Have U4 treat every `getBlobStore().<method>` call as needing an audience literal, except a named list of exemptions (`resolvePublic`). A later method then needs only a table edit, which matches U4's own stated rule that "the test logic never changes".
+- **S2:** Give the upload request a `Content-Type: application/octet-stream` header. The server ignores the client's type entirely; the sniff decides.
+- **S3:** An optional `ingest.yml` input, `transport: auto | staged | legacy` (default `auto`), would let the operator deliberately prove the staged upload path on site-pasturechurch with a one-off change to its calling workflow. That closes the third residual on the operator's schedule. Phase 3's call.
+
+**Proposed DECISION-279** (orchestrator records it):
+
+> **DECISION-279: Site ingest gains a staged, content-addressed transport. The legacy single POST stays.**
+> - Three fixed-path routes, `POST /api/sites/ingest/{plan,images,commit}`, share one gate (OIDC, then flag 503, then repo 404, then `already_current`) and one publish function (private bundle store, `recordSiteIngest`, audit, revalidate) with the legacy route. The client picks legacy only when the whole bundle is at most 4,000,000 bytes.
+> - The server keeps no session state; `blob_assets` is the staging area.
+> - Commit builds `imageKeys` on the server from sha256s held as `public_site` in the caller's organization, through a new `BlobStore.findByContentHashes({ organizationId, audience, contentHashes })` (DECISION-030; audience a literal per DECISION-277). The client never sends or receives a blob uuid.
+> - The server recomputes the hash and sniffs every upload.
+> - One app-enforced 4,000,000-byte limit per request makes the platform's 4.5 MB cap unreachable and testable locally.
+> - No schema change, no dependency, no proxy change; fixed paths only, because the matcher's extension exclusion (F151) would otherwise expose a dynamic `*.jpg` segment on custom hosts.
+> - The presby-site-kit client is a tested ES module (`scripts/ingest.mjs`) with its token getter passed in. It fetches a fresh OIDC token per request, and runs are serialized per repository by a job-level concurrency group.
+> - Rollout: server first, then presby-site-kit `main`.
+> - Accepted residuals: images uploaded but never published (no takedown until F289 Tier 2); re-running an older run republishes older content.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 2 — Architectural review | architect | Complete; R1–R14, S1–S3; DECISION-279 proposed; no migration (0077 unused) | Approved with suggestions | 2026-10-26 |
+
+(The date follows the work-log header; the system date here reads 2026-10-25.)
+
+## Handoff
+
+The next agent is **tech-lead** (Phase 3). Points to carry:
+- Carry R1–R14 and Phase 1 Gaps 3–14 into the Carry-forward and Edge Cases tables, each with the test that pins it.
+- Fix the wire contract, keeping header names, error format and limit identical in both repositories.
+- Settle the manifest entry cap and whether uploads run one at a time or a few in parallel. If parallel, the client must still upload each distinct hash once (R7).
+- Rule on S3.
+- Name the implementers. I suggest api-developer for presby and full-stack-developer for presby-site-kit, with the site-kit part able to start now.
+- Route S1 to the F289 coordinator before F289's Batch 2 writes U4.
+
+Files read:
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/work-log/2026-10-26-site-ingest-size.md`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/app/api/sites/ingest/route.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/app/api/sites/ingest/route.test.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/storage/blob-store.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/sites-ingest-auth.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/sites.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/db/domain/assets.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/proxy.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/domains/cron-passthrough.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/architecture.md`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/deployment.md`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/decisions.md`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/schema-design-2.md`
+- `/Users/cshenso/git/presby-platform/presby-assets/docs/work-log/2026-10-25-public-asset-allowlist.md`
+- `/Users/cshenso/git/presby-platform/presby-site-kit/.github/workflows/ingest.yml`
+- `/Users/cshenso/git/presby-platform/presby-site-kit/scripts/build-bundle.mjs`
+- `/Users/cshenso/git/presby-platform/presby-site-kit/package.json`
+- `/Users/cshenso/git/presby-platform/presby-site-kit/vitest.config.*`
+- `/Users/cshenso/git/presby-platform/site-fpcw/.github/workflows/` (calling workflow only)
+- `/Users/cshenso/git/presby-platform/site-pasturechurch/.github/workflows/deploy.yml` (calling workflow only)
 
 ---
 

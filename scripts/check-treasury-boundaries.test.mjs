@@ -13,8 +13,11 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import {
+  checkSharpHasItsImporter,
   checkTreasuryBoundaries,
+  checkTreasuryBoundariesTree,
   collectFiles,
+  DEV_DOCS_FILE,
   EMAIL_AUDIENCE_FILE,
   inputTags,
   isNoOwnerConnectionZone,
@@ -114,11 +117,20 @@ describe("T2 - only src/lib/reimbursement/ and the Drizzle mirror name a reimbur
     expect(checkTreasuryBoundaries([f("src/lib/audit.ts", "// reimbursement_events is the record\n/* presby_reimbursement_detail */")])).toEqual([]);
   });
 
+  it("lets the developer reference file the tables by name, and nothing else in src/lib/ do the same", () => {
+    expect(checkTreasuryBoundaries([f(DEV_DOCS_FILE, '  reimbursement_requests: "T. Reimbursements",')])).toEqual([]);
+    expect(rules(checkTreasuryBoundaries([f("src/lib/dev-docs-extra.ts", '  reimbursement_requests: "T. Reimbursements",')]))).toEqual(["T2"]);
+  });
+
   it("defines the allowed places", () => {
     expect(mayNameReimbursementTables("src/lib/reimbursement/a.ts")).toBe(true);
     expect(mayNameReimbursementTables("src/lib/db/domain/reimbursement.ts")).toBe(true);
     expect(mayNameReimbursementTables("src/lib/db/domain/reimbursement.schema.ts")).toBe(true);
     expect(mayNameReimbursementTables("src/lib/testing/reimbursement-fixture.ts")).toBe(true);
+    // the developer reference classifies every table by name (F283, filed by each pipeline per F338)
+    expect(mayNameReimbursementTables(DEV_DOCS_FILE)).toBe(true);
+    expect(mayNameReimbursementTables("src/lib/dev-docs.test.ts")).toBe(false);
+    expect(mayNameReimbursementTables("src/lib/dev-docs/other.ts")).toBe(false);
     expect(mayNameReimbursementTables("src/lib/db/domain/people.ts")).toBe(false);
     expect(mayNameReimbursementTables("src/lib/db/domain/reimbursement/x.ts")).toBe(false);
     expect(mayNameReimbursementTables("src/lib/treasury/team.ts")).toBe(false);
@@ -276,13 +288,44 @@ describe("T5 - sharp is imported at runtime only by src/lib/storage/image-saniti
   it("does not mistake another package whose name starts with sharp", () => {
     expect(checkTreasuryBoundaries([f("src/lib/x.ts", 'import s from "sharp-thing";')])).toEqual([]);
   });
+
+  describe("exactly one: the allowed file must exist and import it at runtime", () => {
+    it("passes when the one file imports sharp, however it is written", () => {
+      for (const src of ['import sharp from "sharp";', 'const sharp = require("sharp");', 'const s = await import("sharp");']) {
+        expect(checkSharpHasItsImporter([f(SHARP_FILE, src)])).toEqual([]);
+      }
+    });
+
+    it("fails when the file is missing from the tree", () => {
+      const v = checkSharpHasItsImporter([f("src/lib/storage/blob-store.ts", "export {};")]);
+      expect(rules(v)).toEqual(["T5"]);
+      expect(v[0].file).toBe(SHARP_FILE);
+      expect(v[0].message).toMatch(/does not exist/);
+    });
+
+    it("fails when the file exists but no longer imports sharp (or only its types, or only in a comment)", () => {
+      for (const src of ["export const x = 1;", 'import type { Sharp } from "sharp";', '// import sharp from "sharp";']) {
+        const v = checkSharpHasItsImporter([f(SHARP_FILE, src)]);
+        expect(rules(v), src).toEqual(["T5"]);
+        expect(v[0].message).toMatch(/no longer imports/);
+      }
+    });
+
+    it("the whole-tree check is the main check plus this one, so an extra importer AND a missing one both show", () => {
+      const v = checkTreasuryBoundariesTree([f("src/lib/reimbursement/receipts.ts", 'import sharp from "sharp";')]);
+      expect(rules(v)).toEqual(["T5", "T5"]);
+      expect(v.map((x) => x.file)).toEqual(["src/lib/reimbursement/receipts.ts", SHARP_FILE]);
+    });
+  });
 });
 
 // ── The scan itself ─────────────────────────────────────────────────────────
 
 describe("the real repository", () => {
-  it("is clean", async () => {
-    expect(checkTreasuryBoundaries(await collectFiles())).toEqual([]);
+  it("is clean, and image-sanitize.ts is the one file importing sharp (T5, exactly one)", async () => {
+    const files = await collectFiles();
+    expect(checkTreasuryBoundariesTree(files)).toEqual([]);
+    expect(files.some((file) => file.path === SHARP_FILE)).toBe(true);
   });
 
   it("scans real files (the scan is not vacuous) and planting one violation per rule in the real tree makes it fail", async () => {

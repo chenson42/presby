@@ -30,7 +30,10 @@
  *        a Drizzle table identifier (`reimbursementRequests`, ...). A page or an
  *        action that wanted a row reads through a function in
  *        `src/lib/reimbursement/`. `src/lib/testing/` (DB-test actors, never
- *        shipped) is the one other place.
+ *        shipped) and `src/lib/dev-docs.ts` (the developer reference's
+ *        classification of every table by name: a map key, never a query or a
+ *        shape; orchestrator ruling F338 has each pipeline file its own tables
+ *        there) are the two others.
  *   T3 - no `capture` attribute on any `type="file"` input in `src/`. Global,
  *        because there is no legitimate use: `capture` forces the camera and
  *        removes the photo library, which is the wrong picker for a receipt that
@@ -49,8 +52,11 @@
  *        `src/lib/storage/image-sanitize.ts` (DECISION-270: the receipt
  *        re-encoder is the guarantee that no EXIF location or embedded payload
  *        survives, so it must have one door). A type-only import is erased and is
- *        not a runtime import. The allowed file does not exist until Batch 2b;
- *        until then the rule is "nowhere".
+ *        not a runtime import. EXACTLY one: no other file imports it, and that
+ *        file does (a tree where the re-encoder has stopped using the library, or
+ *        has been renamed away, fails too - `checkTreasuryBoundariesTree`, which
+ *        the command runs; `checkTreasuryBoundaries` alone is the "no other
+ *        importer" half, for the synthetic-file tests).
  *
  * Not a proof; just a tripwire. It sees file PRESENCE of a token, not data flow
  * - the DB tests (`scripts/treasury/test-rls-73.sql`) and code review cover what
@@ -72,7 +78,7 @@ const SRC = path.join(ROOT, "src");
 
 // ── The zones and allowlists ─────────────────────────────────────────────────
 
-/** The one file that may import `sharp` at runtime (T5; Batch 2b creates it). */
+/** The one file that may, and must, import `sharp` at runtime (T5). */
 export const SHARP_FILE = "src/lib/storage/image-sanitize.ts";
 
 /** The audience registry: holds every module's template keys; not notice code (T4). */
@@ -91,11 +97,16 @@ export function isNoOwnerConnectionZone(rel) {
   return false;
 }
 
+/** Names every table once, as a map key, to classify it for the developer reference (T2 exemption). */
+export const DEV_DOCS_FILE = "src/lib/dev-docs.ts";
+
 /** The places allowed to name a reimbursement table or definer (T2). */
 export function mayNameReimbursementTables(rel) {
   if (rel.startsWith("src/lib/reimbursement/")) return true;
   if (/^src\/lib\/db\/domain\/reimbursement[^/]*\.ts$/.test(rel)) return true;
   if (rel.startsWith("src/lib/testing/")) return true;
+  // The developer reference files every table under a module by NAME (F283's classification test, F338).
+  if (rel === DEV_DOCS_FILE) return true;
   return false;
 }
 
@@ -117,6 +128,15 @@ const NOTICE_FORBIDDEN_RE =
 const SHARP_FROM_RE = /\b(import|export)\s+(type\s+)?([^;'"]*?)\bfrom\s*["']sharp(?:\/[^"']*)?["']/g;
 const SHARP_SIDE_EFFECT_RE = /\bimport\s+["']sharp(?:\/[^"']*)?["']/g;
 const SHARP_DYNAMIC_RE = /\b(?:require|import)\s*\(\s*["']sharp(?:\/[^"']*)?["']\s*\)/g;
+
+/** Every runtime (not type-only) import of `sharp` in comment-stripped source, as `{ index }`. */
+function sharpRuntimeImports(code) {
+  const imports = [];
+  for (const m of code.matchAll(SHARP_FROM_RE)) if (!m[2]) imports.push({ index: m.index });
+  for (const m of code.matchAll(SHARP_SIDE_EFFECT_RE)) imports.push({ index: m.index });
+  for (const m of code.matchAll(SHARP_DYNAMIC_RE)) imports.push({ index: m.index });
+  return imports;
+}
 
 function isTestFile(rel) {
   return /\.(test|spec)\.(ts|tsx|mjs)$/.test(rel);
@@ -270,12 +290,7 @@ export function checkTreasuryBoundaries(files) {
 
     // T5 - sharp is imported at runtime by one file.
     if (rel !== SHARP_FILE) {
-      const imports = [];
-      for (const m of code.matchAll(SHARP_FROM_RE)) imports.push({ index: m.index, typeOnly: Boolean(m[2]) });
-      for (const m of code.matchAll(SHARP_SIDE_EFFECT_RE)) imports.push({ index: m.index, typeOnly: false });
-      for (const m of code.matchAll(SHARP_DYNAMIC_RE)) imports.push({ index: m.index, typeOnly: false });
-      for (const imp of imports) {
-        if (imp.typeOnly) continue;
+      for (const imp of sharpRuntimeImports(code)) {
         const line = lineOf(code, imp.index);
         violations.push({
           rule: "T5",
@@ -289,6 +304,35 @@ export function checkTreasuryBoundaries(files) {
   }
 
   return violations;
+}
+
+/**
+ * T5's other half: the allowed file must actually be there and import `sharp`
+ * at runtime ("exactly one", not "at most one"). Needs the WHOLE tree, so it is
+ * separate from `checkTreasuryBoundaries`, whose callers pass a handful of
+ * synthetic files.
+ *
+ * @param {Array<{ path: string, content: string }>} files
+ */
+export function checkSharpHasItsImporter(files) {
+  const own = files.find((file) => file.path === SHARP_FILE);
+  if (own && sharpRuntimeImports(stripComments(own.content)).length > 0) return [];
+  return [
+    {
+      rule: "T5",
+      file: SHARP_FILE,
+      line: 1,
+      text: "",
+      message: own
+        ? `${SHARP_FILE} no longer imports "sharp" at runtime. T5 is EXACTLY one importer: the one re-encoder (DECISION-270) must exist and use the library, or receipts have no sanitizer.`
+        : `${SHARP_FILE} does not exist. T5 is EXACTLY one importer: the one re-encoder (DECISION-270) must exist, or receipts have no sanitizer.`,
+    },
+  ];
+}
+
+/** The whole-tree check the command runs: every rule, plus T5's "and that one does". */
+export function checkTreasuryBoundariesTree(files) {
+  return [...checkTreasuryBoundaries(files), ...checkSharpHasItsImporter(files)];
 }
 
 // ── Script entry point ───────────────────────────────────────────────────────
@@ -318,7 +362,7 @@ const isMain =
   import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("check-treasury-boundaries.mjs");
 
 if (isMain) {
-  const violations = checkTreasuryBoundaries(await collectFiles());
+  const violations = checkTreasuryBoundariesTree(await collectFiles());
 
   if (violations.length > 0) {
     console.error("Treasury-boundaries check FAILED:\n");

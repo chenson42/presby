@@ -173,7 +173,7 @@ function ChangeDialog({
           <AlertDialogDescription>{copy.body}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{copy.cancel}</AlertDialogCancel>
+          <AlertDialogCancel className="min-h-11">{copy.cancel}</AlertDialogCancel>
           <AlertDialogAction
             onClick={(event) => {
               // Keep the dialog open until the action returns; `applyChange` closes it.
@@ -181,6 +181,7 @@ function ChangeDialog({
               void applyChange();
             }}
             disabled={pending}
+            className="min-h-11"
           >
             {copy.confirm}
           </AlertDialogAction>

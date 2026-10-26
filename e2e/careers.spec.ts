@@ -582,6 +582,41 @@ test.describe("Job openings - platform host and staff admin", () => {
       await anon.close();
     });
 
+    test("the status dialogs name the title as typed, fit the phone, and Close keeps a typed edit - regression for the stale dialog title and dropped edits", async () => {
+      await addPosting(sql, fx, { slug: "dialog-draft", title: "E2E Dialog Draft", state: "draft" });
+      const openId = await addPosting(sql, fx, { slug: "dialog-open", title: "E2E Dialog Open", state: "published" });
+      const draftId = (await sql`select id from job_postings where organization_id = ${fx.orgId}::uuid and slug = 'dialog-draft'`)[0]!.id as string;
+
+      const page = await ctx.newPage();
+      await page.setViewportSize({ width: 360, height: 800 });
+      await page.goto(staff(`/${draftId}`));
+      await page.getByLabel(/^Title/).fill("E2E Dialog Draft Renamed");
+      await page.getByRole("button", { name: "Publish" }).click();
+      const dialog = page.getByRole("alertdialog");
+      await expect(dialog.getByText('Publish "E2E Dialog Draft Renamed"?')).toBeVisible();
+      // The dialog zooms in; measure once it has settled.
+      await expect.poll(async () => (await dialog.getByRole("button").last().boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      const box = (await dialog.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(360);
+      for (const button of await dialog.getByRole("button").all()) {
+        expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      }
+      await noHorizontalScroll(page, 360);
+      await dialog.getByRole("button", { name: "Keep as draft" }).click();
+
+      await page.goto(staff(`/${openId}`));
+      await page.getByLabel(/^Title/).fill("E2E Dialog Open Renamed");
+      await page.getByRole("button", { name: "Close this opening" }).click();
+      await expect(page.getByRole("alertdialog").getByText('Close "E2E Dialog Open Renamed"?')).toBeVisible();
+      await page.getByRole("button", { name: "Yes, close it" }).click();
+      await expect(page.getByText("Closed.", { exact: true })).toBeVisible();
+      const row = await postingBySlug(sql, fx, "dialog-open");
+      expect(row?.status).toBe("closed");
+      expect(row?.title).toBe("E2E Dialog Open Renamed");
+      await page.close();
+    });
+
     test("the staff list (long title, move buttons) and the editor (toolbar, preview) fit, with 44px targets", async () => {
       const list = await ctx.newPage();
       await list.setViewportSize({ width: 360, height: 800 });

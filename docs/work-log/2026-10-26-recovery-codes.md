@@ -19,8 +19,8 @@
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete; mechanism confirmed; adjacent HIGH finding F344 (regenerate bypasses the second factor); three Phase 3 decisions | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete; R1–R6 binding; option A rebuilt as a client holder that survives the re-render; cookie removed; F344 refusal + audit key; grant allow-list test; DECISION-292 proposed | Approved with suggestions | 2026-10-26 |
-| 3 — Technical design | tech-lead | Pending | — | — |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 3 — Technical design | tech-lead | Complete. R1–R6 and DECISION-292 carried; `completeEnrollment` per R1 plus a transaction; client holder at the root of every `/account/2fa` branch (layout fallback is a Phase 4 decision); cookie path removed; F344 refusal + audit key + page notice; set-equal grant allow-list; failing-first plan; eight smokes on 3650 and the handoff spec in the prod lane on 3651; Copy table C1–C12 with the four checks; no migration. Open for the operator: "Copy all" deferred | Design complete | 2026-10-26 |
+| 4 — Implementation | full-stack-developer | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -395,60 +395,373 @@ No files were edited, no database was touched and `git stash` was not used.
 
 ---
 
-# Phase 3 — Technical Design (tech-lead)
+# Phase 3 — Technical Design (tech-lead) — F166 recovery codes + F344 regenerate bypass
+
+*Bug-fix variant with a full design: the change is auth-touching (the grant gains a third call site), so Phase 4 carries the running-server gate. Written against the live tree of this worktree (branch `pipeline/recovery-codes`, from `main` at 0.46.2). F343 (`presby-2fa`) and Community 2b (`presby-2b`) are unmerged and not in this tree.*
+
+## Root cause
+
+Five facts, four from Phase 1 and one from Phase 2, that together explain "the codes vanish and the account answers a second challenge".
+
+1. **The page swaps component types.** `page.tsx` returns `<TotpEnrollForm>` for an unenrolled user and a plain `<div>` for an enrolled one. `completeEnrollment()` ends in `revalidatePath("/account/2fa")`, so the re-render returns the `<div>`. React unmounts `TotpEnrollForm` and drops its `enrolled` and `recoveryCodes` state: the "save these now" panel and its Continue link are gone within about a second (`totp-enroll-form.tsx:93-120`).
+2. **Nothing in the management view reads `callbackUrl`**, and it has no way onward. After the swap, or after any reload, back or second tab, the person has no Continue and no destination.
+3. **The cookie path cannot rescue it.** `setFreshRecoveryCodesCookie` puts a 5-minute plaintext copy in a cookie that the management view renders on the *next* render and clears on mount. It renders no Continue either, and (Phase 1, Flow 4) on the regenerate path it can produce a second, duplicate panel.
+4. **Enrolment does not verify the session.** Only `verifyTotpAction` marks a session verified (DECISION-230). A required, unverified person who clicks Continue to `/o/<slug>` or `/admin` is bounced by the proxy to `/totp` and must enter a code they just proved they hold (2b's E-35).
+5. **(Phase 2) A cookie write in a server action re-renders the route in Next 16.4.2.** `request-cookies.js:125` sets `pathWasRevalidated`; `action-handler.js:957` and `:123-126` then render the page and send `x-action-revalidated`; `server-action-reducer.js:126,228` applies the tree; `next-auth` `lib/actions.js:82-84` writes the session cookie inside `update()`. So once enrolment marks the session verified (the operator's "remove it" ruling), the page re-renders after `completeEnrollment` whatever we do with `revalidatePath`. The design therefore makes the re-render harmless (client holder, same identity in every branch) instead of trying to prevent it.
+
+**F344 root cause.** `regenerateRecoveryCodes` checks only `auth()` and that a `user_totp` row exists. `/account/2fa` is deliberately outside the proxy's 2FA wall (`(account)/layout.tsx` note), and `twoFactorVerified` is reset to `false` at every sign-in (`src/auth.ts:264`). A person with only a password can open `/account/2fa`, press Regenerate, read ten fresh codes and use one at `/totp`.
 
 ## Summary
 
-[One paragraph: what we're building and why.]
+Make first enrolment end well and close the regenerate bypass, with no schema change. `completeEnrollment` becomes an atomic, refuse-if-enrolled confirmation that, after the possession proof, marks the session verified through the same single-use grant `verifyTotpAction` uses (DECISION-292, amending DECISION-230's call sites). The ten recovery codes are delivered only in client memory, held by one client component (`EnrolmentHandoff`) that sits at the root of every branch of `/account/2fa`, so they survive the server-action re-render; the person leaves with **Continue** to the sanitized `callbackUrl` and meets no second challenge. The plaintext fresh-codes cookie, its helpers, its server action and its component are deleted. A management view reached with a `callbackUrl` (reload, back, second tab) gets a full-width Continue. `regenerateRecoveryCodes` (F344) refuses any session that is not 2FA-verified, writes a refusal audit row, and the page offers "Confirm it's you" in place of the button.
 
 ## Permissions & Flags
 
-- Permission key(s): `area.action`
-- Default role bindings: [list]
-- Feature flag(s): [key, or "not needed"]
+- **Permission keys:** none new. `/account/2fa` stays auth-only by design (proxy fall-through, `proxy.ts:183-199`). F344 adds a *session-state* check (`session.user.twoFactorVerified`), not a `FEATURES.*` key.
+- **Default role bindings:** none.
+- **Feature flags:** not needed (no new platform flags before go-live; rollback is revert). The behaviour depends on two existing flags, both seeded ON by `scripts/seed.ts` (`auth.require_2fa` :124, `auth.local_login` :118): `requiresTwoFactor` is computed from `auth.require_2fa`, and the e2e sign-ins use credentials.
+- **Audit:** `TOTP_ENROLLED` gains `metadata: { sessionVerified: boolean }` (a boolean, not a secret). New key `TOTP_RECOVERY_CODES_REGENERATE_REFUSED: "totp.recovery_codes.regenerate_refused"` with `metadata: { twoFactorRequired }`. No code, secret, hash or cookie value in any metadata or log line.
 
 ## API Contract
 
-- `POST /api/...` — purpose, request body, response shape
-- `GET /api/...` — purpose, query params, response shape
-- Or server-action signatures: `async function actionName(input): Promise<Result>`
+No route is added or changed. Two server actions in `src/app/(account)/account/2fa/actions.ts` (`"use server"`); after this change that file exports exactly `completeEnrollment` and `regenerateRecoveryCodes` (pinned by R4/G3). `clearFreshCodesCookieAction` is removed (a public endpoint that disappears).
+
+### `completeEnrollment(input: { code: string }): Promise<ActionResult<{ recoveryCodes: string[]; sessionVerified: boolean }>>`
+
+R1, step for step. `userId` is always `session.user.id`, never input.
+
+```ts
+const session = await auth();
+if (!session?.user) return { ok: false, error: "Unauthorized." };
+const userId = session.user.id;
+
+// 1. pending row by session user; refuse missing or expired (as today; copy C10 for missing)
+const pending = await db.query.userTotpPendingEnrollments.findFirst({ where: eq(..userId, userId) });
+if (!pending)            return { ok: false, error: NO_SETUP_IN_PROGRESS };   // C10
+if (pending.expiresAt < new Date()) { delete pending row; return { ok: false, error: "Enrollment session expired. Reload the page to start over." }; }
+
+// 2. possession proof BEFORE anything else can happen
+if (!verifyToken(input.code, decryptSecret(pending.secretCiphertext)))
+  return { ok: false, error: "That code did not match. Try again." };
+
+// 3 + 4. one transaction. The already-enrolled guard IS the insert (never SELECT-then-insert: F342 / DECISION-290).
+const codes = generateRecoveryCodes();
+const enrolled = await db.transaction(async (tx) => {
+  const inserted = await tx.insert(userTotp)
+    .values({ userId, secretCiphertext: pending.secretCiphertext })
+    .onConflictDoNothing({ target: userTotp.userId })
+    .returning({ userId: userTotp.userId });
+  await tx.delete(userTotpPendingEnrollments).where(eq(userTotpPendingEnrollments.userId, userId));
+  if (inserted.length === 0) return false;           // an enrolment already exists: replace nothing
+  await replaceRecoveryCodes(tx, userId, codes);      // delete + insert, same transaction
+  return true;
+});
+if (!enrolled) return { ok: false, error: ALREADY_ENROLLED };   // C9; no grant, no codes, no TOTP_ENROLLED audit
+
+// 5. mark the session verified: after the commit, inside the grant, for session.user.id, with an empty payload
+let sessionVerified = false;
+try {
+  const updated = await withTwoFactorGrant(userId, "totp", () => unstable_update({}));
+  sessionVerified = updated?.user?.twoFactorVerified === true;
+} catch {
+  console.error("[2fa] session refresh after enrolment failed");   // one PII-free line; fail closed: one /totp challenge
+}
+
+// 6. one audit row
+await recordAudit({ action: AUDIT_ACTIONS.TOTP_ENROLLED, resourceType: "user", resourceId: userId, metadata: { sessionVerified } });
+
+// 7. no revalidatePath, no cookies()
+return { ok: true, data: { recoveryCodes: codes, sessionVerified } };
+```
+
+Two tightenings inside R1's bounds, both Phase 4 verifies against the live `next-auth` return:
+- `sessionVerified` is true only if the update **completed and the session it returned reports `twoFactorVerified: true`** (`update()` returns `res.body`, the projected session, `lib/actions.js:82-91`). If the returned body turns out not to carry the claim, Phase 4 falls back to "completed without throwing", records the deviation, and the unit test E6 changes with it. Never `true` on a throw.
+- The transaction (R1's suggestion, adopted) also closes the half-written state (secret stored, codes missing) and the TODO.md:428 interleaving for this path. `replaceRecoveryCodes` takes the executor (`db` or `tx`), so regenerate uses one too.
+
+### `regenerateRecoveryCodes(): Promise<ActionResult<{ recoveryCodes: string[] }>>`
+
+Order: `auth()` → no session `Unauthorized.` → enrolment row missing: existing "Enroll in 2FA before regenerating recovery codes." (no refusal audit; nothing to escalate) → **F344 refusal** → transaction replace → `recordAudit(TOTP_RECOVERY_CODES_REGENERATED)` → `revalidatePath("/account/2fa")` (kept, so the unused count refreshes; the re-render is harmless because the management tree keeps its identity) → return codes. No cookie.
+
+The refusal: `if (!session.user.twoFactorVerified)` return `{ ok: false, error: C8 }` after `recordAudit({ action: TOTP_RECOVERY_CODES_REGENERATE_REFUSED, resourceType: "user", resourceId: userId, metadata: { twoFactorRequired: session.user.twoFactorRequired } })`. Predicate per R3: *not verified*, whether or not required. No lockout: `/totp` accepts any signed-in enrolled user with a TOTP code or a recovery code and returns to a sanitized `callbackUrl`.
 
 ## Data Model
 
-[New tables / columns / indexes, or "No schema changes required."]
+No schema changes required; **no migration** (0081 stays reserved and unused). `presby_app` already holds INSERT, DELETE (and SELECT) on `user_totp`, `user_totp_pending_enrollments`, `user_totp_recovery_codes`: today's action uses all of them, and `ON CONFLICT DO NOTHING` needs INSERT only. `user_totp.user_id` is the primary key and is the conflict arbiter. These three tables carry no row-level security (platform axis; every statement keys on the session user, `paper`, unchanged).
 
 ## Component / Page Plan
 
-- Pages to create: [list]
-- Components to create: [list]
-- Files to modify: [list]
+All under `src/app/(account)/account/2fa/` unless stated. No new route, layout or `loading.tsx` (CLAUDE.md: a loading boundary on this tree is not wanted; none is added).
+
+**Create**
+- `enrolment-handoff.tsx` (`'use client'`). `EnrolmentHandoff({ callbackUrl, children })` keeps `delivery: { codes: string[]; sessionVerified: boolean } | null` in `useState`, exposes `useRecoveryCodesHandoff()` (returns `present(delivery)`; throws a clear error outside the provider). Renders a **constant** structure: `<Ctx.Provider value={…}>{delivery ? <Delivered/> : children}</Ctx.Provider>`. `Delivered` is the h1 (focused on mount, `tabIndex={-1}`, so a keyboard or screen-reader user is not left on an unmounted form), the C2 body, the shared panel, the C5 note when `sessionVerified === false`, and `<ContinueButton href={callbackUrl}>`. `callbackUrl` is the server-sanitized prop; the file never reads `useSearchParams`, `window.location` or any query string (pinned by H7).
+- `recovery-codes-panel.tsx`: presentational, shared by `Delivered` and `RegenerateCodesForm` (props: `heading`, `headingLevel`, `intro`, `codes`, optional `footnote`). The amber block and 2-column mono grid, moved verbatim from the two existing copies.
+- `continue-button.tsx`: not a client file; `<Button asChild className="mt-6 min-h-11 w-full"><a href={href}>Continue</a></Button>` (the `(invite)/invite/accepted` precedent: `min-h-11 w-full`; no new size variant). A plain `<a>`, not `next/link`, on purpose: a full document navigation drops the codes from memory and guarantees the proxy reads the freshly written session cookie.
+- `actions.db.test.ts`, `page.test.tsx`, `enrolment-handoff.test.tsx`, `regenerate-codes-form.test.tsx` (none exists today) and `src/lib/auth/two-factor-grant.boundaries.test.ts`.
+- `e2e/hydration/totp-enrol-handoff.spec.ts`, `e2e/totp-first-enrolment.spec.ts`, `e2e/totp-regenerate-gate.spec.ts`, and `e2e/support/enrolment-fixture.ts` (new file, throwaway-user helper; see Implementation Order for why a new file rather than an edit).
+
+**Modify**
+- `page.tsx`: drop `cookies()`, the fresh-codes read, `clearFreshCodesCookieAction` and `FreshRecoveryCodes`. Compute `callbackUrl = sanitizeCallbackUrl(sp.callbackUrl)` and `hasCallback = typeof sp.callbackUrl === "string" && sp.callbackUrl.length > 0`. **Every `return` is `<EnrolmentHandoff callbackUrl={callbackUrl}>…</EnrolmentHandoff>` at its root, no `key`, no wrapper** (enrolled / not configured / enrol form). Enrolled branch: the existing header and counts; `{hasCallback && <ContinueButton href={callbackUrl} />}` directly under the "You enrolled on" paragraph (visible without scrolling at 360px); then `session.user.twoFactorVerified ? <RegenerateCodesForm /> : <ConfirmItsYou …/>` (C7; the link is `/totp?` + `new URLSearchParams({ callbackUrl: returnTo })` where `returnTo` is `/account/2fa`, or `/account/2fa?` + `new URLSearchParams({ callbackUrl })` when `hasCallback`; both `callbackUrl`s are the sanitized value).
+- `totp-enroll-form.tsx`: remove `enrolled`, `recoveryCodes`, the panel and the Continue; drop the `callbackUrl` prop; on `result.ok && result.data` call `present({ codes, sessionVerified })` from the context; the catch branch now toasts C11 (closes TODO.md:425). Everything else (auto-submit guard, `HydrationGate`, `OneTimeCodeInput`, `key={attempt}`) is untouched.
+- `regenerate-codes-form.tsx`: render through `RecoveryCodesPanel`; add the C12 footnote; no other behaviour change.
+- `actions.ts`: as above. Delete `setFreshRecoveryCodesCookie`, `FRESH_COOKIE_TTL_SECONDS`, `clearFreshCodesCookieAction`, the `next/headers` import and the `FRESH_RECOVERY_CODES_COOKIE` import.
+- `actions.test.ts`: rewritten (see Failing-first plan); the BUG-2 `clearFreshCodesCookieAction` tests are deleted with the action, and the BUG-2 page static test is replaced by the S1 pin (neither `page.tsx` nor `actions.ts` imports `next/headers`).
+- `totp-enroll-form.test.tsx`: renders inside `EnrolmentHandoff`; success cases assert `present` is called, not that a panel appears inside the form.
+- `src/lib/two-factor.ts`: delete `FRESH_RECOVERY_CODES_COOKIE` (:98) and fix the :90-92 comment ("shown once via the FRESH_RECOVERY_CODES_COOKIE handoff").
+- `src/lib/audit.ts` and `src/lib/audit.test.ts`: the new key, and its mirror.
+- `e2e/invitation-new-account.spec.ts` (:29 header, :198-232), `e2e/invitation-existing-account.spec.ts` (after :317), `e2e/totp-enrol-concurrency.spec.ts` (:130 and the header), `docs/testing.md` (:62, and the specs list).
+- `src/lib/auth/two-factor-grant.ts`: optional one-line comment naming the three call sites (R5).
+
+**Delete**
+- `src/components/shared/fresh-recovery-codes.tsx` and `fresh-recovery-codes.test.tsx`.
+
+**The R2 fallback.** If smoke 1 shows the page subtree remounting (the codes disappear, or "You enrolled on" appears while the panel should be up), Phase 4 moves the holder into a co-located `src/app/(account)/account/2fa/layout.tsx` as a context provider that `page.tsx` feeds the sanitized `callbackUrl`, and records the deviation here and in DECISION-292. That is a Phase 4 decision, not a Phase 3 loop-back, provided no new route and no new directory results.
 
 ## Implementation Order
 
-1. Schema (if any) → `npm run db:push` on a Neon branch
-2. `FEATURE_CATALOG` entry + seed binding
-3. Route handlers / server actions
-4. UI
-5. Audit events for security-sensitive paths
-6. Release notes entry
+1. **Red first.** Write the tests in the Failing-first plan below; run them against the unchanged tree and record each red in the Phase 4 section.
+2. **Batch 1 — F344 (`fix(auth): …`, one commit).** `audit.ts` key + `audit.test.ts` mirror; `regenerateRecoveryCodes` refusal and the transaction helper; the page's notice (`ConfirmItsYou`) and `session.user.twoFactorVerified` branch; E-R1..R6, P5/P6, D3; `e2e/totp-regenerate-gate.spec.ts`; `e2e/support/enrolment-fixture.ts`. Trailers: `Caught-By: agent-review`, `Discovered-In: Phase-1`, `Work-Log: 2026-10-26-recovery-codes`.
+3. **Batch 2 — F166 (`fix(auth): …`, one commit).** `completeEnrollment` rewrite; cookie removal (actions, page, `fresh-recovery-codes.*`, `two-factor.ts`); `EnrolmentHandoff`, `RecoveryCodesPanel`, `ContinueButton`; `TotpEnrollForm`/`RegenerateCodesForm` edits; the grant boundaries test; the e2e edits and the two new specs; `docs/testing.md`. Trailers: `Caught-By: agent-review`, `Discovered-In: Phase-6`. (If the implementer finds the two cannot be separated without churn in `actions.ts`/`page.tsx`, one `fix:` commit with both trailers is acceptable; say so in Phase 4.)
+4. **Audit events** are in 2 and 3 (`TOTP_ENROLLED` metadata; the refusal key). `npm run check:audit` must stay green: both mutations reference an `AUDIT_ACTIONS` key.
+5. **Running-server gate (R6), before Phase 5.** A server this pipeline starts itself on **3650** with `E2E_BASE_URL=http://localhost:3650` (the testing.md "Running Playwright from a worktree" recipe: the fakes, the pid noted, stopped by PID, never `pkill -f next`); smokes 1–8 below. Then the production-build lane for the handoff spec on **3651**: `PW_PROD_PORT=3651 npm run test:e2e:prod -- --project=prod-build e2e/hydration/totp-enrol-handoff.spec.ts` (built in a scratch copy outside `~/git/presby-platform/` with a hardlinked `node_modules`, per testing.md, because of the `turbopack.root` font-resolution failure in worktrees). No attach to :3000.
+6. **Rule 16 / shared files** (orchestrator, at integration; the implementer must not edit them mid-pipeline): `docs/decisions.md` DECISION-292, `docs/schema-design-2.md` (F344 and F166 as the next lettered finding after §2af), `docs/TODO.md`, `docs/STATE.md`, `docs/reviews/log.md`. **`e2e/support/*`:** the new helper is a **new file** (`enrolment-fixture.ts`), not an edit of a shared one; if the implementer finds an existing support file needs an edit, stop and ask. No person-id range is needed: the new specs create `users` rows only, no `people` rows; the invitation specs keep their existing fixtures.
+7. **Release notes** (after Phase 6 SHIP IT, `/release-notes`): v0.46.3, draft below; functionality-map line 35 (Rule 14); no `architecture.md` change (not architectural).
 
-## Carry-forward
+## Failing-first plan
 
-| Phase 1 gap / Phase 2 ruling | Addressed here (where), or *deferred* (who accepted) |
-|---|---|
-| [gap or ruling] | [section, or deferred + who accepted] |
+Each test is written first and must be red on the unchanged tree. "Red because" is what Phase 4 records.
+
+| Id | File | Asserts | Red because |
+|---|---|---|---|
+| E1 | `actions.test.ts` | valid code: returns 10 codes + `sessionVerified: true`; `unstable_update` called once with `{}` inside a grant for the session user (the `takeTwoFactorGrant` spy, as `(auth)/totp/actions.test.ts:87`) | no grant call today |
+| E2 | same | wrong code: no insert, no code replacement, no grant, no audit | passes today; kept as guard |
+| E3 | same | call order `verifyToken` < `insert…onConflictDoNothing` < `unstable_update`; the grant is never reached before `verifyToken` passes | no ordering today |
+| E4 | same | insert returns `[]`: refusal C9, pending row deleted, no `replaceRecoveryCodes`, no grant, no `TOTP_ENROLLED` audit | today `onConflictDoUpdate` replaces the secret |
+| E5 | same | `unstable_update` rejects: result is still `ok` with codes and `sessionVerified: false`; audit metadata `{ sessionVerified: false }`; exactly one `console.error`, containing no code, secret or hash | no catch today |
+| E6 | same | update resolves with a session whose `twoFactorVerified` is false: `sessionVerified: false` | n/a today |
+| E7 | same | `TOTP_ENROLLED` metadata is exactly `{ sessionVerified }`; `JSON.stringify(metadata)` contains none of the codes or the secret | no metadata today |
+| E8 | same | no session: `Unauthorized.`, nothing touched | guard |
+| E9 | same | pending missing → C10; expired → existing copy and pending deleted | C10 is new |
+| E10 | same | enrol path never calls `revalidatePath` | `revalidatePath` is called today |
+| S1 | same | source scan: neither `page.tsx` nor `actions.ts` imports `next/headers` or contains `cookies(` (replaces the BUG-2 test) | both do today |
+| R1 | same | F344: enrolled, `twoFactorRequired` true, unverified → refused (C8); no delete, no insert, no `revalidatePath`; refusal audit fired with `{ twoFactorRequired: true }` | no check today |
+| R2 | same | F344: enrolled, not required, unverified → refused; audit `{ twoFactorRequired: false }` | same |
+| R3 | same | F344: verified → succeeds, codes returned, `TOTP_RECOVERY_CODES_REGENERATED` fired, no cookie | cookie set today |
+| R4 | same | not enrolled → the existing "Enroll in 2FA…" message and **no** refusal audit | guard |
+| R5 | same | no session → `Unauthorized.` | guard |
+| R6 | same | the replacement runs inside `db.transaction` | not transactional today |
+| D1 | `actions.db.test.ts` (`npm run test:db`) | two concurrent `completeEnrollment` for one user with the same pending secret and a correct code: exactly one `ok`, one C10/C11 refusal; `user_totp.secret_ciphertext` unchanged; stored hashes equal the winner's ten | both succeed and the last write wins today |
+| D2 | same | a user who already has a `user_totp` row: confirmation refused; secret and recovery hashes byte-identical afterwards; pending row gone | secret replaced today |
+| D3 | same | F344: unverified session calls regenerate: refused, hashes byte-identical | no check today |
+| G1-G4 | `two-factor-grant.boundaries.test.ts` | R4 verbatim (below) | the third importer does not exist yet |
+| A1 | `audit.test.ts` | the new key is in the mirrored list | key absent |
+| P1 | `page.test.tsx` | every branch's root element `type === EnrolmentHandoff` and `props.callbackUrl` is the sanitized value; no `key` | today's roots are `TotpEnrollForm` and `div` |
+| P2 | same | hostile `callbackUrl` (`//evil.example`, `/\evil.example`, `/.//evil.example`, a control character) → `/launch` on the holder and on the management Continue | n/a today |
+| P3 | same | management Continue present iff the request carried a `callbackUrl`; its `href` is the sanitized value | no Continue today |
+| P4 | same | source scan: every `return (` in `page.tsx` opens with `<EnrolmentHandoff callbackUrl={callbackUrl}>` (the identity pin: a fourth branch added without the holder fails here) | n/a |
+| P5 | same | enrolled + unverified: the notice and the `/totp?callbackUrl=%2Faccount%2F2fa` link (exact string); with a `callbackUrl`: `…callbackUrl=%2Faccount%2F2fa%3FcallbackUrl%3D%252Fadmin`; no `RegenerateCodesForm` in the tree | no gate today |
+| P6 | same | enrolled + verified: `RegenerateCodesForm`, no notice | guard |
+| H1 | `enrolment-handoff.test.tsx` | `present(...)` shows the panel, the C2 body, and Continue whose `href` equals the prop | n/a today |
+| H2 | same | after `present`, the children are not rendered | |
+| H3 | same | **survives the re-render:** `rerender` the same holder with different children (the management `div`) and the panel is still up | the pin for R2 at React level |
+| H4 | same | `sessionVerified: false` shows C5; `true` does not | |
+| H5 | same | the h1 takes focus after `present` | |
+| H6 | same | `useRecoveryCodesHandoff()` outside the provider throws | |
+| H7 | same | source scan: no `useSearchParams`, `location.search`, `window.location`, `@/auth`, `two-factor-grant`, `unstable_update` | |
+| F1-F3 | `totp-enroll-form.test.tsx` | success calls `present({ codes, sessionVerified })` and renders no panel itself; a thrown action toasts C11 and re-enables the boxes (replaces the N-5 comment "the design adds no copy for it"); the existing N-1..N-6 and hydration tests pass unchanged inside the wrapper | F1/F3: the panel is inside the form today |
+| RG1-RG4 | `regenerate-codes-form.test.tsx` | success shows the shared panel and C12; failure toasts the server's error; the panel survives a parent re-render; a refusal (C8) toasts and shows no panel | no test file today |
+
+**R4 allow-list test** (`src/lib/auth/two-factor-grant.boundaries.test.ts`, header cites DECISION-292; strips comments; globs non-test `src/**/*.{ts,tsx}`; **set equality**):
+- G1 importers of `@/lib/auth/two-factor-grant` are exactly `src/auth.ts` (`takeTwoFactorGrant` only), `src/app/(auth)/totp/actions.ts` (`withTwoFactorGrant` only) and `src/app/(account)/account/2fa/actions.ts` (`withTwoFactorGrant` only).
+- G2 `withTwoFactorGrant(` call sites: exactly 2 in the totp actions and 1 in the 2fa actions, each matching `withTwoFactorGrant(session.user.id, "<totp|recovery>", () => unstable_update({}))` (the 2fa one may bind the result; the regex allows an `await`/assignment prefix and nothing else).
+- G3 the exports of the two `'use server'` files are exactly {`verifyTotpAction`} and {`completeEnrollment`, `regenerateRecoveryCodes`}.
+- G4 every `'use client'` file under `(account)/account/2fa/` and `(auth)/totp/` is free of `@/auth`, `two-factor-grant` and `unstable_update`.
+
+## Running-server smokes (R6), port 3650 (+ prod lane on 3651)
+
+Every spec sets the flags it needs through `e2e/support/flags.ts`: `captureFlags(["auth.require_2fa"])`, `setFlag(…, true)` in `beforeAll`, `restore()` in `afterAll` (a no-op against the seeded value, and honest if the seed changes). No key goes into `scripts/ci/e2e-baseline-flags.sql`: nothing here asserts against a flag it cannot set.
+
+| # | Spec | What it proves |
+|---|---|---|
+| 1 | `invitation-new-account.spec.ts` (modified, default lane) | Invitee (required) signs in, lands in enrolment with `callbackUrl=/launch`, types the code. **The panel with ten codes is visible after the action resolves and still visible after the re-render** (wait for network idle; "You enrolled on" never appears while it is up). Continue's `href` equals the sanitized target; clicking it reaches `/o/<slug>` and the recorded URL history contains **no `/totp`**. Replaces the F166 workaround at :198-232. |
+| 1b | `e2e/hydration/totp-enrol-handoff.spec.ts` (**both lanes**: `chromium` on 3650, `prod-build` on 3651) | A throwaway required user (no organization) enrols; panel visible and surviving the re-render; `GET /api/auth/session` then reports `twoFactorVerified: true` (the no-org stand-in for "no second challenge", so the production build proves the grant and the holder without a seeded congregation); Continue `href` is `/launch`; `context.cookies()` never holds a `claudecode_fresh_recovery_codes` cookie. |
+| 1c | `invitation-existing-account.spec.ts` (extended after :317) | The treasurer (existing account, forced into enrolment by arm B) enrols, sees the panel, Continue lands on `/o/<slug>` with no `/totp` hop. |
+| 2 | `e2e/totp-first-enrolment.spec.ts` | Administrator (throwaway user with the `admin` role row, as `seed-users.ts` gives `mfa-admin`; not the shared fixture, which must stay unenrolled) signs in, `/admin` → `/totp` → `/account/2fa?callbackUrl=/admin`; enrols; Continue lands on `/admin` directly. |
+| 3 | same | Voluntary enrolment from `/account`, `two_factor_required = false`, no `callbackUrl`: Continue → `/launch`; session verified. |
+| 4 | same | Reload while the codes show: none of the earlier code strings is in the DOM; the management view shows the full-width Continue (bounding box ≥ 44px tall, ≥ the viewport's content width minus padding at 360px) when a `callbackUrl` is present; no fresh-codes cookie at any checkpoint of smokes 1–4. |
+| 5 | same | Hostile `callbackUrl` (`//evil.example`, `/\evil.example`, `/.//evil.example`) on `/account/2fa`: Continue is `/launch` in the panel and in the management view. |
+| 6 | `e2e/totp-regenerate-gate.spec.ts` | Throwaway enrolled user (`seedTotpEnrollment` from `totp-fixture.ts`, imported not edited), password sign-in only: `/account/2fa` shows the notice and **no** Regenerate button; the link goes to `/totp` and returns to `/account/2fa`; after the code Regenerate works and **the new panel survives the `revalidatePath` re-render**. **The refused call:** with the page open and verified in tab A, a second sign-in in tab B resets the shared cookie's claim to unverified (`auth.ts:264`); pressing Regenerate in tab A shows C8, the DB hashes are unchanged and one `totp.recovery_codes.regenerate_refused` row exists. (This replaces R6's "direct action call", because server-action ids are not a stable surface to call from a spec; the action-level refusal is also pinned by R1-R3 and D3 against the real database.) |
+| 7 | `totp-enrol-concurrency.spec.ts` (extended; also :130 updated to expect the panel) | Two tabs confirm with the same correct code: the second is refused (C9 or C10, either wording), the first tab's codes stay valid (one passes `/totp`), the secret is unchanged. |
+| 8 | `totp-full-login.spec.ts`, `totp-code-entry.spec.ts`, `totp-recovery-code.spec.ts`, `totp-callback-bypass.spec.ts`, `session-claim-integrity.spec.ts`, `hydration/totp-challenge.spec.ts` (**unchanged**, run) | Regression: sign-in → `/totp` → `/admin` still passes; no forged payload sets the claim. |
+
+360px: smokes 1b and 4 run at 360x740 with `scrollWidth <= clientWidth`, the Continue ≥ 44px, and a screenshot of the panel (10 codes in the 2-column grid), the management Continue and the F344 notice, saved to `testInfo.outputPath`.
+
+## Existing e2e blast radius
+
+| Existing spec | Assertion this change alters | Change |
+|---|---|---|
+| `invitation-new-account.spec.ts:198-232` | after enrolment it expects "You enrolled on", then `/launch` → `/totp` challenge → `submitTotp` | the panel and Continue; no `/totp`; the `submitTotp` import goes if unused |
+| `invitation-existing-account.spec.ts:317` | stops at `/account/2fa` and never enrols | extended (smoke 1c); the earlier assertions are untouched |
+| `totp-enrol-concurrency.spec.ts:130` (+ header) | after the code, "You enrolled on" | the panel text; header says what the spec now proves |
+| `account-page.spec.ts:93-115`, `role-boundaries.spec.ts:58`, `member-home.spec.ts:180-215`, `post-login-routing.spec.ts:87`, `giving-shell.spec.ts:137` | none (they stop at the enrolment form's URL or heading, which is unchanged) | run, unchanged |
+| `totp-*`, `session-claim-integrity`, `developer-2fa-gate`, `giving-connect`, `domains-ui-fixture`, `giving-fixture` | none (they use the already-enrolled `mfa-enrolled` fixture) | run, unchanged |
+| **`presby-2b`** (`no-organization-connect.spec.ts:22,225-228`, `community-sign-in-invite.spec.ts:437-439`, `e2e/support/sign-in-invite-fixture.ts:511` `enrolOnPage`) | **assert "Enrolment does NOT verify the session (E-35)" and a `/totp` challenge after enrolment: both become false once this merges** | **coordination item below; not edited here** |
 
 ## Edge Cases & Risks
 
-- [Thing that could fail or that needs special handling; each claim cites the test that pins it or says "unverified"]
+Each claim cites the test that pins it, or says unverified.
+
+- **The re-render after the action drops the codes.** The central risk (DECISION-292 residual c). Pinned at React level by H3 and by P4 (every branch is the holder); at the framework level only by smoke 1/1b/6 in both lanes. If it fails: the layout fallback above.
+- **Reload, back, second tab while the codes show.** Codes are gone by design (operator ruling "shown once"); the management view shows the full-width Continue when a `callbackUrl` is present (P3; smoke 4); with none, "← Home" (17px, 2b walk) is the way out. Recovery is Regenerate after confirming (smoke 6).
+- **Back button after Continue.** Either the management view or a bfcache-restored panel; never an error. Which one is unverified (and in Chrome a `no-store` page is normally not bfcache-eligible). Either way the codes sit in the person's own browser; not a new exposure.
+- **Two tabs confirm at once.** One wins; the loser gets C9 or C10 and the winner's codes stay valid (D1; smoke 7). The loser's pending-row delete is idempotent.
+- **A user who is already enrolled posts a code.** Refused, nothing replaced, no grant (E4, D2). Phase 1's condition that "has a pending row" must not become "can replace my second factor and be verified".
+- **The session update fails.** Enrolment still succeeds, `sessionVerified: false`, C5 is shown, the person answers one `/totp` challenge (E5, H4). The claim is never set on a throw (E5, E6).
+- **Grant before possession.** Not reachable: `verifyToken` precedes the transaction and the grant (E3).
+- **The action response is lost** (network, phone sleep). The person is enrolled with unseen codes (DECISION-292 residual d). C11 tells them to reload; the management view then offers Regenerate after confirming. Unverified end to end (cannot be driven reliably in e2e); C11's toast is pinned by F3.
+- **Hostile `callbackUrl`** reaches no link unsanitized: only the server computes it (P1, P2, H7; smoke 5).
+- **No plaintext code outside client memory.** The cookie, its helpers and its action are gone (S1; smokes 1b/4 assert no such cookie in `context.cookies()`). A stale cookie from before the deploy expires by itself and nothing reads it.
+- **F344 predicate.** Unverified is refused whether or not 2FA is required (R1, R2). An enrolled, not-required account answers one voluntary `/totp` before it can regenerate (residual e; C7 says so). A verified session that is later reset by an administrator keeps its claim (DECISION-230's residual; unchanged).
+- **The grant stays un-exported.** No exported wrapper around `withTwoFactorGrant` can appear (G3); the module's importers are a closed list (G1).
+- **360px.** Ten codes in a two-column grid fit (about 190px of 360); the Continue and the notice link are full width and at least 44px (smokes 1b, 4; the screenshot); the long `callbackUrl` is never printed, only used as an `href`, so it cannot overflow.
+- **HydrationGate / H3.** `TotpEnrollForm` keeps both (`check:hydration-gate`); the holder renders no form; `RegenerateCodesForm` is a plain `onSubmit` form with no `useForm` today and stays so.
+- **Failure of the guard.** If `onConflictDoNothing().returning()` ever returned a row on conflict the refusal would not fire; D1/D2 run against the real database and would go red.
+- **Not changed, and said so:** the missing rate limit on `completeEnrollment` (TODO.md:427; residual (a) shows it adds no attacker power for a never-enrolled account because the attacker already holds the secret the page showed), the regenerate-vs-sign-in race, and key rotation.
+
+## Out of Scope (confirm with the operator)
+
+- A **"Copy all" or "Download" button** for the codes (Phase 1 gap 5). Ten codes in a grid can be photographed or selected. Added to TODO as a follow-up; **not ruled by the operator, so this is the one scope call to confirm.**
+- A "have you saved these?" acknowledgement before Continue. The operator ruled "shown once"; the copy says so plainly. A person who clicks Continue at once loses the codes and can regenerate.
+- Rate-limiting `completeEnrollment` (TODO.md:427).
+- Wording changes to the 2b no-organization copy and its E-35 e2e lines (coordination item).
+- F343 itself, key rotation, the regenerate-vs-sign-in race.
+- Any change to `src/auth.ts`, `src/proxy.ts`, `two-factor-grant.ts` logic, `CLAUDE.md`, or `docs/architecture.md`.
 
 ## Copy
 
-- [Every user-facing string, checked against the accepted residuals: copy may not deny a residual the record admits]
+Every user-facing string the change adds or changes. **An implementer who needs a string not listed here stops for a ruling.** American spelling follows the surrounding screens ("Enroll" in the form heading, "enrollment" in action errors).
+
+| # | String | Where | Status |
+|---|---|---|---|
+| C1 | "Two-factor authentication enabled" (h1) | holder, after enrolment | unchanged text, moved from `totp-enroll-form.tsx:93` |
+| C2 | "Your authenticator app is now linked. Save these recovery codes now. They are shown only once: if you reload or leave this page, we cannot show them again." | holder body | **changed** from `totp-enroll-form.tsx:95-96` ("…the only time they will be shown in plaintext.") |
+| C3 | "Recovery codes — save these now" (panel heading) | holder | unchanged |
+| C4 | "Each code lets you sign in once if you lose your authenticator." | holder panel | unchanged |
+| C5 | "You may be asked for a code from your app once more before you reach your destination." | holder, only when `sessionVerified === false` | **new** |
+| C6 | "Continue" (full-width button) | holder, and management view when the request carried a `callbackUrl` | label unchanged, now a 44px button in both places |
+| C7 | "To make new recovery codes, first confirm it's you with your authenticator app or a recovery code." + link "Confirm it's you" | management view, enrolled and unverified, in place of the Regenerate button | **new** (Phase 2 proposal, adopted) |
+| C8 | action refusal: "Confirm it's you with your authenticator app or a recovery code first. Reload this page to see how." | `regenerateRecoveryCodes`, shown as a toast | **new** (Phase 2 proposal, reworded to carry the way back) |
+| C9 | action refusal: "Two-factor authentication is already set up on this account, possibly in another tab. Reload this page." | `completeEnrollment`, toast | **new** (Phase 2 proposal, adopted with the hedge) |
+| C10 | "No setup in progress was found. Reload this page to see where things stand." | `completeEnrollment`, toast | **changed** from "No pending enrollment found. Reload the page to start over." (`actions.ts:85`) |
+| C11 | "Something went wrong and we could not confirm your code. Reload this page to see whether setup finished." | `TotpEnrollForm` catch, toast | **new** (closes TODO.md:425) |
+| C12 | "If you reload or leave this page, these codes will not be shown again." | regenerate panel footnote | **new** |
+
+Unchanged and re-checked as still true: "Replaces every existing code. The new set is shown once — save them before leaving the page." (`regenerate-codes-form.tsx:52`), "New recovery codes — save these now" and "Your old codes are no longer valid. Each new code can be used once.", "{n} unused code(s) remaining (of {total} total).", "You enrolled on {date}.", "That code did not match. Try again.", "Enrollment session expired. Reload the page to start over.", "Enroll in 2FA before regenerating recovery codes.", "Unauthorized.", the QR copy and the form labels.
+
+**The four checks, per string group**
+
+1. **C1–C6 (the codes panel and Continue).**
+   - *Residuals:* nothing denies DECISION-292 (a)–(f). C2 says the codes are shown once and cannot be shown again, which is true because nothing durable re-derives them and the cookie is gone (S1); it does not claim the enrolment cannot be unverified, and C5 states the one case where a challenge follows. It does not deny residual (d): the panel is only ever shown to someone whose response arrived.
+   - *Source of truth:* "now linked" is established by `completeEnrollment`'s insert returning a row (the action returns codes only after it); "shown only once" by the codes living only in the holder's state and the removal of the cookie (S1, smokes 1b and 4); C5 by the `sessionVerified` boolean the action returns, which is true only when the update completed and the returned session reports the claim. A claim the query does not read: "you will not be asked again" is **not** written anywhere, because for a not-required account the answer is not ours to promise; C5 says "may".
+   - *Audience:* the person who just enrolled (any signed-in role). C6 is something every role can do (a link to their own sanitized destination); "save these now" is something they can do (select, photograph, write down).
+   - *Neighbours:* `totp-enroll-form.tsx:93-120` (this is the same panel, moved and edited); `src/components/shared/fresh-recovery-codes.tsx:47-51` ("We hash codes at rest — this is the only time you'll see them in plaintext", deleted with the component); `src/lib/two-factor.ts:90-92` (comment names the cookie handoff: modified); `(invite)/invite/accepted/page.tsx` ("you will be walked through setting it up the first time": still true); `src/lib/onboarding/invitation-email.ts:63` ("once you have set up two-factor sign-in": still true); `docs/testing.md:62` and `:181` (modified: enrolment now ends in a verified session). In `presby-2b`: `src/lib/onboarding/no-organization-copy.ts:57,62` ("One more step: confirm/set up two-factor sign-in … then come back here and select Check again") stays true; the e2e comments and assertions listed above do not.
+2. **C7, C8 (F344).**
+   - *Residuals:* C7 tells an enrolled, not-required person they must confirm with their app first, which is residual (e) stated rather than hidden. It does not say the account is safe from a password-only attacker, or that a reset session is revoked (residual b).
+   - *Source of truth:* "first confirm it's you" is shown when `session.user.twoFactorVerified` is false in the `auth()` the page read, with an enrolment row present (the branch it renders in); the action reads the same claim from its own `auth()`. Neither reads the database for verification state, which is why neither says "your session has expired" or "your account is locked".
+   - *Audience:* any signed-in person with an enrolment, the surface's default role. They can follow the link: `/totp` accepts any signed-in enrolled user, with a TOTP code or a recovery code (verified in `(auth)/totp/page.tsx`: it redirects only the *un*enrolled to `/account/2fa`). The toast C8 has no link, so it says "Reload this page to see how", and the reloaded page renders C7 with the link.
+   - *Neighbours:* `src/app/(account)/account/2fa-status.tsx:22` ("Manage / regenerate codes") still true (the page it links to explains the extra step); `regenerate-codes-form.tsx:52` still true; `src/app/(auth)/totp/totp-challenge-form.tsx:40` ("Try again, or use a recovery code") still true.
+3. **C9, C10, C11 (enrolment failures).**
+   - *Residuals:* none denied. C9 hedges its cause ("possibly in another tab"); C11 says "whether setup finished", not that it did or did not (residual d).
+   - *Source of truth:* C9 = the conflict insert returned no row, i.e. a `user_totp` row exists for this user; it does not claim which tab or who made it. C10 = no pending row for `session.user.id` (true for both the second-tab loser and an admin reset or garbage-collection); the instruction is the same in either. C11 = a rejected call, so the string states no state.
+   - *Audience:* the person enrolling, any role; "reload this page" is something they can do.
+   - *Neighbours:* `actions.ts:85` (the old "start over", modified, because "start over" is false for someone who has enrolled); the unchanged "Enrollment session expired. Reload the page to start over." is still correct (the expired case); `docs/TODO.md:425` is closed by C11.
+4. **C12 (regenerate footnote).** *Residuals:* none. *Source:* the codes live in `RegenerateCodesForm` state only; a reload drops them (RG tests). *Audience:* an enrolled, verified person (the form is only rendered then). *Neighbours:* the text under the button already says "shown once"; consistent.
+
+## Carry-forward
+
+| Phase 1 gap / Phase 2 ruling | Addressed here, or *deferred* (who accepted) |
+|---|---|
+| P1 Gap 1: regenerate bypasses the second factor (F344) | Batch 1; API Contract (`regenerateRecoveryCodes`), R1-R6 and D3, smoke 6, C7/C8 |
+| P1 Gap 2: plaintext in a cookie and in client state | The cookie is removed from both paths (Component Plan, S1, smokes 1b/4) |
+| P1 Gap 3: "once" versus "survives a reload" | Operator ruled "shown once"; C2 says so; reload loses the codes by design |
+| P1 Gap 4: management view has no way onward | Management Continue (P3, smoke 4) |
+| P1 Gap 5: no copy/download | *Deferred*; not ruled by the operator, flagged for confirmation under Out of Scope; TODO line |
+| P1 Gap 6: the extra `/totp` challenge | Option C: the grant (E1, smokes 1, 1b, 1c, 2); C5 covers the failure case |
+| P1 Gap 7: authenticator-only steps untested end to end | Smokes 1-4 type a real code from the shown key; the new specs assert what the person sees |
+| P1 Flow 3/4 (reload; regenerate duplicate panel) | Smoke 4; smoke 6; the cookie path that produced the duplicate is gone |
+| P1 adversarial: redirect target | Server-sanitized prop only (P1, P2, H7, smoke 5) |
+| P1 adversarial: marking verified at enrolment, five conditions | Possession proof first (E3), refuse-if-enrolled in the insert (E4, D1, D2), grant inside the action for `session.user.id` (G2), no client path (G4, H7), distinguishable audit (E7) |
+| P1 edge: back button, second tab, DB error message | Back: unverified, accepted above; second tab: C9/C10 (smoke 7); DB error: C11 (F3) |
+| P1 edge: 360px, HydrationGate | Smokes 1b/4; `check:hydration-gate` |
+| P1 "Fix Must Preserve" (all eight) | Codes shown once; hashes via `hashRecoveryCode`; sanitizer; no secret logged (E5, E7); gates; grant only via `withTwoFactorGrant` in an action; `TOTP_ENROLLED` on every enrolment (E7); 0.44.1 auto-submit and F342's guarantee (existing N-1..N-6 kept, unchanged page-side helper) |
+| P1 Phase 6 walk | Phase 6 walk below |
+| P1 open questions 1-4 | 1: fixed here; 2: operator, "shown once"; 3: operator, "remove it"; 4: walk, below |
+| Orchestrator: F344 in this pipeline; recommend "any enrolled session unverified is refused" | Done, with the wider predicate (R3) |
+| Operator: "shown once", "remove the second prompt" | Option A rebuilt + option C |
+| **R1** (exact `completeEnrollment` shape) | API Contract, steps 1-7 verbatim, plus the transaction and the stricter `sessionVerified` |
+| **R2** (same-identity holder, context setter, Continue, management Continue, cookie removal, BUG-2 replacement, fallback) | Component Plan; P1, P4, H1-H7, S1; fallback recorded as a Phase 4 decision |
+| **R3** (F344 refusal, audit key, notice, tests failing-first) | API Contract; C7/C8; R1-R6, A1, P5; "Confirm it's you" link via `URLSearchParams` |
+| **R4** (set-equal allow-list) | G1-G4 above, verbatim |
+| **R5** (docs; stage for downstream-sync) | `two-factor-grant.ts` comment; DECISION-292; the TODO line for `/downstream-sync` (below) |
+| **R6** (eight smokes, 3650, prod lane) | Smokes 1-8 table, with 1b as the production-lane spec on 3651 and two stated adaptations (the refused call as a stale-tab press; the production lane's no-org stand-in) |
+| R6 unit extras (already-enrolled refusal, order spy, caught failure, 360px) | E4, E3, E5; 360px in smokes 1b/4 |
+| **DECISION-292 text** and residuals (a)-(f) | Reproduced in the work-log Phase 2; the Phase 3 additions to it are listed below; every Copy string was checked against (a)-(f) |
+| TODO.md:425 (thrown action shows no message) | Closed by C11 |
+| TODO.md:428 (non-transactional replacement) | Closed for both paths by the transaction (the rate limit half stays at :427) |
+| TODO.md:427 (no rate limit on `completeEnrollment`) | *Deferred*; already tracked; residual (a) is why it is not worsened; flagged to the operator |
+| TODO.md:429 (remove the 2b `enrolOnPage` workaround) | Coordination item below (the workaround lives in `presby-2b`, not in this tree) |
+
+**Phase 3 additions to DECISION-292** (for the orchestrator to merge at integration; no new number): (1) the enrolment writes run in one `db.transaction`, and so does the regenerate replacement; (2) `sessionVerified` requires the returned session to report the claim, not just a clean return; (3) Continue is a plain `<a>` (full navigation) so the codes leave memory and the proxy reads the fresh cookie; (4) the layout fallback is the one sanctioned deviation for R2.
+
+## Feasibility check, against the live tree
+
+- **No SQL, no migration.** The only "signature" changes are TypeScript: `replaceRecoveryCodes(executor, userId, codes)`.
+- **No `ALTER`/`DROP`.** Nothing is dropped from the database; the removed exports (`FRESH_RECOVERY_CODES_COOKIE`, `clearFreshCodesCookieAction`, `FreshRecoveryCodes`) were grepped: references are only in this route, `two-factor.ts` and `fresh-recovery-codes.*` (`grep -rn` over `src e2e docs scripts .claude`); no `SECURITY DEFINER` function references them (they are application code).
+- **No CHECK, trigger, FK.** `scripts/seed-dev.sql` and the fixture files are not touched; `seedTotpEnrollment` inserts into `user_totp` unchanged.
+- **Drizzle.** `drizzle-orm ^0.45.2`: `insert().values().onConflictDoNothing({ target }).returning()` and `db.transaction()` on the neon-serverless pool are both in use (`src/lib/event-types.ts:509` for `onConflictDoNothing`; `src/lib/people.ts` for `db.transaction` on the `presby_app` pool, which `src/lib/db/index.ts:70` builds as a WebSocket pool). The comment in `(admin)/admin/users/[id]/actions.ts:71-75` that says the driver cannot transact is stale (it describes the retired neon-http driver); it is not touched here. One transaction rule applies (`people.ts:316`): an early `return` inside the callback **commits** what was written so far, only a throw rolls back. The `inserted.length === 0` branch relies on that on purpose, so the pending-row delete commits and nothing else was written. `presby_app` needs only INSERT/DELETE on the three tables, which today's action already uses.
+- **`unstable_update` return.** `next-auth@5.0.0-beta.32` `update()` returns `res.body`; Phase 4 confirms it carries `user.twoFactorVerified` (the session callback projects it, `session-projection.ts:25`), with the stated fallback.
+- **Parallel pipelines.** Neither `presby-2fa` (F343: `local-login.ts`, a migration) nor `presby-2b` has touched `(account)/account/2fa/*`; the only files in common are the shared hand-edited ones, edited only at integration. The 2b design predates this change (Increment 2b was designed 2026-10-22): its feasibility is *not* re-run here; that is the coordination item.
+
+## Coordination items (named, not edited here)
+
+1. **Community 2b (`presby-2b`).** Once this merges, three things in 2b are false and will fail loudly: (a) `e2e/no-organization-connect.spec.ts:22,225-228` and `e2e/community-sign-in-invite.spec.ts:437-439` assert that enrolment does not verify the session (E-35) and that a challenge follows; (b) `e2e/support/sign-in-invite-fixture.ts:511` `enrolOnPage` is the reload-and-retry workaround that F342 made removable (TODO.md:429) and that this change makes obsolete in a second way (it reads the old "You enrolled on" settle); (c) 2b's work-log E-35 wording. The user-facing copy (`no-organization-copy.ts:57,62`) stays true. Whichever of the two merges second re-runs `no-organization-connect` and `community-sign-in-invite` and updates those lines in its own pipeline.
+2. **F343 (`presby-2fa`).** Independent files. After F343, plain new members default to not-required; for them this is a voluntary enrolment (smoke 3). Administrators and treasurers still enrol on the way in (smokes 1, 1c, 2).
+
+## Phase 6 walk (set now)
+
+On `development`, at 360px, from the pipeline branch (a Neon branch, `.env.local` pointing at it), list each page and what it shows:
+1. **Accepted-invitation new account:** `/invite/accepted` → sign in → `/signin?callbackUrl=/launch` → `/account/2fa?callbackUrl=…` (enrol form) → type the six digits → the codes panel with Continue, no second prompt → Continue → `/o/<slug>`.
+2. **A founding administrator who must enrol** (arrives via `/admin` or `/o/<slug>`; the `callbackUrl` survives to Continue).
+3. **A voluntary enrolment** from `/account` with no `callbackUrl` (Continue → `/launch`).
+4. Then, as the same people: reload while the codes show (management view with Continue), press Regenerate with a verified session (panel survives), and sign in again in another tab and try Regenerate (the refusal).
+Also run F343's "administrators and treasurers still enrol on the way in" case after F343 merges (Phase 1 open question 4).
+
+## TODO lines (orchestrator, at integration; Rule 10)
+
+- Move to Done at ship: TODO.md:167 (F166), F344 (registered by the orchestrator), :425 (thrown action message), :428 (non-transactional replacement, both paths).
+- Add: **"Copy all" / download button for recovery codes** (P1 gap 5; deferred pending operator).
+- Update :429 (`enrolOnPage`): it now also depends on this merge; remove it and the E-35 assertions in `presby-2b` when 2b rebases onto a main that has F166; re-run `invitation-new-account` x40.
+- Add: **`/downstream-sync`: stage F166 and F344** (the fresh-codes cookie came from the starter, note the `claudecode_` prefix; both are starter-generic; Phase 2 suggestion).
+- Keep: :427 (rate limit on `completeEnrollment`).
+
+## Release note (draft for `/release-notes`, v0.46.3, non-engineer wording)
+
+> ### Fix: setting up two-factor sign-in keeps your recovery codes on screen
+>
+> **Value:** When you set up two-factor sign-in for the first time, your ten recovery codes now stay on the page until you choose Continue, and Continue takes you straight to where you were going, without asking for another code from your app.
+>
+> Before, the codes disappeared within a second of finishing, the Continue link went with them, and you were asked for a code again. Now the codes stay up, and you are signed in as verified as soon as setup finishes. The codes are shown once: if you reload or leave the page they are not shown again, so save them first. If you lose them, you can make a new set from the Two-Factor Auth page.
+>
+> **Also fixed:** making a new set of recovery codes now needs you to have confirmed it's you with your authenticator app or a recovery code in this sign-in. Before, someone who knew only your password could make new codes and use one to get past the second step. The page now shows a short "Confirm it's you" step first. An account that has set up two-factor but is not required to use it will also be asked for one code before it can make new codes.
+>
+> **What this does not change:** an account that has never set up two-factor can still be set up by anyone who knows its password (that was already true; it now counts as verified straight away instead of after one more prompt). If an administrator resets someone's two-factor, a browser that is already signed in stays signed in until it signs out. If your connection drops at the very moment setup finishes, you may be set up without having seen your codes; confirm it's you, then make a new set. Setup still has no limit on how many codes can be tried in a row.
+>
+> **Notes for the operator:** no migration, no new setting.
+
+(Residuals a, b, d, e and the open rate limit are named; nothing in the note denies them. The "what this does not change" paragraph is checked against DECISION-292 (a)-(f) and TODO.md:427.)
 
 ## Implementer
 
-[database-admin | api-developer | ux-developer | full-stack-developer]
+**full-stack-developer.** The change is small and tightly coupled across server action, one client holder, a server page and e2e (a split would force a second hand-off over the same two files). Two commits as described; the running-server gate on 3650 and the prod lane on 3651 are theirs to run before Phase 5, and the red-first evidence goes in the Phase 4 section.
 
 ---
 

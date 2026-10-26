@@ -30,6 +30,7 @@ import { test, expect, type Browser, type Page } from "@playwright/test";
 import { platformSql, withDbRetry, type Sql } from "./support/db";
 import { E2E_USERS, storageStatePath } from "./support/users";
 import { signInOnPage } from "./support/invitation-ui";
+import { extractPdfText } from "../src/lib/testing/pdf-text";
 
 const TOGGLE = "org_portal.reimbursement";
 const P = "e2e96000-0000-4000-8000-";
@@ -609,6 +610,74 @@ test.describe("Reimbursements, member side", () => {
     expect((await requests()).find((r) => r.id === id)?.status).toBe("withdrawn");
     await expect(page.getByTestId("withdraw-open")).toHaveCount(0);
     await ctx.close();
+  });
+
+  test("prints the form: Print the form downloads a PDF of the request as the requester sees it, an approver may print it too, anyone else gets the one 404, and a GET writes nothing", async ({ browser }) => {
+    const target = (await requests()).find((r) => r.kind === "reimburse" && r.status !== "draft" && r.status !== "withdrawn")!;
+    const printPath = `${base()}/${target.id}/print`;
+    const before = await eventCount(target.id);
+
+    const ctx = await contextFor(browser, "member", 360, 740);
+    const page = await ctx.newPage();
+    await page.goto(`${base()}/${target.id}`);
+    const button = page.getByTestId("request-print");
+    await expect(button).toHaveText("Print the form");
+    await expect(button).toHaveAttribute("href", printPath);
+    const box = (await button.boundingBox())!;
+    expect(box.height, "a phone thumb target").toBeGreaterThanOrEqual(44);
+    expect(box.x + box.width, "inside the viewport").toBeLessThanOrEqual(360);
+    await noHorizontalScroll(page);
+    await page.screenshot({ path: "test-results/reimbursement-360/detail-print-button.png", fullPage: true });
+
+    const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
+    expect(download.suggestedFilename()).toBe(`reimbursement-request-${target.id.slice(0, 8)}.pdf`);
+    const { readFileSync } = await import("node:fs");
+    const bytes = readFileSync(await download.path());
+    expect(bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    const text = extractPdfText(bytes).replace(/\s+/g, " ");
+    for (const expected of ["Reimbursement request", NAMES.org, "Charged to", NAMES.property, "What it was for", target.purpose, "Printed from PresbyPortal."]) {
+      expect(text, expected).toContain(expected);
+    }
+    // The requester's sheet: no history, no payment, no approver names.
+    expect(text).not.toContain("History");
+    expect(text).not.toContain("Check number");
+
+    // The headers, read from the route itself (the signed-in member's cookies).
+    const res = await ctx.request.get(printPath);
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toBe("application/pdf");
+    expect(res.headers()["content-disposition"]).toBe(`attachment; filename="reimbursement-request-${target.id.slice(0, 8)}.pdf"`);
+    expect(res.headers()["cache-control"]).toBe("private, no-store");
+    expect(res.headers()["x-content-type-options"]).toBe("nosniff");
+    await ctx.close();
+
+    // An approver of the group may print it (any viewer of the request); a member who is not a seat holder gets the one 404.
+    const chair = await contextFor(browser, "presbytery-nogrant");
+    expect((await chair.request.get(printPath)).status()).toBe(target.group_id === fx.groupProperty ? 200 : 404);
+    await chair.close();
+    const bystander = await contextFor(browser, "org-unmanaged");
+    const hidden = await bystander.request.get(printPath);
+    expect(hidden.status()).toBe(404);
+    const body = await hidden.text();
+    expect(body).toBe("Not found");
+    const missing = await bystander.request.get(`${base()}/11111111-1111-4111-8111-111111111111/print`);
+    expect([missing.status(), await missing.text()]).toEqual([404, body]);
+    const malformed = await bystander.request.get(`${base()}/not-a-uuid/print`);
+    expect([malformed.status(), await malformed.text()]).toEqual([404, body]);
+    await bystander.close();
+
+    // Signed out: sent to sign in, with the print address as the way back.
+    const anonymous = await browser.newContext();
+    const redirect = await anonymous.request.get(printPath, { maxRedirects: 0 });
+    expect(redirect.status()).toBe(307);
+    const location = new URL(redirect.headers()["location"]!, "http://localhost");
+    expect(location.pathname).toBe("/signin");
+    expect(location.searchParams.get("callbackUrl")).toBe(printPath);
+    await anonymous.close();
+
+    // A GET writes nothing: the same events, the same status.
+    expect(await eventCount(target.id)).toBe(before);
+    expect((await requests()).find((r) => r.id === target.id)!.status).toBe(target.status);
   });
 
   test("a vendor request, and a request for someone else through the directory search", async ({ browser }) => {

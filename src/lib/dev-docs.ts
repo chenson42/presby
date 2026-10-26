@@ -200,6 +200,13 @@ export const MODULES: Record<string, string> = {
   ticket_messages: "S. Support",
   ticket_actions: "S. Support",
   congregation_feedback: "S. Support",
+  // Treasury Increment 1 (drizzle/0073, src/lib/db/domain/reimbursement.ts).
+  reimbursement_chargeable_groups: "T. Reimbursements",
+  reimbursement_categories: "T. Reimbursements",
+  reimbursement_requests: "T. Reimbursements",
+  reimbursement_attachments: "T. Reimbursements",
+  reimbursement_payments: "T. Reimbursements",
+  reimbursement_events: "T. Reimbursements",
 };
 
 /**

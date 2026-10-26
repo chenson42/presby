@@ -3,17 +3,23 @@
 # docs/work-log/2026-10-25-treasury-inc1.md -> Phase 4 Batch 1a (first cut),
 # Batch 7 (CLAUDE.md hunk), Batch 1b (regenerated 2026-10-26 against the
 # branch after its merge of origin/main at 0.46.1, 49ea633: 0068 and 0072 are
-# on main, so the journal entries 73 and 74 now follow 0072). Produced by
-# database-admin from edits applied LOCALLY (uncommitted) to test, then
-# reverted; the branch commits none of these six files. Every hunk passes
-# `git apply --check` against the branch HEAD it was cut from; if main moves
-# again before integration, re-cut it the same way.
+# on main, so the journal entries 73 and 74 now follow 0072), Batch 2b
+# (2026-10-26: the two non-Rule-16 hunks, the `src/lib/db/domain/index.ts`
+# export and the `src/lib/dev-docs.ts` classification, are DROPPED from this
+# patch because the branch now commits them itself, orchestrator ruling F338:
+# a pipeline that adds tables commits its own one-line barrel export and its
+# dev-docs entry, the merge conflict being a trivial append, so the unit suite is
+# green on the branch without this patch). Produced by database-admin from edits
+# applied LOCALLY (uncommitted) to test, then reverted; the branch commits none
+# of the four files below. Every hunk passes `git apply --check` against the
+# branch HEAD it was cut from; if main moves again before integration, re-cut it
+# the same way.
 #
 # Apply at integration, from the repository root:
 #
 #     git apply docs/work-log/treasury-inc1.integration.patch
 #
-# It touches six files: five Rule 16 shared files and src/lib/dev-docs.ts:
+# It touches four files: three Rule 16 shared files and CLAUDE.md:
 #   1. drizzle/meta/_journal.json      idx 73 and 74 entries after idx 72 (tags
 #                                      = filenames; `when` continues the 0072
 #                                      + n days series)
@@ -24,21 +30,9 @@
 #                                      template), and appends
 #                                      `\ir treasury/test-rls-73.sql` after the
 #                                      section-72 include
-#   4. src/lib/db/domain/index.ts      one export line (./reimbursement)
-#   5. CLAUDE.md                       the tripwire count "eight" -> "nine" in the
+#   4. CLAUDE.md                       the tripwire count "eight" -> "nine" in the
 #                                      Phase 4 gate and the command list, and the
 #                                      `check:treasury-boundaries` line (Batch 7)
-#   6. src/lib/dev-docs.ts             the six reimbursement tables filed under
-#                                      MODULES "T. Reimbursements" (F283's
-#                                      classification test, on main since 0.46).
-#                                      Not a Rule 16 file, but it must land WITH
-#                                      the index.ts export: before it,
-#                                      dev-docs.test.ts fails "sees the same
-#                                      tables in the exports as are declared"
-#                                      (the branch's one known red unit test);
-#                                      with the export and without this entry it
-#                                      fails "every table is in MODULES". Both
-#                                      together: 125/125 green.
 #
 # Order of the migrations everywhere: 0072 before 0073 (0073 section 1.0
 # raises 'reimbursement 0073: apply 0072 (blob_assets audience) first'
@@ -156,30 +150,3 @@ index 97a7716..bd84fc0 100644
 +--     production. Section 73a/73g assert the receipt FK that 72b also counts.
 +-- ===========================================================================
 +\ir treasury/test-rls-73.sql
-diff --git a/src/lib/db/domain/index.ts b/src/lib/db/domain/index.ts
-index 25dc4a3..cd4626c 100644
---- a/src/lib/db/domain/index.ts
-+++ b/src/lib/db/domain/index.ts
-@@ -33,3 +33,4 @@ export * from "./imports";
- export * from "./giving";
- export * from "./domains";
- export * from "./invitations";
-+export * from "./reimbursement";
-diff --git a/src/lib/dev-docs.ts b/src/lib/dev-docs.ts
-index 603d5fd..36cd62c 100644
---- a/src/lib/dev-docs.ts
-+++ b/src/lib/dev-docs.ts
-@@ -200,6 +200,13 @@ export const MODULES: Record<string, string> = {
-   ticket_messages: "S. Support",
-   ticket_actions: "S. Support",
-   congregation_feedback: "S. Support",
-+  // Treasury Increment 1 (drizzle/0073, src/lib/db/domain/reimbursement.ts).
-+  reimbursement_chargeable_groups: "T. Reimbursements",
-+  reimbursement_categories: "T. Reimbursements",
-+  reimbursement_requests: "T. Reimbursements",
-+  reimbursement_attachments: "T. Reimbursements",
-+  reimbursement_payments: "T. Reimbursements",
-+  reimbursement_events: "T. Reimbursements",
- };
- 
- /**

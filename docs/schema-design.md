@@ -1247,6 +1247,85 @@ reachable. It does **not** bypass RLS.
 `presby_app` must not hold `BYPASSRLS`. This boundary survives application bugs. Break-glass
 elevation lands in Phase 5 with the AI worker.
 
+### Sign-in identity: address proof, sign-in invitations, accept in place and auto-connect (added 2026-10-25, `drizzle/0065_presby_sign_in_and_connect.sql`)
+
+`people.user_id` is the identity binding every tenant authorization starts from
+(`presby_user_organizations` resolves user, then person, then memberships). Before 0065 any
+`presby_app` statement could write it, `users.email_verified` was not tied to the current address,
+and the only way a recorded person got a sign-in was a platform-issued designation. 0065 makes the
+binding and its proof database facts, and adds two congregation-side ways to reach it (Community
+Increment 2b; `docs/work-log/2026-10-22-founding-admin-directory.md`, Phase 3 amendment 2;
+DECISION-207 and DECISION-208 as amended, DECISION-225 to DECISION-228; F186, F187, F196, F197, F230,
+F232, F233). A forward fix on 0059 and 0064; neither is edited.
+
+- **Proof is a fact about the current address (R37).** `users_guard_email_proof` (BEFORE INSERT OR
+  UPDATE on `users`, invoker, owner decided by `pg_class.relowner`, no role named): a non-owner may
+  only clear `email_verified`; for every role, the owner included, an address change that does not
+  restate the stamp clears it (a letter-case change keeps it). Three owner-path writers set it: a
+  new-account acceptance, `presby_record_google_email_proof` (an active, unstamped account whose
+  address equals the Google-asserted one) and `presby_complete_email_change` (consumes the
+  verification token; writes address and stamp in one statement). `users_email_lower_uq` makes one
+  account per address regardless of case (F187 narrowed). **Residual, `paper`:** neither writer can
+  tell a real verification from a forged one made by `presby_app` (a forged Google call, a forged
+  token row): the F187 class, named in DECISION-225.
+- **The link is written on the owner path only (F186, R44).** `people_guard_user_link` refuses an
+  insert with a non-null `user_id` or any change of it by every role that is not the table owner.
+  Exactly two function bodies write the column: `presby__bind_person_account` (the
+  `update ... where user_id is null`, then the matching active contact's `verified_at`) and the
+  accept core's `created_person` insert; a live-catalog test pins that set. `contact_methods.
+  verified_at` is an output of linking and an input to nothing (R43). **Residual, `paper`:** the owner
+  path (fixtures, `getPlatformDb()`) is unbound; the A2 source scan is the mitigation.
+- **Sign-in invitations.** `account_invitations` gains purpose `sign_in` (always origin `org`, CHECK
+  `purpose_origin_tie`), a person at creation (`sign_in_has_person`), `person_deceased` as a blocked
+  reason, one open row per `(organization, person)` (`open_sign_in_person_uq`), and address
+  uniqueness for every other purpose (`open_address_uq`, re-predicated under its 0059 name). The
+  insert guard's resend lineage compares organization, purpose, origin and person but not the
+  address for `sign_in` (R33, F197). `presby_app` still holds no privilege on the table; it reaches
+  it through five definers, all organization-from-`presby_current_org()`, actor a `users.id`
+  resolved by `presby__actor_person` to an active member holding `people.manage`, one identity
+  literal (`account_invitations: this sign-in invitation action is not permitted`) and closed typed
+  outcomes: issue, resend (re-reads the current address; 5-minute cooldown; 5 resends), revoke, the
+  closed-shape reader (states, delivery columns, `connected_via`/`connected_on` from this
+  organization's own invitation and audit rows, never `users`) and card standing. Limits: 30 per
+  organization, 30 per inviter, 3 per `(organization, address)` in 24 hours, `origin = 'org'` rows
+  only, bounded `created_at <= now()`.
+- **One standing core (R40, S13).** `presby__person_sign_in_standing(person, organization)` is the
+  only place that knows what makes a record eligible: a refusal (`person_merged` > `person_deceased`
+  > `membership_ended` > `person_elsewhere`, R31), the standing from
+  `presby_membership_standing(roll, engagement)` (listed | staff_anchor | visitor | inactive |
+  unclassified; plain immutable SQL), the Session and diaconate seats (open or future), and the set T
+  of roles and permission keys held outside the closed derived list (`active_membership`, `session`,
+  `diaconate`; any other derived kind counts, failing closed). Issue, both acceptance presentations,
+  connect and the card all map that one output through one table; text and live-catalog scans pin
+  the classifier call, the R31 test and the closed list to the core alone.
+- **One acceptance core, two presentations (R45, F196).** `presby_accept_invitation`'s body moved,
+  not rewritten, into `presby__accept_invitation_core`; the token function keeps its signature and
+  ACL and calls it with `'token'`. `presby_accept_in_place(invitation, user, factor)` calls it with
+  `'in_place'`: the account's proven, active address must equal the invitation's (any miss is the
+  one `dead`), and the founding administrator, the treasurer and an authority-bearing `sign_in`
+  need a `user_totp` row and a verified factor (`needs_second_factor`, non-terminal). Every purpose
+  branch names its purpose and ends in `else raise`. A `sign_in` acceptance re-checks that the
+  invited address is still an active email of the person (R27, unlocked then `FOR SHARE`), runs the
+  standing core, and writes the link and the contact stamp and nothing else. The designation parity
+  golden is byte-identical, and an in-place twin of it is the anti-fork test.
+- **Auto-connect (R41, R42, R47).** `presby_connect_signed_in_account(user, factor)` links a proven,
+  active, unlinked account to the one record that carries its address when that record is the only
+  unmerged, living person with a live membership anywhere holding it as an active email, has exactly
+  one live membership at a managed organization whose `org_portal.sign_in_connect` toggle row is
+  enabled (an absent row declines), passes the standing core and is not a visitor, and no open
+  invitation is addressed to the address. An authority-bearing record needs a `user_totp` row and a
+  verified factor. Every other reason is the one `declined`. It locks in acceptance's order
+  (organization, user, person, contact) and re-checks under the locks; it reads no platform
+  predicate. **Residuals, `paper`:** identity and factor are caller-asserted (E-30); F232, a
+  `people.manage` holder can put an address they control on an authority-bearing record, is
+  detected by the audit chain and not prevented.
+
+Proven by `src/lib/db/domain/email-proof.db.test.ts`, `sign-in-invitations.db.test.ts`,
+`sign-in-accept.db.test.ts`, `sign-in-standing.db.test.ts`, `connect.db.test.ts`,
+`accept-in-place.db.test.ts`, `invitations.schema.test.ts` and `invitations.db.test.ts`;
+`src/lib/onboarding/designation-parity.db.test.ts` and its in-place twin; and
+`scripts/sign-in-invitations/test-rls-65.sql` (as `presby_app`, section 65 at integration).
+
 ---
 
 ## 11. Section H — Consent, privacy, demographics

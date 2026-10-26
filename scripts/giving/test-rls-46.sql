@@ -642,8 +642,12 @@ rollback;
 -- Offline record and void (deviation D2: the actor must hold giving.record).
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  -- Desmond (the fixture recorder) has no user; link founding.fixture's user to him for this block.
-  update people set user_id = :U_FOUNDING where id = :DESMOND;
+  -- Desmond (the fixture recorder) has no user; link founding.fixture's user to him for this block
+  -- (through presby_connect_signed_in_account: scripts/giving/test-rls-46-link.sql).
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :DESMOND, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   -- current_date - 1: the guard compares with ORG-LOCAL today (America/New_York),
   -- which trails the session's UTC current_date for several hours a day.
   select presby_giving_record_offline_gift(:G_DONOR_PLATE, :G_GENERAL, current_date - 1, 'cash', 1234, null, null, null,
@@ -954,7 +958,10 @@ begin;
   -- Isolate arm B: alder's org-wide 2FA policy OFF for this transaction.
   select set_config('app.current_org_id', :ALDER, true);
   update organization_settings set require_two_factor = false;
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select assert_eq((select presby_two_factor_required(:U_FOUNDING)::int), 1,
                    '46j: arm B - the treasurer (giving keys, direct grant) is required to use 2FA with the org policy off');
   update role_grants set ends_on = current_date where role_id = :TREASURER_ROLE and person_id = :PRIYA;
@@ -986,7 +993,10 @@ rollback;
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   update organization_settings set require_two_factor = false;
-  update people set user_id = 'e0000000-0000-0000-0000-0000000000f5' where id = 'c0000000-0000-0000-0000-000000000003';
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', 'c0000000-0000-0000-0000-000000000003', true);
+  select set_config('rls_test.link_user', 'e0000000-0000-0000-0000-0000000000f5', true);
+\ir test-rls-46-link.sql
   insert into role_grants (organization_id, role_id, group_id, starts_on)
   values (:ALDER, :G_RECORDER_ROLE, :ALDER_SESSION_GROUP, current_date - 1);
   select set_config('app.current_org_id', '', true);
@@ -1399,7 +1409,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   -- Premise: every fixture gift (and the refund) sits in its FIXED fixture
   -- year, so 46p-46t never depend on today's date or on the day the seed ran.
   select assert_eq(
@@ -1506,7 +1519,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_year', :'G_YEAR_CURRENT', true);
@@ -1546,7 +1562,10 @@ rollback;
 begin;
   -- giving.record alone is not enough: issuing needs giving.manage AND giving.view.
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :DESMOND;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :DESMOND, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
@@ -1564,7 +1583,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
@@ -1625,7 +1647,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
@@ -1682,7 +1707,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);

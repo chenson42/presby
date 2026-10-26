@@ -577,3 +577,477 @@ describe.skipIf(!hasDb)("drizzle/0065 sign-in invitations and the user-link guar
     });
   });
 });
+
+// =============================================================================
+// Batch A2: issue, resend, revoke, the reader and card standing (drizzle/0065
+// section 12; Phase 3 Test Plan 1.1 and 1.5 as amended by Phase 3 amendment 2
+// sections 5.8 and 8.3 T-4). Through the presby_app connection with the
+// organization context set, exactly as org-invite.ts will call them.
+// =============================================================================
+describe.skipIf(!hasDb)("drizzle/0065 sign-in invitation callables, A2 (Postgres-backed)", () => {
+  const DENY = /account_invitations: this sign-in invitation action is not permitted/;
+  let s: import("@/lib/testing/sign-in-fixture").SignInFixture;
+  let org: string;
+  let other: string;
+  let admin: { userId: string; personId: string; email: string };
+
+  async function refusal(p: Promise<unknown>): Promise<{ code?: string; text: string }> {
+    try {
+      await p;
+    } catch (err) {
+      return { code: pgCode(err), text: pgText(err) };
+    }
+    throw new Error("expected a refusal");
+  }
+
+  const UUID = /^[0-9a-f-]{36}$/;
+  /** Seed `n` already-revoked org-origin rows (owner path) so the limits count them. */
+  async function seedRows(n: number, r: { org: string; person: string; address: string; createdBy: string; createdAt?: string; purpose?: string }) {
+    for (const v of [r.org, r.person, r.createdBy]) if (!UUID.test(v)) throw new Error("bad uuid");
+    if (!/^[a-z0-9.@+-]+$/.test(r.address)) throw new Error("bad address");
+    const platform = r.purpose === "founding_administrator";
+    const created = r.createdAt ? `'${r.createdAt}'::timestamptz` : "now() - interval '1 hour'";
+    await s.q(sql.raw(`
+      do $do$
+      declare v uuid;
+      begin
+        for i in 1..${n} loop
+          insert into account_invitations (organization_id, purpose, origin, email_normalized, person_id,
+                 invitee_first_name, invitee_last_name, token_hash, created_by_user_id, created_at, expires_at)
+          values ('${r.org}', '${platform ? "founding_administrator" : "sign_in"}', '${platform ? "platform" : "org"}',
+                  '${r.address}', ${platform ? "null" : `'${r.person}'`}, ${platform ? "'Seed', 'Row'" : "null, null"},
+                  md5(random()::text) || md5(random()::text), '${r.createdBy}', ${created}, ${created} + interval '7 days')
+          returning id into v;
+          update account_invitations set revoked_at = now(), revoked_by_user_id = '${r.createdBy}' where id = v;
+        end loop;
+      end $do$`));
+  }
+
+  beforeAll(async () => {
+    const { createSignInFixture } = await import("@/lib/testing/sign-in-fixture");
+    s = await createSignInFixture("is65");
+    org = await s.congregation("a");
+    other = await s.congregation("b");
+    admin = await s.sender(org, ["people.manage", "officers.manage", "directory.view", "events.view"]);
+  });
+
+  afterAll(async () => {
+    if (s) await s.cleanup();
+  });
+
+  // ---------------------------------------------------------------------------
+  // identity: one literal, 42501, for every callable
+  // ---------------------------------------------------------------------------
+  describe("identity refusals raise the one literal (42501)", () => {
+    it.each(["issue", "resend", "revoke", "states", "card"] as const)("%s", async (fn) => {
+      const p = await s.person(org);
+      const noManage = await s.sender(org, ["directory.view"]);
+      const merged = await s.sender(org, ["people.manage"]);
+      await s.merge(merged.personId);
+      const ended = await s.sender(org, ["people.manage"]);
+      // A membership cannot end over an open position (presby_guard_membership_end): end the grant first.
+      await s.q(sql`update role_grants set ends_on = current_date where person_id = ${ended.personId} and organization_id = ${org}`);
+      await s.q(sql`update memberships set ended_on = current_date where person_id = ${ended.personId} and organization_id = ${org}`);
+      const foreign = await s.sender(other, ["people.manage", "officers.manage"]);
+      const call = (o: string | null, actor: string | null) => {
+        switch (fn) {
+          case "issue": return s.issue(o, actor, p.id, { confirmed: p.email });
+          case "resend": return s.resend(o, actor, p.id, { confirmed: p.email });
+          case "revoke": return s.revoke(o, actor, p.id);
+          case "states": return s.states(o, actor, [p.id]);
+          case "card": return s.card(o, actor, p.id);
+        }
+      };
+      const before = await s.footprint(org);
+      for (const [label, o, actor] of [
+        ["no organization context", null, admin.userId],
+        ["a null actor", org, null],
+        ["an actor without people.manage", org, noManage.userId],
+        ["a merged actor", org, merged.userId],
+        ["an actor whose membership ended", org, ended.userId],
+        ["an actor from another organization", org, foreign.userId],
+      ] as const) {
+        const r = await refusal(call(o, actor));
+        expect(r.code, `${fn}: ${label}`).toBe("42501");
+        expect(r.text, `${fn}: ${label}`).toMatch(DENY);
+      }
+      expect(await s.footprint(org)).toEqual(before);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // issue
+  // ---------------------------------------------------------------------------
+  describe("issue", () => {
+    it("ok: the row's shape and what the email needs", async () => {
+      const p = await s.person(org, { first: "Ignatius" });
+      await s.q(sql`update people set preferred_name = 'Iggy' where id = ${p.id}`);
+      const [q] = await s.q(sql`insert into email_queue (to_email, subject, html_body, template_key, status)
+                                 values (${p.email}, 'Fixture', '<p>fixture</p>', 'account_sign_in_invitation', 'queued') returning id`);
+      const hash = (await import("@/lib/testing/invitation-fixture")).mintToken().tokenHash;
+      const r = await s.issue(org, admin.userId, p.id, { confirmed: p.email, tokenHash: hash, queueId: String(q!.id) });
+      const [o] = await s.q(sql`select name from organizations where id = ${org}`);
+      const [sender] = await s.q(sql`select first_name || ' ' || last_name as n from people where id = ${admin.personId}`);
+      expect(r).toMatchObject({
+        outcome: "ok", address: p.email, recipient_first_name: "Iggy", organization_name: o!.name,
+        sender_name: sender!.n, ack_reasons: [], existing_invitation_expired: false,
+      });
+      const row = await s.invitation(String(r.invitation_id));
+      expect(row).toMatchObject({
+        organization_id: org, purpose: "sign_in", origin: "org", email_normalized: p.email, person_id: p.id,
+        token_hash: hash, created_by_user_id: admin.userId, email_queue_id: q!.id, resend_count: 0,
+        invitee_first_name: null, invitee_last_name: null, accepted_at: null,
+      });
+      expect(new Date(String(r.invitation_expires_at)).getTime()).toBe(new Date(String(row.expires_at)).getTime());
+      await s.q(sql`delete from email_queue where id = ${q!.id}`);
+    });
+
+    it("the confirmed address is compared case- and space-insensitively", async () => {
+      const p = await s.person(org);
+      expect((await s.issue(org, admin.userId, p.id, { confirmed: `  ${p.email!.toUpperCase()} ` })).outcome).toBe("ok");
+    });
+
+    it("a person under 18 with an address of their own is invitable (no age gate)", async () => {
+      const p = await s.person(org);
+      await s.q(sql`update people set date_of_birth = current_date - interval '12 years' where id = ${p.id}`);
+      expect((await s.issue(org, admin.userId, p.id, { confirmed: p.email })).outcome).toBe("ok");
+    });
+
+    it("every refusal writes nothing", async () => {
+      const cases: Array<[string, () => Promise<{ id: string | null; confirmed: string | null }>]> = [
+        ["not_found", async () => ({ id: "00000000-0000-4000-8000-000000000065", confirmed: "x@example.invalid" })],
+        ["not_found", async () => { const p = await s.person(other); return { id: p.id, confirmed: p.email }; }],
+        ["not_found", async () => ({ id: null, confirmed: "x@example.invalid" })],
+        ["already_signs_in", async () => { const p = await s.person(org); await s.linkUser(p.id, await s.user(s.email("x"))); return { id: p.id, confirmed: p.email }; }],
+        ["already_signs_in", async () => ({ id: admin.personId, confirmed: admin.email })],
+        ["no_email_on_file", async () => { const p = await s.person(org, { email: false }); return { id: p.id, confirmed: "x@example.invalid" }; }],
+        ["address_changed", async () => { const p = await s.person(org); return { id: p.id, confirmed: s.email("typo") }; }],
+        ["address_changed", async () => { const p = await s.person(org); return { id: p.id, confirmed: null }; }],
+        ["address_is_yours", async () => { const p = await s.person(org, { email: admin.email }); return { id: p.id, confirmed: admin.email }; }],
+        ["address_shared", async () => {
+          const p = await s.person(org);
+          const q2 = await s.person(org, { email: false });
+          await s.addEmail(q2.id, p.email!);
+          return { id: p.id, confirmed: p.email };
+        }],
+        ["needs_acknowledgement", async () => { const p = await s.person(org, { engagement: "visitor", roll: null }); return { id: p.id, confirmed: p.email }; }],
+        ["needs_acknowledgement", async () => {
+          const p = await s.person(org);
+          await s.q(sql`update contact_methods set do_not_contact = true where person_id = ${p.id}`);
+          return { id: p.id, confirmed: p.email };
+        }],
+      ];
+      for (const [expected, make] of cases) {
+        const m = await make();
+        const before = await s.footprint(org);
+        const r = await s.issue(org, admin.userId, m.id, { confirmed: m.confirmed });
+        expect(r.outcome, expected).toBe(expected);
+        expect(r.invitation_id ?? null).toBeNull();
+        expect(r.address ?? null).toBeNull();
+        expect(r.existing_invitation_expired).toBe(false);
+        expect(await s.footprint(org)).toEqual(before);
+      }
+    });
+
+    it("address_shared ignores another organization's holder and a holder whose membership ended (R29)", async () => {
+      const p = await s.person(org);
+      const away = await s.person(other, { email: false });
+      await s.addEmail(away.id, p.email!);
+      const ended = await s.person(org, { email: false, endedOn: "2024-01-01" });
+      await s.addEmail(ended.id, p.email!);
+      expect((await s.issue(org, admin.userId, p.id, { confirmed: p.email })).outcome).toBe("ok");
+    });
+
+    it("acknowledgements: the reasons come from the definer, never the client (F177 conditions 1 and 2)", async () => {
+      const v = await s.person(org, { engagement: "visitor", roll: null });
+      expect(await s.issue(org, admin.userId, v.id, { confirmed: v.email })).toMatchObject({ outcome: "needs_acknowledgement", ack_reasons: ["visitor"] });
+      expect(await s.issue(org, admin.userId, v.id, { confirmed: v.email, acknowledged: true })).toMatchObject({ outcome: "ok", ack_reasons: ["visitor"] });
+
+      const d = await s.person(org, { engagement: "visitor", roll: null });
+      await s.q(sql`update contact_methods set do_not_contact = true where person_id = ${d.id}`);
+      expect(await s.issue(org, admin.userId, d.id, { confirmed: d.email })).toMatchObject({ outcome: "needs_acknowledgement", ack_reasons: ["do_not_contact", "visitor"] });
+
+      // A client that acknowledges for a non-visitor records nothing.
+      const m = await s.person(org);
+      expect(await s.issue(org, admin.userId, m.id, { confirmed: m.email, acknowledged: true })).toMatchObject({ outcome: "ok", ack_reasons: [] });
+    });
+
+    it("already_pending for an open row, saying whether it has expired", async () => {
+      const p = await s.person(org);
+      await s.signInRow(org, p.id, p.email!);
+      expect(await s.issue(org, admin.userId, p.id, { confirmed: p.email })).toMatchObject({ outcome: "already_pending", existing_invitation_expired: false, invitation_id: null });
+      const q = await s.person(org);
+      await s.signInRow(org, q.id, q.email!, { createdAt: sql`now() - interval '9 days'`, expiresAt: sql`now() - interval '2 days'` });
+      expect(await s.issue(org, admin.userId, q.id, { confirmed: q.email })).toMatchObject({ outcome: "already_pending", existing_invitation_expired: true });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // limits (R32, G9): origin org only, created_at <= now(), inside the org lock
+  // ---------------------------------------------------------------------------
+  describe("limits: 30 per organization, 30 per inviter, 3 per (organization, address) in 24 hours", () => {
+    it("the 31st send at an organization is rate_limited; 2099-dated and platform-origin rows never count", async () => {
+      const at = await s.congregation("lim");
+      const sender = await s.sender(at, ["people.manage", "officers.manage", "directory.view", "events.view"]);
+      const seed = await s.person(at);
+      await seedRows(25, { org: at, person: seed.id, address: s.email("seed"), createdBy: sender.userId });
+      await seedRows(4, { org: at, person: seed.id, address: s.email("seed"), createdBy: s.actingUserId });
+      await seedRows(5, { org: at, person: seed.id, address: s.email("far"), createdBy: sender.userId, createdAt: "2099-01-01" });
+      await seedRows(5, { org: at, person: seed.id, address: s.email("plat"), createdBy: sender.userId, purpose: "founding_administrator" });
+      const p30 = await s.person(at);
+      expect((await s.issue(at, sender.userId, p30.id, { confirmed: p30.email })).outcome).toBe("ok");
+      const p31 = await s.person(at);
+      const before = await s.footprint(at);
+      expect((await s.issue(at, sender.userId, p31.id, { confirmed: p31.email })).outcome).toBe("rate_limited");
+      expect(await s.footprint(at)).toEqual(before);
+    });
+
+    it("an inviter's 30 sends at other organizations count against them here", async () => {
+      const at = await s.congregation("liminv");
+      const away = await s.congregation("liminv2");
+      const sender = await s.sender(at, ["people.manage", "officers.manage", "directory.view", "events.view"]);
+      const seed = await s.person(away);
+      await seedRows(30, { org: away, person: seed.id, address: s.email("inv"), createdBy: sender.userId });
+      const p = await s.person(at);
+      expect((await s.issue(at, sender.userId, p.id, { confirmed: p.email })).outcome).toBe("rate_limited");
+    });
+
+    it("3 sends to one address at one organization; another organization's sends to it do not count (F155)", async () => {
+      const at = await s.congregation("limaddr");
+      const sender = await s.sender(at, ["people.manage", "officers.manage", "directory.view", "events.view"]);
+      const p = await s.person(at);
+      const away = await s.congregation("limaddr2");
+      const awayPerson = await s.person(away, { email: false });
+      await seedRows(5, { org: away, person: awayPerson.id, address: p.email!, createdBy: s.actingUserId });
+      await seedRows(2, { org: at, person: p.id, address: p.email!, createdBy: s.actingUserId });
+      expect((await s.issue(at, sender.userId, p.id, { confirmed: p.email })).outcome).toBe("ok");
+      await s.revoke(at, sender.userId, p.id);
+      expect((await s.issue(at, sender.userId, p.id, { confirmed: p.email })).outcome).toBe("rate_limited");
+    });
+
+    it("the SQL literals are 30, 30, 3, 5 minutes and 5 resends, in issue and resend alike", () => {
+      const text = readFileSync(MIGRATION_PATH, "utf8");
+      for (const fn of ["presby_issue_sign_in_invitation", "presby_resend_sign_in_invitation"]) {
+        const start = text.indexOf(`create or replace function ${fn}(`);
+        const body = text.slice(start, text.indexOf("end $$;", start));
+        expect([...body.matchAll(/\) >= (\d+)/g)].map((m) => Number(m[1])), fn).toEqual([30, 30, 3]);
+        expect(body).toMatch(/i\.origin = 'org'/);
+        expect(body.match(/i\.created_at <= now\(\)/g)?.length, fn).toBe(3);
+      }
+      const resend = text.slice(text.indexOf("create or replace function presby_resend_sign_in_invitation("));
+      expect(resend).toMatch(/interval '5 minutes' > now\(\)/);
+      expect(resend).toMatch(/resend_count >= 5/);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // resend and revoke
+  // ---------------------------------------------------------------------------
+  describe("resend", () => {
+    it("not_open when nothing is open (and for another organization's person)", async () => {
+      const p = await s.person(org);
+      expect(await s.resend(org, admin.userId, p.id, { confirmed: p.email })).toMatchObject({ outcome: "not_open", invitation_id: null });
+      const away = await s.person(other);
+      await s.signInRow(other, away.id, away.email!);
+      expect((await s.resend(org, admin.userId, away.id, { confirmed: away.email })).outcome).toBe("not_open");
+    });
+
+    it("cooldown within 5 minutes of the open row, with next_resend_at", async () => {
+      const p = await s.person(org);
+      const inv = await s.signInRow(org, p.id, p.email!);
+      const r = await s.resend(org, admin.userId, p.id, { confirmed: p.email });
+      const row = await s.invitation(inv.id);
+      expect(r.outcome).toBe("cooldown");
+      expect(new Date(String(r.next_resend_at)).getTime()).toBe(new Date(String(row.created_at)).getTime() + 5 * 60_000);
+      expect(row.superseded_at).toBeNull();
+    });
+
+    it("R33: a corrected address resends to the NEW address; the old row is superseded; the queue row to cancel is returned", async () => {
+      const p = await s.person(org);
+      const [q] = await s.q(sql`insert into email_queue (to_email, subject, html_body, template_key, status)
+                                 values (${p.email}, 'Fixture', '<p>fixture</p>', 'account_sign_in_invitation', 'queued') returning id`);
+      const old = await s.signInRow(org, p.id, p.email!, { createdAt: sql`now() - interval '10 minutes'`, emailQueueId: String(q!.id) });
+      const corrected = s.email("corrected");
+      await s.platform.transaction(async (tx) => {
+        await tx.execute(sql`update contact_methods set ended_at = now(), is_primary = false where person_id = ${p.id} and ended_at is null`);
+        await tx.execute(sql`insert into contact_methods (person_id, kind, value, is_primary) values (${p.id}, 'email', ${corrected}, true)`);
+      });
+      const r = await s.resend(org, admin.userId, p.id, { confirmed: corrected });
+      expect(r).toMatchObject({ outcome: "ok", cancel_email_queue_id: q!.id, address: corrected });
+      expect((await s.invitation(old.id)).superseded_at).not.toBeNull();
+      expect(await s.invitation(String(r.invitation_id))).toMatchObject({
+        email_normalized: corrected, resent_from_id: old.id, resend_count: 1, purpose: "sign_in", origin: "org", person_id: p.id,
+      });
+      await s.q(sql`delete from email_queue where id = ${q!.id}`);
+    });
+
+    it("a refusal from the shared check leaves the open row as it was", async () => {
+      const p = await s.person(org);
+      const old = await s.signInRow(org, p.id, p.email!, { createdAt: sql`now() - interval '10 minutes'` });
+      const before = await s.invitation(old.id);
+      expect((await s.resend(org, admin.userId, p.id, { confirmed: s.email("stale") })).outcome).toBe("address_changed");
+      expect(await s.invitation(old.id)).toEqual(before);
+    });
+
+    it("chain_cap at 5 resends", async () => {
+      const p = await s.person(org);
+      let parent = await s.signInRow(org, p.id, p.email!, { createdAt: sql`now() - interval '1 hour'` });
+      for (let n = 1; n <= 5; n += 1) {
+        await s.q(sql`update account_invitations set superseded_at = now() where id = ${parent.id}`);
+        const { tokenHash } = (await import("@/lib/testing/invitation-fixture")).mintToken();
+        const [row] = await s.q(sql`
+          insert into account_invitations (organization_id, purpose, origin, email_normalized, person_id, token_hash,
+                 created_by_user_id, created_at, expires_at, resent_from_id, resend_count)
+          values (${org}, 'sign_in', 'org', ${p.email}, ${p.id}, ${tokenHash}, ${s.actingUserId},
+                  now() - interval '1 hour', now() + interval '6 days', ${parent.id}, ${n})
+          returning id`);
+        parent = { ...parent, id: String(row!.id) };
+      }
+      expect((await s.resend(org, admin.userId, p.id, { confirmed: p.email })).outcome).toBe("chain_cap");
+    });
+  });
+
+  describe("revoke", () => {
+    it("ok, terminal, and then not_open; the queue row to cancel is returned", async () => {
+      const p = await s.person(org);
+      const inv = await s.signInRow(org, p.id, p.email!);
+      const r = await s.revoke(org, admin.userId, p.id);
+      expect(r).toMatchObject({ outcome: "ok", invitation_id: inv.id, cancel_email_queue_id: null });
+      expect(await s.invitation(inv.id)).toMatchObject({ revoked_by_user_id: admin.userId });
+      expect(await s.revoke(org, admin.userId, p.id)).toMatchObject({ outcome: "not_open", invitation_id: null });
+      expect((await s.accept(inv.token, { userId: await s.user(p.email!) })).outcome).toBe("dead");
+    });
+
+    it("people.manage alone may cancel (cancelling is never an escalation)", async () => {
+      const clerk = await s.sender(org, ["people.manage"]);
+      const p = await s.person(org);
+      await s.seat(org, p.id);
+      await s.signInRow(org, p.id, p.email!);
+      expect((await s.revoke(org, clerk.userId, p.id)).outcome).toBe("ok");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // the reader (R30, R42)
+  // ---------------------------------------------------------------------------
+  describe("the reader", () => {
+    it("the closed column list, from the catalog", async () => {
+      const [row] = await s.q(sql`
+        select array_to_string(p.proargnames, ',') as names from pg_proc p
+         where p.proname = 'presby_sign_in_invitation_states'`);
+      expect(row!.names).toBe(
+        "p_person_ids,p_actor_user_id,person_id,linked,state,sent_at,expires_at,resend_count,next_resend_at," +
+          "invited_address,address_current,outcome,queue_status,queue_delivered_at,queue_bounced_at," +
+          "queue_complained_at,connected_via,connected_on",
+      );
+      const body = readFileSync(MIGRATION_PATH, "utf8");
+      const fn = body.slice(body.indexOf("create or replace function presby_sign_in_invitation_states("));
+      const text = fn.slice(0, fn.indexOf("end $$;"));
+      expect(text).not.toMatch(/token_hash|to_email|subject|html_body|failure_reason|provider_message_id|created_by_user_id|from users/);
+    });
+
+    it("bounds: an empty array, a null and 501 ids raise", async () => {
+      expect((await refusal(s.states(org, admin.userId, []))).code).toBe("22023");
+      expect((await refusal(s.states(org, admin.userId, null))).code).toBe("22023");
+      const many = Array.from({ length: 501 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+      expect((await refusal(s.states(org, admin.userId, many))).code).toBe("22023");
+    });
+
+    it("every state, with linked taking precedence, another organization's person omitted, and nothing beyond the closed shape", async () => {
+      const none = await s.person(org);
+      const pending = await s.person(org);
+      const pendingInv = await s.signInRow(org, pending.id, pending.email!);
+      const expired = await s.person(org);
+      await s.signInRow(org, expired.id, expired.email!, { createdAt: sql`now() - interval '9 days'`, expiresAt: sql`now() - interval '1 day'` });
+      const revoked = await s.person(org);
+      await s.signInRow(org, revoked.id, revoked.email!);
+      await s.revoke(org, admin.userId, revoked.id);
+      const linked = await s.person(org);
+      await s.signInRow(org, linked.id, linked.email!);
+      await s.linkUser(linked.id, await s.user(s.email("lk")));
+      const away = await s.person(other);
+
+      const rows = await s.states(org, admin.userId, [none.id, pending.id, expired.id, revoked.id, linked.id, away.id]);
+      const by = Object.fromEntries(rows.map((r) => [String(r.person_id), r]));
+      expect(Object.keys(by).sort()).toEqual([none.id, pending.id, expired.id, revoked.id, linked.id].sort());
+      expect(by[none.id]).toMatchObject({ linked: false, state: "none", sent_at: null, invited_address: null });
+      const [pRow] = await s.q(sql`select created_at from account_invitations where id = ${pendingInv.id}`);
+      expect(by[pending.id]).toMatchObject({ state: "pending", invited_address: pending.email, address_current: true, resend_count: 0, outcome: null });
+      expect(new Date(String(by[pending.id]!.next_resend_at)).getTime()).toBe(new Date(String(pRow!.created_at)).getTime() + 5 * 60_000);
+      expect(by[expired.id]).toMatchObject({ state: "expired", invited_address: expired.email });
+      expect(by[revoked.id]).toMatchObject({ state: "revoked", next_resend_at: null });
+      expect(by[linked.id]).toMatchObject({ linked: true, state: "signs_in", sent_at: null, invited_address: null, connected_via: null });
+    });
+
+    it("invited_address is withheld once the address leaves the record", async () => {
+      const p = await s.person(org);
+      await s.signInRow(org, p.id, p.email!);
+      await s.platform.transaction(async (tx) => {
+        await tx.execute(sql`update contact_methods set ended_at = now(), is_primary = false where person_id = ${p.id}`);
+        await tx.execute(sql`insert into contact_methods (person_id, kind, value, is_primary) values (${p.id}, 'email', ${s.email("n")}, true)`);
+      });
+      expect((await s.states(org, admin.userId, [p.id]))[0]).toMatchObject({ state: "pending", invited_address: null, address_current: false });
+    });
+
+    it("blocked outcomes: the three cross-organization reasons collapse to needs_support", async () => {
+      for (const [reason, outcome] of [
+        ["person_elsewhere", "needs_support"], ["person_linked_elsewhere", "needs_support"], ["ambiguous_person", "needs_support"],
+        ["membership_ended", "membership_ended"], ["person_merged", "person_merged"], ["person_deceased", "person_deceased"],
+      ] as const) {
+        const p = await s.person(org);
+        const inv = await s.signInRow(org, p.id, p.email!);
+        await s.platform.transaction(async (tx) => {
+          await tx.execute(sql`select set_config('presby.invitation_accept_active', 'true', true)`);
+          await tx.execute(sql`update account_invitations set blocked_at = now(), blocked_reason = ${reason} where id = ${inv.id}`);
+        });
+        expect((await s.states(org, admin.userId, [p.id]))[0], reason).toMatchObject({ state: "blocked", outcome });
+      }
+    });
+
+    it("the delivery columns come only through this organization's own row", async () => {
+      const p = await s.person(org);
+      const [q] = await s.q(sql`insert into email_queue (to_email, subject, html_body, template_key, status, sent_at, delivered_at)
+                                 values (${p.email}, 'Fixture', '<p>fixture</p>', 'account_sign_in_invitation', 'sent', now(), now()) returning id`);
+      await s.signInRow(org, p.id, p.email!, { emailQueueId: String(q!.id) });
+      const [r] = await s.states(org, admin.userId, [p.id]);
+      expect(r).toMatchObject({ queue_status: "sent", queue_bounced_at: null, queue_complained_at: null });
+      expect(r!.queue_delivered_at).not.toBeNull();
+      await s.q(sql`delete from email_queue where id = ${q!.id}`);
+    });
+
+    it("connected_via / connected_on: an accepted invitation, a sign_in_connected audit row, the earlier of the two; never from users", async () => {
+      const a = await s.person(org);
+      const ua = await s.user(a.email!);
+      const ia = await s.signInRow(org, a.id, a.email!);
+      expect((await s.accept(ia.token, { userId: ua })).outcome).toBe("accepted");
+
+      const b = await s.person(org);
+      await s.linkUser(b.id, await s.user(b.email!));
+      await s.q(sql`insert into audit_events (action, resource_type, resource_id, metadata, created_at)
+                    values ('tenant.person.sign_in_connected', 'person', ${b.id},
+                            jsonb_build_object('organizationId', ${org}::text, 'personId', ${b.id}::text), '2026-03-04 12:00+00')`);
+      // the same audit row for another organization does not count
+      const c = await s.person(org);
+      await s.linkUser(c.id, await s.user(c.email!));
+      await s.q(sql`insert into audit_events (action, resource_type, resource_id, metadata)
+                    values ('tenant.person.sign_in_connected', 'person', ${c.id},
+                            jsonb_build_object('organizationId', ${other}::text, 'personId', ${c.id}::text))`);
+
+      const rows = await s.states(org, admin.userId, [a.id, b.id, c.id]);
+      const by = Object.fromEntries(rows.map((r) => [String(r.person_id), r]));
+      expect(by[a.id]).toMatchObject({ state: "signs_in", connected_via: "invitation" });
+      expect(by[a.id]!.connected_on).not.toBeNull();
+      expect(by[b.id]).toMatchObject({ connected_via: "sign_in" });
+      expect(String(by[b.id]!.connected_on).slice(0, 10)).toBe("2026-03-04");
+      expect(by[c.id]).toMatchObject({ connected_via: null, connected_on: null });
+
+      // both: the earlier wins
+      await s.q(sql`insert into audit_events (action, resource_type, resource_id, metadata, created_at)
+                    values ('tenant.person.sign_in_connected', 'person', ${a.id},
+                            jsonb_build_object('organizationId', ${org}::text, 'personId', ${a.id}::text), '2020-01-02 12:00+00')`);
+      const [again] = await s.states(org, admin.userId, [a.id]);
+      expect(again).toMatchObject({ connected_via: "sign_in" });
+      expect(String(again!.connected_on).slice(0, 10)).toBe("2020-01-02");
+    });
+  });
+});

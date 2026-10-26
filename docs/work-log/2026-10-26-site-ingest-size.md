@@ -1298,3 +1298,265 @@ Failures: [...]
 2. **Order with F289 (OQ2):** build in parallel against F289's `store({audience})` / `resolve` signatures from the F289 Phase 3 design; this pipeline merges **after** F289 (and 0072 is applied to production first). New store call sites get rows in F289's `audience-callsites` table.
 3. **Hash check (OQ3), measured by the orchestrator, read-only:** the 81 files in `site-fpcw/images/` hash to 80 distinct sha256 values (two files are byte-identical), and **all 80 are already present** among production's 82 distinct FPCW image hashes in `blob_assets`. A content-addressed plan for FPCW's first real publish therefore reports zero missing images: one plan request and one small commit request.
 4. **Oversize (OQ4):** accepted — fail the run early, client-side, naming the image and the limit; chunked upload is a tracked follow-up.
+
+---
+
+# Phase 5 — Verification (qa)
+
+**Date:** 2026-10-26
+**Verified by:** qa
+**Trees:** presby `/Users/cshenso/git/presby-platform/presby-ingest` at `41eea22` (pipeline branch `pipeline/site-ingest-size`; F289's four Rule 16 files still uncommitted, as instructed). Neon `pipeline-site-ingest-size` (`ep-nameless-cloud`). Every connection-string variable was checked by host match only; none was printed. presby-site-kit `/Users/cshenso/git/presby-platform/presby-site-kit-ingest` at `ad109b1` (v4.1.0).
+
+**Scope run:**
+- **Full:** typecheck, lint, `npm run check`, `npm run build`, the unit suite, and all of site-kit's gates.
+- **DB-backed (serial):** the ingest, storage, sites, tenant-branding, read-org-brand and testing suites, and the public site tree.
+- **e2e on my own server at :3610:**
+  - custom-hosts project: `lockdown`, `assets`, `serving`, `public-calendar`.
+  - chromium: `public-sites.spec.ts`.
+- **Global flags:** reset to the CI baseline with `scripts/ci/e2e-reset-flags.sql` (`pipeline_branch=1`) before the e2e run.
+
+**Not re-run:**
+- The full `test:db`. This pipeline's own diff (`5fbb90f..41eea22`) touches no migration, no `src/lib/db/`, no `authz.ts` and no shared e2e fixture. 0072 and the `src/lib/db` changes arrived with F289's merge, and F289's QA covers them.
+- `scripts/test-rls.sql` (no schema change here).
+- The prod-build lane and the full chromium suite: no layout, proxy, auth or `e2e/support` change in this diff. The PR's CI covers them.
+- The 360 px check. No UI changed. Phase 3 placed the visitor-side image check at runbook step 5, after the first FPCW publish in production. It is still owed there.
+
+## Type Check
+
+`npm run typecheck`: **PASS**. Also clean:
+- `npm run lint` (`--max-warnings=0`).
+- `npm run check`: all eight tripwires pass.
+- `npm run build`: passes, and `/api/sites/ingest`, `/plan`, `/images`, `/commit` are all emitted as dynamic routes.
+
+site-kit:
+- `npm run typecheck` clean.
+- `npm run build` clean, with no `dist/` change (`git status` clean afterwards).
+- `actionlint .github/workflows/ingest.yml` exits 0.
+
+## Unit Tests
+
+| Suite | Files | Tests | Result | Time |
+|---|---|---|---|---|
+| presby unit (`npm run test`, no DB) | 598 passed, 90 skipped | 9,147 passed, 2,664 skipped, 0 failed | pass | 29.9 s |
+| presby DB-backed (`dotenv … vitest run --no-file-parallelism` over the set above) | 42 passed | 831 passed, **0 skipped**, 0 failed | pass | 86.0 s |
+| presby-site-kit `npm test` | 22 passed | 235 passed, 0 skipped | pass | 1.8 s |
+
+- The 90 files skipped in the unit lane are the DB-backed suites, which skip without the env. The ingest, storage and sites ones ran green in the DB lane above, with no skips.
+
+**BR-1 (the implementer's bridge run, re-run as-is):** `scratch/bridge/br1.test.ts`, 5 of 5 passed.
+
+**QA's own bridge** (scratch copy only, now deleted): the real client `ingest.mjs@ad109b1` against the real handlers `@41eea22` and real Postgres, with synthetic images and a freshly signed token per request. 8 of 8 passed. Real client log lines are quoted where they matter.
+
+| Case | Result |
+|---|---|
+| Q1: small site | Legacy, one request of 53,559 bytes, 1 token |
+| Q2: 8.0 MB site, 5 files with 4 distinct, over a **real socket** (real `fetch` into a local HTTP server wrapping the handlers) | Staged: `/plan:384`, `/images:1600000` ×4 (the duplicate sent once), `/commit:635`. 6 tokens for 6 requests. Every body ≤ 4,000,000. `dup` and `p1` share one blob. Every `imageKeys` value resolves through `resolvePublic` to the original bytes |
+| Q3: same sha | `The platform has already ingested commit …; nothing to do.` One `/plan`, and the blob row count is unchanged |
+| Q4: new sha, same images, with the commit reply lost twice (502) | `All 4 image(s) are already on the platform; nothing to upload.` Plan, then commit ×3 (two retries), published once |
+| Q5: forced failure at the 3rd upload | `Step "upload" for image "r2": the platform answered 500: …`. `last_ingested_commit_sha` and `content_bundle_key` stay null. The re-run prints `2 already on the platform; 2 to upload.` and publishes. A third run answers `already_current` |
+| Q6: exact boundary across both repos | A 4,000,000-byte image is accepted by the real `/images` (body exactly 4,000,000). A 4,000,001-byte image gets E1 from the client, with 0 requests and 0 tokens |
+| Q7: a 4,000,001-byte body with a **valid** token over a real socket | 413 `{"status":"error","code":"request_too_large",…}` on all four routes |
+| Q8: suspended site | See Copy Truthfulness: the log says "Published", the site stays `suspended` |
+
+- Every response in Q1–Q7 was scanned for a uuid-shaped string. None was found.
+
+## End-to-End Tests
+
+Own dev server on :3610 (`E2E_BASE_URL`/`AUTH_URL` `http://localhost:3610`):
+- Env: `RATE_LIMIT_DISABLED=true`, the `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`, `E2E_ALLOW_SHARED_DB=true`.
+- The server was stopped by PID (64390/64410), and port 3610 is confirmed free.
+
+| Run | Total | Passed | Failed | Skipped | Time |
+|---|---|---|---|---|---|
+| `--project=custom-hosts` lockdown, assets, serving, public-calendar | 76 | 76 | 0 | 0 | 2.0 m |
+| `--project=chromium` `e2e/public-sites.spec.ts` | 7 | 7 | 0 | 0 | 12.4 s |
+
+Real-server probes (curl against :3610):
+- Unauthenticated `POST` to `/api/sites/ingest`, `/plan`, `/images` and `/commit` each answers `401`, `content-type: application/json`, `{"status":"error","code":"unauthorized",…}`, with no `Set-Cookie` and no uuid. This is runbook step 1 confirmed.
+- A 5 MB unauthenticated body to `/images` answers 401, not 413.
+- `GET /plan` answers 405.
+- `POST /api/sites/ingest/nope` (a stand-in for a rolled-back server) answers an HTML 404 that does not parse as the error format. That confirms the rollback claim that the client prints E12.
+
+## Regression Tests Added
+
+Failing-first was reproduced independently in a `git archive` scratch copy: the HEAD tree with `src/app/api/sites/ingest/route.ts` restored from `5fbb90f`.
+
+- **Legacy cases against the pre-fix route:** 9 failed, 27 passed. That is LG-2 ×2, LG-4, LG-5, LG-6 ×2, LG-7, LG-8, plus the audit-metadata case (`transport`). LG-3 passed, as the implementer reported. This matches the Phase 4 claim.
+  - **LG-7 is a characterization, not a regression guard.** Before the fix it failed only on the new `transport` metadata, because the dedup it describes already held.
+- `src/app/api/sites/ingest/route.test.ts:797`, LG-2: a body over 4,000,000 bytes is a JSON 413. Guards against the plain-text platform 413 reappearing as an unreadable failure.
+- `src/app/api/sites/ingest/route.test.ts:815`, LG-3: an oversize body without a valid token is 401. Guards against the limit becoming an unauthenticated lever.
+- `src/app/api/sites/ingest/staged-flow.test.ts:150`, SF-1: a site over 4.5 MB publishes with every request ≤ 4,000,000. Guards the defect itself, as a property.
+- `src/app/api/sites/ingest/commit/route.test.ts:230`, CM-4: a missing hash refuses the whole commit and changes nothing. Guards sha-last and all-or-nothing publishing.
+- `src/app/api/sites/ingest/plan/route.test.ts:231` (PL-10), `images/route.test.ts:266` (UP-9), `commit/route.test.ts:374` (CM-12): no uuid in any response.
+- site-kit `test/ingest.test.ts:321` (KI-2 boundary), `:369` and `:932` (KI-3: every body ≤ limit, one token per fetch), `:622` (KI-9 exact image).
+
+Mutation checks. Every mutation below was caught:
+
+| Repo | Mutation | Caught by |
+|---|---|---|
+| site-kit | legacy/staged boundary `<=` → `<` | KI-2 |
+| site-kit | token cached once per run | KI-3 ×2, KI-14 ×2, KI-26 |
+| site-kit | image limit `>` → `>=` | KI-9 |
+| site-kit | `MAX_REQUEST_BYTES` → 4,500,000 | KI-1, KI-2, KI-12 |
+| site-kit | `redirect: "follow"` | KI-3, KI-24 |
+| presby | counted body limit `>` → `>=` | SI-2 |
+| presby | plan/commit lookup audience `public_site` → `private` | 3 unit cases (incl. SI-13 and the audience-callsites table), plus 8 DB cases (PL-3, PL-4, CM-2, CM-3, CM-4, CM-5, CM-7, CM-12) |
+
+The tests guard the property, not one literal line.
+
+## Coverage on Critical Modules
+
+Not re-measured. This diff does not touch `src/lib/permissions.ts`, `src/lib/two-factor.ts` or `src/lib/flags.ts`.
+
+## Feature-Gate Audit
+
+These routes have no session and no `FEATURES.*` key by design: authorization is the GitHub OIDC repository identity (DECISION-087). The audit was done by reading each handler body. Each one's first statement is `authorizeIngest(req)`, which runs in this order:
+
+1. OIDC verification → 401, code `unauthorized`. The verifier only returns status 401.
+2. `sites.public_render` off → 503, code `ingest_disabled`.
+3. `resolveOrganizationByRepo` with no match → 404, code `site_not_provisioned`, as JSON.
+4. Verified `sha` equals `last_ingested_commit_sha` → 200 `already_current`.
+
+The body is never read before the gate passes. The organization and sha come only from the verified claims.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| `POST /api/sites/ingest` (legacy) | n/a: OIDC via `authorizeIngest`, first statement | n/a | n/a; flag `sites.public_render` 503 |
+| `POST /api/sites/ingest/plan` | n/a: OIDC via `authorizeIngest`, first statement | n/a | n/a; flag 503; then `x-presby-ingest-protocol: 1` |
+| `POST /api/sites/ingest/images` | n/a: OIDC via `authorizeIngest`, first statement | n/a | n/a; flag 503; protocol header; server-side sha256 and sniff |
+| `POST /api/sites/ingest/commit` | n/a: OIDC via `authorizeIngest`, first statement | n/a | n/a; flag 503; protocol header; server-derived `imageKeys` |
+
+- **Gate tests:**
+  - SI-3 covers the order table-driven across all four handlers.
+  - PL-1, UP-1 and CM-1 cover it against real Postgres.
+  - On the real server, an unauthenticated POST answers 401 JSON on every route.
+- **404 stays JSON on `/plan`:** `site_not_provisioned` is sent through `errorResponse`. So a JSON 404 gives the provisioning hint, not E12 (KI-15).
+- **Custom host:** `/api/sites/ingest/{plan,images,commit}` get the neutral 404 with no cookie (`lockdown.spec.ts:152`, passed). `src/proxy.ts` is untouched. PX-2 pins that none of the fixed paths falls under the F151 extension exclusion.
+- **Schema/RLS:** this pipeline makes no schema change. Live-catalog probe of `blob_assets` on the pipeline branch:
+  - `relrowsecurity` and `relforcerowsecurity` are both `t`.
+  - The policy is `tenant_isolation` (ALL).
+  - `blob_assets_org_audience_hash_key` is present.
+  - `presby_app` holds `INSERT,SELECT` only.
+  - The new lookup runs on `presby_app` inside `withTrustedOrgContext` with an explicit `organization_id` filter. BD-3 (cross-org absent) runs against real `presby_app`.
+
+## Copy Truthfulness
+
+- [x] Every added or changed string is in the design's Copy table. **Three exceptions:**
+  - `Unsupported schemaVersion.` at `src/lib/sites-ingest.ts:366` is new and not in S3.
+  - `Malformed request body.` at `:318` and `:364` reuses the legacy text on `/plan` and `/commit`, but S3 does not list it there.
+  - Both are true. They need S3 rows (doc-only), as implementer deviation 1 already flagged.
+  - The README section "Publishing a site (ingest)" has no Copy rows. It is true apart from "exactly as before": per deviations 7 and 8, the legacy body now carries the sniffed `contentType` and a sorted image order. Non-blocking.
+- [x] The query behind each claim was opened. **One defect, below.** Checked and true:
+  - L4a/L4b/L9 "already on the platform": `findByContentHashes(public_site, org)`. It does not read other organizations or `private` rows, and the copy only claims usable-as-site-image.
+  - L8 "ingested": reads `last_ingested_commit_sha` only.
+  - E13's "Nothing was published" for plan and upload: neither writes `organization_sites`.
+  - H503 "not accepting": correctly avoids "switched off".
+- [x] Each instruction is traceable to the reader. The audience is a site repository collaborator: re-run, replace or rename a file, set repository variables (repository admins), contact support. Nothing points them at a platform-admin action.
+- [x] Older strings checked:
+  - The old `presby ingest responded …` and `Ingest failed with status …` lines are removed. KW-2 pins that `bundle.json` is gone.
+  - `docs/deployment.md` and `docs/TODO.md` staleness is already queued as an operator item in the Rule 16 patch.
+  - The release-note draft does **not** promise the first publish uploads nothing. The patch's `docs/deployment.md` step 2 says "do not promise it uploads nothing".
+
+**copy truthfulness: FAIL (one defect)**
+
+- **L7 on a suspended site.**
+  - Where: `presby-site-kit-ingest/scripts/ingest.mjs:252`; Copy table L7 at `docs/work-log/2026-10-26-site-ingest-size.md:873`.
+  - Viewer: a site repository collaborator reading the GitHub Actions log.
+  - What it says: `Published commit {sha7} to "{slug}" ({pageCount} page(s)).`
+  - What it reads: only the 200 `ingested` body. That body carries no site status.
+  - What actually happens: `recordSiteIngest` (`src/lib/sites.ts:1486`) keeps a `suspended` site `suspended`, so nothing is published to visitors.
+  - Reproduced with the real client in QA bridge case Q8. The log printed `Published commit q8-1792 to "qabr-susp-…" (1 page(s)).`, and the row afterwards was `status: suspended`.
+  - The design applied exactly this reasoning to L8 ("ingested", not "published", because a suspended site is ingested but not shown) but not to L7.
+  - The fix is a wording ruling plus a client change. The existing exact-text cases (`test/ingest.test.ts:317`, `:435`, `:464`, under KI-2 and KI-25) must be updated so they fail on the old text.
+
+**Release-note draft wording** (required edit at `/release-notes`, non-blocking for Phase 5):
+- `docs/work-log/2026-10-26-site-ingest-size.md:939` says the site "can be published **again**".
+- No CI run of a large site ever published. Every `site-fpcw` run failed, and the August load was a scratch load.
+- Use "can now be published".
+
+**DECISION-279 draft** (`docs/work-log/site-ingest-size.integration.patch:79`, non-blocking):
+- It says "an unauthenticated caller sees a 401, not a 413".
+- That holds up to Vercel's 4.5 MB cap. Above it, the platform's plain-text 413 answers before any route code runs.
+- Suggest "the app's own 413 is answered only to an authenticated caller".
+
+## Verdict
+
+**FAIL**: copy truthfulness, one defect (L7 says "Published" for a suspended site). Every technical check is green:
+- typecheck, lint, the eight tripwires and the build;
+- unit suite, the scoped DB lane and site-kit's 235 tests;
+- BR-1, plus QA's extended bridge over a real socket;
+- e2e, 83 of 83;
+- failing-first reproduced, with mutations caught on both sides;
+- gate audit clean, no uuid in any response.
+
+This is not auth-touching: `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/` and `src/lib/auth/` are untouched. So the MFA login e2e does not apply.
+
+The defect is in a design-authored string (Copy L7), so the loop-back goes to **Phase 3 (tech-lead)** for the L7 wording first. Then to **Phase 4 Batch A (full-stack-developer)** to change `scripts/ingest.mjs:252` and the exact-text assertions at `test/ingest.test.ts:317`, `:435` and `:464`. The same pass should add the two missing S3 rows.
+
+The re-verification is narrow:
+- site-kit `npm test`, typecheck and actionlint;
+- one BR-1 re-run;
+- the copy check on the new L7.
+
+The presby server needs no change unless tech-lead decides the success body should carry the site status.
+
+**Non-blocking notes:**
+1. Commit `7ef67b6` carries `Caught-By: agent-review`. The defect surfaced when a real `site-fpcw` CI run hit the production platform, and no agent chose to run a check. By CLAUDE.md's rule that reads as `Caught-By: production`. The commit is unpushed, so it can still be reworded.
+2. Q4 shows that a commit whose reply is lost after `recordSiteIngest` is retried and reported as success. If the lost reply hid an audit-write failure, the publish has no audit row. This is the existing "UPDATE and audit are separate statements" gap from Phase 1, now reachable through retries. Record it under residuals.
+3. Sites whose legacy body is between 4.0 and 4.5 MB and still run a pre-v4.1.0 client would get a 413 after the server deploys. No real site is in that band (pasturechurch is tiny, FPCW is 37.8 MB). Worth one line in the rollout note.
+
+**Housekeeping:**
+- Both worktrees are as found. presby shows only F289's four Rule 16 files modified, and nothing under `scratch/` is tracked. site-kit is clean.
+- My bridge fixtures were torn down (0 `qabr-`/`br1-` organizations remain).
+- The scratch copies `presby-pre` and `sk-mut`, the copied `.env.local` among them, were deleted by literal path. What remains under the scratchpad are tracked `.env.example` templates from earlier sessions' archives, with no secrets.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. All gates green: presby 9,147 unit, 831 DB, 83 e2e; site-kit 235; BR-1 5/5 and QA bridge 8/8; failing-first and mutations reproduced; gate audit clean. One copy-truthfulness defect (L7 "Published" on a suspended site). Two S3 rows missing | FAIL | 2026-10-26 |
+
+## Handoff
+
+The next agent is **tech-lead** (Phase 3 loop-back, Copy table only):
+- rule on the L7 wording for a suspended site, for example "Sent commit {sha7} to "{slug}" ({n} page(s)); the platform has ingested it.", or have the server report the site status;
+- add S3 rows for `Unsupported schemaVersion.` and `Malformed request body.` (plan/commit).
+
+Then **full-stack-developer** (Phase 4 Batch A):
+- change `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/scripts/ingest.mjs:252`;
+- update the exact-text assertions at `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/test/ingest.test.ts:317`, `:435` and `:464` so they fail on the old text.
+
+Then back to **qa** for the narrow re-run above. The release-note "again" edit and the DECISION-279 qualifier go to the orchestrator at integration and `/release-notes`.
+
+Files read or run (absolute paths):
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/work-log/2026-10-26-site-ingest-size.md`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/work-log/site-ingest-size.integration.patch`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/sites-ingest.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/app/api/sites/ingest/route.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/app/api/sites/ingest/plan/route.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/app/api/sites/ingest/images/route.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/app/api/sites/ingest/commit/route.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/storage/blob-store.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/sites.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/testing/site-ingest-harness.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/scratch/bridge/br1.test.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/e2e/custom-domains/lockdown.spec.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/playwright.config.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/scripts/ci/e2e-reset-flags.sql`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/scripts/ingest.mjs`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/scripts/build-bundle.mjs`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/.github/workflows/ingest.yml`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/README.md`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/test/ingest.test.ts`
+
+Run logs are under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/`.
+
+## Orchestrator rulings on Phase 5 run 1 (2026-10-26)
+
+- **L7 (copy truthfulness defect):** the client prints, on a 200 `ingested` body: `Sent commit {sha7} to "{slug}" ({pageCount} page(s)); the platform has ingested it.` — it claims ingestion, which the body proves, and never "published", which a suspended site is not. No server change. The exact-text assertions at site-kit `test/ingest.test.ts:317`, `:435`, `:464` change so they fail on the old "Published commit…" text.
+- **S3 rows added:** `Unsupported schemaVersion.` (commit; a bundle schema version other than 1) and `Malformed request body.` (plan and commit, as on the legacy route) — both true as worded; no code change.
+- **Release note:** say the site "can now be published", not "again".
+- **DECISION-279:** "the app's own 413 is answered only to an authenticated caller" (above Vercel's 4.5 MB cap the platform answers first).
+- **Residual recorded:** a commit whose reply is lost after `recordSiteIngest` is retried and reported as success; if the lost reply hid an audit-write failure, that publish has no audit row (the existing separate-statement gap from Phase 1, now reachable via retries).
+- **Rollout note:** a site whose legacy body is 4.0–4.5 MB on a pre-v4.1.0 client would get a 413 after the server deploys; no real site is in that band.
+- **`7ef67b6` trailer** reads `Caught-By: agent-review`; by CLAUDE.md the defect surfaced on a real production CI run (`Caught-By: production`). Left as is (rewriting mid-branch history across a merge is riskier than the stats error); noted for the retrospective.

@@ -719,8 +719,8 @@ Order is fixed: **the server before the client.** The legacy POST keeps every or
 0. **Before anything:** 0072 applied to production by F289's runbook; F289 merged and promoted. This pipeline never merges before that.
 1. **Promote this pipeline's server** (`/pre-push`, `/merge-pr`, one at a time after F289). The new routes sit unused. Verify with an unauthenticated `POST` to each of `/api/sites/ingest/plan`, `/images`, `/commit` on the production platform host: each answers **401 with the JSON error body** (`code: unauthorized`). A 404 means the route did not deploy. The legacy path is unchanged apart from the 4,000,000-byte limit and the added `code`.
 2. **Read-only prediction for FPCW (operator or orchestrator; counts only).** After 0072, count `blob_assets` rows for the `fpcw` organization with `audience = 'public_site'`, and compare the 80 distinct hashes of `site-fpcw/images/` against that set. Hashes present as `private` only are reported missing by the plan, so the first FPCW publish is **not guaranteed to upload nothing**; it uploads exactly the ones not held as site images. No release note or log line may say otherwise.
-3. **Merge the site-kit branch to `main`** (the one commit, `feat: v4.1.0 -- ...`; the operator tags `v4.1.0`). This takes effect for every site's next push. `site-pasturechurch` (no images, tiny bundle) stays on the legacy request in `auto` mode, so its next push is the first production exercise of the new client's legacy path.
-4. **Optional, recommended, operator's call (S3):** in `site-pasturechurch`'s `deploy.yml` add `transport: staged` under `with:`, push, read the log (expect: Built, "Staged ingest was requested", "This site has no images to send.", Publishing, Published), then remove it. It publishes identical content and proves OIDC, the three routes and Vercel's real behavior; it does **not** prove an upload (zero images). It is a live customer's repository, so it needs the operator's go.
+3. **Merge the site-kit branch to `main`** (the one commit, `feat: v4.1.0 -- ...`; the operator tags `v4.1.0`). *[Annotated at integration, Phase 6 required edit 1: the branch grew a second commit, the L7 fix `ea9e78a`; tag `v4.1.0` on `ea9e78a`, not on `ad109b1`.]* This takes effect for every site's next push. `site-pasturechurch` (no images, tiny bundle) stays on the legacy request in `auto` mode, so its next push is the first production exercise of the new client's legacy path.
+4. **Optional, recommended, operator's call (S3):** in `site-pasturechurch`'s `deploy.yml` add `transport: staged` under `with:`, push, read the log (expect: Built, "Staged ingest was requested", "This site has no images to send.", Publishing, Published), then remove it. It publishes identical content and proves OIDC, the three routes and Vercel's real behavior; it does **not** prove an upload (zero images). It is a live customer's repository, so it needs the operator's go. *[Superseded at Phase 6: the proof run is skipped, not a gate. The log lines it names ("Published") are superseded by the L7 ruling: the client now prints `Sent commit ...; the platform has ingested it.`]*
 5. **FPCW's first real ingest.** Operator go: given (the orchestrator relayed "lets put it on now" for the calendar page, 2026-10-26); the preconditions in `docs/TODO.md:237` still apply (`sites.public_render` on in production, both repository variables present and correct, `organization_sites.repo` equals the repository, `org_portal.public_calendar` as that line orders). Push to `site-fpcw` `main`. Expected log shape, with the numbers filled in from step 2:
 
    ```
@@ -734,9 +734,11 @@ Order is fixed: **the server before the client.** The legacy POST keeps every or
    Sent <M> new image(s); <R> already on the platform.
    ```
 
+   *[Superseded by the L7 ruling (Phase 5 run 1): the seventh line above now reads `Sent commit <sha7> to "<slug>" (14 page(s)); the platform has ingested it.` The block is kept as the historical Phase 3 record; the operative copy is the `docs/deployment.md` section "Site ingest: the staged transport".]*
+
    Then verify at 360 px and 1280 px that `/site/<slug>` pages show their images, and that `/admin/organizations/<id>` shows the new commit and time.
 6. **A masked second failure is expected to be possible** (Gap 10): the 413 has hidden everything after it. The client prints a hint for each (variable mismatch -> 401; unprovisioned repository -> 404; switched off -> 503). Fix the named cause and re-run the job; every step is safe to repeat, and a repeat of an already-ingested sha reports so.
-7. **Rollback.** Client: revert the one site-kit commit on `main`. Server: revert the presby release; a staged client then gets a non-JSON 404 on `/plan` and prints "the platform does not support staged ingest yet" (small sites unaffected). Neither needs a database action.
+7. **Rollback.** Client: revert the v4.1.0 change on site-kit `main` (both commits, `ad109b1` and the L7 fix `ea9e78a`, or the merge commit with `git revert -m 1`; corrected at Phase 6, was "the one site-kit commit"). Server: revert the presby release; a staged client then gets a non-JSON 404 on `/plan` and prints "the platform does not support staged ingest yet" (small sites unaffected). Neither needs a database action.
 8. **Unverified until production:** the plan and commit on Vercel's real stack, `getIDToken` behavior across 80 calls, the timing of one upload on a cold function, and the actual `exp` of a GitHub OIDC token (irrelevant by design, because every request mints a new one). The first FPCW run is the evidence for the first three; the bridge run is the pre-production proxy.
 
 ## Feasibility check (against the live tree)
@@ -937,12 +939,13 @@ Unchanged and kept verbatim: every existing 401 text, `No site is provisioned fo
 
 ### Release-note lines (draft; written for the operator, final text via `/release-notes` after Phase 6)
 
-> **Value:** A church website with many photos can be published again; before this, the publish failed with a "request too large" error.
+> **Value:** A church website with many photos can now be published; before this, the publish failed with a "request too large" error.
 > - Photos are now sent one at a time, and only the ones the platform does not already have. Smaller sites publish as before.
 > - If a publish stops partway, running it again picks up where it left off. Photos already sent stay on the platform; they do not appear on the website until a later publish uses them.
 > - When several updates are pushed close together, they are published one at a time, and only the newest of the waiting ones is published.
 > - A photo larger than 4 MB (4,000,000 bytes) cannot be published yet. The publish stops before sending anything and names the photo.
 > - Running an older, failed publish again after a newer one has succeeded puts the older content back. Re-run only the latest.
+> - If the confirmation of a publish is lost on its way back, the retry reports success; in that rare case the record of who published and when may be missing. (Phase 6 addition.)
 
 ### The four checks, one line per group
 

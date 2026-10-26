@@ -1550,3 +1550,9 @@ Existing assertions altered: listed under "What changes in code", item 1 (tests)
 - Gate: `tsc --noEmit` clean, `npm run lint` clean, `npm run check` (all eight tripwires) clean, `npm run test` 619 files passed / 96 skipped, 9393 tests passed / 2774 skipped; `treasurer-reads.db.test.ts` serial 16/16 against `pipeline-treasury`; `scripts/treasury/test-rls-73.sql` as presby_app: 52 pass notices, no failure.
 - Unverified: the real 2,000 bound is exercised only through the lowered `bounds`, not by seeding 2,001 rows; the org-midnight time-zone edge of the payment date is still unverified (as the amendment says).
 - **Handoff:** ux-developer, Batch 6. The strings and `listTreasurerGroups` are ready to consume; Batch 6 still owns the giving team-action wording (C12), the send-back dialog, the filter bar and empty states, X3, and the X6 clamp.
+
+## Orchestrator rulings on Batch 5 (2026-10-26)
+
+- **No chargeable group (Phase 1 Flow 6):** the request form shows, in place of the `Charge to` select, `No groups can be charged yet. Ask your treasurer to set them up.` and Send stays disabled. Copy checks: true for a member with zero chargeable groups (the read returns none); the treasurer (manage holder) is the one who sets chargeable groups; no residual denied. Applied by Batch 6's implementer as a small member-form edit with a test.
+- **Request page heading:** the amount as the H1, with "Reimbursements" for an amountless draft — accepted.
+- **Treasury-only viewer redirect** lands on Batch 6's detail page; Batch 6 closes the 404.

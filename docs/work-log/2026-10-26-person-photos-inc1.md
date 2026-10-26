@@ -27,6 +27,7 @@
 | 3 — amendment (Phase 5 run 2) | tech-lead | Complete: (d) ruled (`remove` for an unlisted person reuses `removeIsWebsiteWithheld`; `removeIsWebsite` hedged to "can no longer show it"); `websiteStops` kept; QA note 1 routed through the website-withheld answer; effect-verb sweep also changed `removeIsFallback`, `websiteNotListed` and one status line; tests T12-T19; implementer full-stack-developer; no schema, route, flag, permission or e2e change. See the last section of this log | Design complete; back to Phase 4 | 2026-10-26 |
 | 4 — Phase 5 run 2 fix (copy) | full-stack-developer | Complete: `websiteNotShowing` (unlisted or withheld) drives the remove sentence; `removeIsWebsite`, `removeIsFallback`, `websiteNotListed` verbatim from R-d2/R-d5/R-d4; hidden photo known through the directory answer routes both designate dialogs to `websiteHidden`/`websiteMerged`; `websiteLine` 4th `directoryHidden` parameter; T12-T19 red first (22 failing on c225091), green after; gates, unit 9,954, DB 267, e2e 5/5 and the 360 walk clean; no schema, route, action, flag, permission or e2e change | Complete; to qa for the scoped re-run | 2026-10-26 |
 | 3 — amendment (Phase 5 run 3) | tech-lead | Complete: sentences now chosen by comparing before/after outcomes of a pure mirror of the two SQL functions (`outcome.ts`); claims registry over 720 worlds x 10 intents; Postgres property test pins mirror to SQL and store (website photo = directory photo included); (e) Option A (keep the clearance, say so, name "Stop using in directory"; no operator decision, Option B declined), (f) and "related" ruled, QA notes 1 and 3 fixed, note 2 accepted; four new strings, one removed, two reworded; tests T20-T29; implementer full-stack-developer; no schema, route, action, flag, permission or audit change | Design complete; back to Phase 4 | 2026-10-26 |
+| 4 — Phase 5 run 3 fix (outcome-derived copy) | full-stack-developer | Complete: `outcome.ts` (pure mirror: `outcomesOf`/`applyIntent`/`afterIntent`/`shiftOf`), `consequencesFor` rewritten to pick sentences from before/after outcomes (no per-state predicate), reader extraction (`loadAnswers`, `snapshot.ts`), claims registry over 720 worlds x 10 intents (S1-S5), `outcome-parity.db.test.ts` (P1/P2/P3 + not-live and minor slices, 5 mutations all red), R-e8 strings verbatim, T20-T29; pure claims registry red on 10107d5 first; gates green; 360 px same-photo walk incl. roster after confirm; back to Phase 5 (run 4) | Ready for QA | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2291,3 +2292,109 @@ Withdrawing clearance as a control or as a side effect (Option B, R-e5); a new S
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 3 — amendment (Phase 5 run 3) | tech-lead | Complete: structural fix, sentences chosen by comparing before/after outcomes of a pure mirror of the two SQL functions (`outcome.ts`), claims registry over 720 worlds x 10 intents, Postgres property test pinning mirror to SQL and store (website = directory photo included); (e) Option A (keep the clearance, say so, name "Stop using in directory"; no operator decision needed, Option B declined), (f) and "related" ruled, notes 1 and 3 fixed, note 2 accepted; four new strings, one removed, two reworded; tests T20-T29; implementer full-stack-developer; no schema, route, action, flag, permission or audit change | Design complete; back to Phase 4 | 2026-10-26 |
+
+---
+
+## Phase 4 — Phase 5 run 3 fix (outcome-derived copy)
+
+**Author:** full-stack-developer, 2026-10-26. **Trigger:** Phase 5 run 3 FAIL on copy truthfulness (e) and (f); spec is "Phase 3 — amendment (Phase 5 run 3: outcome-derived copy)" above (R-e1 to R-e8, T20-T29). **Tree:** `pipeline/person-photos`, worktree `presby-photos`, from 98ba7c9; Neon `pipeline-person-photos`. No migration, SQL, route, action, flag, permission, audit or Rule 16 shared-file change (`docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md` untouched). Nothing was unbuildable and no string was missing; the deviations and additions are listed below.
+
+### Commits (not pushed)
+
+| Commit | Prefix | What |
+|---|---|---|
+| `1e96e38` | `refactor(photos)` | `loadAnswers(tx, org, person)` extracted from `readPhotoSet` (`reader.ts`); new pure `snapshot.ts` (`buildSnapshot`, `statusesOf`, `PhotoAnswers`). A pure move: `public-photo.db.test.ts` 25/25 and `scan.test.ts` green unchanged. |
+| `3f337cb` | `refactor(photos)` | `outcome.ts` (the mirror), `src/lib/testing/person-photo-world.ts` (the `World` type, 720 `WORLDS`, 10 `INTENTS`, `factsOfWorld`, `snapshotOfWorld`, `applyIntentToWorld`), `outcome.test.ts` (T20, T21). |
+| `916170d` | `fix(photos)` | `consequences.ts` rewritten to R-e2; `copy.ts` R-e8; the claims registry `consequences.claims.test.ts` (T23); T22, T24, T25, T26 and the updated existing rows. `Caught-By: agent-review`, `Discovered-In: Phase-5`. |
+| `fb3ed54` | `test(photos)` | `outcome-parity.db.test.ts` (T28). |
+| `fa80293` | `test(photos)` | `e2e/person-photos.spec.ts` step 5b (T29). |
+
+### What was built
+
+- **`src/lib/person-photos/outcome.ts`** exactly as R-e1: `outcomeOfFacts` (selection rule, gate priority minor, merged, hide, not_listed, not_published, clear; directory gate minor then `hideHere`), `factsOfSnapshot` (unknown is clear), `outcomesOf`, `applyIntent` (the store's rules, `remove` nulls both fields, a designate for a minor returns the snapshot unchanged), `afterIntent`, `shiftOf` (`none|begins|ends|moves|unchanged`), `mayShow`, `selectedId`. One addition: `sourceOf(o)` (the selected photo's source or null), used by the chooser and the tests. The header carries the one asymmetry the design asked for.
+- **`consequencesFor`** chooses every sentence from `before`, `after`, `shift` and the gate via the R-e2 row table; `websiteIsWithheld`, `websiteNotShowing` and the `directoryWebsiteConditional` path are deleted. `directoryPhotoServesWebsite` stays exported as a thin wrapper over the mirror. The `undesignate_website` same-photo branch (`shift === "unchanged"`) emits `websiteUnchangedCleared`, then `websiteTakeOffTip` only when `afterIntent(next, undesignate_directory).website.photoId === null`, and no `websiteStops` or `websiteCaches`.
+- **`copy.ts`** (R-e8 verbatim): added `websiteAlreadyUses`, `websiteKeepsOther`, `websiteUnchangedCleared`, `websiteTakeOffTip`; removed `directoryWebsiteConditional`; changed `DESIGNATE_COPY.directory.body` and `PAGE_COPY.minorNotice`. The header gained the selection-verb and effect-verb convention.
+- **Reader extraction** as R-e4: `loadAnswers` stays in `reader.ts` (so `scan.test.ts` "named only in reader.ts" stays true), `buildSnapshot` and `statusesOf` are in the pure `snapshot.ts`; `readPhotoSet` calls both.
+- **The claims registry** (`consequences.claims.test.ts`): one `{subject, claim}` per `CONSEQUENCE_COPY` key (typed `Record<keyof typeof CONSEQUENCE_COPY, Claim>`, so a missing claim is also a compile error), rendered text reverse-mapped to keys, S1 to S5 over 720 x 10 = 7,200 pairs, plus the QA (e) property named as its own test. Every claim table row is the design's.
+
+### Failing-first evidence (red before any source edit)
+
+1. **The pure claims registry against 10107d5's source** (`consequences.claims.test.ts`, written first; `consequences.ts` and `copy.ts` unchanged at that point): 3 of 8 failed.
+   - **S5** failed: the registry has the four new keys, the source has `directoryWebsiteConditional`.
+   - **S1** failed: `directoryWebsiteConditional has no claim` (the "related" state and (f)), and `websiteStops is false` in the same-photo state and in the stale-page states.
+   - **The (e) test** failed: `websiteStops` emitted in all 48 same-photo worlds for `undesignate_website`.
+   - S2, S3 and S4 passed on 10107d5 (no sentence was silent; the defect was a lie, not an omission).
+   - Log: `scratchpad/photos-fix3/claims-red-10107d5.log`.
+2. **All of T22, T24, T25, T26 plus the claims file** against the unchanged source: `5 failed | 2 passed` files, **27 failed | 202 passed** tests (`red-10107d5-all.log`):
+   - `consequences.test.ts` 11 (T22: same-photo x4, the retired conditional rows x2, the new `websiteAlreadyUses`, the two remove-fall-back rows, and the two stale-page rows);
+   - `copy.test.ts` 6 (T24 x5, plus the run 1 directory-body test updated to the new text);
+   - `consequences.claims.test.ts` 3;
+   - `confirm-dialogs.test.tsx` 3 (T25);
+   - `designate-dialog.test.tsx` 4 (T26 x3, plus the body row).
+   - `page.test.tsx` (T27) is constant-driven and passes before and after, as the design said; the exact `minorNotice` text is pinned in T24.
+3. **T29** has no separate red run (the design: "none to flag"); the same sentences are red in the unit rows above.
+
+After `916170d`: the same files are green (381 passed, 51 skipped, in `src/lib/person-photos` plus the photos page directory).
+
+### The T22 rows that changed from the old table (the three the design named, and why)
+
+- `directory, cleared, but not listed` (was `directoryWebsiteConditional`): now `[websiteNotListed]`.
+- `directory, cleared, listed, but a website photo exists` (was the conditional): now `[websiteKeepsOther]`.
+- `remove the website photo only` (website A, directory B attested, listed): now `[removeBase, removeIsWebsite, removeCaches, websiteFallsBack]`.
+
+Every other pre-existing row kept its expected output. New rows are listed in the T22 table of the design and in the file (same-photo listed, unlisted, minor and hide known; website A with a different cleared directory photo; stale pages; unlisted and hidden remove with a fall-back; same-photo remove).
+
+### T28: the parity test, and the mutation run
+
+`src/lib/person-photos/outcome-parity.db.test.ts` (serial, real Postgres, about 66 s for the whole file; **no cut to the product was needed**, so `minor x merged` stays a full cross).
+
+- **Seeding** is set-based (one statement per table per chunk of at most 150): people, memberships, `merged_into_id`, a loop-in-one-statement for second-organization memberships (the link guard authorizes one person per transaction), `person_privacy` (this org or the other org; one row per person), `staff_positions` for listed worlds, four private blobs and two photos per person, and designations. One person per world.
+- **P1** (the 360 published worlds): `outcomeOfFacts` against the owner-only core, the page wrapper (`presby_person_public_photo_status`), `presby_person_directory_photo` and `presby_public_staff_roster` (present iff listed; `photo_key` non-null iff shown and equal to the selected master); the wrapper equals the core row for row; the same-photo cleared world is asserted to be served on the roster; then the not-live slice: site flipped to `provisioning`, every roster read empty, restored.
+- **P2**: `buildSnapshot(first, await loadAnswers(tx, org, person))` deep-equals `snapshotOfWorld` mapped to real photo ids, for all 360.
+- **P3**: 600 transitions (15 designation states x listed x hide{none, other org} x 10 intents) through the real `designatePhoto`, `undesignatePhoto`, `removePhoto`, 8 at a time, each on its own person; the re-read is compared with P1 against `applyIntentToWorld` (written independently of the mirror) and with P2 against its projection. **Addition to the design:** P3 also checks the mirror's own `applyIntent(beforeSnapshot, intent)` against the real after-snapshot's designations and `afterIntent` against the real selected photos, so a bug in `outcome.ts`'s `applyIntent` is red here and not only in the pure test. The minor slice is 2 minor worlds x 6 designate intents = 12: every call returns `refused / minor`, the re-read equals the before-world, and `applyIntent` leaves the snapshot unchanged.
+- **The mutation run** (one flip each, source restored by `git checkout -- <file>` after each; logs `scratchpad/photos-fix3/mut-*.log`, diffs `mut-*.diff`). Every flip turned exactly the named test red (1 failed, 6 skipped by the `-t` filter):
+
+| # | Flip | File | Red test | First mismatch reported |
+|---|---|---|---|---|
+| m1 | drop the `attested` filter (`else if (f.directory?.attested)` to `else if (f.directory)`) | `outcome.ts` | P1 | `... dir:A: core source null != directory_attested` |
+| m2 | swap `hide` and `hideHere` (the directory gate reads the person-wide hide) | `outcome.ts` | P1 | `hide:other_org ... dir:A+att: directory withheld null != hide_photo` |
+| m3 | drop the `merged` gate | `outcome.ts` | P1 | `merged ... dir:A+att: core withheld merged != null (mirror gate not_listed)` |
+| m4 | `remove` nulls only the website field | `person-photo-world.ts` (`applyIntentToWorld`) | P3 | `P1 ... remove A: core source null != directory_attested` |
+| m5 | `remove` nulls only the website field | `outcome.ts` (`applyIntent`) | P3 | `applyIntent ... remove A: mirror [null,{...attested:true}] != store [null,null]` |
+
+  m4 and m5 are the same flip in the two implementations the test keeps apart. Working tree clean of mutations (checked with `git status`); the committed test is the unmutated one and was re-run green (7/7) afterwards. QA can re-run two with `scratchpad/photos-fix3/mutate.sh <name> <file> '<old>' '<new>' '<test name filter>'`.
+
+### Gates and results (all in the worktree)
+
+- `npm run typecheck`, `npm run lint` (0 warnings), `npm run check` (8 of 8 tripwires): pass.
+- `rm -rf .next && npm run build`: pass.
+- `npx vitest run` (unit): **654 files passed, 97 skipped; 10,027 tests passed, 2,854 skipped** (the skips are the env-gated DB files).
+- DB-backed, serial (`dotenv -e .env.local -- vitest run --no-file-parallelism` over `src/lib/person-photos`, `src/lib/db/domain/person-photos.db.test.ts`, `src/lib/db/domain/public-roster-photo.db.test.ts`, `src/lib/org-feature-warnings`): **15 files, 341 passed, 0 skipped**, including `outcome-parity.db.test.ts` 7/7.
+- Flags reset to the CI baseline first (`scripts/ci/e2e-reset-flags.sql`, `-v pipeline_branch=1`: COMMIT, 10 keys).
+- Own dev server on :3620 (listener PID 56859, parent npx 56841; `AUTH_URL` and `E2E_BASE_URL` on :3620, `RATE_LIMIT_DISABLED=true`, `E2E_ALLOW_SHARED_DB=true`, `CRON_SECRET`, the domains fakes), stopped by PID; :3620 confirmed free. Never :3000.
+  - `--project=chromium`: `e2e/person-photos.spec.ts` (360 and desktop, now with step 5b = T29; E4, document 233,861 bytes; toggle-off) and `e2e/hydration/person-photos-upload.spec.ts`: **5 passed**, 1.1 min.
+  - `--project=custom-hosts`: `e2e/custom-domains/person-photos-roster.spec.ts`: **2 passed**.
+  - The prod lane (:3621) was not re-run: no hydration, route or component structure changed; the hydration spec ran on the dev lane above.
+- **360 px walk of the same-photo state** (scratch script `scratchpad/photos-fix3/walk.mts`, adapted from QA's, never committed; its own fixture org with a live custom host `fix3-photos.invalid`, synthetic images; fixture torn down, leftover 0/0/0; flags restored). Screenshots and `results.json` in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/photos-fix3/`:
+  - **Samewalk (listed, one photo is both the website photo and the cleared directory photo).** Anonymous roster before: the image is served (naturalWidth 240). "Stop using on website" dialog (`360-S-stop-website-dialog.png`): "This photo is also Samewalk's directory photo, and it was cleared for the website, so this changes nothing on the website." then "To take it off the website, use "Stop using in directory" on this photo as well." No "will no longer use", no cache sentence. I confirmed it: one directory designation (attested) remains, the page reads "Website: the directory photo, because it was cleared for the website.", and **the roster still serves the image (naturalWidth 240), as the dialog said.** I then followed the tip: "Stop using in directory" (dialog: initials, and "The website is also using this photo, because it was cleared for the website. After this, the website will show no photo."), confirmed: no designations remain, the page reads "Website: no photo chosen, so the website shows none.", and **the roster no longer serves the image (0 img elements for that key)**, the person still listed by name.
+  - **Lisqa (listed, website photo only), "Use in directory" ticked**: "This is already Lisqa's website photo, so this changes nothing on the website." (no "only if"). Confirmed: directory (attested) plus website designations; the roster still serves the image.
+  - **Difwalk (a different website photo)**, ticked on the other photo: "Difwalk has a different website photo, so the website keeps using that one instead of this photo."
+  - **Unlisted (no website photo)**, ticked: "Unlisted isn't listed on the public website, so this photo won't appear there while that is so."
+  - The directory dialog body reads "Members who can see <name> in the directory will see this photo, unless <first> has hidden their photo or appears to be under 18." in all of them.
+  - Every dialog fits the 360 px viewport, the action buttons are 44 px (the close icon is the pre-existing shared primitive at 16 px, QA note 4), no horizontal overflow, no native dialog.
+
+### Deviations, additions and things to know
+
+- **Added to the design (all test or helper side):** `sourceOf` in `outcome.ts`; P3 also pins the mirror's own `applyIntent`/`afterIntent`; the claims file adds the (e) property as its own named test and a distinct-renderings guard (a rendered line maps back to exactly one key); `outcome.test.ts` adds `directoryPhotoServesWebsite`'s equivalence to the mirror over all 720 worlds. A first-name prefix `W<n>` names the parity people (not `P<n>`, which collided with the phase names in failure output).
+- **`websiteTakeOffTip` is derived but cannot currently be false.** Per R-e2 it is shown only when `afterIntent(next, undesignate_directory).website.photoId === null`; but `next` has no website designation (that is what the click did), so removing the directory designation always leaves nothing selected. The guard is faithful to the design and its claim is checked against the truth, but today it never withholds the tip. It would start to matter if a third source of a website photo ever existed. Reported, not changed.
+- **S2, S3 and S4 passed on 10107d5**: the defect class was a false sentence, not a missing one; S1 is the property that caught it.
+- **`removeCaches` and `websiteCaches` are absent exactly in the unchanged selection** (as the design recorded), and S4 proves they are present in every state that withdraws a shown photo.
+- **Neighbour check** (grep over `src`, `e2e`, `docs/release-notes`, `docs/product`): no remaining hit for `directoryWebsiteConditional`, "instead of their initials", or "any existing photos are not shown." outside the work-log's own history. The release-note C9 clause (R-e7) is for the `/release-notes` skill at ship time and is not touched here.
+- **Retained, as asked:** the old T2 and T15 properties in `consequences.test.ts` still run over their (smaller) product; they pass and are cheap guards. They are no longer the safety net.
+
+### Notes for QA (run 4)
+
+- Run the scoped unit files (`src/lib/person-photos/*.test.ts`, the photos page directory) and the person-photos DB set serially; `outcome-parity.db.test.ts` is about 66 s on its own.
+- Re-run two mutations from the table (m1 and m5 are the cheapest and cover both files); expect exactly the named test red, then `git status` clean.
+- Re-run the same-photo walk at 360 and 1280 including the anonymous roster after the confirm (the new copy says it is still served) and after the tip (served none). The check QA did in run 3 passes the opposite way now: the dialog no longer lies.
+- Handoff: **qa, Phase 5 run 4.** The proposed decision text and finding in the amendment, the C9 release-note clause and the touch-target TODO candidate remain for the orchestrator.

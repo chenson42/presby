@@ -18,7 +18,8 @@ vi.mock("@/lib/dev-docs", async (orig) => ({
   loadDescriptions: loadMock,
 }));
 
-import DataModelIndex from "./page";
+import DataModelIndex, { metadata } from "./page";
+import { NOT_LISTED } from "@/lib/dev-docs";
 
 const table = (name: string, module: string, extra: Record<string, unknown> = {}) => ({
   name,
@@ -111,9 +112,44 @@ describe("data-model index", () => {
     expect(within(rules).getByText("Written by hand")).toBeTruthy();
     const perms = screen.getByRole("heading", { name: "Platform permissions" }).parentElement!;
     expect(within(perms).getByText("Generated")).toBeTruthy();
-    expect(document.querySelector(".reg__provenance")!.textContent).toBe("Generated");
+    expect(document.querySelector(".reg__provenance")!.textContent).toBe("Tables: Generated");
     expect(screen.getByText(/Rules marked/).parentElement!.textContent).toContain(
       "nothing in the database stops a violation, so review catches it.",
     );
+  });
+
+  it("rules note states the weaker true claim — regression for the rules-note copy defect", async () => {
+    render(await DataModelIndex());
+    const note = screen.getByText(/Rules marked/).parentElement!;
+    const text = note.textContent!.replace(/\s+/g, " ");
+    expect(text).toContain(
+      "A test checks that every heading under Key Invariants in CLAUDE.md has an entry here or a recorded reason for leaving it out. The wording of each entry is written by hand.",
+    );
+    expect(text).not.toContain("has an entry here; the wording");
+  });
+
+  it("renders NOT_LISTED from the constant with the lead line", async () => {
+    expect(Object.keys(NOT_LISTED)).toEqual(["No Real Data", "Verify in a Browser"]);
+    render(await DataModelIndex());
+    const text = document.body.textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("Left out of this list, with the reason recorded in src/lib/dev-docs.ts:");
+    for (const [heading, reason] of Object.entries(NOT_LISTED)) {
+      expect(text).toContain(heading);
+      expect(text).toContain(reason);
+    }
+  });
+
+  it("NOT_LISTED No Real Data text is the approved wording", () => {
+    expect(NOT_LISTED["No Real Data"]).toBe(
+      "A rule about what may be committed to the repository, not a property of the running system. npm run check:secrets checks the shapes it can.",
+    );
+    expect(NOT_LISTED["No Real Data"]).not.toContain("obeys");
+  });
+
+  it("metadata description is read-from-the-code wording", () => {
+    expect(metadata.description).toBe(
+      "Tables, columns and keys in the PresbyPortal schema, read from the code.",
+    );
+    expect(metadata.description).not.toMatch(/generated/i);
   });
 });

@@ -971,3 +971,11 @@ Verified by reading each file. No `FEATURES` key is involved by design (Ruling 1
 - Logs: `.../logs/e2e-chromium2.log`, `.../logs/e2e-hosts.log`, `.../logs/e2e-prod.log`, `.../logs/unit.log`, `.../logs/walk.json`
 - Screenshots: `.../shots/`
 - Pre-fix e2e artifacts: `.../pw-prefix/`
+
+### Phase 4 — loop-back 1 (copy, 2026-10-25, ux-developer)
+
+Implemented S1-S5 only (S6 stays held for Step Z). Files: `src/app/(admin)/developer/data-model/page.tsx` (S1 rules note, S2 `NOT_LISTED` paragraphs rendered from the constant and skipped when empty, S4 metadata, S5 `Tables:` masthead), `src/lib/dev-docs.ts` (S3 `No Real Data` text), `developer.css` (`.reg__provenance` wrapping flex row, 0.8125rem, `var(--iron)`), `page.test.tsx` (five-row exact-text test plus the `:114` assertion changed to `Tables: Generated`).
+
+**Red first.** Before the fix, the new/changed rows failed (5 failed, 6 passed): masthead `Tables: Generated`, exact S1 sentence, `NOT_LISTED` rendered with lead line, S3 exact text, S4 metadata. **Green after:** 11/11.
+
+**Gate.** `npm run typecheck`, `npm run lint`, `npm run check` clean; full unit suite 612 files passed, 9138 tests passed (81 files skipped, DB-backed). Real browser on a dev server at :3570 (stopped by PID): `e2e/developer-portal.spec.ts` 14 passed (includes the 360px no-sideways-scroll check on `/developer/data-model`); a throwaway spec (deleted, not committed) confirmed the lead line, both omitted-rule paragraphs and `Tables: Generated` and no horizontal overflow at 360px and 1280px, screenshot inspected at 360px.

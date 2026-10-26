@@ -6,6 +6,7 @@ import {
   moduleSlug,
   summarize,
   INVARIANTS,
+  NOT_LISTED,
   PLATFORM_MODULE,
   type TableDoc,
 } from "@/lib/dev-docs";
@@ -17,7 +18,8 @@ import "../developer.css";
 
 export const metadata = {
   title: "Data model",
-  description: "Generated technical reference for the PresbyPortal schema.",
+  description:
+    "Tables, columns and keys in the PresbyPortal schema, read from the code.",
 };
 
 /**
@@ -55,6 +57,8 @@ export default async function DataModelIndex() {
     (i) => i.enforcement === "paper",
   ).length;
 
+  const omitted = Object.entries(NOT_LISTED);
+
   return (
     <div className="reg">
       <div className="reg__inner">
@@ -91,7 +95,7 @@ export default async function DataModelIndex() {
             </span>
           </p>
           <div className="reg__provenance">
-            <ProvenanceLabel kind="generated" />
+            <span>Tables:</span> <ProvenanceLabel kind="generated" />
           </div>
           <p className="reg__legend">
             A filled dot marks a table with an <code>organization_id</code>{" "}
@@ -171,10 +175,23 @@ export default async function DataModelIndex() {
             Rules marked <span className="reg__tag reg__tag--paper">paper</span>{" "}
             are the ones to watch: nothing in the database stops a violation, so
             review catches it. Some also have a source-scan check, which the
-            rule&apos;s text names. A test checks that every rule heading in
-            CLAUDE.md has an entry here; the wording of each entry is written
-            by hand.
+            rule&apos;s text names. A test checks that every heading under Key
+            Invariants in CLAUDE.md has an entry here or a recorded reason for
+            leaving it out. The wording of each entry is written by hand.
           </p>
+          {omitted.length > 0 && (
+            <>
+              <p className="reg__note">
+                Left out of this list, with the reason recorded in{" "}
+                <code>src/lib/dev-docs.ts</code>:
+              </p>
+              {omitted.map(([heading, reason]) => (
+                <p className="reg__note" key={heading}>
+                  <strong>{heading}.</strong> {reason}
+                </p>
+              ))}
+            </>
+          )}
           <ul className="reg__list">
             {INVARIANTS.map((inv) => (
               <li key={inv.title}>

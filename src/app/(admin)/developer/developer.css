@@ -494,6 +494,12 @@ a.reg__row:hover .reg__rowName {
 
 .reg__provenance {
   margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--iron);
+  font-size: 0.8125rem;
 }
 
 .reg__legend {

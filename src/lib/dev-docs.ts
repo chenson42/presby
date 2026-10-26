@@ -621,7 +621,7 @@ export const INVARIANTS: Invariant[] = [
  */
 export const NOT_LISTED: Record<string, string> = {
   "No Real Data":
-    "A rule about what may be committed to the repository, not a property of the running system; the portal obeys it and npm run check:secrets enforces the shapes it can.",
+    "A rule about what may be committed to the repository, not a property of the running system. npm run check:secrets checks the shapes it can.",
   "Verify in a Browser":
     "A working practice for people changing the code, not a property of the system.",
 };

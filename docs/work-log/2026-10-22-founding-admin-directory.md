@@ -8253,3 +8253,240 @@ Observations, none from this batch: on the Officers roster at 360 the table scro
 ### Handoff
 
 **Browser checks for QA:** run `no-organization-connect`, `community-sign-in-invite` and both hydration specs on a server whose database has 0067 (the 24 calendar specs go green there), expect `invitation-new-account` to flake about 1 in 20 until the race is fixed (the verdict above is the evidence, not a regression), and confirm the Google path with the operator's one-time production check named in the hand-offs. **Next agent:** qa (Phase 5), after the orchestrator applies 0067 to the pipeline branch. Nothing is pushed; the integration patch is not in the commit.
+
+---
+
+# Increment 2b — Phase 5: Verification (qa), run 1
+
+**Date:** 2026-10-26
+**Verified by:** qa (read-only). No repository file was edited. The staged `e2e-global-setup.integration.patch` was applied for the e2e runs and reverted with `git checkout -- e2e/support/global-setup.ts`. The tree is clean at `7832730`.
+**Worktree / branch / database:** `presby-2b`, `pipeline/signin-invites` @ `7832730`, Neon `ep-delicate-tree` (0065 and 0067 applied). Own dev server on :3540 (PID 20031, stopped by PID, port confirmed free). Production lane on :3541 (confirmed free afterwards).
+**Flag state:** global flags were reset to the CI baseline first (`scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, this worktree's `PLATFORM_DATABASE_URL`).
+**Scope run (everything requested, nothing taken from Phase 4's evidence):** typecheck, lint, `npm run check`, `npm run build`, full unit suite, full serial DB lane, `test-rls-65.sql`, full `test-rls.sql` with the staged patch in a scratch copy, full `chromium` and `custom-hosts` projects, prod lane, a real-browser walk at 1280 and 360, independent failing-first checks, live-catalog probes. The DB lane and the e2e lane never ran at the same time.
+**Not verified:** the branch is behind `origin/main` (0.44.1, 0.45.0 / 0068). Nothing here was run against merged `main`.
+
+## Type Check
+
+`npm run typecheck`: **PASS** (exit 0). `npm run lint`: PASS. `npm run check`: all eight tripwires pass. `npm run build`: PASS.
+
+## Unit Tests
+
+- **Unit (`vitest run`):** 617 files passed, 93 skipped. 9,528 passed, 2,803 skipped, 0 failed (30.7 s). The skips are the `skipIf(!hasDb)` DB suites, and every one of them ran in the DB lane below.
+- **DB lane (`npm run test:db`, serial):** 710 files passed. 12,330 passed, 0 failed, 1 skipped (1,935 s). The one skip is pre-existing: A1's pre-migration baseline also had exactly 1. No 2b file contains a skip.
+- **`test-rls-65.sql` as `presby_app`** (`rolbypassrls = f`, `ON_ERROR_STOP`): exit 0, 92 passes. Re-run after all probes: still 92.
+- **Full `scripts/test-rls.sql` (scratch copy, staged patch, stop-on-error off):** 1,390 passes. The only failures are the three known drift failures: `:217` presbytery members 3≠2, `:516` 2fa definer, `:7927` DECISION-152. The 6 "aborted" lines are cascades inside those three blocks. Sections 44, 46, 65 and 67 pass.
+  - **Defect in the staged asset:** `scripts/sign-in-invitations/test-rls.sql.integration.patch` no longer applies to HEAD. `git apply --check` reports "patch failed: scripts/test-rls.sql:8653".
+  - Hunk 3, the section-65 `\ir` append, collides with the section-67 include that the 0.44.0 merge brought in (`5fa2e29`). Hunks 1 and 2 (the section 44 conversions) apply.
+  - I appended the `\ir` by hand in the scratch copy only, so the suite could run.
+
+## End-to-End Tests
+
+| Lane | Total | Passed | Failed | Duration |
+|---|---|---|---|---|
+| `chromium`, :3540 | 491 | 489 | **2** | 21.8 m |
+| `custom-hosts`, :3540 | 111 | 111 | 0 | 3.4 m |
+| prod (`prod-build` + `prod-custom-hosts`), :3541 | 83 | 83 | 0 | 2.2 m |
+
+No test was skipped or left unrun in any lane. With 0067 now on the branch, Batch D's 24 calendar failures are green.
+
+**Failures (deterministic; failed again on a single re-run):**
+
+- `e2e/community-sign-in-invite.spec.ts:390`, lane 7, at desktop **and** at 360px. The assertion at **`:449-451`** expects `/o/<slug>/admin/roles` to say "don't have permission".
+- The page instead renders "Role administration isn't turned on for E2E Invitation Church yet." (`roles/page.tsx:84`, `isFlagEnabled("org_portal.roles")`).
+- `org_portal.roles` is `false` at its seed value and in the CI baseline. The spec's `captureFlags` / `setFlag` list at `:87-88` covers only members_create, officers and require_2fa.
+- So the test passes only on a branch where someone switched that flag on. This is the CI 2026-10-23 defect class, and it would fail in CI.
+- The rest of lane 7 after `:451` (Community list, views, edit page) did not run.
+
+**The auth gate:** the full login path ran against my own dev server. `totp-full-login` (an MFA-enrolled seeded user: password, a real TOTP challenge, landing), `totp-callback-bypass`, `session-claim-integrity`, `branded-signin` case 2, `sign-in-connect-smoke`, `post-login-routing`, `member-home`, `forgot-password` and `account-page` all passed.
+
+**F342 (the TOTP enrolment race):**
+- No 2b spec depends on it. The 2b specs that enrol (`no-organization-connect` (d) and (d2), `community-sign-in-invite` lane 7) go through `enrolOnPage`, which reloads and retries up to three times on "That code did not match".
+- The unedited `invitation-new-account` passed in this run.
+- The lane 7 failure is the flag above, not the race: it fails after enrolment succeeded.
+
+**Google path:** not e2e-able. It is covered by `src/auth.connect.test.ts` (which caught my mutation M1 below) and the DB tests. The operator's one-time production check is still owed.
+
+**Real-browser walk** (scratch spec outside the repo, using the repo fixtures; Chromium at 1280×800 and 360×740; screenshots in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa2b/walk/shots/`). Pages walked:
+- `/no-organization` N0, and "Nothing new yet." after Check again
+- N1 with two cards (a sign-in card, and a founding-administrator card in its not-enrolled two-factor variant)
+- `/invite` for a sign-in invitation, signed out
+- the Community edit card for a seated elder
+- the Session hand-off on the pending page
+- the platform panels and the designation revoke dialog
+
+Results:
+- No horizontal overflow anywhere.
+- No control on a new surface is under 44px.
+- The only small target is the pending page's "Back to portal" link at 20px, which predates 2b.
+- The walk is also where findings (a) to (c) under Copy Truthfulness were seen.
+
+## Regression Tests Added
+
+Fix commit `3423f81`. The regression tests are:
+- `sign-in-types.test.ts:285` (connected person has no blocked marker)
+- `sign-in-types.test.ts:314` (a blocked seat reads blocked and offers Open)
+- `org-invite.test.ts:640` (a blocked invitation reads blocked, not "Not connected yet")
+- `org-invite.test.ts:704` (a blocked seat's row reads blocked with Open)
+
+**Failing-first confirmed independently:** the pre-fix source with the post-fix tests gives 10 failed, including three of the named regressions (the `:285` one is a negative property, so it passes either way). The fix gives 162/162.
+
+**Failing-first for the key mechanisms (my own runs):**
+
+TypeScript, in a `git archive` scratch copy:
+
+| # | Mechanism removed | Result |
+|---|---|---|
+| M1 | Proof recorded for an unverified Google claim | 6 fail (`auth.connect.test.ts` ×5, `boundaries.test.ts` ×1) |
+| M2 | Factor passed as `true` at sign-in | 2 fail (`connect.test.ts`) |
+| M3 | G9 pre-check removed from accept in place | 1 fail (`actions.test.ts`) |
+| M4 | Check again takes the factor from the form | 2 fail |
+| M5 | Accept in place takes the user id from the form | 2 fail |
+| M6 | `unstable_update` given a payload | 4 fail |
+| M7 | Connect moved below the two-factor computation | Inconclusive: my mutation did not compile. B1's ordering mutation stands. |
+
+SQL: one owner transaction, rolled back. It granted itself SET on `presby_app`, applied the mutation, ran `SET ROLE presby_app`, and then ran the implementer's `test-rls-65.sql` with its blocks turned into savepoints. The unmodified baseline gave 92/92.
+
+| # | Mechanism removed | Result |
+|---|---|---|
+| f1 | `people_guard_user_link` disabled | 65.1, 65.2 FAIL |
+| f2 | `users_guard_email_proof` disabled | 65.1, 65.3 FAIL |
+| f3 | Connect's factor check removed | 65.7 (R42) FAIL |
+| f4 | Issue limits raised | 65.10 FAIL ("31st send was ok") |
+| f5 | In-place proof gate removed | 65.8 (E-16) FAIL |
+| f6 | In-place factor gate removed | 65.8 (R45) FAIL |
+| f7 | Connect's proof check removed | 65.7 (R37/E-34) FAIL |
+
+- **Resend cooldown and cancel:** checked by probe only. Unmodified: issue=ok, resend=cooldown, revoke=ok, revoke again=not_open. With the cooldown removed, resend=ok.
+- The Vitest-level failing-first for cooldown and chain cap needs committed DDL, so it rests on A2/B2's record.
+- Afterwards, the grant had not persisted (0 rows), both triggers read `O`, and `test-rls-65` gave 92 again.
+
+## Coverage on Critical Modules
+
+| Module | Coverage |
+|---|---|
+| `src/lib/permissions.ts` | 100% |
+| `src/lib/two-factor.ts` | 91.3% statements |
+| `src/lib/flags.ts` | 100% |
+| `view.ts` | 100% |
+| `no-organization-copy.ts` | 100% |
+| `connect.ts` | 97.6% |
+| `sign-in-types.ts` | 95.7% |
+| `sign-in-copy.ts` | 93.7% |
+
+## Live-catalog probes (0065, the pipeline branch)
+
+**Catalog state:**
+- `people`, `account_invitations`, `contact_methods` and `organization_feature_toggles` are RLS + FORCE.
+- `users`, `user_totp` and `email_verification_tokens` have no RLS (as designed).
+- `presby_app` has no privilege on `account_invitations` (`aclexplode`). EXECUTE is granted to exactly the 15 callables.
+- The five internals and every `presby_platform` grant are false.
+- Every definer is owned by `neondb_owner` and has `search_path=public, pg_temp`.
+- Both guard triggers are present and `O`.
+- Indexes present: `users_email_lower_uq`, `open_sign_in_person_uq`, `open_address_uq` (re-predicated) and the audit index.
+- Database-wide, the only `user_id` writers are `presby__bind_person_account` (update) and `presby__accept_invitation_core` (insert).
+- No connect, standing, listing or in-place body reads `is_platform_admin` or `verified_at`.
+- There are 17 organizations and 17 enabled toggle rows.
+
+**Which layer refuses what**, probed on the `presby_app` connection itself unless stated:
+
+| Probe | Result | Refusing layer |
+|---|---|---|
+| `update people set user_id` with no org context | 0 rows | RLS |
+| Same, with org context (row visible: 1) | refused | trigger `presby_guard_people_user_link` |
+| Stamped `users` insert; stamp from null | refused | trigger `presby_users_guard_email_proof` |
+| Address change | stamp cleared; a case-only change keeps it | trigger |
+| `select` on `account_invitations` | permission denied | grant |
+| Calling `presby__bind_person_account` or `presby__person_sign_in_standing` | permission denied | grant |
+| Case-variant duplicate address | refused | index `users_email_lower_uq` |
+| Owner (`neondb_owner`) updates `people.user_id` | 1 row, not refused | nothing (the recorded `paper` residual of DECISION-208) |
+| Owner changes an address without re-stamping | stamp cleared | the trigger, on every role |
+
+## Feature-Gate Audit
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct key? |
+|---|---|---|---|
+| `checkAgainAction` (`no-organization/actions.ts`) | yes (redirects if signed out) | n/a (DECISION-226: identity binding gated by database facts; the user id and the factor flag come only from `auth()`, pinned by scans and by my M4) | n/a |
+| `acceptInPlaceAction` | yes | n/a (DECISION-228: proven address and factor in the definer; G9 pre-check; M3/M5) | n/a |
+| `switchAccountAction` | n/a (sign-out only) | n/a | n/a |
+| `sendSignInInvitationAction` / `resend…` / `revoke…` (community `[id]/edit/actions.ts`) | yes, plus `resolveOrgContext` | tenant axis: `people.manage` checked in the library, re-checked by the definer through `presby__actor_person`; `officers.manage` for seats in the definer | `people.manage` |
+| `revokeAllInvitationsAction` (admin `organizations/[id]/actions.ts`) | yes | yes | `FEATURES.ADMIN_ORGANIZATIONS`, plus the new required `scope` |
+| `(invite)/actions.ts` | unchanged gates (outcome mapping only) | unchanged | unchanged |
+| `/no-organization` page | yes (`cachedAuth`, redirect) | n/a | n/a |
+| Admin org page (new panel) | yes | yes | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `src/app/api/**` | no route added or changed | | |
+
+Note, not a FAIL: the three community sign-in actions do not re-check the `org_portal.members_create` flag or toggle. Neither does any other action in that file, and Phase 3 named this as the existing paper control.
+
+## Copy Truthfulness — **copy truthfulness: FAIL (3 findings)**
+
+- [x] Every added or changed string checked against the Copy tables (§10 and amendment 3)
+- [x] Queries behind the claims opened
+- [x] Instructions traced to their viewer's render gate and permission
+- [ ] **Older strings made false: no.** Findings (c) and (a) are both of this kind.
+
+**(a) `src/lib/onboarding/no-organization-copy.ts:78-79`, the card for a founding-administrator or treasurer invitation.**
+- It reads "{Congregation} invited you to be its founding administrator / treasurer."
+- **Viewer:** the address-proven account holder on `/no-organization`, view N1. Seen live.
+- Designation rows are `origin = 'platform'` by CHECK (the purpose/origin tie), and the listing reads no origin and no inviter. The email for the same row (`invitation-email.ts:154`) and the `/invite` page (`invite-summary.tsx:48`) both say "A PresbyPortal administrator invited you".
+- The card misattributes who sent it. The string is in the §10 Group C Copy table, so this traces to the design.
+
+**(b) `src/lib/onboarding/sign-in-copy.ts:120`, rendered at `sign-in-card.tsx:251`.**
+- It reads "Accepting lets them sign in as themselves. It doesn't change what they can do here."
+- **Viewer:** a `people.manage` holder on the Community edit card, `none`/`revoked` state, for any record. That includes an elder reached from the Session hand-off's "Invite" link. Seen live.
+- It renders directly above "{Name} holds a role or a seat here…".
+- Connecting activates whatever the record carries. The design's own Group F check says "recording seats, connecting activates", and release-note "do not write" #6 says the same. The banner on the pending page tells the same viewer that no one can approve until a member connects.
+- This is a Phase 3 string that the Q1 ruling (elders connect) and the hand-off made false.
+
+**(c) `src/app/(admin)/admin/organizations/[id]/revoke-all-invitations.tsx:39-48` and `revoke-all-control.tsx:53-54`.**
+- The designation takedown still says:
+  - "This organization has N open invitations. Revoke them all at once…"
+  - "Revoke every open invitation?"
+  - "Every open invitation for {org} stops working immediately, whoever it was sent to."
+  - on success, "All open invitations were revoked." The `org_sent` control shows the same success message.
+- **Viewer:** a platform operator holding `FEATURES.ADMIN_ORGANIZATIONS`.
+- After 2b the control posts `scope=designations`, and N counts platform rows only (`issue.ts:1019`). The congregation's open sign-in invitations survive the takedown.
+- Seen live: 1 open designation and 1 open sign-in invitation, and the dialog claimed every open invitation.
+- §10 told Batch C to keep "its existing confirm unchanged", and the neighbour check missed it. For an abuse takedown, misreporting scope is the costly direction.
+
+**Rulings on Batch C's off-Copy strings** (all acceptable as derivations):
+
+| String | Ruling |
+|---|---|
+| `NAME_FALLBACK = "you"` | Unreachable: `first_name` and `last_name` are NOT NULL and a sign-in row requires a person. Grammatical. |
+| Org-sent dialog title reuses the button text | True. |
+| "Keep them" / "Yes, revoke all" reused | Pre-existing on `main`, and true for the `org_sent` scope. "Cancel"/"revoke" verb mismatch is cosmetic. |
+| Panel load-failed borrows `SIGN_IN_CARD_COPY.loadFailed` ("We couldn't load this just now. Reload the page.") | True and generic. |
+| Marker separator in "Not connected yet. No email on file" | Fine. |
+| "Address removed" and "Sent {date}" in the org-sent rows (not reported, but reused from `invitation-list.tsx:116,135`) | Fine. |
+
+The success message in the shared control is **not** acceptable; see (c).
+
+**Observations, not FAIL (the operator approved these strings):**
+- "One more step: set up two-factor sign-in to finish connecting" leads to a second step, because enrolment does not verify the session (E-35, recorded in the design).
+- The sign-in email's "you choose a password" is false for a recipient who already has an account (Group I, which the operator read).
+- The Session hand-off sentence is unhedged, whereas the card's `by_sign_in` line says "if it can".
+
+## Verdict
+
+**FAIL.**
+
+1. **e2e flag dependency.** `e2e/community-sign-in-invite.spec.ts:449-451` (lane 7, both widths) depends on `org_portal.roles` without setting or capturing it. It fails deterministically on the CI-baseline flags. Back to the Batch D implementer.
+2. **Copy truthfulness, findings (a) to (c).** All three trace to design Copy text, so they escalate to **tech-lead** for a Copy amendment, then to the implementers (api-developer for `no-organization-copy.ts` and `sign-in-copy.ts`; ux-developer for the revoke-all components), each with an exact-text test that fails on the old text.
+3. **Staged patch.** `scripts/sign-in-invitations/test-rls.sql.integration.patch` must be re-staged against the current `scripts/test-rls.sql` (database-admin), or the orchestrator appends the `\ir` by hand at integration.
+
+Everything else is green: the auth gate (real server, MFA-enrolled user, full login), the DB lane, the SQL isolation suite, custom-hosts, the prod lane, the 360px walk, the gate audit, the live-catalog probes, and failing-first for every key mechanism.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 5 — Verification, run 1 | qa | Complete. Static gates and build green. Unit 9,528 / 0 failed. DB lane 12,330 / 0 failed / 1 pre-existing skip. `test-rls-65` 92. Full `test-rls.sql` 1,390 with only the 3 known drift failures; the staged patch's hunk 3 no longer applies to HEAD. Flags reset to the CI baseline. e2e on own :3540: chromium 489/491 (lane 7 ×2 fails on `org_portal.roles`, repeats), custom-hosts 111/111, prod :3541 83/83. Auth gate met with an MFA-enrolled user. Failing-first reproduced (6 TS mutations; 7 SQL mutations caught by the implementer's suite; cooldown by probe; fix `3423f81` regression fails then passes). Gate audit clean. Live-catalog layer probes match the design. Copy truthfulness FAIL ×3 (designation card misattributes the sender; card says accepting "doesn't change what they can do"; designation takedown claims "every open invitation"). | **FAIL** | 2026-10-26 |
+
+## Handoff
+
+- **To tech-lead (Phase 3):** a Copy amendment for findings (a), (b) and (c), naming the corrected strings and their exact-text tests. The neighbour checks in §10 Groups C and I and the Phase 3 panel row are where they were missed.
+- **To full-stack-developer (Batch D):** `e2e/community-sign-in-invite.spec.ts`. Add `org_portal.roles` to the `captureFlags`/`setFlag` list at `:87-88` (or assert both refusal states), then re-run lane 7 at both widths on reset flags.
+- **To database-admin:** re-stage `scripts/sign-in-invitations/test-rls.sql.integration.patch` so `git apply --check` is clean on the current tree (append after the section-67 include).
+- **Next QA run:** the changed files and lane 7, plus the walk of the three corrected surfaces at 360 and 1280. The rest of this run's evidence stands unless the fixes touch `src/auth.ts`, a migration, or `e2e/support/`.
+
+Scratch artefacts (logs, walk screenshots, the SQL harness, the scratch copy) are under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa2b/`.

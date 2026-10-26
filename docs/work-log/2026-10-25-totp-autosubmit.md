@@ -875,3 +875,193 @@ Red evidence was taken in the worktree before editing the source (the working tr
 **Gate results.** `npm run typecheck`, `npm run lint`, `npm run check` (all eight tripwires) clean. The three changed unit files: 104 passed (100 before this loop-back, plus the 4 new tests C-4, C-4b, F-5b, N-3b). `e2e/totp-code-entry.spec.ts` plus `e2e/totp-full-login.spec.ts` on :3560 with the MFA-enrolled user: 19 passed. The dev server was stopped by PID. 360px look at the overflow case: six filled boxes, Verify enabled and not pending, no horizontal overflow.
 
 **Handoff:** to qa (Phase 5 re-run, scoped to O-1: C-4, C-4b, F-5b, N-3b, E-8b, plus the three unit files and the two e2e specs), then analyst (Phase 6). Still for the orchestrator at integration: DECISION-257 and the DECISION-193(a) pointer in `docs/decisions.md`, the Gap 6 TODO line.
+
+---
+
+# Phase 5 — Verification (qa), run 2 (O-1 loop-back)
+
+**Verdict: PASS.** The O-1 fix works and its tests fail on the old code. The implementer's one deviation (C-4b) matches Decision 3. I edited no repository files.
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-otp`, `pipeline/totp-autosubmit` at `9216216` (fix commit `5036932`). Neon branch `pipeline-totp-autosubmit`. I compared endpoint hashes, not values: both connection strings point to a different endpoint from the main checkout's `development` branch.
+
+**What I ran.** The diff since run 1 (`404de0b..9216216`) is small:
+- the `exact` calculation in `spread()` in `src/components/shared/one-time-code-input.tsx`, plus its doc comments;
+- one comment in `src/app/(auth)/totp/totp-challenge-form.tsx`;
+- four new tests across the three unit files and `e2e/totp-code-entry.spec.ts`;
+- `docs/ui-standards.md:407`.
+
+No action, page, `src/auth.ts` or `src/proxy.ts` changed: `git diff --quiet 404de0b HEAD` is clean for those files.
+
+I ran:
+- typecheck, lint and `npm run check`;
+- the three changed unit files, on HEAD and on the pre-fix source;
+- e2e on my own dev server at :3560: the five named specs, then every other spec that reaches `OneTimeCodeInput` directly or through the shared helpers (`verifiedContext`, `submitTotp`, `enterTotpCode`);
+- a 360px look at the overflow case;
+- component probes for other inputs that drop a digit.
+
+**Not re-run:**
+- the full e2e suite (the consumer set was green, so nothing triggered it);
+- the prod-build lane: `e2e/hydration/totp-challenge.spec.ts` types through the keyboard, which never reaches `spread()`. Run 1 had 13/13 at `404de0b`, and CI runs both lanes;
+- the DB-backed vitest suites and `test-rls.sql`: no migration, `authz.ts`, `src/lib/db/` or fixture change.
+
+**Flag state:** before any e2e run, I reset global flags to the CI baseline with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, against this worktree's `PLATFORM_DATABASE_URL` only. It ended in `COMMIT`.
+
+**Environment:** I checked env vars for presence only and printed no values. 563 GiB disk free.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**
+- `npm run lint` (`--max-warnings=0`): **PASS** (exit 0)
+- `npm run check`: **PASS**, all eight tripwires, including `check:hydration-gate` (H3) and `check:proxy-imports`
+
+## Unit Tests
+
+The three changed files on HEAD: **104 passed, 0 failed, 0 skipped.** C-4, C-4b, F-5b and N-3b are all green.
+
+**Failing-first, checked independently.** I built a `git archive HEAD` copy and put back the two source files `5036932` changed (`one-time-code-input.tsx` and the comment-only `totp-challenge-form.tsx`) at their `5036932^` versions, keeping the new tests. I used no `git stash`.
+
+| Test | Old source | HEAD |
+|---|---|---|
+| C-4 (`one-time-code-input.test.tsx:430`) | **FAIL**: `onComplete` called with `{ exact: true }`, expected `false` | pass |
+| C-4b (`:441`) | pass. It checks behaviour the old code already had, as the implementer stated | pass |
+| F-5b (`totp-challenge-form.test.tsx:146`) | **FAIL**: `verifyTotpAction` called once (`:151`) | pass |
+| N-3b (`totp-enroll-form.test.tsx:123`) | **FAIL**: the form auto-submitted, the success panel replaced the boxes, and the box lookup at `:129` failed | pass |
+| E-8b (`e2e/totp-code-entry.spec.ts:253`), old-source dev server on :3560 | **FAIL** at `:267`: Verify disabled. The server log shows the auto-submit `POST /totp` | pass |
+
+All three files on the old source: 3 failed / 104 — exactly C-4, F-5b and N-3b. That matches the Phase 4 loop-back record.
+
+**Probes on the HEAD component** (a throwaway vitest file in the scratch copy, now deleted):
+
+| Probe | Result |
+|---|---|
+| P1: 3 typed, then a 4-character change event (autofill, not paste) into box 4 | `123456`, `exact: false` |
+| P2: complete code, then box 6's selected digit replaced by a 2-character change event `78` | `123457`, **`exact: true`**. See O-9 |
+| P3: 5 typed, then paste `67` into box 6 | `exact: false` |
+| P4: paste `123456789` into box 1 | `exact: false` |
+| P5: 5 typed, then a 2-character change event into empty box 6 | `exact: false` |
+| P6: 3 typed, then paste `4 5-6` into box 4 (fits after stripping) | `exact: true` |
+| P7: complete code, then paste `78` into box 1 | `783456`, `exact: true`. Nothing dropped; same as run 1 |
+
+## End-to-End Tests
+
+The dev server on **:3560** ran from the worktree with the e2e env (`RATE_LIMIT_DISABLED`, the `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`; `E2E_ALLOW_SHARED_DB=true` on the runner). I stopped it by PID, and ports 3560 and 3561 are free. The `mfa-enrolled` seeded user was used throughout. `totp-full-login` covers password, then a typed TOTP that auto-submits, then `/admin`.
+
+- **Named set** (`totp-code-entry`, `totp-full-login`, `totp-recovery-code`, `invitation-new-account`, `hydration/totp-challenge`; `--project=chromium`): 23 total, 23 passed, 0 failed, 0 skipped, 39.3s. E-8b ran at 360px and asserts no horizontal overflow.
+- **Other consumers**, `--project=chromium --project=custom-hosts`: 162 total, 162 passed, 0 failed, 0 skipped, 10.1m. The specs:
+  - `session-claim-integrity`, `totp-callback-bypass`, `branded-signin`
+  - `invitation-existing-account`, `account-page`
+  - `giving-admin`, `giving-connect`, `giving-member`, `giving-public`, `giving-settlements`, `giving-statements`, `giving-webhook`
+  - `hydration/domains-claim-form`, `hydration/giving-give-form`, `hydration/giving-offline-gift-form`
+  - `custom-domains/domains-admin`, `custom-domains/domains-platform`, `custom-domains/forms-and-giving`
+- The two `src` files I found that use the component are `totp-challenge-form.tsx` and `totp-enroll-form.tsx`. The e2e helper `enterTotpCode` types with `page.keyboard.type`, which uses the one-digit path and never reaches `spread()`. Only paste and fill tests reach the changed line.
+
+**360px look at the overflow case** (Chromium at 360×740, `/totp?callbackUrl=%2Fadmin`, typed 1, 2, 3, then a real clipboard paste of `4567` into box 4):
+- Boxes show `123456` and the form stays on `/totp`.
+- 0 POSTs after 1.5s; no error alert; the status region is empty.
+- Verify reads "Verify" and is enabled; focus is on box 6.
+- 0px horizontal overflow.
+- Screenshot: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-otp-r2-shots/totp-360-overflow-paste.png`.
+
+I did not repeat the overflow case visually on `/account/2fa`. N-3b covers it in unit tests, and the layout there is unchanged since run 1.
+
+**Decision 3 and the deviation (C-4b): it matches.** Decision 3 says: "A paste or autofill with exactly 6 digits after stripping spaces and dashes auto-submits. One with more than 6 digits … does not auto-submit."
+- A 6-digit paste into box 4 is exactly 6 digits. It restarts at box 1, replaces the whole code, and drops none of the pasted digits. Submitting it follows the letter of Decision 3 and its purpose: a truncated input waits; a whole code submits.
+- The brief's literal formula, `start + digits.length <= length`, would have stopped this paste from submitting. That breaks Decision 3's letter. It would also stop a whole-code autofill landing in a focused later box from submitting, which is the iOS and password-manager case Decision 2 wants covered.
+- The typed digits 1–3 being overwritten is the old whole-code-replace behaviour (C-3). It is not a dropped pasted digit.
+
+The implemented rule is right; C-4b pins it.
+
+## Regression Tests Added
+
+- **C-4** (`src/components/shared/one-time-code-input.test.tsx:430`) — guards against a short paste that overflows the remaining boxes being marked exact. Failed before the fix.
+- **C-4b** (`:441`) — keeps the exact-fit paste and the whole-code paste into a later box marked exact, so the next change cannot over-correct.
+- **F-5b — regression for O-1** (`src/app/(auth)/totp/totp-challenge-form.test.tsx:146`) — `/totp` does not auto-submit when a digit is dropped, and Verify posts `123456` once. Failed before the fix.
+- **N-3b — regression for O-1** (`src/app/(account)/account/2fa/totp-enroll-form.test.tsx:123`) — same guard on enrolment. Failed before the fix.
+- **E-8b — regression for O-1** (`e2e/totp-code-entry.spec.ts:253`) — browser proof at 360px: no POST, Verify enabled, then exactly one POST on click. Failed before the fix.
+
+**Naming nit (does not block):** the new component test is named "C-4", but "C-4: a repeated identical whole-code input event reports completion once" already exists, and the Phase 3 Edge Cases cite C-4 for that one. The new C-4 and C-4b also lack the `— regression for O-1` suffix the other three carry. Renaming them (for example to C-5 and C-5b with the suffix) is a test-name-only change for the implementer.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`, `src/lib/two-factor.ts`, `src/lib/flags.ts`: not changed since run 1 (100% / 91.3% / 100% statements there).
+- `one-time-code-input.tsx` on HEAD: 100% statements, 95.5% branches. The uncovered branches are the overtype path (lines 174 and 178–182). The new `exact` expression is fully covered.
+
+## Feature-Gate Audit
+
+**No protected routes touched.** `5036932` and `9216216` add or change no route handler, server action, permission or flag. `verifyTotpAction`, `completeEnrollment`, `totp/page.tsx`, `src/auth.ts` and `src/proxy.ts` are unchanged since run 1.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| `verifyTotpAction` (unchanged) | yes (unchanged) | n/a (sign-in only, by design) | n/a |
+| `completeEnrollment` (unchanged) | unchanged | n/a | n/a |
+
+## Copy Truthfulness
+
+No user-facing string changed in this loop-back. Only comments and docs changed.
+
+- [x] **In the Copy table:** no new user-facing string.
+- [x] **Source of each claim checked against `spread()` and `handlePaste()`:**
+  - `docs/ui-standards.md:407`, "a paste that drops a digit, such as an over-long one, does not submit": true. Every paste goes through `spread()`, and P3, P4, C-4 and E-8b confirm it.
+  - The O-3 typo is fixed ("move. A complete code").
+  - The prop doc at `one-time-code-input.tsx` (lines 57–61) says `exact` is false when "a paste or autofill delivered a digit that was dropped". That holds for pastes and for change events of 3 or more characters. P2 is a narrow exception: a 2-character change event that replaces a filled, selected box (O-9).
+- [x] **Instructions:** none added.
+- [x] **Older strings about the same subject:** none is now false. Four still say only "over-long" and are now incomplete:
+  - `docs/product/functionality-map.md:54` ("an over-long paste fills the boxes and waits")
+  - `docs/testing.md:65` ("Recovery mode and an over-long paste still need the button")
+  - the DECISION-257 draft in this work-log (line 373, "an over-long paste or autofill fills the boxes and waits")
+  - the release-note draft (line 453, "If you paste something longer than six digits…")
+
+  Recommendation: widen the DECISION-257 text when the orchestrator lands it, and the release-note line at Phase 6, to "a paste that doesn't fit".
+
+**Copy truthfulness: PASS.**
+
+## Observations (do not block the verdict)
+
+- **O-1: closed.** The fix is verified above.
+- **O-3: closed** (typo fixed).
+- **O-9 (new, low): one input path can still drop a digit and auto-submit.**
+  - What happens: focus selects a filled box (`one-time-code-input.tsx:279`). A 2-character change event then replaces the selection, for example a keyboard-suggestion chip or a drag-and-drop of `78` onto box 6 of a complete code. That takes the overtype path (lines 177–183), which keeps the first digit, drops the second, and commits with the default `exact = true`. P2 gave `123457` with `exact: true`.
+  - Why it is low: an actual paste event, and change events of 3 or more characters, are handled correctly. Reaching this needs a non-paste insertion of exactly 2 characters into a filled box. The cost is one attempt, the same as the accepted typo risk.
+  - Possible fix, if wanted: in the overtype path, commit with `exact = false` when `prev` is not one of the 2 characters. That would be a new failing-first test for the implementer.
+  - Recommend recording it as a TODO rather than holding the pipeline.
+- **O-10 (naming):** the duplicate "C-4" name and missing suffix, under Regression Tests Added.
+- **Still open from run 1:**
+  - O-2: DECISION-257 and the DECISION-193(a) pointer in `docs/decisions.md:336` are still to land at integration (Rule 16).
+  - O-4: a thrown `completeEnrollment` still fails silently.
+  - O-5: real-device autofill, a screen reader and bfcache back-navigation are still unverified.
+  - O-6: the disabled recovery toggle still shows no visual change.
+  - O-7: the missing stash entry is for the orchestrator.
+
+**Leftovers:**
+- `git status` in the worktree is clean at `9216216`; the main checkout is clean; `git stash list` is empty.
+- I started two dev servers on :3560 and stopped both by PID.
+- The scratch copy is deleted, including its `.env.local` and node_modules clone.
+- Logs and the screenshot remain in the scratchpad (no secrets): `qa-otp-r2-named.log`, `qa-otp-r2-consumers.log`, `qa-otp-r2-old-dev.log`, `qa-otp-r2-head-dev.log`, `qa-otp-r2-shots/`.
+
+## Verdict
+
+**PASS**
+
+The auth gate is met. The e2e ran against my own dev server on :3560 with the MFA-enrolled seeded user, including the full login path in `totp-full-login`. The named set passed 23/23 and the consumer set 162/162, with 0 skipped. I reproduced the failing-first runs myself:
+- unit: 3 failed / 104 on the old source (exactly C-4, F-5b and N-3b), 104/104 on HEAD;
+- e2e: E-8b failed on an old-source server and passes on HEAD.
+
+---
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 2, O-1 loop-back) | qa | Complete. Failing-first reproduced myself (unit 3/104: C-4, F-5b, N-3b; E-8b red on the old-source server); HEAD 104/104; typecheck, lint and check green; e2e on :3560 with the MFA-enrolled user: named 23/23, consumers 162/162, 0 skipped; 360px overflow case checked; flags reset to the CI baseline; C-4b deviation judged to match Decision 3 | PASS | 2026-10-25 |
+
+**Handoff:** to **analyst (Phase 6)**.
+- Carry O-9 (rule on it or make it a TODO), O-4 and O-5.
+- At integration, the orchestrator must:
+  - land DECISION-257, worded as "a paste that drops a digit", not just "over-long", plus the DECISION-193(a) pointer at `docs/decisions.md:336`;
+  - land the Gap 6 TODO line;
+  - optionally widen `docs/product/functionality-map.md:54` and `docs/testing.md:65`;
+  - check O-7.
+- The release-note line ("longer than six digits") should be widened at `/release-notes`.
+- O-10 (test renames) is optional for the implementer.

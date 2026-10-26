@@ -19,7 +19,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 | 1 — Functional refinement | analyst | Complete (parent log): R1–R15, Q1–Q14 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; implementer named per batch; eight items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note) | Design complete | 2026-10-25 |
-| 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Pending | — | — |
+| 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests; 2 giving-team tests red pending a ruling (loop-back 1). Batches 1b–7 pending | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -817,6 +817,110 @@ Per batch (table above): **database-admin** (Batch 1a, 1b); **api-developer** (B
 # Phase 4 — Implementation
 
 *(Per batch; implementers fill in. Files created, files modified, schema changes, audit events, deviations, strings added or changed with file:line, gate counts.)*
+
+## Batch 1a — database-admin (2026-10-25)
+
+Built on `origin/main` at 0.43.0 (`2a25584`, fast-forward). Scope: 0073 without the receipt FK, 0074, the Drizzle mirror, the presby_app suite, the dev seed, the integration patch, DB tests. Batch 1b (the receipt FK and its 0072 guard) is marked in 0073 section 1d.
+
+### Files Created
+
+- `drizzle/0073_presby_reimbursements.sql` — six tables; RLS, grants; 18 internal helpers; the triggers (delete, insert, transition/freeze/revision, attachments, payments, events, config, two deferred constraint pairs); the F301 guards; the identity literal; 17 write and 13 read definers.
+- `drizzle/0074_presby_reimbursement_permissions.sql` — four keys; treasurer template bindings; `reimbursement_clerk` template; backfill; closing assertions.
+- `src/lib/db/domain/reimbursement.ts` — Drizzle mirror of the six tables (types only; presby_app cannot query four of them).
+- `src/lib/testing/reimbursement-fixture.ts` — DB-test harness (orgs, members, seats, roles, blobs, presby_app calls, `pgError`).
+- `src/lib/db/domain/reimbursement.schema.test.ts` (pure), `reimbursement.db.test.ts` (owner-path triggers), `reimbursement-definers.db.test.ts` (definers via presby_app), `reimbursement-permissions.db.test.ts` (0074).
+- `scripts/treasury/test-rls-73.sql` — section 73, runs as presby_app.
+- `scripts/treasury/seed-dev-treasury.sql` — Alder: keys on the treasurer role, toggle on, Tobias chair of Property Committee, Property Committee and Session chargeable, two categories. No people, users or memberships.
+- `docs/work-log/treasury-inc1.integration.patch` — the four Rule 16 shared-file edits, as a `git apply`-able diff checked against HEAD: `src/lib/db/domain/index.ts` (export), `drizzle/meta/_journal.json` (idx 73, 74), `scripts/test-rls.sql` (`\ir treasury/test-rls-73.sql`, and the template-role count 6 to 7), `scripts/seed-dev.sql` (`\ir treasury/seed-dev-treasury.sql`). Applied locally to test, then reverted; none of the four is committed.
+
+### Files Modified (F323 modify targets; not shared files)
+
+- `scripts/giving/test-rls-46.sql` — 46j: six 2FA keys (was three) plus an assertion naming the three reimbursement ones; 46m: the treasurer template carries exactly seven keys.
+- `src/lib/onboarding/designation-parity.golden.json` — regenerated with `WRITE_DESIGNATION_GOLDEN=1` under the DECISION-269/F322 ruling. Diff reviewed key by key: exactly the four reimbursement keys added to the three treasurer blocks (`tr-congregation`, `tr-new_worshiping_community`, `tr-f109-congregation`); nothing else moved. The HEAD golden failed those three scenarios against the new state first.
+- `e2e/invitation-existing-account.spec.ts:342` — `permissionKeys` is the seven-key sorted list (`presby_apply_treasurer` sorts with `collate "C"`).
+
+### Schema Changes
+
+- Migration mode: **hand-written**. Applied with `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0073_presby_reimbursements.sql` then the same for 0074, against the `pipeline-treasury` Neon branch (owner, direct endpoint). Never against `$APP_DATABASE_URL`, development or production.
+- Idempotency: each whole file applied twice in a row, both exit 0, row counts unchanged (0074: `4|9|1` permissions / reimbursement bindings / clerk template after apply 1 and after apply 2; 0073 re-applied after every in-place edit during the batch, final double apply recorded under Gates). `reimbursement-permissions.db.test.ts` also replays the whole 0074 text twice inside a rolled-back transaction with no count change.
+- `_journal.json`: entries `{idx 73, tag 0073_presby_reimbursements}` and `{idx 74, tag 0074_presby_reimbursement_permissions}` are in the integration patch, not committed (Rule 16).
+- Tables: `reimbursement_chargeable_groups`, `reimbursement_categories`, `reimbursement_requests`, `reimbursement_attachments`, `reimbursement_payments`, `reimbursement_events`. Every one: `unique (id, organization_id)`, composite FKs (groups `(id, org)`, memberships `(person_id, org)`, own tables `(id, org)`), single-column FKs only to `organizations` (cascade) and `users` (actors), FORCE RLS, one `tenant_isolation` policy. presby_app: SELECT on the two config tables, nothing on the other four; presby_platform: nothing; DELETE: nobody.
+- `check:schema-parity` (run with the index export applied locally): 91 domain tables, 0 failing; the six new tables have no difference, so no allowlist row is needed in 1a. Batch 1b's receipt FK will need the architectural `extra_fk` row the other blob FKs carry.
+
+### Deviations from the Phase 3 text (each named in the 0073 / 0074 headers)
+
+- **D1** A `withdrawn` request may be incomplete (completeness and vendor-name CHECKs admit `draft` and `withdrawn`): "a discarded draft is withdrawn" (Phase 2).
+- **D2** An eligible approver and an effective key holder must have an active login (`people.user_id` set, `users.is_active`). The design says "live, unmerged person". A chair who cannot sign in would make the route `seat` forever and block the override path. **Needs a ruling** (see loop-back list).
+- **D3** A payment row admits a null payer only for an `origin = 'import'` request (trigger-enforced; the R13 door needs it for an imported paid row).
+- **D4** Extra outcomes, each for a case the list did not name: submit `not_editable` (withdrawn or voided); withdraw, void, reverse `reason_too_long`; waive, record, note `note_too_long`; attach `invalid_shape`. Extra return columns, never fewer: submit `missing`; approve `current_status`; return `decided_on`, `current_status`, `notify_requester_person_id`; void `notify_requester_person_id`; record_payment `payment_id`, `self_paid`, `notify_requester_person_id`; reverse `payment_id`.
+- **D5** A pay holder cannot waive the receipt on, or send back / mark not approved, a request they created or are paid by. Consequence: a sole pay holder paying their own request must attach a receipt.
+- **D6** `needs_another_payer` counts a pay holder who could actually pay this request (not the actor, the approver in force, the creator or the beneficiary). `needs_second_payer` (override) counts any pay holder who is not the actor (Q6 as written).
+- **D7** Until Batch 1b's FK, `attach_receipt` checks the blob exists at the acting org with the stated content type and byte size.
+- **D8** 0074's closing assertion does not fail on an org-owned **custom** role carrying a key (an adopted clerk copy, or a role the treasurer delegated through the team page). The design's "any other role" would make 0074 fail on replay once the team page is used. It still fails on any protected or constitutional non-treasurer role, and on the six named office roles of any kind.
+- **D9** `reimbursement_events.seq` (identity) orders history. Events in one transaction share `created_at = now()` (which the deferred check matches on), so `(created_at, id)` was random order; the index is `(request_id, created_at, seq)`.
+- **Order in `record_payment`**: `payer_is_approver` and `needs_another_payer` are checked before `receipt_missing`, so a person who can never pay this request is told that rather than asked for a receipt.
+- **Dates**: every "today" is org-local (`presby_reimbursement_org_today()`, America/New_York fallback). `treasurer_list` and `export_rows` filter `from`/`to` on the org-local date of `coalesce(submitted_at, created_at)`. That choice is mine; the design did not say which date.
+- **History at member level**: `override_approved` is shown as `approved`; `note`, `receipt_waived` and `imported` are omitted; notes appear only on `returned` / `not_approved` events; no actor names.
+
+### CHECKs and triggers restated in English (checked against Phase 3, not against the SQL)
+
+- `kind_shape`: a pay-me-back request names exactly one person and no vendor. A vendor request names no person, and must name the vendor unless it is a draft or a discarded draft. Matches DECISION-268 plus D1.
+- `complete_shape`: anything past a draft (other than a discarded draft) has an amount, a date and a purpose. Matches.
+- `submission_shape`: the first and latest submission stamps are set together; a draft has neither; an app request that is neither draft nor withdrawn has been submitted. Matches.
+- `approval_shape`: approval columns are all empty or all set (actors may be empty only on an import); the path is seat or override; an approval exists exactly while approved or paid. Matches.
+- `waiver_shape`: waiver columns all empty or all set (actor empty only on an import); a waiver exists only while submitted, approved or paid. Matches.
+- `payments_shape` / `check_reference`: a payment has a method and a date and offsets nothing; a reversal offsets a payment, has a reason, and has no method, reference or date; a check payment has a check number. Matches.
+- `events_actor_shape`: every history row names who acted, except an import. Matches.
+- Insert guard: an app request starts as a draft at revision 1 with nothing stamped; an import may start anywhere. Matches.
+- Update guard: identity never changes. Kind, group and payee freeze at the first submission. Edits happen only while draft or returned, never in the same write as a status change, and each edit or receipt change moves the revision by exactly one. Status moves only along the listed arrows. Submit needs a receipt or the no-receipt claim and stamps its own times. Approve names an approver who is neither creator nor beneficiary (merges and logins included), on the current revision. Paid needs a live payment and leaving paid needs none. Leaving approved/paid clears the approval; leaving submitted/approved/paid clears the waiver. A waiver is set once, while submitted or approved. Matches P3-6..P3-8 and DECISION-268.
+- Attachment guard: a receipt is added or detached only while draft or returned, at most five live, a detach changes nothing else and happens once, and either bumps the revision. Matches P3-17.
+- Payment guard: insert only. A payment needs an approved request, a receipt or waiver, no live payment, the request's amount, a date between the expense and org-local today, and a payer who is not the approver; it stamps self_paid itself. A reversal needs a paid request and offsets one un-reversed payment of the same request for the same amount. Matches P3-7 and DECISION-268.
+- Deferred: at commit a request is paid exactly when it has a live payment, and every insert or status change has a same-transaction event moving to that status. Matches P3-6.
+- Delete guard: no row of the six is deleted while its organization exists. Matches EC34.
+
+### Handoff for Batch 2a (api-developer): the SQL contract
+
+Every public definer: `security definer`, `search_path = public, pg_temp`, EXECUTE to presby_app only, actor (`users.id`) last, no defaulted parameters. Identity refusal is SQLSTATE `42501` with the literal `reimbursement: not permitted`. Outcomes are listed in check order in each function's 0073 comment (section 7); `outcomes.ts` should be pinned to those comments.
+
+- Writes: `save_draft(client_key, kind, group_id, beneficiary_person_id, vendor_name, amount_cents, expense_date, purpose, category_id, pre_approved_by, no_receipt, actor) -> (outcome, request_id, revision, created)`; `update_request(request_id, expected_revision, kind, group_id, beneficiary_person_id, vendor_name, amount_cents, expense_date, purpose, category_id, pre_approved_by, no_receipt, actor) -> (outcome, revision)`; `submit(request_id, expected_revision, actor) -> (outcome, route, notify_person_ids, group_name, revision, missing)`; `withdraw(request_id, reason, actor)`; `approve(request_id, expected_revision, path, actor) -> (outcome, decided_on, current_status, notify_requester_person_id, notify_pay_person_ids)`; `return(request_id, expected_revision, kind, reason, actor) -> (outcome, decided_on, current_status, notify_requester_person_id)`; `void(request_id, reason, actor) -> (outcome, notify_requester_person_id)`; `waive_receipt(request_id, note, actor)`; `record_payment(request_id, method, reference, paid_on, note, actor) -> (outcome, payment_id, self_paid, notify_requester_person_id)`; `reverse_payment(request_id, reason, actor) -> (outcome, payment_id)`; `add_note(request_id, note, actor)`; `receipt_preflight(request_id, actor) -> (outcome, live_count)`; `attach_receipt(request_id, blob_key, content_sha256, content_type, byte_size, display_name, actor) -> (outcome, attachment_id)`; `detach_receipt(request_id, attachment_id, actor)`; `set_chargeable(group_id, chargeable, actor)`; `save_category(category_id, name, sort_order, actor) -> (outcome, category_id)`; `end_category(category_id, actor)`.
+- Reads: `may_file(actor) -> boolean`; `org_today() -> date`; `my_requests(actor, limit, offset)`; `waiting_for_me(actor)`; `counts(actor)`; `treasurer_list(actor, tab, group_id, from, to, limit, offset)` (with `total_count`; an unknown tab is SQLSTATE 22023); `detail(request_id, actor, level) -> jsonb` (null for missing or forbidden; the keys are camelCase: see `reimbursement-definers.db.test.ts` for the asserted shape, the zod schema and golden are 2a's); `attachment_lookup(request_id, attachment_id, actor) -> (blob_key, content_type, display_name, viewer_is_creator)`; `export_rows(actor, from, to, status, limit)` (clamped to 20,001); `settings(actor) -> jsonb`; `form_options(actor) -> jsonb` (`mayFile`, `groups`, `categories`, `canRequestForOthers`); `pay_holder_count()`; `open_count()`.
+- The Neon driver returns `date` columns as strings; cast in SQL (`check:sql-date`).
+- Write definers do NOT write audit rows (P3-20: `insertAuditRow` in the same transaction from TypeScript).
+- Local apply: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0073_presby_reimbursements.sql`, then 0074, then `scripts/treasury/seed-dev-treasury.sql`. On the pipeline branch all three are already applied.
+
+### test-rls sections
+
+- New: section 73 (`scripts/treasury/test-rls-73.sql`, 52 assertions): (a) structure, (b) closed tables and config isolation, (c) the identity literal across 28 calls, (d) the path as presby_app including SoD and the deferred checks, (e) isolation by the definers' org predicate (a person who is a member at Alder and at the presbytery), (f) F301 on the tenant connection.
+- Touched: section 46 (46j, 46m), in `scripts/giving/test-rls-46.sql`; and, through the integration patch, DECISION-152's template-role count in `scripts/test-rls.sql` (6 to 7).
+- Failing-first, each on the pipeline branch, then restored and green again:
+  - M1 `no force row level security` on requests: fails at 73a "ENABLED and FORCED, expected 6, got 5".
+  - M2 `grant select on reimbursement_payments to presby_app`: fails at 73a "NO privilege on requests, attachments, payments or events, expected 0, got 1".
+  - M3 `revoke execute on presby_deny_reimbursement from presby_app`: fails at 73a; with section (c) run alone it fails with `wrong refusal "permission denied for function presby_deny_reimbursement"`.
+  - M4 the delegation guard disabled: fails at 73a (10 expected, got 9); section (f) alone fails with "FAIL 73f - a reimbursement role travelled a delegation". The binding guard disabled: (f) fails with "a reimbursement key was bound to a delegated role".
+  - M5 `my_requests` re-created without its `organization_id` predicate: fails at 73e "and is not in his list there, expected 0, got 1".
+  - After `drizzle/0073` was re-applied whole: 52 passes, exit 0.
+
+### Gates
+
+- `npm run typecheck` exit 0; `npm run lint` exit 0 (repo-wide, `--max-warnings=0`); `npm run check` all eight tripwires passed.
+- New Vitest: `reimbursement.schema.test.ts` 14/14 (pure); `reimbursement.db.test.ts` 26/26 (owner path, including the generated 56-pair transition matrix); `reimbursement-definers.db.test.ts` 36/36 (presby_app); `reimbursement-permissions.db.test.ts` 7/7. 83 new tests.
+- `designation-parity.db.test.ts` 12/12 after the regeneration (3/12 failed against the HEAD golden first).
+- Full `npm run test:db` (serial, 668 files): 11,374 passed, 1 skipped, **7 failed**:
+  - 2 are mine: `src/lib/giving/team.db.test.ts` (loop-back 1).
+  - 5 are environmental and not caused by this batch: `src/proxy.test.ts` (loopback), `src/lib/auth/safe-callback.test.ts` (absolute URL), `tickets/actions.test.ts` and `feedback/actions.test.ts` (absolute link), `src/lib/onboarding/issue.db.test.ts` (invite link). Each pins `localhost:3000`, and this worktree's `.env.local` sets `NEXT_PUBLIC_APP_URL=http://localhost:3590` (Batch 0). The four pure ones pass without `.env.local` (146/146) and fail with it (4 failed). Every parallel worktree on a non-3000 port will see the same.
+- `scripts/treasury/test-rls-73.sql` as presby_app: **52 passes, exit 0**. `scripts/giving/test-rls-46.sql`: **264 passes, exit 0** (the HEAD version fails at 46j against the new state).
+- Full `scripts/test-rls.sql` as presby_app with the integration patch applied locally: 1,293 passes, with every section reached (run from a temporary copy without the main file's `ON_ERROR_STOP`, deleted after). **3 failures, all inherited data drift on this branch, none touching 0073/0074**: (1) "presbytery: sees only its own members, expected 2, got 3" (the operator's demo-account membership at the Northern Reach, created 2026-10-14); (2) "2fa policy: definer function sees the requirement" (Alder's `organization_settings.require_two_factor` is false on this branch, `updated_at` 2026-08-19); (3) "exactly ONE org-owned role holds statistics.publish" (three `demo_everything` roles from 2026-10-14 and the `e2e_statistics_publish` fixture role). The one failure 0074 did cause, DECISION-152's template-role count (6 to 7, the clerk template), is fixed in the integration patch. If `development` carries the same drift, the post-merge re-run (Rule 16) shows the same three.
+- Idempotency, final files: snapshot before, then 0073, 0073, 0074, 0074, all exit 0, identical every time: requests/events/payments/attachments/categories/chargeable `0/0/0/0/2/2`, 60 functions, 20 triggers, 6 policies, 133 constraints, 26 indexes, `4/9/1` catalog/bindings/clerk template, and the same md5 over every function's ACL.
+- `check:schema-parity` (index export applied locally): 91 tables, 0 failing.
+- Not run here: the e2e edit (`invitation-existing-account.spec.ts:342`); it needs a dev server and is Batch 7's lane. The change mirrors the regenerated golden, key for key.
+
+### Loop-back candidates (for the orchestrator / tech-lead)
+
+1. **`src/lib/giving/team.db.test.ts` cannot "pass unchanged" (design, P3-14 and the test blast radius table).** After 0074, 2 of its 24 tests fail: "creates the treasurer role from its template too" (`escalation_denied`) and "reactivates a deactivated role and reconciles ADDITIVELY" (key-set mismatch). Their actor holds exactly the three giving keys. Under the unchanged subset rule (DECISION-068/106), adopting a seven-key template is now correctly an escalation. Batch 2a's wrapper cannot make them pass without changing the subset rule. The fix is a test change (the fixture actor holds the template's keys), and that needs a ruling, since the design says the file stays unchanged. Not edited here.
+2. **D2** (active login required for a seat and for a key holder): confirm, or rule that a login-less chair counts.
+3. **D8** (0074 closing assertion scope): confirm.
+4. **The date filter for `treasurer_list` and `export_rows`** (submitted date, org-local): confirm, or name another (expense date, paid date).
+5. **Design text vs SQL on `presby_reimbursement_detail`'s shape**: the design leaves the jsonb keys to "a zod schema and a golden test" in 2a. The keys are now fixed by 0073 section 8g; 2a should pin them rather than rename them.
 
 ---
 

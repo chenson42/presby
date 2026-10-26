@@ -20,7 +20,7 @@
 | 2 — Architectural review | architect | See parent (shared) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; designed against the F289 0072 **draft** (`presby-assets` worktree, unmerged); three Phase 2 rulings corrected (R3 invoker to definer, R2 Drizzle declaration, R5 dead join); F333–F337 raised; open rulings O1–O4 | Design complete | 2026-10-26 |
 | 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied); F338 ruled by the orchestrator (the barrel line and the dev-docs entry are committed on the branch). Batch 2 (api-developer) complete: sharp 0.35.5 installed, image pipeline, store, reader, consequences, copy, four server actions, `resolveMany`, directory swap to `photoThumbKey`, catalog toggle, audit keys and the off-warning; 644 unit files / 9718 tests, 63 DB-backed files / 1351 tests, RLS 78 = 82 and RLS 72 = 24, `npm run check` 8/8, build and typecheck and lint clean. Batch 3 (ux-developer) complete: photos page, upload island with client downscale, designate and remove dialogs, edit-page link, three listing-dialog rewrites, UI copy, unit, e2e and hydration specs, browser walk at 360 and 1280 px; QA next | Batch 3 done | 2026-10-26 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1): all gates green; copy truthfulness (a)(b)(c) failed | FAIL | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -965,3 +965,216 @@ Next: **qa, Phase 5.** Review: the Phase 5 copy-truthfulness check (Copy C2 to C
 # Phase 6 — Shipped vs Intent (analyst)
 
 *Pending. Walk it as a `people.manage` holder in a fresh organization at 360 px, and as an anonymous visitor on a custom host at 360 px. What's-new advisory (Rule 13) applies.*
+
+---
+
+## Phase 5 — Verification (qa)
+
+**Verdict: FAIL.** The cause is copy truthfulness only. Every mechanical gate, all three suites, both e2e lanes, the feature-gate audit, the live-catalog audit and every mutation check passed. Three user-facing strings say things that are not true: two dialogs promise a photo "will appear" on the website when the page above them says it won't, a remedy names an action the page has no control for, and the off-warning counts designations as photos.
+
+**Date:** 2026-10-26
+**Verified by:** qa
+**Tree:** `pipeline/person-photos` @ 9a90c28, worktree `/Users/cshenso/git/presby-platform/presby-photos`, Neon `pipeline-person-photos` (`ep-sweet-scene`). The worktree is clean after the run. The 0078 catalog fingerprint was `c926b4a3…` before and after the mutation work.
+
+**Scope run (everything requested, in full):**
+- Typecheck, lint, `npm run build`, `npm run check`, `check:schema-parity`.
+- The full unit suite and the full serial DB-backed suite.
+- RLS 78 and RLS 72 as presby_app, and the full integrated `test-rls.sql` in a scratch copy.
+- D4 on a scratch database.
+- Full chromium and custom-hosts e2e on my own server at :3620, and the prod lane on :3621.
+- Database and TypeScript mutation checks.
+- A live-catalog probe and a browser walk at 360 and 1280 px.
+- Global flags were reset to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`) before the e2e run.
+
+**Not run:**
+- Coverage measurement.
+- The real-iPhone check (48 MP HEIC, 12 MP library JPEG; edge case 24). I have no device; the operator still owes this check.
+- The Vercel linux `sharp` trace (edge case 26, deployment-engineer). Locally, the photos page's `.nft.json` traces `@img/sharp-darwin-arm64` and libvips.
+
+## Type Check
+
+`npm run typecheck`: PASS. Lint PASS. `npm run build` PASS (cleared `.next` first). `npm run check` 8/8 PASS. `check:schema-parity`: 87 tables, 9 differences, 9 allowlisted, 0 failing.
+
+## Unit Tests
+
+- **Unit suite:** 9,886 tests passed, 0 failed, 29.8 s. 652 files passed; 96 DB-backed files skipped here and run below.
+- **Full serial DB-backed suite (`npm run test:db`):** 12,725 passed, 5 failed, 1 skipped, 2,764 s.
+  - All 5 failures are environmental. Each asserts a `localhost:3000` origin, and `.env.local` sets `NEXT_PUBLIC_APP_URL` to a different localhost origin:
+    - `src/proxy.test.ts:535`
+    - `src/lib/auth/safe-callback.test.ts:239`
+    - `src/lib/onboarding/issue.db.test.ts:303`
+    - `src/app/(member)/feedback/actions.test.ts:516`
+    - `src/app/(org)/o/[slug]/tickets/actions.test.ts:333`
+  - Confirmed by cause: re-run with the origin set to `localhost:3000`, four pass. `proxy.test.ts` passes with the origin unset, as CI has it. The diff touches none of these files.
+  - The 1 skip is `render-pdf.test.ts:152`, the pre-existing `STATEMENT_SAMPLE_DIR` opt-in.
+- **RLS, run as presby_app (`rolbypassrls = f`):**
+  - `test-rls-78.sql`: 82/82.
+  - `test-rls-72.sql`: 24/24.
+  - Full `scripts/test-rls.sql` (integration patch applied in a scratch copy, `ON_ERROR_STOP` off): 1,470 passes. The only failures are the three known drift lines, :219, :518 and :7953. Sections 78 (82) and 72 (24) run complete inside it.
+- **D4 (`test-0078-migration.sh`):** PASS on `scratch_0078_qa`, FP1 `fd85faf3…`, which matches Batch 1. All 8 steps passed, including F335 and the drizzle-kit runner. The scratch database was dropped afterwards.
+
+## End-to-End Tests
+
+- **Dev lane (:3620, my own server, `AUTH_URL` and `E2E_BASE_URL` set to :3620):** 612/612 passed, `--project=chromium --project=custom-hosts`, 23.7 min, 0 skipped, 0 retries. It covers all four photo specs.
+- **E4 measurement:** a 234,076-byte document for 25 inlined thumbnails, inside the 500 KB budget.
+- **Prod lane (`test:e2e:prod`, `PW_PROD_PORT=3621`):** 95/95 passed (prod-build plus prod-custom-hosts), including `hydration/person-photos-upload.spec.ts`.
+- Both servers were stopped by PID.
+
+**Browser walk** (a scratch Playwright script against its own fixture org with a live site, a listed staff person and a live custom host `qa-photos.invalid`; synthetic images only; identical results at 360 and 1280 px):
+
+- **Uploads:**
+  - A 4.9 MB noise JPEG with EXIF orientation 6, a copyright string and a GPS IFD went over the wire as 636 KB.
+  - A 4.0 MB 4000×3000 PNG went over the wire as 872 KB.
+  - Toasts read "Photo added. It's now Qawalk's directory photo." and "Photo added."
+- **Stored masters:** JPEG, `private`. One is 800×1200 (the rotated source, stored upright); the other is 1200×900. Both have no EXIF, ICC or XMP block, no `Exif\0` marker and no copyright bytes. Thumbnails are 160×160 WebP with no metadata.
+- **Website designation:** confirm stays disabled until the box is ticked. Afterwards the chips read "Directory" and "Website".
+- **Directory:** the `img` is `data:image/webp`, byte-identical to the stored thumbnail, natural width 160.
+- **Public roster on the custom host:** the image loads at natural width 1200.
+- **Platform slug page:** 307 to `https://qa-photos.invalid/` with `no-store`. This is the designed hand-off to a live custom host. The platform roster render itself is covered by `person-photos-roster.spec.ts`, which passed.
+- **Asset door, before removal:**
+  - The asset returns 200 `image/jpeg`, `private, max-age=86400`, `nosniff`.
+  - The thumbnail key returns the neutral 404 `{"error":"Not found"}` with `no-store`.
+- **Remove through the AlertDialog:**
+  - Both hosts then return the neutral 404.
+  - The roster shows the name with no image.
+  - Removing the directory photo returns the directory to initials.
+- **Layout:** no horizontal scroll and no native dialogs. The only target under 44 px is the pre-existing "Back to portal" link (20 px, (org) chrome, not in this diff).
+
+## Regression Tests Added
+
+This is a feature, not a bug fix. Instead of trusting the implementers' failing-first notes, I re-checked the property each test guards by breaking it myself.
+
+**Database mutations:** each was applied to `ep-sweet-scene`, the tests were run, then 0078 was re-applied whole (with explicit constraint re-adds where `create table if not exists` cannot restore them). The fingerprint was verified restored after every one.
+
+| Mutation | Caught by |
+|---|---|
+| Image FK loses its audience pin (2-column) | 78a; with catalog blocks stripped, 78c "a photo pointed at a public_site blob" |
+| Thumbnail FK loses its pin | 78a catalog assertion only (no behavioural probe; acceptable, see note) |
+| `person_photos_audience_private` dropped | 78c "declared itself public_site" |
+| Membership FK dropped | 78c; `person-photos.db.test.ts:166` |
+| Designation photo FK dropped | Behaviour is held by the guard; `person-photos.db.test.ts:142` (guard disabled) catches the FK |
+| `active_idx` dropped | 78c "a second active directory designation" |
+| Website attestation CHECK dropped | 78c "an unattested website designation" |
+| Removal not one-way / ending not one-way | 78d; `person-photos.db.test.ts:108` |
+| Owner exempted from the photo guard | 8 owner-path tests fail (the refusing layer on `neondb_owner` is the trigger) |
+| Retired `people.photo_key` CHECK dropped | 78a; `person-photos.db.test.ts:158` |
+| Minor predicate forced false | 78e; `public-roster-photo.db.test.ts:320`; the directory and D2 tests |
+| `hide_photo` ignored (core; directory function) | 78e; `public-roster-photo.db.test.ts:158`; `directory.test.ts` |
+| `hide_photo` scoped to the org in the core (F333) | 78e "set at another org" |
+| Toggle forced on | 78e; the D2 27-combination matrix (`public-photo.db.test.ts:355`); `public-roster-photo.db.test.ts:306` |
+| Door serves any photo key | `public-roster-photo.db.test.ts:257` (thumbnail) and 19 others |
+| Q6 fallback without attestation | 78e; `public-roster-photo.db.test.ts:262` |
+
+Two mutations survived, and they are equivalent rather than gaps: the door's `is_photo` ignoring thumbnails, and ignoring removed photos. Either way the key falls to the `site` branch, which requires `public_site`, and the FK plus CHECK pin every photo blob `private`. The defence-in-depth clause is therefore untested by design, which is fine while the pin holds.
+
+**TypeScript mutations** (in a `git archive` scratch copy, since deleted by literal path):
+
+| Mutation | Caught by |
+|---|---|
+| `sharp` imported by `reader.ts`, by `import()` in `blob-store.ts`, or by `require` in an (org) file | `scan.test.ts:55` |
+| `withMetadata`, `keepExif`, `keepIccProfile`, or `keepMetadata` on the thumbnail | `image.test.ts:53` / :70 / :81 |
+| Pixel-count cap removed; header caps removed; edge cap removed | `image.test.ts:240` / :249 |
+| Byte ceiling removed in `image.ts`; in the action | `image.test.ts:203`; `actions.test.ts` |
+| Sniff accepts anything; pages check removed; `autoOrient` removed | `image.test.ts:207` / :215 / :70 |
+| Attestation check loosened to truthy | 3 `actions.test.ts` cases |
+| Decode before authorization | `store.db.test.ts:292` and 4 more |
+| Final transaction does not repeat the gate | edge-case 7 and 8 tests |
+| Audit failure swallowed | `store.db.test.ts:588`, :600 |
+| Designate skips the adult re-check | `store.db.test.ts:396` |
+
+Every mutation was killed.
+
+## Coverage on Critical Modules
+
+Not measured. The diff touches none of `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+## Feature-Gate Audit
+
+Checked by reading each action and page body. These are tenant-axis gates: `people.manage` through `presby_has_permission(actor, org, …)` inside the mutation's own `withOrgContext` transaction, toggle first. The platform `FEATURES.*` catalog does not apply.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| `addPersonPhotoAction` | yes (+ `resolveOrgContext`, re-run in body) | n/a: toggle, then `people.manage`, then membership, adult and cap, in `store.ts` `gate()` before decode and again under the lock | n/a (`people.manage`, correct per Q3) |
+| `designatePersonPhotoAction` | yes | n/a: same gate in one transaction, plus photo ownership and the adult re-check | n/a |
+| `undesignatePersonPhotoAction` | yes | n/a: same gate | n/a |
+| `removePersonPhotoAction` | yes | n/a: same gate plus photo ownership | n/a |
+| GET `/o/[slug]/admin/community/[id]/edit/photos` | yes (`cachedAuth`, `resolveOrgContext`, `assertOrgAccess`) | n/a: `readPhotoSet` checks toggle, `people.manage` and membership in one transaction | n/a |
+| Edit-page "Photos" link | yes | rendered only when `getPersonForEdit` returns ok (`people.manage`) and the toggle is on | n/a |
+
+No route handler was added (`scan.test.ts`). The public door's route is unchanged; its SQL changed and is covered by the schema audit below.
+
+**Schema/RLS audit (live catalog, `ep-sweet-scene`):**
+- **RLS and policy:** both tables have `relrowsecurity` and `relforcerowsecurity` on, owner `neondb_owner`. Each has one `tenant_isolation` ALL policy, USING and WITH CHECK on `presby_current_org()`.
+- **Grants:** `aclexplode` shows presby_app holds SELECT and INSERT only. Column UPDATE is limited to `removed_at`/`removed_by` and `ended_at`/`ended_by`. There is no DELETE, and presby_platform has nothing.
+- **Triggers:** both guards are BEFORE INSERT OR UPDATE and enabled.
+- **Constraints:** all 4 composite FKs are NO ACTION and validated. The CHECKs are validated, including `people_photo_key_retired`.
+- **Functions:**
+  - All 7 new functions pin `search_path`.
+  - `presby_person_public_photo` is a definer with `{neondb_owner=X}` only.
+  - The status wrapper is a definer executable by presby_app.
+  - The rosters and door keep definer status, `proconfig` and ACL.
+  - No stored body reads `people.photo_key`, and 0 rows carry it.
+- **Which layer refuses (proven on the connection that matters):**
+  - On presby_app: DELETE is refused by the grant; immutable-column UPDATE by the column grant; WITH CHECK by RLS (78b, 78d).
+  - On the owner connection: the trigger refuses. The owner-exemption mutation shows the grant cannot.
+
+## Copy Truthfulness
+
+- [ ] Every added or changed string is in the design's Copy table. All are verbatim, so the defects below trace to the design text and its wiring.
+- [x] The query behind each claim was opened, and what it does not read was named.
+- [ ] Each instruction was traced to the role that sees it, and that role can do it. Item (b) fails.
+- [x] Older strings about the same subject were grepped for. Only the three listing dialogs mentioned photos, and their C8 rewrite is true: it is hedged with "may" and gives no instruction to a viewer who may not hold `people.manage`.
+
+**copy truthfulness: FAIL**
+
+**(a) The dialogs promise "will appear" while the page says the photo is withheld.**
+- **Viewer:** a `people.manage` holder.
+- **Where:**
+  - `/Users/cshenso/git/presby-platform/presby-photos/src/lib/person-photos/consequences.ts:68` and `:57`, rendering `copy.ts:149` ("{first} is listed, so this photo will appear on the website.") and `copy.ts:142` ("…this photo will also appear there.").
+  - The directory dialog body, `copy.ts:219` ("…will see this photo instead of their initials.").
+- **What it does not read:** the snapshot built at `reader.ts:256-261` carries `listed`, `website` and `directory` only. It carries no `withheld` (`hide_photo`, merged), and no site status or `sites.*` flags.
+- **Reproduced in the walk at both widths:** with `hide_photo` set, the page reads "Website: not shown, because Qawalk has hidden their photo." while the "Use on website" dialog on the same page reads "Qawalk is listed, so this photo will appear on the website."
+- **Also reachable today:** "will appear" for a listed person whose organisation has no published site. The page's own listing line hedges this correctly ("only while … the website is published").
+- **Fix:** pass the SQL `withheld` answers into the snapshot and suppress or condition these lines. Hedge or condition "will appear" the same way the listing line does. Add an exact-text test that fails on the old text.
+
+**(b) The unattested remedy names an action with no control.**
+- **Viewer:** a `people.manage` holder.
+- **Where:** `copy.ts:108-109` ("…or clear the directory photo for the website.").
+- **What the page offers:** the tile for the current directory photo shows only "Stop using in directory / Use on website / Remove" (`tile-controls.tsx:55-62`, observed after removal). The directory designate dialog, the only place the attestation can be ticked, is unreachable for that photo.
+- **Contradicts the design:** C2 claims "both performed … in the designate dialog". The only path is stop-using then re-choosing, which passes through an initials state the copy never mentions.
+- **Fix:** offer the dialog for the current directory photo (the store already handles a changed attestation as end-then-insert), or reword the instruction.
+
+**(c) The off-warning counts designations as photos.**
+- **Viewer:** the `org_features.manage` holder at `/admin/features`.
+- **Where:** `org-feature-warnings.ts:64-66` uses `countPhotoDesignations` (`reader.ts:74-87`) and renders `copy.ts:79` ("{n} photos are currently chosen…").
+- **Effect:** one headshot used for both the directory and the website, the natural case G3 names, reads as "2 photos". Count distinct photos, or say "photo choices".
+
+**Note (lower, fold into the same ruling):** `copy.ts:98` ("Directory: members see the photo…") is chosen from `presby_person_directory_photo`, which does not read `directory_hidden` or membership status. The photos page stays reachable for a `directory_hidden` or ended member, for whom it is false.
+
+**Passed:**
+- C1 description, C3, C5, C6, C7 and C8.
+- Batch 2's listing-line join: it reads the roster functions' own predicates and rendered "(staff)" correctly.
+- Deviation 1, no success toast for designate, un-designate or remove: no string claims one, and the page re-renders its chips and status lines. This is UX for Phase 6, not a copy defect.
+
+## Verdict
+
+**FAIL — copy truthfulness only.** Items (a) and (b) trace to Copy C2/C4 claims in the design and to wiring; item (c) to the C1 count source. The strings are design-owned (the design says "an implementer who needs a string that is not here stops for a ruling"), so this goes to tech-lead first.
+
+**Observations, not failures:**
+1. The shared scratchpad's `qa/` directory was in concurrent use by another QA agent: a treasury dev server writing to the same `dev.log`, and the same `walk/` name. I checked that my evidence logs came from this tree, by content and counts, and moved my walk to `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-p5/`. The orchestrator may want per-agent scratch names.
+2. Batch 2's deviation 7 (the adapter's double-submit dedup race affects the logo and ticket paths too) still needs a TODO line.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. Every gate green:<br>• typecheck, lint, build, check 8/8, parity 0 failing<br>• unit 9,886/9,886<br>• test:db 12,725 passed; 5 failures environmental by cause (localhost:3000 origin), 1 pre-existing opt-in skip<br>• RLS 78 82/82, RLS 72 24/24; full test-rls 1,470 passes with only the 3 known drift lines<br>• D4 PASS<br>• e2e dev 612/612, prod 95/95 (flags reset to the CI baseline first)<br>• 20 DB and 16 TS mutations all killed or shown equivalent; live-catalog probe clean; feature-gate audit clean; walk at 360/1280 clean<br>FAILED on copy truthfulness: (a) "will appear" dialogs ignore withheld state, (b) the unattested remedy has no control, (c) the off-warning counts designations as photos. Real-device HEIC and the Vercel linux `sharp` trace are still unverified | FAIL | 2026-10-26 |
+
+**Handoff:**
+1. **tech-lead (Phase 3, brief):** rule the replacement strings for C4's "will appear" lines and the directory dialog body under withheld states, C2's unattested remedy (control or wording), C1's count noun, and the C2 `directory_hidden` note.
+2. **ux-developer (Phase 4):**
+   - Pass the SQL `withheld` answers into `PhotoStateSnapshot` and `consequencesFor`.
+   - Make the attestation reachable for the current directory photo.
+   - Count distinct photos in the warning.
+   - Add exact-text tests that fail on the old strings.
+3. Then back to qa for a scoped re-run: copy, consequences, the photos page specs and the walk.

@@ -161,6 +161,21 @@ describe("PORTAL_TILES — flag-key shape", () => {
     expect(calendar?.flagKey).toBeUndefined();
   });
 
+  it("the two reimbursement tiles carry the ruled Copy, byte for byte (Phase 3 amendment, T1)", () => {
+    const text = (key: string) => {
+      const tile = PORTAL_TILES.find((t) => t.key === key);
+      return [tile?.label, tile?.description];
+    };
+    expect(text("reimbursements")).toEqual([
+      "Reimbursements",
+      "Ask to be paid back for something you bought for the church, or to pay a vendor.",
+    ]);
+    expect(text("reimbursements-admin")).toEqual([
+      "Reimbursement requests",
+      "For the people who handle reimbursements. See every request, record payments, and choose which groups can receive requests.",
+    ]);
+  });
+
   it("every tile has a non-empty key, label, description, and href builder", () => {
     for (const tile of PORTAL_TILES) {
       expect(tile.key.length).toBeGreaterThan(0);

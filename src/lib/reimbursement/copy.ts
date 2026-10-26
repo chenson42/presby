@@ -98,6 +98,13 @@ export const COPY = {
     beneficiaryPlaceholder: "Search by name",
     beneficiaryNoMatch: "No match.",
     beneficiaryHint: "Only people who appear in the directory can be chosen.",
+    /** A visually hidden polite status after a search that returned people (amendment T3). */
+    searchFound: (n: number) => (n === 1 ? "1 person found." : `${n} people found.`),
+    /** The call threw or the network dropped (a gate refusal shows the action's own error). */
+    searchFailed: "We couldn't search just now. Try again.",
+    /** After a person is picked: the button beside their name, and its accessible name. */
+    changeBeneficiary: "Change",
+    changeBeneficiaryLabel: "Change who we are paying back",
     vendorLabel: "Vendor name",
     amountLabel: "Amount",
     dateLabel: "Date of the expense",
@@ -259,6 +266,8 @@ export const COPY = {
     withdrawBody: "It will be closed. You can start a new one any time.",
     withdrawConfirm: "Withdraw",
     withdrawKeep: "Keep it",
+    /** Toast after a withdraw succeeds (amendment T3). Claims a status only; nothing is deleted. */
+    withdrawn: "Request withdrawn.",
     withdrawAlreadyPaid: "This request was already paid, so it can't be withdrawn. Ask the treasurer.",
   },
 

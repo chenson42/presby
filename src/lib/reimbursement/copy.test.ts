@@ -65,6 +65,13 @@ describe("C3 the request form", () => {
     expect(COPY.form.beneficiaryPlaceholder).toBe("Search by name");
     expect(COPY.form.beneficiaryNoMatch).toBe("No match.");
     expect(COPY.form.beneficiaryHint).toBe("Only people who appear in the directory can be chosen.");
+    // Phase 3 amendment, T3
+    expect(COPY.form.searchFound(1)).toBe("1 person found.");
+    expect(COPY.form.searchFound(2)).toBe("2 people found.");
+    expect(COPY.form.searchFound(8)).toBe("8 people found.");
+    expect(COPY.form.searchFailed).toBe("We couldn't search just now. Try again.");
+    expect(COPY.form.changeBeneficiary).toBe("Change");
+    expect(COPY.form.changeBeneficiaryLabel).toBe("Change who we are paying back");
     expect(COPY.form.vendorLabel).toBe("Vendor name");
     expect(COPY.form.amountLabel).toBe("Amount");
     expect(COPY.form.dateLabel).toBe("Date of the expense");
@@ -239,6 +246,7 @@ describe("C6 decide and withdraw", () => {
     expect(d.withdrawTitle).toBe("Withdraw this request?");
     expect(d.withdrawBody).toBe("It will be closed. You can start a new one any time.");
     expect([d.withdrawConfirm, d.withdrawKeep]).toEqual(["Withdraw", "Keep it"]);
+    expect(d.withdrawn).toBe("Request withdrawn.");
     expect(d.withdrawAlreadyPaid).toBe("This request was already paid, so it can't be withdrawn. Ask the treasurer.");
   });
 });

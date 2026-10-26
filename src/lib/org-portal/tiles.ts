@@ -428,9 +428,10 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   // would need a per-viewer read; the "waiting for you" count is on the page.
   // The destination renders its own honest Forbidden / toggle-off state.
   //
-  // COPY GAP (reported to the orchestrator, Batch 2a): the two LABELS are the
-  // Copy section's own page headings (C2 H1, C7 H1); the two DESCRIPTIONS are
-  // not in the Phase 3 Copy section and are a proposal pending a ruling.
+  // The two LABELS are the Copy section's own page headings (C2 H1, C7 H1); the
+  // two DESCRIPTIONS are ruled Copy (Phase 3 amendment, group T1, in
+  // docs/work-log/2026-10-25-treasury-inc1.md) and byte-pinned in tiles.test.ts.
+  // The treasurer string names its audience because every member sees the tile.
   {
     key: "reimbursements",
     label: "Reimbursements",
@@ -444,7 +445,8 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   {
     key: "reimbursements-admin",
     label: "Reimbursement requests",
-    description: "See every request, record payments, and choose which groups can receive requests.",
+    description:
+      "For the people who handle reimbursements. See every request, record payments, and choose which groups can receive requests.",
     href: (slug) => `/o/${slug}/admin/reimbursements`,
     orgFeatureKey: "org_portal.reimbursement",
     category: "administer",

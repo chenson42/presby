@@ -54,7 +54,7 @@ deferred R1a, R1b, R1e, R1f, R7c and R7d).
 | Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Phase 5, QA run 2 | migration 0067; DECISION-238-241; F250-F257; port 3500 | QA run 2 |
 | Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Phase 5, QA | migration 0068; DECISION-242-245; F258-F265; port 3510 | QA |
 | Community Increment 2b, sign-in invitations (`2026-10-22-founding-admin-directory`) | `presby-2b` | Phase 4, Batch A1 | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Batch A1 |
-| TOTP auto-submit | not recorded here | Phase 3 | see its work-log | Phase 3 |
+| TOTP auto-submit (`2026-10-25-totp-autosubmit`) | `presby-otp` | Integrated on its branch as **0.44.1** (Phase 6 SHIP WITH NOTES) | no migration; DECISION-257; F282; port 3560 | `/pre-push`, `/merge-pr`, then remove the worktree and Neon branch |
 | Developer portal | not recorded here | Phase 1 | see its work-log | Phase 1 |
 | Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Waits on 2b | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | after 2b |
 

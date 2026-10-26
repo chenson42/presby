@@ -4,6 +4,24 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-257 — The two-factor code is submitted when its last digit lands; `OneTimeCodeInput` says whether the completion was exactly code-length; the session grant stays inside `verifyTotpAction`. Amends DECISION-193(a) and the "nothing auto-submits" sentence of `docs/ui-standards.md` (DECISION-192/193).**
+
+**Status:** Resolved (operator request 2026-10-25; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-totp-autosubmit` (no migration; v0.44.1)
+
+- **Rule.** `onComplete(code, { exact })` fires on a user edit that leaves the code complete and changed. A consumer may submit only when `exact` is true. `exact` is true only when no delivered digit was dropped: a paste or autofill that drops a digit fills the boxes and waits for the button. That covers an over-long run and a short run that overflows the remaining boxes (three typed digits plus a four-digit paste into box 4). A six-digit run delivered into a later box restarts at box 1, drops nothing, and submits (the C-4b rule: it is an exact whole code, and blocking it would defeat whole-code autofill, the case this decision exists for). Recovery codes never auto-submit (variable length, no last-character event).
+- **`/totp`.** The trigger arms a ref; an effect keyed on the code runs after the commit that carries the six digits and calls `form.requestSubmit()` on the existing `<form action={verifyTotpAction}>`. The client never calls the action's internals, `unstable_update` or `@/auth`: the 0.42.3 grant (`withTwoFactorGrant`) opens only inside the action. One submission per complete code; none while pending; a hole re-arms.
+- **Reset.** After an attempt settles (`useFormStatus` pending true then false) the digit boxes are cleared and refocused by remounting the input. It is keyed on completion, not on the URL, because two failures in a row redirect to the same URL (F282).
+- **`/account/2fa`.** The same trigger calls the existing handler directly with the code it was handed; the input is remounted (and focused) after a failure.
+- **Accepted residuals.**
+  - **A mistyped last digit** is submitted at once: one of ten attempts a minute on `/totp` and one `totp.verify_failed` audit row, with no chance to correct. Accepted because the code expires in about 30 seconds; the Verify button stays as the fallback. Expect more `verify_failed` rows from fast typos.
+  - **O-9, the one known hole in `exact`.** A two-character, non-paste change event into a filled, selected box of a complete code (a keyboard-suggestion chip, or a drag-and-drop of two digits onto box 6) drops a digit and is still `exact`, so it submits. It costs one attempt and one `verify_failed` row, the same as the mistyped-last-digit residual, and the Verify button is still there. It is not fixed here because an ordinary overtype (the box holds `6`, the caret is after it, the user types `7`, and the browser reports `67`) has the same two-character shape; a fix must tell "the old digit plus one new one" from "two unrelated digits" and deserves its own failing-first test (`docs/TODO.md`). `paper`.
+  - **`completeEnrollment` has no rate limit** (pre-existing, unchanged, `docs/TODO.md`).
+  - **A thrown `completeEnrollment` shows no message** on `/account/2fa` (O-4; the boxes re-enable and Confirm works; `docs/TODO.md`).
+- **Not verified on a real device** (O-5): iOS and Android one-time-code autofill, a screen reader, and bfcache back-navigation are emulated in e2e and tracked as a manual check (`docs/TODO.md`).
+- **Rejected.** Keying the form on `error` (identical URL on repeat failure); a `useActionState` wrapper (a second action entry point near the grant); submitting from the change handler (posts the previous hidden value).
+
+---
+
 **DECISION-241 — Public events calendar: the implementation shape.**
 
 **Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (events Increment 4, v0.44.0, migration 0067)
@@ -430,7 +448,7 @@ You cannot responsibly revoke an unnamed person, and the confirm must name them.
 
 **Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-review-polish` (Phase 3, tech-lead; confirmed as shipped in Phase 4)
 
-- **(a) Code entry.** `OneTimeCodeInput` is six real generated `<Input>` boxes plus one hidden `name`d input carrying the joined digits, not a single hidden input under presentational cells (DECISION-192 holds either way). Backspace and Delete both erase backward across boxes; paste and whole-code autofill spread across boxes; there is no auto-submit, and completing the code moves focus to Verify. On `/totp` the digit mode and the recovery mode mount mutually exclusive `token` fields, so `FormData.get("token")` can never pick the wrong one.
+- **(a) Code entry.** `OneTimeCodeInput` is six real generated `<Input>` boxes plus one hidden `name`d input carrying the joined digits, not a single hidden input under presentational cells (DECISION-192 holds either way). Backspace and Delete both erase backward across boxes; paste and whole-code autofill spread across boxes; there is no auto-submit, and completing the code moves focus to Verify (amended by DECISION-257). On `/totp` the digit mode and the recovery mode mount mutually exclusive `token` fields, so `FormData.get("token")` can never pick the wrong one.
 - **(b) Layout vocabulary.** `renderEmail` takes a closed block vocabulary (`p`, `facts`, `list`, `quote`) plus one optional action and a footnote, escapes everything, and declares a single `color-scheme: light` while only one scheme ships.
 - **(c) Imports.** Message builders for the two `'use server'` account senders live in `src/lib/email/account-messages.ts`; every sender imports `@/lib/email/render` directly, never through the `@/lib/email` barrel that several tests stub.
 - **(d) Links.** Ticket and feedback mail links are built from `platformOrigin()` and the button is omitted when it is `null` (F165).

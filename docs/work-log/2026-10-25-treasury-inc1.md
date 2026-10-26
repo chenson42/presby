@@ -18,7 +18,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete (parent log): R1–R15, Q1–Q14 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
-| 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12 | Design complete | 2026-10-25 |
+| 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12; second amendment 2026-10-26 rules Batch 4's Copy gaps, X1 to X7, the queue's group filter and residual 13 | Design complete | 2026-10-25 |
 | 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). **Batch 3 complete (api-developer)**: `decisions.ts` (approve on the seat and override paths, send back / not approved), `notices.ts` + `notify.ts` (the four `person:role` notices; submit now tells approvers or pay holders), `approveRequestAction` / `returnRequestAction`, the Phase 3 amendment's Copy (tiles, `copy.ts`), ~115 new tests, decisions/notify/role-bundle DB suites; see the Batch 3 section. **Batch 4 complete (api-developer)**: `payments.ts` (record, reverse, waive, void, note; the `paid` and `closed` notices), `treasurer_list` reader, `csv-export.ts` + the export route (V4), the ten treasurer-tree actions and three team actions, residual-12 characterization, role-bundle payment half, 177 new tests, 168-file DB subset green; Copy gaps and one UI data gap reported (see the Batch 4 section). Batches 1b, 2b (waits on F289), 5–7 pending | — | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
@@ -602,7 +602,7 @@ Every user-facing string this increment adds or changes. Written here so the imp
 | `reimbursement.notice.needs_approval` | the eligible approvers computed in the submit definer | `A reimbursement request needs your approval` | `A reimbursement request is waiting, and you are one of the people who can approve it.` | `Open the request` |
 | `reimbursement.notice.needs_treasurer` | every effective `pay` holder | `A reimbursement request needs a treasurer's approval` | `No one in the group it is charged to is able to approve it, so it is waiting for someone who can.` | `Open the request` |
 | `reimbursement.notice.ready_to_pay` | every effective `pay` holder except the approver | `A reimbursement request is ready to pay` | `An approved reimbursement request is waiting for payment.` | `Open the request` |
-| `reimbursement.notice.requester_update` (variants) | the creator | `Your reimbursement request was approved` / `…was sent back` / `…wasn't approved` / `…was paid` / `…was closed` | `It is now waiting for payment.` / `It needs a change before it can go on. Open it to see why.` / `Open it to see why.` / `A payment has been recorded for it.` / `Open it to see what happened.` | `Open the request` |
+| `reimbursement.notice.requester_update` (variants) | the creator, unless the creator is the person acting (amended 2026-10-26, S6) | `Your reimbursement request was approved` / `…was sent back` / `…wasn't approved` / `…was paid` / `…was closed` | `It is now waiting for payment.` / `It needs a change before it can go on. Open it to see why.` / `Open it to see why.` / `A payment has been recorded for it.` / `Open it to see what happened.` | `Open the request` |
 
 Footnote on all: `Sign in to see the details. This message doesn't include any.` No name, amount, purpose, group name or date appears in any subject, html or text (`notices.test.ts`).
 
@@ -1320,5 +1320,156 @@ Existing assertions this amendment alters: `src/lib/org-portal/tiles.test.ts` (d
 | Residuals 4, 6, 8 and 9 | Not denied by any string here (T1, T3) |
 | F138 (founding administrator cannot repair treasury keys) | Stated in residual 12; unchanged |
 | Anything deferred | Nothing new, except the operator's confirmation of residual 12 |
+
+---
+
+## Phase 3 — amendment (Copy gaps from Batch 4)
+
+**Date:** 2026-10-26 · **Author:** tech-lead · **Class:** Copy amendment inside the Treasury Inc 1 Feature; no schema, migration, route, permission, flag or audit change · **Inputs:** Batch 4's "Copy gaps" 1 to 7, deviations X1 to X7, the "Known UI gap" (the queue's group filter) and loop-back notes 1 and 2 (this log), Phase 1 Flows 2 to 4 in the parent log (`docs/work-log/2026-10-25-treasury.md:167-186`), and the live tree at `8c8900a` on `pipeline/treasury` (`src/lib/reimbursement/{copy,treasury-messages,treasury-input,messages,reads}.ts`, `src/lib/treasury/team.ts`, `…/admin/reimbursements/{actions,team/actions}.ts`, `drizzle/0073` definers `waive_receipt`, `void`, `record_payment`, `reverse_payment`, `approve`, `return`, `save_category`, `end_category`, `treasurer_list`). Nothing outside this work-log was edited. The Copy section's rule stands: an implementer who needs a string not in it stops for a ruling; this amendment is those rulings. Every string below lives in `src/lib/reimbursement/copy.ts` and is byte-pinned in `copy.test.ts`; the UI batches import them and type none.
+
+### Rulings at a glance
+
+| # | Gap | Ruling | Applied by |
+|---|---|---|---|
+| 1 | `note_required` (empty treasury note) | New: `Write a note.` | Batch 4 follow-up |
+| 2 | `date_out_of_range` (payment dated before the expense, or after today) | **Replaces** C8's `Choose a date that isn't in the future.`: `Choose a date between the day of the expense and today.` | Batch 4 follow-up |
+| 3 | Set-up-role `not_treasury_only` | New: `That role already exists with permissions outside Giving and Reimbursements. An administrator can fix it under Roles.` Also fixes C9's grant sentence, which told the viewer to do what they cannot (3b) | Batch 4 follow-up; giving's twin in Batch 6 (C12) |
+| 4 | Reuse of giving's five `COPY.team.*` strings | **Confirmed**, with the one exception in ruling 3 | none |
+| 5 | The neutral `This request isn't available.` for state refusals | **Changes for the treasurer tree only**: six short sentences, each true for every cause its outcome can have. `not_found` and the whole member tree stay neutral | Batch 4 follow-up |
+| 6 | X1 (no notice to an acting creator), X2 (treasurer send-back is always "needs changes") | **Both confirmed** against Phase 1; C10 and C8 are amended to say so; the send-back dialog has no radio and two body strings | Batch 4 follow-up (C10 text); Batch 6 (dialog) |
+| 7 | Category that vanished (gap 3), tampered shape (gap 4), settings success text (gap 6) | New: `That category isn't in the list any more. Reload the page to see the current list.`; the other two **stand** (save-failed sentence; no success text) | Batch 4 follow-up; Batch 6 |
+| 8 | The queue's "Charged to" filter (Known UI gap) | **Orchestrator ruling recorded**: derived from the groups present in the rows the viewer can already see; no definer, no schema. Feasibility finding: the definer clamps a page to 200 rows, so the derivation pages, bounded at 2,000 rows. Filter strings and empty states ruled | Batch 4 follow-up (the reader and strings); Batch 6 (the controls) |
+| 9 | X3 to X7 | **Confirmed**; each gives the UI a condition (below) | Batch 6 |
+
+**Batch 5 (member UI) is not touched by this amendment.** Every string below is on the treasurer, settings or team surface, and the member tree's refusals (`decisionRefusal`, `withdraw`) stay on the neutral answer.
+
+### What changes in code (small; batch owners named)
+
+1. **Batch 4 follow-up (api-developer, one commit, before Batch 6 starts):**
+   - `copy.ts`: add `treasury.results.noteRequired`, `treasury.results.dateOutOfRange` (and delete `dateNotFuture`, `copy.ts:366`), `treasury.refusals.{notWaivable, receiptPresent, notVoidable, notReversible, notApprovable, notReturnable}`, `treasury.sendBack.{title, body, bodyApproved}`, `settings.categoryGone`, `team.ensureNotTreasuryOnly`, replace `team.notTreasuryOnly` (`copy.ts:407`) with the ruling 3 sentence, and replace `queue.nothingWaiting` (`copy.ts:291`) with `queue.empty.{pay, override, progress, paid, all, filtered}`, plus `queue.filter.{groupAll, groupSelected, submittedFrom, submittedTo, datesHint, apply, clear, groupsTruncated}`. Pin each in `copy.test.ts` (the member page's own `page.nothingWaiting`, `copy.ts:46`, is untouched).
+   - `treasury-input.ts:58-59` (the `paidOn` schema uses the date sentence for an empty or impossible date too: the new sentence is true for those) and `:100` (`addNoteSchema.note` uses `COPY.form.saveFailed` for an empty note: becomes `noteRequired`).
+   - `treasury-messages.ts`: `date_out_of_range` to `dateOutOfRange` (`:50`); `note_required` to `noteRequired` (`:93`); `waiveRefusal` and `reasonVerbRefusal` and `overrideRefusal` map the five state outcomes to `treasury.refusals.*` (their `not_found` stays neutral); a new `treasuryReturnRefusal(outcome)` maps `not_returnable` to the treasurer sentence and delegates every other outcome to `decisionRefusal`; `treasuryReturnAction` calls it (`admin/reimbursements/actions.ts`, where it now calls `decisionRefusal`); `categoryRefusal`'s `not_found` to `settings.categoryGone` (`:151`). The member tree's `messages.ts` is not edited.
+   - `team/actions.ts:150` (the ensure action) returns `COPY.team.ensureNotTreasuryOnly`; `:71` (grant) keeps `COPY.team.notTreasuryOnly`, now the ruling 3 grant sentence.
+   - `reads.ts`: `listTreasurerGroups(identity)` (ruling 8), with a DB test.
+   - Tests altered (the blast radius): `treasury-messages.test.ts:52-53, 60, 66, 95, 105` (the EC16 "ONE neutral answer" cases become "`not_found` is neutral, each state outcome is its sentence"), `treasury-input.test.ts:42-43, 93`, `admin/reimbursements/actions.test.ts:186-194, 224, 273` (assert text, not only `kind`), `team/actions.test.ts:88, 156`, `copy.test.ts:336` and new pins. `payments.db.test.ts` asserts outcomes, not text, and is unchanged.
+2. **Batch 6 (ux-developer):** the treasurer queue, detail, dialogs, settings and team pages consume the strings; the send-back dialog, the filter bar, the empty states, the X3 link and the X6 clamp (below); `giving/team/actions.ts:54` and `:142`, `team-list.tsx:107` and `giving/team/actions.test.ts:140` take the C12 edit with ruling 3's grant wording (`…outside Giving and Reimbursements. An administrator can grant it from Roles.`), so the two team pages say the same sentence.
+3. **Batch 5:** nothing.
+
+### The strings, exact, with the four checks (one paragraph per group)
+
+**Group S1: the two form-field errors (gaps 1 and 2).**
+
+| Where | String |
+|---|---|
+| Add a note, empty or whitespace only (field error beside `Note`; also the zod message) `COPY.treasury.results.noteRequired` | Write a note. |
+| Record payment, `Date paid` empty, impossible, after today, or before the expense date (field error beside `Date paid`) `COPY.treasury.results.dateOutOfRange` | Choose a date between the day of the expense and today. |
+
+**R.** Neither denies a residual or a Phase 2 ruling; the date sentence does not claim anything about when money moved, only which dates the record accepts. **S.** The note sentence is shown for `note_required` (the definer cleans the text and finds nothing, `presby_reimbursement__clean_text`) and for the same check in `addNoteSchema` before the library is called. The date sentence is shown for `date_out_of_range`, whose predicate is exactly `paid_on > presby_reimbursement__local_date(org, now()) or paid_on < expense_date` (`drizzle/0073:884`, `:2161`), so "between the day of the expense and today" is inclusive at both ends, and "today" is the organization's calendar day, not the viewer's browser's. The edge where a payer in another time zone sits across midnight from the organization is unverified. A blank or impossible date reaches the same sentence through the schema; the sentence is still an instruction that fixes it. **A.** Both are read by a `pay` holder (date) or a `view` holder (note), each of whom can edit the field. **N.** Neighbours grepped (`src`, `Choose a date`, `in the future`, `Write a note`, `note`): the live ones are `copy.ts:366` (`dateNotFuture`, the string this replaces), `treasury-input.ts:58-59`, `treasury-messages.ts:50`, `treasury-input.test.ts:42-43` (modify targets above), `copy.ts:102` (`fieldErrors.date`, the member expense date: "Choose a date that isn't in the future or more than a year ago.", a different field and still true), and `giving/gifts/actions.ts:59`, giving's own, not touched. The hint under `Note` (`Only the treasury team can see notes.`) stays true.
+
+**Group S2: team actions (gaps 4 and 5).**
+
+| Where | String |
+|---|---|
+| Set up the Treasurer or Reimbursement Clerk role, and the org's role of that key carries a key outside Giving and Reimbursements `COPY.team.ensureNotTreasuryOnly` | That role already exists with permissions outside Giving and Reimbursements. An administrator can fix it under Roles. |
+| Grant a role that carries a key outside Giving and Reimbursements (C9, **amended**) `COPY.team.notTreasuryOnly` | That role includes permissions outside Giving and Reimbursements. An administrator can grant it from Roles. |
+| The other five `COPY.team.*` reuses (`invalidRole`, `assignmentEnded`, `endFromRoles`, `templateUnavailable`, `ensureEscalation`) | Unchanged, as Batch 4 reused them |
+
+**R.** Residual 12 and F138 are not denied: the strings say who can repair a role, and the founding administrator can (they hold `roles.manage`). **S.** Ensure's sentence is shown only for `not_treasury_only` from `ensureTreasuryRole`, which `team.ts:90` returns when the org's role of that key has at least one permission key and not all of them are in the treasury modules; "already exists" is true because the function found the role. Grant's sentence is shown for the same predicate on the chosen role (`team.ts:316`). **A.** The viewer holds `reimbursement.manage` (the default Treasurer). A Treasurer does not hold `roles.manage` or `role_grants.manage` and, by the subset rule, cannot hand out keys they lack, so C9's original "Grant it from Roles instead" told the viewer to do something they cannot (the finding behind the amendment). The Church Administrator role carries `roles.manage` (`drizzle/0032`, the founding-administrator set at `drizzle/0059:541`), so "An administrator can ..." names someone who can. This is the audience rule applied to C9, a Phase 3 string, and it is a Phase 3 defect fixed here rather than carried. **N.** `giving/team/actions.ts:54` ("...outside Giving. Grant it from Roles instead.") has the same defect and is amended in Batch 6 with C12; `giving/team/actions.ts:142` already has the ensure shape and gains only "and Reimbursements". `endFromRoles` ("That assignment can only be ended from Roles.") is a statement of where, not an instruction, so it stands.
+
+**Group S3: state refusals in the treasurer tree (gap 7 of Batch 4, "does a treasurer deserve a more specific sentence").** Yes, in one sentence each, and only where the sentence is true for every cause the outcome has.
+
+| Outcome (tree) | `COPY.treasury.refusals.*` | String |
+|---|---|---|
+| `not_waivable` (waive) | `notWaivable` | A receipt can't be waived on this request. Reload the page to see where it stands. |
+| `receipt_present` (waive) | `receiptPresent` | This request already has a receipt, so there is nothing to waive. |
+| `not_voidable` (void) | `notVoidable` | This request can't be voided. Reload the page to see where it stands. |
+| `not_reversible` (reverse) | `notReversible` | This request has no payment that can be reversed. Reload the page to see where it stands. |
+| `not_approvable` (approve as treasurer) | `notApprovable` | You can't approve this request as treasurer. Reload the page to see where it stands. |
+| `not_returnable` (send back, treasurer tree) | `notReturnable` | You can't send this request back. Reload the page to see where it stands. |
+| `not_found`, and every member-tree refusal | `COPY.detail.unavailable` | This request isn't available. (unchanged) |
+
+**R.** None denies a residual; "can't ... on this request" names no cause, so it neither confirms nor denies the separation-of-duties checks (residuals 3 and 8). **S.** Each sentence is chosen by the definer's outcome and by nothing else. The causes were read in `drizzle/0073`: `not_waivable` is a status outside submitted and approved, or already waived, or the viewer created or is paid by the request (`:2088`); `not_voidable` is a status outside submitted, returned and approved (`:2043`); `not_reversible` is a status other than paid or no live payment (`:2233`); `not_approvable` on the treasurer's path is a status other than submitted, or the viewer created or is paid by it (`:1886`, `:1904`); `not_returnable` is a status outside submitted and approved, the viewer created or is paid by it, or a seat holder exists for a submitted request (`:1980-2002`). Because some outcomes mix a state cause with a conflict-of-interest cause, the sentences say "can't" and do not name a cause; this is why `not_waivable` is not worded "already waived". **A.** The viewer holds `pay`, who can reload; the pages hide a verb the request cannot take, so these appear from a stale tab, and "Reload the page" is something the viewer can do. When the cause is the viewer's own conflict, reloading shows no button, which completes the explanation without naming it. **Why this does not reopen EC16.** EC16 is "a missing request id and a forbidden one give the same response". `not_found` is still neutral and so is every member-tree refusal. A `pay` holder without `view` already learns a request's state from C8's pre-form blocks (`This request isn't waiting for payment.`, `This payment was already recorded.`), so the new sentences add no state a `pay` holder could not already read; recorded as a residual below. **N.** Neighbours: `treasury-messages.ts:11-19` (the header comment that defends the one-neutral-answer reading, modified), `messages.ts:120-127` (the member tree's twin, **unchanged**, and `decisionRefusal` keeps its comment), `treasury-messages.test.ts:52-53, 60, 95`.
+
+**Residual 13 (added to the Accepted residuals list):** a `pay` holder who holds no `view` can learn, by posting a request id, that the id exists and is in a state the verb refuses (it already could through `record_payment`'s blocks). `paper`; the identity of the request, its amount and its people are not disclosed.
+
+**Group S4: the treasurer's send back (X2) and the dialog (C8 "as C6 with kind fixed").**
+
+| Where | String |
+|---|---|
+| Dialog title `COPY.treasury.sendBack.title` | Send this request back? |
+| Body, request is submitted `…sendBack.body` | The requester can fix it and send it again. |
+| Body, request is approved `…sendBack.bodyApproved` | The requester can fix it and send it again. It will need approval again. |
+| Field | Reason (the requester will see this) |
+| Buttons; result | Send back / Cancel; Sent back. |
+
+There is no radio; "Needs changes" and "Not approved" do not appear, because the treasurer path is fixed to needs changes. **R.** The approved body states what Phase 1 Flow 3 says ("Return to requester. This clears the approval, and a fresh approval is required"). **S.** The body is chosen from the detail's `status` (`approved` or `submitted`) which is the status the definer acts on; a revision change is caught by `changed_since_viewed`. "send it again" is true because a `returned` request is editable and resubmittable by its creator. **A.** A `pay` holder. **N.** Reuses the C6 radio's own description (`The requester can fix it and send it again.`); no other string says the treasurer can also mark a request "not approved", and none may (X2).
+
+**Group S5: the vanished category (gap 3), the tampered shape (gap 4), the settings success text (gap 6).**
+
+| Where | String |
+|---|---|
+| Rename or retire a category that is gone or already retired (shown beside the row) `COPY.settings.categoryGone` | That category isn't in the list any more. Reload the page to see the current list. |
+| Tampered shape (`method_invalid`, a bad group or category id, a bad number) | We couldn't save that. Your entries are still here. Try again. (stands, `COPY.form.saveFailed`) |
+| Settings success | No toast text. The three settings actions return data, and the page shows the change in place; a toggle that fails shows `COPY.form.saveFailed` |
+
+**R.** None. **S.** `not_found` from `save_category` is an id that is not a live category of this organization (`:2487`); from `end_category` it is the same (`found` is false when nothing changed, `:2530`), which includes a category already retired, so "isn't in the list any more" is true for each. **A.** A `manage` holder, who can reload. **N.** The save-failed sentence in this position (`treasury-messages.ts:151`) told the viewer to try again, which cannot work for a category that does not exist: the reason for the new sentence. `categoryNameTaken` and `categoryNameInvalid` stand.
+
+**Group S6: X1 (no notice to an acting creator) and X2, confirmed against Phase 1.**
+
+**X1: confirmed, narrowing C10.** Phase 1 Flow 3 says "the requester is told 'Paid'"; the purpose of the notice is to tell someone who is not at the screen. A creator who is also the person who just recorded the payment or voided the request (a sole pay holder, or a treasurer who entered a request for themselves) is at the screen and sees `Payment recorded.` or `Request voided.` plus, for payment, the `selfPaid` record. A second email about one's own click carries no information and costs a send. The cases that remain notified are the real ones: a creator who is not the actor, and a clerk who entered a request on behalf of a member (the creator is the clerk, not the beneficiary, as C10 already says). **Amendment to C10 (the `requester_update` row):** recipients read *the creator, unless the creator is the person acting*. It is `tested` (`payments.db.test.ts`) and costs no Copy. **Audience:** nobody sees a new string. **Neighbour:** `notices.ts` and `decisions.ts` need no edit (an approver cannot be the creator, and a treasurer cannot send back or override-approve their own request, D5).
+
+**X2: confirmed.** Phase 1 Flow 3 names one treasurer return: "Wrong amount seen on the receipt: Return to requester. This clears the approval, and a fresh approval is required" (`docs/work-log/2026-10-25-treasury.md:183`), and the actor table says "return an approved request" (`:146`). Neither names a treasurer "not approved". The definer already forbids `not_approved` from `approved` (`kind_invalid`, `drizzle/0073:~2000`), so fixing the kind to needs changes also makes the form unable to produce a refusal. A treasurer who wants a request to end uses Void, which is its own verb with its own notice (`…was closed`). No Copy change beyond group S4.
+
+**Group S7: the queue's filter and empty states (the Known UI gap; Batch 6 would have had to stop here).**
+
+| Where | String |
+|---|---|
+| Group select label `COPY.queue.chargedTo` (exists) | Charged to |
+| First option `queue.filter.groupAll` | All groups |
+| The selected group when it is not among the listed groups and no row names it `queue.filter.groupSelected` | This group |
+| Date fields `queue.filter.submittedFrom`, `submittedTo` | Submitted from · Submitted to |
+| Hint under the date fields `queue.filter.datesHint` | Dates are the day each request was last submitted. |
+| Buttons `queue.filter.apply`, `queue.filter.clear` | Filter · Clear |
+| Hint under the group select, only when the list is cut off `queue.filter.groupsTruncated` | Only groups with one of the 2,000 most recent requests are listed. |
+| Empty, by tab and with no filter set `queue.empty.*` | Waiting for payment: Nothing is waiting for payment. · Needs treasurer approval: Nothing needs a treasurer's approval. · In progress: Nothing is in progress. · Paid: Nothing has been paid yet. · All: No one has sent in a request yet. |
+| Empty, any of group, from or to set `queue.empty.filtered` | No requests match those filters. |
+
+**The derivation (orchestrator ruling, 2026-10-26; recorded as given).** The "Charged to" options are the distinct groups present in the rows the viewer can already see. No new definer, no schema change. **Feasibility finding against the live tree:** `presby_reimbursement_treasurer_list` clamps a page to 200 rows (`drizzle/0073:~2718`, `limit least(greatest(coalesce(p_limit, 50), 1), 200)`) and orders `all` newest first (the `pay` and `override`/`progress` order terms are null for `all`). A one-call derivation would therefore omit every group whose only requests are older than the 200th. The ruled shape is a pure-TypeScript reader, `listTreasurerGroups(identity)` in `reads.ts`: it calls the existing `treasurer_list(user, 'all', null, null, null, 200, offset)` from offset 0 by 200 until it has read `total_count` rows or 10 pages (2,000 rows), returns the distinct `{ id, name }` sorted by name, and `truncated: true` if `total_count` exceeded 2,000. It runs on the same `view` gate as the queue; a `denied` result is the queue's `denied`. A typical congregation is one call; an organization with more than 2,000 non-draft requests gets the `groupsTruncated` hint, not a wrong list. **Tradeoff, said out loud:** fine now because Increment 1 has no history import and a congregation files tens to low hundreds of requests a year; revisit with a distinct-groups definer (a Batch 1 schema change) if any organization exceeds 2,000, or if the queue page's latency shows the extra calls. The names are the groups' current names (the join in the definer), so a renamed group shows its new name.
+
+**R.** "Submitted" and the datesHint state accepted ruling 4 of 2026-10-26 (the filter is on the org-local date last submitted), and the CSV uses the same dates, so the hint is true of the export too. The truncation hint states the limit rather than hiding it. **S.** *All groups*, the group list and `groupsTruncated` read the rows from `treasurer_list`; `groupSelected` is shown only for a `groupId` in the URL that the derived list does not contain and that no returned row names, so it claims nothing about the group; the dates hint is `coalesce(submitted_at, created_at)` converted to the org-local date (the definer), and a request that was sent back and sent again is filtered on its latest submission. An empty tab sentence is chosen by the tab and by whether any filter is set; "No one has sent in a request yet" is true because the `all` tab is every non-draft request (a draft is not "sent in", and the treasurer cannot see drafts). **A.** `view` holders; none of the strings instructs. **N.** `queue.nothingWaiting` ("Nothing is waiting.", `copy.ts:291`) is stale on Paid and All and under any filter (it is wrong to say nothing is "waiting" in a list of paid requests), so it is replaced; the member page's `page.nothingWaiting` (`copy.ts:46`) is about the member's own waiting list and stands. The card's `Sent {date}` (`copy.ts:289`) is the same date as the filter; the filter says "Submitted" because accepted ruling 4 says so, and the hint ties the two words together.
+
+### Confirmed deviations (X3 to X7) and the conditions they put on Batch 6
+
+- **X3 (`suggestTeam`):** confirmed. The UI appends `COPY.treasury.override.addOneUnderTeam` as a link to `/o/<slug>/admin/reimbursements/team`; the string begins with a space, which the UI renders as a space before the link text and does not trim away. A `pay`-only viewer gets the sentence alone, as C8 requires.
+- **X4 (group name read after the refusal):** confirmed; `Someone in the group can approve this, so it needs their approval.` for a viewer who cannot read the request is true and discloses no name.
+- **X5 (first refusal is the gate's `You don't have permission to do that.`):** confirmed; it is `COPY.gate.notPermitted` (ruled in the Batch 2a amendment, T2).
+- **X6 (a page past the last page is empty with total 0):** confirmed. Batch 6 redirects a `page` above 1 whose items are empty to page 1 of the same filters; it never prints "page 2 of 0". Pinned by a `queue-page` test (to be written).
+- **X7 (invalid query values are dropped):** confirmed. The condition: the filter bar and the `Export CSV` link are built from the **parsed** query (`parseQueueQuery`), never the raw one, so the page shows exactly the filter applied and a hand-typed bad date can only widen the view the viewer sees on screen. No sentence for a rejected filter is needed because the browser's date inputs cannot produce one.
+- **Loop-back note 3, 4 and 5:** unchanged. Note 1 (gaps 1, 2, 5) and note 2 (the group filter) are closed by this amendment.
+
+### Blast radius
+
+Existing assertions altered: listed under "What changes in code", item 1 (tests). Existing e2e specs asserting any of these strings: none (the four reimbursement specs and the hydration entry are Batch 7, not yet written). **For Batch 7:** the treasurer spec asserts `Choose a date between the day of the expense and today.`, one of the six refusal sentences by posting a stale page, the empty-state sentence for a filtered queue, and `Write a note.`. Flags each affected spec depends on: the per-org toggle `org_portal.reimbursement` only, set through `e2e/support/flags.ts` or the fixture's `setToggle`; nothing goes into `scripts/ci/e2e-baseline-flags.sql`. Edge cases and the test that pins each: the bounded pagination reaches `truncated` at 2,001 rows (to be pinned by a `reads.db` case that seeds the cap through a lowered constant; the real 2,000 is unverified); `treasuryReturnAction` posting `kind: "not_approved"` is still dropped (`actions.test.ts › sends back for CHANGES only`, exists); a `pay`-only holder's refusal text (`actions.test.ts`, extended); the midnight/time-zone date edge is **unverified**.
+
+### Carry-forward
+
+| Item | Addressed or deferred |
+|---|---|
+| Batch 4 Copy gap 1 (`note_required`) | S1; closed |
+| Gap 2 (payment before the expense date) | S1; closed |
+| Gap 3 (category vanished) | S5; closed |
+| Gap 4 (tampered shape) | S5; stands |
+| Gap 5 (set-up-role `not_treasury_only`; reuse of giving's five) | S2; closed, reuse confirmed |
+| Gap 6 (settings success text) | S5; none, stands |
+| Gap 7 (neutral for state refusals) | S3; changed for the treasurer tree, neutral kept for `not_found` and the member tree; residual 13 |
+| X1, X2 | S6; both confirmed, C10 amended |
+| X3, X4, X5, X6, X7 | Confirmed above; conditions on Batch 6 |
+| Known UI gap (group filter) | S7; orchestrator ruling recorded, bounded derivation, `groupsTruncated` |
+| Orchestrator ruling 4 of 2026-10-26 ("submitted") | S7 labels and hint |
+| Residuals 3, 8, 12, F138 | Not denied by any string here |
+| C12 (giving team strings) | Batch 6, now also carrying the grant sentence fix (S2) |
+| Anything deferred | The distinct-groups definer, if any organization passes 2,000 requests (tech-lead; no operator confirmation needed); Batch 7's assertions of these strings |
+
+**Decision draft (number pre-assigned by the orchestrator at integration):** *The treasurer tree answers a refused verb with a short sentence that is true for every cause of that outcome; only a missing request and the whole member tree stay on the neutral answer. The queue's group filter is read from the requests the viewer can already see, bounded at 2,000.*
 
 **Implementer:** per the table above, api-developer for Batches 3 and 4 and ux-developer for Batch 5. Status: Phase 3 amendment complete, 2026-10-26; one new item on the confirmation list.

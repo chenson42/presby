@@ -38,10 +38,11 @@
     "check:brand-scope": "node scripts/check-brand-scope.mjs",
     "check:hydration-gate": "node scripts/check-hydration-gate.mjs",
     "check:giving-boundaries": "node scripts/check-giving-boundaries.mjs",
+    "check:treasury-boundaries": "node scripts/check-treasury-boundaries.mjs",
     "check:proxy-imports": "node scripts/check-proxy-imports.mjs",
     "check:secrets": "node scripts/check-secrets-pii.mjs",
     "check:schema-parity": "dotenv -e .env.local -- tsx scripts/check-schema-parity.ts",
-    "check": "npm run check:audit && npm run check:sql-date && npm run check:deps-drift && npm run check:brand-scope && npm run check:secrets && npm run check:hydration-gate && npm run check:giving-boundaries && npm run check:proxy-imports",
+    "check": "npm run check:audit && npm run check:sql-date && npm run check:deps-drift && npm run check:brand-scope && npm run check:secrets && npm run check:hydration-gate && npm run check:giving-boundaries && npm run check:treasury-boundaries && npm run check:proxy-imports",
     "docs:erd": "tsx scripts/generate-erd.ts"
   },
   "dependencies": {

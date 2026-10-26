@@ -79,13 +79,16 @@ const PASSWORD = "Brindled-Wren-Cordage-42"; // leak-ok: a throwaway password fo
 test.describe("Community sign-in invitation", () => {
   test.setTimeout(240_000);
 
+  const ROLES_FLAG = "org_portal.roles";
   let sql: Sql;
   let flags: FlagCapture;
 
   test.beforeAll(async () => {
     sql = platformSql("community-sign-in-invite.spec");
-    flags = await captureFlags(sql, [COMMUNITY_FLAG, OFFICERS_FLAG, REQUIRE_2FA_FLAG]);
-    for (const key of [COMMUNITY_FLAG, OFFICERS_FLAG, REQUIRE_2FA_FLAG]) await setFlag(sql, key, true);
+    // Lane 7 asserts the Roles page's PERMISSION refusal (`/admin/roles`), which is only reachable with
+    // `org_portal.roles` on; it is off in the seed and in the CI baseline, so the spec sets it (QA run 1).
+    flags = await captureFlags(sql, [COMMUNITY_FLAG, OFFICERS_FLAG, ROLES_FLAG, REQUIRE_2FA_FLAG]);
+    for (const key of [COMMUNITY_FLAG, OFFICERS_FLAG, ROLES_FLAG, REQUIRE_2FA_FLAG]) await setFlag(sql, key, true);
   });
 
   test.afterAll(async () => {
@@ -162,7 +165,7 @@ test.describe("Community sign-in invitation", () => {
         await openCard(page, person);
 
         await expect(card(page)).toContainText(
-          `Invite ${person.name} to sign in. We'll email ${person.email} with a link that works once. Accepting lets them sign in as themselves. It doesn't change what they can do here.`,
+          `Invite ${person.name} to sign in. We'll email ${person.email} with a link that works once. Accepting lets them sign in as themselves, and any role or seat they hold here then takes effect.`,
         );
         await expect(card(page)).toContainText(
           `When ${person.name} signs in with ${person.email}, PresbyPortal connects them to this record if it can. An invitation also connects them.`,

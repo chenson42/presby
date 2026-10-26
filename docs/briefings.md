@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=7e54e8c -->
+<!-- covers: decision=224 commit=451d186 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start

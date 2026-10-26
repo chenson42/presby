@@ -5,8 +5,9 @@
  * over both trees. A page that is only a redirect or a re-export may carry
  * `// gate-exempt: <reason>` on a line of its own.
  *
- * Today only the member `actions.ts` exists; the scan is the standing guard for
- * the pages and routes later batches add.
+ * The member `actions.ts` (Batch 2a/3) and, from Batch 4, the treasurer tree's
+ * `actions.ts`, `team/actions.ts` and `export/route.ts`; the scan is the standing
+ * guard for the pages and routes later batches add.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -32,8 +33,27 @@ function walk(dir: string): string[] {
 describe("gate coverage of both reimbursement route trees (EC25)", () => {
   const files = TREES.flatMap(walk).filter((f) => SURFACE.test(path.basename(f)) && !f.endsWith(".test.ts"));
 
-  it("finds at least the member actions file (the scan is not vacuous)", () => {
-    expect(files.map((f) => path.relative(ORG_TREE, f))).toContain(path.join("reimbursements", "actions.ts"));
+  it("finds the member actions file and the treasurer tree's three surfaces (the scan is not vacuous)", () => {
+    const found = files.map((f) => path.relative(ORG_TREE, f));
+    expect(found).toContain(path.join("reimbursements", "actions.ts"));
+    expect(found).toContain(path.join("admin", "reimbursements", "actions.ts"));
+    expect(found).toContain(path.join("admin", "reimbursements", "team", "actions.ts"));
+    expect(found).toContain(path.join("admin", "reimbursements", "export", "route.ts"));
+  });
+
+  it("every treasurer-tree action and route names the key it needs - a bare gate call (member surface) is a defect there", () => {
+    const treasury = files.filter((f) => f.includes(`${path.sep}admin${path.sep}reimbursements${path.sep}`));
+    expect(treasury.length).toBeGreaterThanOrEqual(3);
+    for (const file of treasury) {
+      const source = readFileSync(file, "utf8");
+      const calls = [...source.matchAll(/\bgateReimbursement(?:Page|Action|Route)\s*\(([^)]*)\)?/g)];
+      expect(calls.length, path.relative(ORG_TREE, file)).toBeGreaterThan(0);
+      // every call in the file carries a key set: `anyOf`, or a constant (PAY / VIEW / MANAGE) built from it
+      expect(source, path.relative(ORG_TREE, file)).toMatch(/anyOf:\s*\[/);
+      for (const call of calls) {
+        expect(call[1], `${path.relative(ORG_TREE, file)}: ${call[0]}`).toMatch(/anyOf|PAY|VIEW|MANAGE/);
+      }
+    }
   });
 
   it("every page, actions file and route handler calls a reimbursement gate", () => {

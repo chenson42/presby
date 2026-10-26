@@ -844,3 +844,34 @@ The auth-touching gate is met. The e2e suite ran against a real dev server on :3
 | 5 — Verification | qa | Complete; failing-first reproduced (unit 6/55, 9/33, 6/12; e2e 6/17 + invitation-new-account red); auth e2e 58/58, full 523/523, prod lane 13/13, 0 skipped; adversarial probes 9/9; 360px pending and failure checked on /totp and /account/2fa; flags reset to the CI baseline | PASS | 2026-10-25 |
 
 **Handoff:** to **analyst (Phase 6)**. Carry O-1 (a truncated partial paste auto-submits; a design-level choice worth a ruling or TODO), O-4 and O-5 into the shipped-vs-intent review. Before merge, the orchestrator must land DECISION-257 plus the DECISION-193(a) pointer at `docs/decisions.md:336`, and the Gap 6 TODO line (O-2). O-7 is for the orchestrator.
+
+## Phase 4 — loop-back (O-1)
+
+**Trigger:** Phase 5 observation O-1 (a short paste that overflows the remaining boxes auto-submitted and silently dropped a digit), plus O-3 (typo). Implementer: full-stack-developer.
+
+**Root cause.** `spread()` in `src/components/shared/one-time-code-input.tsx` computed `exact = digits.length <= length`, which ignored the starting box. Three typed digits plus a four-digit paste into box 4 delivers 4 digits (<= 6, so "exact"), but only 3 fit, so the fourth was dropped and the code submitted. That is the property Decision 3 exists to prevent ("a truncated input waits for the button").
+
+**Fix.** `exact` is true only when no delivered digit is dropped:
+
+- a run of at least `length` digits restarts at box 1 (existing behaviour) and drops only what exceeds the code, so it is exact only when `digits.length === length`;
+- a shorter run is exact only when `start + digits.length <= length`.
+
+**One deliberate difference from the loop-back brief.** The brief's formula was `start + digits.length <= length`. Applied literally it would also mark a full 6-digit code pasted into box 4 as not exact, although that paste restarts at box 1, replaces the whole code and drops nothing (the existing "whole-code replace" behaviour, C-3). The implemented rule keeps that case exact; every case the brief names (overflow into box 4, full-length run from box 1, over-length run) behaves as specified. Pinned by C-4b.
+
+**Tests (failing first).** Written and run against the unmodified source before the fix:
+
+| Test | Before fix | After fix |
+|---|---|---|
+| `one-time-code-input.test.tsx` C-4: 3 typed + 4-digit paste into box 4 fills six, reports `{ exact: false }` once | FAIL (`onComplete` called with `exact: true`) | pass |
+| `one-time-code-input.test.tsx` C-4b: exact fit into box 4, and a 6-digit paste into box 4, both report `exact: true` | pass (negative pin) | pass |
+| `totp-challenge-form.test.tsx` F-5b: same paste, `verifyTotpAction` not called, Verify enabled, then Verify posts `123456` once | FAIL (action called on the paste) | pass |
+| `totp-enroll-form.test.tsx` N-3b: same paste, `completeEnrollment` not called, Confirm then sends `123456` | FAIL (auto-submitted; boxes gone) | pass |
+| `e2e/totp-code-entry.spec.ts` E-8b (360px viewport, no horizontal overflow): same paste on :3560, no POST in 750 ms, Verify enabled, Verify then posts once | FAIL (Verify disabled: form had auto-submitted) | pass |
+
+Red evidence was taken in the worktree before editing the source (the working tree held only the new tests over the unmodified source, so a `git archive` scratch copy would have shown the same thing); the dev server was :3560.
+
+**Other changes.** `docs/ui-standards.md:407`: O-3 typo fixed ("move. A complete code"), and the clause "an over-long paste does not submit" widened to "a paste that drops a digit, such as an over-long one, does not submit". The `OneTimeCodeInput` `onComplete` doc comment and the `totp-challenge-form.tsx` comment say the same.
+
+**Gate results.** `npm run typecheck`, `npm run lint`, `npm run check` (all eight tripwires) clean. The three changed unit files: 104 passed (100 before this loop-back, plus the 4 new tests C-4, C-4b, F-5b, N-3b). `e2e/totp-code-entry.spec.ts` plus `e2e/totp-full-login.spec.ts` on :3560 with the MFA-enrolled user: 19 passed. The dev server was stopped by PID. 360px look at the overflow case: six filled boxes, Verify enabled and not pending, no horizontal overflow.
+
+**Handoff:** to qa (Phase 5 re-run, scoped to O-1: C-4, C-4b, F-5b, N-3b, E-8b, plus the three unit files and the two e2e specs), then analyst (Phase 6). Still for the orchestrator at integration: DECISION-257 and the DECISION-193(a) pointer in `docs/decisions.md`, the Gap 6 TODO line.

@@ -62,7 +62,7 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar, org_portal.giving, org_portal.public_calendar and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
+  it("makes org_portal.calendar, org_portal.giving, org_portal.public_calendar, org_portal.reimbursement and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
@@ -70,6 +70,7 @@ describe("ORG_FEATURE_CATALOG", () => {
       "org_portal.giving",
       "org_portal.mail_domain",
       "org_portal.public_calendar",
+      "org_portal.reimbursement",
     ]);
 
     const provisioned = ORG_FEATURE_CATALOG.filter((e) => e.provisionedOn);
@@ -112,9 +113,25 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(giving!.provisionedOn).toBe(false);
     expect(giving!.category).toBe("giving");
     for (const entry of ORG_FEATURE_CATALOG) {
-      if (entry.key === "org_portal.giving") continue;
+      if (entry.key === "org_portal.giving" || entry.key === "org_portal.reimbursement") continue;
       expect(entry.orgTypes, entry.key).toBeNull();
     }
+  });
+
+  it("scopes org_portal.reimbursement exactly like Giving (congregation + new_worshiping_community), provisioned OFF, toggle-only, in the giving category, self-service (treasury Inc 1, P3-15)", () => {
+    const entry = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.reimbursement");
+    expect(entry).toBeDefined();
+    expect(entry!.name).toBe("Reimbursements");
+    expect([...(entry!.orgTypes ?? [])].sort()).toEqual(["congregation", "new_worshiping_community"]);
+    const giving = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.giving")!;
+    expect([...(entry!.orgTypes ?? [])].sort()).toEqual([...(giving.orgTypes ?? [])].sort());
+    expect(entry!.flag).toBeNull();
+    expect(entry!.provisionedOn).toBe(false);
+    expect(entry!.category).toBe("giving");
+    expect(entry!.operatorEnabled).toBe(false);
+    expect(entry!.description).toBe(
+      "Lets members ask for reimbursement or a vendor payment, lets the chairs and leaders of a group approve it, and lets the treasurer record the payment. It doesn't send money. Turning this off hides every reimbursement page and deletes nothing.",
+    );
   });
 
   it("operatorEnabled is a boolean on every entry and true for EXACTLY org_portal.domains and org_portal.mail_domain (Q1: platform admin only, for now)", () => {
@@ -210,7 +227,12 @@ describe("ORG_FEATURE_CATALOG", () => {
       const entry = ORG_FEATURE_CATALOG.find((e) => e.key === t.orgFeatureKey);
       return entry?.orgTypes !== null;
     });
-    expect(scoped.map((t) => t.key).sort()).toEqual(["giving", "giving-admin"]);
+    expect(scoped.map((t) => t.key).sort()).toEqual([
+      "giving",
+      "giving-admin",
+      "reimbursements",
+      "reimbursements-admin",
+    ]);
     for (const tile of scoped) {
       const entry = ORG_FEATURE_CATALOG.find((e) => e.key === tile.orgFeatureKey)!;
       expect([...(tile.orgTypeScope ?? [])].sort(), tile.key).toEqual(

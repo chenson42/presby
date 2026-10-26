@@ -25,6 +25,14 @@ describe("TILE_ICONS", () => {
     expect(TILE_ICONS["giving-admin"]).not.toBe(TILE_ICONS.giving);
   });
 
+  it("maps both reimbursement tiles, with distinct glyphs (treasury Increment 1)", () => {
+    for (const key of ["reimbursements", "reimbursements-admin"]) {
+      expect(PORTAL_TILES.some((t) => t.key === key), key).toBe(true);
+      expect(TILE_ICONS[key], key).toBeDefined();
+    }
+    expect(TILE_ICONS["reimbursements-admin"]).not.toBe(TILE_ICONS.reimbursements);
+  });
+
   it("has no icon for a tile that no longer exists", () => {
     const keys = new Set(PORTAL_TILES.map((t) => t.key));
     const orphans = Object.keys(TILE_ICONS).filter((key) => !keys.has(key));

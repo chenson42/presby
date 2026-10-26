@@ -419,6 +419,38 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     domain: "giving",
     orgTypeScope: ["congregation", "new_worshiping_community"],
   },
+  // Reimbursements (docs/work-log/2026-10-25-treasury-inc1.md, Phase 3 "Files to
+  // modify"; P3-12). TOGGLE-ONLY, like Giving: no `flagKey`, and the per-org
+  // `org_portal.reimbursement` toggle (provisioned OFF) is the whole gate. Both
+  // tiles carry the same `orgTypeScope` as the catalog entry's `orgTypes`
+  // (set-equality, pinned in org-feature-catalog.test.ts). No count badge
+  // (P3-12): tiles are permission-blind static data (DECISION-162), and a count
+  // would need a per-viewer read; the "waiting for you" count is on the page.
+  // The destination renders its own honest Forbidden / toggle-off state.
+  //
+  // COPY GAP (reported to the orchestrator, Batch 2a): the two LABELS are the
+  // Copy section's own page headings (C2 H1, C7 H1); the two DESCRIPTIONS are
+  // not in the Phase 3 Copy section and are a proposal pending a ruling.
+  {
+    key: "reimbursements",
+    label: "Reimbursements",
+    description: "Ask to be paid back for something you bought for the church, or to pay a vendor.",
+    href: (slug) => `/o/${slug}/reimbursements`,
+    orgFeatureKey: "org_portal.reimbursement",
+    category: "operate",
+    domain: "giving",
+    orgTypeScope: ["congregation", "new_worshiping_community"],
+  },
+  {
+    key: "reimbursements-admin",
+    label: "Reimbursement requests",
+    description: "See every request, record payments, and choose which groups can receive requests.",
+    href: (slug) => `/o/${slug}/admin/reimbursements`,
+    orgFeatureKey: "org_portal.reimbursement",
+    category: "administer",
+    domain: "giving",
+    orgTypeScope: ["congregation", "new_worshiping_community"],
+  },
   // Custom domains (docs/work-log/2026-10-19-custom-domains.md, Phase 3
   // "Permissions & Flags"; T9/T10). TOGGLE-ONLY and operator-enabled: no
   // `flagKey`, and the per-org `org_portal.domains` toggle (flipped by a

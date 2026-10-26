@@ -111,6 +111,21 @@ describe("PORTAL_TILES — flag-key shape", () => {
   // mocked: this file deliberately imports nothing from `org-features` (F135),
   // so a runtime import creeping back into `tiles.ts` fails here at load.
 
+  it("the two reimbursement tiles are toggle-only (no flagKey, no comingSoon, no count badge) and gated by the org_portal.reimbursement org toggle; they link the member page and the treasurer queue", () => {
+    const byKey = Object.fromEntries(PORTAL_TILES.map((t) => [t.key, t]));
+    for (const key of ["reimbursements", "reimbursements-admin"]) {
+      const tile = byKey[key];
+      expect(tile, key).toBeDefined();
+      expect(tile?.orgFeatureKey, key).toBe("org_portal.reimbursement");
+      expect(tile?.flagKey, key).toBeUndefined();
+      expect(tile?.comingSoon, key).toBeUndefined();
+    }
+    expect(byKey.reimbursements.href("alder-creek")).toBe("/o/alder-creek/reimbursements");
+    expect(byKey["reimbursements-admin"].href("alder-creek")).toBe("/o/alder-creek/admin/reimbursements");
+    expect(byKey.reimbursements.label).toBe("Reimbursements");
+    expect(byKey["reimbursements-admin"].label).toBe("Reimbursement requests");
+  });
+
   it("the two giving tiles are toggle-only (no flagKey, no comingSoon) and gated by the org_portal.giving org toggle — R11: giving has no platform flag", () => {
     for (const key of ["giving", "giving-admin"]) {
       const tile = PORTAL_TILES.find((t) => t.key === key);
@@ -172,15 +187,15 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("PORTAL_TILES has exactly 22 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains)", () => {
-    expect(PORTAL_TILES.length).toBe(22);
+  it("PORTAL_TILES has exactly 24 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains + 2 reimbursements)", () => {
+    expect(PORTAL_TILES.length).toBe(24);
   });
 
   it("no tile is keyed 'feedback' — removed entirely, re-surfaces as an avatar-menu item + prompt card (commit 2)", () => {
     expect(PORTAL_TILES.map((t) => t.key)).not.toContain("feedback");
   });
 
-  it("mirrors the full 22-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains)", () => {
+  it("mirrors the full 24-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains + 2026-10-25 reimbursements)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
@@ -200,6 +215,8 @@ describe("PORTAL_TILES — flag-key shape", () => {
         "members",
         "officers",
         "oversight",
+        "reimbursements",
+        "reimbursements-admin",
         "reports",
         "roles",
         "staff",
@@ -279,6 +296,16 @@ describe("PORTAL_TILES — flag-key shape", () => {
       category: "administer",
       orgTypeScope: ["congregation", "new_worshiping_community"],
     },
+    reimbursements: {
+      domain: "giving",
+      category: "operate",
+      orgTypeScope: ["congregation", "new_worshiping_community"],
+    },
+    "reimbursements-admin": {
+      domain: "giving",
+      category: "administer",
+      orgTypeScope: ["congregation", "new_worshiping_community"],
+    },
     domains: { domain: "communications", category: "administer" },
     worship: { domain: "worship", category: "operate" },
     committees: {
@@ -340,7 +367,12 @@ describe("PORTAL_TILES — flag-key shape", () => {
       "reports",
     ]);
     const congregationOnly = new Set(["filings"]);
-    const congregationAndNwc = new Set(["giving", "giving-admin"]);
+    const congregationAndNwc = new Set([
+      "giving",
+      "giving-admin",
+      "reimbursements",
+      "reimbursements-admin",
+    ]);
     for (const tile of PORTAL_TILES) {
       if (presbyteryOnly.has(tile.key)) {
         expect(tile.orgTypeScope).toEqual(["presbytery"]);

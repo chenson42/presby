@@ -41,6 +41,7 @@ beforeEach(() => {
   catalog.length = 0;
   catalog.push({ key: "org_portal.calendar", flag: null });
   catalog.push({ key: "org_portal.giving", flag: null });
+  catalog.push({ key: "org_portal.reimbursement", flag: null });
 });
 
 /** Turns exactly the named org-toggle keys on. */
@@ -442,13 +443,15 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
     expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
       "org_portal.domains",
       "org_portal.giving",
+      "org_portal.reimbursement",
     ]);
     isOrgFeatureEnabled.mockClear();
-    // ...and an operate call does, once each, for the two toggle-gated tiles.
+    // ...and an operate call does, once each, for the three toggle-gated tiles.
     await visiblePortalTiles("operate", "congregation", VIEWER);
     expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
       "org_portal.calendar",
       "org_portal.giving",
+      "org_portal.reimbursement",
     ]);
     isOrgFeatureEnabled.mockClear();
     // A presbytery's operate call never reads the giving toggle: orgTypeScope
@@ -489,6 +492,8 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
       "org_portal.domains",
       "org_portal.giving",
       "org_portal.giving",
+      "org_portal.reimbursement",
+      "org_portal.reimbursement",
     ]);
   });
 

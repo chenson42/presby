@@ -136,7 +136,7 @@ index cbdbfcd..3afac18 100644
 +4. Optional, the operator's call, on a live customer repository: add `transport: staged`
 +   to `site-pasturechurch`'s calling workflow for one push and read the log (Built,
 +   "Staged ingest was requested", "This site has no images to send.", Publishing,
-+   Published), then remove it. It proves OIDC, the three routes and Vercel's real
++   "Sent commit ...; the platform has ingested it."), then remove it. It proves OIDC, the three routes and Vercel's real
 +   behavior; it does **not** prove an upload (that site has no images).
 +5. The first real `site-fpcw` ingest (see "Deferred by operator decision"). Expected log
 +   shape: `Built 14 page(s) and 81 image(s): 80 distinct, 28.3 MB.` · `The site is 37.8 MB
@@ -144,7 +144,7 @@ index cbdbfcd..3afac18 100644
 +   `Checking which of the 80 distinct image(s) the platform still needs.` ·
 +   `<R> already on the platform; <M> to upload.` (or `All 80 image(s) are already on the
 +   platform; nothing to upload.`) · one `Uploaded i of M` line per image · `Publishing ...`
-+   · `Published commit <sha7> to "<slug>"` · `Sent <M> new image(s); <R> already on the
++   · `Sent commit <sha7> to "<slug>" (<n> page(s)); the platform has ingested it.` · `Sent <M> new image(s); <R> already on the
 +   platform.` A previously masked failure is possible (the 413 hid everything after it):
 +   the client prints a named cause and hint for each (401 variable mismatch, 404
 +   unprovisioned repository, 503 flag off or unreadable); fix it and re-run, every step is

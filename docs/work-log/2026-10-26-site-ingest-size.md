@@ -870,7 +870,7 @@ Run-log lines are what the **site repository's GitHub Actions log** shows. **Aud
 | L4c | `This site has no images to send.` | `D` = 0 |
 | L5 | `Uploaded {i} of {M}: "{key}" ({size}).` | printed after the upload's 200; `key` is the first manifest key with that hash |
 | L6 | `Publishing {P} page(s) and {N} image reference(s).` | the commit request being sent |
-| L7 | `Published commit {sha7} to "{slug}" ({pageCount} page(s)).` | the 200 `ingested` body (`commitSha`, `organizationSlug`, `pageCount`) |
+| L7 | `Sent commit {sha7} to "{slug}" ({pageCount} page(s)); the platform has ingested it.` (superseded "Published commit…" per the Phase 5 run-1 ruling) | the 200 `ingested` body (`commitSha`, `organizationSlug`, `pageCount`) |
 | L8 | `The platform has already ingested commit {sha7}; nothing to do.` | the 200 `already_current` body |
 | L9 | `Sent {U} new image(s); {R} already on the platform.` | client counts of this run's uploads and the plan |
 
@@ -922,6 +922,7 @@ Unchanged and kept verbatim: every existing 401 text, `No site is provisioned fo
 | S1 | `request_too_large` | `Request body is larger than 4,000,000 bytes.` |
 | S2 | `unsupported_protocol` | `Unsupported ingest protocol. Send the header x-presby-ingest-protocol: 1.` |
 | S3 | `invalid_request` | `images must be an array of at most 2000 entries.` · `images[{i}] needs a lowercase 64-character sha256 and a size from 1 to 4000000.` · `images[{i}] repeats an earlier sha256.` · `images[{i}] needs a manifestKey of 1 to 200 characters with no control characters, and a lowercase 64-character sha256.` · `images[{i}] repeats the manifestKey "{key}".` · `pages must be a non-empty array.` · `Malformed entry in pages.` · `bundle.images has more than 2000 entries.` (legacy) · `x-presby-sha256 must be a lowercase 64-character hex sha256.` · `The image body is empty.` |
+| S3b | `invalid_request` | `Malformed request body.` (plan and commit, as on the legacy route) · `Unsupported schemaVersion.` (commit) — added per the Phase 5 run-1 ruling |
 | S4 | `hash_mismatch` | `The bytes received do not match x-presby-sha256.` |
 | S5 | `not_an_image` | `The uploaded file is not a PNG, JPEG, or WEBP.` |
 | S6 | `images_not_uploaded` | `These images are not available to this site yet: "{key}", "{key}" (and {k} more). Upload them, then commit again.` (up to 20 keys, then the count) |
@@ -1569,3 +1570,170 @@ Applied in the site-kit worktree on `fix/staged-ingest` as `ea9e78a` (on top of 
 - Red: the three exact-text assertions (`test/ingest.test.ts:317`, `:435`, `:464`) were changed first and failed against the old string (3 failed, 232 passed).
 - Green: after the one-line change, `npm test` 235/235, `npm run typecheck` and `npm run build` clean, `actionlint .github/workflows/ingest.yml` clean. `dist/` is tracked but unchanged (the script is not part of the build output).
 - Commit trailers: `Caught-By: agent-review`, `Discovered-In: Phase-5`.
+
+---
+
+# Phase 5 — Verification (qa), run 2
+
+**Date:** 2026-10-26
+**Verified by:** qa
+**Trees:**
+- presby `/Users/cshenso/git/presby-platform/presby-ingest` at `855b84a`. F289's four Rule 16 files are still uncommitted, as instructed. Neon `pipeline-site-ingest-size` (`ep-nameless-cloud`). Each connection-string variable was checked by presence, length and host match only; none was printed.
+- presby-site-kit `/Users/cshenso/git/presby-platform/presby-site-kit-ingest` at `ea9e78a` (the L7 fix on top of `ad109b1`).
+
+**Scope run** (the narrow re-run named in run 1's handoff):
+- site-kit: `npm test`, typecheck, build, actionlint.
+- L7 failing-first, reproduced against `ad109b1`'s `scripts/ingest.mjs` in a `git archive` scratch copy.
+- BR-1 re-run with the new client.
+- Q8 (suspended site) on both the legacy and staged paths.
+- Copy-truthfulness check on the new L7 and the two new S3 rows.
+
+**Not re-run, and why:** the presby code has not changed since run 1. `git diff --stat 41eea22 855b84a` touches only the work-log. So these results still stand from run 1: presby typecheck, lint, `npm run check`, build, the unit suite (9,147), the DB lane (831), e2e (83 of 83), the gate audit and the schema probe. No e2e was run in this pass, so no flag reset was needed. Disk was checked first: 561 GiB free.
+
+## Type Check
+
+site-kit `npm run typecheck`: **PASS** (exit 0). Also clean:
+- `npm run build`, exit 0, with `git status` clean afterwards (no `dist/` drift).
+- `actionlint .github/workflows/ingest.yml`, exit 0.
+
+## Unit Tests
+
+| Suite | Files | Tests | Result | Time |
+|---|---|---|---|---|
+| presby-site-kit `npm test` @ `ea9e78a` | 22 passed | 235 passed, 0 skipped, 0 failed | pass | 1.6 s |
+| BR-1 `scratch/bridge/br1.test.ts`, run as-is against the new client | 1 | 5 passed, 0 skipped | pass | 9.8 s |
+| QA Q8 bridge (scratch copy, now deleted) | 1 | 2 passed | pass | 3.3 s |
+
+**BR-1 with the new client:**
+- The real client log now prints `Sent commit … ; the platform has ingested it.` on every ingested outcome: (a) legacy, (b) staged, (d) a new sha with images already held, and (e2) the resume after a failure.
+- Request shapes and token counts are the same as Phase 4's paste:
+  - (b): `/plan:477`, `/images:1200000` ×5, `/commit:779`, 7 tokens.
+  - (c): `already_current` with one `/plan`.
+  - (e1)/(e2): three uploads and a throw, then 2 uploaded, 3 already held, published.
+
+**Q8, the suspended site:** the real client against the real handlers and real Postgres, with a site fixture created through `setSiteStatus(…, "suspended")`.
+
+| Path | Requests | Client success line | Row afterwards |
+|---|---|---|---|
+| legacy | `/:27011` | `Sent commit q8r2-le to "qabr2-susp-legacy-…" (2 page(s)); the platform has ingested it.` | `status=suspended`, `lastIngestedCommitSha` set |
+| staged (`transport: staged`) | `/plan:103`, `/images:20000`, `/commit:365` | `Sent commit q8r2-st to "qabr2-susp-staged-…" (2 page(s)); the platform has ingested it.` | `status=suspended`, `lastIngestedCommitSha` set |
+
+The old line `Published commit …` no longer appears. The line only claims what the 200 `ingested` body proves.
+
+## End-to-End Tests
+
+Not re-run. Nothing in presby changed since run 1's 83 of 83 (custom-hosts lockdown, assets, serving and public-calendar; chromium `public-sites.spec.ts`). The site-kit change is one log string and has no e2e surface. This is not auth-touching.
+
+## Regression Tests Added
+
+Failing-first was reproduced independently. I took a `git archive` of site-kit `ea9e78a`, put `ad109b1`'s `scripts/ingest.mjs` back into it (the diff is exactly line 252), and ran vitest:
+- **3 failed, 232 passed.** These are the three exact-text cases, each failing on the L7 string itself (`- "Sent commit …"` against `+ "Published commit …"`).
+- Against the fixed client: 235 of 235.
+
+The three cases:
+- `test/ingest.test.ts:317`, KI-2: the legacy run log, exact text.
+- `test/ingest.test.ts:435`, KI-25: the staged run log, exact text.
+- `test/ingest.test.ts:464`, KI-25: the no-image site, exact text.
+
+Each asserts the whole log array with `toEqual`, so any "Published" wording on that line fails it. That is the property the ruling fixes: ingestion is claimed, publication is not.
+
+## Coverage on Critical Modules
+
+Not re-measured. `permissions.ts`, `two-factor.ts` and `flags.ts` are untouched.
+
+## Feature-Gate Audit
+
+No protected routes were touched in this round. The server is unchanged since run 1, whose audit table covers all four `/api/sites/ingest` handlers (OIDC through `authorizeIngest` as the first statement, then the flag 503).
+
+## Copy Truthfulness
+
+**New L7:** `Sent commit {sha7} to "{slug}" ({pageCount} page(s)); the platform has ingested it.` at `presby-site-kit-ingest/scripts/ingest.mjs:252`. The viewer is a site-repository collaborator reading the Actions log.
+
+1. **In the Copy table?** Yes, through "Orchestrator rulings on Phase 5 run 1".
+2. **Is what it claims backed by what it reads?** Yes:
+   - "Sent commit" is true on both the legacy and staged paths, and on a retried commit.
+   - "Ingested" is true because the `ingested` body is returned only after `recordSiteIngest` sets `last_ingested_commit_sha`. Q8 shows this on a suspended site.
+   - `sha7`, `slug` and `pageCount` come from the server's body. The slug is derived from the verified claims.
+   - Nothing is claimed about whether the site is visible.
+3. **Instructions:** none.
+4. **Older strings made false:** see the integration edits below.
+
+**S3 rows:**
+- `Malformed request body.` appears at `src/lib/sites-ingest.ts:318` (plan) and `:364` (commit). It is returned exactly when the parsed body is not an object.
+- `Unsupported schemaVersion.` appears at `:366`. It is returned exactly when `schemaVersion !== 1`.
+
+Both are true as worded and carry no instruction.
+
+**Required edits at integration** (orchestrator-applied text, the same class as run 1's release-note "again" edit; non-blocking for Phase 5):
+1. **The integration patch still quotes the old L7 as the expected log.** In `docs/work-log/site-ingest-size.integration.patch`:
+   - `:138`, runbook step 4, says "Publishing, Published".
+   - `:147`, runbook step 5, says `Published commit <sha7> to "<slug>"`.
+
+   An operator reading the first `site-fpcw` log against this runbook would see a different line. Change both to `Sent commit <sha7> to "<slug>" (<n> page(s)); the platform has ingested it.`
+2. **The design's Copy table has not been updated to match the rulings.** In `docs/work-log/2026-10-26-site-ingest-size.md`:
+   - `:873` (L7) still reads `Published commit …`.
+   - `:924` (S3) lacks the two new rows.
+
+   The rulings section records the change, but the table is what the next reader treats as the source. Amend both rows, or annotate them "superseded by the run-1 ruling".
+
+**Observation, for an orchestrator ruling (non-blocking; I missed it in run 1):**
+- L6 `Publishing {P} page(s) and {N} image reference(s).` at `scripts/ingest.mjs:461` still prints on a suspended site. It appears in the Q8 staged log, just before the new L7.
+- I am not counting it as a defect, for two reasons:
+  - It describes the request being sent, not the site's resulting state, and the next line now reports the outcome truthfully.
+  - "Publish" names the operation throughout the pinned vocabulary: README "Publishing a site", E12, E13, E15, the workflow comments and the release notes.
+- If you read the L7 ruling ("never 'published', which a suspended site is not") as covering every success-path "publish" verb, this becomes a FAIL. The fix would be "Sending …" at `:461`, plus the exact-text assertions at `test/ingest.test.ts:434`, `:463` and `:484`.
+
+**copy truthfulness: PASS** (with the two integration edits above).
+
+## Verdict
+
+**PASS.**
+- The L7 defect from run 1 is fixed, and the fix is proven red-then-green.
+- Site-kit gates are all green: 235 tests, typecheck, build, actionlint.
+- BR-1 passes 5 of 5 with the new client.
+- Q8 shows a suspended site's log no longer says "Published", on either transport, and the row stays `suspended`.
+- The S3 rows are true.
+
+Everything on the presby side rests on run 1, since its code is unchanged.
+
+**Notes:**
+- The fix commit's trailers `Caught-By: agent-review` and `Discovered-In: Phase-5` are correct: the suspended-site case was a QA judgment call, not a mandatory check.
+- Run 1's other carry-forwards are already recorded in the rulings: the release-note "now", the DECISION-279 qualifier, the audit-on-retry residual, the 4.0–4.5 MB rollout line, and the `7ef67b6` trailer.
+
+**Housekeeping:**
+- Both worktrees are as found. presby shows only F289's four uncommitted Rule 16 files; site-kit is clean.
+- The scratch copies were deleted by literal path, including the copied `.env.local`:
+  - `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/sk-red`
+  - `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/q8-run2`
+- Bridge fixtures were torn down: 0 `qabr2-` or `br1-` organizations or granter users remain.
+- Run logs are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs2/`, scanned clean of connection strings.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 2) | qa | Complete. L7 fix verified: site-kit 235/235, typecheck, build and actionlint clean; failing-first reproduced against `ad109b1` (3 red, exact-text); BR-1 5/5 with the new client; Q8 suspended site (legacy and staged) logs "the platform has ingested it", row stays `suspended`; S3 rows true. Presby unchanged since run 1, whose results stand. Two integration text edits owed (patch `:138` and `:147`, Copy table `:873` and `:924`); L6 "Publishing" left for an orchestrator ruling | PASS | 2026-10-26 |
+
+## Handoff
+
+Next agent: **analyst** (Phase 6, shipped vs intent).
+
+Before the integration commit, the orchestrator should:
+- apply the two required text edits above;
+- rule on the L6 observation.
+
+Files read or run:
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/work-log/2026-10-26-site-ingest-size.md`
+- `/Users/cshenso/git/presby-platform/presby-ingest/docs/work-log/site-ingest-size.integration.patch`
+- `/Users/cshenso/git/presby-platform/presby-ingest/scratch/bridge/br1.test.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/testing/site-ingest-harness.ts`
+- `/Users/cshenso/git/presby-platform/presby-ingest/src/lib/sites-ingest.ts`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/scripts/ingest.mjs`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/test/ingest.test.ts`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/.github/workflows/ingest.yml`
+- `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/README.md`
+
+## Orchestrator ruling on QA run 2 (2026-10-26)
+
+- **L6 `Publishing {P} page(s) and {N} image reference(s).` stays.** It names the operation being sent (the vocabulary throughout README, E12–E15, workflow comments), and the very next line (L7) now reports the outcome truthfully. The L7 ruling covers outcome claims, not the operation's name.
+- The two required text edits are applied: the integration patch's runbook steps 4–5 now quote the new L7, and the Copy table's L7 and S3 rows are amended.

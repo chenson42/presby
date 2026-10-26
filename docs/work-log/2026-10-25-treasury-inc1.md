@@ -958,6 +958,7 @@ Twelve `tenant.reimbursement.*` keys added to `AUDIT_ACTIONS` (`REIMBURSEMENT_AP
 - **V5** `searchBeneficiaries` does not search under two characters and returns an empty list (the design is silent on a minimum; `BENEFICIARY_QUERY_MIN` in `limits.ts`).
 - **V6** `submitRequest` returns `notifyPersonIds` and does not send anything (notices are Batch 3, which adds the call inside the same transaction). For `already_submitted` it reports `route` from the live detail when the request is still waiting and `null` once it has moved on; `sentMessage(null, …)` reads as the `seat` sentence.
 - **V7** `saveRequest` re-judges a posted beneficiary only when it differs from the stored one on an edit (the database applies its "as of now" checks to a changed value only), so a payee hidden after filing does not strand a returned request. The stored payee comes from the member-level `detail`.
+- **V9** The action results nest their payload under `data` (`{ ok: true, data: { requestId, revision } }`), the house `ActionResult` / `GivingActionResult` shape, where the Phase 3 text sketches it flat (`{ ok, requestId, revision }`).
 - **V8** The tiles and icons were added in 2a (the design lists tile data under 2a); the icon map lives in a UI file.
 
 ### Copy gaps (strings not in the Copy section; rule: stop and report)

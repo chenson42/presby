@@ -20,7 +20,7 @@
 | 2 — Architectural review | architect | Shared; recorded in the parent | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete (this file); Copy four-check, Carry-forward and e2e blast radius below; no operator answer blocks Phase 4 | Design complete | 2026-10-25 |
 | 4 — Implementation | ux-developer (Batches A, C), api-developer (Batch B) | In progress: Batch A (shell promotion) and Batch B (gate, proxy, schema.json, registries; MFA e2e smoke green) done and committed; Batch C (portal pages, registries, e2e; ux-developer) done and committed, awaiting Phase 5 | — | 2026-10-25 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1: all suites in scope green; MFA e2e green; failing-first reproduced (F283/F284/F285/F288); copy truthfulness FAIL on the data-model rules-note sentence (design C4) and the metadata description; calendar failures environmental (0067 missing on branch) | FAIL | 2026-10-25 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -698,3 +698,204 @@ Pending.
 # Phase 6 — Shipped vs Intent (analyst)
 
 Pending.
+
+---
+
+# Phase 5 — Verification (qa)
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**Subject:** `pipeline/developer-portal` at fa376ee (Batches A cd9fb31, B 694da68 + 017e0b6, C fa376ee); Neon branch `pipeline-developer-portal`
+
+**Verdict: FAIL.** One sentence on the data-model page is false (copy truthfulness, details below). It comes from the design's Copy table (C4), so the wording goes back to tech-lead before the implementer changes it. Every suite this change could affect is green, the auth-touching gate is satisfied, and every failing-first claim was reproduced independently.
+
+## Run scope
+
+- **Run in full:** typecheck, lint, `npm run check` (all eight tripwires), the unit suite, `next build`, the full chromium e2e project, the custom-hosts project, and the production-build lane on :3571.
+- **Database-backed suites: not run.** No changed test file is database-backed. The only change under `src/lib/db/` is one assertion string in `events.schema.test.ts`, which mocks `@/lib/db`. There is no migration, no `authz.ts` change and no shared-fixture change.
+- **Flags:** global flags were reset to the CI baseline with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, against this worktree's `PLATFORM_DATABASE_URL` only (10 rows, committed). I ran it again after aborting the first e2e run (see the server note below).
+- **Servers:** I started each one myself on :3570, with `AUTH_URL` and `E2E_BASE_URL` set to `http://localhost:3570` and the full env (`RATE_LIMIT_DISABLED=true`, the `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`, `E2E_ALLOW_SHARED_DB=true`). Each was stopped by PID (97004, 97952, 463). Never :3000. The concurrent `presby-otp` run on :3560 was left alone.
+- **Server note:** the first dev server, started in the worktree itself, got stuck in a reload loop on `/signin`. The browser received `{"type":"reloadPage","data":"HMR hash mismatch"}` on every connect, from a stale Turbopack dev cache in the worktree's `.next`. That is environmental, not this change. A server built from a fresh `git archive` of HEAD did not loop, and all reported results come from that copy. **The worktree's `.next` needs clearing before the next run there.**
+- **Scratch copies** (`git archive`, no stash) were deleted afterwards, including their `.env.local`. My two throwaway walk users (`e2e-qa-…@example.invalid`) were deleted; 0 `e2e-qa-` or `e2e-dev*` rows remain. The worktree is clean at fa376ee.
+
+## Type Check
+
+`npm run typecheck`: PASS. `npm run lint` (max-warnings 0): PASS. `npm run check`: all eight tripwires pass, including `check:proxy-imports`. `next build`: PASS (inside the production-build lane).
+
+## Unit Tests
+
+Total: 11,638 | Passed: 9,134 | Failed: 0 | Skipped: 2,504 (the 81 database-backed files, which skip without env) | Duration: 30.5s. 612 files passed.
+
+## End-to-End Tests
+
+**Chromium project, full suite (clean HEAD on :3570):** Total 459 | Passed 439 | Failed 7 | Did not run 13 | Duration 21.6m.
+
+- Every spec in the blast radius passed:
+
+  | Spec | Passed |
+  |---|---|
+  | `developer-portal` | 14/14 |
+  | `developer-2fa-gate` | 5/5, with a real TOTP enrolment |
+  | `admin-shell` | 7/7 |
+  | `totp-full-login` | 1/1 |
+  | `totp-callback-bypass` | 7/7 |
+  | `totp-code-entry` | 11/11 |
+  | `totp-recovery-code` | 2/2 |
+  | `session-claim-integrity` | 1/1 |
+  | `admin-login` | 4/4 |
+  | `post-login-routing` | 12/12 |
+  | `header-controls` | 22/22 |
+  | `member-home` | 8/8 |
+  | `role-boundaries` | 5/5 |
+
+- **Pre-existing, not a regression.** All 7 failures and the 13 did-not-run are calendar specs: `hydration/public-events-calendar.spec.ts:68`, `member-calendar.spec.ts:293`, and `public-calendar.spec.ts` lines 111, 349, 394, 442 and 473.
+  - The error is `NeonDbError: column "website_listed" of relation "events" does not exist`. A read-only catalog check confirms `events.website_listed` is absent on the pipeline branch. That column is added by `drizzle/0067_presby_public_events_calendar.sql`, which came in with the 0.44.0 merge and was never applied to this branch.
+  - The diff touches no `drizzle/`, calendar or event file. CI migrates a fresh database, so the PR's own run covers these specs.
+  - Because these were skipped, they are a gap in this run, not passes. **The orchestrator should apply 0067 to `pipeline-developer-portal`.**
+
+**Custom-hosts project:** Total 111 | Passed 103 | Failed 1 | Did not run 7 | Duration 3.9m.
+- `custom-domains/lockdown.spec.ts` passed 30/30, including the two added `/developer` paths.
+- The one failure (`custom-domains/public-calendar.spec.ts:73`) and its 7 serial followers are the same missing column.
+
+**Production-build lane (`next build && next start`, :3571):** Total 79 | Passed 76 | Failed 2 | Did not run 1 | Duration 2.7m.
+- Passed: `lockdown` 30/30, `headers` 8/8, `serving` 26/26, and the `/admin` hydration forms (`create-organization-form`, `domains-claim-form`) and `totp-challenge`.
+- Failures, both downstream of the missing column:
+  - `hydration/public-events-calendar.spec.ts:68` hit the column error directly.
+  - `hydration/event-types-form.spec.ts:64` failed only in `afterAll` (`calendar-fixture.ts:242`: "teardown left 2 fixture rows behind"). Those were `E2E` event types leaked by the custom-hosts calendar canary that died on the column. The same spec passed in the dev lane, where it ran before any leak.
+- Two fixture event types from that leak remain in a throwaway `e2e94001-…` organization. The next calendar-fixture sweep removes them once 0067 is applied.
+
+**Auth-touching gate:** satisfied. A real dev server, an MFA-enrolled user with a real TOTP enrolment, and the full password → TOTP → landing path (`developer-2fa-gate` cases 1 and 2, `totp-full-login`) all passed.
+
+## Regression Tests Added (failing-first reproduced independently)
+
+- **F284 (proxy):** `proxy - /developer (F284)` at `src/proxy.test.ts:110`, which guards the `/developer` 2FA gate.
+  - Run against the pre-fix `src/proxy.ts` (ec7db4f with HEAD's tests overlaid): **5 failed**, namely `/developer`, `/developer/`, `/developer/tables/x`, `/developer/schema.json`, and the ADMIN_ROLE holder. At HEAD all pass.
+  - The `/developerx` and `/developer-x` rows are boundary guards and cannot fail first by design.
+- **F284 (end to end):** `e2e/developer-2fa-gate.spec.ts:95`, `:121` and `:179`, run against a **pre-fix dev server** on :3570.
+  - Case 1 failed because the unverified MFA user navigated straight to `/developer/tables/roll_actions`, which is the bug itself.
+  - Case 2 failed because `schema.json` was not redirected to `/totp`.
+  - The forbidden case failed because the response had no `cache-control: no-store`.
+  - The signed-out and `/developerx` cases passed, as expected. At HEAD all 5 pass.
+- **F288 (gate failure modes), by mutation on a HEAD copy:**
+  - A throwing read changed to return `forbidden` fails `access.test.ts:70` and the sync-throw row.
+  - Removing the 2FA check fails 4 tests, including `access.test.ts:19` and the guard's `/totp` redirect row.
+  - Restoring the old `forbidden → redirect("/home")` fails `guard.test.ts:71`.
+  - At the pre-fix commit these tests fail only on missing imports, which proves nothing about the property, so the mutations are the evidence.
+- **F283 (`src/lib/dev-docs.test.ts:83`):** with the pre-fix 47-entry `MODULES` restored and `PLATFORM_TABLES` emptied, it fails and names **exactly 58 tables**. An unclassified probe table also fails it.
+  - It reads the live Drizzle exports, so it tests the property ("every table is classified"), not a literal list.
+- **F285 (`dev-docs.test.ts:157`, `:165`):** removing the six new entries fails `:157` and names 5 headings. The sixth, Permissions vs Flags, is legitimately still covered by the credential entry's `source`. A new `###` heading fails `:157`; renaming a heading fails both `:157` and `:165`.
+- **E13:** `shell-boundaries.test.ts:48` pins that there is no `loading.tsx`. A `find` over the tree confirms there is none.
+
+**Observation (non-blocking):** `shell-boundaries.test.ts`'s import allow-list only checks `@/` aliases. A relative import such as `../../../../lib/db` would bypass the "forbidden by omission" rule. Worth tightening in Increment 3.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.3% statements (meets the 90%+ target)
+- `src/lib/flags.ts`: 100%
+- `src/lib/developer-portal/access.ts`: 100% statements and branches
+
+## Feature-Gate Audit
+
+Verified by reading each file. No `FEATURES` key is involved by design (Ruling 1: the gate is a live read of `users.is_platform_admin`; `PROTECTION_RULES` contains no `developer`, pinned by `shell-boundaries.test.ts`).
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| GET `/developer` (`page.tsx`) | yes (`requireDeveloper`, which calls `cachedAuth`), first call | n/a | n/a: live `readEntitled` |
+| GET `/developer/data-model` | yes, first call, before any `buildSchemaDocs` or `loadDescriptions` | n/a | n/a |
+| GET `/developer/docs` | yes, first call | n/a | n/a |
+| GET `/developer/tables/[table]` | yes, before `notFound()` and any read (only `await params` comes first, to build the return path) | n/a | n/a |
+| GET `/developer/erd/[module]` | yes, same order | n/a | n/a |
+| GET `/developer/schema.json` | yes (`checkDeveloperApiRequest`, which calls `auth()` and the uncached read). Returns JSON 401 / 403 `two_factor_required` / 503 / 403 `forbidden` / 200, all `no-store` | n/a | n/a |
+| `layout.tsx` | chrome only, never gates. A failed read degrades to no nav | n/a | n/a |
+| Proxy | `/developer` and `/developer/…` 2FA-gated at a segment boundary, before the ADMIN_ROLE shortcut | n/a | none, correctly |
+| Server actions | none added or changed | — | — |
+
+- `readEntitled` is `cache(readIsPlatformAdmin)`. A throw propagates, so the `unavailable` state is reachable and is not swallowed into `forbidden`.
+- There is no `loading.tsx` at any depth, and unknown tables and diagrams return a real HTTP 404 (verified in the browser).
+
+## Browser walk (Chromium, real server)
+
+**Pages at 360px and 1280px.** `scrollWidth` equals `innerWidth` on every one:
+- home, data-model;
+- `tables/roll_actions`, `tables/giving_settlement_lines`, `tables/user_totp_recovery_codes`;
+- `erd/d-rolls`, `erd/p-online-giving`, `erd/platform-shell`;
+- docs, `tables/nope` (404), `erd/nope` (404).
+
+**Gate states:**
+- **Forbidden:** shown with HTTP 200 and no redirect for the `member` fixture and for the `admin` fixture (ADMIN_ROLE, no column), on `/developer` and on a missing table. Header and avatar are present; no nav and no Menu button.
+- **Unverified 2FA:** sent to `/totp`. With no enrolment that continues to `/account/2fa`, keeping the callback. The portal is never rendered.
+- **Signed out:** goes to `/signin` and keeps the deep link.
+
+**Phone Menu sheet:** titled "Developer portal", shows `Version 0.44.0`, and lights Data model on the data-model page.
+
+**`/admin` after the shell move:** unchanged at both widths (the "Platform admin" label, nav groups and cards). The admin nav's Reference group holds `/admin/docs` and `/admin/design-system` only, with no `/developer` link. The Domains and Email queue cards exist, which confirms the claim in the Documentation page's Status row.
+
+**Dark mode** (data-model and table pages): readable.
+
+**Not this diff:** the console error "Encountered a script tag while rendering React component" on any `notFound()` in dev mode. It also occurs on `/admin/organizations/<bad id>` and `/o/<bad slug>`.
+
+**Batch C deviations, judged:**
+1. **Transparent `.reg` background: accepted.** It removes a floating panel, and it was verified in light and dark at both widths, which settles E26.
+2. **Fixture inline in the spec: accepted.** It avoids editing a Rule 16 shared file, and its prefix differs from the 2FA spec's, so neither spec's stale sweep can delete the other's user.
+3. **One "Generated" label under the counts line: accepted, with a note.** The rules and permissions sections carry their own labels. But the masthead label sits beside "10 rules rely on review", a count drawn from the hand-written list, so its scope reads as ambiguous. A "Tables:" prefix would settle it, as part of the tech-lead ruling below.
+
+**Minor, pre-existing:**
+- The ERD tab title shows the slug ("d-rolls diagram · Developer portal") rather than the module name that C1's `{module} diagram` implies.
+- The data-model page gives Platform shell no Diagram link, but the table-page crumb links to `/developer/erd/platform-shell`, which renders.
+
+## Copy Truthfulness
+
+- [x] Every added or changed string is in the design's Copy table. **One exception:** `src/app/(admin)/developer/data-model/page.tsx:20`, the metadata description `"Generated technical reference for the PresbyPortal schema."`. It was changed (presby → PresbyPortal), is not in C4, and calls the whole page "Generated" while the page says its module grouping and rules are hand-kept.
+- [x] The query behind each claim was opened:
+  - "does not read congregation records": `loadDescriptions` reads only `pg_catalog`, and `readIsPlatformAdmin` reads the viewer's own `users` row.
+  - "with organization_id": a column-name check, not a policy check, and the wording now matches that.
+  - "rules rely on review": the count of entries tagged `paper`.
+  - Docs "lives today": all eight paths exist, and the Status row's dashboard cards exist.
+  - "Reviewed": `FormattedDate` parses the date as a calendar date, with no timezone shift.
+- [x] Each instruction was traced to the role that sees it:
+  - "Clear the search" and the `COMMENT ON TABLE` hint are seen by an entitled developer, who can do both.
+  - "Ask a platform administrator" is seen by any signed-in non-entitled user; it is executable only by SQL until Increment 2. C7 rules that acceptable.
+- [ ] **Older and current strings made false. One defect:**
+
+**copy truthfulness: FAIL.** `src/app/(admin)/developer/data-model/page.tsx:174-176` says "A test checks that every rule heading in CLAUDE.md has an entry here". This is seen by entitled viewers (`users.is_platform_admin`).
+- It is false for 2 of CLAUDE.md's 14 Key Invariants headings. `No Real Data` and `Verify in a Browser` are in `NOT_LISTED` (`src/lib/dev-docs.ts`), have no entry on the page, and the page never mentions them.
+- The test (`dev-docs.test.ts:157`) checks "an entry **or** a reason in NOT_LISTED", which is a weaker claim than the sentence makes.
+- This is the same class as F285: a list claiming to match CLAUDE.md when it doesn't.
+- The sentence is C4's verbatim, so it traces to the design.
+- **Fix:** tech-lead either rewords it (for example "…has an entry here or a recorded reason it is left out (No Real Data, Verify in a Browser)") or has the page render `NOT_LISTED`. The implementer then adds an exact-text test that fails on the current sentence.
+- The same ruling should cover `:20` above.
+- **For Step Z:** C11's draft release-note line "it now matches the project's own list" overstates in the same way and must not ship as written.
+
+**Stale strings for Phase 6 (orchestrator, not blocking):**
+- `CLAUDE.md:153` still says "generated schema reference".
+- `CLAUDE.md:465` says "`/developer` marks each one", but the marks now live on `/developer/data-model` and two headings are unmarked.
+- `docs/product/functionality-map.md:20` is due under Rule 14.
+- `docs/TODO.md:359` should be closed along with 72 and 216 (C-3).
+
+## Verdict
+
+**FAIL**, on copy truthfulness only. The fix is the sentence at `src/app/(admin)/developer/data-model/page.tsx:174-176`, plus the metadata string at `:20`. Because the wording comes from Phase 3's Copy C4, it goes back to tech-lead first, then to the implementer. Everything else needed for PASS is in place. On the re-run, QA will re-check the one string and its exact-text test, plus typecheck, lint, `npm run check` and the unit suite. The auth-touching e2e set does not need repeating unless a file it covers changes.
+
+---
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Run 1 complete. All suites in scope green. MFA e2e green on a self-started :3570 server. Failing-first reproduced (F284: 5 unit rows and pre-fix e2e; F283: 58 tables; F285: 5 headings; F288: 3 mutations). Copy truthfulness failed on one design-originated sentence. 7+1+2 calendar failures pre-existing (pipeline branch missing 0067). | FAIL | 2026-10-25 |
+
+## Handoff
+
+**Next agent: tech-lead (Phase 3 loop-back, Copy ruling only), then ux-developer (Phase 4) to land it.**
+- **tech-lead:** rule new wording for C4's rules-note sentence and for the data-model metadata description. Optionally rule the "Tables:" scoping of the masthead "Generated" label. Correct the C11 "matches the project's own list" line before Step Z.
+- **ux-developer:** change `src/app/(admin)/developer/data-model/page.tsx:174-176` and `:20`, and add an exact-text test that fails on the current sentence.
+- **Orchestrator:**
+  - Apply `drizzle/0067_presby_public_events_calendar.sql` to Neon branch `pipeline-developer-portal`.
+  - Clear the worktree's stale `.next` before the next dev-server run there (HMR hash-mismatch reload loop).
+  - At integration, record the Phase 6 doc edits and the TODO.md closures listed above.
+
+**Evidence files** (scratchpad, `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/`):
+- Logs: `.../logs/e2e-chromium2.log`, `.../logs/e2e-hosts.log`, `.../logs/e2e-prod.log`, `.../logs/unit.log`, `.../logs/walk.json`
+- Screenshots: `.../shots/`
+- Pre-fix e2e artifacts: `.../pw-prefix/`

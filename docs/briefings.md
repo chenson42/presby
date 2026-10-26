@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=b10dd63 -->
+<!-- covers: decision=224 commit=078fe79 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,8 @@ is checked.*
 ---
 
 ## 2026-10-26
+
+- [ ] **`decision` · A congregation can publish job openings on its own website; it is off everywhere until a congregation turns on "Job openings" (0.47.0; DECISION-264 to DECISION-266 and DECISION-278).** This is Increment 1 of 3: writing, publishing, closing and reading openings. Applying online, resume storage and retention are Increment 2 (0075), and the cutover runbook and import are Increment 3. **A gap you accepted:** every founding administrator, existing and new, now holds `careers.applicants`, a tier-3 key. It reads nothing until Increment 2, and then the resume-download audit row detects use but cannot prevent it; CLAUDE.md names it the second known violation of "No role carries a wildcard." **You must:** snapshot production and apply 0071 before merging (`docs/deployment.md`, "Careers (0071)"); re-read the live founding-administrator function and count the roles it backfills first; confirm `org_portal.roles` and `org_portal.admin_hub` are on, or the Hiring Committee role cannot be adopted. Before release, three defects the walk found were fixed (open pages were hidden from search, the pay unit defaulted to per hour, a paste glued onto the next line). The first customer's Employment page is a later step for its site's author.
 
 - [ ] **`decision` · A church website with many photos can now be published, and the first real publish of the first customer's site is yours to trigger (0.46.3; DECISION-279).** The old publish sent the whole site in one 37.8 MB request and the host refuses anything over 4.5 MB, so every earlier attempt failed (F324). Photos now go one at a time and only the ones the platform lacks; a small final step flips the live site, so a stopped run leaves it unchanged and a re-run finishes it. **The order matters:** F289 promoted and 0072 applied first, then this release, then merge the site-kit change and tag `v4.1.0` on `ea9e78a`, then push the site's content. That push makes the whole migrated site public, and its events calendar shows "Our events calendar isn't available right now" until you switch on the calendar at `/o/fpcw/admin/features`, which you can do as its founding administrator. **Not proven anywhere yet:** the host accepting the new requests, and the photo upload on Vercel. **Residuals:** a photo over 4 MB cannot be published; unused uploaded photos are never removed; re-running an older failed run puts older content back; a publish whose confirmation is lost may lack its audit row. Steps: `docs/deployment.md`, "Site ingest: the staged transport".
 

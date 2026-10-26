@@ -1657,3 +1657,9 @@ No private-consumer row exists in production today: the backfill's private set i
 - **Journal idx = 72** (idx equals the migration number) accepted; P3's `<next>` is corrected in the integration patch.
 - **Directory toggles do not gate roster photos:** operator, 2026-10-26 — "nah. we can test that in the future." Edge Case 19 stays an accepted, deferred item; the TODO question line becomes a deferred line.
 - **For Batch 2 (from the site-ingest pipeline, Phase 2 S1):** in `audience-callsites.test.ts`, treat every `getBlobStore().<method>(` call as requiring an audience literal, with a named exemption list (`resolvePublic`), so a later adapter method (the ingest pipeline's `findByContentHashes`, the photos pipeline's `resolveMany`) needs only a table edit, not a scan-logic change.
+
+## Orchestrator rulings on Phase 4 Batch 2 (2026-10-26)
+
+- **F341** registered: the design's grep for `ON CONFLICT (organization_id, content_hash)` was stale after the 0.44.0 merge — `e2e/support/public-calendar-fixture.ts` and `scripts/public-calendar/seed-dev-bundle.sql` (from the events-calendar pipeline) target the key 0072 drops. Seed fixed in `e81287f`'s batch; the e2e support fix is integration-patch diff 4. Any future `ON CONFLICT` on `blob_assets` targets `(organization_id, audience, content_hash)`.
+- **Toggle dialogs unreachable on a phone** (the roster's toggle cell is `hidden sm:table-cell`): pre-existing, not this pipeline's; becomes a TODO line at integration.
+- **Development:** 0067 was applied to the shared `development` branch on 2026-10-26 (owed from the 0.44.0 integration) with the public-calendar seed; full `scripts/test-rls.sql` as `presby_app` shows only the known drift failures at :217 and :516.

@@ -149,7 +149,21 @@ begin;
   select assert_eq(
     (select count(*) from pg_constraint where conrelid = 'reimbursement_attachments'::regclass
         and conname = 'reimbursement_attachments_asset_audience_private' and convalidated),
-    1, '73a (DECISION-277): asset_audience is pinned to private (the Batch 1b FK carries it)');
+    1, '73a (DECISION-277): asset_audience is pinned to private (the receipt FK carries it)');
+  select assert_eq(
+    (select count(*) from pg_constraint c
+      where c.conrelid = 'reimbursement_attachments'::regclass and c.contype = 'f'
+        and c.conname = 'reimbursement_attachments_blob_fk'
+        and c.confrelid = 'blob_assets'::regclass
+        and c.conindid = (select k.conindid from pg_constraint k where k.conname = 'blob_assets_id_org_audience_key')
+        and c.confdeltype = 'a' and c.confupdtype = 'a' and c.convalidated
+        and (select array_agg(a.attname::text order by k.ord) from unnest(c.conkey) with ordinality k(attnum, ord)
+               join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum)
+            = array['blob_key', 'organization_id', 'asset_audience']
+        and (select array_agg(a.attname::text order by k.ord) from unnest(c.confkey) with ordinality k(attnum, ord)
+               join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.attnum)
+            = array['id', 'organization_id', 'audience']),
+    1, '73a (F289, DECISION-277): reimbursement_attachments_blob_fk is (blob_key, organization_id, asset_audience) -> blob_assets_id_org_audience_key, NO ACTION both ways, validated');
   select assert_eq(
     (select count(*) from permissions where module = 'reimbursement' and sensitivity_tier = 2
         and requires_two_factor = (key <> 'reimbursement.request_for_others')),
@@ -446,6 +460,69 @@ begin;
     end if;
     raise notice 'pass  73f (F301): a reimbursement key cannot be bound to a role a delegation uses';
   end $$;
+rollback;
+
+-- ===========================================================================
+-- (g) A receipt is this organization's PRIVATE blob (F289's catalog rule,
+--     DECISION-277; drizzle/0073 section 1d). On the tenant path the refusal
+--     is attach_receipt's `invalid_shape` (its D7 pre-check); the guarantee
+--     on every connection is reimbursement_attachments_blob_fk, asserted in
+--     (a) and proven on the owner path in reimbursement.db.test.ts.
+--     presby_app holds INSERT on blob_assets (the store adapter's path), so it
+--     can create both bad shapes itself: a public_site image of its own org,
+--     and a private blob of Bramblewood (written under Bramblewood's context,
+--     which RLS's with-check admits, then the context is switched back).
+-- ===========================================================================
+begin;
+  select set_config('app.current_org_id', :P73_BRAMBLE, true);
+  insert into blob_assets (id, organization_id, content_hash, content_type, byte_size, bytes)
+  values ('a7399999-0000-4000-8000-0000000000e1', :P73_BRAMBLE, repeat('71', 32), 'image/jpeg', 3, '\x010203');
+
+  select set_config('app.current_org_id', :P73_ALDER, true);
+  insert into blob_assets (id, organization_id, content_hash, content_type, byte_size, bytes, audience)
+  values ('a7399999-0000-4000-8000-0000000000e2', :P73_ALDER, repeat('72', 32), 'image/jpeg', 3, '\x010203', 'public_site');
+  insert into blob_assets (id, organization_id, content_hash, content_type, byte_size, bytes)
+  values ('a7399999-0000-4000-8000-0000000000e3', :P73_ALDER, repeat('73', 32), 'image/jpeg', 3, '\x010203');
+  select assert_eq(
+    (select count(*) from blob_assets
+      where (id, organization_id, audience) in (('a7399999-0000-4000-8000-0000000000e2'::uuid, :P73_ALDER::uuid, 'public_site'),
+                                                ('a7399999-0000-4000-8000-0000000000e3'::uuid, :P73_ALDER::uuid, 'private'))),
+    2, '73g (not vacuous): Alder now holds one public_site and one private jpeg of the same size');
+
+  select * from presby_reimbursement_save_draft('p73-key-00000g', 'reimburse', :P73_PROPERTY, null, null, 1200,
+           presby_reimbursement_org_today() - 1, 'Bulbs for the hall', :P73_CATEGORY, null, false, :P73_MARGUERITE_USER) \gset p73g_
+  select assert_eq((:'p73g_outcome' = 'ok')::int, 1, '73g: Marguerite saves a draft to attach receipts to');
+
+  select assert_eq(
+    (select count(*) from presby_reimbursement_attach_receipt(:'p73g_request_id', 'a7399999-0000-4000-8000-0000000000e2',
+              repeat('e2', 32), 'image/jpeg', 3, 'public.jpg', :P73_MARGUERITE_USER) s
+      where s.outcome = 'invalid_shape' and s.attachment_id is null),
+    1, '73g (F289): a receipt cannot point at a public_site blob, even its own org''s');
+  select assert_eq(
+    (select count(*) from presby_reimbursement_attach_receipt(:'p73g_request_id', 'a7399999-0000-4000-8000-0000000000e1',
+              repeat('e1', 32), 'image/jpeg', 3, 'foreign.jpg', :P73_MARGUERITE_USER) s
+      where s.outcome = 'invalid_shape' and s.attachment_id is null),
+    1, '73g (F2): a receipt cannot point at another organization''s private blob');
+  select assert_eq(
+    (select count(*) from presby_reimbursement_attach_receipt(:'p73g_request_id', gen_random_uuid(),
+              repeat('e4', 32), 'image/jpeg', 3, 'missing.jpg', :P73_MARGUERITE_USER) s
+      where s.outcome = 'invalid_shape'),
+    1, '73g: nor at a key that names no blob');
+  select assert_eq(
+    (select count(*) from presby_reimbursement_receipt_preflight(:'p73g_request_id', :P73_MARGUERITE_USER) p
+      where p.outcome = 'ok' and p.live_count = 0),
+    1, '73g: the three refusals attached nothing');
+  select assert_eq(
+    (select count(*) from presby_reimbursement_attach_receipt(:'p73g_request_id', 'a7399999-0000-4000-8000-0000000000e3',
+              repeat('e3', 32), 'image/jpeg', 3, 'private.jpg', :P73_MARGUERITE_USER) s
+      where s.outcome = 'ok' and s.attachment_id is not null),
+    1, '73g (not vacuous): the same request takes its own org''s private blob of the same type and size');
+  select assert_eq(
+    (select count(*) from presby_reimbursement_receipt_preflight(:'p73g_request_id', :P73_MARGUERITE_USER) p
+      where p.outcome = 'ok' and p.live_count = 1),
+    1, '73g: and holds exactly that one receipt');
+  set constraints all immediate;
+  set constraints all deferred;
 rollback;
 
 \echo ' Section 73 complete.'

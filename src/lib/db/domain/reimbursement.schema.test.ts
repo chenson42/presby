@@ -29,6 +29,9 @@ const MIGRATION = readFileSync(
   "utf8",
 );
 
+/** Line comments removed, so a marker quoted in a comment can never satisfy an assertion. */
+const SQL_NO_COMMENTS = MIGRATION.replace(/--[^\n]*/g, "");
+
 const TABLES: PgTable[] = [
   reimbursement.reimbursementChargeableGroups,
   reimbursement.reimbursementCategories,
@@ -55,6 +58,15 @@ const COMPOSITE_FKS: Record<string, [string, string]> = {
   reimbursement_events_actor_fk: ["person_id", "organization_id"],
   reimbursement_events_payment_fk: ["id", "organization_id"],
 };
+
+/**
+ * Names 0073 creates that the mirror deliberately does NOT declare. One entry:
+ * the receipt FK into blob_assets, DDL-only because declaring it would make
+ * reimbursement.ts import assets.ts (DECISION-058; giving_statements_blob_fk is
+ * the precedent). Pinned by text below instead, and by catalog in
+ * reimbursement.db.test.ts and scripts/treasury/test-rls-73.sql (73a).
+ */
+const DDL_ONLY = new Set(["reimbursement_attachments_blob_fk"]);
 
 function namesCreatedByMigration(): Map<string, Set<string>> {
   const byTable = new Map<string, Set<string>>();
@@ -107,7 +119,13 @@ describe("drizzle/0073 constraint and index names are mirrored in reimbursement.
     (name, table) => {
       const declared = namesDeclaredByDrizzle(table);
       const expected = created.get(name) ?? new Set<string>();
-      for (const n of expected) expect(declared.has(n), `${name} does not declare ${n}`).toBe(true);
+      for (const n of expected) {
+        if (DDL_ONLY.has(n)) {
+          expect(declared.has(n), `${name} declares the DDL-only ${n}`).toBe(false);
+          continue;
+        }
+        expect(declared.has(n), `${name} does not declare ${n}`).toBe(true);
+      }
       for (const n of declared) {
         // Drizzle auto-names single-column .references() FKs (organizations, users).
         if (/_(organizations|users)_id_fk$/.test(n)) continue;
@@ -150,12 +168,38 @@ describe("the shapes behind the names (F2, DECISION-270)", () => {
     }
   });
 
-  it("receipts carry the constant private audience the Batch 1b FK will use, and the TODO marks where", () => {
+  it("receipts carry the constant private audience, and 0073 pins it in the three-column FK into blob_assets (F289)", () => {
     const col = getTableConfig(reimbursement.reimbursementAttachments).columns.find((c) => c.name === "asset_audience");
     expect(col?.notNull).toBe(true);
     expect(col?.default).toBe("private");
-    expect(MIGRATION).toContain("TODO(Batch 1b, F289 / drizzle/0072, DECISION-277)");
-    expect(MIGRATION).not.toMatch(/^alter table reimbursement_attachments add constraint reimbursement_attachments_blob_fk/m);
+    expect(SQL_NO_COMMENTS).toMatch(
+      /alter table reimbursement_attachments add constraint reimbursement_attachments_blob_fk\s+foreign key \(blob_key, organization_id, asset_audience\)\s+references blob_assets \(id, organization_id, audience\) on delete no action on update no action;/,
+    );
+    // Drop-then-add, so the whole file re-applies.
+    expect(SQL_NO_COMMENTS.indexOf("drop constraint if exists reimbursement_attachments_blob_fk")).toBeGreaterThan(-1);
+    expect(SQL_NO_COMMENTS.indexOf("drop constraint if exists reimbursement_attachments_blob_fk")).toBeLessThan(
+      SQL_NO_COMMENTS.indexOf("add constraint reimbursement_attachments_blob_fk"),
+    );
+    expect(MIGRATION).not.toContain("TODO(Batch 1b");
+    // The mirror stays off assets.ts (DECISION-058): no FK of the attachments table targets blob_assets.
+    for (const fk of getTableConfig(reimbursement.reimbursementAttachments).foreignKeys) {
+      expect(getTableName(fk.reference().foreignTable)).not.toBe("blob_assets");
+    }
+  });
+
+  it("D10: the 0072 guard raises before the FIRST table is created (the file has no transaction of its own)", () => {
+    const guard = SQL_NO_COMMENTS.indexOf("raise exception 'reimbursement 0073: apply 0072 (blob_assets audience) first'");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(SQL_NO_COMMENTS.indexOf("create table if not exists"));
+    expect(SQL_NO_COMMENTS).toMatch(/conname = 'blob_assets_id_org_audience_key'/);
+  });
+
+  it("D7: attach_receipt's pre-check names only this organization's PRIVATE blob of the stated type and size", () => {
+    const start = SQL_NO_COMMENTS.indexOf("create or replace function presby_reimbursement_attach_receipt(");
+    const body = SQL_NO_COMMENTS.slice(start, SQL_NO_COMMENTS.indexOf("create or replace function", start + 10));
+    expect(body).toMatch(
+      /not exists \(select 1 from blob_assets b\s+where b\.id = p_blob_key and b\.organization_id = v_org\s+and b\.audience = 'private'\s+and b\.content_type = p_content_type and b\.byte_size = p_byte_size\)/,
+    );
   });
 
   it("no table has a deletable_until column (the delete guard admits only the org-teardown cascade)", () => {

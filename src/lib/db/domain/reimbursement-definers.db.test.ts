@@ -580,6 +580,21 @@ describe.skipIf(!hasDb)("drizzle/0073 reimbursement definers through presby_app 
         .toBe("not_editable");
     });
 
+    it("F289: a public_site blob of the actor's OWN organization is invalid_shape, and nothing is attached (the FK backs it on every connection)", async () => {
+      const s = await save(A, requester, { noReceipt: false });
+      const id = String(s.request_id);
+      const pub = await fx.blob(A, "image/jpeg", "public_site");
+      const refused = one(await fx.app(A, sql`select * from presby_reimbursement_attach_receipt(${id}::uuid, ${pub.id}::uuid,
+        ${pub.sha}, 'image/jpeg', 3, 'public.jpg', ${requester.userId}::uuid)`));
+      expect(refused).toMatchObject({ outcome: "invalid_shape", attachment_id: null });
+      expect(one(await fx.app(A, sql`select * from presby_reimbursement_receipt_preflight(${id}::uuid, ${requester.userId}::uuid)`)))
+        .toMatchObject({ outcome: "ok", live_count: 0 });
+      // Not vacuous: the same request takes a private blob of the same type and size.
+      const priv = await fx.blob(A);
+      expect(one(await fx.app(A, sql`select * from presby_reimbursement_attach_receipt(${id}::uuid, ${priv.id}::uuid,
+        ${priv.sha}, 'image/jpeg', 3, 'private.jpg', ${requester.userId}::uuid)`)).outcome).toBe("ok");
+    });
+
     it("EC21 (P3-21): the duplicate flag reaches seats and treasury, never the requester; treasury also gets the earlier id", async () => {
       const shared = await fx.blob(A);
       const attachTo = async (actor: Actor, id: string) =>

@@ -23,17 +23,13 @@
 -- Phase 4 Batch 1a). Unreleased until shipped, so it may be corrected in
 -- place until then (CLAUDE.md -> Project Layout -> drizzle/).
 --
--- DEPENDENCY ON drizzle/0072 (F289, DECISION-277) - BATCH 1b.
---   The receipt FK (reimbursement_attachments.blob_key, organization_id,
---   asset_audience) -> blob_assets (id, organization_id, audience) targets a
---   unique key that only 0072 creates. Batch 1a (this text) creates the
---   attachments table with the asset_audience column and its `= 'private'`
---   CHECK but WITHOUT that FK; section 1d carries the marked TODO where Batch
---   1b adds the FK and the guard that raises
+-- DEPENDENCY ON drizzle/0072 (F289, DECISION-277).
+--   The receipt FK reimbursement_attachments_blob_fk (blob_key,
+--   organization_id, asset_audience) -> blob_assets (id, organization_id,
+--   audience) (section 1d, Batch 1b) targets blob_assets_id_org_audience_key,
+--   a unique key that only 0072 creates. Section 1.0 raises
 --     'reimbursement 0073: apply 0072 (blob_assets audience) first'
---   when blob_assets_id_org_audience_key is absent. Until then
---   presby_reimbursement_attach_receipt() checks that the blob exists at the
---   acting organization with the stated content type and size (D7).
+--   before any table is created when that key is absent (D10).
 --
 -- Sections, in dependency order:
 --    1. tables (1a chargeable groups, 1b categories, 1c requests,
@@ -85,13 +81,21 @@
 --        approver in force, not the creator, not the beneficiary. "A second
 --        payer" (override's needs_second_payer) is a pay holder who is not
 --        the actor (Q6 as written).
---   (D7) See DEPENDENCY above: the blob check in attach_receipt stands in for
---        the FK until Batch 1b.
+--   (D7) attach_receipt pre-checks the blob (this org's, PRIVATE, the stated
+--        content type and size) and answers `invalid_shape`, so the tenant
+--        path gets a named outcome rather than a raw 23503 from inside a
+--        definer. The guarantee on every connection is the FK (1d); the
+--        pre-check only words the refusal, and adds the type/size match the
+--        FK cannot express.
 --   (D8) (0074) the closing assertion's scope; see that file.
 --   (D9) reimbursement_events.seq (identity): events written in one
 --        transaction share created_at = now(), so history is ordered by
 --        (created_at, seq), not (created_at, id); the index is
 --        (request_id, created_at, seq).
+--   (D10) The 0072 guard is the first statement of section 1, not of the
+--        attachments section (Phase 3's text): the file has no transaction,
+--        so a guard at 1d would leave 1a-1c built on a database without
+--        0072. It raises before anything is created.
 --
 -- CONVENTIONS FOR EVERY DEFINER (0055/0062 shape): security definer,
 -- search_path = public, pg_temp (DECISION-148); p_actor is a users.id bound
@@ -107,6 +111,20 @@
 -- ---------------------------------------------------------------------------
 -- 1. Tables
 -- ---------------------------------------------------------------------------
+
+-- 1.0 The 0072 dependency guard (D10). This file has no transaction of its
+-- own and is applied without -1, so the guard runs BEFORE the first table:
+-- on a database without drizzle/0072 nothing of 0073 is created, rather than
+-- 1a-1c being built and the file stopping at 1d's receipt FK.
+do $$
+begin
+  if not exists (select 1 from pg_constraint
+                  where conname = 'blob_assets_id_org_audience_key'
+                    and conrelid = 'blob_assets'::regclass and contype = 'u') then
+    raise exception 'reimbursement 0073: apply 0072 (blob_assets audience) first'
+      using errcode = 'undefined_object';
+  end if;
+end $$;
 
 -- 1a. Groups a request may be charged to (R9: an explicit list, never
 -- inferred). Ended, never deleted; re-adding a group inserts a new row.
@@ -331,21 +349,25 @@ alter table reimbursement_attachments drop constraint if exists reimbursement_at
 alter table reimbursement_attachments add constraint reimbursement_attachments_detach_shape
   check ((detached_at is null) = (detached_by_user is null));
 
--- TODO(Batch 1b, F289 / drizzle/0072, DECISION-277): add here, in this order,
---   (1) the dependency guard - a DO block that raises
---       'reimbursement 0073: apply 0072 (blob_assets audience) first'
---       unless pg_constraint has blob_assets_id_org_audience_key;
---   (2) the composite FK reimbursement_attachments_blob_fk
---         (blob_key, organization_id, asset_audience)
---         -> blob_assets (id, organization_id, audience),
---       NO ACTION on delete and update, as the usual drop-if-exists /
---       add-constraint pair (so a referenced receipt is undeletable on every
---       connection, F44);
---   and the catalog assertions (constraint name, the three columns,
---   confdeltype = 'a') in reimbursement.db.test.ts and test-rls-73.sql.
---   Until then presby_reimbursement_attach_receipt() checks the blob exists
---   at the acting organization (D7). The Drizzle mirror's foreignKey() lands
---   with the FK (it needs F289's blob_assets.audience column in assets.ts).
+-- The receipt FK (F289's catalog rule, drizzle/0072 section 8; DECISION-277).
+-- A receipt is the acting organization's own PRIVATE blob, as a database
+-- property on every connection, the owner included: the constant
+-- asset_audience = 'private' is the third column of a composite FK into
+-- blob_assets_id_org_audience_key, so a public_site blob, a foreign org's
+-- blob and a missing blob are all refused (23503). NO ACTION on delete and
+-- update, exactly as giving_statements_blob_fk: a referenced receipt's
+-- blob_assets row cannot be deleted while a reimbursement_attachments row
+-- (live or detached; attachments are never deleted) names it (F44).
+-- MATCH SIMPLE is moot: all three columns are NOT NULL. Its dependency on
+-- 0072 is guarded at 1.0 above (D10). Drop-then-add, like every constraint
+-- here; the index after it serves the RI check when a blob is deleted (the
+-- org-teardown cascade).
+alter table reimbursement_attachments drop constraint if exists reimbursement_attachments_blob_fk;
+alter table reimbursement_attachments add constraint reimbursement_attachments_blob_fk
+  foreign key (blob_key, organization_id, asset_audience)
+  references blob_assets (id, organization_id, audience) on delete no action on update no action;
+create index if not exists reimbursement_attachments_blob_idx
+  on reimbursement_attachments (organization_id, blob_key);
 
 create unique index if not exists reimbursement_attachments_live_sha_idx
   on reimbursement_attachments (request_id, content_sha256) where detached_at is null;
@@ -515,7 +537,7 @@ comment on column reimbursement_requests.revision is
 comment on column reimbursement_requests.beneficiary_person_id is
   'The payee when kind = reimburse (exactly one person; laundering has nowhere to hide, DECISION-268). Null when kind = vendor.';
 comment on table reimbursement_attachments is
-  'drizzle/0073: a receipt on a request. blob_key names a PRIVATE blob_assets row (asset_audience is the constant ''private''; the composite FK into blob_assets(id, organization_id, audience) is added in Batch 1b once drizzle/0072 exists). content_sha256 is the hash of the bytes as RECEIVED (before re-encoding), for the duplicate flag (P3-21); never joined through blob_assets (DECISION-030). Detached (detached_at), never deleted; insert and detach only while the request is draft or returned (reimbursement_attachments_write_guard). presby_app holds NO privilege.';
+  'drizzle/0073: a receipt on a request. blob_key names a PRIVATE blob_assets row (asset_audience is the constant ''private'', the third column of reimbursement_attachments_blob_fk into blob_assets(id, organization_id, audience), NO ACTION both ways: a receipt is never a public_site or foreign-org blob, and a referenced blob is undeletable on every connection; drizzle/0072, DECISION-277, F44). content_sha256 is the hash of the bytes as RECEIVED (before re-encoding), for the duplicate flag (P3-21); never joined through blob_assets (DECISION-030). Detached (detached_at), never deleted; insert and detach only while the request is draft or returned (reimbursement_attachments_write_guard). presby_app holds NO privilege.';
 comment on table reimbursement_payments is
   'drizzle/0073: insert-only payments and reversals (one reversal per payment). self_paid is DERIVED by reimbursement_payments_write_guard (payer is the creator or beneficiary, merge-resolved); the caller never supplies it. The trigger refuses a payment by the approver in force. UPDATE always raises. presby_app holds NO privilege.';
 comment on table reimbursement_events is
@@ -2359,10 +2381,12 @@ begin
      or p_content_type is null or p_content_type not in ('image/jpeg', 'application/pdf')
      or p_byte_size is null or p_byte_size < 1 or p_byte_size > 4000000
      or v_name is null or char_length(v_name) > 80 or v_name ~ '[/\\]'
-     -- D7: until Batch 1b's FK, the blob must exist at THIS organization
-     -- with the stated type and size.
+     -- D7: the blob must be THIS organization's PRIVATE row with the stated
+     -- type and size. reimbursement_attachments_blob_fk (1d) is the
+     -- guarantee; this words the refusal as an outcome and checks type/size.
      or not exists (select 1 from blob_assets b
                      where b.id = p_blob_key and b.organization_id = v_org
+                       and b.audience = 'private'
                        and b.content_type = p_content_type and b.byte_size = p_byte_size) then
     outcome := 'invalid_shape'; return next; return;
   end if;

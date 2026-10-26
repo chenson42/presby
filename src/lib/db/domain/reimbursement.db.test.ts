@@ -596,6 +596,119 @@ describe.skipIf(!hasDb)("drizzle/0073 reimbursement triggers, owner path (Postgr
   });
 
   // =========================================================================
+  // The receipt FK (F289's catalog rule, drizzle/0072 section 8; 0073 section
+  // 1d; DECISION-277). On the OWNER connection no grant or policy binds, so
+  // the FK is the whole guarantee here (F44).
+  // =========================================================================
+  describe("the receipt FK into blob_assets (F289)", () => {
+    async function attachRaw(tx: Tx, requestId: string, blobKey: string, sha: string, opts: { audience?: string; orgOf?: string } = {}) {
+      return x(tx, sql`
+        insert into reimbursement_attachments (organization_id, request_id, blob_key, asset_audience, content_sha256,
+               content_type, byte_size, display_name, created_by_user)
+        values (${opts.orgOf ?? org}, ${requestId}, ${blobKey}, ${opts.audience ?? "private"}, ${sha}, 'image/jpeg', 3,
+                'r.jpg', ${creator.userId})
+        returning id`);
+    }
+
+    it("is (blob_key, organization_id, asset_audience) -> blob_assets_id_org_audience_key, NO ACTION both ways, validated, not deferrable", async () => {
+      const [c] = await fx.q(sql`
+        select c.confdeltype, c.confupdtype, c.convalidated, c.condeferrable,
+               c.conindid = (select k.conindid from pg_constraint k where k.conname = 'blob_assets_id_org_audience_key') as on_audience_key,
+               (select array_agg(a.attname::text order by k.ord) from unnest(c.conkey) with ordinality k(attnum, ord)
+                  join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum) as cols,
+               (select array_agg(a.attname::text order by k.ord) from unnest(c.confkey) with ordinality k(attnum, ord)
+                  join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.attnum) as fcols
+          from pg_constraint c
+         where c.conname = 'reimbursement_attachments_blob_fk' and c.conrelid = 'reimbursement_attachments'::regclass
+           and c.confrelid = 'blob_assets'::regclass and c.contype = 'f'`);
+      expect(c).toEqual({
+        confdeltype: "a",
+        confupdtype: "a",
+        convalidated: true,
+        condeferrable: false,
+        on_audience_key: true,
+        cols: ["blob_key", "organization_id", "asset_audience"],
+        fcols: ["id", "organization_id", "audience"],
+      });
+    });
+
+    it("refuses a public_site blob of the SAME organization on the owner connection; a private one of the same shape is accepted", async () => {
+      await rolledBack(async (tx) => {
+        const id = await draft(tx);
+        const pub = await fx.blob(org, "image/jpeg", "public_site");
+        const err = await raises(tx, (sp) => attachRaw(sp, id, pub.id, pub.sha));
+        expect(err.code).toBe("23503");
+        expect(err.message).toContain("reimbursement_attachments_blob_fk");
+        const priv = await fx.blob(org);
+        expect(await attachRaw(tx, id, priv.id, priv.sha)).toHaveLength(1);
+      });
+    });
+
+    it("refuses another organization's private blob, and a key that names no blob", async () => {
+      await rolledBack(async (tx) => {
+        const id = await draft(tx);
+        const foreign = await fx.blob(presbytery);
+        const err = await raises(tx, (sp) => attachRaw(sp, id, foreign.id, foreign.sha));
+        expect(err.code).toBe("23503");
+        expect(err.message).toContain("reimbursement_attachments_blob_fk");
+        const missing = await raises(tx, (sp) => attachRaw(sp, id, "00000000-0000-4000-8000-0000000000aa", "a".repeat(64)));
+        expect(missing.code).toBe("23503");
+      });
+    });
+
+    it("the constant cannot be set to public_site to match a public row (the CHECK fires first)", async () => {
+      await rolledBack(async (tx) => {
+        const id = await draft(tx);
+        const pub = await fx.blob(org, "image/jpeg", "public_site");
+        const err = await raises(tx, (sp) => attachRaw(sp, id, pub.id, pub.sha, { audience: "public_site" }));
+        expect(err.code).toBe("23514");
+        expect(err.message).toContain("reimbursement_attachments_asset_audience_private");
+      });
+    });
+
+    it("NO ACTION: a referenced receipt's blob cannot be deleted on the owner connection, live or detached (F44)", async () => {
+      await rolledBack(async (tx) => {
+        const id = await draft(tx);
+        const b = await fx.blob(org);
+        const [a] = await attachRaw(tx, id, b.id, b.sha);
+        const live = await raises(tx, (sp) => x(sp, sql`delete from blob_assets where id = ${b.id}`));
+        expect(live.code).toBe("23503");
+        expect(live.message).toContain("reimbursement_attachments_blob_fk");
+        await x(tx, sql`update reimbursement_attachments set detached_at = now(), detached_by_user = ${creator.userId} where id = ${a!.id}`);
+        const detached = await raises(tx, (sp) => x(sp, sql`delete from blob_assets where id = ${b.id}`));
+        expect(detached.code).toBe("23503");
+        // Not vacuous: an unreferenced blob of the same org deletes.
+        const loose = await fx.blob(org);
+        await x(tx, sql`delete from blob_assets where id = ${loose.id}`);
+      });
+    });
+
+    it("the org-teardown cascade (the e2e fixtures' one `delete from organizations`) still removes an organization holding a receipt", async () => {
+      const tOrg = await fx.makeOrg("teardown");
+      const tCreator = await fx.member(tOrg, "Teardown");
+      const tGroup = await fx.makeGroup(tOrg, "Teardown Committee");
+      await fx.chargeable(tOrg, tGroup, tCreator.userId);
+      const b = await fx.blob(tOrg);
+      await rolledBack(async (tx) => {
+        const [r] = await x(tx, sql`
+          insert into reimbursement_requests (organization_id, kind, client_key, created_by_user, created_by_person_id,
+                 group_id, beneficiary_person_id, amount_cents, expense_date, purpose, no_receipt_claimed)
+          values (${tOrg}, 'reimburse', 'teardown-key-01', ${tCreator.userId}, ${tCreator.personId}, ${tGroup},
+                  ${tCreator.personId}, 900, presby_reimbursement__local_date(${tOrg}, now()) - 1, 'Teardown', false)
+          returning id`);
+        await attachRaw(tx, String(r!.id), b.id, b.sha, { orgOf: tOrg });
+        // The fixture cleanup's own shape (derived roster rows need the guard lifted).
+        await x(tx, sql`alter table group_memberships disable trigger group_memberships_reject_derived`);
+        await x(tx, sql`delete from organizations where id = ${tOrg}`);
+        const [left] = await x(tx, sql`
+          select (select count(*) from reimbursement_attachments where organization_id = ${tOrg})::int as att,
+                 (select count(*) from blob_assets where organization_id = ${tOrg})::int as blobs`);
+        expect(left).toEqual({ att: 0, blobs: 0 });
+      });
+    });
+  });
+
+  // =========================================================================
   // No delete (EC34) and F301 (EC30), owner path
   // =========================================================================
   describe("delete guards and the downward guards", () => {

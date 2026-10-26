@@ -59,10 +59,15 @@ import { users } from "../schema";
  *         same-transaction event (*_insert_has_event, *_status_has_event_upd).
  *   - F301 guards on administrative_commissions, org_delegations and
  *     app_role_permissions (section 5).
- *   - The receipt FK into blob_assets (blob_key, organization_id,
- *     asset_audience) -> (id, organization_id, audience) is Batch 1b: it
- *     needs drizzle/0072's blob_assets.audience column (F289). The
- *     asset_audience column and its `= 'private'` CHECK are here already.
+ *   - The receipt FK reimbursement_attachments_blob_fk (blob_key,
+ *     organization_id, asset_audience) -> blob_assets (id, organization_id,
+ *     audience), NO ACTION both ways (0073 section 1d, ~line 365; F289's
+ *     catalog rule, DECISION-277). DDL-ONLY, like giving_statements_blob_fk:
+ *     assets.ts is imported by the storage adapter and nothing else
+ *     (DECISION-058), so this file does not import blobAssets. The
+ *     asset_audience column and its `= 'private'` CHECK are declared below;
+ *     scripts/check-schema-parity.ts carries the architectural extra_fk row
+ *     and reimbursement.schema.test.ts pins the FK in the migration text.
  *   - CHECK constraints are mirrored by NAME (reimbursement.schema.test.ts
  *     pins every name 0073 creates); their SQL is a faithful copy, and 0073
  *     wins if they ever disagree.
@@ -277,9 +282,13 @@ export const reimbursementRequests = pgTable(
 );
 
 /**
- * 0073 section 1d. A receipt. blob_key names a PRIVATE blob; asset_audience is
- * the constant 'private' the Batch 1b composite FK carries into blob_assets
- * (DECISION-270/277). content_sha256 is the hash of the bytes AS RECEIVED.
+ * 0073 section 1d. A receipt. blob_key names this organization's PRIVATE blob;
+ * asset_audience is the constant 'private', the third column of the DDL-only
+ * composite FK reimbursement_attachments_blob_fk into blob_assets (id,
+ * organization_id, audience) (0073 ~line 365, NO ACTION both ways: a public_site
+ * or foreign-org blob is refused, and a referenced blob is undeletable on every
+ * connection; DECISION-270/277, F44). content_sha256 is the hash of the bytes
+ * AS RECEIVED.
  */
 export const reimbursementAttachments = pgTable(
   "reimbursement_attachments",
@@ -309,9 +318,10 @@ export const reimbursementAttachments = pgTable(
       foreignColumns: [reimbursementRequests.id, reimbursementRequests.organizationId],
       name: "reimbursement_attachments_request_fk",
     }),
-    // TODO(Batch 1b, F289): foreignKey reimbursement_attachments_blob_fk
-    // (blobKey, organizationId, assetAudience) -> blob_assets (id,
-    // organization_id, audience), once assets.ts carries `audience`.
+    // reimbursement_attachments_blob_fk (blobKey, organizationId,
+    // assetAudience) -> blob_assets (id, organization_id, audience) is
+    // DDL-only: drizzle/0073 section 1d (~line 365). Not a foreignKey() here
+    // because that would import assets.ts (DECISION-058; see the header).
     check("reimbursement_attachments_asset_audience_private", sql`${t.assetAudience} = 'private'`),
     check("reimbursement_attachments_sha_shape", sql`${t.contentSha256} ~ '^[0-9a-f]{64}$'`),
     check(
@@ -334,6 +344,8 @@ export const reimbursementAttachments = pgTable(
       .on(t.organizationId, t.contentSha256)
       .where(sql`${t.detachedAt} is null`),
     index("reimbursement_attachments_request_idx").on(t.requestId).where(sql`${t.detachedAt} is null`),
+    // Serves the receipt FK's RI check when a blob_assets row is deleted.
+    index("reimbursement_attachments_blob_idx").on(t.organizationId, t.blobKey),
   ],
 );
 

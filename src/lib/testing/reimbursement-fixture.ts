@@ -209,13 +209,22 @@ export async function createReimbursementFixture(label: string) {
     return String(row!.id);
   }
 
-  /** A stored blob at `org` (synthetic bytes). Returns its id and the sha to attach under. */
-  async function blob(org: string, contentType = "image/jpeg"): Promise<{ id: string; sha: string; size: number }> {
+  /**
+   * A stored blob at `org` (synthetic bytes). Returns its id and the sha to attach under.
+   * `audience` defaults to `private`, the only audience a receipt may name
+   * (reimbursement_attachments_blob_fk, drizzle/0073 section 1d); `public_site`
+   * exists to prove the refusal.
+   */
+  async function blob(
+    org: string,
+    contentType = "image/jpeg",
+    audience: "private" | "public_site" = "private",
+  ): Promise<{ id: string; sha: string; size: number }> {
     counter += 1;
     const sha = createHash("sha256").update(`${label}-${stamp}-${counter}`).digest("hex");
     const [row] = await q(sql`
-      insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes)
-      values (${org}, ${`fixture-${sha}`}, ${contentType}, 3, '\\x010203'::bytea) returning id`);
+      insert into blob_assets (organization_id, content_hash, content_type, byte_size, bytes, audience)
+      values (${org}, ${`fixture-${sha}`}, ${contentType}, 3, '\\x010203'::bytea, ${audience}) returning id`);
     return { id: String(row!.id), sha, size: 3 };
   }
 

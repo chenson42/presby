@@ -1,0 +1,184 @@
+site-ingest-size (F324, DECISION-279) - Rule 16 integration patch, Batch B
+Work-log: docs/work-log/2026-10-26-site-ingest-size.md (Phase 4, Batch B)
+
+Everything above the first `diff --git` line is prose; `git apply` skips it.
+The four diffs below are against this branch's HEAD (which already merged
+pipeline/public-asset-allowlist at 83ea135). They touch shared, hand-edited files
+that Rule 16 reserves for integration, so they are NOT committed on the pipeline
+branch. At integration, if main has moved, `git apply --3way` and re-order newest
+first.
+
+1. docs/decisions.md - DECISION-279, final text, inserted newest-first above the
+   current top entry. Re-number at integration if another pipeline took 279 first
+   (it was pre-assigned to this pipeline at kickoff).
+2. docs/TODO.md - two lines under "Deployment & production" (the operator's staged
+   rollout steps; the possibly-stale `site-fpcw` repository-variable lines) and a
+   new "Site ingest follow-ups" subsection at the top of Backlog (the accepted
+   residuals). No Done entry: that is written when Phase 6 closes.
+3. docs/deployment.md - a "Site ingest: the staged transport" section (transports,
+   the fixed rollout order, rollback, what is unverified until production). F289's
+   Batch 2 also edits this file; the hunks are far apart.
+4. docs/product/functionality-map.md - the Ingest line (line 100).
+
+Also at integration, outside this patch:
+- Merge order is AFTER F289 (public-asset-allowlist) and after 0072 is applied to
+  production. The pipeline branch already contains F289's commits.
+- audience-callsites.test.ts is already edited on the branch (its ACTIVE row for
+  src/lib/sites-ingest.ts replaces the one for the legacy route).
+- Release notes and the version bump come after Phase 6 (/release-notes).
+- presby-site-kit branch fix/staged-ingest (ad109b1, v4.1.0) is merged to that
+  repository's main only after the server is promoted (rollout step 3).
+
+diff --git a/docs/TODO.md b/docs/TODO.md
+index 4076367..c235bb3 100644
+--- a/docs/TODO.md
++++ b/docs/TODO.md
+@@ -99,6 +99,9 @@ here are the tracking surface only.
+ - [ ] Google OAuth and Resend are **deferred by decision** until go-live; production currently has **no way to sign in at all**, including for the operator. Accepted.
+ - [ ] First real `site-fpcw` ingest still blocked: the Production env vars `SITES_INGEST_OIDC_AUDIENCE` and `GITHUB_SITES_ORG` now exist (corrected 2026-10-25), but `site-fpcw` has no repository variables (`PRESBY_INGEST_URL`, `PRESBY_OIDC_AUDIENCE`; `site-pasturechurch` has both), every `Deploy site content` run on it failed (the five newest, 2026-08-26 to 08-28; the logs have expired, so "failed for the missing variables" is an inference), and `last_ingested_commit_sha` is a scratch placeholder. `PRESBY_OIDC_AUDIENCE` must equal the Production `SITES_INGEST_OIDC_AUDIENCE` exactly. The first ingest publishes the whole migrated site at `presbyportal.org/site/fpcw` and needs the operator's explicit go. See the public events calendar line under Blocking a flag flip.
+ 
++- [ ] **Staged site ingest rollout (operator, `2026-10-26-site-ingest-size`, DECISION-279, F324).** After the server is promoted (it sits behind the 0072/F289 release): unauthenticated `POST` to `/api/sites/ingest/plan`, `/images` and `/commit` on the production platform host must each answer 401 with the JSON body (`code: unauthorized`; a 404 means the route did not deploy); then merge presby-site-kit branch `fix/staged-ingest` (v4.1.0) to its `main` and tag `v4.1.0` (this takes effect for every site's next push); optionally add `transport: staged` to `site-pasturechurch`'s calling workflow for one push to prove OIDC, the three routes and Vercel's real behavior (zero images there, so it does not prove an upload), then remove it; then the first `site-fpcw` push, which needs the operator's go and the preconditions in the line above. Read-only first: count `fpcw`'s `public_site` rows after 0072 and compare the 80 distinct hashes in `site-fpcw/images/` (a hash held only as `private` is reported missing, so the run uploads exactly those and no log line may promise otherwise). — `docs/work-log/2026-10-26-site-ingest-size.md` Rollout runbook
++- [ ] **Confirm or correct the `site-fpcw` repository-variable lines.** `docs/deployment.md` (the `SITES_INGEST_OIDC_AUDIENCE` row and "Deferred by operator decision") and the line above say `site-fpcw` carries neither `PRESBY_INGEST_URL` nor `PRESBY_OIDC_AUDIENCE`; run 40251133138 got a platform 413, which needs a non-empty ingest URL, so at least one of them is probably stale. Operator check, then reconcile both. — `docs/work-log/2026-10-26-site-ingest-size.md` Phase 3 Neighbours
++
+ ## Verification debt (DECISION-045)
+ 
+ Phases 5 and 6 deferred on the foundation pipelines, to be cleared in one
+@@ -483,6 +486,16 @@ been independently verified.
+ 
+ ## Backlog
+ 
++### Site ingest follow-ups (`2026-10-26-site-ingest-size`, accepted residuals of DECISION-279)
++
++- [ ] **Chunked upload of an image over 4,000,000 bytes.** The client stops before sending anything and names the image; the server stores up to 10,485,760 bytes. No real image is near it. Build only when one is. — Phase 1 OQ4
++- [ ] **Unreferenced `public_site` images are never collected** (a run that uploaded and never published; also an image dropped from a later bundle). They are fetchable only by uuid, which no ingest response discloses. Needs F289 Tier 2 (takedown) and a soft-delete story; all deletes are soft. — DECISION-279 residuals
++- [ ] **A per-organization blob storage budget.** Per-request, per-entry and per-image bounds are enforced; a compromised content repo can still store without a total cap (the legacy route already allowed repeated calls). — Phase 3 Out of Scope
++- [ ] **Validate that page content references only declared image keys** (either transport). The server cannot tell which block props are image references; the renderer already degrades an unknown key to "no image". — Phase 3 G3b
++- [ ] **Revisit sequential uploads and the per-request OIDC token** if a site routinely exceeds about 500 images in one run or a run exceeds five minutes, or if GitHub throttles `getIDToken` (token reuse below `exp` with an injectable clock). The first `site-fpcw` run is the evidence. — Phase 3 Decisions made here
++- [ ] **Order commit shas on the server.** The per-repository concurrency group serializes runs but a manual re-run of an older failed run still republishes older content. — Phase 2 residuals
++- [ ] **`site-pasturechurch/README.md` (operator's repo) says its CI "POSTs the bundle to presby's POST /api/sites/ingest".** Suggested wording: "sends the site to presby's `/api/sites/ingest`, in one request or, for a large site, in steps." — Phase 3 Neighbours
++
+ ### Not designed yet — needs its own Phase 1
+ 
+ - [ ] **No in-product way to give an existing headless organization its first parent.** `presby_transfer_affiliation()` needs an open affiliation row to close, and the platform is not a council. When `presby_organize_congregation()` is built, scope it to cover "first parent for an existing headless org" too, so an operator error (including the F124-class pre-hydration create above) is not SQL-only to repair. — `docs/work-log/2026-09-28-organization-parent-picker.md` Phase 1 Adversarial §7 / Phase 6
+diff --git a/docs/decisions.md b/docs/decisions.md
+index 6be0a13..e3af6c2 100644
+--- a/docs/decisions.md
++++ b/docs/decisions.md
+@@ -4,6 +4,24 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
+ 
+ ---
+ 
++**DECISION-279 — Site ingest gains a staged, content-addressed transport; the legacy single POST stays.**
++
++**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; built as designed, deviations recorded in the work-log) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-site-ingest-size` (F324)
++
++- **The defect.** The CI ingest sent every image, base64, in one request. A real site's single request was 37.8 MB against Vercel's 4.5 MB function-body cap, which answers a plain-text 413 before any route code runs. Nothing in the route could raise the cap.
++- **Three fixed-path routes** beside the legacy one: `POST /api/sites/ingest/{plan,images,commit}`. They share one gate (`authorizeIngest`: OIDC, then the `sites.public_render` flag 503, then the repository's site 404, then `already_current`) and one publish function (`publishSiteBundle`: store the private bundle, `recordSiteIngest`, audit, revalidate) with the legacy route, through `src/lib/sites-ingest.ts`. The client picks legacy only when the whole bundle is at most 4,000,000 bytes, so neither repository's deploy order can break a small site.
++- **The server keeps no session state.** `blob_assets` is the staging area: a plan asks which sha256 digests the organization lacks as `public_site` images, an upload stores one image, a commit publishes. A re-run converges because the commit sha is written last, in the single `recordSiteIngest` UPDATE.
++- **The server derives every key.** `commit` resolves each declared `{ manifestKey, sha256 }` through the new `BlobStore.findByContentHashes({ organizationId, audience, contentHashes })` (DECISION-030; `audience` a required string literal per DECISION-277) and builds `imageKeys` itself. The client never sends or receives a blob uuid; no plan, upload or commit response contains one. A hash held only as `private`, or only by another organization, counts as not held. The server recomputes every upload's hash and sniffs its magic bytes, and stores the sniffed type.
++- **One app-enforced limit, 4,000,000 bytes per request body, on all four routes** (about 11% under 4.5 MB): a declared `Content-Length` over it is refused without reading, otherwise the bytes actually read are counted and the stream is cancelled at the limit. It is checked only after the gate, so an unauthenticated caller sees a 401, not a 413. A local server and a production one behave the same, so the limit is testable.
++- **The wire is pinned in both repositories** (presby `sites-ingest.test.ts` SI-4/SI-9, presby-site-kit `ingest.test.ts` KI-1) and driven end to end by the bridge run: `MAX_REQUEST_BYTES` 4,000,000 · `MAX_MANIFEST_ENTRIES` 2,000 · headers `x-presby-ingest-protocol: 1` and `x-presby-sha256` · error body `{ status: "error", code, error }` over a closed code set (legacy errors gain `code`, additively) · manifest keys 1 to 200 UTF-16 units with no control characters (`__proto__` is data, `imageKeys` is built with `Object.fromEntries`).
++- **Audit.** `SITE_CONTENT_INGESTED` stays one row per publish, on both transports, with `transport: "legacy" | "staged"` added. Uploads and plans write none (nothing is published until commit).
++- **No schema change, no dependency, no proxy change, no flag.** The paths are fixed because the proxy matcher excludes any path ending in an image extension (F151): a dynamic `/images/<key>.jpg` would have bypassed the custom-host lockdown.
++- **Implementation rulings.** Uploads are sequential, one image per request (revisit above about 500 images in a run or a run over five minutes). `storeSiteImage` retries a unique violation once, so identical concurrent uploads are safe (F289 Edge Case 17). The client throws `IngestFailure`, mints a fresh OIDC token for every request, retries a thrown fetch or any 5xx three times, and does not follow redirects. `ingest.yml` gains `transport: auto | staged | legacy` and a per-repository job concurrency group.
++- **Accepted residuals (`paper`).** Images uploaded by a run that never published stay as `public_site` rows no bundle uses; they can be fetched only by uuid, which no ingest response discloses, and nothing collects them (all deletes are soft; no takedown until F289 Tier 2). Re-running an older failed run after a newer one succeeded republishes the older content (the concurrency group serializes runs, it does not order commit shas). An image over 4,000,000 bytes cannot be published: the client stops before sending anything and names it. There is no per-organization storage budget. A page that references an image key the commit does not declare is not validated, in either transport. The upload path may first run in production at the first real `site-fpcw` publish.
++- **Rollout: the server before the client.** Promote this server, then merge the presby-site-kit change to its `main` (v4.1.0). Rollback of the client is a revert on presby-site-kit `main`; of the server, a revert of the release (a staged client then prints "the platform does not support staged ingest yet"; small sites are unaffected).
++
++---
++
+ **DECISION-241 — Public events calendar: the implementation shape.**
+ 
+ **Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (events Increment 4, v0.44.0, migration 0067)
+diff --git a/docs/deployment.md b/docs/deployment.md
+index cbdbfcd..3afac18 100644
+--- a/docs/deployment.md
++++ b/docs/deployment.md
+@@ -986,6 +986,75 @@ hides their photo in the directory is withheld from every public roster.
+ 
+ ---
+ 
++## Site ingest: the staged transport (DECISION-279, F324)
++
++A content repo's CI publishes through presby-site-kit's `ingest.yml`. Vercel refuses
++any function request body over 4.5 MB before route code runs (a plain-text 413), so
++the ingest has two transports and the client chooses:
++
++- **Legacy, one request:** `POST /api/sites/ingest` with the whole bundle (pages and
++  base64 images). Used when the exact serialized body is at most **4,000,000 bytes**.
++  Unchanged apart from the limit and an added `code` on errors.
++- **Staged:** `POST /api/sites/ingest/plan` (which image sha256 digests the platform
++  still lacks), `/images` (one image's raw bytes per request) and `/commit` (the pages
++  plus `{ manifestKey, sha256 }` per image). Every request carries its own fresh GitHub
++  OIDC token and the header `x-presby-ingest-protocol: 1`. The server derives every blob
++  key itself, and the site changes only at the commit.
++
++The app enforces the 4,000,000-byte per-request limit itself on all four routes (413
++`request_too_large`, after authentication), so a local server behaves like production.
++There are no new environment variables, flags or migrations. The routes need
++`sites.public_render` on and 0072 applied, like the legacy one.
++
++**Rollout order is fixed: the server before the client.**
++
++1. Apply 0072 and promote F289 (see "Public asset audience (0072)"), then promote the
++   release carrying this change. Verify with an unauthenticated `POST` to each of
++   `/api/sites/ingest/plan`, `/images` and `/commit` on the production platform host:
++   each answers **401 with the JSON body** (`{"status":"error","code":"unauthorized",...}`).
++   A 404 means the route did not deploy.
++2. Read-only prediction for `fpcw` (counts only): after 0072, count its `blob_assets`
++   rows with `audience = 'public_site'` and compare the distinct hashes of
++   `site-fpcw/images/`. A hash held only as `private` is reported missing, so the first
++   publish uploads exactly the ones not held as site images; do not promise it uploads
++   nothing.
++3. Merge presby-site-kit's `fix/staged-ingest` (v4.1.0) to its `main` and tag `v4.1.0`.
++   This takes effect for every site's next push (the workflow file comes from `@main`;
++   the scripts come from `site_kit_ref`). A site that pins `site_kit_ref` to a tag older
++   than v4.1.0 is unsupported by the new workflow and fails with a readable line.
++4. Optional, the operator's call, on a live customer repository: add `transport: staged`
++   to `site-pasturechurch`'s calling workflow for one push and read the log (Built,
++   "Staged ingest was requested", "This site has no images to send.", Publishing,
++   Published), then remove it. It proves OIDC, the three routes and Vercel's real
++   behavior; it does **not** prove an upload (that site has no images).
++5. The first real `site-fpcw` ingest (see "Deferred by operator decision"). Expected log
++   shape: `Built 14 page(s) and 81 image(s): 80 distinct, 28.3 MB.` · `The site is 37.8 MB
++   as one request, over the 4.0 MB limit, so images are sent one at a time.` ·
++   `Checking which of the 80 distinct image(s) the platform still needs.` ·
++   `<R> already on the platform; <M> to upload.` (or `All 80 image(s) are already on the
++   platform; nothing to upload.`) · one `Uploaded i of M` line per image · `Publishing ...`
++   · `Published commit <sha7> to "<slug>"` · `Sent <M> new image(s); <R> already on the
++   platform.` A previously masked failure is possible (the 413 hid everything after it):
++   the client prints a named cause and hint for each (401 variable mismatch, 404
++   unprovisioned repository, 503 flag off or unreadable); fix it and re-run, every step is
++   safe to repeat and a repeat of an ingested sha says so.
++
++**Rollback.** Client: revert the one commit on presby-site-kit `main` (large sites then
++fail as before; small ones are unaffected). Server: revert the presby release; a staged
++client then gets a non-JSON 404 on `/plan` and prints "the platform does not support
++staged ingest yet". Neither needs a database action.
++
++**Unverified until production.** The plan and commit on Vercel's real stack; whether
++`getIDToken` tolerates about 80 calls in a run; the timing of one upload on a cold
++function; the actual `exp` of a GitHub OIDC token (irrelevant by design, every request
++mints a new one). The first `site-fpcw` run is the evidence; the in-process bridge run
++(real client, real handlers) is the pre-production proxy.
++
++**Accepted residuals.** Images uploaded by a run that never published remain as
++`public_site` rows no bundle uses (fetchable only by uuid, which no ingest response
++discloses; no takedown until F289 Tier 2). Re-running an older failed run after a newer
++one succeeded republishes the older content: re-run only the latest.
++
+ ## Deferred by operator decision (2026-09-23)
+ 
+ These are **not** oversights.
+diff --git a/docs/product/functionality-map.md b/docs/product/functionality-map.md
+index 1e2e266..5a27e71 100644
+--- a/docs/product/functionality-map.md
++++ b/docs/product/functionality-map.md
+@@ -97,7 +97,7 @@ inherited from the starter.
+ 
+ - `/site/<slug>` — anonymous per-congregation website, gated `sites.public_render` (seeded off; no real congregation site provisioned yet). `getPublishedSite()` reads through `presby_published_site()` (SECURITY DEFINER) — the only tenant-connection path to `organization_sites`, which carries no `presby_app` grant at all. Enumeration-safe: never-provisioned, suspended, nonexistent, and inactive-org all collapse to the same zero-row 404, proven at the SQL, unit, integration, and e2e layers. `src/app/(public)/site/[slug]/`, `src/lib/sites.ts`.
+ - `presby-site-kit` (`github.com/chenson42/presby-site-kit`, public, `v0.0.1-stub`) — the shared rendering shell, pinned by git tag in `package.json`. Renders staged pages via `renderSiteBundle()`; a component allowlist (no arbitrary JS from content repos) is the enforced boundary.
+-- Ingest — `POST /api/sites/ingest`, called by a content repo's own CI on push to `main`. GitHub Actions OIDC only (hardcoded RSA-SHA256, `iss`/`aud`/`repository_owner`/`ref`/`job_workflow_ref` all checked, never trusts the token's declared `alg`), then the `sites.public_render` flag (503 if off — checked *after* auth, so a stolen token can't probe the flag), then bundle validation + per-image magic-byte sniffing, idempotent on commit sha. `src/app/api/sites/ingest/route.ts`, `src/lib/sites-ingest-auth.ts`.
++- Ingest — `POST /api/sites/ingest`, called by a content repo's own CI on push to `main`. GitHub Actions OIDC only (hardcoded RSA-SHA256, `iss`/`aud`/`repository_owner`/`ref`/`job_workflow_ref` all checked, never trusts the token's declared `alg`), then the `sites.public_render` flag (503 if off — checked *after* auth, so a stolen token can't probe the flag), then bundle validation + per-image magic-byte sniffing, idempotent on commit sha. A site whose whole bundle is over 4,000,000 bytes publishes in steps (DECISION-279): `POST /api/sites/ingest/plan` (which image sha256 digests the platform still lacks), `/images` (one image per request, hash-verified and sniffed) and `/commit` (pages plus `{ manifestKey, sha256 }`, the server builds `imageKeys` itself); the single request stays for small sites; every request is capped at 4,000,000 bytes. `src/app/api/sites/ingest/route.ts` and `plan|images|commit/route.ts`, `src/lib/sites-ingest.ts`, `src/lib/sites-ingest-auth.ts`.
+ - Contact form — anonymous `site_contact_messages` (FORCE RLS, composite tenant key), honeypot + IP/slug rate limit, read side on the existing `/o/<slug>/tickets` page gated `tickets.file` (DECISION-089). `src/lib/sites.ts`.
+ - Admin — `/admin/sites` provisions a site (repo string, `FEATURES.ADMIN_ORGANIZATIONS`) and sets status (provisioning/live/suspended).
+ - Staff/leadership/committee directory primitives — `PublicStaffDirectory` (`(public)/site/[slug]/staff-directory.tsx`) and the new `PublicCommitteeDirectory` (`committee-directory.tsx`), both `liveSlot` blocks a content author places in an org's MDX; `getPublicStaffRoster(slug, filter?)` → `presby_public_staff_roster()` and the new sibling `getPublicCommitteeRoster(slug, filter?)` → `presby_public_committee_roster()` (both SECURITY DEFINER, anonymous, no per-person route, no id/group_id ever in the projection). Each grew an optional filter (`kind`/`department`/`office`/`hasPriority` for staff; `committee`/`hasPriority` for committees) matched server-side against an author-baked marker, never a runtime/visitor-facing query — `presby-site-kit` v4.0.0 turned `liveSlots` values into resolver functions `(filter) => ReactElement | null` (DECISION-132) so the same slot name renders a different filtered subset per marker instance, and a new `PersonCard` primitive (no contact-field props at all) composes grouped, per-committee sections. A new admin-set `publicDisplayOrder` column (staff/officer/committee tables, DECISION-133) lets an admin hand-curate an ordered subset (`{"hasPriority": true}`) without ever putting a person id in the lower-trust content repo. Name/role/title/department/photo only, never contact fields, opt-in per row (`staff_positions`/`officer_terms`/`group_memberships`) via an admin toggle on `admin/staff`/`admin/officers`/`admin/groups/<id>` (`groups.manage`-gated for committees, with the derived-group write path guarded exactly like `endGroupMembership()`). Gated `sites.public_staff_directory` and the new, separate `sites.public_committee_directory`, both seeded off; ships with photo upload still unwired (`docs/TODO.md`). `docs/work-log/2026-08-27-public-staff-directory.md`, `docs/work-log/2026-08-28-public-directory-primitives.md`.

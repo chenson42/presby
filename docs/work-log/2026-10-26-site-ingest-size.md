@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete; Gaps 1–14; Open Questions 1–4 | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete; R1–R14, S1–S3; DECISION-279 proposed; no migration (0077 unused) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; Batch A (site-kit) ready now, Batch B (presby) gated on F289 Batch 2 | Design complete, implementers named | 2026-10-26 |
-| 4 — Implementation | full-stack-developer (Batch A, site-kit); api-developer (Batch B, presby) | Batch A complete (site-kit `ad109b1`, 235 tests green, not pushed); Batch B pending | — | 2026-10-26 |
+| 4 — Implementation | full-stack-developer (Batch A, site-kit); api-developer (Batch B, presby) | Batch A complete (site-kit `ad109b1`, 235 tests green, not pushed); Batch B complete (presby `96784a7` + `7ef67b6`; BR-1 green with the real client; not pushed) | Batch A + Batch B green | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -898,6 +898,8 @@ Every `E1` to `E8` is raised before any request and ends `Nothing was sent.`, wh
 | E14 | `Step "{step}": the platform redirected this request to {origin}. Set the PRESBY_INGEST_URL repository variable to that address (ending in /api/sites/ingest), then re-run this job.` |
 | E15 | `presby-site-kit ref "{ref}" has no scripts/ingest.mjs, so this site cannot publish with it. Set site_kit_ref to "main" (or to v4.1.0 or later), then re-run this job.` |
 | E16 | `Unexpected error in the ingest tool: {message}. Re-run this job; if it keeps failing, contact PresbyPortal support.` |
+| E17 | `Image "{path}" has a name the platform cannot accept ("{key}"): image names must be 1 to 200 characters with no control characters. Rename the file, then push again. Nothing was sent.` (added by Batch A, recorded here by Batch B: the staged path only, raised before any request; the rule it states is the one the server enforces on `/commit`, `SI-4`/`CM-7`) |
+| E18 | `Could not read the site: {message} Nothing was sent.` (added by Batch A, recorded here by Batch B: wraps the page-reading errors, "no .json files" and malformed JSON, which used to surface as a raw stack in the build step) |
 
 | ID | Shown after | Hint |
 |---|---|---|
@@ -1055,9 +1057,152 @@ None from this batch (client only). Server audit is Batch B.
 
 None.
 
-## Batch B — presby server (api-developer)
+## Batch B — presby server (api-developer), 2026-10-25
 
-Pending (gated on F289 Batch 2 being committed).
+Worktree `/Users/cshenso/git/presby-platform/presby-ingest`, branch `pipeline/site-ingest-size`, Neon branch `pipeline-site-ingest-size` (host `ep-nameless-cloud`; 0072 applied to it, never to development or production), port 3610. Nothing pushed.
+
+### Commits (all carry `Work-Log: 2026-10-26-site-ingest-size` and the attribution lines)
+
+| Commit | Subject |
+|---|---|
+| `5fbb90f` | `Merge branch 'pipeline/public-asset-allowlist' into pipeline/site-ingest-size` (B0; F289 at `83ea135`; merge, no rebase, no stash) |
+| `96784a7` | `feat(storage): findByContentHashes, the per-audience 'which hashes do we hold' lookup` (BS-1..4 red first, BD-1..5) |
+| `7ef67b6` | `fix(sites): site ingest publishes a site over the request-size limit, staged and content-addressed` (`Caught-By: agent-review`, `Discovered-In: production`) |
+| (this section and the patch) | `docs(work-log): site ingest size Phase 4 Batch B` |
+
+### B0 — the feasibility re-run against the merged tree (mandatory; passed, no return to Phase 3)
+
+- `BlobAudience`, `BlobRef.audience`, `StoreInput.audience`, `ResolveInput.audience`, `PublicImageType` exist in `blob-store.ts`; `audience-callsites.test.ts` (U4) exists and, per the S1 ruling, already holds any `getBlobStore().<method>(` call to an `audience` literal by default, with `resolvePublic` the one named exemption. Its self-test even carried a `findByContentHashes` case. So `findByContentHashes` needed no change to the scan logic: only the `ACTIVE` table edit below.
+- 0072 applied to this Neon branch with `psql -1 -v ON_ERROR_STOP=1`; the `audience` column and `blob_assets_org_audience_hash_key` verified present afterwards (`BD-5` asserts the index on every run).
+- Re-grepped every `getBlobStore` caller through U4's own scan: no new caller outside `sites-ingest.ts`; the three store calls there are exactly the table row.
+- Characterization first: the existing `route.test.ts` (27 cases) and the storage suites ran green on the merged tree before any edit (145 tests in 7 files).
+- F289's four Rule 16 files (`drizzle/meta/_journal.json`, `e2e/support/custom-hosts.ts`, `e2e/support/public-calendar-fixture.ts`, `scripts/test-rls.sql`) were applied from F289's `public-asset-allowlist.integration.patch` into the working tree so the e2e lane runs, and are **uncommitted**; every commit used explicit paths. Their `ON CONFLICT (organization_id, audience, content_hash)` fix is what lets `e2e/custom-domains/public-calendar.spec.ts` run. This pipeline writes no `ON CONFLICT` on `blob_assets`.
+
+### Files Created
+
+- `src/lib/sites-ingest.ts` (`server-only`): the wire constants; `INGEST_ERROR_CODES` and `errorResponse`; `handleIngest` (JSON 500, one `console.error` carrying only the error's name and Postgres code, because Drizzle's text quotes bound values); `authorizeIngest` (401, 503, 404, `already_current`, in the legacy order); `requireProtocol`; `readBoundedBody` and `readJsonBody`; `validateSha256`, `validateManifestKey`, `validatePages` (moved from the legacy route, caller-named field), `validatePlanImages`, `validateCommitBody`; `describeMissingKeys`; `storeSiteImage` (sniff, `store` as `public_site`, one retry on `23505`); `findHeldSiteImages` (the only caller of `findByContentHashes`); `publishSiteBundle` (private bundle, `recordSiteIngest`, audit with `transport`, revalidate). Source order of the three store calls is `storeSiteImage`, `findHeldSiteImages`, `publishSiteBundle`.
+- `src/app/api/sites/ingest/plan/route.ts`, `images/route.ts`, `commit/route.ts`: thin handlers over the module (`export const POST = handleIngest(...)`). None imports the blob adapter.
+- Tests: `src/lib/sites-ingest.test.ts` (78), `plan/route.test.ts` (23), `images/route.test.ts` (21), `commit/route.test.ts` (22), `staged-flow.test.ts` (6), `src/lib/storage/blob-store-find.test.ts` (14), `blob-store-find.db.test.ts` (5), and the shared `src/lib/testing/site-ingest-harness.ts` (token signer and JWKS stub, synthetic image generator, flag flip, fixture orgs with a provisioned site, teardown).
+- `docs/work-log/site-ingest-size.integration.patch`: the Rule 16 patch (below). Uncommitted scratch, never to be committed: `scratch/bridge/br1.test.ts` and `scratch/bridge/vitest.config.ts` (gitignored).
+
+### Files Modified
+
+- `src/app/api/sites/ingest/route.ts` (legacy): thin; gate, bounded read, `validateBundle` (kept here), per-image `storeSiteImage`, `publishSiteBundle(... "legacy")`; header comment rewritten for the four routes and `code`. `imageKeys` is built with `Object.fromEntries` (a `__proto__` key is data; before, `imageKeys["__proto__"] = ...` was a silent no-op). The unreachable "is not valid base64" branch is kept as it was.
+- `src/lib/storage/blob-store.ts`: `findByContentHashes` on `BlobStore` and `PostgresBlobStore`, `MAX_FIND_HASHES`, header comment.
+- `src/app/api/sites/ingest/route.test.ts`: plumbing moved to the harness; every existing case unchanged; audit `toEqual` gains `transport: "legacy"`; new cases LG-2..LG-8 (9 tests).
+- `src/lib/storage/audience-callsites.test.ts`: the `ACTIVE` row for `src/app/api/sites/ingest/route.ts` removed; `src/lib/sites-ingest.ts: ["store:public_site", "findByContentHashes:public_site", "store:private"]` added. No change to the scan's logic.
+- `src/proxy.test.ts`: PX-1 (the three paths join `platformPaths`) and PX-2 (the matcher matches all four ingest paths; a hypothetical `/images/hero.jpg` would not, which is why the paths are fixed). `e2e/custom-domains/lockdown.spec.ts`: PX-3 (the three paths in `PLATFORM_PATHS` and in the POST list). `src/proxy.ts` is untouched.
+- `docs/work-log/2026-10-26-site-ingest-size.md`: E17 and E18 added to the Copy table (Batch A's two strings); this section; status rows.
+
+### API contract (as built; the wire is the Phase 3 "API Contract" unchanged)
+
+| Method + path | Gate | Request | Success |
+|---|---|---|---|
+| `POST /api/sites/ingest` (legacy) | OIDC, `sites.public_render`, repo site, `already_current` | `{ bundle: { schemaVersion: 1, pages, images: [{ manifestKey, contentType, bytesBase64 }] } }`, at most 4,000,000 bytes and 2,000 images | `200 { status: "ingested", organizationSlug, commitSha, pageCount }` |
+| `POST /api/sites/ingest/plan` | same + `x-presby-ingest-protocol: 1` | `{ images: [{ sha256, size }] }` | `200 { status: "planned", missing: [hex...] }` |
+| `POST /api/sites/ingest/images` | same + `x-presby-sha256: <hex>` | the raw bytes of one image | `200 { status: "stored", sha256, byteSize, contentType }` |
+| `POST /api/sites/ingest/commit` | same + protocol header | `{ schemaVersion: 1, pages, images: [{ manifestKey, sha256 }] }` | the legacy success body |
+
+Any of the four answers `200 { status: "already_current", organizationSlug, commitSha }` from the gate. Errors on all four: `{ status: "error", code, error }` over the closed set (`unauthorized` 401, `site_not_provisioned` 404, `ingest_disabled` 503, `request_too_large` 413, `invalid_json` / `invalid_request` / `unsupported_protocol` / `hash_mismatch` / `not_an_image` / `images_not_uploaded` / `reserved_page` / `image_rejected` 422, `server_error` 500). Authorization is the OIDC repository identity only (no `FEATURES.*`, no session); the flag `sites.public_render` is checked on every route. No new `FEATURES` key, no flag, no seed change, no migration, no new dependency.
+
+Adapter: `BlobStore.findByContentHashes({ organizationId, audience: BlobAudience, contentHashes: readonly string[] }): Promise<Map<string, BlobRef>>` (1..2,000 distinct lowercase 64-hex digests, else `BlobValidationError` before any query; never selects `bytes`).
+
+### Audit Events
+
+`SITE_CONTENT_INGESTED` is written once per publish by `publishSiteBundle`, on both transports, with metadata exactly `{ repo, commitSha, pageCount, imageCount, transport }` (`transport` is `"legacy"` or `"staged"`; `imageCount` is the number of manifest entries on both). Pinned by `CM-2`, `LG-1` and `LG-7`. Plan and upload write none, and `UP-9` and `PL-9` assert it. `check:audit` does not scan route files (DECISION-084), so the route tests are the coverage.
+
+### Schema Changes
+
+None. 0072 was applied to this pipeline's Neon branch only so the DB-backed tests can run.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| Failing-first | `BS-*` and `BD-1..4` red (`findByContentHashes is not a function`: 18 failed) before the adapter method; the new legacy cases `LG-2`, `LG-4..LG-8` run against the **pre-change** route (restored from `HEAD` for the run, then put back): 8 failed, 1 passed (`LG-3`, which the old route already satisfied) before the fix. `SI-*`, `PL-*`, `UP-*`, `CM-*` and `SF-*` test routes that did not exist, so they were authored with the code and are red by absence. |
+| `npm run typecheck` | clean |
+| `npm run lint` | clean (`--max-warnings=0`) |
+| `npm run build` | passes; `.next/server/app/api/sites/ingest/{commit,images,plan,route}` all emitted |
+| `npm run check` | all eight tripwires pass (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, proxy-imports) |
+| Unit suite (`npx vitest run`, no database) | 598 files passed, 90 skipped; 9,147 tests passed, 2,664 skipped (DB-backed suites skip without the env) |
+| DB-backed, serial (`dotenv -e .env.local -- vitest run --no-file-parallelism`) over `src/app/api/sites`, `src/lib/storage`, `src/lib/sites*`, `src/lib/tenant-branding`, `src/lib/brand/read-org-brand`, `src/lib/testing`, `src/app/(public)/site` | 42 files, **831 tests, all passed** |
+| New tests in this batch | 179: 14 `BS` + 5 `BD` + 78 `SI` + 23 `PL` + 21 `UP` + 22 `CM` + 6 `SF` + 9 `LG` + 1 `PX-2` (PX-1, PX-3 and the audience table extend existing cases) |
+| e2e, own dev server on :3610 (`E2E_BASE_URL`/`AUTH_URL` `http://localhost:3610`, `RATE_LIMIT_DISABLED`, `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`, `E2E_ALLOW_SHARED_DB`) | `custom-hosts` project: `lockdown.spec.ts`, `assets.spec.ts`, `serving.spec.ts`, `public-calendar.spec.ts`: **76 passed**; `chromium` project `public-sites.spec.ts`: **7 passed**. Server stopped by PID (21630). No auth-path file was touched, so no MFA login e2e is required (Phase 3 handoff). |
+
+Not run: the full `npm run test:db` (about 40 minutes; F289's Batch 1 full run is the baseline and this batch adds no schema); `scripts/test-rls.sql` (no schema change); the `prod-build` e2e lane. `src/proxy.test.ts` has one environment-sensitive case (`treats loopback as the platform outside a production deployment`) that fails when the file is run under `dotenv -e .env.local` and passes in the plain unit lane; `src/proxy.ts` and everything it imports are unchanged by this pipeline, so it is not caused by it (not investigated further).
+
+### BR-1 — the bridge run (real site-kit client, real handlers, in process)
+
+`scratch/bridge/br1.test.ts` (gitignored; run with `dotenv -e .env.local -- vitest run --config scratch/bridge/vitest.config.ts --no-file-parallelism`). It imports the **real** `/Users/cshenso/git/presby-platform/presby-site-kit-ingest/scripts/ingest.mjs` (v4.1.0, `ad109b1`) by `file://` URL, injects a `fetch` that turns each client request into `new Request(url, init)` and calls the real `POST` for that path with a real RS256 token minted per request (the JWKS `fetch` is stubbed, as in `route.test.ts`), against real Postgres. Synthetic bytes only. **5 passed.** Pasted output (the client's own log lines; `requests:` is `path:body-bytes`):
+
+```
+--- (a) small site ---
+Built 2 page(s) and 2 image(s): 2 distinct, 50.0 KB.
+Sending the site as one request (67.1 KB of the 4.0 MB allowed).
+Published commit sha-sma to "br1-small-<stamp>" (2 page(s)).
+requests: /:67075            tokens minted: 1
+
+--- (b) 6 MB site, staged ---
+Built 2 page(s) and 5 image(s): 5 distinct, 6.0 MB.
+The site is 8.0 MB as one request, over the 4.0 MB limit, so images are sent one at a time.
+Checking which of the 5 distinct image(s) the platform still needs.
+0 already on the platform; 5 to upload.
+Uploaded 1 of 5: "photo-1" (1.2 MB).   ... through   Uploaded 5 of 5: "photo-5" (1.2 MB).
+Publishing 2 page(s) and 5 image reference(s).
+Published commit sha-big to "br1-big-<stamp>" (2 page(s)).
+Sent 5 new image(s); 0 already on the platform.
+requests: /plan:477  /images:1200000 x5  /commit:779            tokens minted: 7
+
+--- (c) same sha again ---
+Checking which of the 5 distinct image(s) the platform still needs.
+The platform has already ingested commit sha-big; nothing to do.
+requests: /plan:477            tokens minted: 1
+
+--- (d) new sha, same images ---
+All 5 image(s) are already on the platform; nothing to upload.
+Publishing 2 page(s) and 5 image reference(s).
+Published commit sha-big to "br1-big-<stamp>" (2 page(s)).
+Sent 0 new image(s); 5 already on the platform.
+requests: /plan:477  /commit:779            tokens minted: 2
+
+--- (e1) forced failure at the 4th upload (the 4th image request and its retries answered 500) ---
+0 already on the platform; 5 to upload.
+Uploaded 1 of 5: "pic-1" (1.2 MB).  Uploaded 2 of 5: "pic-2" (1.2 MB).  Uploaded 3 of 5: "pic-3" (1.2 MB).
+requests: /plan  /images x6 (3 stored, then the 4th and its 2 retries)   tokens minted: 7
+  -> the client threw IngestFailure; organization_sites unchanged (no sha, no bundle key); 3 public_site rows held
+
+--- (e2) the re-run ---
+3 already on the platform; 2 to upload.
+Uploaded 1 of 2: "pic-4" (1.2 MB).  Uploaded 2 of 2: "pic-5" (1.2 MB).
+Publishing 2 page(s) and 5 image reference(s).
+Published commit sha-res to "br1-resume-<stamp>" (2 page(s)).
+Sent 2 new image(s); 3 already on the platform.
+requests: /plan:477  /images:1200000 x2  /commit:769            tokens minted: 4
+(third run: already_current)
+```
+
+Asserted in the run: legacy for the small site; staged for the 6 MB site (the legacy body would be about 8.0 MB, over 4.5 MB); **every request body at most 4,000,000 bytes**; a token minted per request (`tokens == requests`); the five published `imageKeys` resolve through `resolvePublic` to the original bytes; the failed run leaves the site unchanged and the re-run uploads only what is missing. Every item in Batch A's "What Batch B must match" list held against the real handlers, with no change to either side.
+
+### Rule 16 patch (not committed to the shared files; the patch file is committed)
+
+`docs/work-log/site-ingest-size.integration.patch` (applies cleanly with `git apply --check` against this branch's HEAD): DECISION-279 final text with the implementation addendum (`docs/decisions.md`), two operator lines under Deployment and a "Site ingest follow-ups" Backlog subsection (`docs/TODO.md`: chunked upload, orphan `public_site` images, a storage budget, page-to-image reference validation, the sequential-upload and token-reuse revisit, server-side sha ordering, the pasturechurch README wording), the "Site ingest: the staged transport" section with the rollout order, rollback and unverified list (`docs/deployment.md`), and the Ingest line (`docs/product/functionality-map.md:100`). The edits were made in the working tree, captured with `git diff`, and the four files reverted, so none is on the branch.
+
+### Implementer Notes — deviations and findings
+
+1. **Two server strings are not in the Copy table** (QA copy-truthfulness will find them): `Unsupported schemaVersion.` (the commit body's `schemaVersion` is not 1; the legacy route says `Unsupported bundle.schemaVersion.` and S3 lists nothing for commit) and `Malformed request body.` (a plan or commit body that is not a JSON object; the same text the legacy route already has). Both are `invalid_request`, 422, read by the same log audience.
+2. **`/images` checks the hash header before reading the body** (the design listed gate, bounded read, empty body, hash). The only observable difference is a request with both a malformed header and an oversize body, which now answers 422 `invalid_request` instead of 413. It avoids reading up to 4 MB for a request that is already refused.
+3. **`handleIngest` logs `{ name, code }` only.** The design said "one `console.error` that carries no request content"; Drizzle's error message includes the failing statement and its bound values (image bytes), so even `err.message` is not safe to log. Cost: less to debug with; the stack stays in Vercel's own function logs.
+4. **Extra exports** beyond the design's list: `requireProtocol`, `readJsonBody`, `describeMissingKeys`, `sha256Hex`, `INGEST_ERROR_CODES`, `IngestOrg`/`IngestGate`/`StoreSiteImageResult` types. `validateCommitBody` returns `{ pages, images }` and `validatePlanImages` returns `{ images }`.
+5. **The legacy route builds `imageKeys` with `Object.fromEntries`** (design: staged only). One consequence: a legacy bundle with a `__proto__` manifest key now publishes that key as data (`LG-8`), where before the assignment was a silent no-op. Duplicate manifest keys in a legacy bundle still resolve last-wins, as before.
+6. **A byte-identical bundle is deduplicated.** `SF-2` first asserted a new bundle row after a re-commit of the same pages and images; the bundle JSON is identical bytes, so `store()` returns the existing private row (correct, and the sha bookkeeping still advances). The test now asserts no new image row instead. Worth knowing for the operator: two publishes of identical content share one bundle blob.
+7. **The grep for `ON CONFLICT` on `blob_assets` was repeated** on the merged tree: this pipeline adds none; the only ones are the two F289 already fixed (one in a Rule 16 file, applied locally and uncommitted).
+8. **The unauthenticated-413 policy holds.** A body over the limit with no or a bad token is 401, because the gate runs before the body is read (`LG-3`, `PL-11`, `UP-6`, `CM-11`). That also means the limit is not an unauthenticated resource lever.
+9. **Unverified, as the design said:** how undici and Vercel treat an unread oversize body on a real socket (in-process calls cannot show it; `SI-2` covers the counted path and a lying `Content-Length`); the timing of one upload on a cold function; `getIDToken` across about 80 calls. The first `site-fpcw` run is the evidence.
+10. **Attribution trailers** use the `Claude Opus 5.5` line the task specified (Batch A used the session's Sonnet line).
+
+### Handoff
+
+Next agent: **qa** (Phase 5), then **analyst** (Phase 6). QA should: re-run the gate list above (typecheck, lint, build, `npm run check`, unit suite, the DB-backed set serially on this branch's Neon branch, the `custom-hosts` lockdown/assets/serving/calendar specs and `public-sites.spec.ts` on its own port); re-run `BR-1` (the file is in `scratch/bridge/`; the command is above; it needs `site-kit-ingest` at `ad109b1` and 0072 on the Neon branch) and read its output; confirm the failing-first claims (`LG-2`/`LG-4..8` against the old route); run the copy-truthfulness check on the Copy table including E17 and E18, the two server strings in deviation 1, and the Rule 16 patch's deployment text (it states the rollout order and what is unverified); run site-kit's own gate (`npm test` 235, `typecheck`, `actionlint`) since it has no CI; and confirm `git status` shows exactly the four F289 Rule 16 files uncommitted and nothing under `scratch/` tracked. The orchestrator applies the integration patch (`git apply --3way`), renumbers DECISION-279 if it was taken, and merges after F289 with 0072 applied to production.
 
 # Phase 5 — Verification (qa)
 

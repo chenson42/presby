@@ -97,6 +97,10 @@
 --        so a guard at 1d would leave 1a-1c built on a database without
 --        0072. It raises before anything is created.
 --
+-- RESIDUALS (accepted):
+--   (14) the owner connection can TRUNCATE the six tables or DISABLE their
+--        triggers; presby_app and presby_platform cannot. The 0055 class.
+--
 -- CONVENTIONS FOR EVERY DEFINER (0055/0062 shape): security definer,
 -- search_path = public, pg_temp (DECISION-148); p_actor is a users.id bound
 -- server-side from the session, LAST in the list; an identity refusal (no
@@ -958,12 +962,15 @@ end $$;
 --    function is SECURITY DEFINER with search_path = public, pg_temp.
 -- ---------------------------------------------------------------------------
 
--- 4a. No delete on any of the six tables, owner included, except the
+-- 4a. No row DELETE on any of the six tables, owner included, except the
 -- organization-teardown cascade: presby_guard_organizations_delete()
 -- (drizzle/0044) has already validated the organization's own
 -- deletable_until, and the RI cascade fires after the organization row is
 -- gone. No deletable_until column is needed here (the e2e fixture
 -- organization is removed with one delete from organizations).
+-- TRUNCATE fires no row trigger and is not guarded, and the owner can also
+-- ALTER TABLE ... DISABLE TRIGGER: accepted residual 14, the 0055 class
+-- (DECISION-267).
 create or replace function presby_reimbursement_guard_delete()
 returns trigger language plpgsql security definer
 set search_path = public, pg_temp

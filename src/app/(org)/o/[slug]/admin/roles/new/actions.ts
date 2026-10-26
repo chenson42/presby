@@ -76,6 +76,12 @@ export async function createRoleAction(
         ok: false,
         error: `You can't create a role with permissions you don't hold yourself: ${result.missingPermissions.join(", ")}.`,
       };
+    case "seat_only_key":
+      return {
+        ok: false,
+        error:
+          "That permission is held through a recorded seat and can't be added to a role.",
+      };
     case "ok":
       break;
   }
@@ -135,6 +141,12 @@ export async function adoptTemplateAction(
       return {
         ok: false,
         error: `That template carries permissions you don't hold yourself: ${result.missingPermissions.join(", ")}.`,
+      };
+    case "seat_only_key":
+      return {
+        ok: false,
+        error:
+          "That permission is held through a recorded seat and can't be added to a role.",
       };
     case "ok":
       break;

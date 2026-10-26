@@ -171,10 +171,10 @@ describe("the shapes behind the names", () => {
 });
 
 describe("/developer marks 'at least one fallback' as paper", () => {
-  it("INVARIANTS carries the event-type fallback entry with enforcement 'documented'", async () => {
+  it("INVARIANTS carries the event-type fallback entry with enforcement 'paper'", async () => {
     const { INVARIANTS } = await import("@/lib/dev-docs");
     const entry = INVARIANTS.find((i) => i.title.startsWith("A congregation's event types"));
-    expect(entry?.enforcement).toBe("documented");
+    expect(entry?.enforcement).toBe("paper");
     expect(entry?.detail).toContain("drizzle/0054");
   });
 });

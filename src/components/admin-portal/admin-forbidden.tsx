@@ -9,6 +9,9 @@
  * This one varies by page title and area, and that is fine here: the console
  * has no tenant-enumeration surface.
  *
+ * The developer portal (/developer) is the second platform consumer: its
+ * forbidden state reuses this component with area "the developer portal".
+ *
  * It claims only that the account lacks the capability, never why, and it is
  * actionable: a platform administrator can assign the role at /admin/users.
  *

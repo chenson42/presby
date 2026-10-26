@@ -70,7 +70,8 @@ jobs:
     needs: check-secrets
     if: needs.check-secrets.outputs.has-neon == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    # 50 minutes was hit on PR #58 (parish management) with no failing spec; the suite has outgrown it.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:

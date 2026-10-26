@@ -1932,6 +1932,10 @@ Pipeline `2026-10-25-platform-admin-redesign` (Increment 1 shipped as v0.43.0; n
 
 **F281 (low, defense in depth, fixed) — `/admin/docs` was gated only by the proxy (`src/proxy.ts:42`), and `/admin/design-system` has no key at all.** The release-notes page checked nothing itself, so its protection was one rule in one file. **Closed by** a page-level `ADMIN_RELEASE_NOTES` check on `/admin/docs` with a failing-first test; the proxy already enforced the same key, so this is not a change in who can read it. `/admin/design-system` has no permission key of its own and is reachable by any holder of the admin door, including a door-only viewer; that is documented as door-level in `nav.ts` and the page header rather than gated, because it is a reference page with no tenant data (acceptable drift, Phase 6).
 
+## 2ab. TOTP auto-submit — finding (F282)
+
+**F282 (low, fixed) — clearing the code boxes after a wrong code depended on the page remounting when its URL changed, and two wrong codes in a row redirect to the identical URL.** The first failure lands on `/totp?callbackUrl=…&error=invalid`; a second lands on the same address, so anything keyed on the query string (or on Next remounting the segment) would leave the stale code in the boxes and, with auto-submit, nothing to re-arm. **Closed by** resetting on settle rather than on URL: when the form's pending state goes true then false, the input is remounted (`key={attempt}`), clearing and refocusing box 1 whether or not Next remounts. Pinned by `e2e/totp-code-entry.spec.ts` E-6/E-7 ("two wrong codes in a row") and the F-9/F-9b unit tests. DECISION-257; `docs/work-log/2026-10-25-totp-autosubmit.md`.
+
 ## 2ab. Public events calendar — findings (F250–F256)
 
 Pipeline `2026-10-25-public-events-calendar` (events Increment 4; v0.44.0; migration 0067; DECISION-238–241). F250–F253 were found at Phase 2 and F254–F256 at Phase 3; F257 was reserved and returned unused. Phase 6 verdict SHIP WITH NOTES. The migration is additive: one default-false column on `events`, one CHECK and one `SECURITY DEFINER` function. No new table, policy or table grant.
@@ -1949,6 +1953,40 @@ Pipeline `2026-10-25-public-events-calendar` (events Increment 4; v0.44.0; migra
 **F255 (accepted, tracked) — marking is allowed while the organization toggle is off, and turning the toggle on shows every marked event at once with no confirmation.** Mitigated by the form hint and the release note. Closing it needs a count read by an `org_features.manage` holder (a definer bare count, as `presby_giving_active_schedule_count` does) and an on-direction dialog, which the off-warning mechanism does not support today. Recorded in `docs/TODO.md`.
 
 **F256 (accepted, `paper`) — the title, description and location length limits (200, 2000, 200) are enforced only in `src/lib/events.ts`.** The table has no length CHECK. The definer clips to the same limits, so a direct writer cannot inflate the public payload. Pinned by T1 (clip).
+
+## 2ac. Parish management — findings (F258–F265)
+
+Pipeline `2026-10-25-parish-management` (v0.45.0; migration 0068; DECISION-242–245). F258–F264 were found at Phase 2, F265 at Phase 3. Phase 5 run 1 also found that a direct `presby_app` write of a self-labelled derived row into the new seat group is not refused by the database; that is the already-registered F240/F245 (closed by 0066, Community 3a), recorded as an accepted `paper` residual in DECISION-242 rather than given a new number. Phase 6 verdict SHIP WITH NOTES. Work-log: `docs/work-log/2026-10-25-parish-management.md`.
+
+**F258 (fixed in 0068) — `presby_app` and `presby_platform` held DELETE on `org_units`.** This contradicted the all-deletes-are-soft rule; a hard delete of a district would erase it with no trace. 0068 revokes DELETE from both roles (the 0063 precedent) and adds an owner-path `BEFORE DELETE` guard that allows the organization-delete cascade only.
+
+**F259 (fixed in 0068) — `org_units.unit_type` had no CHECK.** The vocabulary (`parish`, `campus`, `district`) existed only as a column comment. 0068 adds a validated CHECK, a name-shape CHECK and a unique active-name index; its stop-block raises on any existing row outside the shape.
+
+**F260 (closed for `parishes.assign`; open for `roll.approve`, tracked) — `grantRole()` and `setRolePermissions()` let a holder of a seat-derived key grant it to a person directly.** For `parishes.assign` 0068 makes the key seat-only on every grant arm (`presby_seat_key_group` and triggers on `app_role_permissions`, `role_grants`, `administrative_commissions`, `org_delegations`). The same open path for `session_member` / `roll.approve` is a `docs/TODO.md` line; extending `presby_seat_key_group` closes it.
+
+**F261 (fixed) — a native `<select>` that commits on change fires once per arrow key on Windows desktop browsers.** Moving a household would have committed on the first key press. The row picker is a native `<select>` plus an explicit Move or Assign button; the 10-second Undo stays.
+
+**F262 (fixed) — `scripts/test-rls.sql` deleted an `org_units` row as `presby_app`.** It breaks under F258's revoke. The cross-org district block is rewritten to roll back instead of delete (the integration patch `scripts/parishes/test-rls.sql.integration.patch`).
+
+**F263 (fixed in 0068) — no index on `households (organization_id, org_unit_id)`.** The district counts and the Unassigned list would scan every household of the organization. Added.
+
+**F264 (fixed) — the `selfRecorded` stamp and badge covered the Session offices only.** Recording the Moderator seat is also a self-recordable authority. `AUTHORITY_OFFICES` (the Session offices plus `deacons_moderator`) drives both the stamp and the roster badge.
+
+**F265 (fixed) — `deriveDeaconsByOrgUnit` tested `ot.ends_on is null`.** A deacon whose term has a future end date was dropped, and a term that had not started yet was counted. The predicate now follows the officer-term dates used everywhere else.
+
+**Accepted residuals (not new numbers).** The seat-group roster write and the `membership_source` / `derived_from` re-label (F240/F245) until 0066, `paper` (DECISION-242). 0068 re-creates `presby_sync_derived_group()` as `SECURITY DEFINER` with a pinned `search_path` so 0066's owner-only guard applies in either order; the catalog pin and a source scan keep it so.
+
+## 2ad. Developer portal Increment 1 — findings (F283, F284, F285, F288)
+
+Pipeline `2026-10-25-developer-portal-inc1` (v0.46.0; no migration; DECISION-258, 261). Not a schema round: recorded here beside the other platform-shell findings. F286 and F287 belong to Increment 2 and are not recorded yet; F288 was slotted in Increment 3 by the analyst and closed here, so Increment 3's number list loses it.
+
+**F283 (medium, fixed) — the data-model page filed 58 of 105 tables under "platform (from starter)" and claimed it "cannot drift from what is deployed".** `MODULES` is a hand map; any table absent from it fell into the starter bucket, which has no diagram. All 15 `giving_*` tables, the tickets, events, domains, sites, invitations and presbytery-oversight tables were mislabelled, and a new table silently joined the wrong bucket (the 2026-09-25 code review's C-3 and the `docs/TODO.md:72` item had flagged the same drift). **Closed by** classifying every table (seven new modules, two extended, one closed `PLATFORM_TABLES` list with reasons) and `src/lib/dev-docs.test.ts`, which fails CI on an unclassified table, a stale entry or a table in both lists, in the way `contract.ts` fails an unclassified token. The header copy no longer claims the grouping cannot drift.
+
+**F284 (medium, fixed) — `/developer` had no 2FA gate and no shell.** The proxy's 2FA gate covered `/admin` and `/o/` only, and the guard did not check either, so a platform administrator whose account requires a second factor and had not verified it could read the schema, the permission catalog and the invariants. The page also had no header, no sign-out and no way back to `/home`. **Closed by** a segment-boundary line in `src/proxy.ts` (eight rows in `proxy.test.ts`), the page gate's repeat of the check, `schema.json`'s JSON `403 two_factor_required`, a portal layout, and a running-server MFA e2e (a required-but-unverified user opening `/developer/tables/roll_actions` lands on `/totp` and returns to that path). DECISION-258.
+
+**F285 (low, fixed) — `INVARIANTS` omitted six of CLAUDE.md's Key Invariants and carried a stale note.** Composite Tenant Keys, Extensibility Goes Through Support, The Brand Is a Cascade Override, A Custom Host Is a Key, The Proxy Does Not Reach the Database and Permissions vs Flags were absent; the wildcard entry still said `ADMIN_ROLE` "must be removed before ship" where CLAUDE.md records a known, bounded violation; the vocabulary said `documented` where CLAUDE.md says `paper`; and the page's headline counted "rules unenforced" from that list. **Closed by** a `source` field tying each entry to its CLAUDE.md heading, a closed `NOT_LISTED` with reasons, the vocabulary rename, six new entries, the repaired wildcard entry and `dev-docs.test.ts`, which fails when a Key Invariants heading is neither listed nor reasoned away. The wording of each entry is still hand-written and labelled so.
+
+**F288 (low, fixed) — the gate's failure modes and the unconsumed `schema.json` claim.** `readIsPlatformAdmin` threw on a database error and showed Next's default error page; a signed-in non-entitled viewer was silently redirected to `/home`, which reads as revoked access or a bug; `schema.json`'s header comment said it served "the AI support worker", which nothing calls (it is session-authenticated, so an automated worker could not). **Closed by** the `ok`/`forbidden`/`unavailable` gate (the calm unavailable state fails closed), the shared `AdminForbidden` page, JSON `503 unavailable` from `schema.json`, and removal of the false comment. (The analyst slotted this in Increment 3; the orchestrator's Increment 1 scope contains both halves, so it ships here.)
 
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 

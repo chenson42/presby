@@ -74,6 +74,12 @@ export async function setRolePermissionsAction(
         ok: false,
         error: `You can't add permissions you don't hold yourself: ${result.missingPermissions.join(", ")}.`,
       };
+    case "seat_only_key":
+      return {
+        ok: false,
+        error:
+          "That permission is held through a recorded seat and can't be added to a role.",
+      };
     case "self_lockout_blocked":
       return {
         ok: false,

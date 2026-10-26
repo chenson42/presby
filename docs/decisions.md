@@ -4,6 +4,91 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-261 — The second-consumer trigger of DECISION-253 fires: the collapsing console nav and header move to `src/components/shared/` with required props.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-developer-portal-inc1` (v0.46.0, no migration)
+
+- **Promotion.** `AdminNavLinks`, `AdminNav`, `AdminMobileMenu` and `AdminHeader` become `ConsoleNavLinks`, `ConsoleNav`, `ConsoleMobileMenu` and `ConsoleHeader`. The console label, the id prefix, the main-landmark id and `canAccessAdmin` are required props with no defaults, so each caller states them; `/admin` passes the strings it used to hard-code. The Menu button does not render when `groups` is empty. A nav item may carry `alsoActiveOn` prefixes so a section whose pages live under other paths still lights.
+- **`AdminForbidden`** stays in `admin-portal/` (DECISION-040: it must not become the `(org)` miss response) and is reused by import; its doc comment names the second platform consumer. A scan pins that `(org)` and `(public)` never import `admin-portal/`.
+- **Nav registry.** The developer registry is pure data in `src/lib/developer-portal/nav.ts` and is unfiltered. The portal never appears in the admin left nav (DECISION-044); the way back to `/admin` is the avatar menu, gated on `canAccessAdmin`.
+- **`.reg` palette.** It stays on the data-model pages with a tracked follow-up (Q8).
+- **Pre-approved fallback.** If a padmin Phase 4 holds the files, parameterise in place with the same required props and record the promotion in `docs/TODO.md`.
+- **Revisit if** a third console needs a different shell shape (then lift the layout composition, not just the pieces).
+
+---
+
+**DECISION-258 — The developer portal is an internal engineering portal in the existing `(admin)/developer` tree, with stable URLs, provenance labels, one gate, two-layer 2FA and no `loading.tsx`.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-developer-portal-inc1` (v0.46.0, no migration)
+
+- **Information architecture.** Home, Data model, API, Rules, Access and Documentation, each carrying a provenance label in text and icon: `Generated`, `Tested list`, `Written by hand`, `Planned`. Increment 1 ships Home, Data model and Documentation; the rest arrive with their pages. The nav registry is pure data in `src/lib/developer-portal/nav.ts`.
+- **Stable URLs.** `/developer/tables/[table]`, `/developer/erd/[module]` and `/developer/schema.json` keep their URLs; the former index moves to `/developer/data-model`, and `/developer` is the home.
+- **Placeholders.** One Documentation placeholder page of labelled rows, each naming where the material lives today. No empty routes and no status route.
+- **One gate, three outcomes.** `requireDeveloper` (pages) and `checkDeveloperApiRequest` (the route handler) both call the pure `decideDeveloperAccess`, which yields `ok`, `forbidden` or `unavailable` (plus signed-out and two-factor redirects). Every page and handler gates before it parses params or calls `notFound()`, so a non-entitled viewer gets one answer for every URL. A read failure is `unavailable` and fails closed; there is no silent redirect to `/home`. `forbidden` and `unavailable` render with HTTP 200 (a platform page has no enumeration surface).
+- **Layout is chrome only.** It never gates; it renders the nav only when its own live read is true and always renders `children`. It renders bare children for a viewer with no session or an unverified required second factor.
+- **2FA in two layers.** The proxy gates `/developer` by segment-boundary prefix (`/developer` and `/developer/…`, not `/developerx`), before the `ADMIN_ROLE` shortcut; the page gate repeats the check; `schema.json` answers JSON `401`, `403 two_factor_required`, `403 forbidden` and `503 unavailable` itself, all `no-store`.
+- **No `loading.tsx` anywhere under `(admin)/developer`**, which applies DECISION-251: `tables/[table]` and `erd/[module]` call `notFound()`. `error.tsx` and `not-found.tsx` render calm copy and never `error.message`. Pinned by `shell-boundaries.test.ts`.
+- **Internal for good.** `/developer` is never made public. A future public developer surface is a separate public route on a platform host, never this tree made public.
+- **Revisit if** a section needs streaming badly enough to justify a route group whose descendants never call `notFound()`.
+
+---
+
+**DECISION-245 — District assignment is overwritten and audited, not kept as dated history; concurrency, lock order and audit keys.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)
+
+- **Rule.** Care routing is not a constitutional fact, so history lives in `audit_events` (six keys, written in the same transaction, no household or person name), and no history view is promised. Every writer locks `org_units` rows first (`FOR SHARE`, by id) and then `households` rows (`FOR UPDATE`, by id). A single move is `UPDATE ... WHERE org_unit_id IS NOT DISTINCT FROM expected`; zero rows is a conflict unless the household is already at the target. Undo is the same call. A bulk move is `{source, target, expectedCount}` with no household ids; the source must be archived, the target active, the cap is 100, and the response carries counts only. The row picker commits on an explicit button, never on selection (F261).
+- **Revisit if** a moderator hits the 100 cap, or if congregations need to read the history (the audit viewer is platform-only).
+
+---
+
+**DECISION-244 — Parish placement, one household count, name masking.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)
+
+- **Rule.** Everything under `directory/parishes/*` and `src/lib/parishes.ts`, which alone writes `org_units` and `households.org_unit_id` and also owns the roster read (moved from `directory.ts` to avoid an import cycle). "Households in a district" is every `households` row with that `org_unit_id`; the roster, district page, archive dialog, bulk dialog and `expectedCount` all use one helper. Masking is server-side, using the exported `directory_hidden` expression; `people.manage` and `directory.view_hidden` see hidden names, others see "Private". No contact, birthday, photo or address on these surfaces. No user-controlled return parameter.
+- **Consequence.** The roster count changes for existing viewers (release note 0.45.0). `deriveDeaconsByOrgUnit` now counts a deacon whose term has a future end date and ignores a term that has not started (F265).
+
+---
+
+**DECISION-243 — District lifecycle and archive enforcement are database properties; moves are conditional updates under RLS, not a definer function.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)
+
+- **Rule.** `org_units.archived_at`, a validated `unit_type` CHECK (F259) and name-shape CHECK, a unique active-name index, a household index (F263), and a guard trigger on `households` and open `officer_terms` that refuses a newly set archived, campus or missing district with `FOR SHARE` (the composite FK takes only `FOR KEY SHARE`, which an archive does not conflict with). `DELETE` on `org_units` is revoked from `presby_app` and `presby_platform` (F258) and guarded on the owner path. No `SECURITY DEFINER` move function: everything stays inside one organization, RLS enforces tenancy, and authorization is checked in the application inside the same transaction.
+- **Consequence.** `households.org_unit_id` now means "deacon district" only; a campus dimension needs its own column.
+
+---
+
+**DECISION-242 — The Board of Deacons Moderator is a dated seat recorded in `officer_terms`, and its authority flows through the resolver.**
+
+**Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES; the CLAUDE.md sentence operator-approved 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-parish-management` (v0.45.0, migration 0068)
+
+- **Rule.** The office `deacons_moderator` fills a derived `roster` group of the same key. A protected baseline role `deacons_moderator` carrying only `parishes.assign` is bound to that group. `parishes.assign` is **seat-only on every grant arm**: `presby_seat_key_group` and triggers on `app_role_permissions`, `role_grants`, `administrative_commissions` and `org_delegations` refuse a person grant, a commission or delegation, a binding to any other role or group, and a re-pointed or re-shaped seat role. **The seat group's roster is protected by the derived-row guard that lands in migration 0066 (F240/F245, DECISION-236); until then a direct `presby_app` write of a self-labelled derived row into any derived group, this one included, or a re-labelling of that group's own `membership_source` or `derived_from` (F245), is not refused by the database. That is shared with the Session group, no application path reaches it, and it is `paper`.** Administrators move households with `people.manage` and define districts with `officers.manage`; the founding-administrator key set is unchanged. `moderator` is unchanged (DECISION-079). Self-recording is permitted, stamped `selfRecorded` and `paper`.
+- **Consequence.** The sync function that materializes the roster (`presby_sync_derived_group`) is `SECURITY DEFINER` with a pinned `search_path` from 0068, so 0066's owner-only guard can apply in either order. 0066 must also widen its `derived_from` kind list to five values including `deacons_moderator` (`docs/TODO.md`).
+- **Rejected.** Reusing `moderator` (existing rows would gain authority from data alone); a person grant (the request rules it out); a `group_role` on the diaconate (trigger-owned, always `member`); a dedicated `officer_terms` predicate (a second evaluator of dated authority).
+- **Revisit if** a second seat-derived permission is added: extend `presby_seat_key_group` (and close F260 for `roll.approve`).
+
+---
+
+**DECISION-257 — The two-factor code is submitted when its last digit lands; `OneTimeCodeInput` says whether the completion was exactly code-length; the session grant stays inside `verifyTotpAction`. Amends DECISION-193(a) and the "nothing auto-submits" sentence of `docs/ui-standards.md` (DECISION-192/193).**
+
+**Status:** Resolved (operator request 2026-10-25; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-totp-autosubmit` (no migration; v0.44.1)
+
+- **Rule.** `onComplete(code, { exact })` fires on a user edit that leaves the code complete and changed. A consumer may submit only when `exact` is true. `exact` is true only when no delivered digit was dropped: a paste or autofill that drops a digit fills the boxes and waits for the button. That covers an over-long run and a short run that overflows the remaining boxes (three typed digits plus a four-digit paste into box 4). A six-digit run delivered into a later box restarts at box 1, drops nothing, and submits (the C-4b rule: it is an exact whole code, and blocking it would defeat whole-code autofill, the case this decision exists for). Recovery codes never auto-submit (variable length, no last-character event).
+- **`/totp`.** The trigger arms a ref; an effect keyed on the code runs after the commit that carries the six digits and calls `form.requestSubmit()` on the existing `<form action={verifyTotpAction}>`. The client never calls the action's internals, `unstable_update` or `@/auth`: the 0.42.3 grant (`withTwoFactorGrant`) opens only inside the action. One submission per complete code; none while pending; a hole re-arms.
+- **Reset.** After an attempt settles (`useFormStatus` pending true then false) the digit boxes are cleared and refocused by remounting the input. It is keyed on completion, not on the URL, because two failures in a row redirect to the same URL (F282).
+- **`/account/2fa`.** The same trigger calls the existing handler directly with the code it was handed; the input is remounted (and focused) after a failure.
+- **Accepted residuals.**
+  - **A mistyped last digit** is submitted at once: one of ten attempts a minute on `/totp` and one `totp.verify_failed` audit row, with no chance to correct. Accepted because the code expires in about 30 seconds; the Verify button stays as the fallback. Expect more `verify_failed` rows from fast typos.
+  - **O-9, the one known hole in `exact`.** A two-character, non-paste change event into a filled, selected box of a complete code (a keyboard-suggestion chip, or a drag-and-drop of two digits onto box 6) drops a digit and is still `exact`, so it submits. It costs one attempt and one `verify_failed` row, the same as the mistyped-last-digit residual, and the Verify button is still there. It is not fixed here because an ordinary overtype (the box holds `6`, the caret is after it, the user types `7`, and the browser reports `67`) has the same two-character shape; a fix must tell "the old digit plus one new one" from "two unrelated digits" and deserves its own failing-first test (`docs/TODO.md`). `paper`.
+  - **`completeEnrollment` has no rate limit** (pre-existing, unchanged, `docs/TODO.md`).
+  - **A thrown `completeEnrollment` shows no message** on `/account/2fa` (O-4; the boxes re-enable and Confirm works; `docs/TODO.md`).
+- **Not verified on a real device** (O-5): iOS and Android one-time-code autofill, a screen reader, and bfcache back-navigation are emulated in e2e and tracked as a manual check (`docs/TODO.md`).
+- **Rejected.** Keying the form on `error` (identical URL on repeat failure); a `useActionState` wrapper (a second action entry point near the grant); submitting from the change handler (posts the previous hidden value).
+
+---
+
 **DECISION-241 — Public events calendar: the implementation shape.**
 
 **Status:** Resolved (tech-lead, Phase 3; shipped as built, QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-events-calendar` (events Increment 4, v0.44.0, migration 0067)
@@ -430,7 +515,7 @@ You cannot responsibly revoke an unnamed person, and the confirm must name them.
 
 **Status:** Resolved · **Date:** 2026-10-21 · **Feature:** `2026-10-21-review-polish` (Phase 3, tech-lead; confirmed as shipped in Phase 4)
 
-- **(a) Code entry.** `OneTimeCodeInput` is six real generated `<Input>` boxes plus one hidden `name`d input carrying the joined digits, not a single hidden input under presentational cells (DECISION-192 holds either way). Backspace and Delete both erase backward across boxes; paste and whole-code autofill spread across boxes; there is no auto-submit, and completing the code moves focus to Verify. On `/totp` the digit mode and the recovery mode mount mutually exclusive `token` fields, so `FormData.get("token")` can never pick the wrong one.
+- **(a) Code entry.** `OneTimeCodeInput` is six real generated `<Input>` boxes plus one hidden `name`d input carrying the joined digits, not a single hidden input under presentational cells (DECISION-192 holds either way). Backspace and Delete both erase backward across boxes; paste and whole-code autofill spread across boxes; there is no auto-submit, and completing the code moves focus to Verify (amended by DECISION-257). On `/totp` the digit mode and the recovery mode mount mutually exclusive `token` fields, so `FormData.get("token")` can never pick the wrong one.
 - **(b) Layout vocabulary.** `renderEmail` takes a closed block vocabulary (`p`, `facts`, `list`, `quote`) plus one optional action and a footnote, escapes everything, and declares a single `color-scheme: light` while only one scheme ships.
 - **(c) Imports.** Message builders for the two `'use server'` account senders live in `src/lib/email/account-messages.ts`; every sender imports `@/lib/email/render` directly, never through the `@/lib/email` barrel that several tests stub.
 - **(d) Links.** Ticket and feedback mail links are built from `platformOrigin()` and the button is omitted when it is `null` (F165).

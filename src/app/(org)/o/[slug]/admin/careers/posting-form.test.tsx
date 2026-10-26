@@ -218,6 +218,16 @@ describe("PostingForm - T21", () => {
     expect(mockRefresh).toHaveBeenCalled();
   });
 
+  it("edit: a posting with no pay shows 'Choose…' for the unit, and adding an amount without one is refused - regression for the silent per-hour default", async () => {
+    render(<PostingForm slug="alder-creek" orgToday="2026-11-03" posting={posting({ payMinCents: null, payMaxCents: null, payUnit: null })} />);
+    const unit = screen.getByLabelText("Pay (optional)") as HTMLSelectElement;
+    expect(unit.value).toBe("");
+    fireEvent.change(field("Lowest"), { target: { value: "52,000" } });
+    await submit();
+    expect(await screen.findByText("Choose per hour or per year.")).toBeTruthy();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
   it("edit: an unlocked draft sends its slug", async () => {
     mockUpdate.mockResolvedValue({ ok: true, data: { version: 4 } });
     render(<PostingForm slug="alder-creek" orgToday="2026-11-03" posting={posting()} />);

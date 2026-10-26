@@ -20,7 +20,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12; second amendment 2026-10-26 rules Batch 4's Copy gaps, X1 to X7, the queue's group filter and residual 13; third amendment 2026-10-26 rules Phase 5 run 1's three questions ("Saving…" ratified as C4; invite-summary string C12 addendum; owner TRUNCATE accepted as residual 14) | Design complete | 2026-10-25 |
 | 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). **Batch 3 complete (api-developer)**: `decisions.ts` (approve on the seat and override paths, send back / not approved), `notices.ts` + `notify.ts` (the four `person:role` notices; submit now tells approvers or pay holders), `approveRequestAction` / `returnRequestAction`, the Phase 3 amendment's Copy (tiles, `copy.ts`), ~115 new tests, decisions/notify/role-bundle DB suites; see the Batch 3 section. **Batch 4 complete (api-developer)**: `payments.ts` (record, reverse, waive, void, note; the `paid` and `closed` notices), `treasurer_list` reader, `csv-export.ts` + the export route (V4), the ten treasurer-tree actions and three team actions, residual-12 characterization, role-bundle payment half, 177 new tests, 168-file DB subset green; Copy gaps and one UI data gap reported (see the Batch 4 section). **Batch 5 complete (ux-developer)**: the member pages (list, new, edit, request, approve / send back, withdraw), the request form with the receipt slot bounded for Batch 2b, 88 + 29 + 15 new unit tests, 18 member e2e + 1 hydration spec green on :3590 and the hydration spec on the production lane :3591; see the Batch 5 section. **Batch 6 complete (ux-developer)**: the treasurer queue, request page, payment form, verb dialogs, settings and Treasury team pages, the C12 string edits and the no-chargeable-group sentence; 14 treasurer e2e + 3 hydration specs green on :3590 and :3591; see the Batch 6 section. **Batch 7 complete (full-stack-developer)**: the printed form (`print-model.ts`, `print.ts`, `GET /o/<slug>/reimbursements/<id>/print`, the Print the form button), `scripts/check-treasury-boundaries.mjs` (T1 to T5) wired into `npm run check` (nine tripwires), the additive `e2e/support/reimbursement-fixture.ts`, and the MFA deep-link, approval, CSV-bytes, role-bundle and toggle specs plus a print test and the Retire long-name check; see the Batch 7 section. **Batch 1b complete (database-admin)**: merged origin/main (0.46.1); 0073 corrected in place with `reimbursement_attachments_blob_fk` (three columns, private-pinned, NO ACTION) and the 0072 guard; test-rls-73 61 (73g new), test-rls-72 25, 9 new Vitest tests, integration patch re-cut (six hunks); see the Batch 1b section. **Batch 2b complete (api-developer, full-stack scope)**: merged origin/main (0.46.2); `sharp@0.35.5` direct and exact, `src/lib/storage/image-sanitize.ts` (the one importer, T5 now exactly one), `upload-request.ts`, `receipts.ts`, the two receipt routes, `detachReceiptAction`, the live receipt slot, F289's call-site row ACTIVE, F338 barrel and dev-docs lines committed; ~150 new unit tests, a 22-test DB suite, 5 new member e2e tests and one each in the treasurer-UI and CSV specs, all reimbursement specs green on :3590 and the hydration specs on :3591; see the Batch 2b section. Batch 2b is the last implementation batch; Phase 5 next. **Batch 8 complete (full-stack-developer)**: the treasurer invitation summary string (`invite-summary.tsx`, ruling 2) with `invite-summary.test.tsx`, and the comment-only residual 14 text in 0073 (ruling 3); see the Batch 8 section | — | 2026-10-26 |
-| 5 — Verification | qa | Run 1 FAIL (F-QA-1); run 2 scoped re-run PASS (F-QA-1 resolved; Batch 8 copy/comment re-check pending); EC42 open | PASS (run 2) | 2026-10-26 |
+| 5 — Verification | qa | Run 1 FAIL (F-QA-1); run 2 PASS (F-QA-1 resolved); run 3 PASS (Batch 8); EC42 open for PR preview | PASS (run 3) | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2413,3 +2413,139 @@ Logs are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b
 - **What to test in the browser:** open a treasurer invitation link at 360 px and read the role paragraph; confirm a founding-administrator link is unchanged.
 - **Not done here:** `drizzle/0073` was not re-applied to any database (comment-only, nothing to apply); `docs/decisions.md` DECISION-267 text is the tech-lead's (the amendment already inserted the residual 14 bullet).
 - **Next agent:** qa, scoped re-run per the amendment: `invite-summary.test.tsx`, `npm run check:schema-parity`, and confirm `drizzle/0073*` differs from `13332b1` in comment lines only; then Phase 6 (analyst).
+
+---
+
+# Phase 5 — Verification (qa), run 3
+
+**Date:** 2026-10-26
+**Verified by:** qa. Read-only run: I edited no repository file and used no `git stash`. `git status` is clean before and after, and HEAD stayed at `2525ba9`. The only database write was the flag reset. The e2e fixtures created and removed their own rows.
+**Tree:** `/Users/cshenso/git/presby-platform/presby-treasury`, branch `pipeline/treasury`, HEAD `2525ba9`.
+**Database:** Neon `pipeline-treasury`, through this worktree's `.env.local`. I checked only that the variables are set (`PLATFORM_DATABASE_URL` length 148). I compared hosts by hash: this worktree's `DATABASE_URL` and `PLATFORM_DATABASE_URL` hosts both differ from the main worktree's. No value was printed.
+
+### Scope run
+This is a scoped re-run for Batch 8. Run 1 and run 2 results stand for everything else, and these were not re-run: the full unit and DB-backed suites, `test-rls.sql`, the reimbursement e2e set beyond role-bundle, the prod lane, and the gate and RLS audits.
+
+- **Diff:** `git diff ac3f2ae..HEAD --stat` shows exactly four files: `src/app/(invite)/invite/invite-summary.tsx` (1 line changed), `invite-summary.test.tsx` (new, +62), `drizzle/0073_presby_reimbursements.sql` (+8/−1) and the work-log. The commits are `d15ade0`, `dd11ae8` and `2525ba9`.
+- **Flags:** I reset the global flags to the CI baseline with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, on this worktree's `PLATFORM_DATABASE_URL` only. It reported COMMIT, and afterwards 10 of 39 flags were on, the same as run 2. Per-org toggles were not touched.
+- **Server:** I ran my own dev server on :3590 after `rm -rf .next`, with the same environment as run 2 (`RATE_LIMIT_DISABLED=true`, the `DOMAINS_*` fakes, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`, and `AUTH_URL`/`E2E_BASE_URL` set to :3590). The log contains no `localhost:3000`. I stopped it by PID (81356/81375/81376), and the port is free afterwards.
+- **Disk:** `df -h /System/Volumes/Data` showed 557 GiB free.
+
+## Type Check
+`npm run typecheck`: exit 0.
+
+## Unit Tests
+- `npx vitest run "src/app/(invite)"`: 6 files, 74/74 passed, 0 skipped. This includes `page.test.tsx`, the `*-state`/accept-form tests and the new `invite-summary.test.tsx` (3 tests).
+- `npm run lint`: exit 0.
+- `npm run check`: exit 0. All tripwires passed: audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, treasury-boundaries and proxy-imports.
+- `npm run check:schema-parity`: "91 domain tables compared — 8 differences, 8 allowlisted (0 of them unclosed drift), 0 failing".
+
+## End-to-End Tests
+Dev lane on :3590, `--project=chromium`, `E2E_ALLOW_SHARED_DB=true`.
+
+`e2e/invitation-existing-account.spec.ts`, `e2e/invitation-new-account.spec.ts`, `e2e/invitation-fixture-sweep.spec.ts` and `e2e/reimbursement-role-bundle.spec.ts`: **Total 15 | Passed 15 | Failed 0 | Skipped 0 | 1.6 min.**
+
+| Spec | Passed |
+|---|---|
+| `invitation-existing-account` (Case B is MFA-enrolled, through the real `/totp`; includes the treasurer-purpose case) | 4 |
+| `invitation-fixture-sweep` | 1 |
+| `invitation-new-account` | 1 |
+| `reimbursement-role-bundle` (real treasurer invitation, then sign-in, then `/totp`) | 9 |
+
+**Stamped people and leftovers after every run, including the 360px pass:**
+- 0 people with `deletable_until` set (also 0 before the run).
+- 0 `e2e96000-…` people.
+- 0 `e2e-invite-*` or `e2e-reimb*` organizations, and 0 invitations under them.
+
+The dev log has one `The destination stream errored while writing data` line, which is the usual aborted-navigation noise during e2e and matches no failed test.
+
+**360px check.** I ran a throwaway spec from a `git archive HEAD` scratch copy against :3590, as an anonymous visitor at a 360×800 viewport. The fixture org was created and removed by `setupInviteOrg`/`removeInviteOrg`. The scratch copy is deleted.
+- **Treasurer invitation:** the rendered role paragraph is the new string with the org name interpolated twice. `scrollWidth` is 360, so there is no horizontal scroll. The paragraph wraps cleanly in muted text above "Sent to … expires". Screenshot: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-treasury-r3/invite-treasurer-360.png`. The dark "N" disc over the Password label is the Next dev overlay, not the page.
+- **Founding-administrator invitation:** the sentence is unchanged and does not mention Reimbursements. `scrollWidth` is 360. Screenshot: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-treasury-r3/invite-founding_administrator-360.png`.
+
+## Regression Tests Added
+`src/app/(invite)/invite/invite-summary.test.tsx` was written by the implementer. I checked failing-first myself:
+
+1. I extracted `git archive HEAD` into a scratch copy with `node_modules` symlinked, and replaced `invite-summary.tsx` with `ac3f2ae`'s version (`diff` confirms line 8 is the only difference). I confirmed with `cmp` that the test file is byte-identical to HEAD.
+2. **Old string: exit 1, 1 failed / 2 passed.** The failing test is `treasurer: names the giving and reimbursement abilities, byte for byte`.
+3. **Control:** I restored HEAD's `invite-summary.tsx` in the same copy and got exit 0, 3/3 passed. So the failure comes from the string and not from the scratch setup.
+4. I deleted the scratch copy by its literal path.
+
+On the test's strength:
+- It pins the exact text, which suits a copy ruling. It fails on the old text and on any drift.
+- The founding-administrator case asserts the absence of `/reimbursement/i`, so it would catch the treasurer clause leaking into the wrong role.
+- No DB mock is involved: it is a pure component render.
+
+## Coverage on Critical Modules
+Unchanged from run 1. The diff does not touch `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+## Feature-Gate Audit
+No protected routes touched. The diff changes a pure display component, a migration comment and docs. No `route.ts` or `"use server"` action changed, and run 1's table stands.
+
+## Schema/RLS Audit
+The 0073 change is comment-only, and nothing needs to be re-applied.
+
+- **Diff filter:** I took the added and removed lines of `git diff -U0 13332b1..HEAD -- drizzle/` and filtered out comments (`--`) and blanks. Nothing remained (grep exit 1). The change is 8 insertions and 1 deletion, all comments.
+- **Not inside any function body:**
+  - The header `RESIDUALS (accepted)` block sits at lines 100–103, and there is no `$$` anywhere in lines 1–110.
+  - The 4a comment edits sit at lines 965–973, between `end $$;` (957) and `as $$` (977), so they are top-level SQL comments. No `COMMENT ON` is involved.
+- **Live catalog:** `md5(prosrc)` of `presby_reimbursement_guard_delete` on `pipeline-treasury` is `f5a54caad68ea5a5a50b74a6faaaa4f0`. The function body extracted from the file gives the same hash at HEAD and at `13332b1`. The deployed body already equals the file, and the edit changed no body text.
+- **Journal:** `drizzle/meta/_journal.json` is untouched.
+- Residual 14 itself (owner `TRUNCATE`/`DISABLE TRIGGER`) was probed in run 1 and is recorded as accepted by tech-lead. It is still pending operator confirmation as amendment item 10.
+
+## Copy Truthfulness
+`copy truthfulness: PASS`. One string changed: `src/app/(invite)/invite/invite-summary.tsx:8`. The viewer is the invitee of a `treasurer` invitation, signed in or anonymous.
+
+1. **In the Copy table.** It matches the amendment's ruling 2 exactly: a programmatic comparison of the work-log text with the source returned `True`. It is recorded as C12's fourth modify-target row.
+2. **True with the toggle on, toggle off, and for org types without Reimbursements.**
+   - The claim is conditioned on "If {org} uses Reimbursements". With the toggle off, or with the giving category kill switch off, `loadReimbursementContext` returns `toggle_off` (`src/lib/reimbursement/access.ts`). The condition is false, so the sentence promises nothing.
+   - For an org type outside `["congregation","new_worshiping_community"]` (`src/lib/org-features.ts:186`), `access.ts` returns `not_applicable`, and again the condition is false.
+   - In practice that case cannot arise: `TREASURER_DESIGNATION_ORG_TYPES` (`src/lib/onboarding/treasurer-designation.ts:44`) is the same two types, so a treasurer invitation exists only where Reimbursements can apply.
+   - With the toggle on, the `ok` branch resolves the `view`/`pay`/`manage` keys the treasurer holds.
+3. **The abilities match the bundle.** Source: `drizzle/0074_presby_reimbursement_permissions.sql:41-49`, and the template guard at `:126` requires all four `reimbursement.%` keys on the `treasurer` template.
+   - "view reimbursement requests" maps to `reimbursement.view` ("View every reimbursement request…").
+   - "record payments on them" maps to `reimbursement.pay` ("Record and reverse reimbursement payments…").
+   - "choose which groups can receive them" maps to `reimbursement.manage` ("Choose which groups can receive reimbursement requests…"). Here "them" refers to requests, and the wording matches the key description.
+   - "This role requires two-factor sign-in" stays true: `view`, `pay` and `manage` are `requires_two_factor = true`, alongside `giving.manage`.
+   - The sentence gives no instruction, so no render gate or permission check needs proving.
+   - `role-bundle` 9/9 shows these three abilities working end to end for a real treasurer invitee.
+4. **No older string made false.** I grepped `src` and `e2e` for "As treasurer you will", "view gifts and donors" and "uses Reimbursements". The hits are the source line, its test, and `src/lib/onboarding/invitation-email.ts:63`. That email teaser does not say "only", and tech-lead ruled it a deliberate summary. No e2e asserted the old text.
+
+## Findings
+- **None blocking.**
+- **Observation, not a finding:** with the Next dev overlay at 360px, its "N" disc sits over the Password label. It is dev-only and does not appear in production.
+- **EC42 (`sharp` in a Vercel function):** still open. It is the orchestrator's to close at PR preview and does not block this verdict.
+- **Residual 14:** tech-lead's default is "accepted". It still needs the operator's confirmation (amendment item 10). That is a Phase 6 and orchestrator matter, not a QA gate.
+
+## Verdict
+**PASS.**
+- The diff is limited to the four expected files.
+- The 0073 change is comment-only, sits outside every function body, and the live `prosrc` hash equals the file body at HEAD and at `13332b1`, so nothing needs re-applying. Schema parity reports 0 failing.
+- The invite string matches the amendment exactly and is true in every toggle and org-type state. Its abilities map one to one onto `view`/`pay`/`manage`.
+- The new test fails on the old string (1 failed / 2 passed) and passes on HEAD (3/3).
+- Typecheck, lint and `npm run check` are green, and the `(invite)` directory passed 74/74.
+- e2e passed 15/15 with 0 skipped, on my own :3590 server after a CI-baseline flag reset. This includes the real MFA `/totp` path.
+- 0 people were stamped before and after, and the 360px page is clean for both purposes.
+- Everything outside this scope rests on runs 1 and 2.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 3) | qa | Complete. Scoped re-run for Batch 8. Diff limited to 4 files. 0073 comment-only, verified by line filter, by position outside `$$` bodies, and by live `prosrc` md5 equal to the file body (no re-apply needed). schema-parity 0 failing. Invite string matches amendment ruling 2 verbatim; copy truthfulness PASS (toggle on/off, non-applicable org types, `view`/`pay`/`manage`). Failing-first shown in a scratch copy (old string 1 failed, HEAD 3/3). typecheck, lint and `check` green; `(invite)` 74/74. Flags reset to CI baseline. e2e on :3590: invitation-* and role-bundle 15/15, 0 skipped. 0 stamped people after. 360px clean for treasurer and founding-admin. Runs 1–2 stand otherwise. EC42 open for orchestrator at PR preview | PASS | 2026-10-26 |
+
+## Handoff
+**Next agent: analyst (Phase 6).**
+
+**Orchestrator:**
+- Close EC42 on the PR's Vercel preview build before merge.
+- Get the operator's confirmation of residual 14 (amendment item 10).
+- The flag reset left `pipeline-treasury` at the CI baseline (10 of 39 flags on), and nothing needs restoring.
+
+Logs and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-treasury-r3/`:
+- Static checks: `typecheck.log`, `lint.log`, `check.log`, `parity.log`
+- Unit tests: `vitest-invite.log`
+- Failing-first: `ff-old-string.log`, `ff-new-string.log`
+- e2e: `e2e-set.log`, `e2e-360.log`
+- Dev server: `dev3590.log`
+- Screenshots: `invite-treasurer-360.png`, `invite-founding_administrator-360.png`

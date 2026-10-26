@@ -18,7 +18,7 @@ Phase 1 (analyst) and Phase 2 (architect) for this increment are recorded verbat
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete (parent log): R1–R15, Q1–Q14 | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log): DECISION-267–271, F296–F301 | Approved with suggestions | 2026-10-25 |
-| 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12; second amendment 2026-10-26 rules Batch 4's Copy gaps, X1 to X7, the queue's group filter and residual 13 | Design complete | 2026-10-25 |
+| 3 — Technical design | tech-lead | Complete; implementer named per batch; nine items need a confirmation (see "Needs a confirmation"; two depart from a Phase 2 note). Amendment 2026-10-26 rules Batch 2a's Copy gaps (tiles, gate strings, withdraw/search) and residual 12; second amendment 2026-10-26 rules Batch 4's Copy gaps, X1 to X7, the queue's group filter and residual 13; third amendment 2026-10-26 rules Phase 5 run 1's three questions ("Saving…" ratified as C4; invite-summary string C12 addendum; owner TRUNCATE accepted as residual 14) | Design complete | 2026-10-25 |
 | 4 — Implementation | database-admin, api-developer, ux-developer, full-stack-developer (Batches 1–7) | Batch 1a complete (database-admin): 0073 (minus the receipt FK), 0074, mirror, test-rls-73 (52), 83 new Vitest tests. **Batch 2a complete (api-developer)**: shared csv/session/keys, treasury team path + giving wrapper, catalog entry, tiles, off-warning, 12 audit keys, `src/lib/reimbursement/` (pure modules, three gates, requests, reads, config, pickers), member actions without receipts, the team.db fixture ruling applied; 285 new tests; three copy gaps reported (see the Batch 2a section). **Batch 3 complete (api-developer)**: `decisions.ts` (approve on the seat and override paths, send back / not approved), `notices.ts` + `notify.ts` (the four `person:role` notices; submit now tells approvers or pay holders), `approveRequestAction` / `returnRequestAction`, the Phase 3 amendment's Copy (tiles, `copy.ts`), ~115 new tests, decisions/notify/role-bundle DB suites; see the Batch 3 section. **Batch 4 complete (api-developer)**: `payments.ts` (record, reverse, waive, void, note; the `paid` and `closed` notices), `treasurer_list` reader, `csv-export.ts` + the export route (V4), the ten treasurer-tree actions and three team actions, residual-12 characterization, role-bundle payment half, 177 new tests, 168-file DB subset green; Copy gaps and one UI data gap reported (see the Batch 4 section). **Batch 5 complete (ux-developer)**: the member pages (list, new, edit, request, approve / send back, withdraw), the request form with the receipt slot bounded for Batch 2b, 88 + 29 + 15 new unit tests, 18 member e2e + 1 hydration spec green on :3590 and the hydration spec on the production lane :3591; see the Batch 5 section. **Batch 6 complete (ux-developer)**: the treasurer queue, request page, payment form, verb dialogs, settings and Treasury team pages, the C12 string edits and the no-chargeable-group sentence; 14 treasurer e2e + 3 hydration specs green on :3590 and :3591; see the Batch 6 section. **Batch 7 complete (full-stack-developer)**: the printed form (`print-model.ts`, `print.ts`, `GET /o/<slug>/reimbursements/<id>/print`, the Print the form button), `scripts/check-treasury-boundaries.mjs` (T1 to T5) wired into `npm run check` (nine tripwires), the additive `e2e/support/reimbursement-fixture.ts`, and the MFA deep-link, approval, CSV-bytes, role-bundle and toggle specs plus a print test and the Retire long-name check; see the Batch 7 section. **Batch 1b complete (database-admin)**: merged origin/main (0.46.1); 0073 corrected in place with `reimbursement_attachments_blob_fk` (three columns, private-pinned, NO ACTION) and the 0072 guard; test-rls-73 61 (73g new), test-rls-72 25, 9 new Vitest tests, integration patch re-cut (six hunks); see the Batch 1b section. **Batch 2b complete (api-developer, full-stack scope)**: merged origin/main (0.46.2); `sharp@0.35.5` direct and exact, `src/lib/storage/image-sanitize.ts` (the one importer, T5 now exactly one), `upload-request.ts`, `receipts.ts`, the two receipt routes, `detachReceiptAction`, the live receipt slot, F289's call-site row ACTIVE, F338 barrel and dev-docs lines committed; ~150 new unit tests, a 22-test DB suite, 5 new member e2e tests and one each in the treasurer-UI and CSV specs, all reimbursement specs green on :3590 and the hydration specs on :3591; see the Batch 2b section. Batch 2b is the last implementation batch; Phase 5 next | — | 2026-10-26 |
 | 5 — Verification | qa | Complete (run 1): F-QA-1 fixture leak; EC42 open | FAIL | 2026-10-26 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
@@ -440,7 +440,7 @@ Every claim names the test that pins it, or says **unverified**. File names are 
 | EC31 | The treasurer can grant the treasurer role to a second person who then pays; the clerk role is grantable only because the treasurer holds `request_for_others`; a role with a non-treasury key is refused; the last `reimbursement.manage` holder cannot be ended on that surface; giving's behavior is unchanged | `treasury/team.db.test.ts`; `giving/team.db.test.ts` (unchanged); `role-bundle.db.test.ts`; e2e `reimbursement-role-bundle` |
 | EC32 | A reversal is its own row, one per payment, both stay visible, the request returns to `approved`; a payment with no status flip (or a flip with no payment) fails at commit | `payments.db.test.ts › reversal`; `reimbursement.db.test.ts › status/payment consistency (deferred)` |
 | EC33 | A status change with no history event fails at commit | `reimbursement.db.test.ts › status has event` |
-| EC34 | No delete on any of the six tables, owner included, except the organization teardown cascade | `reimbursement.db.test.ts › delete guards`; e2e fixture teardown |
+| EC34 | No row `DELETE` on any of the six tables, owner included, except the organization teardown cascade. The owner can still `TRUNCATE` a table or `DISABLE TRIGGER` on it: no table in this database has a TRUNCATE guard (the 0055 class), accepted residual 14 (amended 2026-10-26, Phase 5 run 1 ruling 3) | `reimbursement.db.test.ts › delete guards` (the row verb only); e2e fixture teardown |
 | EC35 | The expense date uses the org-local date: a UTC-evening request in `America/New_York` is not "future"; 366 days back is refused when set, an unchanged old date on resubmit is allowed | `dates.test.ts`; `requests.db.test.ts › date window` |
 | EC36 | The import door: a `paid` row with null actors and a historical date is accepted from the owner connection; the same shape with `origin = 'app'` is refused | `reimbursement.db.test.ts › origin import shapes` |
 | EC37 | Text fields: control, bidi and zero-width characters are removed, NFC applied, over-length is a named field outcome, never a truncation; the CSV formula guard holds; no HTML reaches the page, PDF or CSV | `text.test.ts`; `csv-shape.test.ts`; `print-model.test.ts` |
@@ -808,6 +808,7 @@ Footnote on all: `Sign in to see the details. This message doesn't include any.`
 - Transition table by trigger on every connection; freeze rules; revision incremented only while `draft`/`returned`, approve bound to the revision seen. Two deferred constraint triggers: a request is `paid` iff a live payment exists; a status change has a same-transaction history event.
 - Payments are insert-only; a reversal is its own row (one per payment) and returns the request to `approved`; no fund or account column until Increment 5. Saving is create-or-find by client key, then update by id with the expected revision. `origin = 'import'` admits null actors for Track K; the importer is not built.
 - Migration 0073 depends on F289's 0072 (receipt FK). Migration 0074: keys, bindings, backfill.
+- **Accepted residual (the 0055 class; amended 2026-10-26, Phase 5 run 1):** the delete guard is a row trigger, so the owner connection (`neondb_owner`) can still `TRUNCATE` any of the six tables, `reimbursement_events` included, and can `ALTER TABLE ... DISABLE TRIGGER`. `presby_app` and `presby_platform` cannot: neither holds `TRUNCATE`, and neither owns the tables. No table in this database carries a TRUNCATE trigger (0055 and 0056 record the same residual), so a guard on these six alone would be inconsistent and would not stop `DISABLE TRIGGER`. Detection is by the owner credential's scope (migration and operator use only, never the request path) and by the audit rows each definer writes in the same transaction, which a truncate of the six tables alone would leave behind as the only record. `paper`. Revisit if a database-wide event trigger refusing `TRUNCATE` on tenant tables is ever adopted (then it covers every module at once).
 - **Revisit if** partial payments, mileage or recurring expenses are wanted, or the ledger needs a column on the payment row.
 
 ## Implementer
@@ -2176,3 +2177,90 @@ Phase 6 (analyst) starts only after a PASS.
 - `npm run typecheck`, `npm run lint`, `npm run check`: all pass.
 
 **Handoff.** Phase 5 re-run (qa): the scope QA listed for this fix is met by the commands above; the remaining open item is EC42 (the `sharp` preview-build check), which is the orchestrator's.
+
+## Phase 3 — amendment (Phase 5 run 1 rulings)
+
+**Date:** 2026-10-26 · **Author:** tech-lead. QA run 1 asked three questions of Phase 3 (Phase 5 "Copy Truthfulness" and "Schema/RLS Audit"). Source read at `13332b1`: `reimbursements/receipt-slot.tsx:261`, `src/app/(invite)/invite/invite-summary.tsx:8`, `src/lib/onboarding/invitation-email.ts:63`, `drizzle/0073` header and 4a, `drizzle/0055`/`0056` residual blocks, `src/lib/org-features.ts:179-190`. No source was edited. F-QA-1 is already fixed (Phase 4 section above); it is not re-ruled here.
+
+### Ruling 1. "Saving…" as the receipt upload button label: RATIFIED, added to C4
+
+`receipt-slot.tsx:261` renders `COPY.form.saving` (the C3 string `Saving…`) on the "Add a receipt or invoice" button while `busy === "upload"`. It is true on every path that sets `busy`:
+
+- On a new form, `ensureDraft()` saves the draft first, so the draft is being saved.
+- On every form the file is then stored and attached to the request, so the file is being saved.
+- A failure answers `saveFailed` (below), never a success; the label never outlives the work, because `busy` is cleared in the same `finally` as the result.
+
+Add to the C4 table, as a new row (the string is the same as C3's, so no new text is introduced; the row exists so the C4 viewer, the requester, has every receipt string in one place):
+
+| String | Where |
+|---|---|
+| `Saving…` (the label of the `Add a receipt or invoice` button while an upload is running) | `receipt-slot.tsx:261`, viewer: the requester |
+
+Also ratified, recording QA's finding in the table it belongs to: `saveFailed` (`We couldn't save that. Your entries are still here. Try again.`, C3) is the answer to an upload that fails at `receipt-slot.tsx:93`, `:95`, `:169`, `:202`. It is true on every path that reaches it: no attachment row exists and the slot never resets the form. Two accepted edges, both the same class as amendment T3 and the ruled form-save lost reply: "Try again" cannot help on a 404 (toggle off, request not found), and if the reply is lost after a committed attach the message is false and the retry answers `That receipt is already on this request.` (`duplicate`, C4). Accepted; no change.
+
+*Four checks.* Residuals: claims nothing about safety or scanning (C4's rule holds). Source of truth: the label follows the client's `busy` state while the draft save, `store()` and `attach_receipt` calls are in flight; it asserts a save is happening, which is what those calls are. Audience: the requester, who sees the button only while the form is editable; no instruction is given. Neighbours: the string already exists as C3 (`Saving…` under "Buttons"); nothing in the live tree is made stale.
+
+### Ruling 2. C12 addendum: `invite-summary.tsx:8`: AMEND (Batch 8, ux-developer)
+
+The string is shown on the `/invite` page to a **treasurer invitee** before accepting. It tells them what the role lets them do, and a treasurer role minted at acceptance now carries the seven keys (0074 template), including the three reimbursement abilities. It is not false but it is the one place a new treasurer is told what they are accepting, and the platform-side confirm dialog (C12 row 1) already says the fuller thing. Amend, with the same shape as the C12 dialog.
+
+**Exact text.** In `roleSummary`, the `treasurer` branch, replace the returned template literal with (a single string; `${organizationName}` is the invitation's organization name, as today):
+
+`As treasurer you will be able to view gifts and donors, record gifts, and manage giving settings for ${organizationName}. If ${organizationName} uses Reimbursements, you can also view reimbursement requests, record payments on them, and choose which groups can receive them. This role requires two-factor sign-in.`
+
+The founding-administrator branch is unchanged (that role carries no reimbursement key; DECISION-269).
+
+*Four checks.*
+- *Residuals.* Does not deny residual 9 (the toggle is enforced in TypeScript only) or the toggle-off state: the claim is conditioned with "If {org} uses Reimbursements", so it is true when the toggle is off, when it is on, and when the organization type has no Reimbursements at all (`org-features.ts:186`: congregations and new worshiping communities only; the invitee's organization may be neither, and the sentence then simply does not apply). It does not say the invitee may enter requests for others (`request_for_others` is held but its use is not a treasurer duty worth promising here; the C12 dialog omits it for the same reason).
+- *Source of truth.* The abilities are the descriptions of `reimbursement.view`, `.pay` and `.manage` (C9, migration 0074), which the `treasurer` template carries (`reimbursement-permissions.db.test.ts`; QA's catalog audit: seven keys on the template). The role an invitation creates is minted by `presby_apply_treasurer` from that template at acceptance, not at invitation, so an invitation issued before 0074 still mints the seven-key role. "view reimbursement requests" is `view` ("every request" in C9, drafts excluded; the shorter phrase does not repeat that imprecision). "choose which groups can receive them" is `manage`.
+- *Audience.* Shown only to the invitee of a `treasurer` invitation, signed in or not. It makes statements about what the role permits and gives no instruction, so nothing is asked of a viewer who cannot do it. The existing two-factor sentence stays true: `view`, `pay` and `manage` each require two-factor.
+- *Neighbours* (grep of the live tree for "As treasurer you will", "view gifts and donors", "treasurer" in `(invite)` and `onboarding`):
+  - `src/app/(invite)/invite/invite-summary.tsx:8`: the modify target above.
+  - `src/lib/onboarding/invitation-email.ts:63`: `As treasurer you will be able to manage the congregation's online giving once you have set up two-factor sign-in.` **Not changed.** It is the one-sentence teaser in the invitation email, it does not say "only", it appears before the invitee has opened the page that lists every ability, and its tests and golden are pinned. The page the email links to carries the complete list. Accepted as a deliberate summary, not an omission.
+  - `src/app/(invite)/invite/*-state.tsx` and `page.test.tsx`: they render `InviteSummary`; a grep of `src` and `e2e` finds no assertion on the treasurer sentence's text (the only occurrence is the source line), so no existing test is altered.
+
+**Implementer and tests (Batch 8, ux-developer; one file plus one test file).**
+- Edit `src/app/(invite)/invite/invite-summary.tsx` (the one string).
+- Add `src/app/(invite)/invite/invite-summary.test.tsx`: render `InviteSummary` with a `treasurer` preview and assert the text above byte for byte with the organization name interpolated twice; render it with a `founding_administrator` preview and assert the founding sentence is unchanged and contains no "Reimbursements"; assert the treasurer text contains `This role requires two-factor sign-in.`.
+- Run `npm run typecheck`, `npm run lint`, `npm run check`, the new test file and `src/app/(invite)/invite/page.test.tsx` and the `*-state` tests in that directory. No e2e change; no server needed (the string is rendered by a pure component and `e2e/invitation-existing-account.spec.ts` and `e2e/designation-revoke.spec.ts` assert other text). **Mutation proof:** revert the string and confirm the new test fails.
+- Add this string to C12 as a fourth modify-target row (Copy gap list above is otherwise complete).
+
+### Ruling 3. Owner `TRUNCATE`: ACCEPTED as residual 14; no trigger in 0073
+
+**Reasoning.**
+- The guard in 0073 section 4a is a **row** trigger (`presby_reimbursement_guard_delete`, `BEFORE DELETE ... FOR EACH ROW`). A row trigger does not fire for `TRUNCATE`. That is a property of Postgres, and it is the same one the project has already accepted at `drizzle/0055` and `drizzle/0056` ("RESIDUALS (accepted, the 0055 class): TRUNCATE fires no row trigger and is not guarded (the owner can also ALTER TABLE ... DISABLE TRIGGER)"). No table in the database carries a TRUNCATE trigger.
+- A `BEFORE TRUNCATE` guard on these six tables would defend the one door of two: the same owner can `ALTER TABLE ... DISABLE TRIGGER` the delete guard, the freeze triggers and the SoD triggers. It would also make these six tables the only ones guarded, which reads as a property the other money tables do not have. Neither the DISABLE route nor a database-wide policy is in this increment; a per-table TRUNCATE guard buys a half measure and a distinct pattern to maintain.
+- `presby_app` and `presby_platform` cannot reach it: neither holds `TRUNCATE` on any of the six, and neither owns them (QA's `aclexplode` audit). The only actor is the owner credential (`neondb_owner`), which is used for migration and operator work, never the request path (T1 forbids it under `reimbursement`, `treasury` and both route trees). The audit rows each definer writes would remain in `audit_events`.
+- A database-wide guard (a single event trigger or per-table `BEFORE TRUNCATE` across every tenant table) is the right fix if one is wanted, and is its own scoped change touching every module; recorded as the revisit condition in the decision entry.
+
+**Residual 14 (new): "the owner connection can truncate the six reimbursement tables".** *Text as it goes into the decision:* the bullet now inserted at DECISION-267 in "Proposed decision entries" above. *EC34* is reworded in place (above): the guarantee is "no row `DELETE`", and the owner `TRUNCATE` and `DISABLE TRIGGER` are named. The carry-forward table's row for residuals gains 14 (below).
+
+**Copy check for the reword.** Strings that say "nothing is deleted" (C1 off-dialog, C6/C8 void dialog `Nothing is deleted.`, C2's catalog description `deletes nothing`) describe what the **product** does: no page, action or definer path removes a row, and that stays true. They do not claim the database refuses an operator running `TRUNCATE`, so none is denied by residual 14 and none changes. No string says "cannot be deleted" or "permanent" about the database.
+
+**Code change (comment-only; Batch 8, database-admin).** `0073` is unreleased and is corrected in place (same file, same number); the change is to comments only, so there is no DDL change and nothing to re-apply to a branch database.
+- In `drizzle/0073_presby_reimbursement*.sql`, section 4a's comment (line ~961): change `No delete on any of the six tables, owner included, except` to `No row DELETE on any of the six tables, owner included, except`, and append one sentence to that comment block: `TRUNCATE fires no row trigger and is not guarded, and the owner can also ALTER TABLE ... DISABLE TRIGGER: accepted residual 14, the 0055 class (DECISION-267).`
+- In the file's header comment, after the `DEVIATIONS` block, add a short `RESIDUALS (accepted)` block: `(14) the owner connection can TRUNCATE the six tables or DISABLE their triggers; presby_app and presby_platform cannot. The 0055 class.`
+- **Tests:** none new. A test that pins a missing guard fails the day a database-wide one is adopted, so the residual is recorded in prose, as 0055 and 0056 do. The existing `reimbursement.db.test.ts › delete guards` cases pin the row verb and stay. Verification: `npm run check:schema-parity` (comments are not compared; confirms 0 failing), `npm run check`, `npm run typecheck`, and `git diff --stat` shows `drizzle/0073*` only with comment lines. Do not edit `drizzle/meta/_journal.json`.
+- Note for the batch: `scripts/export-table-definitions.py` output includes comments, but no export is required for this change.
+
+### Carry-forward additions
+
+| Item | Where addressed or deferred |
+|---|---|
+| Phase 5 run 1: "Saving…" not in C4 | Addressed: ruling 1, row added to C4 |
+| Phase 5 run 1: `saveFailed` reused for an upload failure | Addressed: ruling 1, ratified with the two named edges |
+| Phase 5 run 1: `invite-summary.tsx:8` incomplete for a treasurer invitee | Addressed: ruling 2, exact text, Batch 8 |
+| Phase 5 run 1: `invitation-email.ts:63` teaser | Deferred, tech-lead accepts as a deliberate summary (ruling 2, neighbours) |
+| Phase 5 run 1: owner `TRUNCATE` vs EC34 | Addressed: ruling 3, residual 14 accepted by tech-lead (the 0055 class); **proposed, not yet accepted by the operator** and added to "Needs a confirmation" as item 10 below |
+| Phase 5 run 1: F-QA-1 | Fixed in "Phase 4 — Phase 5 run 1 fix"; QA re-run owns the close |
+| Phase 5 run 1: EC42 (`sharp` on Vercel) | Open, orchestrator's, closes on the PR's preview build before merge (a Phase 2 return condition) |
+
+**Needs a confirmation (added).** 10. **Residual 14, operator:** the owner connection can `TRUNCATE` or disable triggers on the six tables, as on every other table in the database. *Default taken:* accepted.
+
+### Handoff
+
+**Batch 8 (two small, independent changes; may run in parallel, each its own commit with the Work-Log trailer):**
+- **ux-developer:** ruling 2 (the one string and its test file).
+- **database-admin:** ruling 3 (comment-only edit to 0073).
+
+Then **QA re-run** per the Phase 5 re-run scope (the fixture-leak items) plus: the new `invite-summary.test.tsx`, `npm run check:schema-parity`, and a confirmation that `drizzle/0073*` differs from `13332b1` in comment lines only. No design flaw, so nothing returns to Phase 2. Phase 6 starts after a PASS.

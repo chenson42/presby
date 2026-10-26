@@ -868,3 +868,7 @@ Related standing requirement (platform admin redesign, 2026-10-25): "the same th
 
 - e2e fixture person-id range for developer-role users: ids prefixed `00000000-0000-4258-`.
 - Migration 0071 released (not needed).
+
+## Operator ruling (2026-10-26): what the API page is
+
+Asked after Increment 1's Phase 6: "What should the developer portal's API page be?" — **Internal inventory.** List the internal endpoints and scheduled jobs with what each does and how it is protected, say plainly "PresbyPortal has no public API", and keep the list in sync with the code by test. This confirms Phase 1's interpretation for Increment 3; a public API is not planned.

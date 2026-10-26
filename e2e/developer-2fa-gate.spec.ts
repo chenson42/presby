@@ -87,8 +87,8 @@ async function signIn(
 }
 
 async function verifyTotp(page: import("@playwright/test").Page) {
+  // The sixth digit submits the code (DECISION-257); Verify is only the fallback, so it is not pressed.
   await enterTotpCode(page, generateSync({ secret: E2E_TOTP_TEST_SECRET }));
-  await page.getByRole("button", { name: /^verify$/i }).click();
 }
 
 test.describe("a required, unverified second factor", () => {

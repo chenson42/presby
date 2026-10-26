@@ -18,7 +18,7 @@
 | 2 — Architectural review | architect | Complete; seat via resolver (DECISION-242), DB archive guard (243), placement + single count (244), overwrite+audit + lock order (245); R1 seat-key guards, R2 revoke DELETE; F258–F264 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete; migration 0068 designed in order; `src/lib/parishes.ts` is the only writer; explicit-button picker (F261); S1 declined; F265 raised; staged files and pre-ship reads listed; CLAUDE.md sentence awaits operator approval | Design complete, implementer named | 2026-10-25 |
 | 4 — Implementation | database-admin (Batch A), then full-stack-developer (Batches B, C); loop-back 1 done (see its section at the end) | Batch A complete: 0068 hand-written, applied twice (idempotent), rollback rehearsed, journal idx 68; test-rls-68 64/64 as presby_app; parishes.db.test.ts 25/25; staged seed + two integration patches. Batches B and C complete: library, actions, pages, components, Officers UI, e2e (parishes 10/10, hydration 3/3 on :3510 incl. the MFA-enrolled seat holder), 360px walk, global-setup patch staged; typecheck, lint, `npm run check`, `npm test` (8551), build and the parish DB suites green. Eight items for Phase 5/6 attention (see Implementer Notes) | Batches A, B, C done | 2026-10-25 |
-| 5 — Verification | qa | Run 1: suites green; FAIL on copy truthfulness (archived notice), NFC defect, seat-group roster injection (pre-existing F240/F245 class) | FAIL | 2026-10-25 |
+| 5 — Verification | qa | Run 1 FAIL (copy, NFC, seat-group injection). Run 2: unit 8578/8578, test:db 11115 (2 accepted canaries), test-rls-68 65/65, e2e 425/425, prod 79/79, failing-first re-proved for F2–F5 and the 0068 definer pin, 360px clean, copy PASS | PASS | 2026-10-25 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1780,3 +1780,200 @@ DECISION-242's corrected text, the four TODO lines, the 3a kind-list widening, a
 | Phase | Owner | Status | Verdict | Date |
 |---|---|---|---|---|
 | 4 — Implementation (loop-back 1) | full-stack-developer (Findings 2 to 5), database-admin (0068 `a38a5f5`) | NFC after strip (`bd61c6e`), archived notice states (`97735e9`), bulk not-found (`9514650`), Officers copy and 44px (`7746a2e`), sync function definer (`a38a5f5`), each failing-first; static gates, parish DB suites, e2e 13 of 13 and the 360px look green | Ready for Phase 5 run 2 | 2026-10-25 |
+
+---
+
+# Phase 5 — Verification (qa), run 2
+
+**Date:** 2026-10-25
+**Verified by:** qa
+**Tree:** worktree `presby-parish`, branch `pipeline/parish-management`, HEAD `ddf850d` (loop-back 1: `bd61c6e`, `97735e9`, `9514650`, `7746a2e`, `a38a5f5`). Neon branch `pipeline-parish-management`. Read-only on files. Git status was clean at the end; see the `AGENTS.md` note.
+
+**Scope run:** everything in "QA re-run scope (run 2)", plus the full DB suite because a migration changed. Nothing was left to CI.
+- typecheck, lint, check, unit and build.
+- 0068 applied twice, test-rls-68, and the full patched test-rls.
+- The full serial `test:db`.
+- Failing-first re-proofs in a fresh scratch copy (`git archive` plus an APFS clone of `node_modules`, no symlinks).
+- The Finding 1 probe repeated.
+- The full chromium e2e suite on a Playwright-owned :3510, and the prod lane on :3511.
+- A 360px real-browser pass on my own :3510 server, stopped by PID.
+- A full copy pass.
+- Global flags were reset to the CI baseline (`e2e-reset-flags.sql -v pipeline_branch=1`, this worktree's database only) before the e2e run.
+
+## Type Check
+
+`npm run typecheck`: **PASS**. `npm run lint`: **PASS**. `npm run check`: **PASS**, 8 of 8. `npm run build`: **PASS**.
+
+## Unit Tests
+
+Total: 11118 | Passed: 8578 | Failed: 0 | Skipped: 2540 (database-gated)
+Files: 560 passed, 79 skipped.
+
+**DB-backed (`npm run test:db`, full, serial):**
+Total: 11118 | Passed: 11115 | Failed: 2 | Skipped: 1 | Duration: 1806.8s
+Files: 638 of 639 passed.
+
+The 2 failures are exactly the two accepted environmental ones:
+- `src/lib/db/fixture-deletable.test.ts:199` (leaked rows outstanding)
+- the "EXPIRED window" test in the same file
+
+Both name only the three known rows: `4bfbd55e…`, `dea9c223…`, `a20aa2c7…`. They were left by an earlier Phase 4 run and are permanent on this branch. There is no new leak.
+
+The amended files are all green in this run: `parishes.db.test.ts`, `parishes.test.ts`, `parishes-boundaries.test.ts`, `officers.test.ts`, `officer-offices.test.ts`, `directory.test.ts`, `session-approval.db.test.ts` and the groups tests.
+
+**Migration and RLS:**
+- **0068 applied twice** on the owner connection: both runs exit 0. A 13-item snapshot (12 table row counts plus the 0068 trigger count) is identical before the first run, after it, and after the second.
+- **Catalog:** `presby_sync_derived_group` has `prosecdef = t`, `proconfig {search_path=public, pg_temp}`, owner `neondb_owner`, and `has_function_privilege` false for `presby_app` and `presby_platform`.
+- **`scripts/parishes/test-rls-68.sql` as `presby_app`:** exit 0, **65 of 65** (the new 68a definer pin included).
+- **Full `scripts/test-rls.sql` with both staged patches, as `presby_app` (scratch copy):** 1307 pass lines; section 68 at 65 of 65; both F2 cross-org assertions pass. Only the three known drift failures remain:
+  - `:219` presbytery members
+  - `:518` 2FA definer
+  - `:7953` DECISION-152 `statistics.publish`
+
+## End-to-End Tests
+
+**Dev lane, full `--project=chromium`, Playwright-owned server on :3510:**
+Total: 425 | Passed: 425 | Failed: 0 | Skipped: 0 | Flaky: 0 | Duration: 16.6m
+
+- Includes `parishes.spec.ts` 10 of 10. It covers the 44px select assertion, the new groups-shown-empty state, and an officer term recorded through the app as `presby_app` (`:304`), which exercises the now-definer sync.
+- Also includes `hydration/parishes-controls.spec.ts` 3 of 3 and `totp-full-login.spec.ts`.
+- Grepping for officer under `e2e/` finds only `parishes.spec.ts` recording officer terms.
+
+**Prod lane (`PW_PROD_PORT=3511 npm run test:e2e:prod`, own build and server):**
+Total: 79 | Passed: 79 | Failed: 0 | Duration: 3.7m
+- 15 `prod-build` hydration tests, including `parishes-controls` 3 of 3, plus 64 `prod-custom-hosts`.
+
+**360px real-browser pass (scratch-only spec, one throwaway congregation; I looked at the screenshots):**
+
+| Screen | Viewer | Notice text seen | Child beneath | Bulk trigger |
+|---|---|---|---|---|
+| Archived, 2 households (`bulk`) | seat holder; administrator | "…No households can be moved into it. Move households out one at a time, or all at once below." | "Move all 2 households to…" | 1 |
+| Archived, 102 households (`over_cap`) | seat holder; administrator | "… Move households out one at a time below." | "This district has more than 100 households, so they can't be moved all at once." | 0 |
+| Archived, no active district (`no_target`) | seat holder | base sentence only | "There are no active districts to move them to." | 0 |
+| Same | administrator (`canDefine`) | base sentence only | "…to move them to. Add a district or restore an archived one on the Parishes page first." | 0 |
+| Unassigned, `?hide=members,participants,visitors` | seat holder | — | "No households in the groups shown." with "Show all groups", which returns to the full list | — |
+| Officers form | administrator, congregation; then the toggle-off branch | reworded helper, explainer and no-districts lines (Copy Truthfulness) | — | — |
+
+- On every parish screen: 0px horizontal overflow, and **no** parish control or link under 44px. That includes both "Back to Parishes" links, "Show all groups", both selects and "Move all…".
+- The Officers form's own controls (42px selects, 36px inputs, "Back to portal" at 20px) are the older shared pattern. The amendment left them untouched, with a TODO line.
+- The 100 scratch households, the fixture organization and the fixture-range people were all removed afterwards (0 remaining).
+
+**Presbytery Officers form:** a real presbytery could not be built in the scratch fixture. The person can't get a second organization's membership by direct insert; it must go through `presby_claim_person()`. The presbytery rendering is still verified exactly, because:
+- the form receives no organization type;
+- at a presbytery, `orgFeatureEnabledInTx` refuses the congregation-only toggle, so `parishesEnabled` is false;
+- I rendered that same toggle-off branch in the browser at the fixture congregation;
+- `add-officer-term-form.test.tsx:129` and `:139` pin the presbytery wording.
+
+## Regression Tests Added
+
+Each was re-proved failing-first in the scratch copy against the pre-loop-back files (`7759256`), then passing at HEAD:
+- **F2, pure:** `src/lib/parishes-pure.test.ts`, "normalizeDistrictName returns NFC text after stripping zero-width characters (QA run 1, Finding 2)". 1 failed / 19 passed at the old file; 20 of 20 at HEAD.
+- **F2, database companion:** `src/lib/db/domain/parishes.db.test.ts`, "defineDistrict as presby_app accepts 'Cafe<ZWSP><combining acute> District' and stores 'Café District'". With the old normalizer, the real database refuses it with `23514`; at HEAD it passes.
+- **F3, district page and components** (old `archived-notice.tsx`, `[orgUnitId]/page.tsx`, `bulk-move.tsx`): 13 failed across `presentational.test.tsx`, `[orgUnitId]/page.test.tsx` and `bulk-move.test.tsx`. That includes the invariant "`all at once below` appears if and only if the bulk trigger is present, for every viewer", over_cap, no_target (seat holder and `canDefine`), the 100/101 boundary, and no_target winning over 101+.
+- **F3, pure table:** with the old `parish-copy.ts`, the `archivedMoveState` table and the shared too-many constant fail. 71 of 71 pass at HEAD.
+- **F4:** with the old `parish-failure.ts`, 5 failed: "a bulk not_found is a district … never a household", "no refusal anywhere says … `in smaller groups with Move`", and the bulk action mappings. 23 of 23 pass at HEAD.
+- **F5:** with the old Officers form and page, `unassigned/page.tsx` and `row-assign.tsx`, 5 failed: the presbytery-true seat helper, the toggle-off no-districts line, the explainer, the 44px links and the 44px select. 65 of 65 pass at HEAD.
+- **0068 definer pin:**
+  - The source scan ("0068's definition header carries `security definer` …") fails against the old 0068 text.
+  - For the catalog pin, I applied the old `7759256` 0068 on the pipeline branch. The function went to `prosecdef=false`, the catalog test failed, and test-rls-68 68a failed ("expected 1, got 0").
+  - I then re-applied HEAD's 0068. Result: `prosecdef=true`, pinned `search_path`, no app EXECUTE; the three sync-pin tests pass 3 of 3, and test-rls-68 is back to 65 of 65.
+
+## Coverage on Critical Modules
+
+Unchanged from run 1. The loop-back does not touch these modules.
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.3%
+- `src/lib/flags.ts`: 100%
+- `src/lib/parishes-pure.ts`: covered by its 20 pure tests
+
+## Feature-Gate Audit
+
+The loop-back adds no route, action or permission check, and changes no gate. I re-read the changed page (`[orgUnitId]/page.tsx`): the gate order is unchanged (auth, `resolveOrgContext`, `assertOrgAccess`, platform flags, then `getDistrictPage` with the toggle and `canListHouseholds` before the district lookup). `src/proxy.ts`, `src/auth.ts` and every API route are untouched. The run 1 table stands unchanged.
+
+| Route or action | `auth()` present? | Permission check present? | Correct key? |
+|---|---|---|---|
+| All run 1 rows (three pages, seven parish actions, Officers and Roles actions) | yes (unchanged) | yes (unchanged) | as in run 1 |
+
+### Finding 1 (accepted `paper` residual): probe repeated
+
+- As `presby_app` at Alder Creek, in a rolled-back transaction, a direct insert of `source='derived'` into the `deacons_moderator` group still takes a member with no officer term from `parishes.assign` f to **t**.
+- `update groups set membership_source='managed'` on the seat group still updates 1 row.
+- Both behave as designed until 0066. This is **not** a FAIL.
+
+DECISION-242's corrected Rule text (work-log 1.5) states the first path accurately ("a direct `presby_app` write of a self-labelled derived row into any derived group, this one included, is not refused"). The `membership_source` flip is covered only by the F245 citation and by 1.1, not named in the rule sentence. **Suggest** the orchestrator add "or a re-labelling of the group's own `membership_source`/`derived_from` (F245)" when writing `docs/decisions.md`.
+
+Not yet in the tree, by design (Rule 16, integration):
+- the DECISION-242 text;
+- the four TODO lines in 1.6 (`grep` finds neither in `docs/TODO.md`/`docs/decisions.md`);
+- the 3a kind-list widening;
+- `scripts/parishes/global-setup.integration.patch`.
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the design's Copy table or amendment 1.** These were checked word for word in the browser and the source:
+  - the four `archivedMoveState` sentences and children;
+  - `BULK_TOO_MANY_COPY`, shared by the over-cap child and the `too_many` toast;
+  - `noActiveDistrictsCopy` in its two forms;
+  - the bulk `not_found` district string;
+  - the Officers seat helper, toggle-off no-districts line and explainer;
+  - the six strings approved under Finding 4.
+- [x] **The source behind each claim was opened.**
+  - The notice sentence and its child come from one `archivedMoveState` call fed by `canMove`, the single household count and `activeTargets.length` (`[orgUnitId]/page.tsx`).
+  - "All at once below" holds exactly when `BulkMove` renders its trigger. That was observed at 2 and 102 households and with no target, for both viewers.
+  - "Districts aren't turned on yet" reads `parishesEnabled`, which is false at any non-congregation.
+- [x] **Each instruction was traced to the role that sees it, and that role can do it.**
+  - The move sentences go only to `canMove` viewers (seat holder, `people.manage`).
+  - "Add a district or restore an archived one" goes only to `canDefine` (`officers.manage`), the key that defines and restores. The seat holder gets the plain fact.
+  - A `canDefine`-only viewer cannot reach the district page (`canListHouseholds` false, so "forbidden"), so the notice never addresses them. The page test's four-viewer invariant covers that case, and a viewer with neither key.
+  - The Officers toggle-off line addresses "a congregation's administrator" (`org_features.manage`), and is true at a presbytery.
+- [x] **Older strings about the same subject were grepped, and none is made false.**
+  - "smaller groups" now appears only in an unrelated giving print route (`admin/giving/statements/print/route.ts:49`).
+  - "all at once below" appears only in `parish-copy.ts`'s `bulk` case.
+  - `officers/actions.ts:142` is unchanged and still true.
+
+**Copy truthfulness: PASS.**
+
+## Notes (none blocks)
+
+1. **Pipeline-branch state:**
+   - The three permanent fixture rows will fail the two canary tests on every `test:db` here (accepted).
+   - Global flags sit at the CI baseline after this run, with `org_portal.directory`, `directory_v2` and `officers` off. The run 1 pre-reset snapshot is at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/qa5-flags-before.txt`.
+2. **`AGENTS.md`:** the dev server rewrote it again (`#` to `##` in the `nextjs-agent-rules` block). I restored it with `git checkout -- AGENTS.md`; the TODO line in 1.6 tracks it.
+3. **Single-move target residual:** a single move whose target district is missing still reads "household" (`parishes.ts:986`, `:1036`). Tech-lead accepted this as crafted-request only.
+4. **Older Officers controls:** they stay under 44px, per the amendment and its TODO line.
+
+## Verdict
+
+**PASS**
+
+- **Static gates:** typecheck, lint, check 8/8 and build all green; unit tests 8578 of 8578.
+- **Database:** test:db 11115 passed, with only the two accepted canary failures. 0068 is idempotent, and the sync function is a pinned definer with no app EXECUTE. test-rls-68 is 65 of 65; the full patched test-rls shows only the three known drift failures.
+- **Failing-first:** re-proved for F2 (pure and database), F3, F4, F5 and the 0068 definer pin (catalog, source scan and 68a).
+- **e2e:** 425 of 425 after the flag reset; prod lane 79 of 79.
+- **360px:** clean in every archived state for both viewers, in Unassigned, and on the Officers toggle-off branch.
+- **Copy truthfulness and gate audit:** copy truthfulness passes and the feature-gate audit is unchanged.
+- **Finding 1:** remains the accepted `paper` residual; the probe still succeeds as designed.
+- **Gate class:** not auth-touching, though the MFA-enrolled login path was exercised anyway.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 5 — Verification (run 2) | qa | Static gates green (unit 8578/8578, check 8/8, build). test:db 11115 pass with only the 2 accepted canary failures. 0068 re-applied twice with no row change; sync is a pinned definer with no app EXECUTE. test-rls-68 65/65; full patched test-rls with the 3 known drift failures only. Failing-first re-proved for F2 (pure and DB), F3, F4, F5 and the 0068 definer pin (catalog, source, 68a). Finding 1 probe still succeeds (accepted paper; suggest naming the F245 flip in the DECISION-242 text). e2e chromium 425/425 after the flag reset; prod lane 79/79. 360px: bulk, over_cap and no_target for seat holder and administrator, Unassigned "Show all groups", Officers toggle-off branch; 0px overflow, all parish targets ≥44px. Copy truthfulness PASS | PASS | 2026-10-25 |
+
+**Handoff:** next is **analyst, Phase 6**. Phase 1 still requires the founding-administrator walk at 360px on `development`: create a district, record the seat, move a household.
+
+Integration items for the orchestrator:
+- DECISION-242's corrected text, preferably also naming the F245 flip;
+- the four TODO lines in 1.6;
+- the 3a kind-list widening to five values before 3a's Phase 4;
+- `scripts/parishes/global-setup.integration.patch` with the two RLS/seed patches;
+- re-run `scripts/test-rls.sql` on merged `development`.
+
+Files referenced:
+- `/Users/cshenso/git/presby-platform/presby-parish/docs/work-log/2026-10-25-parish-management.md`
+- `/Users/cshenso/git/presby-platform/presby-parish/drizzle/0068_presby_parishes.sql`
+- `/Users/cshenso/git/presby-platform/presby-parish/src/app/(org)/o/[slug]/directory/parishes/parish-copy.ts`
+- `/Users/cshenso/git/presby-platform/presby-parish/src/app/(org)/o/[slug]/directory/parishes/[orgUnitId]/page.tsx`
+- Logs: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/r2-testdb.log`, `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/r2-e2e-full.log`, `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/r2-e2e-prod.log`, `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/logs/r2-rls-full.out`
+- Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa5r2/qa5r2-shots/`

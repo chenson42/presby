@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=11095cd -->
+<!-- covers: decision=224 commit=5b57917 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,8 @@ is checked.*
 ---
 
 ## 2026-10-25
+
+- [ ] **`decision` · Your congregation's public website can show an events calendar, and nothing appears until each piece is chosen (0.44.0; DECISION-238 to DECISION-241).** An event shows only if its new per-event box is ticked, it is open to everyone, it is not cancelled, and the congregation's "Public events calendar" toggle is on. Everything starts off, and the site's maintainer must also place the calendar on a page. A database check and a read-time filter both back the members-only rule. **You must:** apply migration 0067 to production before merging (the new code reads its column), and run a real-iPhone check before turning it on anywhere. **Accepted:** anyone on the internet can read a shown event's text and archives may keep copies; there is no "add to my calendar" yet; a page carries about 0.75 MB of uncompressed HTML. **Still open (in TODO):** the FPCW site integration, the custom-host check at cutover, and the event import before DNS moves.
 
 - [ ] **`decision` · The platform admin area now opens on a dashboard of what needs attention, behind a grouped menu with a phone version; the organization workspace you asked for is still to come (0.43.0; DECISION-251, DECISION-252, DECISION-253, DECISION-255).** Increment 1 of 4 is read-only. **What to know:** the dashboard's rule that it shows no congregation-member data is held by a test that catches a careless reader, not a deliberately evasive one, and the two-factor card is the one place that reads through people and memberships, by your ruling (DECISION-252). The admin area deliberately has no loading screens, because one would make a missing page report success (DECISION-251). Status uses icons and words for now; proper status colours come in Increment 4 (DECISION-255). The Design system page is visible to anyone who can open the admin area. **Still open:** the organization workspace and the "waiting for a first administrator" and invitation cards (Increment 2); three admin detail pages show the "couldn't load this page" screen instead of a 404 for a malformed address (tracked).
 

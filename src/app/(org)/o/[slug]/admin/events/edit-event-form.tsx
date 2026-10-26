@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,14 @@ import { EventTypePicker } from "@/components/org-portal/event-types/event-type-
 import { editEventSchema, type EditEventFormValues } from "./event-schema";
 import { updateEventAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
+import {
+  OPEN_TO_EVERYONE_LABEL,
+  WEBSITE_HINT,
+  WEBSITE_HINT_MEMBERS_ONLY,
+  WEBSITE_LABEL,
+  WEBSITE_SERIES_NOTE,
+  openToEveryoneHint,
+} from "./website-listing-copy";
 
 /**
  * Edits ONE occurrence's own fields — Flow 2's "single occurrence" case. NO
@@ -54,6 +62,8 @@ export function EditEventForm({
       startsAt: event.startsAt.slice(0, 16),
       endsAt: event.endsAt ? event.endsAt.slice(0, 16) : "",
       isPublic: event.isPublic,
+      // Never true for a members-only event (the database refuses it).
+      websiteListed: event.isPublic && event.websiteListed,
       allowsCheckin: event.allowsCheckin,
       // The fallback is never a picker option (it IS "No type"), so an event
       // stored against it also reads "none".
@@ -68,6 +78,7 @@ export function EditEventForm({
     register,
     formState: { errors, isDirty },
   } = form;
+  const isPublic = useWatch({ control: form.control, name: "isPublic" });
 
   const { discardOpen, setDiscardOpen, guardedNavigate, confirmDiscard } =
     useUnsavedChangesGuard(isDirty);
@@ -81,6 +92,9 @@ export function EditEventForm({
       startsAt: values.startsAt,
       endsAt: values.endsAt || undefined,
       isPublic: values.isPublic,
+      // The server derives the stored value (wish AND open to everyone); this
+      // keeps the posted wish honest too.
+      websiteListed: values.isPublic && values.websiteListed === true,
       allowsCheckin: values.allowsCheckin,
       eventTypeId: values.eventTypeId === "none" ? null : values.eventTypeId,
     };
@@ -178,13 +192,36 @@ export function EditEventForm({
         </div>
 
         <label className="inline-flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" className="h-4 w-4" {...register("isPublic")} />
-          Visible on the public calendar
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            {...register("isPublic", {
+              // Members-only can never be on the website: clear the wish here
+              // (the server re-derives it regardless).
+              onChange: (e) => {
+                if (!e.target.checked) form.setValue("websiteListed", false);
+              },
+            })}
+          />
+          {OPEN_TO_EVERYONE_LABEL}
+        </label>
+        <p className="-mt-2 text-sm text-muted-foreground">{openToEveryoneHint(orgName)}</p>
+
+        <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!isPublic}
+            {...register("websiteListed")}
+          />
+          {WEBSITE_LABEL}
         </label>
         <p className="-mt-2 text-sm text-muted-foreground">
-          If unchecked, the event still shows on the member calendar for everyone in {orgName}.
-          It just stays off the public website.
+          {isPublic ? WEBSITE_HINT : WEBSITE_HINT_MEMBERS_ONLY}
         </p>
+        {isSeriesOccurrence && (
+          <p className="-mt-2 text-sm text-muted-foreground">{WEBSITE_SERIES_NOTE}</p>
+        )}
 
         <label className="inline-flex min-h-11 items-center gap-2 text-sm">
           <input type="checkbox" className="h-4 w-4" {...register("allowsCheckin")} />

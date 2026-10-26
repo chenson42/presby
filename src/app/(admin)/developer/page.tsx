@@ -6,6 +6,7 @@ import {
   moduleSlug,
   summarize,
   INVARIANTS,
+  PLATFORM_MODULE,
   type TableDoc,
 } from "@/lib/dev-docs";
 import { requirePlatformAdmin } from "./guard";
@@ -43,10 +44,10 @@ export default async function DeveloperIndex() {
 
   const tenantCount = tables.filter((t) => t.tenantScoped).length;
   const undocumented = tables.filter(
-    (t) => !t.description && t.module !== "platform (from starter)",
+    (t) => !t.description && t.module !== PLATFORM_MODULE,
   ).length;
   const onPaper = INVARIANTS.filter(
-    (i) => i.enforcement === "documented",
+    (i) => i.enforcement === "paper",
   ).length;
 
   return (
@@ -86,7 +87,7 @@ export default async function DeveloperIndex() {
 
         {Object.entries(modules).map(([module, moduleTables]) => {
           const slug = moduleSlug(module);
-          const isPlatform = module === "platform (from starter)";
+          const isPlatform = module === PLATFORM_MODULE;
           return (
             <section className="reg__module" data-section key={module}>
               <div className="reg__moduleHead">
@@ -164,14 +165,12 @@ export default async function DeveloperIndex() {
                   <span className="reg__rowMeta">
                     <span
                       className={`reg__tag ${
-                        inv.enforcement === "documented"
+                        inv.enforcement === "paper"
                           ? "reg__tag--paper"
                           : "reg__tag--machine"
                       }`}
                     >
-                      {inv.enforcement === "documented"
-                        ? "paper"
-                        : inv.enforcement}
+                      {inv.enforcement}
                     </span>
                   </span>
                 </div>

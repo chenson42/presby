@@ -6,16 +6,30 @@ import { db } from "@/lib/db";
 import { FEATURE_CATALOG } from "@/lib/permissions";
 
 /**
- * Self-documenting technical reference for the developer page.
+ * The data behind the developer portal's Data model section.
  *
- * Everything here is DERIVED from the Drizzle schema at request time. Nothing
- * is hand-maintained, so it cannot drift the way docs/database-schema.md does
- * in the sibling projects — which is the whole reason those repos carry
- * workflow rules whose only job is keeping documentation in step.
+ * What is GENERATED, on each request: the tables, columns, keys, indexes and
+ * checks (read from the Drizzle exports), the foreign-key diagrams, the
+ * permission catalog (from FEATURE_CATALOG) and the table and column
+ * descriptions (from Postgres COMMENT ON, via loadDescriptions).
+ *
+ * What is a HAND LIST with a test: the module a table is filed under (MODULES
+ * and PLATFORM_TABLES). `dev-docs.test.ts` fails CI when a table is in neither,
+ * in both, or named by an entry but gone from the schema, so the grouping can
+ * lag the code only until the next test run.
+ *
+ * What is HAND-WRITTEN, with only its headings checked: INVARIANTS (the rules
+ * the system relies on) and BESPOKE_POLICIES (isolation notes). The same test
+ * fails when a CLAUDE.md Key Invariants heading is neither listed nor named in
+ * NOT_LISTED with a reason; it cannot check what an entry says, which is why the
+ * page labels that section "Written by hand".
+ *
+ * NOT READ AT ALL: row-level security policies, triggers and SQL functions.
+ * Those live in the drizzle/ migrations.
  *
  * Two consumers, one source:
- *   - HTML at /developer, for humans
- *   - JSON at /developer/schema.json, for the AI support worker
+ *   - HTML under /developer, for people
+ *   - JSON at /developer/schema.json, for a program or a developer
  *
  * STRUCTURE ONLY. Never render data, not even per-tenant row counts. A schema
  * browser plus a permission catalog is a map of the application, so it is
@@ -42,8 +56,7 @@ export type ColumnDoc = {
  * A registry here would rot exactly the way docs/database-schema.md rots in the
  * sibling projects — which is why those repos carry workflow rules whose only
  * job is keeping documentation in step. Comments live with the schema, survive
- * dump/restore, show up in psql's \d+ and every GUI, and are readable by the AI
- * support worker without a bespoke endpoint.
+ * dump/restore, and show up in psql's \d+ and every GUI.
  */
 export async function loadDescriptions() {
   const result = await db.execute(sql`
@@ -86,14 +99,28 @@ export type TableDoc = {
 };
 
 /**
- * Which design-doc section each table belongs to. Tables absent from this map
- * are inherited from the starter and grouped under "platform".
+ * The module heading for tables that belong to no presby diagram: the platform
+ * shell inherited from the starter (sign-in, 2FA, platform roles and flags,
+ * email, feedback). Listed in PLATFORM_TABLES, drawn in no diagram.
  */
-const MODULES: Record<string, string> = {
+export const PLATFORM_MODULE = "Platform shell";
+
+/** Where a table lands if nobody classified it. The test fails before this ships. */
+export const UNCLASSIFIED_MODULE = "Unclassified";
+
+/**
+ * Which design-doc section each table belongs to. Letters continue
+ * docs/schema-design.md (which skips I). EVERY table must be here or in
+ * PLATFORM_TABLES: `dev-docs.test.ts` fails CI otherwise, and in production an
+ * unlisted table renders under "Unclassified" rather than crashing the page.
+ */
+export const MODULES: Record<string, string> = {
   organizations: "A. Organizations",
   organization_settings: "A. Organizations",
   organization_identifiers: "A. Organizations",
   organization_name_history: "A. Organizations",
+  organization_brands: "A. Organizations",
+  organization_brand_history: "A. Organizations",
   org_units: "A. Organizations",
   organization_lifecycle_events: "K. Lifecycle and affiliation",
   organization_successions: "K. Lifecycle and affiliation",
@@ -127,6 +154,7 @@ const MODULES: Record<string, string> = {
   role_grants: "G. Authorization",
   administrative_commissions: "G. Authorization",
   org_delegations: "G. Authorization",
+  account_invitations: "G. Authorization",
   person_privacy: "H. Privacy",
   consents: "H. Privacy",
   person_demographics: "H. Privacy",
@@ -137,7 +165,84 @@ const MODULES: Record<string, string> = {
   statistics_submission_grants: "J. Reporting",
   import_batches: "L. Import staging",
   import_rows: "L. Import staging",
+  appointments: "M. Presbytery oversight",
+  congregation_oversight: "M. Presbytery oversight",
+  congregation_statistics: "M. Presbytery oversight",
+  per_capita_rates: "M. Presbytery oversight",
+  per_capita_records: "M. Presbytery oversight",
+  staff_positions: "N. Staff and personnel",
+  event_types: "O. Events",
+  events: "O. Events",
+  giving_checkout_intents: "P. Online giving",
+  giving_donor_identities: "P. Online giving",
+  giving_donor_link_decisions: "P. Online giving",
+  giving_donors: "P. Online giving",
+  giving_funds: "P. Online giving",
+  giving_gift_reversals: "P. Online giving",
+  giving_gifts: "P. Online giving",
+  giving_provider_connections: "P. Online giving",
+  giving_provider_events: "P. Online giving",
+  giving_settings: "P. Online giving",
+  giving_settlement_lines: "P. Online giving",
+  giving_settlements: "P. Online giving",
+  giving_statement_deliveries: "P. Online giving",
+  giving_statement_lines: "P. Online giving",
+  giving_statements: "P. Online giving",
+  organization_sites: "Q. Sites and domains",
+  organization_profiles: "Q. Sites and domains",
+  organization_service_times: "Q. Sites and domains",
+  site_contact_messages: "Q. Sites and domains",
+  organization_domains: "Q. Sites and domains",
+  blob_assets: "Q. Sites and domains",
+  organization_feature_toggles: "R. Organization features",
+  organization_feature_categories: "R. Organization features",
+  tickets: "S. Support",
+  ticket_messages: "S. Support",
+  ticket_actions: "S. Support",
+  congregation_feedback: "S. Support",
 };
+
+/**
+ * The platform shell: tables inherited from the starter that no presby diagram
+ * draws. A CLOSED list with a reason per table (the reason is what the Data
+ * model page can say about it), so "not classified" and "deliberately platform"
+ * are different things. `dev-docs.test.ts` fails on a table in this list and in
+ * MODULES, on an entry that names no table, and on a table in neither.
+ */
+const PLATFORM_GROUPS: Record<string, string[]> = {
+  "Sign-in and sessions": [
+    "users",
+    "accounts",
+    "sessions",
+    "verification_tokens",
+    "email_verification_tokens",
+    "password_reset_tokens",
+  ],
+  "Two-factor sign-in": [
+    "user_totp",
+    "user_totp_pending_enrollments",
+    "user_totp_recovery_codes",
+  ],
+  "Platform roles and flags": [
+    "roles",
+    "user_roles",
+    "features",
+    "role_features",
+    "feature_flags",
+  ],
+  Operations: ["audit_events", "email_queue", "migration_seeds"],
+  "Feedback and announcements": [
+    "feedback",
+    "feedback_prompt_state",
+    "whats_new_entries",
+  ],
+};
+
+export const PLATFORM_TABLES: Record<string, string> = Object.fromEntries(
+  Object.entries(PLATFORM_GROUPS).flatMap(([reason, names]) =>
+    names.map((name) => [name, reason] as const),
+  ),
+);
 
 /**
  * Tables whose isolation is deliberately NOT the standard org predicate. Every
@@ -195,6 +300,13 @@ const BESPOKE_POLICIES: Record<string, string> = {
  */
 const TABLE_NOTES: Record<string, string[]> = {};
 
+/** A table's module heading. Unlisted tables are "Unclassified", never a crash. */
+function moduleOf(table: string): string {
+  if (Object.hasOwn(MODULES, table)) return MODULES[table];
+  if (Object.hasOwn(PLATFORM_TABLES, table)) return PLATFORM_MODULE;
+  return UNCLASSIFIED_MODULE;
+}
+
 function isPgTable(value: unknown): value is PgTable {
   return (
     typeof value === "object" &&
@@ -223,7 +335,7 @@ export function buildSchemaDocs(
 
     docs.push({
       name: config.name,
-      module: MODULES[config.name] ?? "platform (from starter)",
+      module: moduleOf(config.name),
       tenantScoped: columns.some((c) => c.name === "organization_id"),
       columns,
       indexes: config.indexes.map((i) => ({
@@ -266,7 +378,7 @@ export function buildSchemaDocs(
 export function buildErd(tables: TableDoc[], module?: string): string {
   const inScope = module
     ? tables.filter((t) => t.module === module)
-    : tables.filter((t) => t.module !== "platform (from starter)");
+    : tables.filter((t) => t.module !== PLATFORM_MODULE);
   const names = new Set(inScope.map((t) => t.name));
 
   const lines = ["erDiagram"];
@@ -338,98 +450,178 @@ export function buildPermissionDocs() {
 }
 
 /**
- * The invariants from docs/schema-design.md section 1, with how each is
- * enforced. "Documented" means the schema permits a violation and only review
- * catches it — worth stating plainly rather than implying everything is
- * machine-checked.
+ * One rule the system relies on, how it is enforced, and which CLAUDE.md Key
+ * Invariants heading it elaborates.
+ *
+ * `enforcement` uses CLAUDE.md's own three-word vocabulary: `database` (a
+ * constraint, grant or policy), `trigger`, or `paper` (the schema permits a
+ * violation and only review catches it). A rule that a repo tripwire checks for
+ * the shapes it can see is still `paper`, and its text names the tripwire.
+ *
+ * `source` is the exact `###` heading under CLAUDE.md `## Key Invariants`, or
+ * null for a schema-level rule recorded in docs/schema-design.md and its
+ * migration. `dev-docs.test.ts` fails when a heading is neither a `source` nor
+ * in NOT_LISTED, and when a `source` names a heading that no longer exists.
+ * The WORDING of an entry is hand-written and nothing checks it.
  */
-export const INVARIANTS: {
+export type Invariant = {
   title: string;
   detail: string;
-  enforcement: "database" | "trigger" | "documented";
-}[] = [
+  enforcement: "database" | "trigger" | "paper";
+  source: string | null;
+};
+
+export const INVARIANTS: Invariant[] = [
   {
     title: "Two hierarchies intersect nowhere",
     detail:
       "Ecclesiastical (congregation, presbytery, synod, GA) and platform (tenant user, tenant admin, platform admin) are different axes. A platform admin is not above a national admin.",
-    enforcement: "documented",
+    enforcement: "paper",
+    source: "Two Hierarchies Intersect Nowhere",
   },
   {
     title: "Access flows up by publication, never down by inheritance",
     detail:
       "A presbytery admin has no read access inside a member congregation. The only downward paths are an administrative commission and a congregation-granted delegation, both time-boxed and audited.",
     enforcement: "database",
+    source: "Two Hierarchies Intersect Nowhere",
   },
   {
     title: "Tenant isolation is a database property",
     detail:
       "presby_app is created NOBYPASSRLS and every tenant table is FORCE ROW LEVEL SECURITY. Without FORCE, the table owner bypasses every policy and RLS is silently inert (F1).",
     enforcement: "database",
+    source: "Isolation Is a Database Property",
   },
   {
     title: "An approved roll action is immutable",
     detail:
       "Corrections are recorded as voiding actions. Pending rows stay mutable so the approval workflow can edit them.",
     enforcement: "trigger",
+    source: "The Roll Is the System of Record",
   },
   {
     title: "Session and diaconate membership is derived, never edited",
     detail:
       "The session is a court, not a group of people. Its roster projects from active ruling elder terms; direct writes are rejected.",
     enforcement: "trigger",
+    source: "The Court Is Not a Group",
   },
   {
     title: "No role carries a wildcard",
     detail:
-      "Not even administrator roles. A Church Administrator does not read tier 2 or tier 3 by default. NOTE: the starter's ADMIN_ROLE is still a wildcard and must be removed before ship.",
-    enforcement: "documented",
+      "Not even administrator roles. A Church Administrator does not read tier 2 or tier 3 by default. Known violation, bounded: the inherited ADMIN_ROLE is still a wildcard, but only for the platform admin shell, and the tenant connection cannot bypass row-level security.",
+    enforcement: "paper",
+    source: "No Role Carries a Wildcard",
   },
   {
     title: "Nothing about a person is ever hard-deleted",
     detail:
       "PC(USA) records are permanent. delete is revoked on people; use merged_into_id.",
     enforcement: "database",
+    source: "Never Hard-Delete a Person",
   },
   {
     title: "An organization is never hard-deleted either",
     detail:
       "The people rule's twin. insert/update/delete are revoked on organizations from presby_app and a BEFORE DELETE guard covers the owner path too (BYPASSRLS exempts a role from policies, never from triggers); only a deletable_until-stamped test fixture may be removed. A congregation that closes is an organization_lifecycle_events row, never a deleted row. One difference from the person rule, and it is load-bearing: a person merge is FOLLOWED (merged_into_id is a chain), a congregation merge is NOT — following organization_successions would attribute a predecessor's 1987 return to its successor.",
     enforcement: "database",
+    source: "Never Hard-Delete a Person",
   },
   {
     title: "parent_id and path are derived from council affiliation",
     detail:
       "organizations.parent_id and organizations.path are a CACHE of the currently-open organization_affiliations row, rebuilt only by presby_apply_affiliation_to_org_tree(). A direct INSERT ... parent_id or UPDATE of either column is rejected on both connections. The affiliation table itself is write-closed to presby_app: presby_transfer_affiliation() is the only write path, because an EXCLUDE constraint on a FORCE-RLS table is enforced against ALL rows and would otherwise be a cross-tenant existence oracle (F40).",
     enforcement: "trigger",
+    source: "Two Hierarchies Intersect Nowhere",
   },
   {
     title: "A record ABOUT another organization must be affiliated with it",
     detail:
       "congregation_oversight, congregation_statistics, per_capita_records and appointments each carry a row about another organization. drizzle/0045 makes the relationship a database property rather than an application-layer parent_id check: presby_org_affiliated(about_org, recording_council, as_of) must be true, and as_of is the ROW'S OWN YEAR for statistics and per-capita bills, current_date for the rest. That is what lets a 1990 return resolve to the council that received it in 1990 rather than to whoever holds the congregation today — and it means a council may legitimately be refused a historical row for one of its present-day member congregations. A recorded lifecycle event is likewise immutable on every connection (presby_freeze_lifecycle_event(), the roll_actions precedent): correct a minuted act by recording another act.",
     enforcement: "trigger",
+    source: null,
   },
   {
     title: "Publication is an event, not a data-entry screen",
     detail:
       "Access flows up by publication. A congregation's statistical return is an immutable statistical_returns row; publishing it is an immutable publications row naming the recipient council, the date and the session minute; and the presbytery's congregation_statistics row is a PROJECTION of that event, not an independent record. presby_publish_sasr_snapshot() writes all three in one transaction and accepts no organization id of any kind — the recipient is derived from the affiliation history (presby_affiliation_parent_as_of), never from organizations.parent_id, and the supersession chain is derived, never passed. The recipient reads the artifact through presby_list_published_returns_to_me(), filtered on the recorded publication rather than on live affiliation, so a dissolved congregation's returns stay readable by the council that received them (G-3.0107). Withdrawal is a column, never a delete; every one of the three rows is frozen by trigger on every connection, so the projection's copy of published_at and minute_reference cannot drift from the event's (F39).",
     enforcement: "database",
+    source: "Two Hierarchies Intersect Nowhere",
   },
   {
     title: "A submission grant is a credential, and it spends exactly once",
     detail:
       "A presbytery-issued SASR submission grant (D16/DECISION-147) is not a permission and not a flag: it is a token-bearing credential naming one presbytery, one congregation and one report year, and it authorizes exactly one write before it is spent. The token hash is the whole authority, so the caller supplies NO organization id and no org context is set on its behalf — presby_submit_granted_return() is the single SECURITY DEFINER write path, it re-resolves the recipient council from the affiliation history at claim time (presby_affiliation_parent_as_of), and it goes through the same presby_write_return_publication_chain() a self-filing congregation uses, so a granted return is the identical immutable artifact + publication + projection triple. Two mechanisms make the single-spend real and neither is sufficient alone: presby_freeze_statistics_submission_grant() refuses a second claim, a claim of a revoked or expired grant, and any transition not declared by the sanctioned function, on EVERY connection including the owner (F44); and the column-level grant leaves presby_app with UPDATE on revoked_at only, so the tenant connection cannot reach submitted_at or return_id at all — refused by privilege before the trigger is consulted. Issuance is guarded as strongly as mutation (F55/DECISION-141): a grant may only be issued to an unmanaged congregation, by trigger. Every liveness failure — expired, revoked, already spent, nonexistent, flag off — surfaces as one byte-identical literal, so the public page cannot become an enumeration oracle.",
     enforcement: "trigger",
+    source: "Permissions vs Flags",
   },
   {
     title: "The SASR is a projection, never a data-entry screen",
     detail:
       "If a report field cannot be derived, the gap is in the operational model, not in the report.",
-    enforcement: "documented",
+    enforcement: "paper",
+    source: "The Roll Is the System of Record",
   },
   {
     title: "A congregation's event types always include one fallback — except where nobody made one",
     detail:
       "event_types carries a partial unique index allowing at most one is_fallback row per org, a CHECK that it is active, and a CHECK that it is neutral and nothing else is (drizzle/0054). 'At least one' cannot be a constraint, so it is paper: provisioning, the 0054 backfill and the manager's 'Add the standard event types' action create it, and the calendar must (and does) render correctly with zero types, showing untyped events as neutral with no filter pills.",
-    enforcement: "documented",
+    enforcement: "paper",
+    source: null,
+  },
+  {
+    title: "Tenant tables point at each other by a composite key",
+    detail:
+      "Every tenant table declares a unique key on (id, organization_id), and foreign keys between tenant tables include organization_id. A plain reference to another tenant table would let a row in one organization point at a person in another. Row-level security filters reads; this is a write problem (F2).",
+    enforcement: "paper",
+    source: "Composite Tenant Keys",
+  },
+  {
+    title: "There are no custom fields",
+    detail:
+      "Tags are the only attribute an organization can extend (D8). A new need is a support ticket and, if real, becomes a feature for every church.",
+    enforcement: "paper",
+    source: "Extensibility Goes Through Support",
+  },
+  {
+    title: "Branding overrides existing tokens and adds no second styling system",
+    detail:
+      "A congregation's colours re-declare custom properties the platform already declares. Every token is classified brandable, bounded or platform in src/lib/brand/contract.ts, and a test fails on an unclassified one. npm run check:brand-scope keeps the emitter in the two brandable layouts; what that search cannot see is left to review.",
+    enforcement: "paper",
+    source: "The Brand Is a Cascade Override",
+  },
+  {
+    title: "A custom domain is a lookup key, not an identity",
+    detail:
+      "A church's own domain is rewritten to the public site tree and never reaches sign-in, platform routes or cookies. Only a live, proven domain serves; every other state answers the same neutral 404. Absolute URLs come from the database row or the validated platform origin, never from the request. The platform-host set is asserted at build time.",
+    enforcement: "paper",
+    source: "A Custom Host Is a Key, Not an Identity",
+  },
+  {
+    title: "The proxy never reaches the database",
+    detail:
+      "src/proxy.ts decides on host, path and session claims only. It imports a short list of pure modules, and npm run check:proxy-imports fails the check if its imports reach the database, a server-only module or another domains file.",
+    enforcement: "paper",
+    source: "The Proxy Does Not Reach the Database",
+  },
+  {
+    title: "A permission and a flag answer different questions",
+    detail:
+      "A permission says whether this user may do this; a flag says whether the behavior is on at all. A flag never grants access and a permission never stages a rollout. A credential (hashed, single-use, expiring) is a third mechanism that authorizes only the act its own row names.",
+    enforcement: "paper",
+    source: "Permissions vs Flags",
   },
 ];
+
+/**
+ * Key Invariants headings deliberately NOT listed above, each with the reason.
+ * Closed: `dev-docs.test.ts` fails on a heading that is in neither INVARIANTS
+ * nor here, and on an entry here with no reason or no heading.
+ */
+export const NOT_LISTED: Record<string, string> = {
+  "No Real Data":
+    "A rule about what may be committed to the repository, not a property of the running system; the portal obeys it and npm run check:secrets enforces the shapes it can.",
+  "Verify in a Browser":
+    "A working practice for people changing the code, not a property of the system.",
+};

@@ -551,3 +551,11 @@ Failures: [...]
 ## Red Flags (if NEEDS REWORK)
 
 - [Specific. What has to change before this ships.]
+
+## Operator rulings on Phase 1 questions (2026-10-26)
+
+- **Q1 — Two purposes:** directory photo and website photo are designated separately, **but the website falls back to the directory photo** when no website photo is chosen (operator chose against the analyst's no-fallback default). Phase 2/3 must carry the consequences: a directory snapshot reaches the open web for any publicly listed person who has a directory photo and no website photo; the attestation and the listing gate must account for that (G3/G4).
+- **Q2 — Scope:** per congregation (an org-scoped photo set; `people.photo_key` retired, written by no one).
+- **Q3 — Who manages:** reuse `people.manage`.
+- **Q4 — Minors:** adults only in Increment 1 (refuse under 18; null DOB with no child markers allowed; website use needs an audited staff attestation, not a recorded `photo_use` consent).
+- **Q5 (priority, leadership page contact lines):** not yet asked; default: post-cutover priority, leadership page stays hand-authored.

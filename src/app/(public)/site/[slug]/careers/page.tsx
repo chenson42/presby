@@ -60,6 +60,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     return {
       title: { absolute: `Job openings | ${careers.organizationName}` },
       alternates: { canonical: org.urls.origin + org.urls.careers() },
+      robots: { index: true, follow: true },
     };
   }
   if (careers.state === "failed") {

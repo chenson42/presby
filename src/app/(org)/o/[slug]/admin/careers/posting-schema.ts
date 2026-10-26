@@ -43,7 +43,8 @@ export const postingFormSchema = z
     /** Dollars as typed ("45", "52,000", "$45.50"); empty = not given. */
     payMin: z.string(),
     payMax: z.string(),
-    payUnit: z.enum(PAY_UNITS),
+    /** "" = not chosen yet: the form starts there so an amount cannot pick up a unit by default. */
+    payUnit: z.enum([...PAY_UNITS, ""]),
     summary: z.string().refine((v) => charCount(v) <= SUMMARY_MAX, GENERIC_MESSAGE),
     /** 'YYYY-MM-DD' from a native date input, or empty. */
     closingDate: z.string(),
@@ -60,6 +61,10 @@ export const postingFormSchema = z
     }
     if (values.payMax.trim() !== "" && (max === null || max > PAY_CENTS_MAX)) {
       ctx.addIssue({ code: "custom", path: ["payMax"], message: amountMessage });
+    }
+    // An amount with no unit is refused here (Copy S6), exactly as postingInputSchema refuses it.
+    if ((min !== null || max !== null) && values.payUnit === "") {
+      ctx.addIssue({ code: "custom", path: ["payUnit"], message: "Choose per hour or per year." });
     }
     if (min !== null && max !== null && min > max) {
       ctx.addIssue({
@@ -117,7 +122,7 @@ export function toPostingInput(values: PostingFormValues): PostingInput {
     employmentType: values.employmentType,
     payMinCents: min,
     payMaxCents: max,
-    payUnit: hasPay ? values.payUnit : null,
+    payUnit: hasPay && values.payUnit !== "" ? values.payUnit : null,
     descriptionMd: values.descriptionMd,
     closingDate: values.closingDate.trim() === "" ? null : values.closingDate.trim(),
     ...(slug === "" ? {} : { slug }),

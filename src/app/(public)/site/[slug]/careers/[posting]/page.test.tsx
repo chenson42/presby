@@ -140,6 +140,7 @@ describe("generateMetadata - T18", () => {
       title: { absolute: "Music Director | Alder Creek" },
       description: "Lead the choir.",
       alternates: { canonical: "https://presby.invalid/site/alder-creek/careers/music-director" },
+      robots: { index: true, follow: true },
     });
   });
 

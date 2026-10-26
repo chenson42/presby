@@ -234,6 +234,7 @@ test.describe("Job openings - platform host and staff admin", () => {
     await page.getByLabel("Type").selectOption("part_time");
     await page.getByLabel("Lowest").fill("$18");
     await page.getByLabel("Highest").fill("24.50");
+    await page.getByLabel("Pay (optional)").selectOption("hour");
     await page.getByLabel("Short summary").fill("Lead the Sunday evening youth group.");
     await page.getByLabel("Description").fill("## About the role\n\nWe walk alongside students.\n\n- Lead youth group\n- Plan the summer trip\n\nWrite to [the office](mailto:office@example.invalid).");
     await page.getByRole("button", { name: "Save draft" }).click();
@@ -637,6 +638,15 @@ test.describe("Job openings - platform host and staff admin", () => {
       await editor.setViewportSize({ width: 360, height: 800 });
       watchConsole(editor);
       await editor.goto(staff("/new"));
+      // The pay fields: the unit starts on "Choose…", and all three fit the phone.
+      await editor.getByLabel("Lowest").fill("52,000");
+      const unit = editor.getByLabel("Pay (optional)");
+      await expect(unit).toHaveValue("");
+      for (const control of [editor.getByLabel("Lowest"), editor.getByLabel("Highest"), unit]) {
+        const box = (await control.boundingBox())!;
+        expect(box.x + box.width).toBeLessThanOrEqual(360);
+      }
+      expect((await unit.boundingBox())!.height).toBeGreaterThanOrEqual(36);
       await editor.getByLabel("Description").fill("## A heading\n\n" + "word ".repeat(60) + "\n\nhttps://example.invalid/" + "a".repeat(120));
       await expect(editor.getByTestId("description-preview").getByRole("heading", { level: 2 })).toBeVisible();
       await noHorizontalScroll(editor, 360);

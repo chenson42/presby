@@ -1688,3 +1688,21 @@ Fix before release (not deferred to Increment 2), as one small Phase 4 pass with
 - **Finding 7 (first half):** a converted paste inserted mid-line gets a blank-line block boundary. The dropped-link notice needs a Copy line and stays a follow-up.
 - "Choose…" is the only new string; it is the placeholder option of a select whose label already exists (accepted as Copy).
 Everything else in Phase 6 is a tracked follow-up at integration.
+
+## Phase 4 — pre-release fixes (Phase 6 findings 5–7)
+
+**Implementer:** ux-developer. Scope is exactly the three orchestrator rulings above; the dropped-link notice stays a follow-up.
+
+| Finding | Change | Red -> green |
+|---|---|---|
+| 5 robots | `careers/page.tsx` (available, empty list included) and `careers/[posting]/page.tsx` (open) return `robots: { index: true, follow: true }`; closed, failed and notice states keep `index: false` | Metadata tests per state: the two `toEqual` open-state assertions and a new empty-list test failed (3 red) before the source edit, green after |
+| 6 pay unit | `posting-form.tsx` unit select gains an empty "Choose…" option and starts there (create, and edit of a posting with no pay); `posting-schema.ts` allows `""` and refuses an amount with no unit with Copy S6 "Choose per hour or per year."; `toPostingInput` sends `payUnit: null` for `""` | `posting-form.test.tsx`: new test (options, S6 shown, no create call) red before; no-amount test confirms nothing about pay is sent |
+| 7 paste | `description-editor.tsx` `handlePaste` prefixes a blank-line boundary (`\n\n`, or `\n` after a single newline, none at start or after a blank line) | `description-editor.test.tsx`: end-of-line, single-newline/blank-line/start tests and the updated mid-line test red before, green after |
+
+**E2E:** `e2e/careers.spec.ts` create-a-draft now picks "per hour" (it relied on the old default); the 360px editor test also asserts the unit starts on "Choose…" and the three pay controls sit inside 360px. The hydration spec already picked "year" explicitly.
+
+**Gate:** typecheck, lint, `npm run check` clean; full unit suite 622 files / 9517 tests passed; `e2e/careers.spec.ts` (21) and `e2e/hydration/careers-posting-form.spec.ts` (3) green on :3580; hydration spec green on the prod lane :3581.
+
+**360px look:** the pay row stacks to one column and fits. Note for follow-up, not changed here: the shared `Input` and the form's selects are 36px tall (only toolbar and status buttons are 44px), a pre-existing site-wide choice.
+
+**New copy:** "Choose…" (select placeholder). **Handoff:** scoped QA re-check.

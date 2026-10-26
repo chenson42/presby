@@ -153,9 +153,15 @@ describe("generateMetadata - T18", () => {
     expect(await meta("alder-creek")).toEqual({
       title: { absolute: "Job openings | Alder Creek Presbyterian Church" },
       alternates: { canonical: "https://presby.invalid/site/alder-creek/careers" },
+      robots: { index: true, follow: true },
     });
     resolveSiteOrganization.mockResolvedValue(hostOrg("church.example.invalid", "alder-creek"));
     expect((await meta("church.example.invalid")).alternates).toEqual({ canonical: "https://church.example.invalid/careers" });
+  });
+
+  it("available is explicitly indexable, the empty list included - regression for the implicit robots default", async () => {
+    readPublicCareers.mockResolvedValue({ ...AVAILABLE, postings: [] });
+    expect((await meta("alder-creek")).robots).toEqual({ index: true, follow: true });
   });
 
   it("a bundle's own page uses the bundle's metadata", async () => {

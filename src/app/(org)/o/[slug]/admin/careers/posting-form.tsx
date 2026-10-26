@@ -45,7 +45,7 @@ function defaultsFor(posting: PostingRow | undefined): PostingFormValues {
       employmentType: "full_time",
       payMin: "",
       payMax: "",
-      payUnit: "hour",
+      payUnit: "",
       summary: "",
       closingDate: "",
       slug: "",
@@ -58,7 +58,7 @@ function defaultsFor(posting: PostingRow | undefined): PostingFormValues {
     employmentType: posting.employmentType,
     payMin: centsToField(posting.payMinCents),
     payMax: centsToField(posting.payMaxCents),
-    payUnit: posting.payUnit ?? "hour",
+    payUnit: posting.payUnit ?? "",
     summary: posting.summary,
     closingDate: posting.closingDate ?? "",
     slug: posting.slug,
@@ -264,6 +264,7 @@ export function PostingForm({
                   className={SELECT_CLASSES}
                   {...register("payUnit")}
                 >
+                  <option value="">Choose…</option>
                   <option value="hour">per hour</option>
                   <option value="year">per year</option>
                 </select>

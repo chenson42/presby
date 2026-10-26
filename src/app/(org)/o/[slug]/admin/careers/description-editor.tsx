@@ -95,8 +95,12 @@ export function DescriptionEditor({
     const el = event.currentTarget;
     const start = el.selectionStart;
     const end = el.selectionEnd;
-    const next = value.slice(0, start) + converted.markdown + value.slice(end);
-    const caret = start + converted.markdown.length;
+    // Mid-line, the converted block would glue onto the previous text: open it with a blank line.
+    const before = value.slice(0, start);
+    const boundary = before === "" || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+    const inserted = boundary + converted.markdown;
+    const next = before + inserted + value.slice(end);
+    const caret = start + inserted.length;
     commit({ value: next, start: caret, end: caret });
   }
 

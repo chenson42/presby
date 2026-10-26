@@ -65,6 +65,7 @@ export async function generateMetadata({
       title: { absolute: `${read.posting.title} | ${read.organizationName}` },
       description: read.posting.summary || undefined,
       alternates: { canonical: org.urls.origin + org.urls.careersPosting(read.posting.slug) },
+      robots: { index: true, follow: true },
     };
   }
   if (read.state === "closed") {

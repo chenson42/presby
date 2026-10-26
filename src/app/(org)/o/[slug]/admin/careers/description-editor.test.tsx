@@ -113,7 +113,30 @@ describe("DescriptionEditor - T21", () => {
     render(<Harness initial="Before  after" />);
     select(7);
     paste("<h2>Duties</h2><ul><li>One</li><li>Two</li></ul>");
-    expect(textarea().value).toBe("Before ## Duties\n\n- One\n- Two after");
+    expect(textarea().value).toBe("Before \n\n## Duties\n\n- One\n- Two after");
+  });
+
+  it("a converted paste at the end of a line gets a blank-line boundary - regression for the glued heading", () => {
+    render(<Harness initial="Intro line" />);
+    select(10);
+    paste("<h2>Duties</h2>");
+    expect(textarea().value).toBe("Intro line\n\n## Duties");
+  });
+
+  it("a converted paste after a single newline adds just the missing newline; after a blank line or at the start adds none", () => {
+    const { unmount } = render(<Harness initial={"Intro\n"} />);
+    select(6);
+    paste("<h2>Duties</h2>");
+    expect(textarea().value).toBe("Intro\n\n## Duties");
+    unmount();
+    render(<Harness initial={"Intro\n\n"} />);
+    select(7);
+    paste("<h2>Duties</h2>");
+    expect(textarea().value).toBe("Intro\n\n## Duties");
+    cleanup();
+    render(<Harness initial="" />);
+    paste("<h2>Duties</h2>");
+    expect(textarea().value).toBe("## Duties");
   });
 
   it("pasting plain text (no HTML) is left to the browser", () => {

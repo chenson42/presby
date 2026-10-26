@@ -123,6 +123,27 @@ describe("PostingForm - T21", () => {
     expect(mockPush).toHaveBeenCalledWith("/o/alder-creek/admin/careers/new-id");
   });
 
+  it("create: the pay unit starts on 'Choose…', and an amount with no unit is refused with Copy S6 - regression for the silent per-hour default", async () => {
+    render(<PostingForm slug="alder-creek" />);
+    const unit = screen.getByLabelText("Pay (optional)") as HTMLSelectElement;
+    expect(unit.value).toBe("");
+    expect([...unit.options].map((o) => o.text)).toEqual(["Choose…", "per hour", "per year"]);
+    fireEvent.change(field(/^Title/), { target: { value: "Custodian" } });
+    fireEvent.change(field("Lowest"), { target: { value: "52,000" } });
+    await submit();
+    expect(await screen.findByText("Choose per hour or per year.")).toBeTruthy();
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("create: with no amount the unit is not needed and nothing about pay is sent", async () => {
+    mockCreate.mockResolvedValue({ ok: true, data: { id: "new-id" } });
+    render(<PostingForm slug="alder-creek" />);
+    fireEvent.change(field(/^Title/), { target: { value: "Custodian" } });
+    await submit();
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
+    expect(mockCreate.mock.calls[0]![1]).toMatchObject({ payMinCents: null, payMaxCents: null, payUnit: null });
+  });
+
   it("create: a server refusal is a toast with its text and the form stays", async () => {
     mockCreate.mockResolvedValue({ ok: false, error: "Another opening already uses that web address. Choose a different one." });
     render(<PostingForm slug="alder-creek" />);

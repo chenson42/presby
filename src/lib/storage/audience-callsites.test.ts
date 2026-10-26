@@ -71,6 +71,9 @@ const ACTIVE: Record<string, string[]> = {
   "src/components/org-portal/person-avatar.tsx": ["resolveMany:private"],
   "src/lib/brand/read-org-brand.ts": ["resolve:public_site"], // the mark, inlined as data:
   "src/lib/giving/statements.ts": ["store:private"], // the statement PDF
+  // person photos: the master, then its thumbnail; the only writer (store.ts), both private
+  "src/lib/person-photos/reader.ts": ["resolveMany:private"], // the photos page's thumbnails (and the one `?view=` master)
+  "src/lib/person-photos/store.ts": ["store:private", "store:private"],
   "src/lib/sites.ts": ["resolve:private"], // the content bundle (hydratePublishedSite)
   "src/lib/tenant-branding.ts": ["store:public_site"], // the logo
   "src/lib/tickets.ts": ["resolveMeta:private", "resolveMeta:private", "resolveMeta:private"],

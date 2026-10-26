@@ -272,6 +272,11 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   HOUSEHOLD_DISTRICT_BULK_MOVED: "tenant.household.district_bulk_moved",
   EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
   EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  // Person photos (2026-10-26, DECISION-285).
+  PERSON_PHOTO_ADDED: "tenant.person_photo.added",
+  PERSON_PHOTO_REMOVED: "tenant.person_photo.removed",
+  PERSON_PHOTO_DESIGNATED: "tenant.person_photo.designated",
+  PERSON_PHOTO_UNDESIGNATED: "tenant.person_photo.undesignated",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

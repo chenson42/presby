@@ -183,6 +183,34 @@ export const ORG_FEATURE_CATALOG = [
     orgTypes: ["congregation"] as const,
     operatorEnabled: false as const,
   },
+  // Photos of people (docs/work-log/2026-10-26-person-photos-inc1.md, Phase 3
+  // "Permissions & Flags"; DECISION-285, 289; R8). TOGGLE-ONLY (`flag: null`):
+  // the operator's standing rule is a per-org toggle, not a new global flag,
+  // before go-live. Provisioned OFF (a missing row is off; `createOrganization()`
+  // writes nothing and 0078 backfills nothing). SELF-SERVICE (`operatorEnabled:
+  // false`): the congregation's `org_features.manage` holder turns it on.
+  //
+  // OFF HIDES EVERY PHOTO, on the member directory, the photos page and the
+  // public website. THE DATABASE COMPOSES THIS ENTRY IN SQL:
+  // `presby_person_photos_enabled(org)` (drizzle/0078) repeats this entry's key,
+  // its `category` and its `orgTypes` (null: no allow-list) and the category
+  // axis flag, because the anonymous roster and door cannot call
+  // `orgFeatureEnabledInTx`. `person-photos-toggle.test.ts` pins every one of
+  // those literals to this entry and `public-photo.db.test.ts` compares the SQL
+  // with `orgFeatureEnabledInTx` over the whole axis x category x toggle matrix.
+  // Changing the key, category or `orgTypes` here without the migration fails
+  // both, on purpose.
+  {
+    key: "org_portal.person_photos",
+    name: "Photos of people",
+    description:
+      "Lets your team add photos to people's records, choose the photo members see in the directory, and choose the photo shown on your public website for people listed there. Turning this off hides every photo, including on your public website. Nothing is deleted, and turning it back on restores them. Browsers that already saved a photo can keep showing it for up to a day.",
+    category: "people" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: null,
+    operatorEnabled: false as const,
+  },
   // Custom domains (docs/work-log/2026-10-19-custom-domains.md, Phase 3
   // "Permissions & Flags"; T9; DECISION-180; operator ruling Q1, 2026-10-19:
   // "platform admin only, for now"). TOGGLE-ONLY (`flag: null`): the operator's

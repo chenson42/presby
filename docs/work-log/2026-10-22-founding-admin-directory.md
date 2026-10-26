@@ -8663,3 +8663,162 @@ Failure text (`outcome.error`, `DB_ERROR_COPY`, "Invalid scope.", "Forbidden.") 
 ### Handoff
 
 - **To QA (run 2):** re-run the changed unit files, `community-sign-in-invite.spec.ts` (lane 7 at both widths), `no-organization-connect.spec.ts` and the admin organization specs on reset flags; walk the three corrected surfaces at 360 and 1280. Everything else in run 1 stands (this pass touched no auth file, migration or `e2e/support/`).
+
+---
+
+# Increment 2b — Phase 5: Verification (qa), run 2
+
+**Date:** 2026-10-26
+**Verified by:** qa (read-only). No repository file was edited. As in run 1, the staged `scripts/sign-in-invitations/e2e-global-setup.integration.patch` was applied for the e2e and walk runs only. It was reverted with `git checkout -- e2e/support/global-setup.ts`, and `git status` is clean at `88b6eff`.
+**Worktree / branch / database:** `presby-2b`, `pipeline/signin-invites` @ `88b6eff` (fixes `4f09f6f`, `57dd3ae`, `f6abd16`, `c03a52e`), Neon `ep-delicate-tree`.
+- Own dev server on :3540, started by hand after clearing `.next/dev`, with `RATE_LIMIT_DISABLED=true`, `AUTH_URL`/`E2E_BASE_URL` set to `http://localhost:3540`, the `DOMAINS_*` fakes, `CRON_SECRET` and `STRIPE_WEBHOOK_SECRET`.
+- Stopped by PID (70613, 70629, 70631, 70632, 70780). Port confirmed free afterwards.
+- Disk: 559 GiB free.
+
+**Flag state:** global flags were reset to the CI baseline before the e2e run, with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1` on this worktree's `PLATFORM_DATABASE_URL` (exit 0, COMMIT). After the run, `org_portal.roles`, `members_create` and `officers` read `f` again, so the spec restores what it captured.
+
+**Scope run:**
+- In full: typecheck, lint, `npm run check`, the unit suite.
+- Failing-first: the 6 edited test files against the pre-fix sources, plus two isolating mutations.
+- `git apply --check` on the re-staged patch.
+- e2e (`--project=chromium`, both widths where the spec has them): `community-sign-in-invite`, `no-organization-connect`, `admin-organizations`, `admin-organizations-create`, `designation-revoke`, and the 0.42.3 auth guards `totp-full-login`, `totp-callback-bypass`, `session-claim-integrity`, `branded-signin`.
+- A walk of the three corrected screens in a real browser at 1280 and 360.
+
+**Not re-run (still rests on run 1 at `7832730`):** build, the DB lane, `test-rls-65.sql`, full `test-rls.sql`, the full chromium and custom-hosts projects, the prod lane, coverage, and the live-catalog probes. I checked the fix pass's diff (14 files): it touches no migration or SQL, no `src/auth.ts`, `src/proxy.ts` or `src/lib/authz.ts`, no server action, nothing under `e2e/support/`, no layout and no `src/components/` component. The branch is still behind `origin/main`, and nothing here ran against the merged tree.
+
+## Type Check
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | PASS (exit 0) |
+| `npm run lint` | PASS (exit 0) |
+| `npm run check` | All eight tripwires pass (exit 0) |
+
+## Unit Tests
+
+`vitest run`: 617 files passed, 93 skipped. 9,530 tests passed, 2,803 skipped, 0 failed (28 s). That is run 1's 9,528 plus the 2 new tests. The skips are the `skipIf(!hasDb)` DB suites, which run 1 covered in the DB lane.
+
+## End-to-End Tests
+
+| Spec (chromium, :3540) | Passed |
+|---|---|
+| `community-sign-in-invite.spec.ts` (10 lanes × desktop and 360px) | 20/20 |
+| `no-organization-connect.spec.ts` | 22/22 |
+| `admin-organizations.spec.ts` | 25/25 |
+| `admin-organizations-create.spec.ts` | 6/6 |
+| `designation-revoke.spec.ts` | 8/8 |
+| `totp-full-login.spec.ts` | 1/1 |
+| `totp-callback-bypass.spec.ts` | 7/7 |
+| `session-claim-integrity.spec.ts` | 1/1 |
+| `branded-signin.spec.ts` | 5/5 |
+| **Total** | **95/95**, 0 skipped, 0 flaky, 6.4 min, 1 worker |
+
+**Lane 7** (`community-sign-in-invite.spec.ts:393`) now passes at desktop (11.2 s) and at 360px (10.2 s), starting from CI-baseline flags where `org_portal.roles` is `f`.
+- The spec now captures and sets `org_portal.roles` itself (`:82`, `:90-91`). It does not rely on the baseline file.
+- The steps that run 1 never reached all ran: the Roles and Officers refusals at `:452-455`, the Community list, the three refused views, the absent card, and the accepted-audit row.
+
+**Auth gate:** this is an auth-touching pipeline. The full login path ran against my own dev server: `totp-full-login` (an MFA-enrolled seeded user goes password → a wrong code is refused → the real TOTP → landing), the seven `totp-callback-bypass` cases, `session-claim-integrity` and `branded-signin`. All passed.
+
+**Staged patch:**
+- `git apply --check scripts/sign-in-invitations/test-rls.sql.integration.patch` exits 0 on HEAD.
+- The `a340f1f` copy still fails ("patch failed: scripts/test-rls.sql:8653"), so the re-stage is what fixed it.
+- I applied the patch to a scratch copy of `scripts/test-rls.sql`. The file now ends with `\ir public-calendar/test-rls-67.sql` and then `\ir sign-in-invitations/test-rls-65.sql`, under the corrected "59-62, 64 and 67 above" header.
+
+**Real-browser walk** (a scratch spec outside the repo using the repo fixtures; Chromium at 1280×800 and 360×740).
+- **(a)** On `/no-organization` N1, the founding-administrator card reads "A PresbyPortal administrator invited you to be the founding administrator at E2E Invitation Church. Accepting gives you that role." The treasurer card reads "...the treasurer at E2E Invitation Church. Accepting gives you that access." No touch target is under 44px.
+- **(b)** The Community card for a seated elder (`none`), and for a member whose invitation the platform's org-sent lever had just revoked (`revoked`), both show the ruled `none` line. The elder's card has the `by_sign_in_second_factor` line under it, and the two lines agree on "holds".
+- **(c)** The platform organization page shows:
+  - the heading "Open designation invitations"
+  - the count line and explanation exactly as ruled
+  - the dialog "Revoke every open designation invitation?", whose body names both scopes; the dialog's box is inside the 360 viewport (x=24, w=312)
+  - the toast "All open designation invitations revoked."
+
+  **The scope claim held live:** after the designation takedown, the panel just below still read "1 open" sign-in invitation. The org-sent lever then gave "All open sign-in invitations were revoked." and the matching toast, and the panel went to "0 open … 1 cancelled."
+- No horizontal overflow on any page at either width.
+
+## Regression Tests Added
+
+| Commit | Tests |
+|---|---|
+| `4f09f6f` | `no-organization-copy.test.ts:71-76`; `invitation-cards.test.tsx:67-68` (plus the `not.toMatch(/^Alder invited you/)` check); `e2e/no-organization-connect.spec.ts:367` |
+| `57dd3ae` | `sign-in-copy.test.ts:113` and the new `:303-330`; `sign-in-card.test.tsx:121-123, 132-133`; `revoke-all-invitations.test.tsx:32-36, 44-62`; `org-sent-invitations.test.tsx:64-66` |
+| `f6abd16` | `e2e/community-sign-in-invite.spec.ts:168` (the card line) and `:90-91` (the flag) |
+
+**Failing-first, reproduced independently.**
+- **Pre-fix run:** a `git archive` copy of `88b6eff` in the scratchpad, with `no-organization-copy.ts`, `sign-in-copy.ts`, `revoke-all-invitations.tsx` and `revoke-all-control.tsx` restored from `a340f1f`. The six edited test files gave **11 failed, 79 passed**, matching the implementer's count. Every assertion failed on the old literal ("Alder invited you to be its…", "…It doesn't change what they can do here.", "All open invitations were revoked.") or on the then-missing constants.
+- **Mutation 1, old control message only** (new copy module and section, pre-fix `revoke-all-control.tsx`): both status assertions failed on "All open invitations were revoked." That is 2 failed, 7 passed, and shows the designation status literal goes red by itself, not only behind the dialog assertions.
+- **Mutation 2, old toast only** (the post-fix control with just the toast text set back): both `toHaveBeenCalledWith` toast assertions failed. 2 failed, 7 passed.
+- Lane 7 red-first is run 1's deterministic failure on both widths. It is green now on the same baseline.
+- The scratch copy was deleted by its literal path.
+
+## Coverage on Critical Modules
+
+Not re-run. The pass changed only string constants and their tests. Run 1's figures stand: `permissions.ts` 100%, `two-factor.ts` 91.3%, `flags.ts` 100%, and the 2b modules 93.7–100%.
+
+## Feature-Gate Audit
+
+No protected routes touched in this pass. `actions.ts` (including `revokeAllInvitationsAction`'s `auth()` + `FEATURES.ADMIN_ORGANIZATIONS` + required-`scope` checks) is unchanged since `a340f1f`. The only server-side code changed is the copy module. `revoke-all-control.tsx` is a client component, and its change is limited to which string it shows. Run 1's table stands.
+
+## Schema/RLS Audit
+
+Nothing was touched: no migration, grant, policy or trigger. Run 1's live-catalog probes stand. The only SQL-adjacent change is the staged integration patch, which is now `git apply --check` clean, as shown above.
+
+## Copy Truthfulness — **copy truthfulness: PASS**
+
+- [x] Every added or changed string matches amendment 4's tables word for word: `no-organization-copy.ts:82-83`, `sign-in-copy.ts:121`, `:326-350`. No string outside the Copy tables was added. The comment text is not user-facing.
+- [x] I opened the queries behind each claim.
+  - **(a)** CHECK `account_invitations_purpose_origin_tie` makes every designation `origin='platform'`. The card now matches `invite-summary.tsx:48`.
+  - **(c)** The count (`listInvitationsForOrg`: `origin='platform'`, not superseded, status pending or expired) and the revoke (`revokeAllOpenInvitations`: `origin = SCOPE_ORIGIN[scope]` with accepted, revoked, superseded and blocked all null) cover the same rows. Seen live: the sign-in invitation survived the designation takedown.
+  - **(b)** States a rule, consistent with the bind and resolver path and with the pending-page banner.
+- [x] I traced each instruction to the viewer who sees it. (a) The proven-address account holder, whose button is "Set up two-factor sign-in" or "Accept". (b) A `people.manage` holder, whose button is "Send invitation". (c) A `FEATURES.ADMIN_ORGANIZATIONS` operator: the "handled under" pointer is interpolated from `ORG_SENT_PANEL_COPY.heading`, and that panel renders on every load, directly below.
+- [x] Older strings made false: none left. I grepped `src`, `e2e`, `docs` and `scripts` (work-logs excluded) for "invited you to be its", "doesn't change what they can do", "Revoke every open invitation", "All open invitations", "Open invitations" and "whoever it was sent to". The only hits are the new negative assertions and one JSX comment (`no-organization/page.tsx:208`) that is not rendered.
+
+**Observations (not FAIL; for the orchestrator's `docs/TODO.md`):**
+1. **"the congregation" on a non-congregation's page.** Founding-administrator designations apply to every organization type (`foundingAdministratorPlan`). So on a presbytery's or synod's page, `DESIGNATION_TAKEDOWN_COPY.explanation`, `dialogBody` and `REVOKE_ALL_RESULT_COPY.designations.message` call the organization "the congregation". The statement about scope is still true; only the noun is wrong. It uses the same word as the already-approved `ORG_SENT_PANEL_COPY.revokeAllConfirm` ("this congregation"). A tech-lead follow-up could say "the organization" in all four.
+2. The pointer quotes the heading in sentence case, but CSS renders the heading in uppercase. Cosmetic; a reader can still match it.
+
+## RevokeAllControl's vanishing inline result: ruled a follow-up, not a defect
+
+**Measured** (the walk, both widths):
+
+| Lever | Inline `role="status"` result | Toast |
+|---|---|---|
+| Designations | Present at about 490–990 ms. Gone by 1.0–1.5 s, when the revalidated page drops the section because `openInvitationCount` reached 0 (`page.tsx:286`). | Visible until 4–8 s |
+| `org_sent` | Gone by 1.5 s, when `summary.revocable` reached 0 (`org-sent-invitations.tsx`) | Visible until 4–8 s |
+
+**Why it is not a defect of this pass:**
+- No string is false.
+- The scoped toast (sonner, a live region) carries the result long enough to read.
+- The dialog body states the scope before the operator confirms.
+- The page shows what happened afterwards: the designation section is gone, and the sign-in panel directly below still shows its open count, or after its own lever, "1 cancelled".
+- On `origin/main` the designation lever already has the same structure: the same `openInvitationCount > 0` gate and the same inline status. 2b adds a second instance of it.
+
+**What is lost:** the designation message's second sentence, "Sign-in invitations sent by the congregation were not changed.", is effectively never on screen. Also, the unit tests (`revoke-all-invitations.test.tsx:59`, `org-sent-invitations.test.tsx:64`) check the status line in an isolated render. They prove the words are right, not that the line stays visible on the real page.
+
+**Follow-up (ux-developer, tracked):** either render the success result outside the conditionally rendered section (for example a page-level status that survives revalidation), or drop the inline success line and rely on the toast plus the page's new state. Add an e2e assertion on whichever the design keeps.
+
+## Verdict
+
+**PASS.**
+
+- Run 1's three FAIL items are fixed. Lane 7 is green at both widths on CI-baseline flags. Copy findings (a), (b) and (c) render as ruled, with exact-text tests I independently showed fail on the old text. The staged section-65 patch now applies.
+- The auth gate is met again: own dev server, MFA-enrolled seeded user, full login path, all guard specs green.
+- What I did not re-run is listed under Scope and rests on run 1.
+- Still owed at integration (Rule 16): merge `origin/main`, apply the two staged patches, and re-run `scripts/test-rls.sql` on the merged `development` branch.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 5 — Verification, run 2 | qa | Complete. Flags reset to the CI baseline. typecheck, lint and `npm run check` green; unit 9,530 / 0 failed. Failing-first reproduced (11 red on pre-fix sources; status-only and toast-only mutations each 2 red). The re-staged `test-rls.sql.integration.patch` passes `git apply --check` (the old one fails). e2e on own :3540: 95/95, 0 skipped (lane 7 at desktop and 360px; auth guards incl. an MFA-enrolled full login). Walk of (a), (b), (c) at 1280 and 360: strings as ruled, no overflow, nothing under 44px, scope claim held live. Copy truthfulness PASS with 2 observations. RevokeAllControl's inline result ruled a follow-up (gone at about 1–1.5 s, toast carries it; same structure on `main`). DB lane, prod lane and probes not re-run (rest on run 1). | **PASS** | 2026-10-26 |
+
+## Handoff
+
+- **Next agent: analyst (Phase 6)**, shipped vs intent for Increment 2b.
+- **For the orchestrator's `docs/TODO.md`:**
+  1. RevokeAllControl's success result disappears on revalidation, for both levers (ux-developer follow-up, above).
+  2. "the congregation" → "the organization" in `DESIGNATION_TAKEDOWN_COPY`, `REVOKE_ALL_RESULT_COPY.designations` and `ORG_SENT_PANEL_COPY.revokeAllConfirm` (tech-lead Copy follow-up).
+  3. Amendment 4 observation 2's no-lookup "you choose a password" rewording, for the operator to accept or decline.
+- **Integration (Rule 16):** merge `origin/main`, apply both staged patches, and re-run `scripts/test-rls.sql` on merged `development`.
+
+Logs, walk screenshots and the walk spec are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa2b-r2/`. The screenshots are under `walk/shots/`, the e2e log is `e2e.log`, and the walk log is `walk/walk.log`.

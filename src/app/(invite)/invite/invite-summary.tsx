@@ -5,7 +5,7 @@ import type { InvitationPreview } from "@/lib/onboarding/accept";
 /** What each role means, in plain words (the invitee has not yet seen the product). */
 function roleSummary(purpose: InvitationPreview["purpose"], organizationName: string): string {
   if (purpose === "treasurer") {
-    return `As treasurer you will be able to view gifts and donors, record gifts, and manage giving settings for ${organizationName}. This role requires two-factor sign-in.`;
+    return `As treasurer you will be able to view gifts and donors, record gifts, and manage giving settings for ${organizationName}. If ${organizationName} uses Reimbursements, you can also view reimbursement requests, record payments on them, and choose which groups can receive them. This role requires two-factor sign-in.`;
   }
   return `As founding administrator you will be able to manage people, roles and settings for ${organizationName}, and give access to everyone else there.`;
 }

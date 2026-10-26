@@ -436,6 +436,68 @@ export async function recordPaymentViaDefiner(sql: Sql, input: { orgId: string; 
 }
 
 /**
+ * Sends a SUBMITTED request back (as `returnerUser`), has its creator EDIT it (a line is added to the purpose) and
+ * send it again: the status is `submitted` again and the REVISION is not the one an approver's open page
+ * carries (a revision moves with an edit, not with a status change), which is how a spec makes that page stale
+ * without a second browser. Read the new revision from the database if the spec needs it.
+ */
+export async function returnAndResubmitViaDefiner(
+  sql: Sql,
+  input: { orgId: string; requestId: string; returnerUser: string; requesterUser: string; reason?: string },
+): Promise<void> {
+  const rid = uuidLit(input.requestId);
+  // Every step's `outcome` is checked: a definer that refuses returns a row, not an error, and an unchecked refusal
+  // would leave the request untouched and the spec asserting against a change that never happened.
+  await withDbRetry(`return, edit and resubmit ${input.requestId}`, () =>
+    sql.query(`
+      do $do$
+      declare v_rev integer; v_out text; r reimbursement_requests%rowtype;
+      begin
+        perform set_config('app.current_org_id', ${lit(input.orgId)}, true);
+        select * into r from reimbursement_requests q where q.id = ${rid};
+        select o.outcome into v_out from presby_reimbursement_return(${rid}, r.revision, 'needs_info', ${lit(input.reason ?? "Add the vendor name.")}, ${uuidLit(input.returnerUser)}) o;
+        if v_out <> 'ok' then raise exception 'return refused: %', v_out; end if;
+        select q.revision into v_rev from reimbursement_requests q where q.id = ${rid};
+        select u.outcome, u.revision into v_out, v_rev from presby_reimbursement_update_request(
+          ${rid}, v_rev, r.kind, r.group_id, null, r.vendor_name, r.amount_cents, r.expense_date,
+          r.purpose || ' and binding tape', r.category_id, null, r.no_receipt_claimed, ${uuidLit(input.requesterUser)}) u;
+        if v_out <> 'ok' then raise exception 'update refused: %', v_out; end if;
+        select o.outcome into v_out from presby_reimbursement_submit(${rid}, v_rev, ${uuidLit(input.requesterUser)}) o;
+        if v_out <> 'ok' then raise exception 'submit refused: %', v_out; end if;
+      end $do$`),
+  );
+}
+
+/**
+ * Calls the approve definer as `actorUser` on the seat path and returns its `outcome` (`ok`, `not_found`,
+ * `not_approvable`, `already_decided`, ...), or `denied` when the definer's identity check refused. The
+ * outcome is carried out of the `DO` block by an exception, whose message the http driver returns; the
+ * exception also rolls the block back, so an `ok` is REPORTED and never APPLIED: a spec uses this to ask
+ * "would the database let them?" without changing the request.
+ */
+export async function approveViaDefiner(sql: Sql, input: { orgId: string; requestId: string; actorUser: string }): Promise<string> {
+  try {
+    await sql.query(`
+      do $do$
+      declare v_rev integer; v_outcome text;
+      begin
+        perform set_config('app.current_org_id', ${lit(input.orgId)}, true);
+        select revision into v_rev from reimbursement_requests where id = ${uuidLit(input.requestId)};
+        select a.outcome into v_outcome from presby_reimbursement_approve(${uuidLit(input.requestId)}, v_rev, 'seat', ${uuidLit(input.actorUser)}) a;
+        raise exception 'OUTCOME:%', coalesce(v_outcome, 'ok');
+      end $do$`);
+  } catch (err) {
+    const message = String((err as { message?: unknown }).message ?? err);
+    const match = /OUTCOME:(\w+)/.exec(message);
+    if (match) return match[1]!;
+    // The definer's own identity refusal (`presby_deny_reimbursement`); anything else is a defect in the block, not an answer.
+    if (/reimbursement: not permitted/.test(message)) return "denied";
+    throw err;
+  }
+  throw new Error("[reimbursement-fixture] approveViaDefiner: the block returned without an outcome");
+}
+
+/**
  * Bulk `import`-origin PAID requests, each with its payment and its `imported` event, in ONE
  * statement (the deferred status/payment/event consistency checks fire at the statement's commit and
  * see all three). The migration-import door of EC36, used only to cross the CSV row cap (20,000) in

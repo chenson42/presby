@@ -70,7 +70,7 @@ export function OpenPostingView({
             To apply, please contact {organizationName}.{" "}
             {contactPhone ? (
               <>
-                You can reach us at {contactPhone}, or through the contact details on{" "}
+                You can reach us at <span className="whitespace-nowrap">{contactPhone}</span>, or through the contact details on{" "}
                 <a href={urls.home()} className="text-primary underline underline-offset-4">
                   our website
                 </a>

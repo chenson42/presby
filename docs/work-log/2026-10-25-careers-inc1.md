@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (parent log) | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete (parent log) | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete for Increment 1 | Design complete; implementers named | 2026-10-25 |
-| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete, `dcbb94a`; Batch 2 (api-developer) complete, `755cc8b`..`d69b6b2`; Batch 3 (ux-developer) pending | — | 2026-10-25 |
+| 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete, `dcbb94a`; Batch 2 (api-developer) complete, `755cc8b`..`d69b6b2`; Batch 3 (ux-developer) complete, `2da6bdf`..`5ab2e0d` and the commit recording this section | — | 2026-10-25 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1032,6 +1032,52 @@ Strings added or changed (all from Copy):
 **Open for the orchestrator.** No integration patch is needed for this batch (no Rule 16 file was edited; `scripts/careers/*.integration.patch` are Batch 1's). Apply 0067 to development as the calendar pipeline's own integration step requires. The cron's careers audit rows carry the cron request's user agent (`vercel-cron/1.0`) because `insertAuditRow` reads request headers; no ip, actor null.
 
 **Next:** ux-developer (Batch 3).
+
+## Phase 4 - Batch 3 (ux-developer)
+
+**Date:** 2026-10-25. **Commits:** `2da6bdf` (public pages, slot, shared components), `adeeb19` (staff pages, editor, status controls), `5ab2e0d` (e2e and hydration specs, fixture), and the commit that records this section (it also carries a one-line wrap fix, below). **Neon branch:** `pipeline-careers`. Dev server on :3580 and prod lane on :3581, both stopped by PID; :3000 never touched. Orchestrator rulings applied: no Reopen on "Never published" rows; "Add a description before publishing." accepted as Copy.
+
+### Files Created
+- `src/components/careers/`: `posting-description.tsx` (site-kit `<Prose>` in a wrapper with its own typography, no `.presby-site`), `posting-meta.tsx`, `careers-list.tsx`, `careers-notice.tsx`, each with a test.
+- Public: `(public)/site/[slug]/careers-slot.tsx`, `careers/page.tsx`, `careers/[posting]/page.tsx`, `careers/posting-view.tsx`, with tests.
+- Staff, `(org)/o/[slug]/admin/careers/`: `page.tsx`, `new/page.tsx`, `[postingId]/page.tsx`, `careers-access.tsx` (the repeated `(org)` auth ladder in one place), `careers-states.tsx`, `postings-list.tsx`, `placement-line.tsx`, `posting-form.tsx`, `posting-schema.ts` (+ golden test), `description-editor.tsx`, `description-preview.tsx`, `status-controls.tsx`, `move-buttons.tsx`, with tests.
+- e2e: `e2e/careers.spec.ts` (20), `e2e/custom-domains/careers.spec.ts` (9), `e2e/hydration/careers-posting-form.spec.ts` (3), `e2e/support/careers-fixture.ts` (NEW file; no existing support file edited).
+
+### Files Modified
+- `render-site-page.tsx`: the `careers` liveSlot entry beside `eventsCalendar` (closes over the database slug and `urls` only).
+- Tests: `[[...path]]/page.test.tsx` (slot-key set now includes `careers`, plus a closure test: author filter ignored, props are exactly `slug` and `urls`), `give/fall-through.test.tsx` (mocks the careers reader, as it does the calendar's).
+
+### Schema Changes / Audit Events
+None. Batch 3 writes no audit rows itself; the e2e asserts the lib's rows (publish, close, reopen present with ids and an enum only; none for discard).
+
+### Deviations (each restated)
+1. **Fixture location.** `e2e/support/careers-fixture.ts` is a new file under `e2e/support/` (the design lists it there). No existing file in that directory changed. If the orchestrator reads Rule 16's `e2e/support/*` as "no new files either", move it; nothing else depends on its location but the three specs' imports.
+2. **Editor toolbar has no `role="toolbar"`/aria-label.** A label would be a string outside Copy, and labelling it by "Description" made two controls share a name. It is a plain group of seven labelled buttons.
+3. **Pay-unit select has no label text of its own** (Copy gives none): it is named by the "Pay (optional)" legend through `aria-labelledby`, defaults to "per hour", and the unit is sent only when an amount is.
+4. **Publish and Reopen save unsaved edits first** (`prepare` in `posting-form.tsx`), then change status on the returned version; a failed save publishes nothing. Not in the design; it prevents publishing the saved text while the screen shows newer text. Close and Discard never save.
+5. **Reopen is disabled (not just noted)** when the closing date has passed; the Copy note sits beside it.
+6. **Placement line with several slot pages** lists them ("/a, /b and /c pages"); Copy shows one `{path}`.
+7. **Public pages with an unknown organization name** (a `failed` read) show the h1 "Job openings" and the P1 notice, with no back link, because the name is unknown.
+8. **Titles are limited to 150 characters** by the database, so the "200-character unbroken title" fixtures are 150 (the maximum).
+9. **"Direct action call is refused" (T25)** is proven as: a tampered read-only field is ignored by the form, and the owner connection cannot change a published slug (the trigger). A raw Server Action POST is not driven (no stable action id from outside); the lib's refusal is `postings.db.test.ts`'s.
+10. **No Staff-side `loading.tsx`** anywhere in the new routes (they redirect or 404).
+
+### Tests and gates
+- New unit tests: 134 across 18 files (components 12 + notices; slot 5; posting-view 5; public pages 17; staff: states 4, placement 7, list 10, move 5, status 10, editor 13, form 15, pages 17, schema golden 11; plus the two touched existing files). Plain `npm test`: 622 files passed, 85 skipped; 9505 tests passed, 2597 skipped (Batch 2: 606/9364).
+- `npm run typecheck`, `npm run lint` (0 warnings), `npm run check` (all eight), `npm run build`: pass. `boundaries.test.ts` (T24) green with the UI present; it caught a `confirm(` function name in `status-controls.tsx`, renamed.
+- e2e on :3580 (RATE_LIMIT_DISABLED, DOMAINS_* fakes, CRON_SECRET, STRIPE_WEBHOOK_SECRET, E2E_ALLOW_SHARED_DB): `chromium` project `careers.spec.ts` 20/20 and the hydration spec 3/3; `custom-hosts` project `careers.spec.ts` 9/9 plus `lockdown.spec.ts` 30/30. Prod lane on :3581 (`PW_PROD_BUILD=1 PW_PROD_PORT=3581`, own `next build` and `next start`): hydration spec 3/3.
+- Negative controls: with `<HydrationGate>` removed from `posting-form.tsx` the hydration spec's new-form and edit-form tests go red; with `!hydrated ||` removed from the move buttons its list test goes red. Both restored (diff clean). A first e2e run caught a test-side mistake (`Control+a` is "line start" on macOS; now `ControlOrMeta+a`), not a product defect.
+- Editor route client chunk: the one chunk carrying the editor, the preview and all of site-kit is 56,171 bytes raw / 17,717 bytes gzip (production build, minified). `<Prose>` bundles for the client; the design's server-preview fallback was not needed.
+
+### Browser walk (real Chromium, dev server, both hosts)
+A throwaway congregation (removed afterwards) with four published postings (one with a 150-character unbroken title, one past its closing date), a draft, a closed and a discarded posting, a site whose bundle carries the slot on `/employment`, a profile phone and a live custom host `walk-careers.invalid`. Screenshots at 360x800 (touch, mobile) and 1280x900 of: public list, open posting, closed posting, slot page, 150-character-title posting (platform host); list, posting, slot page (custom host); staff list (Closed section opened), new, edit for a published, draft, closed and discarded posting; plus the staff forbidden and feature-off states at 360px. Read by eye: platform list, open posting, closed posting, slot-in-chrome, staff list and published-edit at 360px, and the open posting at 1280px; the rest were captured with the same assertions the specs make (no horizontal scroll, 44px targets) and were not each opened. Findings: none blocking. One cosmetic fix made: the profile phone broke across lines at a hyphen in "How to apply", so it is now `whitespace-nowrap`. The Next dev overlay button appears in the screenshots and is not part of the app.
+
+### Implementer Notes
+Strings added, all from Copy: P1-P9 in `careers-notice.tsx`, `careers-list.tsx`, `posting-meta.tsx`, `posting-view.tsx`, `careers/page.tsx`; S1-S4 in `careers-states.tsx`; S5 in `placement-line.tsx`; S6 in `posting-form.tsx`, `description-editor.tsx`, `description-preview.tsx` and the Reopen note in `status-controls.tsx`; S7 in `postings-list.tsx`; S8 dialogs and toasts in `status-controls.tsx`, `posting-form.tsx`, `move-buttons.tsx`. Not in Copy and flagged: the no-name `failed` page shows P3's "Job openings" as its only heading (deviation 7); the section `aria-label="Job openings"` on the slot (P3's words); the toolbar group has no accessible name (deviation 2); the "Reload" button on the stale message is S8's.
+
+**Integration text for the orchestrator:** none new. Batch 3 edits no Rule 16 file, so there is no new `scripts/careers/*.integration.patch`. The four from Batch 1 stand. At ship (tech-lead): the CLAUDE.md Project Layout lines already cover `src/components/careers/`.
+
+**Next:** qa (Phase 5).
 
 ---
 

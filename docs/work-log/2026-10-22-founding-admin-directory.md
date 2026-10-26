@@ -8614,3 +8614,52 @@ Failure text (`outcome.error`, `DB_ERROR_COPY`, "Invalid scope.", "Forbidden.") 
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | Inc 2b · 3c — Technical design amendment 4 (Copy, QA run 1 findings a-c) | tech-lead | Complete. Three strings ruled with the four checks and exact-text tests; three observations kept as known; implementer named | Design complete; implementer named | 2026-10-26 |
+
+
+---
+
+## Phase 4 — QA run 1 fix pass (full-stack-developer, 2026-10-26)
+
+**Scope:** amendment 4 (a), (b) and (c), the lane 7 flag fix, and the re-staged section-65 patch. Copy, test and staged-asset changes only; no SQL, permission, flag, route, audit or `src/auth.ts` / `src/proxy.ts` / `src/lib/authz.ts` change. `scripts/test-rls.sql` and `e2e/support/*` are untouched; `e2e-global-setup.integration.patch` was applied for the run and reverted (`git checkout -- e2e/support/global-setup.ts`), never committed.
+
+### Commits (branch `pipeline/signin-invites`, none pushed)
+
+| Commit | What |
+|---|---|
+| `4f09f6f` | (a) `NO_ORG_INVITATION_COPY.cardDesignation` names "A PresbyPortal administrator" as the sender: `no-organization-copy.ts`; tests `no-organization-copy.test.ts`, `invitation-cards.test.tsx` (plus the `not.toMatch(/^Alder invited you/)` property), `e2e/no-organization-connect.spec.ts` |
+| `57dd3ae` | (b) `SIGN_IN_CARD_COPY.none` ("... and any role or seat they hold here then takes effect.") and (c) `DESIGNATION_TAKEDOWN_COPY` + `REVOKE_ALL_RESULT_COPY` (typed `Record<RevokeAllScope, ...>`) in `sign-in-copy.ts`, wired into `revoke-all-invitations.tsx` (heading, count line plus explanation, dialog title and body) and `revoke-all-control.tsx` (per-scope message and toast); tests `sign-in-copy.test.ts` (both new constants are also in the "never claims" walk), `sign-in-card.test.tsx` (literal `toContain` / `not.toContain` on `none` and `revoked`), `revoke-all-invitations.test.tsx`, `org-sent-invitations.test.tsx` (literals; toast spy hoisted; `not.toContain("designation")`) |
+| `f6abd16` | e2e: `community-sign-in-invite.spec.ts` reads the corrected card line (b) and sets and captures `org_portal.roles` (a spec-local `ROLES_FLAG`, since `e2e/support/*` is a Rule 16 shared file; not added to the baseline file) |
+| `c03a52e` | `scripts/sign-in-invitations/test-rls.sql.integration.patch` re-staged: hunks 1 and 2 unchanged, hunk 3 is now the section-65 `\ir` appended after the section-67 include (header text reads "59-62, 64 and 67 above") |
+
+### Red then green
+
+- **Unit, red first:** the six edited test files run against the unchanged source gave 11 failed, 79 passed: `no-organization-copy.test.ts` (group C literals), `invitation-cards.test.tsx` x2, `sign-in-copy.test.ts` x3 (card `none`, and the two new takedown / result tests failing on the then-missing constants), `sign-in-card.test.tsx` x2 (`none`, `revoked`), `revoke-all-invitations.test.tsx` x2 (count regexes and dialog title; the status/toast literals sit behind the dialog assertions), `org-sent-invitations.test.tsx` (status text "All open invitations were revoked." not equal to the new scope-named text). After the source change the same files: 89 files passed, 1,621 tests, 0 failed.
+- **Patch, red first:** the HEAD copy of the patch fails `git apply --check` ("patch failed: scripts/test-rls.sql:8653"); the re-staged patch passes it (exit 0) against the current tree.
+- **Lane 7, red first:** QA run 1 reproduced the failure deterministically on the baseline flags (both widths, `:449-451`, "Role administration isn't turned on"); green now (below). I did not re-break it a second time.
+
+### Gate
+
+| Check | Result |
+|---|---|
+| `npm run typecheck`, `npm run lint` | pass |
+| `npm run check` (all eight tripwires) | pass |
+| Unit suite (`vitest run`) | 617 files passed, 93 skipped; 9,530 passed, 2,803 skipped, 0 failed (QA's 9,528 plus the 2 new tests) |
+| e2e, own dev server :3540 (PID 51141, stopped by PID, port confirmed free), flags reset to the CI baseline first (`e2e-reset-flags.sql -v pipeline_branch=1`) | `community-sign-in-invite.spec.ts` (10 lanes x 2 widths, lane 7 included) and `no-organization-connect.spec.ts`: 42/42 passed. `admin-organizations*.spec.ts` + `designation-revoke.spec.ts`: 39/39 passed |
+| Look at the three corrected surfaces at 360 and 1280 (a temporary spec, deleted, not committed; screenshots under `.../scratchpad/shots/`) | (a) the N1 designation card reads "A PresbyPortal administrator invited you to be the founding administrator at E2E Invitation Church. Accepting gives you that role."; (b) the Community card reads the new `none` line; (c) the platform panel section, the dialog ("Revoke every open designation invitation?", body names both scopes) and the post-revoke inline message plus toast all read as ruled. `noHorizontalOverflow` held on all three pages at both widths; the dialog fits the viewport at 360 |
+
+### Notes
+
+- The prod lane (:3541), the DB lane and `test-rls-65.sql` were not re-run: nothing in this pass touches the build graph, a migration or SQL, and QA's amendment 4 handoff scopes the re-run to the changed files, lane 7 and the walk.
+- The inline revoke-all result is rendered by `RevokeAllControl` inside a section that `page.tsx` renders only while `openCount > 0`. In my walk both the message and the toast were present about 400 ms after the click, so the message is announced, but it is not guaranteed to persist once the revalidated page drops the section. Pre-existing structure, unchanged by this pass; offered to QA / the operator as an observation, not changed.
+- The three observations (one more step, "you choose a password", the unhedged hand-off) stand as ruled in amendment 4. Observation 2's follow-up is for the orchestrator's `docs/TODO.md`, not this pass.
+- Still owed at integration, not mine: merging `origin/main`, then applying the two staged patches and re-running `scripts/test-rls.sql` on the merged `development` branch (Rule 16).
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 4 — QA run 1 fix pass | full-stack-developer | Complete. Amendment 4 (a), (b), (c) applied with exact-text tests (11 red, then 89 files green); lane 7 sets `org_portal.roles`; section-65 patch re-staged and `git apply --check` clean. typecheck, lint, `npm run check`, unit 9,530/0 failed; e2e 42/42 and 39/39 on :3540 from baseline flags; 360/1280 look done. Four commits, not pushed | Ready for QA run 2 | 2026-10-26 |
+
+### Handoff
+
+- **To QA (run 2):** re-run the changed unit files, `community-sign-in-invite.spec.ts` (lane 7 at both widths), `no-organization-connect.spec.ts` and the admin organization specs on reset flags; walk the three corrected surfaces at 360 and 1280. Everything else in run 1 stands (this pass touched no auth file, migration or `e2e/support/`).

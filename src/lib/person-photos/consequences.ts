@@ -68,6 +68,17 @@ function websiteIsWithheld(state: PhotoStateSnapshot): boolean {
 }
 
 /**
+ * Is the website not showing this person's photo, for a reason the snapshot can establish? Everything
+ * `websiteIsWithheld` knows, plus NOT LISTED: listing is a roster-function gate the SQL core
+ * (`presby_person_public_photo`) does not apply, so an unlisted person's website photo is returned by
+ * the core and shown by no roster. Site publication is NOT read, so a sentence that depends on it must
+ * not claim a visible result (Phase 5 run 2, R-d1).
+ */
+function websiteNotShowing(state: PhotoStateSnapshot): boolean {
+  return websiteIsWithheld(state) || !state.listed;
+}
+
+/**
  * Is the CURRENT directory photo what the public website is showing for this person right now?
  * A description of the SQL (a withheld person's photo is not shown), never a second authority.
  */
@@ -75,7 +86,11 @@ export function directoryPhotoServesWebsite(state: PhotoStateSnapshot): boolean 
   return state.directory?.attested === true && state.website === null && state.listed && !websiteIsWithheld(state);
 }
 
-/** The sentence for a withheld website, by reason (only called when `websiteWithheld` is set). */
+/**
+ * The sentence for a withheld website, by reason. Only called when `websiteWithheld` or
+ * `directoryWithheld` is set: `merged` wins (as in the SQL), otherwise the hide is known, because
+ * `hide_photo` is person-level and a directory answer of it is one the website core would give too.
+ */
 function websiteWithheldLine(state: PhotoStateSnapshot): string {
   return state.websiteWithheld === "merged" ? C.websiteMerged : C.websiteHidden(state.first);
 }
@@ -90,7 +105,7 @@ export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent):
       if (state.minor) return [C.minorBlocked(first)];
       if (state.directoryWithheld !== null) lines.push(C.directoryHidden(first));
       if (intent.attested) {
-        if (state.websiteWithheld !== null) lines.push(websiteWithheldLine(state));
+        if (state.websiteWithheld !== null || state.directoryWithheld !== null) lines.push(websiteWithheldLine(state));
         else
           lines.push(
             state.listed && state.website === null
@@ -106,7 +121,7 @@ export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent):
 
     case "designate_website": {
       if (state.minor) return [C.minorBlocked(first)];
-      if (state.websiteWithheld !== null) lines.push(websiteWithheldLine(state));
+      if (state.websiteWithheld !== null || state.directoryWithheld !== null) lines.push(websiteWithheldLine(state));
       else lines.push(state.listed ? C.websiteListed(first) : C.websiteNotListed(first));
       if (state.website !== null && state.website.photoId !== intent.photoId) lines.push(C.websiteReplaces);
       return lines;
@@ -133,7 +148,7 @@ export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent):
       const isWebsite = state.website?.photoId === intent.photoId;
       const isFallback = isDirectory && directoryPhotoServesWebsite(state);
       if (isDirectory) lines.push(C.removeIsDirectory(first));
-      if (isWebsite) lines.push(websiteIsWithheld(state) ? C.removeIsWebsiteWithheld : C.removeIsWebsite);
+      if (isWebsite) lines.push(websiteNotShowing(state) ? C.removeIsWebsiteWithheld : C.removeIsWebsite);
       if (isFallback) lines.push(C.removeIsFallback);
       if (isWebsite || isFallback) lines.push(C.removeCaches);
       return lines;

@@ -156,7 +156,7 @@ export const CONSEQUENCE_COPY = {
   websiteListed: (first: string) =>
     `${first} is listed, so this photo can appear on the website while the website is published, unless something withholds it, such as ${first} hiding their photo or appearing to be under 18.`,
   websiteNotListed: (first: string) =>
-    `${first} isn't listed on the public website yet, so this photo won't appear until they are.`,
+    `${first} isn't listed on the public website, so this photo won't appear there while that is so.`,
   websiteReplaces: "This replaces the current website photo.",
   // C4 (Phase 5 run 1, R-a3): what withholds a photo, said before the click
   minorBlocked: (first: string) =>
@@ -179,9 +179,9 @@ export const CONSEQUENCE_COPY = {
   removeBase: "It will no longer be used anywhere. The image file stays in storage and can't be erased from here.",
   removeIsDirectory: (first: string) =>
     `It is ${first}'s directory photo, so wherever ${first} appears in the directory it will show initials instead.`,
-  removeIsWebsite: "It is also their website photo, so it will leave the public website.",
+  removeIsWebsite: "It is also their website photo, so the public website can no longer show it.",
   removeIsWebsiteWithheld: "It is also their website photo, which the website isn't showing at the moment.",
-  removeIsFallback: "It is also being used on the public website because it was cleared for it.",
+  removeIsFallback: "It is also the photo the public website uses for them, because it was cleared for the website.",
   removeCaches: "Browsers that already saved it can keep showing it for up to a day.",
 } as const;
 

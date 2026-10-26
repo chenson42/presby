@@ -39,6 +39,10 @@ const S = {
   websiteHidden: "Ada has hidden their photo, so the website won't show this photo while that is so.",
   websiteMerged: "This record was merged into another, so the website won't show this photo.",
   removeIsWebsiteWithheld: "It is also their website photo, which the website isn't showing at the moment.",
+  // Phase 5 run 2 (R-d2, R-d4, R-d5), literal.
+  removeIsWebsite: "It is also their website photo, so the public website can no longer show it.",
+  removeIsFallback: "It is also the photo the public website uses for them, because it was cleared for the website.",
+  websiteNotListed: "Ada isn't listed on the public website, so this photo won't appear there while that is so.",
   directoryInitials: "Wherever Ada appears in the directory, their initials will show instead.",
   removeIsDirectory: "It is Ada's directory photo, so wherever Ada appears in the directory it will show initials instead.",
 } as const;
@@ -112,7 +116,7 @@ const rows: Row[] = [
     name: "website, first, not listed",
     state: state({ listed: false }),
     intent: { kind: "designate_website", photoId: A },
-    expected: [C.websiteNotListed(first)],
+    expected: [S.websiteNotListed],
   },
   {
     name: "website, replacing another website photo: adds the replacement line",
@@ -124,7 +128,7 @@ const rows: Row[] = [
     name: "website, choosing the photo that is already the website photo: it replaces nothing",
     state: state({ listed: false, website: { photoId: A } }),
     intent: { kind: "designate_website", photoId: A },
-    expected: [C.websiteNotListed(first)],
+    expected: [S.websiteNotListed],
   },
 
   // --- consequence 2: un-designating a website photo
@@ -190,19 +194,19 @@ const rows: Row[] = [
     name: "remove a photo that is both the directory and the website photo (consequence 3)",
     state: state({ listed: true, website: { photoId: A }, directory: { photoId: A, attested: true } }),
     intent: { kind: "remove", photoId: A },
-    expected: [C.removeBase, S.removeIsDirectory, C.removeIsWebsite, C.removeCaches],
+    expected: [C.removeBase, S.removeIsDirectory, S.removeIsWebsite, C.removeCaches],
   },
   {
     name: "remove the website photo only",
     state: state({ listed: true, website: { photoId: A }, directory: { photoId: B, attested: true } }),
     intent: { kind: "remove", photoId: A },
-    expected: [C.removeBase, C.removeIsWebsite, C.removeCaches],
+    expected: [C.removeBase, S.removeIsWebsite, C.removeCaches],
   },
   {
     name: "remove a cleared directory photo the website is using as the fall-back",
     state: state({ listed: true, directory: { photoId: A, attested: true } }),
     intent: { kind: "remove", photoId: A },
-    expected: [C.removeBase, S.removeIsDirectory, C.removeIsFallback, C.removeCaches],
+    expected: [C.removeBase, S.removeIsDirectory, S.removeIsFallback, C.removeCaches],
   },
   {
     name: "remove a cleared directory photo while not listed: it is not on the website, so no website sentences",
@@ -237,10 +241,10 @@ const rows: Row[] = [
     expected: [S.directoryHidden],
   },
   {
-    name: "designate directory ticked, directory withheld, listed, no website photo: hidden sentence first, then the hedged website one",
+    name: "designate directory ticked, directory withheld, listed, no website photo: hidden sentence, then the website-hidden one (R-d6, T14)",
     state: state({ directoryWithheld: "hide_photo", listed: true }),
     intent: { kind: "designate_directory", photoId: A, attested: true },
-    expected: [S.directoryHidden, S.directoryAlsoOnWebsite],
+    expected: [S.directoryHidden, S.websiteHidden],
   },
   {
     name: "designate directory ticked, website withheld (hide_photo): the website-hidden sentence replaces the website one",
@@ -313,6 +317,55 @@ const rows: Row[] = [
     state: state({ listed: true, minor: true, directory: { photoId: A, attested: true } }),
     intent: { kind: "remove", photoId: A },
     expected: [C.removeBase, S.removeIsDirectory],
+  },
+
+  // --- Phase 5 run 2 (R-d1, R-d2, R-d5, R-d6): T12, T13, T14
+  {
+    name: "T12 remove the website photo of an UNLISTED person: the withheld wording, never 'leave the public website'",
+    state: state({ listed: false, website: { photoId: A } }),
+    intent: { kind: "remove", photoId: A },
+    expected: [C.removeBase, S.removeIsWebsiteWithheld, C.removeCaches],
+  },
+  {
+    name: "T12 remove the directory-and-website photo of an UNLISTED person",
+    state: state({ listed: false, website: { photoId: A }, directory: { photoId: A, attested: true } }),
+    intent: { kind: "remove", photoId: A },
+    expected: [C.removeBase, S.removeIsDirectory, S.removeIsWebsiteWithheld, C.removeCaches],
+  },
+  {
+    name: "T13 remove the website photo of a listed person: the hedged 'can no longer show it'",
+    state: state({ listed: true, website: { photoId: A } }),
+    intent: { kind: "remove", photoId: A },
+    expected: [C.removeBase, "It is also their website photo, so the public website can no longer show it.", C.removeCaches],
+  },
+  {
+    name: "T13 remove the fall-back directory photo: the selection wording",
+    state: state({ listed: true, directory: { photoId: A, attested: true } }),
+    intent: { kind: "remove", photoId: A },
+    expected: [
+      C.removeBase,
+      S.removeIsDirectory,
+      "It is also the photo the public website uses for them, because it was cleared for the website.",
+      C.removeCaches,
+    ],
+  },
+  {
+    name: "T14 designate website, hidden photo known only through the directory answer: the website-hidden sentence",
+    state: state({ listed: true, directory: { photoId: B, attested: false }, directoryWithheld: "hide_photo" }),
+    intent: { kind: "designate_website", photoId: A },
+    expected: [S.websiteHidden],
+  },
+  {
+    name: "T14 the clear dialog (attested directory), hidden photo known through the directory answer",
+    state: state({ listed: true, directory: { photoId: A, attested: false }, directoryWithheld: "hide_photo" }),
+    intent: { kind: "designate_directory", photoId: A, attested: true },
+    expected: [S.directoryHidden, S.websiteHidden],
+  },
+  {
+    name: "T14 attested directory, hidden and merged: merged wins on the website line, as in the SQL",
+    state: state({ listed: true, directoryWithheld: "hide_photo", websiteWithheld: "merged" }),
+    intent: { kind: "designate_directory", photoId: A, attested: true },
+    expected: [S.directoryHidden, S.websiteMerged],
   },
 ];
 
@@ -393,6 +446,60 @@ describe("no consequence sentence promises what a withheld state would break (T2
       if (s.minor || s.websiteWithheld !== null || s.directoryWithheld !== null)
         expect(directoryPhotoServesWebsite(s), JSON.stringify(s)).toBe(false);
     }
+  });
+});
+
+/**
+ * T15 (Phase 5 run 2): the effect-verb properties over the same product as T2.
+ */
+describe("effect verbs are never promised where listing or a withhold applies (T15)", () => {
+  const bools = [false, true];
+  const directories: PhotoStateSnapshot["directory"][] = [null, { photoId: B, attested: false }, { photoId: A, attested: true }];
+  const websites: PhotoStateSnapshot["website"][] = [null, { photoId: A }];
+  const dirWithheld: PhotoStateSnapshot["directoryWithheld"][] = [null, "hide_photo"];
+  const webWithheld: PhotoStateSnapshot["websiteWithheld"][] = [null, "hide_photo", "merged"];
+  const removes: PhotoIntent[] = [
+    { kind: "remove", photoId: A },
+    { kind: "remove", photoId: B },
+  ];
+  const designates: PhotoIntent[] = [
+    { kind: "designate_directory", photoId: A, attested: false },
+    { kind: "designate_directory", photoId: A, attested: true },
+    { kind: "designate_website", photoId: A },
+  ];
+  const states: PhotoStateSnapshot[] = [];
+  for (const listed of bools)
+    for (const minor of bools)
+      for (const directory of directories)
+        for (const website of websites)
+          for (const directoryWithheld of dirWithheld)
+            for (const websiteWithheld of webWithheld)
+              states.push(state({ listed, minor, directory, website, directoryWithheld, websiteWithheld }));
+
+  it("(i) no remove result says the photo 'will leave the public website', in any state", () => {
+    for (const s of states)
+      for (const intent of removes)
+        for (const line of consequencesFor(s, intent))
+          expect(line, JSON.stringify([s, intent])).not.toContain("so it will leave the public website");
+  });
+
+  it("(ii) when the person is not listed, or anything is withheld, no remove result says the public website 'can no longer show' it", () => {
+    const quiet = states.filter((s) => !s.listed || s.minor || s.websiteWithheld !== null || s.directoryWithheld !== null);
+    expect(quiet.length).toBeGreaterThan(0);
+    for (const s of quiet)
+      for (const intent of removes)
+        for (const line of consequencesFor(s, intent)) {
+          expect(line, JSON.stringify([s, intent])).not.toBe(C.removeIsWebsite);
+          expect(line, JSON.stringify([s, intent])).not.toBe(C.removeIsFallback);
+        }
+  });
+
+  it("(iii) when the directory answer is withheld, no designate result says the photo 'can appear'", () => {
+    const hidden = states.filter((s) => s.directoryWithheld !== null);
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const s of hidden)
+      for (const intent of designates)
+        for (const line of consequencesFor(s, intent)) expect(line, JSON.stringify([s, intent])).not.toMatch(/can (also )?appear/);
   });
 });
 

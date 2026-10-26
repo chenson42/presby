@@ -66,6 +66,25 @@ describe("website line", () => {
     ).toBe(WEBSITE_LINES.minor(first));
   });
 
+  it("T19 (R-d6): a hidden photo known through the directory row replaces the unattested remedy; minor still wins; with neither the remedy stands", () => {
+    const status = web({ unattestedDirectoryOnly: true });
+    expect(websiteLine(first, status, false, true)).toBe(WEBSITE_LINES.hide(first));
+    expect(websiteLine(first, status, true, true)).toBe(WEBSITE_LINES.minor(first));
+    expect(websiteLine(first, status, false, false)).toBe(WEBSITE_LINES.unattested);
+    expect(websiteLine(first, status)).toBe(WEBSITE_LINES.unattested);
+    expect(
+      statusLines({ first, directory: dir({ withheld: "hide_photo" }), website: status, listings: [], minor: false }).website,
+    ).toBe(WEBSITE_LINES.hide(first));
+    expect(
+      statusLines({ first, directory: dir({ withheld: "hide_photo" }), website: status, listings: [], minor: true }).website,
+    ).toBe(WEBSITE_LINES.minor(first));
+    expect(statusLines({ first, directory: dir(), website: status, listings: [], minor: false }).website).toBe(WEBSITE_LINES.unattested);
+  });
+
+  it("T19: a hidden directory photo does not change the 'none' line when nothing is unattested (the page cannot know)", () => {
+    expect(websiteLine(first, web(), false, true)).toBe(WEBSITE_LINES.none);
+  });
+
   it("a minor with nothing chosen still reads 'none': only the unattested remedy is swapped", () => {
     expect(websiteLine(first, web(), true)).toBe(WEBSITE_LINES.none);
   });

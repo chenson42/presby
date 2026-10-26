@@ -25,7 +25,13 @@ export function directoryLine(first: string, status: DirectoryStatus): string | 
   }
 }
 
-export function websiteLine(first: string, status: WebsiteStatus, minor = false): string | null {
+export function websiteLine(
+  first: string,
+  status: WebsiteStatus,
+  minor = false,
+  /** The directory answer reported `hide_photo`: person-level, so the website core would withhold it too (R-d6). */
+  directoryHidden = false,
+): string | null {
   switch (status.withheld) {
     case "toggle_off":
       return null;
@@ -44,7 +50,13 @@ export function websiteLine(first: string, status: WebsiteStatus, minor = false)
   // never cleared for the website, and no website photo is chosen.
   // A remedy that cannot be performed is not offered: the store refuses a minor, and the page has no
   // "Clear for website" button for one (Phase 5 run 1, R-b4).
-  if (status.unattestedDirectoryOnly) return minor ? WEBSITE_LINES.minor(first) : WEBSITE_LINES.unattested;
+  // A hidden photo is known through the directory row even though the website core returns no row
+  // for an unattested photo (no candidate), so the remedy would be offered to someone it cannot help.
+  if (status.unattestedDirectoryOnly) {
+    if (minor) return WEBSITE_LINES.minor(first);
+    if (directoryHidden) return WEBSITE_LINES.hide(first);
+    return WEBSITE_LINES.unattested;
+  }
   return WEBSITE_LINES.none;
 }
 
@@ -64,7 +76,7 @@ export function statusLines(input: {
 }): StatusLines {
   return {
     directory: directoryLine(input.first, input.directory),
-    website: websiteLine(input.first, input.website, input.minor),
+    website: websiteLine(input.first, input.website, input.minor, input.directory.withheld === "hide_photo"),
     listing: listingLine(input.first, input.listings),
   };
 }

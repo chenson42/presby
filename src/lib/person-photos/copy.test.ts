@@ -268,6 +268,25 @@ describe("the Phase 5 run 1 copy rulings (exact text)", () => {
     expect(DESIGNATE_COPY.clear.confirm).toBe("Clear for website");
   });
 
+  it("Phase 5 run 2: the three replaced strings verbatim (R-d2, R-d4, R-d5), and websiteStops unchanged (R-d3)", () => {
+    expect(CONSEQUENCE_COPY.removeIsWebsite).toBe("It is also their website photo, so the public website can no longer show it.");
+    expect(CONSEQUENCE_COPY.websiteNotListed("Ada")).toBe("Ada isn't listed on the public website, so this photo won't appear there while that is so.");
+    expect(CONSEQUENCE_COPY.removeIsFallback).toBe(
+      "It is also the photo the public website uses for them, because it was cleared for the website.",
+    );
+    expect(CONSEQUENCE_COPY.websiteStops).toBe("The website will no longer use this photo.");
+  });
+
+  it("Phase 5 run 2: the old strings are gone", () => {
+    const everything = allStrings().join("\n") + "\n" + CONSEQUENCE_COPY.websiteNotListed("Ada");
+    const OLD = [
+      "It is also their website photo, so it will leave the public website.",
+      "It is also being used on the public website because it was cleared for it.",
+      "isn't listed on the public website yet, so this photo won't appear until they are.",
+    ];
+    for (const old of OLD) expect(everything, old).not.toContain(old);
+  });
+
   it("the old strings are gone (as of 0df93af: copy.ts:98, 99, 108-109, 142, 149, 154, 166, 219)", () => {
     const everything = allStrings().join("\n") + "\n" + DESIGNATE_COPY.directory.body("Ada Lovelace", "Ada");
     const OLD = [

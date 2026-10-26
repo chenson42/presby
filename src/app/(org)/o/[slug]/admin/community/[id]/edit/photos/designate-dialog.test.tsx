@@ -139,6 +139,12 @@ describe("DesignateDialog — website", () => {
     expect(screen.queryByText(CONSEQUENCE_COPY.websiteListed("Nora"))).toBeNull();
   });
 
+  it("T18 the website dialog for a listed person whose hidden photo is known only through the directory answer: website-hidden, never 'listed, so this photo can appear'", () => {
+    dialog("website", snap({ directory: { photoId: "ph-0", attested: false }, directoryWithheld: "hide_photo" }));
+    expect(screen.getByText("Nora has hidden their photo, so the website won't show this photo while that is so.")).toBeTruthy();
+    expect(screen.queryByText(CONSEQUENCE_COPY.websiteListed("Nora"))).toBeNull();
+  });
+
   it("someone who appears to be under 18: the blocked sentence, and the confirm stays disabled even once ticked", () => {
     dialog("website", snap({ minor: true }));
     expect(
@@ -202,6 +208,14 @@ describe("DesignateDialog — clear for website (R-b2, T6)", () => {
     dialog("directory", snap({ directory: { photoId: "ph-1", attested: false } }), vi.fn(), true);
     fireEvent.click(screen.getByLabelText(CHECKBOX));
     expect(screen.getByText(CONSEQUENCE_COPY.directoryAlsoOnWebsite("Nora"))).toBeTruthy();
+  });
+
+  it("T18 ticked, for a listed person whose hidden photo is known through the directory answer: directory-hidden and website-hidden, never the hedged 'can also appear'", () => {
+    dialog("directory", snap({ directory: { photoId: "ph-1", attested: false }, directoryWithheld: "hide_photo" }), vi.fn(), true);
+    fireEvent.click(screen.getByLabelText(CHECKBOX));
+    expect(screen.getByText("Nora has hidden their photo, so the directory won't show this photo while that is so.")).toBeTruthy();
+    expect(screen.getByText("Nora has hidden their photo, so the website won't show this photo while that is so.")).toBeTruthy();
+    expect(screen.queryByText(CONSEQUENCE_COPY.directoryAlsoOnWebsite("Nora"))).toBeNull();
   });
 
   it("is disabled for someone who appears to be under 18, even once ticked", () => {

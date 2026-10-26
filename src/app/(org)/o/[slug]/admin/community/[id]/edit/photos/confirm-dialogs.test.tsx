@@ -95,6 +95,19 @@ describe("ConfirmDialog", () => {
     expect(screen.queryByText(CONSEQUENCE_COPY.removeIsWebsite)).toBeNull();
   });
 
+  it("T17 remove of a website photo for an UNLISTED person: the withheld wording, never 'can no longer show' or 'leave' (regression for the unlisted remove sentence)", () => {
+    show({ kind: "remove", photoId: "ph-2" }, snap({ listed: false, website: { photoId: "ph-2" } }));
+    expect(screen.getByText("It is also their website photo, which the website isn't showing at the moment.")).toBeTruthy();
+    expect(screen.queryByText(CONSEQUENCE_COPY.removeIsWebsite)).toBeNull();
+    expect(screen.queryByText(/will leave the public website/)).toBeNull();
+  });
+
+  it("T17 remove of a website photo for a listed person: the hedged 'can no longer show it' sentence", () => {
+    show({ kind: "remove", photoId: "ph-2" }, snap({ listed: true, website: { photoId: "ph-2" } }));
+    expect(screen.getByText("It is also their website photo, so the public website can no longer show it.")).toBeTruthy();
+    expect(screen.queryByText("It is also their website photo, which the website isn't showing at the moment.")).toBeNull();
+  });
+
   it("confirming remove calls the remove action with the photo id, then closes", async () => {
     mockRemove.mockResolvedValue({ ok: true });
     const onOpenChange = show({ kind: "remove", photoId: "ph-1" });

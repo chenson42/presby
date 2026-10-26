@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete; Gaps 1–14; Open Questions 1–4 | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete; R1–R14, S1–S3; DECISION-279 proposed; no migration (0077 unused) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; Batch A (site-kit) ready now, Batch B (presby) gated on F289 Batch 2 | Design complete, implementers named | 2026-10-26 |
-| 4 — Implementation | full-stack-developer (Batch A, site-kit); api-developer (Batch B, presby) | Pending | — | — |
+| 4 — Implementation | full-stack-developer (Batch A, site-kit); api-developer (Batch B, presby) | Batch A complete (site-kit `2fffcc1`, 235 tests green, not pushed); Batch B pending | — | 2026-10-26 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -984,35 +984,80 @@ Next: **full-stack-developer for Batch A** immediately. For the orchestrator, be
 
 # Phase 4 — Implementation
 
-## Files Created
+## Batch A — presby-site-kit client (full-stack-developer), 2026-10-25
 
-- `path/to/file` — purpose
+Worktree `/Users/cshenso/git/presby-platform/presby-site-kit-ingest`, branch `fix/staged-ingest` (the name the orchestrator gave; the design said `pipeline/site-ingest-size`), from site-kit `main` 8ca982a. One commit, **not pushed, not merged**: `2fffcc1` `feat: v4.1.0 -- staged ingest: a site over the 4.0 MB request limit now publishes, image by image` (the design names a `feat:` commit, so no `Caught-By`/`Discovered-In` trailers; `Work-Log:` and the attribution lines are present). The main site-kit checkout was not touched. Site-kit has no commit hooks and no CI (`.git/hooks` holds only samples); conventional prefixes are its only convention.
 
-## Files Modified
+### Files Created (site-kit)
 
-- `path/to/file` — what changed
+- `scripts/ingest.mjs` — the client: the wire-contract constants block, `runIngest`, `runFromGithubScript`, `IngestFailure`, `formatBytes`, `validateManifestKey`. No dependency, no `@actions/core`.
+- `test/ingest.test.ts` (`// @vitest-environment node`, 54 tests: KI-1 to KI-27 against an in-memory fake platform), `test/ingest-workflow.test.ts` (5: KW-1 to KW-4 plus one description check), `test/ingest-fixtures.ts` (synthetic generated image bytes: a magic header plus xorshift filler; no real data).
 
-## Schema Changes
+### Files Modified (site-kit)
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- `scripts/build-bundle.mjs` — `BuildError`, `sniffImageType`, `buildManifest`, `legacyBundleFromManifest`, `legacyBodyBytes` (exact), collision check in `buildImages` (so `buildBundle` and `buildManifest` both fail), `--manifest`. The default CLI output is byte-identical to before.
+- `.github/workflows/ingest.yml` — job-level `concurrency` (`presby-site-ingest-${{ github.repository }}`, `cancel-in-progress: false`), `timeout-minutes: 30`, `transport` input (default `auto`), the `Build content bundle` step removed, the github-script step shrunk to the loader with the E15 guard, descriptions per Copy `W`.
+- `test/build-bundle.test.ts` — +13 tests (KB-1 to KB-7); the existing 5 are unchanged.
+- `README.md` — "Publishing a site (ingest)" section. `package.json` 4.0.0 to 4.1.0; `package-lock.json` root version set to 4.1.0 (see deviation 5). `dist/` unchanged (no `src/` change).
 
-## Audit Events
+### Gates (site-kit)
 
-- [Action key written when the security-sensitive mutation fires]
+| Gate | Result |
+|---|---|
+| Red run first (new tests, no implementation) | `build-bundle.test.ts` 11 failed / 7 passed; `ingest.test.ts` failed to import (`scripts/ingest.mjs` absent) |
+| `npm test` | **22 files, 235 tests, all passed** (was 20 files, 163 tests; +72 new: 13 in `build-bundle.test.ts`, 54 in `ingest.test.ts`, 5 in `ingest-workflow.test.ts`) |
+| `npm run typecheck` | clean |
+| `npm run build` | clean; `git status` shows no `dist/` change |
+| `actionlint .github/workflows/ingest.yml` | exit 0, no output (also run by KW-4) |
+| Mutation check | changing the legacy/staged boundary `<=` to `<` fails the boundary test (KI-2, exact 4,000,000 vs 4,000,001 bytes) |
+| Real-fetch check (scratchpad, uncommitted) | the real client with the real Node `fetch` against a local `http` server implementing the contract: 3 x 1.8 MB images, plan, 3 uploads, commit; max body 1,800,000; tokens `t1..t5`, one per request |
+| Loader check (scratchpad, uncommitted) | `await import(pathToFileURL(...).href)` inside an `AsyncFunction` (github-script's shape) resolves `ingest.mjs` on Node 20 |
 
-## Implementer Notes
+Not run: the bridge run (`BR-1`, needs Batch B handlers).
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+### Implementer Notes — deviations from the design
 
-Strings added or changed: [file:line each, or "none"]
+1. **Branch name** `fix/staged-ingest`, per the orchestrator's instruction.
+2. **Two failure lines are not in the Copy table** and need adding (QA copy-truthfulness will find them): **E17** (staged path only, before any request) `Image "{path}" has a name the platform cannot accept ("{key}"): image names must be 1 to 200 characters with no control characters. Rename the file, then push again. Nothing was sent.` — the design pins the manifest-key rule on both sides but gave no client line for violating it; **E18** `Could not read the site: {message} Nothing was sent.` — wraps `buildPages` errors (no `.json` files, malformed JSON) that previously surfaced as a raw stack in the build step.
+3. **Step name for the legacy request is `ingest`** (`Step "ingest": the platform answered ...`); the design named steps `plan`, `upload`, `commit` only.
+4. **Fallback texts**: an empty reply body prints `(no text)` in E13; a redirect with no `Location` header prints "another address" in E14.
+5. **`package-lock.json` was at `3.5.0`, not `4.0.0`** as the design assumed (it had drifted behind `package.json`). Set both root entries to `4.1.0`; nothing else in the lock changed.
+6. **E1 prints the repository-relative path** (`images/huge.png`) and the raw byte count (`4000001 bytes`, no thousands separator). E6's `{bytes}` is the whole commit body (pages plus the image list), not pages alone.
+7. **`buildImages` now sorts by relative path**, so the legacy `images` array order is deterministic. Previously it followed directory order. A manifest-key quirk is deliberately preserved: `path.basename(file, ext)` strips only the lower-cased extension, so `Hero.PNG` still gets key `Hero.PNG` (pinned by KB-3's comment); changing it would silently break content that references the old key.
+8. **`legacy` request `contentType` is now the sniffed type**, not the extension's (a `.png` file whose bytes are JPEG is sent as `image/jpeg`; before, as `image/png`). The server sniffs anyway; this removes a disagreement.
+9. **503 is retried** like any 5xx (design: "any HTTP status 500 or above"), so a switched-off flag costs three requests and about 4 seconds of sleeps before H503 prints. Left as designed.
+10. **`runFromGithubScript` also accepts optional `fetch` and `sleep`** (passed to `runIngest`), so the loader entry point is testable without a network.
+11. **L9 is printed after every successful staged commit**, including `Sent 0 new image(s); 0 already on the platform.` for a site with no images.
+12. **Attribution trailers** use the session's `Co-Authored-By: Claude Sonnet 5.5` line, not the "Opus 5.5" wording in the task message; the `Claude-Session` URL is the same.
 
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
+No design claim proved wrong except deviation 5 (the lock version). One design statement is **unverified until a real run**: github-script's real wrapper behaves like the `AsyncFunction` stand-in used in the loader check.
 
----
+### What Batch B (the presby server) must match
+
+The client is written against exactly this; every item is asserted in `test/ingest.test.ts`.
+
+- **Headers, all lower-case on the wire:** `/plan`, `/images`, `/commit` send `x-presby-ingest-protocol: 1`; the legacy POST sends none. `/images` sends `x-presby-sha256: <64 lowercase hex>` and `content-type: application/octet-stream`; the others send `content-type: application/json`. Every request has `authorization: Bearer <fresh token>`. `redirect: "manual"` — a 3xx is a client failure, never followed.
+- **Plan** request body: `{ "images": [ { "sha256", "size" } ] }`, one entry per **distinct** hash, ordered by the first manifest key carrying it; `images` may be `[]` (a site with no images still plans, so `already_current` can be detected). Response `{ "status": "planned", "missing": [...] }`. **The client rejects (E13) any `missing` entry that is not a hash it sent**, and any non-array.
+- **Upload** response must be `{ "status": "stored", "sha256": "<the same hash>" , ... }`. **The client checks `sha256` equals the one it sent**; `byteSize` and `contentType` are not read. One image per request, sequential, each distinct hash once, in manifest-key order.
+- **Commit** request body, key order `schemaVersion, pages, images`: `{ "schemaVersion": 1, "pages": [ { path, frontMatter, mdxAst: { blocks } } ], "images": [ { "manifestKey", "sha256" } ] }`, images in manifest-key order (code-unit order), two keys may share a hash, `images` may be `[]`. Success response must carry a string `commitSha`, a string `organizationSlug` and a numeric `pageCount`, or the client reports E13 ("may or may not have been published").
+- **`already_current`** (`{ status: "already_current", organizationSlug, commitSha }`) at any of the four routes is success; a missing `commitSha` prints `(unknown)`.
+- **Error bodies** `{ "status": "error", "code", "error" }`. The client picks its hint from the HTTP status (401, 404, 503, 413, 5xx) and, for 422 only, from `code` (`hash_mismatch`, `not_an_image`, `images_not_uploaded`). **A 404 on `/plan` that is not parseable JSON with a string `status` is read as "this platform has no staged ingest" (E12)**, so the real "no site is provisioned" 404 must keep the JSON format on `/plan`.
+- **Legacy request** (unchanged shape): `{ "bundle": { "schemaVersion": 1, "pages": [...], "images": [ { manifestKey, contentType, bytesBase64 } ] } }`, images in manifest-key order, `contentType` the sniffed type, body at most 4,000,000 bytes exactly (client-computed, boundary tested at 4,000,000 / 4,000,001). The legacy route needs no client-visible change except the optional `code` field on errors.
+- **Limits the client enforces before sending** (server must still enforce its own): body 4,000,000 (accepted at exactly 4,000,000), 2,000 manifest entries in every mode, image size 1 to 4,000,000, manifest key 1 to 200 UTF-16 units with no U+0000 to U+001F or U+007F (staged only; a `__proto__` key is legal and must survive).
+- **Retries:** 5xx (including 503) and thrown fetches are retried, three attempts, a fresh token each time, sleeps 1 s then 3 s; so a commit whose reply was lost is retried, and the server must answer the retry `already_current` (the sha is written last).
+- **Wire-literal test:** `KI-1` in `test/ingest.test.ts` is the site-kit half of the literal contract test; presby's `SI-4`/`SI-9` must assert the same literals.
+
+### Audit Events
+
+None from this batch (client only). Server audit is Batch B.
+
+### Schema Changes
+
+None.
+
+## Batch B — presby server (api-developer)
+
+Pending (gated on F289 Batch 2 being committed).
 
 # Phase 5 — Verification (qa)
 

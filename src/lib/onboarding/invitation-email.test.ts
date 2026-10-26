@@ -123,7 +123,7 @@ describe("a congregation's sign-in invitation (Community Increment 2b, purpose s
     expect(text).toContain("You're invited to PresbyPortal");
     expect(text).toContain("Hello Wendeline,");
     expect(text).toContain(
-      "Beatrix Holloway at Quillhaven Fellowship has set up a place for you on PresbyPortal, the website your congregation uses to keep its records and do its work. Accepting takes about a minute: you choose a password, and then you can sign in whenever you need to.",
+      "Beatrix Holloway at Quillhaven Fellowship has set up a place for you on PresbyPortal, the website your congregation uses to keep its records and do its work. Accepting takes about a minute: you sign in, or choose a password if you are new.",
     );
     expect(text).toContain("What you can see and do depends on your role at Quillhaven Fellowship. Accepting doesn't change your role.");
     expect(rendered!.message.html).toContain("Accept the invitation</a>");

@@ -166,7 +166,7 @@ function contentFor(
         subject: `${v.organization} has invited you to sign in to PresbyPortal`,
         blocks: [
           v.greeting,
-          `${who} has set up a place for you on PresbyPortal, the website your congregation uses to keep its records and do its work. Accepting takes about a minute: you choose a password, and then you can sign in whenever you need to.`,
+          `${who} has set up a place for you on PresbyPortal, the website your congregation uses to keep its records and do its work. Accepting takes about a minute: you sign in, or choose a password if you are new.`,
           `What you can see and do depends on your role at ${v.organization}. Accepting doesn't change your role.`,
         ],
         footnote: `The link works once and expires on ${v.expires}. If you already have a PresbyPortal account, sign in with this email address. If you weren't expecting this, you can ignore it. Nothing happens unless you accept.`,

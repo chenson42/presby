@@ -1560,3 +1560,12 @@ Run logs are under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-p
 - **Residual recorded:** a commit whose reply is lost after `recordSiteIngest` is retried and reported as success; if the lost reply hid an audit-write failure, that publish has no audit row (the existing separate-statement gap from Phase 1, now reachable via retries).
 - **Rollout note:** a site whose legacy body is 4.0–4.5 MB on a pre-v4.1.0 client would get a 413 after the server deploys; no real site is in that band.
 - **`7ef67b6` trailer** reads `Caught-By: agent-review`; by CLAUDE.md the defect surfaced on a real production CI run (`Caught-By: production`). Left as is (rewriting mid-branch history across a merge is riskier than the stats error); noted for the retrospective.
+
+## Phase 4 — L7 fix (2026-10-26)
+
+Applied in the site-kit worktree on `fix/staged-ingest` as `ea9e78a` (on top of `ad109b1`; not pushed, not merged).
+
+- `scripts/ingest.mjs:252` now prints `Sent commit {sha7} to "{slug}" ({pageCount} page(s)); the platform has ingested it.` No README line quoted the old text.
+- Red: the three exact-text assertions (`test/ingest.test.ts:317`, `:435`, `:464`) were changed first and failed against the old string (3 failed, 232 passed).
+- Green: after the one-line change, `npm test` 235/235, `npm run typecheck` and `npm run build` clean, `actionlint .github/workflows/ingest.yml` clean. `dist/` is tracked but unchanged (the script is not part of the build output).
+- Commit trailers: `Caught-By: agent-review`, `Discovered-In: Phase-5`.

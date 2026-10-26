@@ -3,6 +3,9 @@ import path from "node:path";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import { auth } from "@/auth";
+import { AdminForbidden } from "@/components/admin-portal/admin-forbidden";
+import { FEATURES, hasFeature } from "@/lib/permissions";
 
 /**
  * Note for forkers: every `.md` file under `docs/release-notes/` is readable
@@ -35,6 +38,14 @@ export default async function DocsPage({
 }: {
   searchParams: Promise<{ file?: string }>;
 }) {
+  // Page-level gate (F281). The proxy also requires this key for the path, but
+  // every console page checks its own, and this one did not. Nothing is read
+  // from disk until the viewer is known to hold it.
+  const session = await auth();
+  if (!hasFeature(session?.user?.features, FEATURES.ADMIN_RELEASE_NOTES)) {
+    return <AdminForbidden title="Release notes" area="release notes" />;
+  }
+
   const sp = await searchParams;
   const files = await listReleaseFiles();
   const current = sp.file && files.includes(sp.file) ? sp.file : files[0];

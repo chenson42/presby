@@ -132,6 +132,18 @@ describe.skipIf(!hasDb)("platform-read (Postgres-backed, platform connection)", 
     expect(await names(filter)).toEqual([...expected()].sort());
   });
 
+  it("countDomainsNeedingAttention: the dashboard card's number equals the attention list it links to (one predicate)", async () => {
+    const [count, list] = await Promise.all([
+      read.countDomainsNeedingAttention(),
+      read.listDomainsAcrossOrgs("attention", 100_000),
+    ]);
+    expect(list.truncated).toBe(false);
+    expect(count).toBe(list.rows.length);
+    // And it includes this suite's three attention hosts.
+    expect(mine(list.rows).map((r) => r.hostname).sort()).toEqual([host("held"), host("lapsed"), host("releasing")].sort());
+    expect(count).toBeGreaterThanOrEqual(3);
+  });
+
   it("days attached without ever being live: counted for an attached host, null for a live one", async () => {
     const { rows } = await read.listDomainsAcrossOrgs("all", 500);
     // attached_at is trigger-owned (not backdatable), so the age is "today": a whole number of days, zero.

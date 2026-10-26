@@ -6,6 +6,7 @@ import {
   WEEKDAY_ABBREVIATIONS,
   WEEKDAY_NAMES,
   formatLongDate,
+  groupByDay,
   monthLabel,
   type MonthGrid,
   type MonthRef,
@@ -14,13 +15,7 @@ import { cn } from "@/lib/utils";
 
 /** Entries grouped by their start day, in the order they arrived (starts_at, id). */
 export function groupEntriesByDay(entries: readonly CalendarEntry[]): Map<string, CalendarEntry[]> {
-  const byDay = new Map<string, CalendarEntry[]>();
-  for (const entry of entries) {
-    const list = byDay.get(entry.dayKey);
-    if (list) list.push(entry);
-    else byDay.set(entry.dayKey, [entry]);
-  }
-  return byDay;
+  return groupByDay(entries);
 }
 
 function GridTable({ children }: { children: ReactNode }) {

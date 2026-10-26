@@ -1,3 +1,4 @@
+import { AdminForbidden } from "@/components/admin-portal/admin-forbidden";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
@@ -75,14 +76,7 @@ export default async function OrganizationBrandDetailPage({
 
   const session = await auth();
   if (!hasFeature(session?.user?.features, FEATURES.ADMIN_ORGANIZATIONS)) {
-    return (
-      <div>
-        <h1 className="text-2xl font-semibold">Organization</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
-          You don&apos;t have permission to manage organization branding.
-        </p>
-      </div>
-    );
+    return <AdminForbidden title="Organization" area="managing organizations" />;
   }
 
   if (!UUID_RE.test(id)) notFound();

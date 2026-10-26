@@ -1,62 +1,58 @@
+import { Suspense } from "react";
+import Link from "next/link";
 import { auth } from "@/auth";
+import { Button } from "@/components/ui/button";
+import { CountCardSkeleton } from "@/components/shared/count-card";
+import { EmptyState } from "@/components/shared/empty-state";
+import { FormattedDate } from "@/components/shared/formatted-date";
 import { GreetingBand } from "@/components/shared/greeting-band";
-import { DomainTileSections } from "@/components/shared/domain-tile-sections";
-import {
-  ADMIN_DOMAIN_LABELS,
-  ADMIN_DOMAIN_ORDER,
-} from "@/lib/admin-portal/tiles";
-import { ADMIN_TILE_ICONS } from "./tile-icons";
-import { visibleAdminTiles } from "./visible-tiles";
+import { FEATURES, hasFeature } from "@/lib/permissions";
+import { DASHBOARD_CARD_VIEWS } from "./_dashboard/cards";
+import { FindOrganization } from "./_dashboard/find-organization";
+import { visibleDashboardZones } from "./_dashboard/visible";
+import { visibleAdminNav } from "./visible-nav";
 
 /**
- * `/admin` — the platform portal hub. Rewritten in full, commit 1 of
- * docs/work-log/2026-08-27-platform-home-and-portal.md (Phase 3,
- * DECISION-123/125).
+ * `/admin` — the platform console's dashboard (Increment 1 of the platform
+ * admin redesign; the tile grid is retired).
  *
- * FIXES TWO PRESENT DEFECTS the design named: (1) every `ADMIN_DASHBOARD`
- * holder previously saw all ten hand-rolled cards regardless of which
- * `admin.*` features they actually held (a `support_operator` got denied on
- * eight of them at their own destination); (2) `FEATURES.ADMIN_TICKETS` has
- * gated `/admin/tickets` at the RSC layer since it shipped, but never had a
- * tile here — it does now.
+ *   GreetingBand
+ *   [ADMIN_ORGANIZATIONS]  action bar: New organization, Find an organization
+ *   "Updated {time}"
+ *   zone Organizations / Support / Access and settings / Recent operator changes
  *
- * FILTERING HAPPENS ONCE, HERE, VIA `visibleAdminTiles()` — hide-if-not-held
- * (`hasFeature()`), per the architect's Phase 2 ruling and DECISION-123.
- * `src/lib/admin-portal/tiles.ts` itself stays pure synchronous data; this
- * page is the one place the session's `features` array and the registry
- * meet. Every `/admin/*` destination independently re-checks its own
- * `hasFeature()` regardless of what this hub renders (verified in Phase 1) —
- * hiding a tile here adds no authorization surface.
+ * EACH CARD IS ITS OWN `Suspense` and its own async server component, so a slow
+ * or failed read costs one card, never the page (U2, E5), and the page shell
+ * paints at once. There is NO `loading.tsx` under this segment (R1c,
+ * DECISION-251): it would wrap four `notFound()` routes and answer their 404s
+ * with HTTP 200.
  *
- * FIXES THE LATENT COMPONENT-RULE-5 VIOLATION: the previous hand-rolled
- * `<Link className="rounded-lg border...">` card is gone — every tile now
- * routes through the same `Button variant="tile"` primitive
- * (`src/components/shared/tile-grid.tsx`) the org-portal axis already used,
- * via the generic, domain-sectioned `DomainTileSections`.
+ * A CARD IS MOUNTED ONLY FOR A HOLDER of the key of the page it links to, so a
+ * reader never runs for a non-holder (E4). Zones follow the nav groups and are
+ * static, so each card streams independently. Hiding is not authorization;
+ * every destination re-checks.
  *
- * `GreetingBand` (relocated shared component, DECISION-125) replaces the
- * previous bare `<h1>Welcome, {name}.</h1>` + roles paragraph.
- * `motionEnabled` is hardcoded `false` — there is no `org_portal.motion`
- * equivalent on this axis, and inventing one for a single mount fade-in
- * isn't justified by this pipeline.
+ * "Updated" is this request's render time, not a database timestamp: cards
+ * stream in after it, within the same request.
  *
- * `demo.new_dashboard`'s example banner is RETIRED, not carried over — it
- * was a teaching example for `isFlagEnabled()` wired to a flag that never
- * gated a real "new dashboard," and the codebase has since accumulated real
- * examples (`org_portal.*`, this very pipeline's own `platform.merged_home`).
- * Its seed row is deleted in `scripts/seed.ts` in the same commit.
+ * EMPTY STATE (reachable): a role holding only the door feature
+ * (`ADMIN_DASHBOARD`) is admitted by the proxy but holds no other `admin.*`
+ * key. It gets the honest empty state, with the strings it has always had.
+ * A holder of only nav-only keys (flags, what's new) has tools but no card;
+ * they get the greeting and the nav, not a false "no access".
  *
- * EMPTY STATE (reachable — see `visible-tiles.test.ts`'s `ADMIN_DASHBOARD`-
- * only case and the work-log's Edge Cases): a hypothetical role holding only
- * the "door" feature and no other `admin.*` key is admitted by the Edge but
- * matches zero tiles. `DomainTileSections` already returns `null` on zero
- * tiles; this wraps that with a dashed-border empty-state card per
- * `docs/ui-standards.md`'s Empty States rule, rather than a blank grid.
+ * `GreetingBand` keeps `data-testid="greeting-band"`, which six e2e specs key
+ * on; `GreetingBand` itself is not edited, so the org portal is untouched.
  */
 export default async function AdminDashboard() {
   const session = await auth();
+  const features = session?.user?.features;
 
-  const tiles = visibleAdminTiles(session?.user?.features);
+  const holdsAnyTool = visibleAdminNav(features).some((group) =>
+    group.items.some((item) => item.requiredFeature !== null),
+  );
+  const canManageOrganizations = hasFeature(features, FEATURES.ADMIN_ORGANIZATIONS);
+  const zones = visibleDashboardZones(features);
 
   return (
     <div className="space-y-8">
@@ -65,25 +61,54 @@ export default async function AdminDashboard() {
         motionEnabled={false}
       />
 
-      {tiles.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border py-16 text-center">
-          <p className="text-sm font-medium">
-            You don&apos;t have access to any admin tools yet.
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Contact a platform administrator to request the features you
-            need.
-          </p>
-        </div>
-      ) : (
-        <DomainTileSections
-          tiles={tiles}
-          getHref={(tile) => tile.href}
-          getIcon={(tile) => ADMIN_TILE_ICONS[tile.key]}
-          domainOrder={ADMIN_DOMAIN_ORDER}
-          domainLabels={ADMIN_DOMAIN_LABELS}
+      {holdsAnyTool ? null : (
+        <EmptyState
+          title="You don't have access to any admin tools yet."
+          body="Contact a platform administrator to request the features you need."
         />
       )}
+
+      {canManageOrganizations ? (
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <Button asChild className="min-h-11 w-full sm:order-2 sm:w-auto">
+            <Link href="/admin/organizations/new">New organization</Link>
+          </Button>
+          <FindOrganization />
+        </div>
+      ) : null}
+
+      {zones.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Updated <FormattedDate value={new Date()} />
+        </p>
+      ) : null}
+
+      {zones.map(({ zone, cards }) => (
+        <section key={zone.key} aria-labelledby={`zone-${zone.key}`}>
+          <h2 id={`zone-${zone.key}`} className="text-lg font-semibold">
+            {zone.heading}
+          </h2>
+          <div
+            className={
+              zone.key === "recent"
+                ? "mt-3 grid grid-cols-1 gap-3"
+                : "mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+            }
+          >
+            {cards.map((card) => {
+              const View = DASHBOARD_CARD_VIEWS[card.id];
+              return (
+                <Suspense
+                  key={card.id}
+                  fallback={<CountCardSkeleton title={card.title} />}
+                >
+                  <View />
+                </Suspense>
+              );
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

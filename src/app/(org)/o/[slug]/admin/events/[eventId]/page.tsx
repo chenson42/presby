@@ -22,6 +22,12 @@ import { OrgAccessDenied, OrgAccessEnded } from "../../../org-states";
 import { EventsFlagOff, EventsForbidden, EventsLoadError } from "../events-states";
 import { CancelEventDialog } from "../cancel-event-dialog";
 import { ExtendSeriesForm } from "../extend-series-form";
+import { SeriesWebsiteListing } from "../series-website-listing";
+import {
+  MARKED_FOR_WEBSITE,
+  MARKED_FOR_WEBSITE_NOTE,
+  visibilityLabel,
+} from "../website-listing-copy";
 
 const EVENTS_FLAG = "org_portal.events";
 
@@ -108,6 +114,9 @@ export default async function EventDetailPage({
   const event = result.data;
   const isSeriesParent = event.isRecurringSeries;
   const isCancelled = event.cancelledAt !== null;
+  // What the row says, not whether it is live: that also depends on the
+  // congregation's toggle and on a website page carrying the calendar.
+  const isMarked = event.websiteListed && !isCancelled;
 
   return (
     <section className="space-y-8">
@@ -123,10 +132,14 @@ export default async function EventDetailPage({
           )}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {event.isPublic ? "Public" : "Members only"}
+          {visibilityLabel(event.isPublic)}
+          {isMarked && ` · ${MARKED_FOR_WEBSITE}`}
           {event.allowsCheckin && " · Check-in enabled"}
           {isCancelled && " · Cancelled"}
         </p>
+        {isMarked && (
+          <p className="mt-1 text-sm text-muted-foreground">{MARKED_FOR_WEBSITE_NOTE}</p>
+        )}
         {event.eventType && (
           <p className="mt-1 text-sm text-muted-foreground">Type: {event.eventType.name}</p>
         )}
@@ -196,6 +209,10 @@ export default async function EventDetailPage({
         </div>
       )}
 
+      {!isCancelled && event.seriesWebsite && (
+        <SeriesWebsiteListing slug={slug} eventId={eventId} summary={event.seriesWebsite} />
+      )}
+
       {isSeriesParent && !isCancelled && event.recurrencePattern && (
         <div className="max-w-md space-y-4">
           <h2 className="text-xl font-semibold">Extend this series</h2>
@@ -207,6 +224,7 @@ export default async function EventDetailPage({
             slug={slug}
             parentEventId={eventId}
             currentPattern={event.recurrencePattern}
+            inheritsOnExtend={event.seriesWebsite?.inheritsOnExtend ?? false}
           />
         </div>
       )}

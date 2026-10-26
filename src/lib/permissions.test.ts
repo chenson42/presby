@@ -38,5 +38,42 @@ describe("permissions", () => {
         expect(f.category.length).toBeGreaterThan(0);
       }
     });
+
+    it("keeps every key string, the FEATURES map, the array order and the categories as shipped — the ADMIN_ORGANIZATIONS change is copy only", () => {
+      expect(FEATURES).toEqual({
+        ADMIN_DASHBOARD: "admin.dashboard",
+        ADMIN_USERS: "admin.users",
+        ADMIN_FLAGS: "admin.flags",
+        ADMIN_RELEASE_NOTES: "admin.release_notes",
+        ADMIN_FEEDBACK: "admin.feedback",
+        ADMIN_AUDIT: "admin.audit",
+        ADMIN_EMAIL_QUEUE: "admin.email_queue",
+        ADMIN_WHATS_NEW: "admin.whats_new",
+        ADMIN_TWO_FACTOR: "admin.two_factor",
+        ADMIN_ORGANIZATIONS: "admin.organizations",
+        ADMIN_TICKETS: "admin.tickets",
+      });
+      expect(FEATURE_CATALOG.map((f) => [f.key, f.category])).toEqual([
+        ["admin.dashboard", "admin"],
+        ["admin.two_factor", "admin"],
+        ["admin.users", "admin"],
+        ["admin.organizations", "admin"],
+        ["admin.tickets", "admin"],
+        ["admin.flags", "admin"],
+        ["admin.release_notes", "admin"],
+        ["admin.feedback", "admin"],
+        ["admin.audit", "admin"],
+        ["admin.email_queue", "admin"],
+        ["admin.whats_new", "admin"],
+      ]);
+    });
+
+    it("describes ADMIN_ORGANIZATIONS as organization management, not only branding", () => {
+      const entry = FEATURE_CATALOG.find(
+        (f) => f.key === FEATURES.ADMIN_ORGANIZATIONS,
+      );
+      expect(entry?.name).toBe("Manage organizations");
+      expect(entry?.description).not.toMatch(/abusive|tenant|neutralis/i);
+    });
   });
 });

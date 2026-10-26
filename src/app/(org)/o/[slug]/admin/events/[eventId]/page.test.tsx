@@ -50,6 +50,11 @@ vi.mock("../extend-series-form", () => ({
 vi.mock("../cancel-event-dialog", () => ({
   CancelEventDialog: () => <div>CancelEventDialog</div>,
 }));
+vi.mock("../series-website-listing", () => ({
+  SeriesWebsiteListing: ({ summary }: { summary: { put: { changes: number } } }) => (
+    <div>SeriesWebsiteListing:{summary.put.changes}</div>
+  ),
+}));
 
 import EventDetailPage from "./page";
 
@@ -89,6 +94,7 @@ function baseEvent(overrides: Record<string, unknown> = {}) {
     startsAt: "2027-03-01T19:00:00",
     endsAt: null,
     isPublic: true,
+    websiteListed: false,
     allowsCheckin: false,
     cancelledAt: null,
     isRecurringSeries: false,
@@ -98,6 +104,7 @@ function baseEvent(overrides: Record<string, unknown> = {}) {
     recurrenceCount: null,
     eventType: null,
     seriesOccurrences: [],
+    seriesWebsite: null,
     ...overrides,
   };
 }
@@ -213,5 +220,77 @@ describe("EventDetailPage — result branches", () => {
 
     expect(screen.getByRole("heading", { name: /part of a series/i })).toBeTruthy();
     expect(screen.getByRole("table")).toBeTruthy();
+  });
+  it("says Open to everyone / Members only (never 'Public'), and the marked line only while marked and not cancelled", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+
+    getEvent.mockResolvedValue({ kind: "ok", data: baseEvent() });
+    let view = render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.getByText("Open to everyone")).toBeTruthy();
+    expect(screen.queryByText(/Marked for the website/)).toBeNull();
+    expect(screen.queryByText(/^Public/)).toBeNull();
+    view.unmount();
+
+    getEvent.mockResolvedValue({ kind: "ok", data: baseEvent({ isPublic: false }) });
+    view = render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.getByText("Members only")).toBeTruthy();
+    view.unmount();
+
+    getEvent.mockResolvedValue({ kind: "ok", data: baseEvent({ websiteListed: true, allowsCheckin: true }) });
+    view = render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.getByText("Open to everyone · Marked for the website · Check-in enabled")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "It appears on your public website once your congregation's public events calendar is turned on and your website has a calendar page.",
+      ),
+    ).toBeTruthy();
+    view.unmount();
+
+    getEvent.mockResolvedValue({
+      kind: "ok",
+      data: baseEvent({ websiteListed: true, cancelledAt: "2027-02-01T00:00:00.000Z" }),
+    });
+    view = render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.queryByText(/Marked for the website/)).toBeNull();
+    expect(screen.getByText("Open to everyone · Cancelled")).toBeTruthy();
+  });
+
+  it("mounts the Website listing section only for a non-cancelled event with a series summary", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    const summary = {
+      fromStartsAt: "2027-03-01T19:00:00",
+      put: { changes: 3, skippedCancelled: 0, skippedMembersOnly: 0 },
+      take: { changes: 0 },
+      inheritsOnExtend: false,
+    };
+
+    getEvent.mockResolvedValue({ kind: "ok", data: baseEvent() });
+    let view = render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.queryByText(/^SeriesWebsiteListing/)).toBeNull();
+    view.unmount();
+
+    getEvent.mockResolvedValue({
+      kind: "ok",
+      data: baseEvent({ isSeriesOccurrence: true, parentEventId: "p", seriesWebsite: summary }),
+    });
+    view = render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.getByText("SeriesWebsiteListing:3")).toBeTruthy();
+    view.unmount();
+
+    getEvent.mockResolvedValue({
+      kind: "ok",
+      data: baseEvent({
+        isSeriesOccurrence: true,
+        parentEventId: "p",
+        seriesWebsite: summary,
+        cancelledAt: "2027-02-01T00:00:00.000Z",
+      }),
+    });
+    view = render(await EventDetailPage({ params: makeParams() }));
+    expect(screen.queryByText(/^SeriesWebsiteListing/)).toBeNull();
   });
 });

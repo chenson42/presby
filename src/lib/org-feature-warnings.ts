@@ -2,7 +2,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { OrgAccessError, withOrgContext, type OrgTx } from "@/lib/authz";
 import { OFF_WARNING_FALLBACK, offWarningCopy } from "@/lib/person-photos/copy";
-import { countPhotoDesignations } from "@/lib/person-photos/reader";
+import { countChosenPhotos } from "@/lib/person-photos/reader";
 
 /**
  * Page-side "turning this OFF has a consequence" warnings for the Features
@@ -29,9 +29,9 @@ import { countPhotoDesignations } from "@/lib/person-photos/reader";
  * `org_portal.person_photos` (docs/work-log/2026-10-26-person-photos-inc1.md,
  * Copy C1): turning it OFF hides every photo of a person, including on the
  * public website, so when photos are chosen the church is told how many before
- * the switch flips. The count comes from `reader.ts` (`countPhotoDesignations`,
- * active designations on live photos, worded "chosen for", never "shown"), so
- * this module never imports the photo tables. Zero designations: no warning.
+ * the switch flips. The count comes from `reader.ts` (`countChosenPhotos`,
+ * distinct photos with an active designation, worded "chosen for", never "shown"), so
+ * this module never imports the photo tables. Zero chosen photos: no warning.
  * The copy lives in `person-photos/copy.ts`; the warning names the cached-copy
  * residual ("up to a day") and says nothing is deleted.
  */
@@ -62,7 +62,7 @@ const REGISTRY: Record<string, OffWarningLoader> = {
     };
   },
   [PERSON_PHOTOS_FEATURE_KEY]: async (tx) => {
-    const count = await countPhotoDesignations(tx);
+    const count = await countChosenPhotos(tx);
     return count > 0 ? offWarningCopy(count) : null;
   },
 };

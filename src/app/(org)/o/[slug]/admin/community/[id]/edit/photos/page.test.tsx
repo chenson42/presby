@@ -82,11 +82,11 @@ function setView(over: Partial<PhotoSetView> = {}): PhotoSetView {
     website: { imageKey: null, source: null, withheld: null, unattestedDirectoryOnly: false },
     listings: [],
     lines: {
-      directory: "Directory: no photo chosen, so members see initials.",
+      directory: "Directory: no photo chosen, so members who can see Nora in the directory see initials.",
       website: "Website: no photo chosen, so the website shows none.",
       listing: "Nora isn't listed on your public website, so no photo shows there. Listing is set separately, under Staff, Officers or Groups, by whoever manages those.",
     },
-    state: { first: "Nora", listed: false, website: null, directory: null },
+    state: { first: "Nora", listed: false, website: null, directory: null, minor: false, directoryWithheld: null, websiteWithheld: null },
     viewed: null,
     ...over,
   };

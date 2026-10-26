@@ -21,11 +21,11 @@ export function directoryLine(first: string, status: DirectoryStatus): string | 
     case "minor":
       return DIRECTORY_LINES.minor(first);
     case null:
-      return status.photoId === null ? DIRECTORY_LINES.none : DIRECTORY_LINES.shown;
+      return status.photoId === null ? DIRECTORY_LINES.none(first) : DIRECTORY_LINES.shown(first);
   }
 }
 
-export function websiteLine(first: string, status: WebsiteStatus): string | null {
+export function websiteLine(first: string, status: WebsiteStatus, minor = false): string | null {
   switch (status.withheld) {
     case "toggle_off":
       return null;
@@ -42,7 +42,10 @@ export function websiteLine(first: string, status: WebsiteStatus): string | null
   if (status.source === "directory_attested") return WEBSITE_LINES.fallback;
   // No eligible designation. The one case with a remedy: a directory photo exists but was
   // never cleared for the website, and no website photo is chosen.
-  return status.unattestedDirectoryOnly ? WEBSITE_LINES.unattested : WEBSITE_LINES.none;
+  // A remedy that cannot be performed is not offered: the store refuses a minor, and the page has no
+  // "Clear for website" button for one (Phase 5 run 1, R-b4).
+  if (status.unattestedDirectoryOnly) return minor ? WEBSITE_LINES.minor(first) : WEBSITE_LINES.unattested;
+  return WEBSITE_LINES.none;
 }
 
 export interface StatusLines {
@@ -56,10 +59,12 @@ export function statusLines(input: {
   directory: DirectoryStatus;
   website: WebsiteStatus;
   listings: readonly ListingKind[];
+  /** `presby_photo_subject_is_minor`, always known. */
+  minor: boolean;
 }): StatusLines {
   return {
     directory: directoryLine(input.first, input.directory),
-    website: websiteLine(input.first, input.website),
+    website: websiteLine(input.first, input.website, input.minor),
     listing: listingLine(input.first, input.listings),
   };
 }

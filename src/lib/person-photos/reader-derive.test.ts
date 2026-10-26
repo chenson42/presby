@@ -5,7 +5,7 @@
  * roster) is `public-photo.db.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { DIRECTORY_LINES, WEBSITE_LINES, listingKinds, listingLine } from "./copy";
+import { DIRECTORY_LINES, PAGE_COPY, WEBSITE_LINES, listingKinds, listingLine } from "./copy";
 import { directoryLine, statusLines, websiteLine } from "./status-lines";
 import type { DirectoryStatus, WebsiteStatus } from "./types";
 
@@ -22,8 +22,8 @@ const web = (over: Partial<WebsiteStatus> = {}): WebsiteStatus => ({
 
 describe("directory line", () => {
   it.each([
-    ["a directory photo is chosen and shown", dir({ photoId: KEY, thumbKey: KEY }), DIRECTORY_LINES.shown],
-    ["no directory photo chosen", dir(), DIRECTORY_LINES.none],
+    ["a directory photo is chosen and shown", dir({ photoId: KEY, thumbKey: KEY }), DIRECTORY_LINES.shown(first)],
+    ["no directory photo chosen", dir(), DIRECTORY_LINES.none(first)],
     ["hidden by the person's setting", dir({ photoId: KEY, withheld: "hide_photo" }), DIRECTORY_LINES.hide(first)],
     ["appears to be a minor", dir({ photoId: KEY, withheld: "minor" }), DIRECTORY_LINES.minor(first)],
     ["the toggle is off: no line (the page shows its own off state)", dir({ photoId: KEY, withheld: "toggle_off" }), null],
@@ -50,9 +50,24 @@ describe("website line", () => {
     expect(websiteLine(first, web({ withheld: "minor", unattestedDirectoryOnly: true }))).toBe(WEBSITE_LINES.minor(first));
   });
 
-  it("the unattested remedy line names both remedies, each of which the same holder performs in the designate dialog", () => {
+  it("the unattested remedy names a control the page has: its words are the label of the 'Clear for website' button (T4)", () => {
+    expect(PAGE_COPY.clearForWebsite).toBe("Clear for website");
     expect(WEBSITE_LINES.unattested).toContain("Choose a website photo");
-    expect(WEBSITE_LINES.unattested).toContain("clear the directory photo for the website");
+    expect(WEBSITE_LINES.unattested).toContain(`"${PAGE_COPY.clearForWebsite}"`);
+    expect(WEBSITE_LINES.unattested).not.toContain("clear the directory photo for the website");
+  });
+
+  it("the unattested remedy for someone who appears to be under 18 is the under-18 line: a remedy that cannot be performed is not offered (R-b4)", () => {
+    const status = web({ unattestedDirectoryOnly: true });
+    expect(websiteLine(first, status, true)).toBe(WEBSITE_LINES.minor(first));
+    expect(websiteLine(first, status, false)).toBe(WEBSITE_LINES.unattested);
+    expect(
+      statusLines({ first, directory: dir(), website: status, listings: [], minor: true }).website,
+    ).toBe(WEBSITE_LINES.minor(first));
+  });
+
+  it("a minor with nothing chosen still reads 'none': only the unattested remedy is swapped", () => {
+    expect(websiteLine(first, web(), true)).toBe(WEBSITE_LINES.none);
   });
 });
 
@@ -86,9 +101,10 @@ describe("statusLines", () => {
         directory: dir({ photoId: KEY, thumbKey: KEY }),
         website: web({ imageKey: KEY, source: "directory_attested" }),
         listings: ["officer"],
+        minor: false,
       }),
     ).toEqual({
-      directory: DIRECTORY_LINES.shown,
+      directory: DIRECTORY_LINES.shown(first),
       website: WEBSITE_LINES.fallback,
       listing: listingLine(first, ["officer"]),
     });

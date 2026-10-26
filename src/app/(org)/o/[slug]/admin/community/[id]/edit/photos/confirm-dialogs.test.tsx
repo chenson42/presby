@@ -20,12 +20,17 @@ import { ConfirmDialog } from "./confirm-dialogs";
 import { CONFIRM_COPY, CONSEQUENCE_COPY } from "@/lib/person-photos/copy";
 import type { PhotoStateSnapshot } from "@/lib/person-photos/consequences";
 
-const STANDING_IN: PhotoStateSnapshot = {
+const snap = (over: Partial<PhotoStateSnapshot> = {}): PhotoStateSnapshot => ({
   first: "Nora",
   listed: true,
   website: null,
-  directory: { photoId: "ph-1", attested: true },
-};
+  directory: null,
+  minor: false,
+  directoryWithheld: null,
+  websiteWithheld: null,
+  ...over,
+});
+const STANDING_IN = snap({ directory: { photoId: "ph-1", attested: true } });
 
 function show(
   action: React.ComponentProps<typeof ConfirmDialog>["action"],
@@ -54,7 +59,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("remove of a photo used nowhere carries no website or cache sentence", () => {
-    show({ kind: "remove", photoId: "other" }, { first: "Nora", listed: true, website: null, directory: null });
+    show({ kind: "remove", photoId: "other" }, snap());
     expect(screen.queryByText(CONSEQUENCE_COPY.removeCaches)).toBeNull();
     expect(screen.queryByText(CONSEQUENCE_COPY.removeIsWebsite)).toBeNull();
   });
@@ -67,15 +72,27 @@ describe("ConfirmDialog", () => {
   });
 
   it("stop using on the website: falls back to the cleared directory photo, and states the cache and archive residual", () => {
-    show({ kind: "stop_website" }, { first: "Nora", listed: true, website: { photoId: "ph-2" }, directory: { photoId: "ph-1", attested: true } });
+    show({ kind: "stop_website" }, snap({ website: { photoId: "ph-2" }, directory: { photoId: "ph-1", attested: true } }));
     expect(screen.getByText(CONFIRM_COPY.stopWebsite.title)).toBeTruthy();
     expect(screen.getByText(CONSEQUENCE_COPY.websiteFallsBack("Nora"))).toBeTruthy();
     expect(screen.getByText(CONSEQUENCE_COPY.websiteCaches)).toBeTruthy();
   });
 
   it("stop using on the website with no cleared directory photo says the website will show none", () => {
-    show({ kind: "stop_website" }, { first: "Nora", listed: true, website: { photoId: "ph-2" }, directory: null });
+    show({ kind: "stop_website" }, snap({ website: { photoId: "ph-2" } }));
     expect(screen.getByText(CONSEQUENCE_COPY.websiteShowsNone("Nora"))).toBeTruthy();
+  });
+
+  it("stop using on the website when the person's photo is withheld: no fall-back promise, 'will show none' (R-a4)", () => {
+    show({ kind: "stop_website" }, snap({ websiteWithheld: "hide_photo", website: { photoId: "ph-2" }, directory: { photoId: "ph-1", attested: true } }));
+    expect(screen.queryByText(CONSEQUENCE_COPY.websiteFallsBack("Nora"))).toBeNull();
+    expect(screen.getByText(CONSEQUENCE_COPY.websiteShowsNone("Nora"))).toBeTruthy();
+  });
+
+  it("remove of a website photo while someone appears to be under 18: it does not say it will 'leave the public website'", () => {
+    show({ kind: "remove", photoId: "ph-2" }, snap({ minor: true, website: { photoId: "ph-2" } }));
+    expect(screen.getByText("It is also their website photo, which the website isn't showing at the moment.")).toBeTruthy();
+    expect(screen.queryByText(CONSEQUENCE_COPY.removeIsWebsite)).toBeNull();
   });
 
   it("confirming remove calls the remove action with the photo id, then closes", async () => {

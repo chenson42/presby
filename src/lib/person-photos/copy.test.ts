@@ -200,3 +200,87 @@ describe("the UI copy (Batch 3: C2, C3, C4, C5, C7, C8)", () => {
     expect(PAGE_COPY.counter(3)).toBe("3 of 10 photos");
   });
 });
+
+/**
+ * T3 (Phase 5 run 1 copy rulings, R-a3, R-a5, R-a6, R-a7, R-b2, R-b3): every
+ * replacement string asserted VERBATIM, and every old string it replaced
+ * asserted ABSENT, so a revert to the promise wording fails here by name.
+ */
+describe("the Phase 5 run 1 copy rulings (exact text)", () => {
+  const UNLESS = "unless something withholds it, such as Ada hiding their photo or appearing to be under 18.";
+
+  it("the consequence sentences say 'can appear ... while the website is published, unless ...' (R-a3)", () => {
+    expect(CONSEQUENCE_COPY.directoryAlsoOnWebsite("Ada")).toBe(
+      `Because Ada is listed on the public website and has no website photo, this photo can also appear there while the website is published, ${UNLESS}`,
+    );
+    expect(CONSEQUENCE_COPY.websiteListed("Ada")).toBe(
+      `Ada is listed, so this photo can appear on the website while the website is published, ${UNLESS}`,
+    );
+  });
+
+  it("the new withheld sentences (R-a3)", () => {
+    expect(CONSEQUENCE_COPY.minorBlocked("Ada")).toBe(
+      "Ada appears to be under 18, so a photo of Ada can't be chosen for the directory or the website yet.",
+    );
+    expect(CONSEQUENCE_COPY.directoryHidden("Ada")).toBe("Ada has hidden their photo, so the directory won't show this photo while that is so.");
+    expect(CONSEQUENCE_COPY.websiteHidden("Ada")).toBe("Ada has hidden their photo, so the website won't show this photo while that is so.");
+    expect(CONSEQUENCE_COPY.websiteMerged).toBe("This record was merged into another, so the website won't show this photo.");
+    expect(CONSEQUENCE_COPY.removeIsWebsiteWithheld).toBe("It is also their website photo, which the website isn't showing at the moment.");
+  });
+
+  it("the directory dialog body names who sees it and carries the unless-clause (R-a5)", () => {
+    expect(DESIGNATE_COPY.directory.body("Ada Lovelace", "Ada")).toBe(
+      "Members who can see Ada Lovelace in the directory will see this photo instead of their initials, unless Ada has hidden their photo or appears to be under 18.",
+    );
+  });
+
+  it("the two retroactive directory strings are conditional on who can see the person (R-a6)", () => {
+    expect(CONSEQUENCE_COPY.directoryInitials("Ada")).toBe("Wherever Ada appears in the directory, their initials will show instead.");
+    expect(CONSEQUENCE_COPY.removeIsDirectory("Ada")).toBe(
+      "It is Ada's directory photo, so wherever Ada appears in the directory it will show initials instead.",
+    );
+  });
+
+  it("the directory status lines are conditional on who can see the person; hide and minor are unchanged (R-a7)", () => {
+    expect(DIRECTORY_LINES.shown("Ada")).toBe('Directory: members who can see Ada in the directory see the photo marked "Directory" below.');
+    expect(DIRECTORY_LINES.none("Ada")).toBe("Directory: no photo chosen, so members who can see Ada in the directory see initials.");
+    expect(DIRECTORY_LINES.hide("Ada")).toBe("Directory: not shown, because Ada has hidden their photo.");
+    expect(DIRECTORY_LINES.minor("Ada")).toBe("Directory: not shown. Ada appears to be under 18, and photos of children aren't used yet.");
+  });
+
+  it("the unattested remedy names a control the page has (R-b3), and the control's label is the same words", () => {
+    expect(WEBSITE_LINES.unattested).toBe(
+      'Website: none. The directory photo isn\'t cleared for the website. Choose a website photo, or choose "Clear for website" on the photo marked "Directory".',
+    );
+    expect(PAGE_COPY.clearForWebsite).toBe("Clear for website");
+    expect(WEBSITE_LINES.unattested).toContain(`"${PAGE_COPY.clearForWebsite}"`);
+  });
+
+  it("the clear dialog (R-b2): title, body with the standing residual, the directory checkbox verbatim, confirm", () => {
+    expect(DESIGNATE_COPY.clear.title).toBe("Clear this photo for the website?");
+    expect(DESIGNATE_COPY.clear.body("Ada")).toBe(
+      "This is Ada's directory photo. Clearing it lets the public website use it too when Ada is listed and no website photo is chosen. Anyone on the internet can see a photo on the public website. Search engines and web archives may keep copies, and removing the photo later can't recall them.",
+    );
+    expect(DESIGNATE_COPY.clear.checkbox("Ada")).toBe(
+      "I have Ada's permission to also use this photo on the public website if they are listed there and no website photo is chosen.",
+    );
+    expect(DESIGNATE_COPY.clear.checkbox("Ada")).toBe(DESIGNATE_COPY.directory.checkbox("Ada"));
+    expect(DESIGNATE_COPY.clear.confirm).toBe("Clear for website");
+  });
+
+  it("the old strings are gone (as of 0df93af: copy.ts:98, 99, 108-109, 142, 149, 154, 166, 219)", () => {
+    const everything = allStrings().join("\n") + "\n" + DESIGNATE_COPY.directory.body("Ada Lovelace", "Ada");
+    const OLD = [
+      'Directory: members see the photo marked "Directory" below.',
+      "Directory: no photo chosen, so members see initials.",
+      "or clear the directory photo for the website.",
+      "this photo will also appear there.",
+      "so this photo will appear on the website.",
+      "'s initials will show in the directory instead.",
+      "'s directory photo, so the directory will show initials.",
+      "will see this photo instead of their initials.",
+    ];
+    for (const old of OLD) expect(everything, old).not.toContain(old);
+    expect(everything).not.toMatch(/will (also )?appear/);
+  });
+});

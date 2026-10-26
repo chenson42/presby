@@ -157,7 +157,7 @@ test.describe("Person photos: the admin page", () => {
         await expect(page.getByRole("heading", { level: 1, name: "Photos" })).toBeVisible({ timeout: 45_000 });
         await expect(page.getByText("No photos yet")).toBeVisible();
         await expect(page.getByText("0 of 10 photos")).toBeVisible();
-        await expect(page.getByText("Directory: no photo chosen, so members see initials.")).toBeVisible();
+        await expect(page.getByText(`Directory: no photo chosen, so members who can see ${first} in the directory see initials.`)).toBeVisible();
         const input = page.getByLabel("Add a photo");
         await expect(input).toBeEnabled({ timeout: 45_000 }); // hydrated
         await expect(input).not.toHaveAttribute("capture", /.*/);
@@ -175,7 +175,9 @@ test.describe("Person photos: the admin page", () => {
         await expect(page.getByText("0 of 10 photos")).toBeHidden({ timeout: 60_000 });
         await expect(page.getByText("1 of 10 photos")).toBeVisible();
         await expect(page.getByAltText(`${full}, photo 1`)).toBeVisible();
-        await expect(page.getByText('Directory: members see the photo marked "Directory" below.')).toBeVisible();
+        await expect(
+          page.getByText(`Directory: members who can see ${first} in the directory see the photo marked "Directory" below.`),
+        ).toBeVisible();
 
         let photos = await photoRows(sql, COMMUNITY_ORG.id, person.personId);
         expect(photos).toHaveLength(1);
@@ -211,6 +213,43 @@ test.describe("Person photos: the admin page", () => {
         expect((await sharp(pngMaster!.bytes).metadata()).exif).toBeUndefined();
         await noHorizontalOverflow(page);
 
+        // 4b. Phase 5 run 1 (R-b): the directory photo was chosen without the website box, so the page offers a
+        // remedy it can perform. The remedy line names the "Clear for website" button; the button opens a dialog
+        // that records the clearance on the SAME photo, and the website line then names the directory photo.
+        const first1 = page.getByRole("group", { name: `${full}, photo 1` });
+        await expect(
+          page.getByText(
+            'Website: none. The directory photo isn\'t cleared for the website. Choose a website photo, or choose "Clear for website" on the photo marked "Directory".',
+          ),
+        ).toBeVisible();
+        await expect(page.getByRole("button", { name: "Clear for website" })).toHaveCount(1); // photo 1 only
+        await expect(page.getByRole("group", { name: `${full}, photo 2` }).getByRole("button", { name: "Clear for website" })).toHaveCount(0);
+        await expect(first1.getByRole("button", { name: "Clear for website" })).toBeVisible();
+        expect((await first1.getByRole("button", { name: "Clear for website" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        await noHorizontalOverflow(page);
+        await first1.getByRole("button", { name: "Clear for website" }).click();
+        const clearDialog = page.getByRole("dialog");
+        await expect(clearDialog.getByText("Clear this photo for the website?")).toBeVisible();
+        await expect(clearDialog.getByText(/search engines and web archives may keep copies/i)).toBeVisible();
+        const confirmClear = clearDialog.getByRole("button", { name: "Clear for website" });
+        await expect(confirmClear).toBeDisabled();
+        const clearBox = await clearDialog.boundingBox();
+        expect(clearBox!.x).toBeGreaterThanOrEqual(0);
+        expect(clearBox!.x + clearBox!.width).toBeLessThanOrEqual(vp.width);
+        await clearDialog
+          .getByLabel(`I have ${first}'s permission to also use this photo on the public website if they are listed there and no website photo is chosen.`)
+          .check();
+        await expect(confirmClear).toBeEnabled();
+        await expect.poll(async () => (await confirmClear.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+        await confirmClear.click();
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        await expect(page.getByText("Website: the directory photo, because it was cleared for the website.")).toBeVisible();
+        await expect(page.getByText("Directory, cleared for website")).toBeVisible();
+        await expect(page.getByRole("button", { name: "Clear for website" })).toHaveCount(0);
+        designations = await designationRows(sql, COMMUNITY_ORG.id, person.personId);
+        expect(designations.filter((d) => !d.ended).map((d) => [d.photo_id === photos[0]!.id, d.purpose, d.attested])).toEqual([[true, "directory", true]]);
+        await noHorizontalOverflow(page);
+
         // 5. The website choice needs the attestation: the confirm stays disabled until ticked.
         const one = page.getByRole("group", { name: `${full}, photo 1` });
         const two = page.getByRole("group", { name: `${full}, photo 2` });
@@ -232,7 +271,7 @@ test.describe("Person photos: the admin page", () => {
         await expect(one.getByRole("button", { name: "Stop using on website" })).toBeVisible();
         designations = await designationRows(sql, COMMUNITY_ORG.id, person.personId);
         expect(designations.filter((d) => !d.ended).map((d) => [d.photo_id === photos[0]!.id, d.purpose, d.attested]).sort()).toEqual([
-          [true, "directory", false],
+          [true, "directory", true], // cleared in step 4b
           [true, "website", true],
         ]);
 
@@ -279,7 +318,9 @@ test.describe("Person photos: the admin page", () => {
         const alert = page.getByRole("alertdialog");
         await expect(alert.getByText("Remove this photo?")).toBeVisible();
         await expect(alert.getByText(/can't be erased from here/)).toBeVisible();
-        await expect(alert.getByText(`It is ${first}'s directory photo, so the directory will show initials.`)).toBeVisible();
+        await expect(
+          alert.getByText(`It is ${first}'s directory photo, so wherever ${first} appears in the directory it will show initials instead.`),
+        ).toBeVisible();
         const alertBox = await alert.boundingBox();
         expect(alertBox!.x).toBeGreaterThanOrEqual(0);
         expect(alertBox!.x + alertBox!.width).toBeLessThanOrEqual(vp.width);
@@ -287,7 +328,7 @@ test.describe("Person photos: the admin page", () => {
         await alert.getByRole("button", { name: "Remove photo" }).click();
         await expect(page.getByRole("alertdialog")).toHaveCount(0);
         await expect(page.getByText("1 of 10 photos")).toBeVisible();
-        await expect(page.getByText("Directory: no photo chosen, so members see initials.")).toBeVisible();
+        await expect(page.getByText(`Directory: no photo chosen, so members who can see ${first} in the directory see initials.`)).toBeVisible();
 
         photos = await photoRows(sql, COMMUNITY_ORG.id, person.personId);
         expect(photos.map((p) => p.removed)).toEqual([false, true]);

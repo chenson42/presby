@@ -276,10 +276,18 @@ describe.skipIf(!hasDb)("person photos: page and public site agree (Postgres-bac
       expect(set.organizationName).toContain("Fixture d2");
       expect(set.website).toMatchObject({ imageKey: photos.Website!.imageKey, source: "website", withheld: null });
       expect(set.lines.website).toBe(WEBSITE_LINES.website);
-      expect(set.lines.directory).toBe(DIRECTORY_LINES.none);
+      expect(set.lines.directory).toBe(DIRECTORY_LINES.none("Website"));
       expect(set.listings).toEqual(["staff"]);
       expect(set.lines.listing).toBe(listingLine("Website", ["staff"]));
-      expect(set.state).toEqual({ first: "Website", listed: true, website: { photoId: photos.Website!.photoId }, directory: null });
+      expect(set.state).toEqual({
+        first: "Website",
+        listed: true,
+        website: { photoId: photos.Website!.photoId },
+        directory: null,
+        minor: false,
+        directoryWithheld: null,
+        websiteWithheld: null,
+      });
       expect(set.isMinor).toBe(false);
     });
 
@@ -291,7 +299,7 @@ describe.skipIf(!hasDb)("person photos: page and public site agree (Postgres-bac
       };
       const attested = await line("DirAttested");
       expect(attested.lines.website).toBe(WEBSITE_LINES.fallback);
-      expect(attested.lines.directory).toBe(DIRECTORY_LINES.shown);
+      expect(attested.lines.directory).toBe(DIRECTORY_LINES.shown("DirAttested"));
       expect(attested.photos[0]).toMatchObject({ isDirectory: true, isWebsite: false, directoryAttested: true });
 
       const plain = await line("DirPlain");
@@ -310,7 +318,7 @@ describe.skipIf(!hasDb)("person photos: page and public site agree (Postgres-bac
       const none = await line("Nobody");
       expect(none.count).toBe(0);
       expect(none.lines.website).toBe(WEBSITE_LINES.none);
-      expect(none.lines.directory).toBe(DIRECTORY_LINES.none);
+      expect(none.lines.directory).toBe(DIRECTORY_LINES.none("Nobody"));
     });
 
     it("a removed photo and an ended designation are not tiles / not chips", async () => {
@@ -334,14 +342,93 @@ describe.skipIf(!hasDb)("person photos: page and public site agree (Postgres-bac
       }
     });
 
-    it("countPhotoDesignations counts active designations on live photos only (worded 'chosen for', never 'shown')", async () => {
+    it("the snapshot carries what SQL withholds: hide_photo, merged and under 18 (T5); the two SQL reasons are unknown without a designation", async () => {
+      const snapshotOf = async (personId: string) => {
+        const r = await reader.readPhotoSet(ctx(), personId);
+        if (r.kind !== "ok") throw new Error(`expected ok, got ${r.kind}`);
+        return r.set.state;
+      };
+
+      // (i) a website designation and hide_photo, no directory designation: the website reports it, the directory has no row.
+      expect(await snapshotOf(people.Hidden!)).toMatchObject({ minor: false, websiteWithheld: "hide_photo", directoryWithheld: null });
+
+      // (ii) both a directory and a website designation, hide_photo: both report it.
+      const both = await fx.makePerson("HiddenBoth", tag);
+      await fx.addMember(org, both);
+      await seedPersonPhoto(fx.platform, { organizationId: org, personId: both, userId: fx.actingUserId, purposes: ["directory", "website"], attestDirectory: true });
+      await q(sql`insert into person_privacy (person_id, organization_id, hide_photo) values (${both}, ${org}, true)`);
+      expect(await snapshotOf(both)).toMatchObject({ minor: false, directoryWithheld: "hide_photo", websiteWithheld: "hide_photo" });
+
+      // (iii) a merged tombstone with a website designation.
+      expect(await snapshotOf(people.Merged!)).toMatchObject({ minor: false, websiteWithheld: "merged", directoryWithheld: null });
+
+      // (iv) a minor with NO designation: minor is always known, the SQL reasons are not (the functions return no row).
+      const child = await fx.makePerson("ChildNone", tag);
+      await fx.addMember(org, child);
+      await q(sql`update people set date_of_birth = (current_date - interval '9 years')::date where id = ${child}`);
+      expect(await snapshotOf(child)).toEqual({
+        first: "ChildNone",
+        listed: false,
+        website: null,
+        directory: null,
+        minor: true,
+        directoryWithheld: null,
+        websiteWithheld: null,
+      });
+
+      // The same limit for a person who has hidden their photo but has no designation: unknown, so null (the dialogs hedge).
+      const quiet = await fx.makePerson("HiddenNone", tag);
+      await fx.addMember(org, quiet);
+      await q(sql`insert into person_privacy (person_id, organization_id, hide_photo) values (${quiet}, ${org}, true)`);
+      expect(await snapshotOf(quiet)).toMatchObject({ minor: false, directoryWithheld: null, websiteWithheld: null });
+
+      // A minor with an existing website designation: minor is the `minor` field, never put in the withheld fields.
+      expect(await snapshotOf(people.MinorDob!)).toMatchObject({ minor: true, websiteWithheld: null, directoryWithheld: null });
+    });
+
+    it("countChosenPhotos counts DISTINCT photos with an active designation on live photos (worded 'chosen for', never 'shown')", async () => {
       const [expected] = await q(sql`
+        select count(distinct d.photo_id)::int as n from person_photo_designations d
+          join person_photos ph on ph.id = d.photo_id and ph.organization_id = d.organization_id
+         where d.organization_id = ${org} and d.ended_at is null and ph.removed_at is null`);
+      const [rows] = await q(sql`
         select count(*)::int as n from person_photo_designations d
           join person_photos ph on ph.id = d.photo_id and ph.organization_id = d.organization_id
          where d.organization_id = ${org} and d.ended_at is null and ph.removed_at is null`);
-      const n = await authz.withOrgContext(editor, org, (tx) => reader.countPhotoDesignations(tx));
+      const n = await authz.withOrgContext(editor, org, (tx) => reader.countChosenPhotos(tx));
       expect(n).toBe(Number(expected!.n));
       expect(n).toBeGreaterThan(5);
+      // WebsiteWins is ONE photo carrying two designations: the row count is larger than the photo count.
+      expect(Number(rows!.n)).toBeGreaterThan(n);
+    });
+
+    it("one photo chosen for both the directory and the website is ONE photo; two photos, one doubly chosen, are two (T9)", async () => {
+      const solo = await fx.makeOrg("d2-count-solo");
+      await setPersonPhotosToggle(fx.platform, solo, true);
+      const soloEditor = await fx.makePerson("Count", `Solo${tag}`);
+      await fx.enroll(solo, soloEditor, ["people.manage"]);
+      const person = await fx.makePerson("Both", tag);
+      await fx.addMember(solo, person);
+      const count = () => authz.withOrgContext(soloEditor, solo, (tx) => reader.countChosenPhotos(tx));
+      expect(await count()).toBe(0);
+
+      await seedPersonPhoto(fx.platform, {
+        organizationId: solo,
+        personId: person,
+        userId: fx.actingUserId,
+        purposes: ["directory", "website"],
+        attestDirectory: true,
+      });
+      const [rows] = await q(sql`select count(*)::int as n from person_photo_designations where organization_id = ${solo} and ended_at is null`);
+      expect(Number(rows!.n), "two designation rows").toBe(2);
+      expect(await count(), "but one photo").toBe(1);
+
+      await seedPersonPhoto(fx.platform, { organizationId: solo, personId: person, userId: fx.actingUserId, purposes: [] });
+      expect(await count(), "an unchosen photo is not counted").toBe(1);
+      const other = await fx.makePerson("Other", tag);
+      await fx.addMember(solo, other);
+      await seedPersonPhoto(fx.platform, { organizationId: solo, personId: other, userId: fx.actingUserId, purposes: ["website"] });
+      expect(await count()).toBe(2);
     });
   });
 

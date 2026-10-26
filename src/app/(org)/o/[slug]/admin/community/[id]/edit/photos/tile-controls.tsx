@@ -8,12 +8,15 @@ import { PAGE_COPY } from "@/lib/person-photos/copy";
 import { ConfirmDialog } from "./confirm-dialogs";
 import { DesignateDialog } from "./designate-dialog";
 
-type Which = "designate_directory" | "designate_website" | "stop_directory" | "stop_website" | "remove";
+type Which = "designate_directory" | "clear_website" | "designate_website" | "stop_directory" | "stop_website" | "remove";
 
 /**
  * The buttons under one photo tile and the dialogs they open (Copy C2, C4, C5).
  * One button per thing that can be done to THIS photo: choose or stop using it
  * for the directory, choose or stop using it for the website, and remove it.
+ * The current directory photo, when it is NOT cleared for the website, also
+ * carries "Clear for website" (Phase 5 run 1, R-b): the one control that makes
+ * the unattested remedy line true. Never shown for someone under 18.
  * `HydrationGate` keeps them inoperable until the page is live (DECISION-159);
  * the dialogs portal out of it, so they stay usable once opened.
  *
@@ -27,6 +30,7 @@ export function TileControls({
   label,
   isDirectory,
   isWebsite,
+  directoryAttested,
   name,
   state,
 }: {
@@ -36,6 +40,8 @@ export function TileControls({
   label: string;
   isDirectory: boolean;
   isWebsite: boolean;
+  /** The directory designation (when this is the directory photo) carries the website attestation. */
+  directoryAttested: boolean;
   name: string;
   state: PhotoStateSnapshot;
 }) {
@@ -60,6 +66,11 @@ export function TileControls({
         >
           {isDirectory ? PAGE_COPY.stopInDirectory : PAGE_COPY.useInDirectory}
         </Button>
+        {isDirectory && !directoryAttested && !state.minor && (
+          <Button type="button" variant="outline" className="min-h-11 w-full justify-center" onClick={() => show("clear_website")}>
+            {PAGE_COPY.clearForWebsite}
+          </Button>
+        )}
         <Button
           type="button"
           variant="outline"
@@ -78,9 +89,10 @@ export function TileControls({
         personId={personId}
         photoId={photoId}
         purpose={open === "designate_website" ? "website" : "directory"}
+        clear={open === "clear_website"}
         state={state}
         name={name}
-        open={open === "designate_directory" || open === "designate_website"}
+        open={open === "designate_directory" || open === "clear_website" || open === "designate_website"}
         onOpenChange={close}
       />
       <ConfirmDialog

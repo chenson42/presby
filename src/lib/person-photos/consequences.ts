@@ -17,6 +17,11 @@ import { CONSEQUENCE_COPY as C } from "./copy";
  * description of the SQL, never a second authority: the page's status lines come
  * from the SQL wrapper itself.
  *
+ * A sentence about what a surface WILL show is allowed only where the queries behind the snapshot
+ * establish it (Phase 5 run 1 rulings, R-a): the snapshot carries `minor`, `directoryWithheld` and
+ * `websiteWithheld`, and a sentence that cannot be established says "can ... unless something
+ * withholds it". The site's publication status and the platform `sites.*` flags are NOT read.
+ *
  * Each dialog's title, confirm and cancel labels, and the attestation
  * checkboxes are UI strings Batch 3 owns; this file returns only the sentences
  * whose truth depends on state.
@@ -31,6 +36,20 @@ export interface PhotoStateSnapshot {
   website: { photoId: string } | null;
   /** The active directory designation, if any; `attested` = it carries the website attestation. */
   directory: { photoId: string; attested: boolean } | null;
+  /** `presby_photo_subject_is_minor`: ALWAYS known (the one withheld reason that needs no designation). */
+  minor: boolean;
+  /**
+   * `presby_person_directory_photo().withheld` when it reported `hide_photo` (scoped to this
+   * organization); else null. null means "none reported", NOT "none applies": with no directory
+   * designation the function returns no row.
+   */
+  directoryWithheld: "hide_photo" | null;
+  /**
+   * `presby_person_public_photo_status().withheld` when it reported `hide_photo` or `merged`; else
+   * null. Same caveat as `directoryWithheld`. `minor` and `toggle_off` never appear here: minor is
+   * its own field, and the toggle is off only on a page that does not render.
+   */
+  websiteWithheld: "hide_photo" | "merged" | null;
 }
 
 export type PhotoIntent =
@@ -40,9 +59,25 @@ export type PhotoIntent =
   | { kind: "undesignate_website" }
   | { kind: "remove"; photoId: string };
 
-/** Is the CURRENT directory photo what the public website is showing for this person right now? */
+/**
+ * Does anything the snapshot knows withhold this person's photo from the website? `hide_photo` is a
+ * person-level setting, so a directory answer of `hide_photo` withholds the website photo too.
+ */
+function websiteIsWithheld(state: PhotoStateSnapshot): boolean {
+  return state.minor || state.websiteWithheld !== null || state.directoryWithheld !== null;
+}
+
+/**
+ * Is the CURRENT directory photo what the public website is showing for this person right now?
+ * A description of the SQL (a withheld person's photo is not shown), never a second authority.
+ */
 export function directoryPhotoServesWebsite(state: PhotoStateSnapshot): boolean {
-  return state.directory?.attested === true && state.website === null && state.listed;
+  return state.directory?.attested === true && state.website === null && state.listed && !websiteIsWithheld(state);
+}
+
+/** The sentence for a withheld website, by reason (only called when `websiteWithheld` is set). */
+function websiteWithheldLine(state: PhotoStateSnapshot): string {
+  return state.websiteWithheld === "merged" ? C.websiteMerged : C.websiteHidden(state.first);
 }
 
 export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent): string[] {
@@ -51,12 +86,17 @@ export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent):
 
   switch (intent.kind) {
     case "designate_directory": {
+      // The store refuses a minor, so the dialog says so before the click and says nothing else.
+      if (state.minor) return [C.minorBlocked(first)];
+      if (state.directoryWithheld !== null) lines.push(C.directoryHidden(first));
       if (intent.attested) {
-        lines.push(
-          state.listed && state.website === null
-            ? C.directoryAlsoOnWebsite(first)
-            : C.directoryWebsiteConditional(first),
-        );
+        if (state.websiteWithheld !== null) lines.push(websiteWithheldLine(state));
+        else
+          lines.push(
+            state.listed && state.website === null
+              ? C.directoryAlsoOnWebsite(first)
+              : C.directoryWebsiteConditional(first),
+          );
       } else if (directoryPhotoServesWebsite(state)) {
         // Replacing a photo that the website is using with one that is not cleared for it.
         lines.push(C.directoryWebsiteWillStop(first));
@@ -65,7 +105,9 @@ export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent):
     }
 
     case "designate_website": {
-      lines.push(state.listed ? C.websiteListed(first) : C.websiteNotListed(first));
+      if (state.minor) return [C.minorBlocked(first)];
+      if (state.websiteWithheld !== null) lines.push(websiteWithheldLine(state));
+      else lines.push(state.listed ? C.websiteListed(first) : C.websiteNotListed(first));
       if (state.website !== null && state.website.photoId !== intent.photoId) lines.push(C.websiteReplaces);
       return lines;
     }
@@ -78,7 +120,9 @@ export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent):
 
     case "undesignate_website": {
       lines.push(C.websiteStops);
-      lines.push(state.directory?.attested === true ? C.websiteFallsBack(first) : C.websiteShowsNone(first));
+      lines.push(
+        state.directory?.attested === true && !websiteIsWithheld(state) ? C.websiteFallsBack(first) : C.websiteShowsNone(first),
+      );
       lines.push(C.websiteCaches);
       return lines;
     }
@@ -89,7 +133,7 @@ export function consequencesFor(state: PhotoStateSnapshot, intent: PhotoIntent):
       const isWebsite = state.website?.photoId === intent.photoId;
       const isFallback = isDirectory && directoryPhotoServesWebsite(state);
       if (isDirectory) lines.push(C.removeIsDirectory(first));
-      if (isWebsite) lines.push(C.removeIsWebsite);
+      if (isWebsite) lines.push(websiteIsWithheld(state) ? C.removeIsWebsiteWithheld : C.removeIsWebsite);
       if (isFallback) lines.push(C.removeIsFallback);
       if (isWebsite || isFallback) lines.push(C.removeCaches);
       return lines;

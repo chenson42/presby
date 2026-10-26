@@ -60,6 +60,7 @@ export function PhotoGrid({ slug, set }: { slug: string; set: PhotoSetView }) {
               label={alt}
               isDirectory={photo.isDirectory}
               isWebsite={photo.isWebsite}
+              directoryAttested={photo.directoryAttested}
               name={set.displayName}
               state={set.state}
             />

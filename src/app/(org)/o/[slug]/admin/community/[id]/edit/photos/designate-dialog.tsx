@@ -19,7 +19,7 @@ import { designatePersonPhotoAction } from "./actions";
 
 /**
  * "Use this photo in the directory / on the public website" (Copy C4). One
- * component, two variants. A `Dialog` (the choice is reversible, so not an
+ * component, three variants. A `Dialog` (the choice is reversible, so not an
  * `AlertDialog`) with a NATIVE checkbox, the `branding-form.tsx` idiom; no
  * checkbox primitive is added.
  *
@@ -29,6 +29,13 @@ import { designatePersonPhotoAction } from "./actions";
  *     are recomputed from the live state on every tick.
  *   - website: the box is REQUIRED and the confirm button stays disabled until
  *     it is ticked (the server also refuses without it).
+ *   - clear (`clear` set, purpose "directory"): the current directory photo's
+ *     "Clear for website" button (Phase 5 run 1, R-b). Records the website
+ *     attestation on the same photo (the store ends the old designation and
+ *     inserts the attested one); the box is REQUIRED, like the website's.
+ *
+ * Every variant disables its confirm when the person appears to be under 18:
+ * the store would refuse, and the consequence line says so before the click.
  *
  * The confirm is a plain `Button`, not `AlertDialogAction`, so a refusal leaves
  * the dialog open with the reason in a toast. Ticks reset each time it opens
@@ -39,6 +46,7 @@ export function DesignateDialog({
   personId,
   photoId,
   purpose,
+  clear = false,
   state,
   name,
   open,
@@ -48,6 +56,8 @@ export function DesignateDialog({
   personId: string;
   photoId: string;
   purpose: Purpose;
+  /** The "Clear for website" variant of the directory purpose. */
+  clear?: boolean;
   state: PhotoStateSnapshot;
   name: string;
   open: boolean;
@@ -56,14 +66,20 @@ export function DesignateDialog({
   const [ticked, setTicked] = useState(false);
   const [pending, setPending] = useState(false);
   const isWebsite = purpose === "website";
-  const copy = isWebsite ? DESIGNATE_COPY.website : DESIGNATE_COPY.directory;
+  const copy = isWebsite ? DESIGNATE_COPY.website : clear ? DESIGNATE_COPY.clear : DESIGNATE_COPY.directory;
+  const description = isWebsite
+    ? DESIGNATE_COPY.website.body
+    : clear
+      ? DESIGNATE_COPY.clear.body(state.first)
+      : DESIGNATE_COPY.directory.body(name, state.first);
+  const needsTick = isWebsite || clear;
   const lines = consequencesFor(
     state,
     isWebsite
       ? { kind: "designate_website", photoId }
       : { kind: "designate_directory", photoId, attested: ticked },
   );
-  const checkboxId = `designate-${purpose}-${photoId}`;
+  const checkboxId = `designate-${clear ? "clear" : purpose}-${photoId}`;
 
   function handleOpenChange(next: boolean) {
     if (pending) return;
@@ -90,7 +106,7 @@ export function DesignateDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{copy.title}</DialogTitle>
-          <DialogDescription>{isWebsite ? DESIGNATE_COPY.website.body : DESIGNATE_COPY.directory.body(name)}</DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="flex items-start gap-3">
           <input
@@ -115,7 +131,7 @@ export function DesignateDialog({
           <Button type="button" variant="outline" className="min-h-11" onClick={() => handleOpenChange(false)} disabled={pending}>
             {DESIGNATE_COPY.cancel}
           </Button>
-          <Button type="button" className="min-h-11" onClick={confirm} disabled={pending || (isWebsite && !ticked)}>
+          <Button type="button" className="min-h-11" onClick={confirm} disabled={pending || state.minor || (needsTick && !ticked)}>
             {copy.confirm}
           </Button>
         </DialogFooter>

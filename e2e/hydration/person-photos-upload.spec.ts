@@ -94,12 +94,16 @@ test.describe("Hydration - the person photos page (DECISION-159)", () => {
     const remove = group.getByRole("button", { name: "Remove" });
     const stopDirectory = group.getByRole("button", { name: "Stop using in directory" });
     const useWebsite = group.getByRole("button", { name: "Use on website" });
+    // The seeded directory photo is NOT cleared for the website, so its tile carries a fourth button (Phase 5 run 1, R-b).
+    const clearWebsite = group.getByRole("button", { name: "Clear for website" });
     await expect(input).toBeAttached();
-    for (const control of [input, choose, remove, stopDirectory, useWebsite]) await expect(control).toBeDisabled();
+    for (const control of [input, choose, remove, stopDirectory, clearWebsite, useWebsite]) await expect(control).toBeDisabled();
 
     // A forced click on a disabled Remove opens nothing, and a file set on the disabled input is refused by the browser.
     await remove.click({ force: true }).catch(() => {});
+    await clearWebsite.click({ force: true }).catch(() => {});
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await input.setInputFiles({ name: "big.png", mimeType: "image/png", buffer: await syntheticLargePng(800, 600) }).catch(() => {});
     expect(await photoRows(sql, COMMUNITY_ORG.id, person.personId)).toHaveLength(1);
     expect((await designationRows(sql, COMMUNITY_ORG.id, person.personId)).map((d) => [d.photo_id === seeded.photoId, d.purpose, d.ended])).toEqual([
@@ -110,7 +114,7 @@ test.describe("Hydration - the person photos page (DECISION-159)", () => {
     release();
 
     await expect(input).toBeEnabled();
-    for (const control of [choose, remove, stopDirectory, useWebsite]) await expect(control).toBeEnabled();
+    for (const control of [choose, remove, stopDirectory, clearWebsite, useWebsite]) await expect(control).toBeEnabled();
     await remove.click();
     await expect(page.getByRole("alertdialog")).toBeVisible();
     await page.getByRole("alertdialog").getByRole("button", { name: /^cancel$/i }).click();

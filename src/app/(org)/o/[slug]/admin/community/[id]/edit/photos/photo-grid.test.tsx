@@ -29,7 +29,7 @@ const tile = (over: Partial<PhotoTileView> & { id: string }): PhotoTileView => (
   ...over,
 });
 
-function set(photos: PhotoTileView[]): PhotoSetView {
+function set(photos: PhotoTileView[], state: Partial<PhotoSetView["state"]> = {}): PhotoSetView {
   return {
     personId: "p-1",
     displayName: "Nora Ashgrove",
@@ -47,6 +47,10 @@ function set(photos: PhotoTileView[]): PhotoSetView {
       listed: false,
       website: null,
       directory: null,
+      minor: false,
+      directoryWithheld: null,
+      websiteWithheld: null,
+      ...state,
     },
     viewed: null,
   };
@@ -92,6 +96,40 @@ describe("PhotoGrid", () => {
     expect(second.getByRole("button", { name: PAGE_COPY.useInDirectory })).toBeTruthy();
     expect(second.getByRole("button", { name: PAGE_COPY.useOnWebsite })).toBeTruthy();
     expect(second.getByRole("button", { name: PAGE_COPY.remove })).toBeTruthy();
+  });
+
+  it("'Clear for website' is on the current directory photo when it is NOT cleared, and nowhere else (T7)", () => {
+    render(
+      <PhotoGrid
+        slug="alder-creek"
+        set={set([
+          tile({ id: "a", isDirectory: true, directoryAttested: false }),
+          tile({ id: "b", isDirectory: true, directoryAttested: true }),
+          tile({ id: "c" }),
+          tile({ id: "d", isWebsite: true }),
+        ])}
+      />,
+    );
+    const names = (n: number) =>
+      within(screen.getByRole("group", { name: `Nora Ashgrove, photo ${n}` })).queryAllByRole("button").map((b) => b.textContent);
+    expect(names(1)).toEqual(["Stop using in directory", "Clear for website", "Use on website", "Remove"]);
+    expect(names(2)).toEqual(["Stop using in directory", "Use on website", "Remove"]); // an attested directory photo
+    expect(names(3)).toEqual(["Use in directory", "Use on website", "Remove"]); // not the directory photo
+    expect(names(4)).toEqual(["Use in directory", "Stop using on website", "Remove"]);
+  });
+
+  it("'Clear for website' is absent when the person appears to be under 18", () => {
+    render(<PhotoGrid slug="alder-creek" set={set([tile({ id: "a", isDirectory: true })], { minor: true })} />);
+    expect(screen.queryByRole("button", { name: PAGE_COPY.clearForWebsite })).toBeNull();
+  });
+
+  it("'Clear for website' opens the clear dialog, with its confirm disabled until the box is ticked (never the plain directory dialog)", () => {
+    render(<PhotoGrid slug="alder-creek" set={set([tile({ id: "a", isDirectory: true })])} />);
+    fireEvent.click(screen.getByRole("button", { name: PAGE_COPY.clearForWebsite }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText(DESIGNATE_COPY.clear.title)).toBeTruthy();
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: DESIGNATE_COPY.clear.confirm }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
   });
 
   it("every button is a 44px target", () => {

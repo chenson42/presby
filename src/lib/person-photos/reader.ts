@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, countDistinct, eq, isNull, sql } from "drizzle-orm";
 import { withOrgContext, type OrgTx } from "@/lib/authz";
 import { personPhotoDesignations, personPhotos } from "@/lib/db/domain/person-photos";
 import { getBlobStore } from "@/lib/storage/blob-store";
@@ -65,15 +65,16 @@ export async function personPhotosEnabled(ctx: ReadCtx): Promise<boolean> {
 
 /**
  * How many photos are currently CHOSEN for the directory or the website in the
- * current organization (active designations on live photos). Worded "chosen for",
+ * current organization: DISTINCT photos with an active designation on a live
+ * photo (one headshot chosen for both is one photo, not two). Worded "chosen for",
  * never "shown": the toggle, a minor or a hidden photo may still withhold one.
  * Called by `org-feature-warnings.ts` so that module never imports the tables.
  * Counts under the transaction's organization (RLS); the Features page already
  * holds that transaction.
  */
-export async function countPhotoDesignations(tx: OrgTx): Promise<number> {
+export async function countChosenPhotos(tx: OrgTx): Promise<number> {
   const [row] = await tx
-    .select({ n: count() })
+    .select({ n: countDistinct(personPhotoDesignations.photoId) })
     .from(personPhotoDesignations)
     .innerJoin(
       personPhotos,
@@ -258,6 +259,11 @@ export async function readPhotoSet(
     listed: listings.length > 0,
     website: websiteActive ? { photoId: websiteActive.photoId } : null,
     directory: directoryActive ? { photoId: directoryActive.photoId, attested: directoryActive.attested !== null } : null,
+    // What SQL withholds, for the dialogs' sentences. The two answers exist only while a designation does
+    // (the functions start from it), so null here means "none reported", never "none applies".
+    minor: isMinor,
+    directoryWithheld: directory.withheld === "hide_photo" ? "hide_photo" : null,
+    websiteWithheld: website.withheld === "hide_photo" || website.withheld === "merged" ? website.withheld : null,
   };
 
   const viewedSrc = viewed ? dataUri(blobs.get(viewed.imageKey)) : null;
@@ -275,7 +281,7 @@ export async function readPhotoSet(
       directory,
       website,
       listings,
-      lines: statusLines({ first, directory, website, listings }),
+      lines: statusLines({ first, directory, website, listings, minor: isMinor }),
       state,
       viewed: viewed && viewedSrc ? { photoId: viewed.id, src: viewedSrc } : null,
     },

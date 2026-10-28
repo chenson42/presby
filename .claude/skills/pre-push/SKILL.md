@@ -135,6 +135,16 @@ npm run check:hydration-gate
 
 **Do not proceed if the hydration-gate check fails.**
 
+## Step 3g: Help Tripwire
+
+```bash
+npm run check:help
+```
+
+`scripts/check-help.ts` checks that the public help (`src/content/help/`, `src/lib/help/registry.ts`) agrees with the tree and with `docs/TODO.md`: a registry entry without a file, a banned future-tense phrase, a quoted label that left the UI, a link that does not resolve, an image without alt text or not in the manifest, a published slug missing from the functionality map, and a `[help:<token>]` out of step with its page (a pending page whose line is Done, a `limitationUntil` naming a Done token). Workflow Rule 17, DECISION-294/296. The catalog and tile coverage half runs in the unit suite (`src/lib/help/coverage.test.ts`, Step 3d). Only CI ran `npm run check` before this step existed, so a red `check:help` was found after the push (F377).
+
+**Do not proceed if the help check fails.**
+
 ## Step 4: Production Build
 
 ```bash
@@ -208,6 +218,11 @@ Treat these as advisory warnings, not hard blockers (unless the user decides oth
   ```bash
   git diff --name-only | grep -E "\.env"
   ```
+- **Help (Workflow Rule 17)?** If the outgoing diff touches a page, label or flow a non-operator can see, something under `src/content/help/` or `src/lib/help/registry.ts` should have changed too, or the work-log says "no help impact":
+  ```bash
+  git diff main...HEAD --name-only | grep -q -E "src/content/help/|src/lib/help/registry.ts" || echo "WARN: no help change on this branch — confirm 'no help impact' is recorded"
+  ```
+  Advisory only; `npm run check:help` (Step 3g, and inside `npm run check`) is the hard gate for the mechanical part.
 
 ## Step 7b: Dependency CVE Audit
 
@@ -231,6 +246,7 @@ Report results:
 - Schema and migrations: in sync / pending (with details)
 - Release notes + version: updated / missing
 - Secrets & PII tripwire: PASS / FAIL (HARD findings) / WARN (SOFT findings reviewed and accepted)
+- Help tripwire: PASS / FAIL
 - Dependency CVE audit: PASS / WARN / FAIL (advisory IDs if any)
 - Housekeeping warnings: list them
 - **Ready to push? yes / no**

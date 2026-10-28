@@ -86,6 +86,7 @@ Review `CLAUDE.md` for drift introduced by the release:
 
 - **Capability Map** (and README's "What you get out of the box") — if the release adds any user-visible capability (a new page, a new auth flow, a new library, a new pattern like `ActionResult<T>`), add it to the relevant Capability Map bullet in CLAUDE.md and the detailed catalog in README. Keep the existing tone: concise, no internal implementation detail unless it's a concept a fork will copy.
 - **Functionality map (Workflow Rule 14)** — update `docs/product/functionality-map.md` for every feature the release adds, materially changes, or removes: the full-map bullet (one line, primary file as jump-off) and the short Index if a whole surface/area shifted. Bump the map's version/surveyed stamp to match the release.
+- **Help (Workflow Rule 17)** — if the release changes anything a non-operator can see, name the help page the release added or edited in the entry (`**Help:** /help/<slug>`), or write `**Help:** no impact` and the reason. Run `npm run check:help`. If the release ships a feature whose TODO line carries a `[help:<token>]`, confirm its page is `published`, its `verifiedIn` is this release, and the `limitationUntil` sentences that named it are gone.
 - **"Project Layout"** — if the release adds any route group or top-level directory under `src/app/`, add the corresponding line to the tree in the right alphabetical/logical position.
 - **"Common Commands"** — if the release adds any npm script that a developer or agent would need to invoke, add it to the command block.
 
@@ -138,6 +139,8 @@ Append one entry to `docs/briefings.md` for this release (severity-tagged, 80-15
 
 - `GET /path` — Description
 - `POST /api/...` — Description
+
+**Help:** [/help/<slug>, or "no impact" and why]
 ```
 
 > **No file lists.** Release notes describe user-facing value and bug context — not implementation. Don't add `Files Added`, `Files Modified`, or any per-file inventory. If a reader needs a per-file diff, they can run `git log vA.B.C..vX.Y.Z`.
@@ -157,6 +160,8 @@ Append one entry to `docs/briefings.md` for this release (severity-tagged, 80-15
 **Changes:**
 - [Change]
 - [Change]
+
+**Help:** [/help/<slug>, or "no impact" and why]
 ```
 
 ---

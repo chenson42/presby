@@ -63,7 +63,7 @@ export function SignInCredentialsForm({ callbackUrl }: Props) {
           onChange={(e) => setEmail(e.target.value)}
           disabled={isPending}
           className="mt-1"
-          placeholder="admin@claudecode.info"
+          placeholder="you@example.org"
         />
       </div>
       <div>

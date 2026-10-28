@@ -23,6 +23,7 @@ Conventions for building consistent, accessible UI across presby. Every rule bel
 - [Four-State Component Design](#four-state-component-design)
 - [Empty States](#empty-states)
 - [Accessibility](#accessibility)
+- [Linking to Help](#linking-to-help)
 - [CLAUDE.md Invariants (cross-reference)](#claudemd-invariants-cross-reference)
 - [Pre-merge UX Audit Checklist](#pre-merge-ux-audit-checklist)
 
@@ -677,6 +678,12 @@ A single gray sentence in the middle of the page is not an empty state.
 - **Plain language, at the reading level of the congregation.** This product's users are church volunteers and members, many of them elderly, none of them obliged to know our vocabulary. Write labels and messages in the words the church already uses — "Add a member", not "Create person record"; "Transferred to another church", not "Roll action: certificate issued". Where the polity has a term of art the clerk genuinely uses (*session*, *per capita*, *profession of faith*), use it — that is the congregation's language, not ours. Where the term is ours (*tenant*, *organization*, *record*, *entity*, *sync*), it does not belong on a member-facing surface. Errors say what happened and what to do next, in a sentence a person can act on without calling the office.
 - **Session length is an accessibility concern.** Someone completing a long form — a roll action, an annual statistical return, a sensitive-info sub-form — may take much longer than a staff user testing it. A session that expires mid-task and discards the work is a failure of this standard, not a security feature. Any flow expected to take more than a few minutes must either keep the session alive while the user is active or preserve entered data across re-authentication. The [Unsaved Changes Guard](#forms--unsaved-changes-guard) protects against navigation, not expiry.
 - **Print.** Church offices print rolls, directories, and reports on monochrome laser printers. Any content page a user might reasonably print — a roll view, a report, a directory listing — must stay legible with color removed: pair a status color with an icon or a label (not just a colored chip), and keep borders and dividers that rely on `border`/`border-input` rather than a colored background alone. Check the browser's print preview, not just the screen, before shipping a page whose primary use is "print this and hand it to the clerk of session."
+
+---
+
+## Linking to Help
+
+The public help site lives at `/help` (Workflow Rule 17). Link to it from a screen only through `helpHref("<slug>")` (or `helpHref("<slug>", "<anchor>")`) from `src/lib/help/urls.ts`, rendered by `HelpLink` (`src/components/help/help-link.tsx`): the slug and anchor are typed against the registry, so a typo, a page that is not published yet, or an anchor the page does not declare is a compile error, and `npm run check:help` fails on a hand-built `"/help…"` string anywhere else. Link text names the page it opens ("Help with signing in", not "click here"). `HelpLink` is a same-tab link with a 44px target (`min-h-11`), the standard text-link focus ring with its 2px offset, and no brand styling. Help is not brandable and is session-free, so do not pass it state; a link to it is always safe to show to a signed-out reader.
 
 ---
 

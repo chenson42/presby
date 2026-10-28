@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { FeaturesHelpLink } from "@/components/help/features-help-link";
 
 /**
  * The non-data-bearing answers `/o/<slug>/admin/careers` (and `new` and
@@ -35,6 +36,7 @@ export function CareersFeatureOff({
           <>Ask someone who manages {name}&apos;s features to turn them on.</>
         )}
       </p>
+      <FeaturesHelpLink />
     </section>
   );
 }

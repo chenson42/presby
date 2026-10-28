@@ -118,6 +118,20 @@ export function foundingAdministratorPlan(
     // drizzle/0057 backfills roles already designated; the additive-only
     // reconcile in designation step 9 tops up a re-designation.
     "domains.manage",
+    // F292 (careers, DECISION-265, operator ruling Q4 2026-10-25): both
+    // careers keys, for the same F111 reason as domains.manage - without them
+    // nobody at an organization holds either key, so the `hiring_committee`
+    // template could never be adopted or granted there. careers.manage is
+    // tier 1 (postings are public content). careers.applicants is TIER 3, the
+    // first key above tier 1 in this bundle: an accepted `paper` residual
+    // (the founding administrator can read applications once the
+    // applications increment ships), detected by that increment's
+    // resume-download audit row. Unconstitutional (DECISION-078: no PC(USA)
+    // office's duty is hiring), so no stated_clerk binding. drizzle/0071
+    // re-creates the SQL function in the same order and backfills roles
+    // already designated.
+    "careers.manage",
+    "careers.applicants",
   ];
   return {
     administration: {

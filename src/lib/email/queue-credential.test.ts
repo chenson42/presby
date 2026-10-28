@@ -78,7 +78,7 @@ import {
   isCredentialTemplateKey,
   processQueueBatch,
 } from "./queue";
-import { ACCOUNT_INVITATION_TEMPLATE_KEY } from "@/lib/onboarding/invitation-email";
+import { ACCOUNT_INVITATION_TEMPLATE_KEY, ACCOUNT_SIGN_IN_TEMPLATE_KEY } from "@/lib/onboarding/invitation-email";
 import { renderEmail } from "./render";
 
 const MSG = renderEmail({ subject: "s", heading: "h", blocks: [{ kind: "p", text: "p" }] });
@@ -113,9 +113,12 @@ beforeEach(() => {
 });
 
 describe("CREDENTIAL_TEMPLATE_KEYS", () => {
-  it("holds exactly the invitation template key in this pipeline (F154: the other three are a follow-up)", () => {
-    expect([...CREDENTIAL_TEMPLATE_KEYS]).toEqual([ACCOUNT_INVITATION_TEMPLATE_KEY]);
+  it("holds exactly the two invitation template keys (F154: the other three are a follow-up)", () => {
+    expect([...CREDENTIAL_TEMPLATE_KEYS].sort()).toEqual(
+      [ACCOUNT_INVITATION_TEMPLATE_KEY, ACCOUNT_SIGN_IN_TEMPLATE_KEY].sort(),
+    );
     expect(isCredentialTemplateKey("account_invitation")).toBe(true);
+    expect(isCredentialTemplateKey("account_sign_in_invitation")).toBe(true);
     expect(isCredentialTemplateKey("password_reset")).toBe(false);
   });
 });

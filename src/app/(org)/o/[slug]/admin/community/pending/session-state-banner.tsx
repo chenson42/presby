@@ -1,15 +1,30 @@
 import Link from "next/link";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import type { SessionApprovalState } from "@/lib/roll";
+import { SESSION_BANNER_COPY } from "@/lib/onboarding/sign-in-copy";
+import type { SessionSignInRow } from "@/lib/onboarding/sign-in-types";
+import { SessionSignInRows } from "./session-sign-in-rows";
+
+/**
+ * What the `no_sign_in` banner says after its count (Community Increment 2b,
+ * Copy group F, replacing Increment 2's "inviting isn't available yet" line):
+ * `rows` for a viewer who holds both `people.manage` and `officers.manage` (names,
+ * states and links to each person's card), `other` for everyone else (one
+ * sentence, no names and no link, because the invite needs `people.manage` and a
+ * read-mode viewer must never be pointed at a page they cannot open, 284e).
+ * Absent means `other`: the safe default.
+ */
+export type SessionHandOff =
+  | { kind: "rows"; rows: SessionSignInRow[]; connectEnabled: boolean }
+  | { kind: "other" };
 
 /**
  * Flow 7: why the Session cannot act yet, in the six states (DECISION-205),
- * `ready` rendering nothing. Counts only, never names. The `no_sign_in`
- * "inviting someone isn't available yet" sentence is the single constant
- * Increment 2b replaces with a link to the invite card.
+ * `ready` rendering nothing. Counts only, never names, except the hand-off rows
+ * a viewer with both keys is shown under `no_sign_in`. The hand-off appears only
+ * in `no_sign_in`, never in `terms_not_started` (284b): a seat that has not
+ * started is not waiting on a sign-in.
  */
-export const NO_SIGN_IN_INVITE_LINE =
-  "Inviting someone to sign in isn't available here yet. Send us a support ticket and we'll help get them set up.";
 
 function Banner({
   title,
@@ -33,8 +48,10 @@ function Banner({
 export function SessionStateBanner({
   slug,
   state,
+  handOff = { kind: "other" },
 }: {
   slug: string;
+  handOff?: SessionHandOff;
   state: Pick<
     SessionApprovalState,
     "kind" | "recorded" | "startingLater" | "nextStart" | "viewer"
@@ -98,33 +115,30 @@ export function SessionStateBanner({
               Session can approve yet.
             </p>
           )}
-          <p>To approve, a member of the Session also needs a PresbyPortal account.</p>
+          <p>{SESSION_BANNER_COPY.termsNotStarted}</p>
         </Banner>
       );
     }
-    case "no_sign_in": {
-      const seated = state.recorded;
-      const plural = seated !== 1;
+    case "no_sign_in":
       return (
         <Banner title="No one can approve yet">
-          <p>
-            {seated} {plural ? "members" : "member"} of the Session{" "}
-            {plural ? "are" : "is"} recorded, but none has a PresbyPortal
-            account yet, so no one can approve.
-          </p>
-          <p>{NO_SIGN_IN_INVITE_LINE}</p>
+          <p>{SESSION_BANNER_COPY.noSignIn(state.recorded)}</p>
+          {handOff.kind === "rows" ? (
+            <SessionSignInRows
+              slug={slug}
+              rows={handOff.rows}
+              recorded={state.recorded}
+              connectEnabled={handOff.connectEnabled}
+            />
+          ) : (
+            <p>{SESSION_BANNER_COPY.otherViewers}</p>
+          )}
         </Banner>
       );
-    }
     case "no_permission":
       return (
         <Banner title="No one can approve yet">
-          <p>
-            Members of the Session are recorded and have accounts, but none of
-            them has permission to approve roll actions. This usually means the
-            Session member role was changed. Check Roles, or send us a support
-            ticket.
-          </p>
+          <p>{SESSION_BANNER_COPY.noPermission}</p>
         </Banner>
       );
   }

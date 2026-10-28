@@ -8,7 +8,9 @@
  *
  * The notice claims only what the system knows: that the email was handed to
  * the provider ("sent") or is being retried ("queued"), never that it arrived or
- * was opened. "From the email" is accurate in both states.
+ * was opened. (Since Community Increment 2b a designation can also be
+ * accepted in place on `/no-organization`, so the sentence no longer says
+ * "from the email".)
  */
 
 /** The two designation purposes an invitation can carry. */
@@ -21,7 +23,7 @@ export const INVITATION_ROLE_WORD: Record<InvitationCopyPurpose, "role" | "acces
 };
 
 /** What the designation is called inside a sentence. */
-const DESIGNATION_NAME: Record<InvitationCopyPurpose, string> = {
+export const DESIGNATION_NAME: Record<InvitationCopyPurpose, string> = {
   founding_administrator: "founding administrator",
   treasurer: "treasurer",
 };
@@ -87,7 +89,7 @@ export function acceptanceSentence(input: {
 }): string {
   const who = inviteeReference(input.name, input.address);
   return (
-    `The ${DESIGNATION_NAME[input.purpose]} designation takes effect when ${who} accepts it from the email. ` +
+    `The ${DESIGNATION_NAME[input.purpose]} designation takes effect when ${who} accepts it. ` +
     `Until then nobody holds this ${INVITATION_ROLE_WORD[input.purpose]}.`
   );
 }

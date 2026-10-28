@@ -141,7 +141,7 @@ describe("InvitationList", () => {
       address: "clerk@example.invalid",
     });
     expect(screen.getByRole("status").textContent).toContain(expected);
-    expect(screen.getByRole("status").textContent).toContain("Marisol Quenby accepts it from the email");
+    expect(screen.getByRole("status").textContent).toContain("Marisol Quenby accepts it");
     expect(screen.getByRole("status").textContent).not.toContain("Nobody holds this role until it is accepted");
   });
 
@@ -164,7 +164,7 @@ describe("InvitationList", () => {
       fireEvent.click(screen.getByRole("button", { name: /^resend$/i }));
     });
     const text = screen.getByRole("status").textContent ?? "";
-    expect(text).toContain("The treasurer designation takes effect when Perpetua accepts it from the email. Until then nobody holds this access.");
+    expect(text).toContain("The treasurer designation takes effect when Perpetua accepts it. Until then nobody holds this access.");
   });
 
   it("shows the server-derived name as the For line for both purposes, and no For line when there is none", () => {

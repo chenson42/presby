@@ -22,6 +22,8 @@ import {
 } from "./support/invitation-observer";
 import { deadHeading, signInOnPage, submitTotp } from "./support/invitation-ui";
 import { E2E_TOTP_TEST_SECRET } from "./support/totp-fixture";
+import { expectPanelSurvives, readPanelCodes, recordUrls, typeEnrolmentCode } from "./support/enrolment-fixture";
+import { generateSync } from "otplib";
 import { E2E_USERS, storageStatePath } from "./support/users";
 
 /**
@@ -356,6 +358,21 @@ test("treasurer purpose, existing account (no MFA): accepting links the roster p
     permissionKeys: ["giving.manage", "giving.record", "giving.view"],
     inviterIsInvitee: false,
   });
+
+  // F166 (DECISION-292): the treasurer, forced into enrolment by arm B, enrols from the page they were sent to. The ten
+  // recovery codes stay up through the re-render, Continue is the sanitized destination (the congregation), and following
+  // it lands on /o/<slug> with NO /totp challenge: enrolling marked the session verified.
+  const urls = recordUrls(page);
+  await expect(page.getByRole("heading", { name: /enroll in two-factor authentication/i })).toBeVisible();
+  await typeEnrolmentCode(page, (secret) => generateSync({ secret }));
+  await expect(page.getByRole("heading", { level: 1, name: "Two-factor authentication enabled" })).toBeVisible({ timeout: 30_000 });
+  await expectPanelSurvives(page);
+  expect(await readPanelCodes(page)).toHaveLength(10);
+  const cont = page.getByRole("link", { name: "Continue" });
+  await expect(cont).toHaveAttribute("href", `/o/${o.slug}`);
+  await cont.click();
+  await page.waitForURL((url) => url.pathname === `/o/${o.slug}`, { timeout: 30_000 });
+  expect(urls.filter((u) => new URL(u).pathname === "/totp"), "no second challenge after enrolling").toEqual([]);
 });
 
 test.describe("signed in as a different account", () => {

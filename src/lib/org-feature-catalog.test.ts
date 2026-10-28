@@ -62,19 +62,24 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar, org_portal.giving, org_portal.parishes, org_portal.public_calendar and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar the one provisioned-on entry", () => {
+  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.public_calendar, org_portal.sign_in_connect and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
+      "org_portal.careers",
       "org_portal.domains",
       "org_portal.giving",
       "org_portal.mail_domain",
       "org_portal.parishes",
       "org_portal.public_calendar",
+      "org_portal.sign_in_connect",
     ]);
 
     const provisioned = ORG_FEATURE_CATALOG.filter((e) => e.provisionedOn);
-    expect(provisioned.map((e) => e.key)).toEqual(["org_portal.calendar"]);
+    expect(provisioned.map((e) => e.key).sort()).toEqual([
+      "org_portal.calendar",
+      "org_portal.sign_in_connect",
+    ]);
 
     const calendar = ORG_FEATURE_CATALOG.find(
       (e) => e.key === "org_portal.calendar",
@@ -158,6 +163,36 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(entry!.operatorEnabled).toBe(false);
     expect(entry!.orgTypes).toBeNull();
     expect(entry!.category).toBe("worship");
+  });
+
+  it("org_portal.sign_in_connect is toggle-only, provisioned ON, tenant-controlled, people category, unscoped by organization type, with the approved name and description (R47, Copy group G)", () => {
+    const entry = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.sign_in_connect");
+    expect(entry).toBeDefined();
+    expect(entry!.name).toBe("Connect people when they sign in");
+    expect(entry!.flag).toBeNull();
+    expect(entry!.provisionedOn).toBe(true);
+    expect(entry!.operatorEnabled).toBe(false);
+    expect(entry!.orgTypes).toBeNull();
+    expect(entry!.category).toBe("people");
+    // It must not promise what it cannot do (R, Copy group G): it stops NEW
+    // connections only, and it does not call the feature safe.
+    expect(entry!.description).toMatch(/Turning this off stops new connections only/);
+    expect(entry!.description).toMatch(/people already connected stay connected/);
+    expect(entry!.description).not.toMatch(/\bsafe\b|secure|prevent/i);
+  });
+
+  it("org_portal.careers is toggle-only, provisioned OFF, SELF-SERVICE, people category, unscoped by organization type (the SQL definer repeats exactly these)", () => {
+    const entry = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.careers");
+    expect(entry).toBeDefined();
+    expect(entry!.name).toBe("Job openings");
+    expect(entry!.description).toBe(
+      "Lets your congregation post job openings on its public website. People are asked to contact the church to apply. Whoever maintains your website can also place the openings on a page.",
+    );
+    expect(entry!.flag).toBeNull();
+    expect(entry!.provisionedOn).toBe(false);
+    expect(entry!.operatorEnabled).toBe(false);
+    expect(entry!.orgTypes).toBeNull();
+    expect(entry!.category).toBe("people");
   });
 
   it("orgTypeAdmitted is an ALLOW-LIST: null admits everything, a list admits only its members, an unknown organization is never admitted by a list", () => {

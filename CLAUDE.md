@@ -149,6 +149,15 @@ src/lib/contact-methods/ — which address a person's mail uses (DECISION-216): 
                          of contact_methods (end-dated, never deleted);
                          reader.ts, the TypeScript door to presby_person_email,
                          the credential authority
+src/lib/careers/       — job postings (Track L): the pure description validator,
+                         toolbar and paste converter; postings.ts (staff reads and
+                         writes, audit in the same transaction); public.ts (the one
+                         anonymous definer read); sweep.ts (the owner-only
+                         auto-close, the only getPlatformDb() user here).
+                         Applications arrive in a later increment and are
+                         definer-only
+src/components/careers/ — the posting description, list and meta pieces shared by
+                         the public tree and the staff preview
 src/lib/site-urls.ts   — SiteUrls: the only place a same-host public URL is
                          built (a source-scan test bans hand-built /site/${…}
                          elsewhere); pure, safe for the proxy and next.config.ts
@@ -537,9 +546,10 @@ referencing an immutable artifact; a recipient reads the published artifact,
 not the source's live state.
 
 A platform admin acquires tenant authority only as any person does — by
-accepting an invitation addressed to their own email; a self-sent designation
-is permitted and audited as such, and the platform role itself confers nothing
-(DECISION-183).
+accepting an invitation addressed to their own email, or by signing in with that
+proven address when a congregation has put it on exactly one eligible record; a
+self-sent designation is permitted and audited as such, and the platform role
+confers nothing either way (DECISION-183, DECISION-226).
 A platform admin may also end the current holders of an organization's
 founding-administrator or treasurer slot from `/admin/organizations/<id>`, as
 lockout recovery (DECISION-194). It never ends a grant held through a derived
@@ -549,6 +559,14 @@ designation lets the platform role clear a slot and then hold it. That chain is
 detected by audit (`org.*.revoked`, then `invitation.created` with
 `selfAddressed`) and is not prevented (operator ruling 2026-10-22). This is
 `paper`.
+A tenant administrator with `people.manage` can edit a person's email to an
+address they control. If that person holds no authority the sender lacks, the
+administrator can then invite them (DECISION-207); whoever signs in with that
+proven address and a confirmed second factor is also connected to the record
+directly, authority-bearing records included, with no sender ceiling (F232,
+DECISION-226). This is `paper`, detected by audit (`tenant.person_email.*`, then
+`invitation.created` or `tenant.person.sign_in_connected`), and bounded by the
+second factor, not prevented.
 A founding administrator who records themselves as a ruling elder, installed
 pastor, co-pastor or associate pastor becomes a Session approver (DECISION-205).
 This is permitted, stamped `selfRecorded` and `selfApproved`, and `paper`.
@@ -586,6 +604,13 @@ demographic, medical — pastoral notes sit *above* financial data.
 still a wildcard. It is bounded (platform shell only, and the tenant connection
 cannot bypass RLS) but not removed.
 
+*Second known violation:* the founding-administrator bundle carries
+`careers.applicants`, a tier-3 key (DECISION-265, operator ruling; the first key
+above tier 1 in that bundle). The founding administrator can read job
+applications once they exist; the key reads nothing until the applications
+increment ships, and that increment's resume-download audit row is what detects
+use. `paper`.
+
 ### Permissions vs Flags
 
 Two mechanisms, never merged (DECISION-003). A **permission** answers *may this
@@ -598,8 +623,19 @@ A credential (hashed, single-use, expiring; DECISION-147, DECISION-183) is a
 third mechanism: it authorizes only the act its own row names, inside SECURITY
 DEFINER functions that derive org and purpose from that row, and is never mapped
 into `FEATURES.*`, a session claim or the resolver. A contact email
-authenticates nothing; only a definer reading it through `presby_person_email`
-may address a credential to it (DECISION-216).
+authenticates nothing. Proof of an address comes only from the account:
+`users.email_verified`, bound to the account's current address (DECISION-225),
+never from `contact_methods.verified_at` or from an address being on file.
+Inside a SECURITY DEFINER function a contact email may do exactly two things:
+address a credential, read through `presby_person_email` (DECISION-216); and
+identify the one person record that an authenticated, address-proven account
+belongs to (invitation acceptance's address match, and
+`presby_connect_signed_in_account`; DECISION-227).
+
+A congregation's sign-in invitation is the same mechanism: addressed to an
+existing person's on-file address, it binds a login to that person and grants
+nothing, so the person's authority is whatever their own records already
+confer (DECISION-207).
 
 `isFlagEnabled()` returns `false` on a missing row or a DB error — right for a
 toggle, wrong for a flag that gates an auth path, where `false` means "deny

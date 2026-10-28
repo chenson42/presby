@@ -73,6 +73,14 @@ const db = drizzle(sql, { schema });
 // stays on `db`: those tables keep their full CRUD grant, and running them
 // through the tenant connection is the only part of this script that
 // exercises the grant model a real sign-in depends on.
+//
+// ONE EXCEPTION, and it is the same rule seen from the other side: CREATING
+// one of those three users stamps `users.email_verified`, and since
+// drizzle/0065 section 3 (`users_guard_email_proof`, Community Increment 2b,
+// DECISION-225) a non-owner role may not write a proof stamp - proof is an
+// OWNER-PATH fact. So the three `insert(schema.users)` calls below run on
+// `platformDb`; the lookup, the update branch (which carries no stamp), and the
+// `user_roles` binding stay on `db`.
 const platformSql = neon(process.env.PLATFORM_DATABASE_URL);
 const platformDb = drizzle(platformSql, { schema });
 
@@ -935,7 +943,9 @@ async function seedLocalAdmin() {
     userId = existing.id;
     console.log(`[seed] updated local admin: ${email}`);
   } else {
-    const [created] = await db
+    // Owner connection: this insert stamps email_verified (see the platformDb
+    // comment above; drizzle/0065 section 3).
+    const [created] = await platformDb
       .insert(schema.users)
       .values({
         email,
@@ -998,7 +1008,9 @@ async function seedMemberUser() {
     userId = existing.id;
     console.log(`[seed] updated local member: ${email}`);
   } else {
-    const [created] = await db
+    // Owner connection: this insert stamps email_verified (see the platformDb
+    // comment above; drizzle/0065 section 3).
+    const [created] = await platformDb
       .insert(schema.users)
       .values({
         email,
@@ -1059,7 +1071,9 @@ async function seedMfaAdminUser() {
     userId = existing.id;
     console.log(`[seed] updated local MFA admin: ${email}`);
   } else {
-    const [created] = await db
+    // Owner connection: this insert stamps email_verified (see the platformDb
+    // comment above; drizzle/0065 section 3).
+    const [created] = await platformDb
       .insert(schema.users)
       .values({
         email,

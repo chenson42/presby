@@ -33,6 +33,8 @@ import {
 import { verifyTurnstile } from "@/lib/turnstile";
 import { takeTwoFactorGrant } from "@/lib/auth/two-factor-grant";
 import { ensureDefaultRole } from "@/lib/auth/default-role";
+import { recordGoogleEmailProof } from "@/lib/auth/email-proof";
+import { connectSignedInAccount } from "@/lib/onboarding/connect";
 
 const INITIAL_ADMIN_EMAILS = (process.env.INITIAL_ADMIN_EMAILS ?? "")
   .split(",")
@@ -221,7 +223,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
     },
     // The `session` callback lives in the shared authConfig so the edge
     // runtime (proxy.ts) sees the same projection.
-    async jwt({ token, user, trigger, session }) {
+    async jwt({ token, user, account, profile, trigger, session }) {
       // `user` is only present on the initial sign-in (Google callback or a
       // successful Credentials authorize). Subsequent requests carry the JWT
       // cookie only, so this block runs exactly once per session.
@@ -237,6 +239,48 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         // DECISION-291), which is why it must stay ABOVE the `dbUser` read.
         token.roles = undefined;
         await ensureDefaultRole(user.id, user.email ?? null, INITIAL_ADMIN_EMAILS);
+
+        // Community Increment 2b (DECISION-225/226): record address proof, then
+        // connect the sign-in to the one person its proven address identifies.
+        // This is the ONLY place either runs at sign-in (R39), and both run
+        // BEFORE `token.twoFactorRequired` is computed below, so a
+        // congregation's two-factor requirement applies to a new link in the
+        // same cookie. Two independent try/catch blocks: a failure of either
+        // NEVER fails sign-in, and logs an error class only (no address, no id).
+        //
+        // Nothing here changes a session claim. `twoFactorVerified` stays false
+        // (a connect at sign-in therefore carries no factor flag: the type makes
+        // passing one a compile error), and this branch reads nothing from the
+        // update payload (DECISION-230). It runs only from a real provider or
+        // Credentials callback, never from a browser-supplied payload.
+        let proof: "google" | "account" = "account";
+        try {
+          // `isEmailClaimVerified` is the same predicate the signIn gate used
+          // (F231, DECISION-246), re-checked here as a post-condition: proof is
+          // never recorded from a claim that is not the boolean `true`.
+          if (
+            account?.provider === "google" &&
+            isEmailClaimVerified(profile?.email_verified) &&
+            profile?.email
+          ) {
+            if (await recordGoogleEmailProof({ userId: user.id, address: profile.email })) {
+              proof = "google";
+            }
+          }
+        } catch {
+          console.error("[auth] email proof failed");
+        }
+        try {
+          await connectSignedInAccount({
+            userId: user.id,
+            via: "sign_in",
+            proof,
+            actorEmail: user.email ?? null,
+          });
+        } catch {
+          console.error("[auth] connect failed");
+        }
+
         await db
           .update(users)
           .set({ lastLoginAt: new Date(), failedLoginAttempts: 0, lockedUntil: null })

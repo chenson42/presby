@@ -200,6 +200,7 @@ export const MODULES: Record<string, string> = {
   ticket_messages: "S. Support",
   ticket_actions: "S. Support",
   congregation_feedback: "S. Support",
+  job_postings: "T. Careers",
 };
 
 /**

@@ -12,7 +12,12 @@
  *      `store.ts`, and nothing deletes from it at all (removal is `ended_at`).
  *   3. AUTH NEVER READS CONTACT EMAILS. Sign-in, password reset, email
  *      verification and the auth API name neither the table, the module nor
- *      `presby_person_email`: a contact email authenticates nothing.
+ *      `presby_person_email`: a contact email authenticates nothing. They MAY
+ *      ask the connect definer to identify a person (Community Increment 2b,
+ *      R43/R41): identification lives in SQL, never in these files. 3b: among
+ *      the auth roots only `src/auth.ts` imports `@/lib/onboarding/connect`,
+ *      exactly once. 3c: `connect.ts` and everything under
+ *      `src/app/no-organization/` name no contact object either.
  *   4. THE READER IS THE ONLY DOOR to `presby_person_email`.
  *   5. NO ADDRESSES IN AUDIT METADATA, by construction: `store.ts` builds its
  *      audit metadata from ids and labels only.
@@ -161,7 +166,10 @@ describe("2. store.ts is the only writer, and nothing deletes", () => {
   });
 });
 
-describe("3. a contact email authenticates nothing: auth paths never read contact emails", () => {
+/** The objects no auth-path file may name (R43). Exported-by-shape so 3 and 3c share it. */
+const CONTACT_OBJECTS = /contact_methods|contactMethods|contact-methods|presby_person_email|getPersonEmail/;
+
+describe("3. a contact email authenticates nothing: auth paths never read contact emails; they may ask the connect definer to identify a person", () => {
   const AUTH_ROOTS = [
     at("auth.ts"),
     at("lib", "auth"),
@@ -184,9 +192,76 @@ describe("3. a contact email authenticates nothing: auth paths never read contac
   });
 
   it("none of them names the table, the module, or presby_person_email", () => {
-    const offenders = authFiles.filter((f) =>
-      /contact_methods|contactMethods|contact-methods|presby_person_email|getPersonEmail/.test(code(f)),
-    );
+    const offenders = authFiles.filter((f) => CONTACT_OBJECTS.test(code(f)));
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it("the scan can fail: a sample that names each forbidden object is caught", () => {
+    for (const sample of [
+      'import { x } from "@/lib/contact-methods/reader";',
+      "select * from contact_methods",
+      "db.select().from(contactMethods)",
+      "select presby_person_email(p, 'credential')",
+      "await getPersonEmail(id)",
+    ]) {
+      expect(CONTACT_OBJECTS.test(stripComments(sample)), sample).toBe(true);
+    }
+    // ...and the identifiers the connect audit row legitimately carries are not caught.
+    expect(CONTACT_OBJECTS.test("contactMethodId contactMethodCreatedAt contact_method_id")).toBe(false);
+  });
+});
+
+describe("3b. among the auth roots only src/auth.ts imports the connect module, exactly once", () => {
+  const AUTH_ROOTS = [
+    at("auth.ts"),
+    at("lib", "auth"),
+    at("app", "(auth)"),
+    at("app", "(password-reset)"),
+    at("app", "(email-verify)"),
+    at("app", "api", "auth"),
+  ];
+  const authFiles = AUTH_ROOTS.flatMap((p) => {
+    try {
+      return statSync(p).isDirectory() ? walk(p) : [p];
+    } catch {
+      return [];
+    }
+  }).filter((f) => !isTest(f));
+  const IMPORT_CONNECT = /from\s+["']@\/lib\/onboarding\/connect["']|from\s+["']\.\.?\/[./]*onboarding\/connect["']/g;
+  const count = (source: string) => (source.match(IMPORT_CONNECT) ?? []).length;
+
+  it("src/auth.ts imports it exactly once, and no other auth-root file does", () => {
+    expect(count(code(at("auth.ts")))).toBe(1);
+    const others = authFiles.filter((f) => f !== at("auth.ts") && count(code(f)) > 0);
+    expect(others.map(rel)).toEqual([]);
+  });
+
+  it("the scan can fail: a second import, and an import from another auth file, are counted", () => {
+    const twice = 'import { a } from "@/lib/onboarding/connect";\nimport { b } from "@/lib/onboarding/connect";';
+    expect(count(twice)).toBe(2);
+    expect(count('import { a } from "../onboarding/connect";')).toBe(1);
+    expect(count('import { a } from "@/lib/onboarding/accept";')).toBe(0);
+  });
+});
+
+describe("3c. connect.ts and src/app/no-organization/ name no contact object: identification lives in SQL only", () => {
+  const CONNECT = at("lib", "onboarding", "connect.ts");
+  const NO_ORG_DIR = at("app", "no-organization");
+  const noOrgFiles = (() => {
+    try {
+      return walk(NO_ORG_DIR).filter((f) => !isTest(f));
+    } catch {
+      return [];
+    }
+  })();
+
+  it("the scan is not vacuous", () => {
+    expect(code(CONNECT)).toMatch(/presby_connect_signed_in_account/);
+    expect(noOrgFiles.map(rel)).toContain(rel(at("app", "no-organization", "page.tsx")));
+  });
+
+  it("neither connect.ts nor anything under src/app/no-organization/ names the table, the module, presby_person_email or getPersonEmail", () => {
+    const offenders = [CONNECT, ...noOrgFiles].filter((f) => CONTACT_OBJECTS.test(code(f)));
     expect(offenders.map(rel)).toEqual([]);
   });
 });

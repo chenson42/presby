@@ -14,6 +14,8 @@ import { getHouseholds } from "@/lib/directory";
 import { getPersonForEdit } from "@/lib/people";
 import { getCommunityStatus, type CommunityStatus } from "@/lib/community";
 import { getSensitiveInfoGrants } from "@/lib/person-sensitive";
+import { getSignInCard } from "@/lib/onboarding/org-invite";
+import type { SignInCardState } from "@/lib/onboarding/sign-in-types";
 import {
   getPendingRollActionsForPerson,
   getSessionApprovalState,
@@ -29,6 +31,7 @@ import { EditPersonForm } from "./edit-person-form";
 import { RecordRollActionForm } from "./record-roll-action-form";
 import { ConnectionCard } from "./connection-card";
 import { ParticipantControls } from "./participant-controls";
+import { SignInCard } from "./sign-in-card";
 
 const MEMBERS_CREATE_FLAG = "org_portal.members_create";
 const ROLL_ACTION_EDIT_FLAG = "org_portal.members_roll_action_edit";
@@ -74,6 +77,12 @@ const CHILDREN_MINISTRY_FLAG = "org_portal.children_ministry";
  * checks (Phase 3 Edge Cases note): a shared call-ordering bug between the
  * two independent conditions must not be able to cross-contaminate either
  * card's render output.
+ *
+ * "Sign in to PresbyPortal" (Community Increment 2b, `sign-in-card.tsx`,
+ * `id="sign-in"`) is read by `getSignInCard()` as one more independent awaited
+ * call, after everything above and outside the page's `try`: a reader failure
+ * renders the card's own "We couldn't load this just now" line and never blocks
+ * the page, and a viewer without `people.manage` never gets this far.
  */
 export default async function EditMemberPage({
   params,
@@ -230,6 +239,21 @@ export default async function EditMemberPage({
     notFound();
   }
 
+  const personName = `${personResult.person.preferredName?.trim() || personResult.person.firstName} ${personResult.person.lastName}`;
+  // An independent awaited call (see the header): `error` renders the card's
+  // honest failure line, `forbidden` / `not_found` render no card.
+  const signInResult = await getSignInCard(
+    {
+      organizationId: resolved.org.organizationId,
+      actingPersonId: resolved.org.personId,
+      actingUserId: session.user.id,
+      actingUserEmail: session.user.email ?? null,
+    },
+    id,
+  );
+  const signInCard: SignInCardState | null | undefined =
+    signInResult.kind === "ok" ? signInResult.card : signInResult.kind === "error" ? null : undefined;
+
   return (
     <section className="max-w-xl space-y-6">
       <div>
@@ -286,6 +310,16 @@ export default async function EditMemberPage({
             />
           )}
         </div>
+      )}
+
+      {signInCard !== undefined && (
+        <SignInCard
+          slug={slug}
+          personId={id}
+          personName={personName}
+          congregation={resolved.org.name}
+          card={signInCard}
+        />
       )}
 
       {rollActionEditFlagOn && (

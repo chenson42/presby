@@ -4,6 +4,43 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-292 — Confirming a first enrolment is a possession proof that may mark the session verified through the same single-use grant. Recovery codes are delivered only in client memory, and minting new ones requires a verified session. Amends DECISION-230's enumerated call sites.**
+
+**Status:** Accepted (architect, Phase 2; Phase 3 additions; Phase 6 SHIP IT with changes, 2026-10-26) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-recovery-codes` (F166, F344; no migration; v0.48.1)
+
+- **Rule (amends DECISION-230's enumerated call sites).** `completeEnrollment` opens `withTwoFactorGrant(session.user.id, "totp", () => unstable_update({}))`, but only when all of these hold:
+  - `verifyToken` has passed against the caller's own pending secret;
+  - the `user_totp` insert actually created the row (`ON CONFLICT DO NOTHING ... RETURNING`; an existing enrolment is refused and never replaced);
+  - the enrolment writes have committed.
+
+  A failed update is caught and costs one `/totp` challenge. `TOTP_ENROLLED` records `sessionVerified`. The grant's importers, call sites and the exports of both `'use server'` files are a closed, set-equal allow-list in `src/lib/auth/two-factor-grant.boundaries.test.ts`.
+- **Delivery.**
+  - The fresh-codes cookie is removed from both paths.
+  - A server action that writes any cookie re-renders the route in Next 16 (`request-cookies.js:125`), and `unstable_update` writes one. So the codes live in a client holder whose identity is the same in every branch of `/account/2fa`, and they survive that re-render.
+  - A reload loses them by design (operator ruling, "shown once").
+  - Both Continue controls take only the server-sanitized `callbackUrl`.
+- **F344.** `regenerateRecoveryCodes` refuses any session without `twoFactorVerified` and writes `totp.recovery_codes.regenerate_refused`. The way back is `/totp?callbackUrl=/account/2fa`.
+- **Phase 3 additions.**
+  1. The enrolment writes run in one `db.transaction`, and so does the regenerate replacement.
+  2. `sessionVerified` requires the session `unstable_update` returns to report the claim, not just a clean return.
+  3. Continue is a plain `<a>` (a full navigation), so the codes leave memory and the proxy reads the fresh cookie.
+  4. A layout-level holder is the one sanctioned deviation from the same-identity holder. **It was not used:** smoke 1 showed no remount in either lane (dev and `next start`), so residual (c) is pinned by e2e, and the layout fallback stays the sanctioned response if Next changes.
+- **Accepted residuals (`paper`):**
+  - **(a)** Someone holding only the first factor of a never-enrolled account reaches a verified session in one step instead of two. No new power: before this they enrolled and then answered a challenge with the secret they chose.
+  - **(b)** DECISION-230's residual carries over: a verified claim outlives an administrator's TOTP reset, and such a session can enrol a new authenticator. Enrolment never required verification, so this is not new.
+  - **(c)** "Codes survive the re-render" depends on React keeping client state across the server-action re-render. Only the running-server e2e pins it, in both lanes.
+  - **(d)** A lost action response leaves the account enrolled with codes nobody saw. Recovery is `/totp`, then Regenerate.
+  - **(e)** Enrolled but not-required accounts answer one voluntary `/totp` before they can regenerate.
+  - **(f)** `verifyToken` has no replay guard. The race between regenerate and sign-in, and key rotation, remain out of scope.
+  - **(g)** The grant allow-list is a regex source scan. Obfuscation (computed member names, split specifiers, Unicode escapes, string-literal and comment tricks) and non-TypeScript source are not caught.
+  - **(h)** The "every `return (` in `page.tsx` opens with the holder" pin misses a parenless `return <X/>`.
+- **Revisit if:**
+  - Next stops re-rendering on cookie writes in actions, or Auth.js's `update()` stops writing the cookie in-process;
+  - a fourth grant call site is proposed;
+  - a per-session server record (DECISION-230's revocation follow-up) lands, which would make the "verified" state revocable at enrolment and reset.
+
+---
+
 **DECISION-228 — Accept in place: the credential model is unchanged, only how it is presented; every binding of authority carries two independent proofs beyond the password.**
 
 **Status:** Resolved (architect, Phase 2 addendum; tech-lead, Phase 3 amendment 2; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory` (Community Increment 2b; migration 0065; v0.48.0); R45, R46; Q2
@@ -411,6 +448,7 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 - **Operator ruling, 2026-10-25: existing sessions are not rotated.** There are two active production accounts, both the operator's, so no member is forced to verify again. The fix covers new activity; it cannot show whether an existing session already carries a claim it did not earn, because that leaves no audit mark. Such a session stays verified until its token expires (about 30 days).
 - **Accepted residual (`paper`).** A verified claim outlives an administrator's TOTP reset or a sign-out elsewhere until the token expires. Tracked as the revocation follow-up.
 - **Disclosure hygiene.** Release notes, commit titles and the PR stay neutral until deploy.
+- **Amended by DECISION-292** (2026-10-26): `completeEnrollment` is a third grant call site, after the possession proof and the commit.
 - **Revisit if** Auth.js or Next changes how async context reaches the jwt callback, `next.config.ts` sets `trailingSlash` or `skipTrailingSlashRedirect` (the route check matches `/api/auth/session` exactly; the callback layer does not depend on it).
 
 ---

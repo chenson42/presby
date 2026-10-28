@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=231 commit=b868139 -->
+<!-- covers: decision=231 commit=039bc21 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -24,6 +24,10 @@ marker when you write new entries — that is the one piece of discipline this f
 is checked.*
 
 ---
+
+## 2026-10-28
+
+- [ ] **`defect` · First two-factor setup now keeps the ten recovery codes on screen and lands without a second code; making new codes needs a confirmed sign-in (0.48.1; DECISION-292).** Before, the codes and Continue vanished within a second and the person was asked for a code again (F166). Separately, a password-only session could make new codes (F344, high; now refused and audited, and the release note is neutral on purpose). **Accepted residuals:** first setup still needs only the password and now counts as confirmed at once; a lost response can leave someone enrolled with unseen codes. **You must:** nothing to apply. **Then:** walk one real invitee in production on a phone; when it passes, lift the 0.48.0 hold on real sign-in invitations and publish 2b's what's-new post. **Open for you:** a "Copy all" button for the codes (not ruled).
 
 ## 2026-10-26
 

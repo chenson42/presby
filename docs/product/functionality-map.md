@@ -1,7 +1,7 @@
 # Functionality Map
 
 A scannable inventory of everything built, so a session
-knows what exists without re-reconning. **Version `0.48.0` · surveyed 2026-10-26.**
+knows what exists without re-reconning. **Version `0.48.1` · surveyed 2026-10-28.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
 a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Entries
@@ -52,7 +52,7 @@ inherited from the starter.
 - Account invitations (v0.37.0, DECISION-183–189) — `/invite` and `/invite/accepted`, the `(invite)` route group (public, platform palette, exact `PUBLIC_PATHS` entries, no layout or loading boundary). The emailed token is the credential: the preview (`presby_preview_invitation`) consumes nothing and masks the address; a new invitee sets a password then enrols 2FA, an existing account signs in (2FA-verified if required) and clicks Accept, a mismatched session is offered a switch; every dead state shows one identical page. The token crosses sign-in in a host-only `Path=/` httpOnly cookie (`__Host-invite_token` in production), never a URL. Acceptance is one SECURITY DEFINER function on `presby_app` (`presby_accept_invitation`); a signed-in accept refreshes the session (F167). `src/app/(invite)/`, `src/lib/onboarding/accept.ts`, `invite-cookie.ts`
 - Organization shell — `/o/<slug>`, `(org)` group; `withOrgContext` only, `getPlatformDb()` forbidden. `src/app/(org)/o/[slug]/`
 - Sign-in — Google OAuth + credentials, Turnstile, lockout-aware, safe `callbackUrl` → `/launch`; refuses a provider email the provider has not verified (`email_verified === true`, checked in `evaluateSignIn()` before any lookup, v0.42.4, DECISION-246); issues its own `/totp` redirect from the 2FA predicate rather than depending on the Edge gate seeing the next request (fixes a same-hop-callbackUrl bypass). Org-branded when `callbackUrl` names an org with a live public site (`getPublishedSiteBrand()`, gated `ui.branded_signin` seeded off) — enumeration-safe (mirrors `/site/<slug>`'s own collapse), Google button excluded via `[data-brand-neutral]`. The Google button is Google's published light/dark style, its colours confined to element-scoped `--gsi-*` properties in `google-sign-in-button.tsx` (the sole palette-literal exemption, DECISION-190). `src/app/(auth)/signin/page.tsx`, `actions.ts`, `parse-org-slug.ts`
-- TOTP verify — code entry + trusted-device cookie; enrolment redirect two-hop (proxy → `/totp` → `/account/2fa`). Since v0.36.0 the code is entered in six boxes (`src/components/shared/one-time-code-input.tsx`, shared with the `/account/2fa` enrolment form): focus on box 1 after hydration, Backspace/Delete across boxes, paste and one-time-code autofill spread across boxes; the sixth digit submits the code (v0.44.1; not a recovery code; a paste that doesn't fit the boxes fills them and waits), and the Verify button remains as the fallback (DECISION-257); a "Use a recovery code instead" toggle swaps in a single recovery field; wrapped in `HydrationGate` (rule H3 of `check:hydration-gate`, DECISION-192). `src/app/(auth)/totp/page.tsx`, `totp-challenge-form.tsx`, `actions.ts`
+- TOTP verify — code entry + trusted-device cookie; enrolment redirect two-hop (proxy → `/totp` → `/account/2fa`); since v0.48.1 a first enrolment ends with the session verified, so its Continue reaches the destination with no second `/totp` (DECISION-292). Since v0.36.0 the code is entered in six boxes (`src/components/shared/one-time-code-input.tsx`, shared with the `/account/2fa` enrolment form): focus on box 1 after hydration, Backspace/Delete across boxes, paste and one-time-code autofill spread across boxes; the sixth digit submits the code (v0.44.1; not a recovery code; a paste that doesn't fit the boxes fills them and waits), and the Verify button remains as the fallback (DECISION-257); a "Use a recovery code instead" toggle swaps in a single recovery field; wrapped in `HydrationGate` (rule H3 of `check:hydration-gate`, DECISION-192). `src/app/(auth)/totp/page.tsx`, `totp-challenge-form.tsx`, `actions.ts`
 - Forgot/reset password — request link + consume token (hashed at rest, enumeration-safe). `src/app/(password-reset)/forgot-password/page.tsx`, `reset-password/page.tsx`, `actions.ts`
 - Email-change verify — token landing with error boundary. `src/app/(email-verify)/account/verify-email/[token]/page.tsx`
 - Access-pending — authenticated, no roles; writes `ACCESS_DENIED` audit on bounce. `src/app/access-pending/page.tsx`
@@ -118,7 +118,7 @@ inherited from the starter.
 ## Account (self-serve)
 
 - Account page — display name, email change (re-verify), password change, delete skeleton, permanent feedback form. `src/app/(account)/account/page.tsx`, `actions.ts`
-- Per-user 2FA — QR enrolment, verify, recovery codes, disable. `src/app/(account)/account/2fa/page.tsx`, `actions.ts`
+- Per-user 2FA — QR enrolment, verify, recovery codes, disable. Since v0.48.1 (F166, F344, DECISION-292): a first enrolment shows the ten recovery codes once, held in client memory only across the post-action re-render (no cookie), with a 44px Continue to the sanitized `callbackUrl` (also on the management view when one is present); enrolling verifies the session through the single-use grant; Regenerate needs a verified session, otherwise a "Confirm it's you" link to `/totp` and an audited refusal. `src/app/(account)/account/2fa/page.tsx`, `actions.ts`, `enrolment-handoff.tsx`
 
 ## Admin (`src/app/(admin)/admin/`)
 
@@ -153,7 +153,7 @@ inherited from the starter.
 - Turnstile — endpoint-level CAPTCHA verify, no-op until keyed. `turnstile.ts`; widget `src/components/shared/turnstile.tsx`
 - Email — durable queue (persist-first, backoff retry, Resend delivery webhook), `escapeHtml()`. Since v0.36.0 every outbound message is a branded `RenderedEmail { subject, html, text }` that only `renderEmail()` can produce (PresbyPortal wordmark, a button with the raw link printed under it, generated plain-text part, inline styles only); `enqueueEmail` accepts nothing else and a source scan bans casts (DECISION-191). Account-message builders in `account-messages.ts`. `email/queue.ts`, `send.ts`, `render.ts`, `account-messages.ts`, `escape-html.ts`
 - DB — Drizzle + Neon; schema is source of truth; unique-violation helper. `db/schema.ts`, `db/errors.ts`
-- Shared UI — `<FormattedDate>` (TZ-safe, ESLint-enforced), `<FeedbackForm>`, global nav, fresh-recovery-codes. `src/components/shared/`
+- Shared UI — `<FormattedDate>` (TZ-safe, ESLint-enforced), `<FeedbackForm>`, global nav. `src/components/shared/`
 
 ## API / Cron / Webhooks
 

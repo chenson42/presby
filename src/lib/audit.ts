@@ -14,6 +14,10 @@ export const AUDIT_ACTIONS = {
   FEATURE_FLAG_TOGGLED: "feature_flag.toggled",
   TOTP_ENROLLED: "totp.enrolled",
   TOTP_RECOVERY_CODES_REGENERATED: "totp.recovery_codes.regenerated",
+  // F344 (DECISION-292): minting new recovery codes needs a session that has
+  // passed the second factor. A refusal is the one observable sign that a
+  // first-factor-only session tried to escalate. Metadata: { twoFactorRequired }.
+  TOTP_RECOVERY_CODES_REGENERATE_REFUSED: "totp.recovery_codes.regenerate_refused",
   TOTP_RESET: "totp.reset",
   USER_ROLE_ASSIGNED: "user.role.assigned",
   USER_ROLE_REMOVED: "user.role.removed",

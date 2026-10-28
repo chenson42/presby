@@ -18,9 +18,10 @@
  *   (c) two people sharing an address: neither connects;
  *   (d) an authority-bearing person (a ruling elder) is not connected by sign-in:
  *       N0, Check again says "One more step", and a fresh account walks
- *       /account/2fa to enrolment and /totp to verification (enrolment does NOT
- *       verify the session: E-35), Check again connects, and /o/<slug> loads
- *       through the two-factor wall;
+ *       /account/2fa to enrolment (which verifies the session, F166: the codes
+ *       panel's Continue reaches N0 with no /totp hop); a later password-only
+ *       sign-in is unverified, so Check again names the verify step, /totp
+ *       verifies, Check again connects, and /o/<slug> loads through the wall;
  *   (e) the congregation's toggle off: not connected, and an invitation still works;
  *   (f) an open sign-in invitation blocks auto-connect, shows as a card, and
  *       Accept connects and lands in the congregation (one `invitation.accepted`
@@ -64,6 +65,7 @@ import {
   auditFor,
   COMMUNITY_FLAG,
   CONNECT_TOGGLE,
+  continueFromCodesPanel,
   enrolOnPage,
   expectTargets44,
   invitationsAt,
@@ -210,7 +212,7 @@ test.describe("Sign-in connect and /no-organization", () => {
         }
       });
 
-      test("(d) a ruling elder is not connected by sign-in; a fresh account enrols, verifies, and Check again connects through the two-factor wall", async ({ page }) => {
+      test("(d) a ruling elder is not connected by sign-in; enrolling verifies, a later password-only sign-in must verify, and Check again connects through the two-factor wall", async ({ page }) => {
         const o = org!;
         await setOrgToggle(sql, o, CONNECT_TOGGLE, true);
         await addSession(sql, o);
@@ -225,11 +227,19 @@ test.describe("Sign-in connect and /no-organization", () => {
         const secret = await enrolOnPage(page);
         expect(await personOfUser(sql, account.id), "sign-in itself connected nobody").toBeNull();
 
-        // Enrolment does NOT verify the session (E-35): the post-login router lands on N0, and Check
-        // again names the verify step (the account is enrolled, so never the "set up" variant).
-        await page.goto("/launch");
-        await page.waitForURL((url) => url.pathname === "/no-organization", { timeout: 30_000 });
+        // F166 (DECISION-292, replaces E-35): enrolling verifies the session, and the codes panel's Continue
+        // goes through the post-login router to N0 with no /totp hop. Neither sign-in nor enrolment connected.
+        await continueFromCodesPanel(page, "/launch", (url) => url.pathname === "/no-organization");
         await expect(n0(page)).toBeVisible();
+        expect(await personOfUser(sql, account.id), "enrolment connected nobody").toBeNull();
+
+        // A later password-only sign-in of the now-enrolled account is unverified: the sign-in form sends it to
+        // /totp, and /no-organization (not behind the wall) says Check again needs the verify step (the account
+        // is enrolled, so never the "set up" variant).
+        await page.context().clearCookies();
+        await signInAs(page, account, (url) => url.pathname === "/totp");
+        await page.goto("/no-organization");
+        await expect(n0(page)).toBeVisible({ timeout: 30_000 });
         await pressCheckAgain(page);
         const notice = page.getByTestId("second-factor-notice");
         await expect(notice).toContainText(

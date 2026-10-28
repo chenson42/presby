@@ -1219,6 +1219,14 @@ nothing by itself; an invitation goes out only when a person with `people.manage
 presses Send, so the hold is a promise to keep, not a switch. The one thing the
 code does on its own is connect at sign-in (point 4, `org_portal.sign_in_connect`).
 
+**Lifting the hold (F166 ships in v0.48.1, no migration).** After 0.48.1 is
+deployed, walk one real invitee in production on a phone before sending any real
+sign-in invitation: send an invitation to a plus-address on a congregation made
+for testing, accept it as a new account, sign in, set up two-factor, check that
+the ten recovery codes stay on screen and that Continue lands in the congregation
+with no second code prompt. When it passes, real invitations can resume and the
+2b what's-new entry can be published (`docs/TODO.md`).
+
 ### Confirm first (read-only, on production)
 
 - `select to_regprocedure('presby_person_email(uuid,text)')` is non-null (0064

@@ -16,4 +16,11 @@ export const SLUG_HISTORY: readonly string[] = [
   "using-the-directory",
   "getting-help",
   "turning-features-on-and-off",
+  // Batch 5b (2026-10-28): the administrator pages.
+  "first-day-as-administrator",
+  "adding-people",
+  "officers-and-the-session",
+  "roles-who-can-do-what",
+  "events-and-the-calendar",
+  "your-congregations-website",
 ];

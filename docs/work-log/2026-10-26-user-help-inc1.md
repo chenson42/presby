@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (parent log, with Addendum A and the operator rulings) | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete (parent log: R1–R14, C1–C10 for Increment 2, DECISION-293/294/295, F345–F349) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete for Increment 1. Placeholder list and four operator questions await the operator | Design complete; implementers named per batch | 2026-10-26 |
-| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | In progress: Batches 0 and 1 done (`d6e7bd7`); Batches 2 to 5c pending | — | 2026-10-28 |
+| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | In progress: Batches 0, 1 (`d6e7bd7`) and 2 (`be636c3`) done; Batches 5a to 5c pending | — | 2026-10-28 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -798,6 +798,43 @@ Named per batch above: **orchestrator** (Batch 0), **api-developer** (Batch 1), 
 - `npm run check`: nine tripwires green on the real repo. `check:help`: "0 registry entries, 0 published, 0 content files, 0 images".
 
 **Contract for Batch 2 (ux-developer).** Import `helpHref`, `plannedHref`, `HELP_INDEX_HREF` from `@/lib/help/urls`; `publishedPages`, `pendingPages`, `plannedPages`, `indexGroups`, `neighbours`, `helpRedirects` from `select`; `applyHelpTokens` from `tokens`; `extractHeadings` from `headings`; `createSlugger` from `slug` (the renderer's heading ids must use it); `resolveLink`, `linkContext`, `EXTERNAL_LINK_ALLOWLIST` from `links`; `HELP_SHOTS` from `screenshots-data`. All are pure and import nothing H19 bans; `content.ts` (Batch 2) may import `server-only` and `node:fs`, which H19 allows. `copy.ts` (Copy C1) is Batch 2's.
+
+## Phase 4 — Batch 2 (ux-developer)
+
+*2026-10-28, worktree `presby-help`, commit `be636c3`, not pushed. No `.env.local` value was printed.*
+
+**Files.** `src/app/(documentation)/`: `layout.tsx`, `help/page.tsx`, `help/[slug]/page.tsx`, `help/planned/page.tsx`, `help/planned/[slug]/page.tsx`, `help/not-found.tsx`, `shell-boundaries.test.ts`, `layout.test.tsx`, `help/help-routes.test.tsx`. `src/components/shared/markdown-document.tsx` (+ test). `src/components/help/`: `needs-block`, `planned-placeholder`, `page-nav`, `on-this-page`, `help-link`, `index-groups`, and `help-components.test.tsx`. `src/lib/help/`: `content.ts`, `copy.ts` (Copy C1 and the C3-free chrome strings), `screenshots.ts` (empty import map plus `resolveShot`), `metadata.ts` (per-page title and openGraph, planned noindex), and tests for content, screenshots, metadata and the `next.config.ts` wiring; `urls.ts` gained `entryHref`, `plannedEntryHref` and `PLANNED_INDEX_HREF`. Modified: `src/components/ui/table.tsx` (`containerProps`, header comment "DIVERGENCE 2") and its test, `next.config.ts` (`...helpRedirects(PLATFORM_HOST)`), `docs/ui-standards.md` (new "Linking to Help" section and contents entry), `src/lib/reserved-slugs.ts` and its test.
+
+**Red before green.** The `Table` `containerProps` case was run against the original `table.tsx` first (`× merges containerProps ...`, 1 failed, 3 passed), then green. The rest of the batch's tests were written after the code, so they were **mutation-checked** instead: `urlTransform` reverted to the default for `src` (1 test fails), heading clamp removed (1), unresolved link rendered as an anchor (3), `rel` loses `noopener` (1), a `flex` class on the `<summary>` (1), `operatorEnabled` ignored in the Needs block (1), the published-first lookup in `loadHelpPageFrom` removed (1). All reverted.
+
+**Static proof (`npm run build`, final run after the last change).** The help routes in the route table:
+```
+├ ○ /help
+├ ○ /help/[slug]
+├ ○ /help/planned
+├ ○ /help/planned/[slug]
+```
+All four are `○` (static) with the registry empty (`generateStaticParams` returns `[]`, `dynamicParams = false`, `dynamic = "error"`). Build exit 0.
+
+**360px browser check** (own dev server `:3660`, stopped by PID; 360x780, light and dark, signed in as the `member` fixture because the proxy sends an anonymous `/help` to `/signin` until Batch 3: curl showed 307 to `/signin?callbackUrl=%2Fhelp` as expected). `/help`: 200, one `<h1>`, document overflow 0, every header link and the planned link 44px tall, the header row wraps (wordmark, then Help / Sign in, then Open PresbyPortal), AAA-looking contrast in both schemes. `/help/no-such-page`: **HTTP 404**, one `<h1>` "We couldn't find that page", overflow 0. `/help/planned` (empty state): 200, overflow 0. The dev overlay shows "1 Issue" on a page: it is the next-themes "script tag while rendering a React component" console message that every page has, not from this batch. Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/help-b2/` (`index-`, `unknown-404-`, `planned-` x `light`/`dark` `-360.png`). Not exercised in a browser (no page content exists yet): the Needs block, on-this-page `<details>` on iOS, tables, images and previous/next; they are covered by jsdom tests and get their first real 360px look in Batch 5a.
+
+**Deviations and findings.**
+1. **`reserved-slugs.test.ts` failed on the new route** (`help` is now a live top-level segment, F157's drift test). Fixed in `src/lib/reserved-slugs.ts`: `help` is reserved, and `docs` too, ahead of its route like `invite` (the proxy bypass makes it a top-level path now). A test pins both. This is a **finding for the orchestrator**: any organization already holding the slug `help` or `docs` would collide; the isolation is by slug path, and none exists in the fixtures (the suite passes), but the production list is unchecked here.
+2. **`urlTransform`.** react-markdown's default transform drops a `shot:<id>` image source (not an allowed scheme). `src` alone passes through the transform; every other URL (all links) keeps the default, and `resolveImage` is then the only gate for an image, rendering nothing for a source it does not admit (pinned by tests for remote, unknown and `javascript:` sources). The renderer-contract row "default URL transform stays" holds for links.
+3. **`urls.ts` additions.** `helpHref` is typed to published slugs, which is `never` with an empty registry and could not be called from a registry-driven list (index, previous and next, planned list). `entryHref(entry)`, `plannedEntryHref(entry)` and `PLANNED_INDEX_HREF` are untyped siblings in the same file for lists whose slug comes from the registry itself (documented in the file); H16 is unaffected.
+4. **`page-nav.tsx` exports two components** (`HelpBreadcrumb`, `PageNav`) because the plan lists the breadcrumb under that file; this is the one place the one-component-per-file rule is bent.
+5. **Empty index.** With no published page the index shows the h1, the intro, the note and the planned link only; no new string was needed (an "empty state" sentence is not in Copy C1 and the registry is never empty at ship). I did not invent one.
+6. **Tables.** `ui/table.tsx` cells are `whitespace-nowrap`; the renderer overrides to `whitespace-normal` with `min-w-32` so prose wraps in a cell and the scroll region only engages for wide tables, and sets `text-base` (the primitive is `text-sm`) so body text keeps the page's size.
+7. **Heading ids** are matched to headings by source line (`scanMarkdown` and `extractHeadings` come from the same scan, so they align one to one), not by a render-order counter; a heading the scanner cannot see (inside a blockquote or list) gets no id.
+8. The header's "Open PresbyPortal" link has `prefetch={false}` (`/launch` does session work). The 404 tab title is the root default "PresbyPortal".
+
+**Gates (worktree).**
+- `npm run typecheck`: clean. `npm run lint`: clean (`--max-warnings=0`).
+- `npm run test`: 690 files passed, 97 skipped; 10,498 tests passed, 2,862 skipped, 0 failed (Batch 1 was 681 / 10,424: +9 files, +74 tests).
+- `npm run check`: nine tripwires green (`check:help`: 0 registry entries, 0 published, 0 content files, 0 images; `check:brand-scope` and `check:proxy-imports` unchanged).
+- `npm run build`: exit 0; help routes static (above).
+
+**For Batch 3 and later.** In-app links use `helpHref` + `HelpLink`. The proxy bypass is still missing, so every manual check of `/help` needs a signed-in session until Batch 3. Batch 4 fills `screenshots.ts`'s `IMAGES` with one `import … from "@/content/help/images/<id>.png"` per manifest entry (H18). `HELP_COPY` and `copy.ts`'s helpers are where Increment 2 and the fork-branding pass look for chrome strings.
 
 ---
 

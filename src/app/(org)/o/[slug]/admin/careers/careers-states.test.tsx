@@ -11,10 +11,15 @@ describe("careers states - T20", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Job openings");
     expect(screen.getByTestId("careers-feature-off").textContent).toContain("Job openings aren't turned on for Alder Creek yet.");
     expect(screen.getByRole("link", { name: "Turn them on under Features" }).getAttribute("href")).toBe("/o/alder-creek/admin/features");
+    expect(screen.getByRole("link", { name: "How features are turned on" }).getAttribute("href")).toBe(
+      "/help/turning-features-on-and-off",
+    );
     expect(screen.queryByText(/Ask someone/)).toBeNull();
 
     rerender(<CareersFeatureOff name="Alder Creek" slug="alder-creek" canManageFeatures={false} />);
-    expect(screen.queryByRole("link")).toBeNull();
+    // No Features link for someone who cannot use it; the help link is for everyone.
+    expect(screen.queryByRole("link", { name: "Turn them on under Features" })).toBeNull();
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["How features are turned on"]);
     expect(screen.getByTestId("careers-feature-off").textContent).toContain(
       "Ask someone who manages Alder Creek's features to turn them on.",
     );

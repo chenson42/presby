@@ -4,6 +4,68 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-297 — Help screenshots come only from a fixture-only database behind a fail-closed guard.**
+
+**Status:** Accepted (tech-lead, Phase 3 as DECISION-new-2; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-28 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)
+
+- Guard rules G1 to G6: a slug allowlist, the profile rows, `.invalid` identities, the same host as the server, an attestation variable (`HELP_SHOTS_DB_OK`), and any error refuses (`src/lib/help/shots-guard.ts`, `e2e/help-shots/`).
+- The manifest is a pure data file (`screenshots-data.ts`) plus a static-import binding (`screenshots.ts`); `capturedIn` can only move by re-running capture (`npm run help:shots`, never part of CI).
+- Every committed image is opened and read by a human for a real name, address, email, brand or tenant (`check:secrets` scans text, not pixels).
+- *Revisit if* images exceed about fifteen, or capture moves into CI.
+
+---
+
+**DECISION-296 — The help tripwire is split, and its content subset is closed.**
+
+**Status:** Accepted (tech-lead, Phase 3 as DECISION-new-1; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-28 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)
+
+- `scripts/check-help.ts` (tsx, no environment) holds the registry, file, history, heading, link, image, phrase, label, TODO-token, map, literal-href and import-boundary rules (H1 to H19).
+- `src/lib/help/coverage.test.ts` (vitest) holds the catalog and tile coverage and the toggle-name rules, because `org-features.ts` and `tiles.ts` import `server-only` and the database, and extracting the catalog would have collided with three unmerged branches.
+- Content is restricted to a subset the hand-written scanner models: inline links, ATX headings, no raw HTML, no bare URLs, and the template tokens `{{contact}}` and `{{privacyContact}}` (the second added for the privacy policy, whose address is a build-time variable, `HELP_PRIVACY_CONTACT_EMAIL`).
+- A published page may carry `limitationUntil: <token>` so a feature's merge (or a defect's fix) names the pages it falsifies. Planned slugs equal their tokens; `slug-history.ts` is append-only.
+- *Revisit if* a page renders a constant by import (then extract the catalog), or the subset blocks an author.
+
+---
+
+**DECISION-295 — Public developer documentation at `/docs` is a closed, curated registry rooted in `src/content/docs/`.**
+
+**Status:** Accepted (architect, Phase 2, 2026-10-26); recorded at Increment 1's integration because the `/docs` proxy bypass is live, though the content ships in Increment 3 · **Date:** 2026-10-26 · **Feature:** `2026-10-26-user-help` (Increment 3)
+
+- It is never a render of any `docs/**` file and never `/developer` made public (consistent with DECISION-258, "internal for good").
+- **Public:** site authoring (kit components from `ALLOWED_BLOCK_TYPES`, block props, front matter, content-repo layout, the publish flow as an author sees it); live-slot names, image limits and the brand partition rendered by import; the "PresbyPortal has no public API" and "publishing is limited to operator-provisioned repositories" statements; links, not copies, to the architecture overview and the repo.
+- **Never rendered:** decisions, work-logs, reviews, TODO, STATE, the functionality map, deployment and runbooks, CLAUDE.md and agent files, schema reviews, the ingest wire contract and OIDC verification internals, production hostnames, Neon or Vercel identifiers, real congregation names and `site-<slug>` repository names.
+- Enforced by a path rule (the registry and loader may not name a path outside `src/content/docs/`) and a content scan (host and identifier shapes), on top of `check:secrets`. Copying private material in by hand remains `paper`.
+- Developer-portal Increment 4 shares the renderer, never the registry or the content root, so the two closed lists are disjoint by construction.
+- Until Increment 3 ships, anonymous `/docs/x` is the framework 404, not a sign-in redirect (pinned by `e2e/help.spec.ts`).
+
+---
+
+**DECISION-294 — A help page's publication is a registry status checked against a `[help:<token>]` on exactly one `docs/TODO.md` line.**
+
+**Status:** Accepted (architect, Phase 2; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)
+
+- The registry has `status: "published" | "pending" | "planned"` and `requires?: "<token>"`.
+- A pending page publishes in the commit that moves its line to Done, and that commit must publish it.
+- A planned placeholder expires the same way.
+- "Done" means a `- [x]` line under `## Done` (F349: checkbox state alone cannot define Done).
+- `check:help` is the ninth tripwire (Workflow Rule 17).
+- The ordinary case needs no token: a feature's own branch adds its page as `published` in the same PR (Rule 17's amendment, F373).
+- Accepted residuals (`paper`): a feature shipped behind a global flag that is off in production; operator flag flips.
+
+---
+
+**DECISION-293 — User help is a static, platform-host-only `(documentation)` route group.**
+
+**Status:** Accepted (architect, Phase 2; amended by the architect's ruling on the help 404 after Batch 3, 2026-10-28; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)
+
+- The proxy bypasses `/help` and `/docs` by segment-boundary prefix with no new import (F348: an exact `PUBLIC_PATHS` list would redirect a typo to sign-in).
+- Content is markdown in `src/content/` with a typed registry, read only at build (`dynamic = "error"`, `dynamicParams = false`). Every `/help` URL that is not a published page or a planned placeholder (unknown, pending, retired, a planned slug at the wrong path, or a deeper path) is answered by one `force-dynamic` catch-all, `help/[...unmatched]`, which calls `notFound()`. So each one gets `help/not-found.tsx` with an identical body and no per-URL cache entry. There is no root `not-found.tsx` and no `global-not-found`, because the custom-host neutral 404 (DECISION-040) must not change.
+- One shared renderer has no `rehype-raw` and no `prose`, and images come from a statically imported manifest.
+- Platform palette, un-brandable, no `loading.tsx`; a custom host answers the neutral 404 on every help path.
+- *Revisit if* `cacheComponents` is enabled (move the lock to `ensureStatic`; `dynamic`, `dynamicParams` and `force-dynamic` all go away), or if a page under these prefixes ever needs a session, or if Vercel stops continuing past a `fallback: false` miss to the next matching route (the preview check in `e2e/help-404.spec.ts`'s gate).
+
+---
+
 **DECISION-291 — Two-factor is role-based: `users.two_factor_required` defaults to false; the platform-admin grant points set it true (audited, still switchable); `roles.manage`, `role_grants.manage` and `domains.manage` carry `permissions.requires_two_factor`.**
 
 **Status:** Accepted (architect, Phase 2; Phase 3 amendments P3-3, P3-4, P3-9, P3-10; residual 1 widened by the Phase 3 amendment after Phase 5 run 1; Phase 6 SHIP WITH NOTES, 2026-10-26) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-2fa-default` (F343; migration 0080; v0.49.0). Amends DECISION-170/175's key set; supersedes the domains T7/S3 deferral.

@@ -13,6 +13,8 @@ import {
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { OrganizationsUnavailable } from "@/components/shared/organizations-unavailable";
 import { Button } from "@/components/ui/button";
+import { HelpLink } from "@/components/help/help-link";
+import { helpHref } from "@/lib/help/urls";
 import { listInvitationsForAccount, type InPlaceInvitation } from "@/lib/onboarding/in-place";
 import { NO_ORG_COPY } from "@/lib/onboarding/no-organization-copy";
 import { CheckAgainForm } from "./check-again-form";
@@ -258,6 +260,12 @@ export default async function NoOrganizationPage() {
             <Link href="/">Read about PresbyPortal</Link>
           </Button>
         </section>
+        {/* The help link (user-help integration, P3-9): in every view this page renders. */}
+        <p className="text-sm">
+          <HelpLink href={helpHref("why-cant-i-see-this", "not-connected-to-a-congregation")}>
+            Why can&apos;t I see this?
+          </HelpLink>
+        </p>
       </div>
       <Link
         href="/home"

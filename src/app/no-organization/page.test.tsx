@@ -266,3 +266,18 @@ describe("/no-organization - the unchanged branches", () => {
     expect(mockList).toHaveBeenCalledWith("u1");
   });
 });
+
+describe("/no-organization - the help link (user-help integration, P3-9)", () => {
+  it.each([
+    ["N0, nothing connected", () => arrange()],
+    ["N1, an open invitation", () => arrange({ invitations: [invitation()] })],
+    ["a standing block (being set up)", () => arrange({ orgs: [org({ platformStatus: "invited" })] })],
+  ])("%s: 'Why can't I see this?' opens the not-connected section of why-cant-i-see-this, same tab", async (_label, setup) => {
+    setup();
+    await renderPage();
+    const help = screen.getByRole("link", { name: "Why can't I see this?" });
+    expect(help.getAttribute("href")).toBe("/help/why-cant-i-see-this#not-connected-to-a-congregation");
+    expect(help.getAttribute("target")).toBeNull();
+    expect(help.className).toContain("min-h-11");
+  });
+});

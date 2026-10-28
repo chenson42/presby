@@ -257,7 +257,9 @@ describe("GivingAdminPage — states", () => {
     render(await GivingAdminPage({ params: params() }));
     expect(screen.getByText(/giving isn.t turned on for Alder Creek Presbyterian Church/i)).toBeTruthy();
     expect(screen.getByText(/ask an administrator who manages your organization.s features/i)).toBeTruthy();
-    expect(screen.queryByRole("link")).toBeNull();
+    // No Features link; the help link ("How features are turned on") is for every member.
+    expect(screen.queryByRole("link", { name: "Go to Features" })).toBeNull();
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["How features are turned on"]);
     expect(notFoundMock).not.toHaveBeenCalled();
   });
 

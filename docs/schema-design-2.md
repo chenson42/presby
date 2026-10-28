@@ -2102,6 +2102,46 @@ Pipeline `2026-10-26-2fa-default` (v0.49.0; migration 0080; DECISION-291, which 
 
 *Accepted residuals (`paper`), DECISION-291 1 to 5:* platform rights written outside the two grant points (and `presby_app` can write `is_platform_admin`; nothing in the database refuses it); a database blip leaves a role- or congregation-only account unrequired until its next re-sign; a mid-session grant reaches the proxy claim only at the next re-sign; each request from a column-false account pays the definer call; a voluntary enrolment brings no challenge at sign-in. If treasury's 0074 merges later, the flagged-key count grows past six (`docs/TODO.md`).
 
+## 2al. User help, Increment 1 — findings (F345–F381)
+
+Pipeline `2026-10-26-user-help` (parent; Phase 2) and `2026-10-26-user-help-inc1` (v0.50.0; no migration; DECISION-293 to 297; Phase 6 verdict SHIP WITH NOTES). No schema change: the findings are about the help tree, its tripwire, and product defects the role walks found. F345–F349 are the architect's (Phase 2); F350–F355 are the design's (F-new-1 to F-new-6); F356–F372 are the Phase 4 walks' (F-new-a to F-new-s; F-new-b is F344, F-new-f was not used); F373–F381 are Phase 5 and 6.
+
+- **F345 (open, Increment 3) — five live slots, not four.** The served set is `staffDirectory`, `committeeDirectory`, `giving`, `eventsCalendar` and `careers`; `/docs` must render them by import (R8).
+- **F346 (closed by the increment split) — `tickets` cannot hold an anonymous inquiry** (organization and person both `NOT NULL`, FORCE RLS). The contact form is Increment 2, with its own migration.
+- **F347 (closed for Increment 1; extraction in Increment 3) — `ORG_FEATURE_CATALOG` and the ingest limits live in `server-only`, database-importing modules.** Closed for Increment 1 by moving the coverage rules to vitest (DECISION-296).
+- **F348 (closed) — an exact `PUBLIC_PATHS` list would 307 a typo'd help URL to sign-in.** Resolved by the segment-boundary prefix bypass (DECISION-293).
+- **F349 (closed) — TODO checkbox grammar.** In Flight holds `- [x]` lines and declined items stay `- [ ]`; Done is section plus checkbox (DECISION-294), pinned by twelve fixtures.
+- **F350–F354 (closed) — design findings:** the catalog was not `tsx`-importable (P3-1); `ui/table.tsx`'s scroll container could not be made focusable (P3-2); the `/no-organization` and `/invite` links collided with 2b's rewrite (P3-9; added at this integration); the proxy-imports walker was private (lifted, P3-3); a pipeline merging before help left a Done line with no token (H12(b)).
+- **F355 (open) — `README.md:14-20` says sign-in is gated off and the site serves public pages only**, which contradicts production (`docs/TODO.md`).
+- **F356 (open, low) — the deactivated-account message is unreachable.** Password sign-in says "Wrong email or password."; a signed-in deactivated session is signed out silently. The help states the truth.
+- **F357 (open) — a successful email change lands on "Something went wrong"** (`revalidatePath` during render in `verify-email/[token]/page.tsx`). `your-account` carries a workaround sentence with `limitationUntil: email-change-error`.
+- **F358 (closed) — the functionality map claimed a trusted-device cookie for two-factor sign-in.** There is none; corrected.
+- **F359 (open) — `development` holds a directory row named like the operator inside a fixture organization.** No committed file or image uses it; the capture database is built from scratch.
+- **F360 (closed; Vercel preview gate open) — the help 404 was the framework 404.** Resolved by the `force-dynamic` catch-all (DECISION-293, architect Option C).
+- **F361 (open) — the Public listing and Display order columns are hidden on a phone** (Officers, Staff). `your-congregations-website` says "use a wider screen", `limitationUntil: phone-public-listing`.
+- **F362 (open, approved by the operator 2026-10-28) — the founding administrator holds neither `events.manage`, `event_types.manage` nor `branding.manage` and cannot grant them.** Two of five Administration cards deny the first user. A full Feature; four pages carry `limitationUntil: founder-events-branding`.
+- **F363 (no action) — nine default event types, four seeded Retired.** The help says "some are switched off at first".
+- **F364 (open) — the Roles page's "Granted by" shows the platform administrator's email** to a congregation's administrator.
+- **F365 (closed at this integration) — the map's recurrence text was stale.**
+- **F366 (open, approved by the operator 2026-10-28) — a visitor can be recorded as a Ruling Elder** and counts as a Session seat; with 2b they can be invited and then approve. Bug-fix pipeline.
+- **F367 (accepted) — the help 404 body is client-rendered;** with JavaScript off it is a blank shell, as `notFound()` is elsewhere.
+- **F368 (closed, `366a1d3`) — the sign-in email box showed the starter's placeholder address.**
+- **F369 (open, low) — the `admin-hub` image is 2,208 px wide and small on a phone.**
+- **F370 (closed) — `config-imports.test.ts` misread an array string ending in "from" as a re-export.**
+- **F371 (closed at this integration, operator nod) — the worship-planning placeholder said "You can put services on the calendar as events."** Now "Someone who holds the events role can…"; restore when F362 ships.
+- **F372 (by design) — H10 never reads a pending page's labels;** they are checked at the publishing commit.
+- **F373 (closed at this integration) — Rule 17 contradicted Rule 16 on the ordinary case.** Rule 17's amendment: the feature's own branch publishes its page; tokens only for pages written ahead of their feature.
+- **F374 (closed at this integration) — the lost-phone answer was a dead end** ("Ask the person who invited you"). The pages now say only the PresbyPortal team can reset it.
+- **F375 (open) — the Features table in `turning-features-on-and-off` is not tied to the catalog.**
+- **F376 (open) — nothing ages a `verifiedIn` stamp.**
+- **F377 (closed at this integration) — `/pre-push` did not run `check:help`.** Step 3g.
+- **F378 (closed at this integration) — `sign-in-invitations` said "It only connects".** Now "The person gets whatever access their record already carries."
+- **F379 (open, operator) — giving is live and the help says nothing about it** (Phase 1 Q5 deferral to revisit).
+- **F380 (closed for `why-cant-i-see-this` at this integration; open for `turning-features-on-and-off`) — three-column tables hide the last column at 360px.**
+- **F381 (open, low) — H10 is satisfied by a label anywhere in `src/`.**
+
+*Accepted residuals (`paper`), DECISION-294:* a feature shipped behind a global flag that is off in production, and an operator flag flip, can falsify a page with no commit to catch it.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=231 commit=caad746 -->
+<!-- covers: decision=297 commit=1516fe3 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -26,6 +26,8 @@ is checked.*
 ---
 
 ## 2026-10-28
+
+- [ ] **`decision` · Help is public at /help, with a privacy policy (0.50.0; DECISION-293 to DECISION-297).** Twenty-one guides, five "not yet" placeholders, a Help link in the menus and on the sign-in, two-factor, invitation and no-access pages, and a ninth tripwire (`check:help`) that `/pre-push` now runs. Workflow Rule 17 in `CLAUDE.md` makes keeping the help current part of every user-visible change. **Before you merge:** check the help 404 on the Vercel preview (`docs/TODO.md`), and confirm Google sign-in works in production or apply the prepared commit that removes the Google sentences. **After deploy:** set `HELP_PRIVACY_CONTACT_EMAIL` in Vercel Production and redeploy; until then the privacy policy sends questions to the public repository. The guides say plainly that a new congregation's first administrator cannot add events or set colours yet (F362, which you approved fixing).
 
 - [ ] **`decision` · Two-factor sign-in now follows a person's role: new members are not asked, administrators, treasurers and newly made platform administrators still are (0.49.0; DECISION-291).** Migration 0080 makes new accounts default to not required (no existing account changes) and flags `roles.manage`, `role_grants.manage` and `domains.manage`. **Accepted residuals:** a platform role or `is_platform_admin` set by SQL does not switch the setting on, and the app's own database role could write it (`paper`); enrolling voluntarily never brings a challenge, and nothing in the product says so yet (a TODO decision for you). **You must:** re-run the two R8 counts, snapshot, and apply 0080 BEFORE merging (`docs/deployment.md`, "Two-factor by role (0080)"); grant no platform role in between; fill the release note's deploy-day bracket. **Know:** the pipeline-branch passwords that leaked in QA run 1 are the same as `development` and production; you chose not to rotate (TODO line).
 

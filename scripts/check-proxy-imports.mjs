@@ -40,6 +40,17 @@
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import {
+  NON_CODE_EXT_RE,
+  SERVER_ONLY_RE,
+  importSpecifiers,
+  resolveSpecifier,
+  stripComments,
+} from "./lib/import-graph.mjs";
+
+// The walker's primitives now live in scripts/lib/import-graph.mjs (user-help P3-3), shared with
+// the help import boundary. Re-exported so this file's public surface, and its tests, are unchanged.
+export { importSpecifiers, stripComments };
 
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname);
 const SRC = path.join(ROOT, "src");
@@ -62,107 +73,6 @@ const BANNED_BARE = [
   /^resend$/,
   /^bcryptjs$/,
 ];
-
-const CODE_EXTS = [".ts", ".tsx", ".mts", ".js", ".mjs"];
-const NON_CODE_EXT_RE = /\.(css|json|svg|png|jpe?g|gif|webp|ico|woff2?|txt|md|sql)$/i;
-
-/**
- * Removes comments, keeping string and template literal contents intact (the
- * specifiers live in strings). Replaces each comment with spaces/newlines so
- * line numbers are preserved. Regex literals are not modelled (a `/` after an
- * operator is treated as division); an exotic regex containing a quote is the
- * only way to desync it, and the failure direction is a spurious violation.
- */
-export function stripComments(src) {
-  let out = "";
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === "/" && d === "/") {
-      while (i < n && src[i] !== "\n") i++;
-      continue;
-    }
-    if (c === "/" && d === "*") {
-      i += 2;
-      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) {
-        out += src[i] === "\n" ? "\n" : " ";
-        i++;
-      }
-      i += 2;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      const quote = c;
-      out += c;
-      i++;
-      while (i < n && src[i] !== quote) {
-        if (src[i] === "\\" && i + 1 < n) {
-          out += src[i] + src[i + 1];
-          i += 2;
-          continue;
-        }
-        if (quote !== "`" && src[i] === "\n") break; // unterminated: resync at the newline
-        out += src[i];
-        i++;
-      }
-      if (i < n && src[i] === quote) {
-        out += quote;
-        i++;
-      }
-      continue;
-    }
-    out += c;
-    i++;
-  }
-  return out;
-}
-
-const STATIC_FROM_RE = /(?:^|[\s;}])(import|export)(\s+type\b)?([^"'`;]*?)\bfrom\s*["']([^"']+)["']/g;
-const SIDE_EFFECT_RE = /(?:^|[\s;}])import\s*["']([^"']+)["']/g;
-const DYNAMIC_RE = /\b(?:import|require)\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
-const SERVER_ONLY_RE = /(?:^|[\s;}])import\s*["']server-only["']|\brequire\s*\(\s*["']server-only["']\s*\)/;
-
-/** Every module specifier a (comment-stripped) file imports at runtime. */
-export function importSpecifiers(code) {
-  const found = new Set();
-  for (const m of code.matchAll(STATIC_FROM_RE)) {
-    const isTypeOnly = Boolean(m[2]);
-    if (isTypeOnly) continue; // erased
-    found.add(m[4]);
-  }
-  for (const m of code.matchAll(SIDE_EFFECT_RE)) found.add(m[1]);
-  for (const m of code.matchAll(DYNAMIC_RE)) found.add(m[1]);
-  return [...found];
-}
-
-function normalize(p) {
-  const parts = [];
-  for (const seg of p.split("/")) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") parts.pop();
-    else parts.push(seg);
-  }
-  return parts.join("/");
-}
-
-/** Resolves an in-repo specifier to a file path in `index`, or null. */
-function resolveSpecifier(spec, fromPath, index) {
-  let base;
-  if (spec.startsWith("@/")) base = `src/${spec.slice(2)}`;
-  else if (spec.startsWith("./") || spec.startsWith("../")) {
-    const dir = fromPath.includes("/") ? fromPath.slice(0, fromPath.lastIndexOf("/")) : "";
-    base = normalize(`${dir}/${spec}`);
-  } else return undefined; // bare specifier: not in-repo
-  const candidates = [
-    base,
-    ...CODE_EXTS.map((e) => base + e),
-    ...CODE_EXTS.map((e) => `${base}/index${e}`),
-  ];
-  for (const c of candidates) if (index.has(c)) return c;
-  return null;
-}
 
 function forbiddenPath(rel, allow) {
   if (rel.startsWith("src/lib/db/")) return "src/lib/db/**";

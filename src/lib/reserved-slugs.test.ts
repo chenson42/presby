@@ -68,6 +68,12 @@ describe("isReservedSlug", () => {
     expect(isReservedSlug("Invite")).toBe(true);
   });
 
+  it("reserves `help` and `docs`, the public documentation prefixes (DECISION-293)", () => {
+    expect(isReservedSlug("help")).toBe(true);
+    expect(isReservedSlug("docs")).toBe(true);
+    expect(isReservedSlug("Help")).toBe(true);
+  });
+
   it("RESERVED_SLUGS contains no empty or whitespace entries", () => {
     for (const slug of RESERVED_SLUGS) {
       expect(slug.trim()).toBe(slug);

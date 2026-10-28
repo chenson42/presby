@@ -19,7 +19,7 @@
 | 2 — Architectural review | architect | Complete (parent log: R1–R14, C1–C10 for Increment 2, DECISION-293/294/295, F345–F349) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete for Increment 1. Placeholder list and four operator questions await the operator | Design complete; implementers named per batch | 2026-10-26 |
 | 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4, 5c) | **Complete**: Batches 0, 1 (`d6e7bd7`), 2 (`be636c3`), 5a (`a0825c7`), 3 (`01a4821`), 5b (`1913918`), the help 404 follow-up (`7f4363e`), 4 (`097b43e`) and 5c (`d7e5d39`, plus the `fix(auth)` placeholder `366a1d3`). The auth-touching smoke (MFA-enrolled user, :3660) ran green at Batch 3 and again at Batch 5c; the production lane (:3661) ran green at Batches 3 and 4 | Ready for Phase 5 | 2026-10-28 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete; chromium 542, custom-hosts 132, prod 100 with MFA user on own servers; 36 mutations red; findings 1–5 non-blocking | PASS | 2026-10-28 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 **Phases 1 and 2 are not repeated here.** They bind this design exactly as the parent records them: Phase 1 Gaps 1 to 11 and the adversarial pass, Addendum A (the website section, `/docs`, placeholders), the operator rulings of 2026-10-26 (contact form, the home line, real pages for in-flight features, placeholders only for bigger backlog tracks, the production-truth answer), and the architect's R1 to R14 and C1 to C10. The Carry-forward table below shows where each is handled.
@@ -1446,7 +1446,276 @@ Legend: **M** read in the merged code on main (`../presby`, HEAD `5059611`, 0.48
 
 # Phase 5 — Verification (qa)
 
-*Pending. Gate: the auth-touching e2e (MFA-enrolled user, real dev server on :3660, production lane on :3661) must have run, or the verdict is BLOCKED. Also: `npm run check` (nine), `coverage.test.ts`, `next build` route table, every published page at 360px in light and dark, every committed image read, the copy-truthfulness check on the help diff.*
+**Date:** 2026-10-28
+**Verified by:** qa (read-only). I ran this in worktree `/Users/cshenso/git/presby-platform/presby-help`, branch `pipeline/user-help`, HEAD `dc18a7e`. The diff was measured from the merge-base `26fd2d8` (main at 0.47.0).
+
+**Verdict: PASS.** Every required check is green, including the stricter auth-touching gate. The findings below don't block the verdict.
+
+**Scope I ran.** This diff touches `src/proxy.ts`, a layout, `playwright.config.ts`, `src/components/shared/` and two `(auth)` pages, so these suites ran in full:
+- typecheck, lint, the unit suite and all nine `npm run check` tripwires
+- the full `chromium` and `custom-hosts` projects on my own dev server at :3660, started from a clean `.next`
+- the whole production lane on :3661
+
+**What I did not re-run:**
+- The DB-backed vitest set. The diff has no migration, no change under `src/lib/db/`, `src/lib/authz.ts` or a shared fixture, and no DB-backed test file.
+- `scripts/test-rls.sql`, because the diff changes no schema.
+
+**Flags.** Before the e2e runs I saved the global flags to `qa-help-p5/flags-start-clean.txt`; that snapshot is byte-identical to the orchestrator's `help-5c/flags-before.txt`. I then reset them to the CI baseline with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`. After the e2e runs I restored them, and `diff` against `help-5c/flags-before.txt` is empty. The browser walk then ran at the production posture.
+
+**Housekeeping.**
+- No `.env.local` value was printed; variables were checked with `test -n`.
+- I edited no repo file and used no `git stash`. All mutations ran in a scratch `git archive` copy at `qa-help-p5/mut`.
+- Both servers I started were stopped by PID. Ports 3660 and 3661 are free, and `git status` is clean.
+- Disk: 556 GiB free.
+
+## Type Check
+
+`npm run typecheck`: **PASS**. `npm run lint` (`--max-warnings=0`): **PASS**.
+
+`npm run check`: **all nine tripwires PASS**. `check:help` reports "28 registry entries, 16 published, 23 content files, 7 images", which is 16 published, 7 pending and 5 planned.
+
+`next build` from a clean `.next`: exit 0. The help routes in the route table:
+- `○ /help` (static)
+- `ƒ /help/[...unmatched]` (dynamic)
+- `● /help/[slug]`: 16 paths
+- `○ /help/planned` (static)
+- `● /help/planned/[slug]`: 5 paths
+
+`/signin`, `/totp` and `/access-pending` stay `ƒ`. The build output has 17 HTML files under `.next/server/app/help/`: the 16 published pages plus `planned.html`.
+
+## Unit Tests
+
+| Run | Files | Tests | Failed |
+|---|---|---|---|
+| Full suite (30.9 s) | 695 passed, 97 skipped (the DB-backed set) | 10,536 passed, 2,862 skipped | 0 |
+| The 38 test files the diff adds or changes, verbose | 38 | 533 passed | 0, nothing skipped |
+
+`coverage.test.ts` passes. Its allowlist pin is 16.
+
+## End-to-End Tests
+
+| Lane | Server | Total | Passed | Failed | Skipped | Duration |
+|---|---|---|---|---|---|---|
+| Dev, `--project=chromium` (full) | own `next dev` on :3660, clean `.next`, `RATE_LIMIT_DISABLED=true`, CI-baseline flags | 542 | 542 | 0 | 0 | 19.0 m |
+| Dev, `--project=custom-hosts` | same server | 132 | 132 | 0 | 0 | 4.3 m |
+| Production lane (`PW_PROD_BUILD=1 PW_PROD_PORT=3661`) | its own `next build && next start` | 100 | 100 | 0 | 0 | 3.0 m |
+
+**MFA login path (the auth-touching gate).** The chromium run used the seeded MFA-enrolled user `admin-2fa-enrolled@presby.invalid`. It went through password, then `/totp` (a wrong code rejected, the real code accepted), then landing. That path is covered by:
+- `totp-full-login`, `totp-recovery-code`, `totp-code-entry` and `totp-callback-bypass`
+- `session-claim-integrity`, `branded-signin`, `post-login-routing` and `developer-2fa-gate`
+- `admin-login`, `member-home`, `header-controls` and `invitation-new-account`
+- `help-gates`: an enrolled user who has not yet entered a code reaches `/help` while `/o/<slug>` still goes to `/totp`
+
+**Production lane** covered the hydration specs, `help-404` (all three paths: 404, `no-store`, no `s-maxage`, no `x-nextjs-cache`) and `prod-custom-hosts`, which includes the lockdown additions.
+
+**Custom-host lockdown**, from the specs plus my own `curl` with `Host: qa-unclaimed.invalid`:
+- `/help`, `/help/signing-in`, `/help/planned`, `/help/planned/worship-planning`, a pending slug, `/help/no-such-page/deeper`, `/docs` and `/docs/x` each return a 404 with no `Set-Cookie` and no `location`.
+- None of those bodies contains help chrome or "PresbyPortal".
+
+**Proxy probes on a platform host:**
+- `/help/../admin` and `/help/%2e%2e/admin` are normalised and redirected to `/signin?callbackUrl=%2Fadmin`.
+- `/help/..%2fadmin` gives the help 404.
+- `/HELP`, `/helpdesk` and `/help%2Fsigning-in` redirect to `/signin`.
+- No probe reached a protected page through the bypass.
+
+## Regression Tests Added
+
+Failing-first is confirmed for each test below:
+
+- **`fix(auth)` 366a1d3:** `shows a fictional example address in the email box — regression for the starter's address placeholder` (`src/app/(auth)/signin/signin-credentials-form.test.tsx`).
+  - I put the form file from `366a1d3^` into the scratch copy: 1 failed (`expected 'admin@claudecode.info' to be 'you@example.org'`).
+  - At `366a1d3`: 2 passed. HEAD's form file is identical to `366a1d3`'s.
+  - The commit carries `Caught-By`, `Discovered-In` and `Work-Log` trailers.
+  - The test pins the exact text, which is the right form for a fixed string.
+- **`fix(help)` 7f4363e (the catch-all):** with `help/[...unmatched]` deleted in the scratch copy, `shell-boundaries.test.ts` fails 2 cases and `help-routes.test.tsx` fails to load. The e2e red-first result rests on the implementer's Batch 4 run.
+- **Proxy predicate**, three mutations of `src/proxy.ts`, each run against `proxy.test.ts`:
+
+  | Mutation | Result |
+  |---|---|
+  | Bare `p.startsWith("/help") \|\| p.startsWith("/docs")` | 1 failed (the look-alike case) |
+  | `/docs` dropped from the predicate | 1 failed |
+  | The bypass moved after `edgeAuth()` | 2 failed (the anonymous case and the mid-2FA case) |
+
+- **`config-imports.test.ts`:**
+  - Adding `import { x } from "@/lib/foo";` to `registry.ts` gives 1 failure ("registry.ts imports "@/lib/foo"").
+  - Adding `export * from "@/lib/foo"` to `select.ts` gives 1 failure.
+- **`check:help` on the real tree**, 15 content mutations; 14 go red with the right rule:
+
+  | Rule | Mutation | Result |
+  |---|---|---|
+  | H8 | "coming soon" in a published page | red |
+  | H10 | renamed the unique label "Use a recovery code instead" in `totp-challenge-form.tsx` | red |
+  | H12 | moved `[help:recovery-codes]` to Done | red: "feature shipped: publish its page" for both pages |
+  | H16 | a `"/help/signing-in"` literal in `avatar-menu.tsx` | red |
+  | H19 | `import "@/lib/flags"` in `needs-block.tsx` | red |
+  | H19 | `import "next/headers"` in `markdown-document.tsx` | red |
+  | H4 | a level-1 heading | red |
+  | H6 | a published page linking a pending page | red |
+  | H2 | a deleted `.md` file | red |
+  | H7 | an unknown shot id | red |
+  | H9 + H5 | an invented congregation name plus a `vercel.app` URL | red |
+  | H3 | a slug removed from `slug-history.ts` | red |
+  | H13 | `verifiedIn` set to 0.49.0 | red |
+  | H5 | raw HTML plus a reference link | red |
+  | H15 | `/help/your-account` removed from the functionality map | red |
+
+  The fifteenth mutation, renaming "Forgot password?" on the sign-in form, stayed green. See finding 4.
+- **The rule code itself**, 7 mutations, each run against `checks.test.ts` + `todo-grammar.test.ts`; every one goes red:
+
+  | Mutation | Tests failed |
+  |---|---|
+  | H8 scans pending pages instead of published | 9 |
+  | H16 matches double quotes only | 1 |
+  | The TODO grammar ignores "declined" | 2 |
+  | H10 drops the own-text condition | 1 |
+  | H17 drops the 400 KB limit | 1 |
+  | H6 always allows pending links | 1 |
+  | H17 drops the unreferenced-image rule | 1 |
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100% statements and branches
+- `src/lib/two-factor.ts`: 91.3% statements (target 90%+; not changed by this diff)
+- `src/lib/flags.ts`: 100% statements and branches
+- `src/lib/help/**`: 96.2% statements overall. `checks.ts` 98.7%, `shots-guard.ts` 100%, `markdown-scan.ts` 91.7%. `copy.ts` is 27% under unit tests alone; its strings are exercised by the component tests.
+
+## Feature-Gate Audit
+
+No protected routes were touched. The diff adds or changes no `route.ts`, no `actions.ts` and no `"use server"` action. The new pages are static, public and session-free by design: they are `(documentation)` pages and the `help/[...unmatched]` catch-all. The proxy gate on `/admin`, `/developer` and `/o/*` is unchanged: the bypass returns before `edgeAuth()` only for `/help`, `/help/…`, `/docs` and `/docs/…`, and I confirmed that with the proxy mutations and the path probes above.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none added or changed | n/a | n/a | n/a |
+
+## Schema/RLS Audit
+
+Not applicable: no migration, schema, grant or RLS change.
+
+## Browser walk
+
+I walked the help pages on a production build (`next start` on :3661) with flags at the production posture. Screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-help-p5/walk/` and `.../qa-help-p5/walk2/`.
+
+**Every published page, the index, `/help/planned` and the 5 planned pages**, at 360×780, signed out, light and dark (46 renders):
+- Each returns HTTP 200 with exactly one `<h1>` and no horizontal overflow.
+- Every link, button and summary outside the prose is at least 44px tall.
+- Every page carries `noindex, nofollow`, and every planned page sets it itself.
+- The 3 tables each sit in a `role="region"` with `tabindex="0"` and the aria-label "Table. Scroll sideways to see all of it.".
+- All 16 published pages have the "On this page" `<details>`. Its `<summary>` keeps `display: list-item` and opens on click.
+- All 7 images have alt text, load, and are scaled to 328px.
+- The one external link carries `rel="noreferrer noopener"`.
+- No `{{` token appears in any rendered page.
+- I read 4 screenshots myself: `why-cant-i-see-this` dark, the worship-planning placeholder light, the signed-in home dark and the TOTP page.
+
+**Planned pages:**
+- Each shows the label "Planned. Not available yet. There is no date." and "Who it is for:" / "Today:" lines.
+- The struck slugs `ledger`, `meeting-minutes` and `directory-export` appear nowhere in `src/`, `docs/TODO.md`, `docs/product`, `e2e/` or `scripts/`, neither as a slug nor as a token.
+
+**Pending pages:**
+- All 7 return the help 404.
+- None appears in the `/help` index HTML, in `prerender-manifest.json` or in the route table.
+
+**In-app links**, at 360px in light and dark:
+
+| Where | Link | Height | Overflow | Opens |
+|---|---|---|---|---|
+| Home, signed out | "Help" | 44px | 0 | |
+| Home, signed in as `org-multi` | "Help" | 44px | 0 | |
+| `/signin` | "Help with signing in" | 44px | 0 | |
+| `/totp` (real mid-challenge session) | "Help with two-factor sign-in" | 44px | 0 | `/help/using-your-code`, and `/o/e2e-alpha` still goes to `/totp` |
+| `/access-pending` | "Why can't I see this?" | 44px | 0 | `/help/why-cant-i-see-this#access-pending` with the section in view |
+| Avatar menu (items "Account", "Help", "Sign out") | "Help" | 44px | | `/help` |
+| Toggle-off states for a no-role member at `e2e-alpha`: community, careers, giving | "How features are turned on" | 44px | 0 | `/help/turning-features-on-and-off` |
+
+The home line reads "PresbyPortal is in early release."
+
+**Enumeration (production build):**
+- Compared 10 single-segment URLs: an unknown slug, a typo, all 7 pending slugs and a planned slug at the wrong path (`/help/worship-planning`).
+- All return 404 with `private, no-cache, no-store, max-age=0, must-revalidate` and no `x-nextjs-cache`.
+- With the requested segment normalised out, every body is byte-identical (sha `e01ae2cd84c2`). The only per-URL difference is that the RSC payload echoes the request's own segments.
+- Two-segment misses are identical to each other in the same way: `/help/planned/no-such`, `/help/planned/signing-in` and `/help/planned/worship-planning-x`.
+- Timing over 25 requests each is indistinguishable: medians 4.1 to 5.3 ms for unknown and pending slugs.
+
+## Images
+
+I opened and read all seven committed images myself.
+
+| Image | What it shows |
+|---|---|
+| `signin-form` | empty boxes; no placeholder address |
+| `totp-boxes` | empty boxes |
+| `portal-tiles` | tiles only; no greeting or header |
+| `admin-hub` | the "Alder Creek Presbyterian Church" fixture |
+| `features-list` | the fixture, plus a "Last changed" timestamp with no address |
+| `community-list` | Marguerite Ashcombe and Corwin Ashgrove, no email |
+| `calendar-month` | fixture events |
+
+- **Names.** "Alder Creek Presbyterian Church" is in `scripts/seed-dev.sql`. Ashcombe is in `seed-dev.sql`, and Ashgrove is in the repository's parishes and invitations seed fixtures.
+- **Nothing real.** No image shows a real person, congregation, address, email, tenant brand mark, avatar menu or dev indicator. No address appears at all, so none is off `.invalid`.
+- **Metadata.** Every PNG holds only `IHDR`, `IDAT` and `IEND` chunks; there is no embedded text metadata.
+- **Captions.** The two image sentences ("…already turned on several features, so its page also lists 'Manage giving' and 'Website domain'"; "…already turned on its features") match what the images show.
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the design's Copy table.** Exceptions are findings 1 and 2. The C1 chrome in `src/lib/help/copy.ts`, the C2 home line, the C3 link texts and the 5 approved planned rows (verbatim; the struck rows are absent) all match.
+- [x] **Each claim was traced to the code or record behind it, and what it does not read is named.**
+  - **Published pages:** I read all 16 in full and spot-checked their claims against code on this branch:
+    - lockout: 5 tries, 900 s
+    - reset link: 60 minutes, single use
+    - recovery codes: `ABCD-EFGH`, case-insensitive, the dash is optional (`normalizeRecoveryCode`)
+    - Google sign-ins also reach the 2FA gate: the `jwt` callback doesn't depend on the provider
+    - the Features table against `ORG_FEATURE_CATALOG`: names, `provisionedOn`, `orgTypes`, `operatorEnabled`
+    - the founding administrator also holds Stated Clerk (`presby_apply_founding_administrator`, 0059), which carries `roll.propose` (0061)
+    - **live read on this branch:** the walk congregation's `founding_administrator` and `congregation_stated_clerk` roles hold no `events.manage`, `branding.manage` or `event_types.manage`. That confirms the "cannot yet" claims on 4 pages.
+    - quoted strings exist in non-test source, interpolated forms included
+  - **Pending pages:** I re-ran my own quoted-string scan against each source tree: `../presby` (5059611, 0.48.1) for three pages, `../presby-2fa`, `../presby-treasury` and `../presby-photos`. Of 261 quoted strings, the only ones not found verbatim are the interpolated templates the implementer already listed. I also checked `who-is-asked-for-a-code` against `../presby-2fa`'s `0080` migration and `platform-role-two-factor.ts`: the six flagged keys, the new-account default, existing accounts keeping their setting, and the platform-role switch-on. The pending pages are checked against those records only; none was walked on a running server.
+- [x] **Each instruction was traced to the role that sees it, and that role can do it.**
+  - The toggle-off link is visible to a no-role member, and its target tells them who to ask.
+  - The "In Features, turn on…" Needs blocks are pinned to the catalog by `coverage.test.ts`.
+  - The founder instructions match the bundle.
+  - No Needs block `who` string contains a permission key.
+- [x] **Older strings about the same subject were grepped for, and none is made false by this diff.** The neighbour greps in the 5a, 5b and 5c records stand.
+  - No future tense outside quoted UI. The only "will" is a verbatim UI string on the pending photos page, and "won't" describes a state.
+  - No permission keys in reader text.
+  - No real congregation name in any help content or registry string.
+  - Nothing varies by whether a congregation is a tenant: the pages are static and read no session, flag or tenant.
+- [x] **Help diff covered:** every `labels` string is enforced on screen by H10. I walked every published page at 360px and opened every committed image.
+
+**Findings (none blocks the verdict):**
+1. **`you@example.org` is not in any Copy table.** It is the new sign-in placeholder from commit 366a1d3. It makes no claim, so it is truthful, but it was added without a recorded ruling. The orchestrator should record the ruling. Two sibling forms use `you@example.com` (`forgot-password/page.tsx:92`, `account/email-form.tsx:77`); that inconsistency is cosmetic.
+2. **Two aria-labels are not in Copy C1:** "Help site" (`headerNavLabel`) and "More help pages" (`pageNavLabel`) in `src/lib/help/copy.ts`. Both are accurate.
+3. **Three-column tables at 360px.** On `why-cant-i-see-this` and `turning-features-on-and-off`, the last column ("Who can fix it", "Applies to") is off-screen at 360px until the reader scrolls. They meet R4 (a focusable scroll region), but Batch 5b turned its own three-column tables into lists for exactly this reason. Worth aligning in a later pass.
+4. **H10 can be satisfied by a label anywhere in `src/`.** Renaming the sign-in form's "Forgot password?" link stays green, because `forgot-password/page.tsx:73` uses the same string as its `<h1>`. That is how R7 defines the check; Rule 17's human walk is the backstop for screen-specific drift.
+5. **F-new-r is still open.** The planned line "You can put services on the calendar as events." is the operator-approved text, but a new congregation's founding administrator cannot add events (confirmed above). It's for the operator to decide.
+
+**Known unverified, carried to Phase 6:**
+- the Google section of `signing-in` (O3)
+- the pending pages against their shipped screens
+- every published page needs a re-walk against 0.48.x before `verifiedIn` moves
+
+**Merge gate (not part of this verdict):** the Vercel preview check of `/help/no-such-page` and `/help/planned/no-such` belongs to the orchestrator before `/merge-pr`.
+
+## Verdict
+
+**PASS.** On this auth-touching diff, the full chromium e2e ran on my own dev server at :3660 with the seeded MFA-enrolled user through password, TOTP and landing, and every spec passed with none skipped. The production lane on :3661 and the custom-hosts project also passed. All nine tripwires, typecheck, lint and the unit suite are green, and the failing-first checks hold.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete. Full chromium (542), custom-hosts (132) and production lane (100) green on own :3660/:3661; nine tripwires; build route table; 36 mutations red as expected (14 of 15 `check:help` content mutations, 7 rule-code, 3 proxy, 2 config-imports, 1 fix(auth) restored from `366a1d3^`, 9 catch-all unit cases); 46-render 360px walk; 7 images read; enumeration identical; flags reset to CI baseline and restored | PASS | 2026-10-28 |
+
+### Handoff
+
+Next is **analyst (Phase 6)**. Re-walk every published page as its reader at 360px. Check the O3 Google section with the operator. Carry findings 1 to 5 above and the Vercel preview merge gate.
+
+Files referenced:
+- `/Users/cshenso/git/presby-platform/presby-help/docs/work-log/2026-10-26-user-help-inc1.md`
+- `/Users/cshenso/git/presby-platform/presby-help/src/proxy.ts`
+- `/Users/cshenso/git/presby-platform/presby-help/src/lib/help/copy.ts`
+- `/Users/cshenso/git/presby-platform/presby-help/src/app/(auth)/signin/signin-credentials-form.tsx`
+- `/Users/cshenso/git/presby-platform/presby-help/src/content/help/why-cant-i-see-this.md`
+- `/Users/cshenso/git/presby-platform/presby-help/src/content/help/turning-features-on-and-off.md`
+- Logs and screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-help-p5/` (`e2e-chromium.log`, `e2e-hosts.log`, `e2e-prod.log`, `build.log`, `content-mut2.log`, `rule-mut.log`, `walk.json`, `walk2.json`, `walk/`, `walk2/`, `flags-start-clean.txt`, `flags-end.txt`)
 
 ---
 

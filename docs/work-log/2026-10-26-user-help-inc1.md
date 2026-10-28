@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (parent log, with Addendum A and the operator rulings) | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete (parent log: R1–R14, C1–C10 for Increment 2, DECISION-293/294/295, F345–F349) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete for Increment 1. Placeholder list and four operator questions await the operator | Design complete; implementers named per batch | 2026-10-26 |
-| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | In progress: Batches 0, 1 (`d6e7bd7`), 2 (`be636c3`), 5a (`a0825c7`), 3 (`01a4821`), 5b (`1913918`), the help 404 follow-up (`7f4363e`) and 4 (`097b43e`) done; Batch 5c pending. The auth-touching smoke (MFA-enrolled user, :3660) and the production lane (:3661) ran green at Batch 3 | — | 2026-10-28 |
+| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4, 5c) | **Complete**: Batches 0, 1 (`d6e7bd7`), 2 (`be636c3`), 5a (`a0825c7`), 3 (`01a4821`), 5b (`1913918`), the help 404 follow-up (`7f4363e`), 4 (`097b43e`) and 5c (`d7e5d39`, plus the `fix(auth)` placeholder `366a1d3`). The auth-touching smoke (MFA-enrolled user, :3660) ran green at Batch 3 and again at Batch 5c; the production lane (:3661) ran green at Batches 3 and 4 | Ready for Phase 5 | 2026-10-28 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1297,6 +1297,149 @@ None shows a real person, congregation, address or email, a brand mark of a tena
 **For Phase 5/6.** Re-read all seven images (the human line in QA's verdict). Each image's page sentence ("The congregation in this picture has already turned on its features...") is a claim: re-check it against the fixture the images came from. If the first live congregation's toggles change, or the founding-administrator bundle changes (F-new-i), the images and the Features and hub sentences need a re-capture. Re-capture is `HELP_SHOTS_DB_OK=1 E2E_BASE_URL=http://localhost:<port> npm run help:shots` against a from-scratch database only, then bump `capturedIn` and the sizes it names.
 
 **Next.** Batch 5c (full-stack-developer): the pending pages and the approved placeholders. The first planned placeholder makes `planned/[slug]`'s `generateStaticParams` non-empty, which is the case the temporary-entry check above covered.
+
+
+## Phase 4 — Batch 5c (full-stack-developer)
+
+*2026-10-28, worktree `presby-help`, commits `d7e5d39` (`docs(help)`, the pages and placeholders) and `366a1d3` (`fix(auth)`, the sign-in placeholder). Not pushed. No `.env.local` value or connection string was printed. Dev server `:3660` was started from a clean `.next` and stopped by PID (31735 and its npm parent); the port is free. Scratch, scripts and screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/help-5c/`.*
+
+**Phase 4 is complete.** What is left is Phase 5 (QA) and, at integration, the orchestrator's publish step for the pending pages (below).
+
+### Files
+
+- **New, pending (seven):** `src/content/help/{accepting-your-invitation,setting-up-two-factor,sign-in-invitations,who-is-asked-for-a-code,reimbursements,reimbursements-for-treasurers,photos-of-people}.md`.
+- **New registry entries:** seven `pending` (each with its `requires` token, `verifiedIn: null`, `covers`, `labels`, and a `needs` block where the design called for one) and five `planned` (`worship-planning`, `children-check-in`, `communications`, `event-sign-ups`, `presbytery-tools`; `confirmedOn: 2026-10-26`, the operator's O1 date; the "Today:" and "Who it is for" lines are the design's table, verbatim). `src/lib/help/slug-history.ts` gains the five planned slugs (pending slugs are appended by the commit that publishes them, which is what `check:help` H3 requires).
+- **Struck placeholders** (`ledger`, `meeting-minutes`, `directory-export`) are not present anywhere.
+- **Changed titles and summaries:** `accepting-your-invitation`'s summary now ends "...set up two-factor sign-in if you are asked." (the design's text was written before F343, and on 0.48.1 plus F343 whether you are asked depends on your role; C4 says pending summaries are provisional). The other six are the design's, unchanged. The five planned entries' `summary` (used only as the page's meta description) is "{Name} is not available yet. There is no date."
+- **`fix(auth)`:** `src/app/(auth)/signin/signin-credentials-form.tsx` (placeholder `you@example.org`) and a new `signin-credentials-form.test.tsx`. No existing test pinned the old placeholder (grep of `src`, `e2e`, `scripts`); the only other mention is `scripts/check-secrets-pii.test.mjs`, which uses the starter's domain as a fixture for the allowlist and is unrelated. `e2e/help-shots/capture.spec.ts` still hides placeholders; the hide is now defensive and its comment stays true enough, so the file is untouched (the `signin-form.png` image shows empty boxes either way and needs no re-capture).
+- **`src/lib/help/config-imports.test.ts` (one-line regex fix, found by this batch, F-new-q below).**
+
+### Where each pending page's facts came from (page, fact, how verified)
+
+Legend: **M** read in the merged code on main (`../presby`, HEAD `5059611`, 0.48.1), file named; **P** read in the pipeline's own tree and Phase 6 record; **L** a label, matched by script (below). **No pending page was walked on a running server**: none of the five features is in this branch, and 2b and F166 are in main only. The orchestrator's re-walk at integration, and Phase 6's, are the verification; Phase 5 should not read these pages as walked.
+
+**accepting-your-invitation (`recovery-codes`)**
+
+| Fact | Source |
+|---|---|
+| The email: heading "You're invited to PresbyPortal", button "Accept the invitation", names the congregation, says when the link stops; "Nothing happens unless you accept"; a designation email says a PresbyPortal administrator invited you | M `src/lib/onboarding/invitation-email.ts` |
+| The link page "You're invited", masked address, expiry date, "Create your account" (First name, Last name, Password, Confirm password, the 8-character rule, "Create account"), "Already have an account?" with "Sign in to accept" | M `src/app/(invite)/invite/{invite-summary,anonymous-state,accept-form,sign-in-to-accept-form}.tsx` |
+| "Your account is ready" and no automatic sign-in | M `invite/accepted/page.tsx` |
+| Signed in: "Accepting as ... at ..." with "If that isn't you, don't accept", "Accept invitation"; the mismatch page "You're signed in as another account" and "Sign out to accept"; the two-factor page "Verify and continue" | M `confirm-state.tsx`, `mismatch-state.tsx`, `two-factor-state.tsx`, `accept-signed-in-form.tsx` |
+| Accepting lands in the congregation (`/launch?next=/o/<slug>`) | M `(invite)/actions.ts:261`, `no-organization/actions.ts:154` |
+| The same dead-link page for every cause, its sentence and "Go to sign in" | M `dead-link-state.tsx`, `src/lib/onboarding/labels.ts:135` |
+| The in-place card "You're invited to {congregation}" / "You have {n} invitations", "Accept the invitation" | M `src/lib/onboarding/no-organization-copy.ts` |
+| Two-factor is asked "depending on your account, your role and your congregation" (rule-neutral, true before and after F343) | M `accepted/page.tsx` ("If your role needs two-factor sign-in"); P F343 Phase 6 |
+
+**setting-up-two-factor (`recovery-codes`)**
+
+| Fact | Source |
+|---|---|
+| The enrolment page, its steps, the key, the 10-minute QR, the six boxes and "Confirm enrollment" | M `src/app/(account)/account/2fa/totp-enroll-form.tsx`; `PENDING_TTL_MINUTES = 10` in `src/lib/totp-pending.ts` |
+| After the code: "Two-factor authentication enabled", the "shown only once" sentence, "Recovery codes — save these now", ten codes, "Continue", the optional "once more" line | M `enrolment-handoff.tsx`, `recovery-codes-panel.tsx`, `continue-button.tsx`; `RECOVERY_CODE_COUNT = 10` in `src/lib/two-factor.ts` |
+| The returning view "You enrolled on", "{n} unused codes remaining (of {total} total)", the Account card ("Not set up", "Active", "Set up two-factor authentication", "Manage / regenerate codes") | M `2fa/page.tsx`, `src/app/(account)/account/2fa-status.tsx` |
+| Regenerating: "Regenerate recovery codes", the footnote that a reload loses the codes, "New recovery codes — save these now", old codes stop | M `regenerate-codes-form.tsx` |
+| Regenerating needs a verified session: "To make new recovery codes, first confirm it's you ..." and "Confirm it's you" | M `confirm-its-you.tsx`, `2fa/page.tsx` (`session.user.twoFactorVerified`) |
+| The four refusal sentences | M `2fa/actions.ts`, `totp-enroll-form.tsx`; P `docs/work-log/2026-10-26-recovery-codes.md` Copy C8 to C11 |
+| What the page does not say: "you will not be asked again" (the record forbids it); that the codes can be copied by a button (none exists; the record lists it as a follow-up) | P Phase 3 Copy checks, Phase 6 follow-ups |
+
+**sign-in-invitations (`signin-invites`)**
+
+| Fact | Source |
+|---|---|
+| The card "Sign in to PresbyPortal" on the Community edit page, every state's sentence, buttons, dialogs, toasts and refusals | M `src/lib/onboarding/sign-in-copy.ts`, `src/app/(org)/o/[slug]/admin/community/[id]/edit/sign-in-card.tsx` |
+| Link works once; seven days; five-minute send-again wait; several sends then a stop | M `SIGN_IN_INVITATION_LIMITS` in `src/lib/onboarding/sign-in-types.ts` (`expiryDays 7`, `resendCooldownMinutes 5`, `maxResendsPerChain 5`) |
+| The list markers and who sees them | M `community/sign-in-marker.tsx` (and `getSignInMarkers`, `people.manage` viewers) |
+| What the invitee sees | M the `/invite` and `/no-organization` files above; P 2b Phase 6 walk ("no name pre-fill") |
+| Connect at sign-in: the conditions (one candidate, not a visitor, one live membership, toggle on, no open invitation, exactly one record carries the address) and "role or seat needs two-factor, then Check again" | M `drizzle/0065_presby_sign_in_and_connect.sql` `presby_connect_signed_in_account` (checks 1 to 11); `NO_ORG_SECOND_FACTOR_COPY` |
+| "Connect people when they sign in": on by default, what turning it off does | M `src/lib/org-features.ts:131` |
+| The Session banner states and the hand-off rows | M `SESSION_BANNER_COPY`, `sessionRowStateLabel`; P 2b Phase 6 |
+
+**who-is-asked-for-a-code (`two-factor-by-role`)**
+
+| Fact | Source |
+|---|---|
+| The three reasons (own setting, role, congregation policy), the strictest wins, decided at sign-in before a congregation is chosen | P `../presby-2fa` Copy S1 paragraph 1; Phase 3 Summary |
+| New accounts are not asked just for existing; existing accounts keep their setting | P Phase 6 One-line take and Intent-vs-shipped |
+| Own setting is changed only by the PresbyPortal team; a platform administrator is asked from the moment the role is given | P Phase 6 "What's Working"; Copy S1 paragraph 2; `src/app/(admin)/admin/users/[id]/two-factor-card.tsx` |
+| The roles: giving (view, record, manage), creating roles, giving roles, website addresses; the first administrator and a treasurer hold them; roles for people or events do not require it | P Phase 3 "Permissions & Flags" and Phase 6 release-note paragraph; `0059:534` bundle in Phase 1 |
+| Given a role while signed in: asked next sign-in | P residual 3 in the Phase 6 release note |
+| A congregation's policy is set by the PresbyPortal team | P `src/app/(admin)/admin/2fa/{page,actions}.tsx` is the only writer of `organization_settings.require_two_factor` outside provisioning (grep of the tree). **Check at publish** that no congregation-side screen has been added since |
+| Setting up on your own does not start asking at sign-in | P Phase 6 and the 0.49.0 release note ("Things to know") |
+| The master switch | P Phase 3 ("`auth.require_2fa` stays the master switch for every source") |
+| Not copied: the deploy-day count in the 2fa release note | by design |
+
+**reimbursements and reimbursements-for-treasurers (`reimbursements`)**
+
+| Fact | Source |
+|---|---|
+| Every quoted label, status word, message, banner, button, dialog line, email heading, tab, filter, payment-form field, refusal, settings and team string | P `../presby-treasury/src/lib/reimbursement/{copy,notices,limits}.ts` (the Copy file is the single source) |
+| The toggle "Reimbursements", off by default, congregations and new worshiping communities | P `src/lib/org-features.ts` `org_portal.reimbursement` |
+| Tiles "Reimbursements" and "Reimbursement requests" and their descriptions | P `src/lib/org-portal/tiles.ts` |
+| Who can ask ("members, regular attenders and staff"), the Treasurer view button for key holders, Category only when the congregation has categories, "Pay someone else back" only for people allowed to enter for others | P `copy.ts` `page.cannotFile`; `reimbursements/page.tsx`; `request-form.tsx`; Phase 6 "What's Working" |
+| Chair or leader approves; nobody approves their own; the approver cannot pay; the sole payer exception and its stamp; treasurer approval needs a second payer | P Phase 6 Intent-vs-Shipped, Phase 3 Copy C8 |
+| Photos re-saved without location data, PDFs kept as uploaded, no virus scan; receipts private to the request; nothing deleted | P Phase 6 release-note paragraph and "What's Working" |
+| 4 MB, 5 files, 20 drafts, 20,000 export rows | P `limits.ts` |
+| Not stated, on purpose: that Session and Board of Deacons requests go to the treasurer "for now" (the release note's own words). It is a limit a pending Deacons-seat feature removes, but that TODO line carries no `[help:]` token, so no `limitationUntil` can mark the sentence. A requester sees the same "Waiting for the treasurer to approve it." banner as for any group with no chair or leader, which the page explains | by design; see "For the orchestrator" |
+
+**photos-of-people (`person-photos`)**
+
+| Fact | Source |
+|---|---|
+| Every label, dialog, status line, refusal and the off-warning | P `../presby-photos/src/lib/person-photos/copy.ts` (the file's own claim registry) |
+| Toggle "Photos of people", off by default, all organization types | P `src/lib/org-features.ts` `org_portal.person_photos` (`orgTypes: null`) |
+| The path Community, "Edit person", "Photos"; the link needs Community on | P the edit page; Phase 6 Help impact |
+| Ten photos, per congregation, first photo becomes the directory photo, never the website photo; website needs the permission tick; website falls back to a cleared directory photo; listed and published; "appears to be under 18" (never "adults only"); hidden; merged; removing keeps the file; a day of browser cache | P Phase 6 "Help impact" and Intent-vs-Shipped |
+| Not claimed: that iPhone camera photos work (the refusal sentence is quoted as text; no sentence says they work) | P Phase 6 "Not to claim yet" |
+
+### Checks run on the pending pages
+
+- **`npm run check:help`** passes with **28 registry entries: 16 published, 7 pending, 5 planned; 23 content files; 7 images.** H2 (file parity), H4 (headings), H5 (subset), H6 (links, pending included), H9 (no real name, host or project id) and H12 (every pending page's token is on exactly one open TODO line; every planned token the same) all run on the new pages.
+- **Labels.** `check:help` H10 reads only published pages, so `labels[]` on a pending page does not fail on this branch, whatever the branch contains. I still filled them, so the publish step is a status flip: a scratch script (`help-5c/labels.ts`, not committed) applies H10's own normalisation and checks that **every one of the 189 pending labels occurs in a non-test `src/` file of the tree of the pipeline it describes** (main for the first three pages, `presby-treasury`, `presby-photos`) **and in the page's own text**: 0 misses. A second scratch script (`quotes.ts`) lists every other double-quoted string in each pending page that is not found verbatim in that tree: the only hits are interpolated templates ("10 unused codes remaining (of 10 total)", "Sent back to you. Reason:", "0 of 10 photos", the 2b banner "are recorded, but none has connected...", "Not connected yet. No email on file", which the code joins at run time).
+- **Banned and future phrasing.** Grep of the seven pages for will, would and "going to": two hits, both verbatim quotes of UI titles ("Photos of people will be hidden", the Features warning, which the photos record lists as a required label). Nothing else. No page names a congregation; example addresses are `.invalid` (`i***@example.invalid`).
+- **Published pages against main.** Because 2b and F166 are on main, I ran the same label and quote scans for the sixteen **published** pages against `../presby`: **one** label is gone: `adding-people` "none has a PresbyPortal account yet" (2b replaced that banner). No other published label or quoted string is missing. See "For the orchestrator".
+
+### The placeholders in the browser (`:3660`, 360x780, light and dark)
+
+- `/help/planned` and each of `/help/planned/{worship-planning,children-check-in,communications,event-sign-ups,presbytery-tools}`: HTTP 200, one `<h1>` (the page's own name; the list page's is "Planned and not available yet"), the fixed label "Planned. Not available yet. There is no date." on each entry, "Who it is for: ..." and "Today: ..." lines, document overflow 0, every link in `main` at least 44px, readable in both schemes. Screenshots (light and dark, full page) are in `help-5c/shots/` (`_help_planned*.png`). I read the list page (light) and one entry (dark).
+- **noindex.** Each of the six pages carries `<meta name="robots" content="noindex, nofollow">` (the planned pages set it themselves; the index and every page also inherit the root's `noindex`).
+- **The planned index** shows the five in registry order and no struck item. The `/help` index lists no pending and no planned entry inline, only its "Planned and not available yet" link (the index is unchanged).
+- **Unknown or misplaced slugs still get the help 404 through the catch-all** (a planned list that is no longer empty is exactly the case the Batch 4 temporary-entry check covered, now with real entries): `/help/planned/no-such`, `/help/planned/signing-in` (a published slug under the planned path), `/help/who-is-asked-for-a-code` (a **pending** slug), and `/help/planned/worship-planning/deeper` each return **404** with the heading "We couldn't find that page" (same markup, light and dark, overflow 0). `help-404.spec.ts` and the `help.spec.ts` "indistinguishable" tests, which now derive the pending slugs from the registry for the first time, passed.
+- `/signin` at 360 light and dark: the email box shows `you@example.org`, document overflow 0.
+- Not exercised in a browser: the pending pages themselves (they do not render by design).
+
+### Gates
+
+- `npm run typecheck`: clean. `npm run lint`: clean (`--max-warnings=0`).
+- `npm run test`: **695 files passed, 97 skipped; 10,536 tests passed, 2,862 skipped, 0 failed** (Batch 4: 694 / 10,534; +1 file and +2 tests, both in `signin-credentials-form.test.tsx`). The first run failed once, `config-imports.test.ts` (F-new-q, fixed; below).
+- `npm run check`: **all nine tripwires green** (`check:secrets` was re-run with the seven new files staged, because it scans tracked files only). `check:help`: "28 registry entries, 16 published, 23 content files, 7 images".
+- `npm run build`: exit 0 from a clean `.next`; `○ /help`, `ƒ /help/[...unmatched]`, `● /help/[slug]` (16 paths), `○ /help/planned`, `● /help/planned/[slug]` with the **five placeholder paths** (static), unchanged otherwise.
+- **The auth-touching re-run (the sign-in page is an `(auth)` page), on my own `:3660` server.** Global flags were saved first (`flags-before.txt`, identical to Batch 3's `flags-after-5a.txt`), **reset to the CI baseline** with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, then **restored afterwards** (`restore-flags.sh`; `diff` against the saved snapshot is empty). Server: full `rm -rf .next`, `RATE_LIMIT_DISABLED=true`, the `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET` and `DOMAINS_*` fakes, `AUTH_URL` on `:3660`. `chromium` project, eight files: `totp-full-login` (the MFA-enrolled user: password, `/totp`, a wrong code rejected, the real code signs in), `help-gates`, `help`, `help-404`, `totp-callback-bypass`, `branded-signin`, `admin-login`, `member-home`: **61 passed, 0 failed, 0 skipped.** The production lane and the lockdown project were not re-run: nothing in this batch touches the proxy, a route or the build graph beyond five static planned pages (the build above shows them), and both ran green in Batch 4 after the last route change.
+- Red before green for the `fix(auth)`: the new test failed against the old file (`expected 'admin@claudecode.info' to be 'you@example.org'`) before the one-line change.
+
+### Findings
+
+- **F-new-q (test defect, fixed in `d7e5d39`).** `src/lib/help/config-imports.test.ts` read `export const HELP_PAGES = [ ... ]` as a re-export whenever a string in the array ended with the word "from" followed by a quote (the label "Submitted from" on the Reimbursements queue), and failed "registry.ts imports `",`". The pattern now excludes `=` between `export` and `from`, so a variable declaration is never a re-export. A real `import ... from "@/..."`, `export * from` and `export { x } from` are still caught (checked with sample text). Any future published label that ends in "from" would have hit the same wall.
+- **F-new-r (copy, for the operator).** The approved placeholder "Worship and service planning" says "You can put services on the calendar as events." That is true for a person holding the events role, but Batch 5b found that a first congregation's founding administrator cannot add events without the PresbyPortal team (F-new-i). The line is the design's approved text and is kept verbatim; it should be re-read when F-new-i is decided.
+- **F-new-s (observation).** `check:help` H10 never reads a pending page's labels, so a label that drifts in a pipeline's final strings is caught only at the publishing commit. That is by design (R6); the scripts above are how this batch kept the labels honest today, and the same two scripts (labels against the merged tree) are a fast check at publish.
+
+### For the orchestrator, at integration (the pending pages are not live until you do these)
+
+1. **Order of merge.** Publish the two `recovery-codes` pages and the `signin-invites` page together (both features are on main). `who-is-asked-for-a-code` links to `setting-up-two-factor` and `accepting-your-invitation`, and `reimbursements-for-treasurers` links to `accepting-your-invitation`, so those two cannot publish before `recovery-codes` does (H6 refuses a published page that links to a pending one). `reimbursements` and `reimbursements-for-treasurers` share one token and publish together. No `recovery-codes` or `signin-invites` page links to `who-is-asked-for-a-code`, and no treasurer page links to it, on purpose, so no page waits on F343.
+2. **Per page, the publish commit does:** set `status: "published"`, set `verifiedIn` to the release you re-walked (the page text is **not** walked yet), append the slug to `slug-history.ts`, move the `[help:<token>]` onto the feature's Done line, add the slug to the functionality map (H15), confirm each `covers` key against the merged catalog (`org_portal.sign_in_connect`, `org_portal.reimbursement`, `tile:reimbursements`, `tile:reimbursements-admin`, `org_portal.person_photos`, `route:/invite`, `route:/account/2fa`; the route ones are checked against the real route list by `coverage.test.ts`), and re-run the label script against the merged tree.
+3. **2b (`signin-invites`) side effects on published pages:** `adding-people` quotes the banner label "none has a PresbyPortal account yet", which main no longer has, so H10 fails there on the merged tree. `adding-people` and `officers-and-the-session` carry the one limitation sentence and `limitationUntil: signin-invites`; `how-a-congregation-gets-started` and `why-cant-i-see-this` carry the same marker. All four are edited in the publish commit: the Session banner states in `adding-people` now read from `SESSION_BANNER_COPY` (quoted above) and the hand-off to `sign-in-invitations`; the "Only an invitation connects you" sentence the 5a notes left out stays out. Also add the `/no-organization` in-app link (P3-9) in that commit, and the `org_portal.sign_in_connect` coverage (this page's `covers`; otherwise the allowlist). `your-account` names two-factor without a link: add one to `setting-up-two-factor` when it publishes.
+4. **`recovery-codes` side effects:** `using-your-code` and `your-account` can link `setting-up-two-factor`; add the `/invite` in-app link (P3-9) with `rel="noreferrer"` in the publish commit; `getting-help`'s "Ask the person who invited you" is unaffected.
+5. **`two-factor-by-role`:** `using-your-code` is rule-neutral and needs no edit. After this page publishes, add a link from `setting-up-two-factor` and `accepting-your-invitation` to it (they cannot carry it now: it would make `recovery-codes` wait on F343). Confirm at publish that the PresbyPortal team is still the only writer of a congregation's policy (see the table).
+6. **`person-photos`:** remove the `limitationUntil: person-photos` sentence from `using-the-directory` (and add that a card shows a photo when one is chosen and initials otherwise); `your-congregations-website` gets the sentence that a photo appears only when a website photo or a cleared directory photo exists and the person has not hidden it. Both are in the photos record's "Help impact".
+7. **`reimbursements`:** if you want the Deacons-seat limit marked, add a `[help:...]` token to that open TODO line and a `limitationUntil` to `reimbursements`; today the page says nothing about Session and Deacons requests.
+8. **Placeholders.** Each token is on exactly one open TODO line (`worship-planning` line 565, `children-check-in` line 422, `communications` line 45, `event-sign-ups` line 50, `presbytery-tools` line 29 in this tree). When one of those features ships, H12(c) fails until the placeholder is deleted and the real page carries `replaces`.
+9. **Walk the pending pages** as their readers on a dev server at 360px before `verifiedIn` moves; Phase 6 does the same for the published ones.
+
+### What QA should cover (Phase 4 is complete)
+
+1. Everything in the **Phase 5** paragraph of this log, with the nine tripwires, `coverage.test.ts` (pin 16), the build route table, every published page at 360px in light and dark and the seven committed images read for real data (unchanged since Batch 4).
+2. **Batch 5c specifically.** (a) `npm run check:help` reports 16 published, 7 pending, 5 planned. (b) The seven pending pages are **not reachable**: each of `/help/<pending slug>` is the help 404 (404, the heading, no redirect to `/signin`), none appears in `/help`, none in the build's route table, none in `generateStaticParams`. (c) `/help/planned` and each `/help/planned/<slug>`: the fixed label text, "Who it is for", "Today:", 360px light and dark, `noindex` meta tag, no struck item (no `ledger`, `meeting-minutes` or `directory-export` anywhere in `src/` or the registry), and an unknown `/help/planned/<x>` still the help 404. (d) The copy-truthfulness check on `git diff -U0 d56dcd7..HEAD -- src/content/help src/lib/help`: each pending page's quoted strings against the record named in the tables above (the scripts are in the scratchpad; a record-based re-check is the QA step, since the features cannot be walked here), and the **forbidden-future-tense** read. (e) The `fix(auth)` commit: `signin-credentials-form.test.tsx` fails against the old file and passes against the new one (verify by `git stash`-free means, e.g. check the file at `366a1d3^`), and the full-login path on a real server with an MFA-enrolled user (`totp-full-login`, `help-gates`) is green, which this batch ran and QA repeats after resetting global flags to the CI baseline. (f) `config-imports.test.ts` still fails for a real `@/` import (mutation: add `import { x } from "@/lib/foo";` to `registry.ts`).
+3. **Known unverified, for Phase 6:** the pending pages' prose against the shipped screens (none walked); the Google section of `signing-in` (O3, unchanged); `F-new-r`; the 2b banner and Session sentences once 2b merges.
 
 
 ---

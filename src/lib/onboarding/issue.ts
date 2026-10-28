@@ -554,8 +554,11 @@ export async function createInvitation(
         greetingName = person.firstName;
       }
 
-      // New accounts default to two_factor_required, so an unconfigured
-      // deployment would strand either invitee at the 2FA wall (D-4, G8).
+      // Both invitation purposes grant a key flagged requires_two_factor (the
+      // treasurer's giving keys, the founding administrator's roles.manage and
+      // role_grants.manage; DECISION-291), so an unconfigured deployment would
+      // strand either invitee at the 2FA wall (D-4, G8). The new account's own
+      // column is false by default; the ROLE is the reason.
       if (!isTotpConfigured()) return { kind: "totp_unavailable" };
 
       if (!input.acknowledgeDoNotContact && (await hasDoNotContact(tx, org.id, email))) {

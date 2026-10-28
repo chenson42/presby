@@ -129,7 +129,12 @@ test("a new invitee: preview consumes nothing, bad passwords are refused inline,
   expect(users).toHaveLength(1);
   const user = users[0];
   expect(user.verified, "the address is verified by the act of using the link").toBe(true);
-  expect(user.two_factor_required, "a new account defaults to 2FA required").toBe(true);
+  // F343 (DECISION-291): a new account's own setting is OFF by default. A founding administrator is required
+  // THROUGH THE ROLE (roles.manage and role_grants.manage are flagged requires_two_factor), which is why the
+  // sign-in walk below still reaches enrolment.
+  expect(user.two_factor_required, "a new account's own setting defaults to off").toBe(false);
+  const [viaRole] = (await sql`select presby_two_factor_required(${user.id}::uuid) as required`) as { required: boolean }[];
+  expect(viaRole.required, "required through the founding-administrator role, not the column default").toBe(true);
   expect(user.is_active).toBe(true);
   expect(user.password, "stored as a bcrypt hash, never the password").toMatch(/^\$2[aby]\$\d{2}\$/);
   expect(user.password).not.toContain(PASSWORD);

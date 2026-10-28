@@ -130,11 +130,12 @@ async function seedFlags() {
     },
     {
       key: "auth.require_2fa",
-      // ON: effective twoFactorRequired = dbUser.twoFactorRequired AND this flag.
-      // Seeded ON — required to keep the seeded MFA admin e2e test green (that
-      // user has twoFactorRequired=true in DB; without this flag the proxy gate
-      // does not fire). Turn OFF to globally disable forced 2FA regardless of
-      // per-user column.
+      // ON: effective twoFactorRequired = (the user's own column OR a congregation
+      // that requires it OR a held key flagged requires_two_factor) AND this flag
+      // (DECISION-291). Seeded ON — required to keep the seeded MFA admin e2e
+      // test green (that user has twoFactorRequired=true in DB; without this flag
+      // the proxy gate does not fire). Turn OFF to globally disable forced 2FA
+      // whatever the source.
       description:
         "Org-level 2FA master switch. OFF = no user is TOTP-gated regardless of per-user column.",
       enabled: true,
@@ -952,7 +953,9 @@ async function seedLocalAdmin() {
         password: hash,
         emailVerified: new Date(),
         // Disabled on initial seed so /admin loads in one click for testing.
-        // Flip to `true` (or omit) once you've enrolled in 2FA.
+        // Flip to `true` once you've enrolled in 2FA. Leaving the column out
+        // means false now (DECISION-291: the column default changed in 0080),
+        // so omitting it is the same as this line; it used to mean true.
         twoFactorRequired: false,
       })
       .returning({ id: schema.users.id });

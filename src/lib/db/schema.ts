@@ -39,7 +39,13 @@ export const users = pgTable("users", {
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
-  twoFactorRequired: boolean("two_factor_required").notNull().default(true),
+  // The account's OWN two-factor setting; false by default since
+  // drizzle/0080_presby_two_factor_default.sql (DECISION-291). A role or a
+  // congregation requires 2FA separately, through presby_two_factor_required();
+  // the platform-role grant points set this true
+  // (src/lib/auth/platform-role-two-factor.ts). check-schema-parity.ts does not
+  // compare defaults: src/lib/db/domain/two-factor-default{,.db}.test.ts pin it.
+  twoFactorRequired: boolean("two_factor_required").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

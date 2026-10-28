@@ -162,7 +162,7 @@ export const VISUAL_ROUTES: VisualRoute[] = [
     path: "/admin/2fa",
     storageState: "admin",
     expectedStatus: 200,
-    note: "Per-congregation 2FA policy (DECISION-033).",
+    note: "2FA policy: congregations, roles and the per-person setting (DECISION-033, DECISION-291).",
   },
   {
     path: "/admin/design-system",

@@ -481,7 +481,17 @@ test.describe("Sign-in connect and /no-organization", () => {
         const elder = await addMember(sql, o, { first: "Barnaby", last: "Colquhoun", email: elderAccount.email });
 
         // 1. The administrator signs in and reads the queue in READ mode: the Session is empty.
-        await signInAs(page, founder, new RegExp(`/o/${o.slug}`));
+        // F343 (DECISION-291): the founding-administrator bundle carries roles.manage and role_grants.manage,
+        // which 0080 flags, so the founder is required THROUGH THE ROLE (own setting still off). An enrolled
+        // founder answers the real /totp challenge on the way in, as lanes (d) and (g) do.
+        const [founderRequirement] = (await sql`
+          select two_factor_required as own, presby_two_factor_required(id) as effective
+            from users where id = ${founder.id}::uuid`) as { own: boolean; effective: boolean }[];
+        expect(founderRequirement, "the founder is required through the role").toEqual({ own: false, effective: true });
+        await seedTotpEnrollment(sql, founder.id);
+        await signInAs(page, founder, (url) => url.pathname === "/totp");
+        await submitTotp(page, E2E_TOTP_TEST_SECRET);
+        await page.waitForURL(new RegExp(`/o/${o.slug}`), { timeout: 45_000 });
         await page.goto(`/o/${o.slug}/admin/community/pending`);
         await expect(page.getByRole("heading", { level: 1, name: "Pending approvals" })).toBeVisible({ timeout: 45_000 });
         await expect(page.getByText(/no one can approve yet|your session roster is empty/i).first()).toBeVisible();
@@ -509,6 +519,14 @@ test.describe("Sign-in connect and /no-organization", () => {
         await noHorizontalOverflow(page);
 
         // 3. The elder signs in on their own device: authority needs the second factor, then Check again connects.
+        // F343 (DECISION-291): nothing REQUIRES two-factor of this account (own setting off, no flagged key, no
+        // congregation policy), so sign-in never challenges it; the enrolment is voluntary. The /totp step below
+        // is what verifies the session, and Check again connecting proves it set twoFactorVerified for a
+        // not-required account (2b's authority-bearing connect after F343).
+        const [elderRequirement] = (await sql`
+          select two_factor_required as own, presby_two_factor_required(id) as effective
+            from users where id = ${elderAccount.id}::uuid`) as { own: boolean; effective: boolean }[];
+        expect(elderRequirement, "the elder's account is not required").toEqual({ own: false, effective: false });
         const device = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
         try {
           const elderPage = await device.newPage();

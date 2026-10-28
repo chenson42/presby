@@ -336,7 +336,10 @@ async function sendOrResend(kind: SendKind, ctx: SignInContext, input: SignInSen
   if (confirmed === null) return { kind: "invalid_input", field: "confirmedAddress" };
   // Checked BEFORE any write. A link built from anything but the validated
   // platform origin is phishable, and an unconfigured two-factor deployment
-  // would strand a new account at the wall (new accounts default to required).
+  // would strand an invitee whom something requires at the wall: a new
+  // account's own setting is off since DECISION-291, but the congregation's
+  // policy or a flagged key can still require it, and an elder's connect
+  // needs a verified second factor.
   if (platformOrigin() === null) return { kind: "link_origin_unavailable" };
   if (!isTotpConfigured()) return { kind: "totp_unavailable" };
 

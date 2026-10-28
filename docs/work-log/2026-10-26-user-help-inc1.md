@@ -1246,3 +1246,126 @@ Legend as 5a: **W** walked on :3660 as the role named; **C** read in code or the
 - **O3 Google sign-in:** operator verbatim: "it hasn't been configured yet, but document it still. i'll turn it on and test soon." The `signing-in` page documents Google sign-in. Before that page publishes, the orchestrator confirms with the operator that Google sign-in works in production; until confirmed, the Google section is the one known-unverified claim and Phase 6 must check it.
 - **O5 Rule 17 and the CLAUDE.md / agent-file / template edits:** approved as drafted; the orchestrator applies them at integration.
 - **O2, O4, O6, O7:** defaults taken (link to the public repository until the contact form ships; static header shows "Sign in" to everyone; each in-flight feature's page publishes in its own integration commit, 2b included; add the six "How features are turned on" links).
+
+---
+
+## Phase 2: ruling on the help 404 (after Batch 3)
+
+*Architect, 2026-10-28. Worktree `/Users/cshenso/git/presby-platform/presby-help`, HEAD `72e0019`. Read-only; no file was written.*
+
+### Verdict
+
+**Approved with suggestions: Option C, a new one.** Add a catch-all segment, `help/[...unmatched]/page.tsx`, that always calls `notFound()` and is `force-dynamic`. Options A and B' are rejected. Option B (accept the framework 404) is the fallback only if the Vercel preview check below fails.
+
+### What Next 16.4.2 actually does (read from `node_modules/next`, version 16.4.2)
+
+- **Why the help 404 is skipped.** In `dist/build/templates/app-page-runtime.js:1092-1096`, if a dynamic page has `prerenderInfo.fallback === false` and the path was not prerendered, the page does not render. Instead it throws `NoFallbackError` (or calls `render404()` when `adapterPath` is set). The page never runs, so `notFound()` is never thrown inside the help segment and `help/not-found.tsx` is never reached. That is the cause of F-new-g.
+- **The router tries the next matching route.** `dist/server/lib/router-server.js:365` catches `NoFallbackError` and calls `handleRequest(handleIndex + 1)`. `dist/server/lib/router-utils/resolve-routes.js:191-197` then moves on to the next matching dynamic route ("when resolving fallback: false the render worker may return a no-fallback response which signals we need to continue resolving"). The framework 404 appears only because nothing else under `/help` matches.
+- **The catch-all can sit beside `[slug]`.** `dist/shared/lib/router/utils/sorted-routes.js` allows `[slug]` and a *required* catch-all `[...x]` at the same level. It sorts `[slug]` first; only an optional catch-all `[[...x]]` would conflict.
+- **What follows from those three:**
+  - `/help/<unknown|pending|planned-slug>`: `[slug]` declines, then the catch-all matches.
+  - `/help/planned/<unknown>`: `planned/[slug]` declines, `[slug]` cannot match two segments, then the catch-all matches.
+  - `/help/a/b/c`: the catch-all matches.
+  - All of them reach `help/not-found.tsx` inside the `(documentation)` layout, so every case gets one body by construction.
+- **Not verified: Vercel.** The `NoFallbackError` throw is guarded by `!isMinimalMode`, and Vercel runs Next in minimal mode. On Vercel, the decision to keep routing after a `fallback: false` miss belongs to the platform's routing config, not to this code. The router-server comment says it mirrors that behaviour, but I have not seen it on Vercel. A preview check is therefore a merge gate (see Tests).
+
+### Why each option was ruled the way it was
+
+| Option | Custom-host neutral 404 | Static lock (R3) | Unknown, pending, planned identical | Caching cost | Ruling |
+|---|---|---|---|---|---|
+| A: `dynamicParams = true` | unaffected | weakened on both content routes | yes | **one cache write per distinct URL** (`s-maxage=31536000`, measured), with attacker-chosen URLs | Rejected |
+| B: accept the framework 404 | unaffected | intact | yes | none | Fallback only: leaves the Phase 1 Flow 1 dead end |
+| B': root `src/app/not-found.tsx` (or the experimental `global-not-found`) | **changed** (see below) | intact | yes | none | Rejected |
+| **C: force-dynamic catch-all** | unaffected (the proxy's first branch rewrites custom hosts to `/site/<host>/…` before `/help` routing exists) | intact on all four content routes | yes, one code path | none: a dynamic render is `no-store`; the cost is one function call per miss, the same as a `/site` neutral 404 | **Adopted** |
+
+- **Why B' is rejected.** `(public)/site/[slug]` has no `not-found.tsx`, so today a custom host's neutral 404 is the framework 404 bubbling up to the root. A root `not-found.tsx` would replace that body on every church's domain with platform-authored copy. That is either a platform identity on a church's domain (which "A Custom Host Is a Key, Not an Identity" forbids) or a change to the DECISION-040 reference body that `lockdown.spec.ts` pins byte for byte. Both are global changes outside this feature.
+- **Rejected: a `next.config.ts` fallback rewrite** to a static 404 page. It needs a `has: host` guard (F151), adds an addressable sentinel URL, and leaves more unverified interactions with `fallback: false` and with Vercel than C does.
+
+### Exact implementation (full-stack-developer, Phase 4 follow-up, before Batch 5b)
+
+1. **New file `src/app/(documentation)/help/[...unmatched]/page.tsx`.** The whole file is:
+   ```tsx
+   import { notFound } from "next/navigation";
+
+   // Every /help URL that is not a published page or a planned placeholder lands here after
+   // [slug] / planned/[slug] decline it (dynamicParams = false), so all of them get
+   // help/not-found.tsx. force-dynamic: a miss is never written to the cache (DECISION-293).
+   export const dynamic = "force-dynamic";
+
+   export default function UnmatchedHelpPage(): never {
+     notFound();
+   }
+   ```
+   - No `generateStaticParams`, no `generateMetadata`, no `dynamicParams` export, and no `params` read.
+   - It is not a content route, so the R3 rule (`dynamic = "error"`) does not apply to it. Its lock is the source scan below.
+2. **`help/[slug]/page.tsx` and `help/planned/[slug]/page.tsx` are unchanged.** Keep `dynamic = "error"`, `dynamicParams = false` and `generateStaticParams`. In `[slug]/page.tsx`, change the comment to say that the catch-all answers a slug outside the list.
+3. **No `loading.tsx` (R9 still holds).** `notFound()` is thrown before any flush, so the response is a real 404.
+4. **Unchanged:** `help/not-found.tsx`, `src/proxy.ts`, `next.config.ts`, the root of `src/app/`, and `/docs` (no route yet; the framework 404 there is still what `help.spec.ts` asserts).
+
+### Tests that pin it
+
+- **`src/app/(documentation)/shell-boundaries.test.ts`**
+  - Add `help/[...unmatched]/page.tsx` to the expected file list.
+  - The `dynamic = "error"` test still covers exactly the four content pages, and excludes the catch-all by name.
+  - The `dynamicParams = false` test's regex `\[[^\]]+\][\\/]page\.tsx$` would match the catch-all. Exclude it by name so the count stays 2.
+  - New test: the catch-all source matches `export const dynamic = "force-dynamic"`, imports only `next/navigation`, and contains no `generateStaticParams`, `generateMetadata`, `dynamicParams` or `params`.
+  - New test: no `loading.tsx` and no root `src/app/not-found.tsx` or `global-not-found.tsx` exists. This guards B' from coming back.
+- **`help-routes.test.tsx`**
+  - Keep line 67's `dynamicParams === false`.
+  - Add a test that `UnmatchedHelpPage()` throws the Next not-found error (digest `NEXT_HTTP_ERROR_FALLBACK;404`).
+- **`e2e/help.spec.ts`**
+  - Remove the `test.fixme` (it becomes a real test) and delete the FINDING comment.
+  - Extend the "indistinguishable" test's paths with `/help/planned/no-such` and `/help/no-such-page/deeper`. Every body must equal the reference, and the reference must contain the heading "We couldn't find that page" and the "Go to the help index" link.
+  - Remove the "Status and URL only" restriction from the `/help/planned/<unknown>` test.
+- **New `e2e/help-404.spec.ts`**
+  - It runs in both lanes: `chromium` picks it up by default, and the `prod-build` project's `testMatch` in `playwright.config.ts` widens to `/(hydration\/.*|help-404)\.spec\.ts$/`.
+  - Request `/help/no-such-page` and `/help/planned/no-such` twice each.
+  - Assert: status 404; the help heading; `cache-control` contains `no-store`; no `s-maxage`; and no `x-nextjs-cache` header on either response.
+  - The production lane is what proves the caching claim.
+- **`e2e/custom-domains/lockdown.spec.ts`:** add `/help/no-such-page/deeper` to `PLATFORM_PATHS`. It must stay the neutral 404, byte-identical, in both lanes. This pins that the catch-all cannot be reached from a church's domain.
+- **Merge gate (orchestrator or deployment-engineer, recorded in the work-log before `/merge-pr`).** On the PR's Vercel preview, `curl -sI` and a body read of `/help/no-such-page` and `/help/planned/no-such`, each requested twice:
+  - Expect 404, the help heading, `no-store`, and no `x-vercel-cache: HIT` on the second request.
+  - **If the preview serves the framework 404,** Vercel's routing does not continue past `fallback: false`. In that case use Option B: delete the catch-all, reword DECISION-293's 404 sentence to "the framework 404, accepted", and restore the `fixme`. Do not fall back to A.
+
+### DECISION-293: text change (the orchestrator records it)
+
+Add this after "…read only at build (`dynamic = "error"`, `dynamicParams = false`).":
+
+> Every `/help` URL that is not a published page or a planned placeholder (unknown, pending, retired, a planned slug at the wrong path, or a deeper path) is answered by one `force-dynamic` catch-all, `help/[...unmatched]`, which calls `notFound()`. So each one gets `help/not-found.tsx` with an identical body and no per-URL cache entry. There is no root `not-found.tsx` and no `global-not-found`, because the custom-host neutral 404 (DECISION-040) must not change.
+
+Add these to *Revisit if*:
+
+> …or if Vercel stops continuing past a `fallback: false` miss to the next matching route (the preview check in `e2e/help-404.spec.ts`'s gate), or if `cacheComponents` is enabled (`dynamic`, `dynamicParams` and `force-dynamic` all go away).
+
+**Amendments to R3 and R9.**
+- R3: "every content route" means the four pages that render content; the catch-all renders none.
+- R9: `help/not-found.tsx` is reached through the catch-all, not through the `[slug]` page's own `notFound()`. That call only fires at build, so it is now a guard rather than the path a reader takes.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 2 — Architectural review (ruling on F-new-g, the help 404) | architect | Complete. Option C (`help/[...unmatched]` force-dynamic catch-all); A and B' rejected; B is the fallback if the Vercel preview check fails; DECISION-293 amended | Approved with suggestions | 2026-10-28 |
+
+### Handoff
+
+Next is **tech-lead**, briefly. Amend the design's e2e item 2 and the Carry-forward rows for R3 and R9 to match this ruling. Then the work goes to **full-stack-developer**, as a Batch 3 follow-up before Batch 5b. The implementer writes the tests above failing first: for example, the `help-404.spec.ts` heading assertion should be red before the catch-all exists. The orchestrator adds the Vercel preview check to the pre-merge list.
+
+**Files read:**
+- `/Users/cshenso/git/presby-platform/presby-help/docs/work-log/2026-10-26-user-help.md` (R1 to R14)
+- `/Users/cshenso/git/presby-platform/presby-help/docs/work-log/2026-10-26-user-help-inc1.md` (Phase 4, Batch 3)
+- `/Users/cshenso/git/presby-platform/presby-help/src/app/(documentation)/` (every file)
+- `/Users/cshenso/git/presby-platform/presby-help/src/lib/help/content.ts`
+- `/Users/cshenso/git/presby-platform/presby-help/e2e/help.spec.ts`
+- `/Users/cshenso/git/presby-platform/presby-help/playwright.config.ts`
+- In `/Users/cshenso/git/presby-platform/presby-help/node_modules/next/dist/`:
+  - `docs/01-app/03-api-reference/03-file-conventions/02-route-segment-config/dynamicParams.md`
+  - `docs/01-app/03-api-reference/03-file-conventions/not-found.md`
+  - `build/templates/app-page-runtime.js`
+  - `server/lib/router-server.js`
+  - `server/lib/router-utils/resolve-routes.js`
+  - `shared/lib/router/utils/sorted-routes.js`
+
+A web search on catch-all fallthrough found nothing that settles the Vercel behaviour, which is why the preview check is a merge gate. Sources returned: [Next.js dynamic routes](https://nextjs.org/docs/app/routing/dynamic-routes), [Next.js 14 generateStaticParams](https://nextjs.org/docs/14/app/api-reference/functions/generate-static-params), [OneUptime: dynamic routing in Next.js](https://oneuptime.com/blog/post/2026-01-24-nextjs-dynamic-routing/markdown).
+
+**Orchestrator note (2026-10-28):** the architect's ruling specifies the implementation, the tests and the DECISION-293 text exactly. The tech-lead amendment it suggested is folded into the implementer's follow-up (it updates the design's e2e item 2 and the R3/R9 Carry-forward rows in its Phase 4 section) rather than run as a separate Phase 3 pass. The Vercel preview check on `/help/no-such-page` and `/help/planned/no-such` is added to the pre-merge list.

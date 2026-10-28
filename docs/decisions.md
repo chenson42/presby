@@ -4,6 +4,35 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-291 — Two-factor is role-based: `users.two_factor_required` defaults to false; the platform-admin grant points set it true (audited, still switchable); `roles.manage`, `role_grants.manage` and `domains.manage` carry `permissions.requires_two_factor`.**
+
+**Status:** Accepted (architect, Phase 2; Phase 3 amendments P3-3, P3-4, P3-9, P3-10; residual 1 widened by the Phase 3 amendment after Phase 5 run 1; Phase 6 SHIP WITH NOTES, 2026-10-26) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-2fa-default` (F343; migration 0080; v0.49.0). Amends DECISION-170/175's key set; supersedes the domains T7/S3 deferral.
+
+- **Rule.** Migration 0080 changes the column default to false and issues no `UPDATE users`; existing accounts keep their value. A new account is required only by:
+  - (a) its own column;
+  - (b) a congregation's `require_two_factor` (arm A);
+  - (c) holding any key flagged `requires_two_factor` (arm B), now six keys: the three giving keys plus `roles.manage`, `role_grants.manage` and `domains.manage`.
+
+  All three stay subject to the `auth.require_2fa` master switch.
+- **Platform admins.** When a person gains `ADMIN_ROLE`, or any role bound to `admin.dashboard`, through `ensureDefaultRole` (`INITIAL_ADMIN_EMAILS`) or `assignRoleAction`, one helper (`requireTwoFactorForPlatformRole`, `src/lib/auth/platform-role-two-factor.ts`) sets the column true in the grant's own transaction. It writes `user.2fa_required.changed` with `cause: platform_role_granted` only when the value changed.
+  - The helper fires only when the grant row was newly inserted, in both callers (P3-3). Pressing Add on a role the person already holds does not undo a deliberate switch-off; a different platform role granted later does switch it on again, audited with its `roleName`.
+  - `ensureDefaultRole` lives in `src/lib/auth/default-role.ts` and takes the parsed `INITIAL_ADMIN_EMAILS` as a parameter (P3-4).
+  - Removing the role does not clear the column, and the per-person switch can still turn it off (operator ruling 2026-10-26). There is no derived platform-role term in `computeEffectiveTwoFactor`.
+  - **Tripwire:** a future writer of `is_platform_admin`, `user_roles` for a platform role, or `role_features` must call `requireTwoFactorForPlatformRole`.
+- **Commission and delegation.** Flagging the administration keys needs no DECISION-175-style refusal trigger. That guard exists for giving privacy; a 2FA flag only adds a challenge. Arm B's commission and delegation arms already require 2FA at every org where `withOrgContext()` lets the key be used. This supersedes the 2026-10-19 T7 rationale and closes TODO S3.
+- **`/admin/2fa`.** The stranded predicate calls `presby_two_factor_required(u.id)`, so the list and the dashboard card agree with sign-in by construction, and the platform-tier exception narrows to a per-account boolean. "Required by" reads Own setting / Congregation policy / A role, in that order.
+- **Deploy skew (production).** 0080 is applied before the code is promoted, in the same sitting. Between the two, the old code runs against the new default, so a platform role granted through the old code would not switch the person on; no platform-role grant and no first sign-in of an `INITIAL_ADMIN_EMAILS` address may happen in that window. Rollback is a forward migration (default true, unflag the three keys); accounts created in between keep `false`, so a rollback also needs a decision about those rows. Runbook: `docs/deployment.md`, "Pre-deploy runbook: 0080".
+- **Cost trigger (P3-9).** Rewrite arm B in `STRANDED_WHERE` as one set-based statement when active unenrolled accounts pass about 1,000, or `EXPLAIN ANALYZE` of `countStranded` exceeds 1 second, whichever comes first (13.2 ms at 31 users on the pipeline branch).
+- **Accepted residuals (`paper`):**
+  1. **Platform rights set outside the helper.** `users.is_platform_admin`, `user_roles` for a platform role, or `role_features` written by anything other than the application's two grant points (`assignRoleAction`, `ensureDefaultRole`) do not set `users.two_factor_required`, and the account is not required. **No database layer prevents this:** `presby_app`, the application's own connection, can `UPDATE users SET is_platform_admin` (no grant, trigger or constraint refuses it; probed by QA, Phase 5 run 1), so the protection is code review and the tripwire sentence above, not the database. (`presby_app` cannot write `permissions` or `role_features`, `0048:90-91`; it can write `user_roles`, which is why `assignRoleAction` is the grant point.) Today no application code writes `is_platform_admin` or `role_features`, and the branch shows the residual is live: both accounts with `is_platform_admin` have their own setting off and are not enrolled. The residual is accepted and `paper` (operator ruling 2026-10-26); the detective control is the audit trail on the helper's writes, which a bare SQL write does not produce.
+  2. **Database blip.** For an account whose only source is a role or a congregation, a database error in `organizationRequiresTwoFactor()` yields "not required" for that computation (DECISION-026). If the blip coincides with a cookie re-sign, the proxy's claim stays false until the next Node-side re-sign or sign-in, not merely for one request. Node-side re-checks (`/admin` layout, giving pages, invitation accept) recompute on every request. Before this decision the column masked this for every default-true account.
+  3. **Mid-session grants.** A key granted to someone else mid-session reaches their proxy claim only at their next re-sign or sign-in. Node-side re-checks cover tier-2 data.
+  4. **Per-request cost.** New accounts no longer short-circuit on the column, so each of their authenticated requests pays the definer call (2.5 to 3.4 ms). `/admin/2fa` costs about 3 ms per active unenrolled account; revisit at the P3-9 trigger.
+  5. **Voluntary enrolment.** Enrolling while not required brings no challenge at sign-in, the same as for any column-false account before; it is now the default for every new member, and nothing in the product says so yet (TODO follow-up).
+- **Production impact.** Existing holders of the three keys become required at their next computation. R8's two read-only counts were 1 active holder, 0 newly required, and 1 platform-role holder, 0 not required (2026-10-26); they are re-run on deploy day and the number stated in the release note.
+
+---
+
 **DECISION-292 — Confirming a first enrolment is a possession proof that may mark the session verified through the same single-use grant. Recovery codes are delivered only in client memory, and minting new ones requires a verified session. Amends DECISION-230's enumerated call sites.**
 
 **Status:** Accepted (architect, Phase 2; Phase 3 additions; Phase 6 SHIP IT with changes, 2026-10-26) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-recovery-codes` (F166, F344; no migration; v0.48.1)

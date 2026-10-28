@@ -1354,6 +1354,170 @@ accepted open residual and is named in the release note.
 
 ---
 
+## Two-factor by role (0080)
+
+Added at integration (v0.49.0). Migration `0080`. Design and rulings:
+`docs/work-log/2026-10-26-2fa-default.md` (Phase 2 R1 and R8, Phase 3 "Data
+Model" and "Deploy order", Phase 6); DECISION-291; F343
+(`docs/schema-design-2.md` section 2ak). The journal entry is idx 80 (the
+migration's own number). The file changes the `users.two_factor_required`
+default to false (no existing row is touched), flags `roles.manage`,
+`role_grants.manage` and `domains.manage` `requires_two_factor`, and restates
+three comments. It touches no function body and no grant.
+
+### Pre-deploy runbook: 0080
+
+1. **Order: counts, snapshot `production`, apply `0080`, verify, then merge and
+   deploy in the same sitting.** Every merge to `main` auto-deploys production,
+   so **0080 is applied BEFORE the code is merged**. Why this order (Phase 3,
+   "Deploy order"; it follows 0072's precedent):
+   - Between the apply and the deploy, the OLD code runs against the new
+     default. Old code never reads the default except when it creates a user,
+     so the only skew is that a platform role granted through the old code (or
+     the first sign-in of an `INITIAL_ADMIN_EMAILS` address) would not switch
+     that person's own setting on. **Grant no platform role, and let no
+     `INITIAL_ADMIN_EMAILS` address sign in for the first time, between the
+     apply and the deploy.** There is one platform-role holder and no grant is
+     planned.
+   - Merging the code first has the opposite skew (the default is still true,
+     which is conservative), but the three keys are not yet flagged, so the
+     new code's role-based requirement would be missing for organization
+     administrators until the apply, and the new `/admin/2fa` copy would name
+     keys that are not flagged.
+2. **R8 counts, read-only, re-run on the owner connection just before the
+   apply.** Record only the numbers (No Real Data): never an address, a name or
+   an id. Run each inside `begin transaction read only; ... rollback;`. Do
+   **not** use "flag the keys in a rolled-back transaction and call the
+   function": it writes, takes locks, and a read-only transaction refuses it.
+
+   **Query 1, tenant side** (0055 section 18's arm B with the key set replaced).
+   `newly_required_not_enrolled` is the number of people who will be sent into
+   enrolment at their next request. On 2026-10-26: `active_holders` 1,
+   `newly_required` 0, `newly_required_not_enrolled` 0. **If
+   `newly_required_not_enrolled` is not zero, stop and tell the operator the
+   number before applying,** and put it in the release note.
+
+   ```sql
+   begin transaction read only;
+   with k(key) as (values ('roles.manage'),('role_grants.manage'),('domains.manage')),
+   me as (select p.user_id, p.id as person_id, m.organization_id as org_id
+            from people p join memberships m on m.person_id = p.id and m.ended_on is null
+           where p.user_id is not null and p.merged_into_id is null),
+   holders as (
+     select me.user_id, 'direct' arm from me
+       join role_grants rg on rg.organization_id = me.org_id and rg.person_id = me.person_id
+        and rg.starts_on <= current_date and (rg.ends_on is null or rg.ends_on > current_date)
+       join app_roles r on r.id = rg.role_id
+       join app_role_permissions rp on rp.role_id = r.id join k on k.key = rp.permission_key
+     union all
+     select me.user_id, 'group' from me
+       join role_grants rg on rg.organization_id = me.org_id and rg.group_id is not null
+        and rg.starts_on <= current_date and (rg.ends_on is null or rg.ends_on > current_date)
+       join group_memberships gm on gm.group_id = rg.group_id and gm.person_id = me.person_id
+        and gm.starts_on <= current_date and (gm.ends_on is null or gm.ends_on > current_date)
+       join app_roles r on r.id = rg.role_id
+       join app_role_permissions rp on rp.role_id = r.id join k on k.key = rp.permission_key
+     union all
+     select me.user_id, 'commission' from me
+       join group_memberships gm on gm.person_id = me.person_id
+        and gm.starts_on <= current_date and (gm.ends_on is null or gm.ends_on > current_date)
+       join administrative_commissions ac on ac.group_id = gm.group_id and ac.target_org_id = me.org_id
+        and ac.starts_on <= current_date and (ac.ends_on is null or ac.ends_on > current_date)
+       join app_roles r on r.id = ac.role_id
+       join app_role_permissions rp on rp.role_id = r.id join k on k.key = rp.permission_key
+     union all
+     select me.user_id, 'delegation' from me
+       join org_delegations od on od.grantor_org_id = me.org_id and od.revoked_at is null
+        and od.starts_on <= current_date and (od.ends_on is null or od.ends_on > current_date)
+       join group_memberships gm on gm.group_id = od.group_id and gm.person_id = me.person_id
+        and gm.starts_on <= current_date and (gm.ends_on is null or gm.ends_on > current_date)
+       join app_roles r on r.id = od.role_id
+       join app_role_permissions rp on rp.role_id = r.id join k on k.key = rp.permission_key)
+   select count(distinct u.id) as active_holders,
+          count(distinct u.id) filter (where not u.two_factor_required
+                                         and not presby_two_factor_required(u.id)) as newly_required,
+          count(distinct u.id) filter (where not u.two_factor_required
+                                         and not presby_two_factor_required(u.id)
+                                         and not exists (select 1 from user_totp t where t.user_id = u.id)) as newly_required_not_enrolled,
+          count(distinct u.id) filter (where h.arm in ('commission','delegation')) as via_commission_or_delegation
+     from holders h join users u on u.id = h.user_id and u.is_active;
+   rollback;
+   ```
+
+   **Query 2, platform side, for information only** (the column stays
+   unchanged for these accounts). On 2026-10-26: `platform_role_holders` 1,
+   `platform_role_holders_not_required` 0.
+
+   ```sql
+   begin transaction read only;
+   select count(*) as platform_role_holders,
+          count(*) filter (where not u.two_factor_required) as platform_role_holders_not_required
+     from users u
+    where u.is_active and (u.is_platform_admin or exists (
+      select 1 from user_roles ur join roles r on r.id = ur.role_id
+       where ur.user_id = u.id and (r.name = 'admin' or exists (
+         select 1 from role_features rf where rf.role_id = r.id and rf.feature_key = 'admin.dashboard'))));
+   rollback;
+   ```
+
+   Also capture the users fingerprint for point 5 (a count and a hash, never a
+   value):
+
+   ```sql
+   begin transaction read only;
+   select count(*) as users,
+          count(*) filter (where two_factor_required) as required_column_true,
+          md5(string_agg(id::text || ':' || two_factor_required::text, ',' order by id)) as fingerprint
+     from users;
+   rollback;
+   ```
+3. **Snapshot `production`** in Neon (for example
+   `pre-migration-0080-<date>`) before any statement runs; `restore_snapshot`
+   is the emergency rollback.
+4. **Apply `0080` WITH `-1`, as the owner, on the direct endpoint:**
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0080_presby_two_factor_default.sql`.
+   `-1` makes the file's three-row guard roll everything back if a catalog row
+   is missing. The file is idempotent (a replay writes no row). It shares no
+   object with 0065, 0067, 0068, 0071 or 0072.
+5. **Verify** (read-only), then merge and deploy:
+   - The column default is false:
+     `select column_default from information_schema.columns where table_schema = 'public' and table_name = 'users' and column_name = 'two_factor_required';`
+     returns `false`.
+   - Exactly the six flagged keys:
+     `select key from permissions where requires_two_factor order by key;`
+     returns `domains.manage`, `giving.manage`, `giving.record`, `giving.view`,
+     `role_grants.manage`, `roles.manage` (and nothing else, unless a later
+     migration such as treasury's 0074 has added its own).
+   - No user row changed: the users fingerprint query from point 2 returns the
+     same `users`, `required_column_true` and `fingerprint` (a sign-up between
+     the two reads changes all three; re-read and compare the old rows if so).
+   - `presby_two_factor_required(uuid)` is unchanged apart from its comment:
+     `select md5(prosrc) from pg_proc where proname = 'presby_two_factor_required';`
+     matches `development`.
+6. **Merge and deploy the code** in the same sitting (`/merge-pr`). Then fill
+   the release note's deploy-day count from Query 1's
+   `newly_required_not_enrolled` (`docs/release-notes/v0.49.md`).
+7. **On `development`, after merge:** apply `0080` the same way, then re-run
+   `scripts/test-rls.sql` as `presby_app` (Rule 16); sections 46j and 47n
+   assert the six keys. Repeat the 360px walk there (founding administrator and
+   platform administrator; `docs/TODO.md`).
+8. **Rollback** is a forward migration, never an edit of 0080 once shipped:
+   `alter table users alter column two_factor_required set default true;` and
+   `update permissions set requires_two_factor = false where key in ('roles.manage','role_grants.manage','domains.manage');`.
+   Accounts created after 0080 keep `false`, so a rollback also needs a
+   decision about those rows. A code rollback alone is safe against the new
+   schema (old code works with the new default; see point 1).
+
+**What to tell the operator after merging.** New members are no longer asked
+to set up two-factor; church administrators, treasurers, holders of the three
+administration keys and newly made platform administrators still are. Setting
+up two-factor voluntarily does not make sign-in ask for a code (DECISION-291
+residual 5; a `docs/TODO.md` decision). Residual 1 is `paper`: a platform role
+or `is_platform_admin` set by SQL, rather than through the application, does
+not switch the person's own setting on, and nothing in the database refuses it.
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.

@@ -2094,6 +2094,14 @@ Pipeline `2026-10-26-recovery-codes` (v0.48.1; no migration; DECISION-292, which
 
 *Accepted residuals (`paper`), DECISION-292 (a) to (h):* a never-enrolled account's first factor reaches a verified session in one step; a verified claim outlives an administrator's reset (DECISION-230); "survives the re-render" is pinned only by running-server e2e; a lost action response leaves an enrolment with unseen codes; a not-required enrolled account answers one voluntary `/totp` before regenerating; no replay guard on `verifyToken`; the grant allow-list is a regex source scan that obfuscation or non-TypeScript source evades; the holder pin misses a parenless `return <X/>`. `completeEnrollment` still has no rate limit (`docs/TODO.md`).
 
+## 2ak. Two-factor is role-based — finding (F343)
+
+Pipeline `2026-10-26-2fa-default` (v0.49.0; migration 0080; DECISION-291, which amends DECISION-170/175's key set and supersedes the domains T7/S3 deferral; Phase 6 verdict SHIP WITH NOTES).
+
+**F343 (policy, fixed by migration 0080 and application code) — every new account was required to use two-factor sign-in because `users.two_factor_required` defaulted to true, while organization administrators were required only through the column default and not through their keys.** **Closed:** 0080 sets the column default to false and issues no `UPDATE users` (existing accounts keep their value; a test pins that the file contains no `update users`), flags `roles.manage`, `role_grants.manage` and `domains.manage` `requires_two_factor` behind a three-row guard (six flagged keys with the giving three), and refreshes the column, `permissions.requires_two_factor` and `presby_two_factor_required()` comments with no function-body change. The platform-role grant points (`assignRoleAction`, `ensureDefaultRole`) call one helper that sets the column true in the grant's transaction, audited, only on a newly inserted grant. `/admin/2fa`'s stranded predicate calls `presby_two_factor_required(u.id)`, so it agrees with sign-in by construction.
+
+*Accepted residuals (`paper`), DECISION-291 1 to 5:* platform rights written outside the two grant points (and `presby_app` can write `is_platform_admin`; nothing in the database refuses it); a database blip leaves a role- or congregation-only account unrequired until its next re-sign; a mid-session grant reaches the proxy claim only at the next re-sign; each request from a column-false account pays the definer call; a voluntary enrolment brings no challenge at sign-in. If treasury's 0074 merges later, the flagged-key count grows past six (`docs/TODO.md`).
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

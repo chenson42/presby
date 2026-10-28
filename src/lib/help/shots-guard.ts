@@ -8,7 +8,8 @@
  *   G2  any organization_profiles row for an organization outside it, or with an email not ending
  *       .invalid, a phone not containing 555, or a website host not ending .invalid
  *   G3  any user email or active contact-method email not ending .invalid
- *   G4  the host of the DATABASE_URL the dev server uses differs from the host the guard read
+ *   G4  the database (host AND name) of the DATABASE_URL the dev server uses differs from the one
+ *       the guard read - two databases on one Neon branch share a host, so the name decides
  *   G5  HELP_SHOTS_DB_OK=1 is not set (the operator attests the branch is fixture-only;
  *       the guard checks, it does not decide)
  *   G6  any query threw
@@ -51,9 +52,9 @@ export interface ShotsGuardSnapshot {
   profiles: readonly ShotsGuardProfile[];
   userEmails: readonly string[];
   contactEmails: readonly string[];
-  /** Host of the DATABASE_URL the dev server will use; null when unknown. */
+  /** Identity (`host/database`, see dbIdentity) of the DATABASE_URL the dev server will use; null when unknown. */
   serverDbHost: string | null;
-  /** Host of the owner connection the guard read; null when unknown. */
+  /** Identity (`host/database`) of the owner connection the guard read; null when unknown. */
   ownerDbHost: string | null;
   attested: boolean;
 }
@@ -101,4 +102,87 @@ export function decideShotsGuard(
   if (s.queryFailed) add("G6", 1, "G6: a guard query failed, so the database could not be checked.");
 
   return { ok: violations.length === 0, violations };
+}
+
+// ---- From database rows to a snapshot (pure, so the mapping is unit-tested) --------------------------------------
+
+/**
+ * `host/database` of a connection string, or null when it is absent or unparseable. Two databases on
+ * one Neon branch share a host, so G4 compares the database name too; the pooler suffix is dropped because
+ * the app and owner URLs legitimately differ in it. Never logged.
+ */
+export function dbIdentity(connectionString: string | undefined | null): string | null {
+  if (!connectionString) return null;
+  try {
+    const u = new URL(connectionString);
+    const database = u.pathname.replace(/^\/+/, "");
+    if (!u.hostname || !database) return null;
+    // Neon serves one endpoint on a direct host and a pooled one (`ep-xxx-pooler.region...`); they are the same database.
+    const host = u.hostname.toLowerCase().replace(/-pooler(?=\.)/, "");
+    return `${host}/${database}`;
+  } catch {
+    return null;
+  }
+}
+
+/** The host of a URL-ish profile field; an unparseable non-empty value is returned as-is so it fails G2 (fail closed). */
+export function urlHost(value: string | null): string | null {
+  if (value === null || value.trim() === "") return null;
+  try {
+    return new URL(value.includes("://") ? value : `https://${value}`).hostname.toLowerCase();
+  } catch {
+    return value.trim();
+  }
+}
+
+export interface ShotsGuardRows {
+  organizationSlugs: readonly string[];
+  /** organization_profiles has a phone and five URL columns (facebook, instagram, x/twitter, youtube, other); it has no email column. */
+  profiles: readonly { organizationSlug: string; phone: string | null; urls: readonly (string | null)[] }[];
+  userEmails: readonly string[];
+  contactEmails: readonly string[];
+}
+
+/**
+ * Builds the snapshot decideShotsGuard reads. A profile's `websiteHost` is the first URL-column host that
+ * is NOT on `.invalid` (so one real link fails G2), else a `.invalid` host, else null. `attestation` is
+ * the raw HELP_SHOTS_DB_OK value: only the exact string "1" attests.
+ */
+export function buildShotsSnapshot(
+  rows: ShotsGuardRows | null,
+  env: { serverUrl: string | undefined; ownerUrl: string | undefined; attestation: string | undefined },
+): ShotsGuardSnapshot {
+  const base = {
+    serverDbHost: dbIdentity(env.serverUrl),
+    ownerDbHost: dbIdentity(env.ownerUrl),
+    attested: env.attestation === "1",
+  };
+  if (rows === null) {
+    return { ...base, queryFailed: true, organizationSlugs: [], profiles: [], userEmails: [], contactEmails: [] };
+  }
+  return {
+    ...base,
+    queryFailed: false,
+    organizationSlugs: rows.organizationSlugs,
+    profiles: rows.profiles.map((p) => {
+      const hosts = p.urls.map(urlHost).filter((h): h is string => h !== null);
+      return {
+        organizationSlug: p.organizationSlug,
+        email: null,
+        phone: p.phone,
+        websiteHost: hosts.find((h) => !endsInvalid(h)) ?? hosts[0] ?? null,
+      };
+    }),
+    userEmails: rows.userEmails,
+    contactEmails: rows.contactEmails,
+  };
+}
+
+/** The refusal text: rule ids and counts only. */
+export function describeShotsRefusal(violations: readonly ShotsGuardViolation[]): string {
+  return [
+    "[help-shots] REFUSING TO CAPTURE: this database is not provably fixture-only.",
+    ...violations.map((v) => `  ${v.message}`),
+    "Capture only against a database built from scratch (docs/testing.md) and seeded with scripts/seed-dev.sql; see the help:shots notes in the work-log.",
+  ].join("\n");
 }

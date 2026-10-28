@@ -5,7 +5,15 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { FIXTURE_SLUGS, decideShotsGuard, type ShotsGuardSnapshot } from "./shots-guard";
+import {
+  FIXTURE_SLUGS,
+  buildShotsSnapshot,
+  dbIdentity,
+  decideShotsGuard,
+  describeShotsRefusal,
+  urlHost,
+  type ShotsGuardSnapshot,
+} from "./shots-guard";
 
 const clean = (over: Partial<ShotsGuardSnapshot> = {}): ShotsGuardSnapshot => ({
   queryFailed: false,
@@ -106,6 +114,92 @@ describe("decideShotsGuard", () => {
       expect(v.message).toMatch(/\d/);
       expect(Number.isInteger(v.count)).toBe(true);
     }
+  });
+});
+
+/** A connection string built from parts, so no literal `scheme://user:pass@host` sits in the source (check:secrets). */
+const conn = (userinfo: string, hostAndDb: string) => `postgresql://${userinfo}@${hostAndDb}`;
+
+describe("dbIdentity and urlHost", () => {
+  it("is host/database, so two databases on one branch differ (G4)", () => {
+    const a = dbIdentity(conn("u:p", "ep-x.invalid/neondb?sslmode=require"));
+    const b = dbIdentity(conn("u2:p2", "EP-X.invalid/help_shots?sslmode=require"));
+    expect(a).toBe("ep-x.invalid/neondb");
+    expect(b).toBe("ep-x.invalid/help_shots");
+    expect(a).not.toBe(b);
+  });
+  it("treats a pooled endpoint and its direct endpoint as the same database, but not a different endpoint", () => {
+    const direct = dbIdentity(conn("u:p", "ep-cool-name-123456.region.invalid/help_shots"));
+    const pooled = dbIdentity(conn("u:p", "ep-cool-name-123456-pooler.region.invalid/help_shots"));
+    expect(pooled).toBe(direct);
+    expect(dbIdentity(conn("u:p", "ep-other-name-654321-pooler.region.invalid/help_shots"))).not.toBe(direct);
+  });
+  it("never includes the user or password", () => {
+    expect(dbIdentity(conn("someone:hunter2", "ep-x.invalid/db"))).not.toMatch(/someone|hunter2/);
+  });
+  it("is null for an absent, empty, database-less or unparseable string", () => {
+    for (const bad of [undefined, null, "", "not a url", conn("u:p", "ep-x.invalid"), conn("u:p", "ep-x.invalid/")]) {
+      expect(dbIdentity(bad as string | undefined)).toBeNull();
+    }
+  });
+  it("urlHost reads a host, tolerates a missing scheme, and keeps an unparseable value so it fails G2", () => {
+    expect(urlHost("https://Example.INVALID/page")).toBe("example.invalid");
+    expect(urlHost("church.invalid")).toBe("church.invalid");
+    expect(urlHost(null)).toBeNull();
+    expect(urlHost("  ")).toBeNull();
+    expect(urlHost("http://")).toBe("http://");
+  });
+});
+
+describe("buildShotsSnapshot", () => {
+  const env = { serverUrl: conn("a:b", "h.invalid/db1"), ownerUrl: conn("c:d", "h.invalid/db1"), attestation: "1" };
+  const rows = {
+    organizationSlugs: ["alder-creek"],
+    profiles: [] as { organizationSlug: string; phone: string | null; urls: (string | null)[] }[],
+    userEmails: ["a@example.invalid"],
+    contactEmails: [] as string[],
+  };
+
+  it("a clean database passes through the decision", () => {
+    expect(decideShotsGuard(buildShotsSnapshot(rows, env))).toEqual({ ok: true, violations: [] });
+  });
+  it("one real link among .invalid ones fails G2", () => {
+    const snap = buildShotsSnapshot(
+      { ...rows, profiles: [{ organizationSlug: "alder-creek", phone: "614-555-0100", urls: ["https://a.invalid/x", "https://church.org/x", null] }] },
+      env,
+    );
+    expect(decideShotsGuard(snap).violations.map((v) => v.rule)).toEqual(["G2"]);
+  });
+  it("all-.invalid links, a 555 phone and no other fields pass", () => {
+    const snap = buildShotsSnapshot(
+      { ...rows, profiles: [{ organizationSlug: "alder-creek", phone: "614-555-0100", urls: ["https://a.invalid/x", null] }] },
+      env,
+    );
+    expect(decideShotsGuard(snap).ok).toBe(true);
+  });
+  it("a query failure (null rows) is G6 and refuses", () => {
+    const snap = buildShotsSnapshot(null, env);
+    expect(decideShotsGuard(snap).violations.map((v) => v.rule)).toEqual(["G6"]);
+  });
+  it("a server on a different database of the same host is G4", () => {
+    const snap = buildShotsSnapshot(rows, { ...env, serverUrl: conn("a:b", "h.invalid/neondb") });
+    expect(decideShotsGuard(snap).violations.map((v) => v.rule)).toEqual(["G4"]);
+  });
+  it("only the exact string 1 attests (G5)", () => {
+    for (const bad of [undefined, "", "0", "true", "yes", "1 "]) {
+      expect(decideShotsGuard(buildShotsSnapshot(rows, { ...env, attestation: bad })).violations.map((v) => v.rule)).toEqual(["G5"]);
+    }
+  });
+  it("the refusal text names rules and counts and carries no value", () => {
+    const snap = buildShotsSnapshot(
+      { ...rows, organizationSlugs: ["real-looking-slug-zq"], userEmails: ["person@example.com"] },
+      { ...env, attestation: undefined },
+    );
+    const text = describeShotsRefusal(decideShotsGuard(snap).violations);
+    expect(text).toMatch(/G1: 1 /);
+    expect(text).toMatch(/G3: 1 /);
+    expect(text).toMatch(/G5/);
+    expect(text).not.toMatch(/real-looking-slug-zq|person@/);
   });
 });
 

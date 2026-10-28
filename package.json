@@ -25,6 +25,7 @@
     "test:db": "dotenv -e .env.local -- vitest run --no-file-parallelism",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "help:shots": "PW_HELP_SHOTS=1 playwright test --project=help-shots",
     "test:e2e:prod": "PW_PROD_BUILD=1 playwright test --project=prod-build --project=prod-custom-hosts",
     "visual:baseline": "PW_VISUAL=1 playwright test --project=visual --update-snapshots",
     "visual:check": "PW_VISUAL=1 playwright test --project=visual",

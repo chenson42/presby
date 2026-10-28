@@ -11,6 +11,8 @@ Until you do, the "Community" tile opens a page that says "Member management isn
 
 The page is headed "Community". It has two links at the top, "Pending approvals" and "Add person", and a row of views: "Everyone", "Members", "Participants", "Visitors", "Staff" and "Former". There is a "Search people" box.
 
+![The Community page on a phone: the view tabs, a search box, and a card for each person with an Edit button.](shot:community-list)
+
 - "Visitors" lists the people you recorded as visitors. A visitor is never in the directory.
 - "Staff" lists people with a staff position, and a person with no position yet is marked "No position yet".
 - "Former" lists people whose connection has ended, with the date.

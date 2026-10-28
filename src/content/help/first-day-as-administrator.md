@@ -6,12 +6,20 @@ After you sign in, you go straight to your congregation's page when it is your o
 
 The page opens with a greeting, "Find a person" and "Coming up". Below them are tiles under headings such as "Community", "Worship & Events" and "Governance & Courts". On a phone, the menu is the button with three lines.
 
+The picture shows the top of the page on a phone, with the tiles under "Community" and the start of "Worship & Events".
+
+![The top of a congregation's page on a phone: tiles under Community, then Worship and Events.](shot:portal-tiles)
+
 Every tile is shown whatever your role. A tile you cannot use opens a page that says you don't have permission. [Why can't I see this?](/help/why-cant-i-see-this) explains each case. Three tiles open a page that only describes an idea, and nothing on them works: "Worship & Service Planning", "Insights & Analytics" and "Communications".
 
 ## The Administration area
 
 1. Open the menu and choose "Administration".
 2. The page is headed "Organization Administration". In a new congregation it lists "Manage events", "Roles", "Tickets", "Features" and "Branding".
+
+The congregation in this picture has already turned on several features, so its page also lists "Manage giving" and "Website domain".
+
+![The Organization Administration page on a wide screen, with cards for each administration task.](shot:admin-hub)
 
 ## What you can do yourself
 

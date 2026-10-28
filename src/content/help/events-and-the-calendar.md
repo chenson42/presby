@@ -4,6 +4,8 @@ The calendar shows your congregation's events to its members. Some events can al
 
 Choose the "Calendar" tile under "Worship & Events". The page is headed "Calendar". On a phone it shows a list of days. The links "Month" and "List" switch the view, and the arrows move between months. "Show filters" lets you filter by event type. "Copy month" copies the month's events so you can paste them into a bulletin, and leaves out events that are not open to everyone. Choose an event to read its details. A cancelled event is not shown.
 
+![The Calendar page on a phone in list view: the month, then each day with its events.](shot:calendar-month)
+
 Your congregation's page also has a "Coming up" card with the next events.
 
 The calendar is on from the start. If it is off, you can turn it on under "Features": it is called "Member calendar".

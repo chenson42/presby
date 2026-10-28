@@ -15,7 +15,13 @@ The page is headed "Features". It has two parts.
 - "Ministry areas": one switch for each of Community, Worship & Events, Giving & Finance, Governance & Courts, Reports & Insights and Communications. All of them are on at first. Turn one off if it does not apply to your congregation.
 - Below it, a card for each feature, with its name, a sentence about what it does and a switch.
 
-When a ministry area is off, the features in it say, for example, "Turn on Worship & Events above to enable this." and their switches are disabled. After a change, the card shows "Last changed" with the date and the address of the person who changed it. A short message such as "Tiered sensitive information turned on." confirms each change.
+When a ministry area is off, the features in it say, for example, "Turn on Worship & Events above to enable this." and their switches are disabled.
+
+The congregation in this picture has already turned on its features. A new congregation sees most of the cards switched off.
+
+![The Features page on a phone: the ministry area switches, then a card with a switch for each feature.](shot:features-list)
+
+After a change, the card shows "Last changed" with the date and the address of the person who changed it. A short message such as "Tiered sensitive information turned on." confirms each change.
 
 ## Which features start on
 

@@ -45,6 +45,19 @@ const isVisualRun = process.env.PW_VISUAL === "1";
  * HTML the server returns.
  */
 const isProdBuildRun = process.env.PW_PROD_BUILD === "1";
+
+/**
+ * True only when `npm run help:shots` sets `PW_HELP_SHOTS=1` (user-help Inc 1, Batch 4). Environment
+ * variable, NOT argv, for the reason `isVisualRun` gives. The `help-shots` project is appended ONLY
+ * when this is true, and the `chromium` project ignores `e2e/help-shots/`, so a bare `playwright test`
+ * never captures. The capture writes the PNGs under src/content/help/images/ and is never part of CI.
+ * Its globalSetup runs the fail-closed fixture-database guard before anything else (see
+ * e2e/help-shots/global-setup.ts).
+ */
+const isHelpShotsRun = process.env.PW_HELP_SHOTS === "1";
+if (isHelpShotsRun && (isVisualRun || isProdBuildRun)) {
+  throw new Error("PW_HELP_SHOTS=1 is mutually exclusive with PW_VISUAL=1 and PW_PROD_BUILD=1.");
+}
 const PROD_PORT = Number(process.env.PW_PROD_PORT ?? 3800);
 const PROD_BASE_URL = `http://localhost:${PROD_PORT}`;
 
@@ -109,7 +122,7 @@ const DOMAINS_TEST_ENV = {
 };
 
 export default defineConfig({
-  globalSetup: "./e2e/support/global-setup.ts",
+  globalSetup: isHelpShotsRun ? "./e2e/help-shots/global-setup.ts" : "./e2e/support/global-setup.ts",
   testDir: "./e2e",
   // Unset in CI and by default locally — "test-results" (the literal
   // e2e.yml's trace-upload step and .gitignore already expect). Only a
@@ -210,7 +223,7 @@ export default defineConfig({
           // The visual project owns visual-parity.spec.ts's per-route viewport /
           // colorScheme matrix via test.use(); running it here too would collide
           // with that spec's own storageState/viewport overrides for no benefit.
-          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//],
+          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//, /help-shots\//],
         },
         // Custom domains (see HOST_RESOLVER_ARGS above). The first test of the first spec is a
         // CANARY proving the `*.invalid` mapping works, so every later failure is real.
@@ -219,6 +232,16 @@ export default defineConfig({
           use: { ...devices["Desktop Chrome"], launchOptions: { args: HOST_RESOLVER_ARGS } },
           testMatch: /custom-domains\/.*\.spec\.ts$/,
         },
+        ...(isHelpShotsRun
+          ? [
+              {
+                name: "help-shots",
+                // The scheme, reduced motion, scale factor and viewport are fixed per shot in the spec.
+                use: { ...devices["Desktop Chrome"], colorScheme: "light" as const },
+                testMatch: /help-shots\/capture\.spec\.ts$/,
+              },
+            ]
+          : []),
         ...(isVisualRun
           ? [
               {

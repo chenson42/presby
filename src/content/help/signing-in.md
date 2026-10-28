@@ -2,6 +2,8 @@ To sign in, open PresbyPortal and choose "Sign in". You can sign in with Google 
 
 The sign-in page shows "Sign in with Google" first, then the word "or", then the email form.
 
+![The sign-in page on a phone: the Google button, then the email and password form.](shot:signin-form)
+
 ## Signing in with email and password
 
 1. Type your email address.

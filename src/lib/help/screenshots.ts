@@ -1,15 +1,30 @@
 import { HELP_SHOTS } from "./screenshots-data";
+import signinForm from "@/content/help/images/signin-form.png";
+import totpBoxes from "@/content/help/images/totp-boxes.png";
+import portalTiles from "@/content/help/images/portal-tiles.png";
+import adminHub from "@/content/help/images/admin-hub.png";
+import featuresList from "@/content/help/images/features-list.png";
+import communityList from "@/content/help/images/community-list.png";
+import calendarMonth from "@/content/help/images/calendar-month.png";
 
 /**
  * Binds each manifest id (screenshots-data.ts) to its imported PNG (P3-14). The images are
  * STATIC IMPORTS from src/content/help/images/, never files in public/ (public/ would answer
  * /help/<file>.png on every host, including a church's own domain). check:help H18 requires
  * exactly one `import <name> from "@/content/help/images/<id>.png"` per manifest entry and
- * none without one; there are no images yet (Batch 4 adds the first seven).
+ * none without one. Written by hand: the capture (`npm run help:shots`) writes the PNGs, never this file.
  */
 type ImportedImage = { src: string };
 
-const IMAGES: Readonly<Record<string, ImportedImage>> = {};
+const IMAGES: Readonly<Record<string, ImportedImage>> = {
+  "signin-form": signinForm,
+  "totp-boxes": totpBoxes,
+  "portal-tiles": portalTiles,
+  "admin-hub": adminHub,
+  "features-list": featuresList,
+  "community-list": communityList,
+  "calendar-month": calendarMonth,
+};
 
 const SHOT_SCHEME = "shot:";
 

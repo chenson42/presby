@@ -11,6 +11,8 @@ Whether you are asked for a code depends on your account, your role and your con
 
 When the code matches, you go on to the page you were heading for, which is usually your congregation's page.
 
+![The six boxes for the code from your authenticator app, with the Verify button and the recovery code link.](shot:totp-boxes)
+
 The code in the app changes every 30 seconds. If a code is refused, wait for the next one and try again. The page says "That code didn't match. Try again, or use a recovery code." when a code is refused.
 
 ## Using a recovery code

@@ -563,3 +563,150 @@ Files:
 - `/Users/cshenso/git/presby-platform/presby-baseline/docs/deployment.md`
 - `/Users/cshenso/git/presby-platform/presby-baseline/docs/work-log/2026-10-28-org-baseline-backfill.md`
 - Scratch evidence (red and green logs, wrapper, count query): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/run2/`
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst)
+
+**Date:** 2026-10-28. **Worktree and HEAD:** `/Users/cshenso/git/presby-platform/presby-baseline`, `pipeline/org-baseline-backfill` at `114dc01`.
+
+**What I did.** I re-read the work-log in full: Phase 1, the production apply, QA runs 1 and 2, the in-place ruling and the fix. I read the corrected `drizzle/0082_presby_backfill_org_baseline.sql` and `provisioningComplete()` in `src/lib/onboarding/issue.ts:304`. I ran read-only `select` counts on `development`. I read the help pages in `/Users/cshenso/git/presby-platform/presby-help` and its `docs/release-notes/v0.50.md`. I did not touch production. I did not open a browser, because this role has no browser tool. I printed no `.env.local` value and no connection string.
+
+## VERDICT
+
+**SHIP WITH NOTES.** The bug is fixed for the user at the data level and in the real `createInvitation()` call. Four notes, below, become tracked follow-ups. The first (N1) is the operator's own walk in production, and I cannot do it from here.
+
+## ONE-LINE TAKE
+
+> The one presbytery that was refused its founding-administrator invitation now has the group the send check looks for, and a fresh database now migrates through the corrected file.
+
+## What's Working
+
+- **Cause and fix line up.** For `purpose = founding_administrator`, `provisioningComplete()` requires exactly one thing: an `active_membership` group in the organization (`issue.ts:310-316`). The "role template" half of the refusal string is checked only for treasurer invitations (`:317-325`). 0082 supplies the group, so no second missing prerequisite is hiding behind the first.
+- **The user-level regression test is real.** `org-baseline-backfill.db.test.ts` builds a bare organization and calls the real `createInvitation()`. It returns `provisioning_incomplete` before 0082 and `ok` after. QA run 2 re-proved the red/green split against both file versions: 4 failed against `a0311a7`, 8 passed against HEAD.
+- **The correction changed no rows.** QA's `cmp` shows the write statements are byte-identical (40 lines each). The guards changed only in when they raise. `development` row counts were identical before and after a re-run, and the fresh `db:migrate` exits 0 at 71 of 71 entries.
+- **`development` today (my read-only counts).** There are 17 organizations. 0 lack the group, 0 have the group but no `member` role, and 0 `member` roles lack a grant to a group. The ledger holds 10 rows, as `deployment.md:145` says (hand-written files are applied by `psql`). The data is internally consistent.
+- **Operator-facing clarity.** The refusal copy is unchanged and still correct for a genuinely unprovisioned organization. `deployment.md` explains the in-place correction in plain terms.
+
+## Intent-vs-Shipped Diff
+
+- **Phase 1 said:** an older presbytery can be sent the founding-administrator invitation, the fix preserves intended behaviour, and no application code changes. **Shipped:** exactly that. The only `src/` change is the new test file. **Verdict:** matches.
+- **Phase 1 said:** the fix adds "exactly" what creation seeds. **Shipped:** the group, the `member` role, its two permissions and the grant. Creation also seeds `organization_settings` and event types, and 0082 does not. **Verdict:** acceptable drift. The scope was always the invitation's prerequisite, but the release note must not claim more than that (see N3 and the sentence check).
+- **The order of events differed from the pipeline.** Production was changed before the code review, on the operator's explicit "Yes, do it now", with a snapshot and two rehearsals. The work-log records this plainly. **Verdict:** acceptable. The later in-place correction is now also on record.
+- **Did the bug stop manifesting for the user?** Proven on `development`, and by the rehearsal on a production-derived branch and the production apply. Not yet witnessed by the operator in production (N1).
+
+## Rulings
+
+**1. Fixture drift (QA run 2 advisory).** I rule: **file a TODO line. Do not accept the drift silently.**
+- **The facts.** `development` has the baseline `member` role on all 17 organizations, because 0082 ran after the fixture. A fresh CI database runs 0082 on an empty catalog, so the 11 later fixture organizations in `seed-dev.sql` keep no `member` role. `seed-dev.sql` seeds the baseline role only for the original fixture organizations (lines 391-395).
+- **Why a TODO and not a fix now.** The drift is real. A future test that depends on who holds `directory.view` or `events.view` will pass locally and fail in CI. But `seed-dev.sql` and `test-rls.sql` carry hard-coded counts (the file says so itself at `:770-773`), and both are Rule 16 integration-only files. Editing them inside a bug-fix pipeline is the wrong place.
+- **A second drift is already open.** Line 228 of `TODO.md` records `development` drift that stops `test-rls.sql`. This is a sibling of that item.
+
+**2. The "no other production organization touched" claim.**
+- **What the record supports.** The role-loop notice counts member roles only, and the rehearsal reported "1 organization added, then 0".
+- **The gap.** A group-only insert elsewhere would need an organization that lacked the group but already held a tenant-owned `member` role. Migration 0017 and the stop-block make that shape unlikely, but nothing in the record excludes it.
+- **Ruling.** The claim is probably true and is unverified for groups. Either of two fixes is acceptable.
+  - Preferred: the operator runs one read-only count in production, `select count(*) from groups where derived_from='active_membership' and created_at >= <the apply time>`, and expects 1.
+  - Otherwise: soften the sentence, as drafted below.
+- Production was out of scope for me and for QA. This is N2.
+
+**3. The two `development` organizations lacking `organization_settings` and event types.**
+- They are `hollinbrook` and `saltmarsh`, both created 2026-10-26.
+- They are deliberate fixtures, not a defect. `seed-dev.sql:776-777` says: "Neither gets an organization_settings row, so the 2FA-policy assertions in section 11 are untouched."
+- No action is needed on `development`.
+- **A production question remains, which QA's note did not reach.** The presbytery created on 2026-08-31 may also lack `organization_settings` and event types if those were seeded later. An absent settings row reads as "2FA not required", which is benign. Other readers of settings and event types may not be. This is a read-only count the operator can run (N3).
+
+**4. Help impact: confirmed none.**
+- The help branch has no page that mentions the refusal, the "baseline setup" string or "contact an engineer".
+- The only relevant line is `roles-who-can-do-what.md:13` (the "Member" role goes to the "Active Membership" group). It is true and stays true.
+- This change touches no `src/content/help/` file and no UI string. The help branch adds no migration, so there is no migration-number collision with idx 82.
+- Merge friction is likely at integration. Help edits `TODO.md`, `briefings.md`, `functionality-map.md` and `docs/release-notes/v0.50.md`, and so does this branch.
+
+**The Phase 6 walk.** The rule requires the walk as the person the path creates, on `development` at 360px. I did not do it. I have no browser, and no one has yet witnessed the accepted-invitation founding administrator for this presbytery.
+- **What I could establish at the data level.** The `member` role is granted to the Active Membership group. That group is a derived roster, populated only by memberships. The presbytery has 0 memberships. So the baseline grant gives a newly seated founding administrator nothing on its own, and their reach comes from the founding-administrator bundle. 0082 therefore adds no authority to the person the path creates.
+- **Why it stays a note.** This is a role grant on a production organization. The three 2026-10-23 escapes were found by exactly this walk, so I will not infer my way out of it (N1).
+
+## Edge Cases
+
+- **Empty state:** pass. On a fresh database 0082 is a no-op on an empty catalog (71 of 71, exit 0). For an organization with no members the invitation page is unchanged.
+- **Failure microcopy:** pass. The `provisioning_incomplete` copy is unchanged. It still names "a baseline setup or a role template", which is true for a treasurer invitation. A stop-block failure is an engineer-facing migration error and is documented in `deployment.md`.
+- **Permission gate:** pass. No route, action or permission key changed. The invitation is still gated as before.
+- **Audit event:** not applicable. The rows are the same ones creation writes without audit. The apply is recorded in the work-log and `deployment.md`, and a platform-admin role grant is the audit-relevant act, which this change is not.
+- **Mobile (360px):** not applicable to the diff (no UI). The operator's walk in N1 covers it.
+
+## Draft: decision text
+
+(Numbering is the orchestrator's. Insert at the top of `docs/decisions.md`.)
+
+**DECISION-NNN — An applied migration may be corrected in place only when the change is guard-only and provably behaviour-neutral where it already ran; otherwise fix forward.**
+
+**Status:** Accepted (operator or orchestrator ruling, 2026-10-28; Phase 6 SHIP WITH NOTES, `2026-10-28-org-baseline-backfill`) · **Date:** 2026-10-28
+
+- **Rule.** CLAUDE.md's `drizzle/` line allows an in-place correction only before a migration reaches a shipped environment. This adds one exception for a file already applied to production or `development`. All of these must hold:
+  - **(a)** The change touches only guards, meaning conditions on `RAISE`, `IF` and `WHEN`, plus comments. Every statement that writes, alters or grants is byte-identical.
+  - **(b)** On every environment that already ran the file, the corrected file writes nothing. This is proven by a zero-row re-run with `psql -1` there, and the counts are recorded.
+  - **(c)** A forward migration cannot serve. The test is that a fresh `db:migrate` stops at the defective index before any later file.
+  - **(d)** The change has a regression test that is red on the as-applied file and green on the corrected one.
+  - **(e)** The work-log, the migration header and `docs/deployment.md` each say that the file was corrected in place, and why.
+- **Why.** `db:migrate` is the only path to a fresh environment. A defect in an applied file blocks every new environment, and nothing after it can run. A guard that is wrong on an empty catalog can only be fixed at its index.
+- **Not covered.** Any change to a write, a grant, a policy or a function body; any renumbering; any change to the journal's `when`. Those fix forward.
+- **Accepted residual (`paper`).**
+  - A guard can be widened, so it refuses in more cases, as the membership stop-block did here. That is neutral on environments that applied the file only because the file is not run again. The re-run in (b) is the check, and nothing mechanical enforces it.
+  - A hand-applied file's bytes are not hashed anywhere (the ledger holds ten rows), so nothing detects drift between "as applied" and "as in the repo" except this record.
+- **First use.** `0082` (stop-blocks corrected before release; commit `421940c`).
+- **Follow-through.** The operator should approve the matching amendment to the `drizzle/` line in CLAUDE.md. I have not edited it. Reword the `deployment.md` Rollback bullet ("never an edit of 0082 once shipped") to "except as DECISION-NNN permits".
+
+## Draft: TODO lines
+
+(Unticked, under Next Up or Open.)
+
+- [ ] **`seed-dev.sql` seeds the baseline for only the original fixture organizations, so `development` and CI differ on who holds `directory.view` and `events.view`.** On `development`, 0082 ran after the fixture and gave all 17 organizations the `member` role. A fresh CI database runs 0082 on an empty catalog, so the 11 later fixture organizations have the Active Membership group missing or no `member` role. Give every fixture organization the derived group and the `member` role (as `groupSeedPlan()` and `baselineRoleSeedPlan()` do), as one deliberate count-edit pass over `seed-dev.sql` and `test-rls.sql` at integration (Rule 16). Do it before the first test that depends on the baseline role. Related to the `test-rls.sql`-does-not-run-clean line. — `docs/work-log/2026-10-28-org-baseline-backfill.md` Phase 5 run 2 / Phase 6
+- [ ] **operator: read-only production counts after the 0082 apply.** (1) `select count(*) from groups where derived_from='active_membership' and created_at >= <apply time>` expects 1, which confirms no other organization was touched. (2) Organizations lacking an `organization_settings` row or any event type; the presbytery created 2026-08-31 may be one. A missing row is benign for the 2FA policy, but confirm what else reads it. If (2) is non-zero, file a backfill as its own bug-fix pipeline. — Phase 6
+- [ ] **operator: walk the founding-administrator invitation for the presbytery in production, on a phone.** Send the invitation, accept it as the invitee, and list each page the account lands on at 360px. Record the result in this work-log. Workflow's Phase 6 walk requirement. — Phase 6
+
+Also at ship time, per Rule 10, move the TODO Done line (`TODO.md:654`) to the 0.50.1 wording, and replace "no decision" with the new DECISION number.
+
+## Release-note sentence check
+
+The note is `docs/release-notes/v0.49.md`, the 0.49.1 entry.
+
+| Sentence | Check | Action |
+|---|---|---|
+| "…it now can. Applied directly to production on 2026-10-28." | True. The test shows `ok`; the apply is recorded. | Keep. |
+| "The same two things every organization gets when it is created today: its 'Active Membership' group and the ordinary 'Member' role…" | True for the group and the role. Creation also seeds settings and event types. "Two things" is accurate only because of the next sentence. | Keep, but see the next row. |
+| "…Nothing else about the organization changed, and **no other organization in production was touched**." | The role-loop count excludes only role inserts. The group-insert count is unverified. | Soften unless N2 passes. Wording: "It was added to the one presbytery that lacked it; organizations that already had it were left as they were." Restore the original wording only after the operator's count returns 1. |
+| "…lets members see the directory and the events calendar." | True of the keys. The events calendar also depends on the congregation's own events setting, as the existing N5 line shows. This presbytery has no members yet. | Change to "lets members see the directory and, where it is turned on, the events calendar." |
+| Notes for the operator: "If an organization ever has members but no 'Active Membership' group, the migration stops…" | Now broader: any membership record, including ended ones. | Say "has membership records (current or past)". |
+| "…already applied… so there is nothing to apply at deploy." | True. | Add: "A fresh environment migrates cleanly through it; the file was corrected before release so it does so." |
+| **Technical:** "No decision recorded; no what's-new post." | No longer true. The in-place correction is the decision. | Replace with "DECISION-NNN (in-place correction of an applied migration); no what's-new post." Also mention the corrected guards. |
+
+**Renumbering.** The entry is anchored `0.49.1` and sits in `v0.49.md`. It becomes `0.50.1` in `v0.50.md`, after the 0.50.0 help entry. Also bump the `TODO.md` Done line, the `briefings.md` entry (and its `covers` marker), `deployment.md` "v0.49.1", `functionality-map.md`, `package.json` and the lockfile. Do not draft a what's-new post, as instructed.
+
+## Follow-Ups (SHIP WITH NOTES)
+
+- **N1.** The operator walks the invitation in production: send, accept and land, on a phone at 360px. Record it in the work-log. This is the Phase 6 walk I could not do. TODO line above.
+- **N2.** Confirm "no other organization touched" with the read-only production count, or ship the softened sentence. TODO line above.
+- **N3.** File the fixture-drift TODO line and the production settings and event-type count. The two `development` organizations lacking settings are intended fixtures and need no action.
+- **N4.** Record the in-place-correction decision, ask the operator to approve the CLAUDE.md `drizzle/` line amendment, reword the `deployment.md` Rollback bullet, apply the release-note edits above, and renumber to 0.50.1.
+
+Workflow Rule 12: no feedback row originated this work. Rule 13: no member-visible behaviour change, no what's-new entry drafted. Rule 14: the functionality-map change is a version bump only. Rule 15: nothing architectural.
+
+**Per-Phase Status row:**
+
+| 6 — Shipped vs intent | analyst | Done | SHIP WITH NOTES (the bug no longer manifests on `development` or in the real `createInvitation()`; N1 to N4 filed, and N1 is the operator's own production walk) | 2026-10-28 |
+
+**Handoff:** to the orchestrator. Write this section and the status row into the work-log. Record the decision and the TODO lines in the same commit as the release housekeeping, in the order Rule 10 asks for. Renumber to 0.50.1 after help 0.50.0 merges, and expect conflicts in `TODO.md`, `briefings.md` and `functionality-map.md`. The operator's confirmation of N1 and N2 closes the follow-ups.
+
+Files:
+- `/Users/cshenso/git/presby-platform/presby-baseline/docs/work-log/2026-10-28-org-baseline-backfill.md`
+- `/Users/cshenso/git/presby-platform/presby-baseline/drizzle/0082_presby_backfill_org_baseline.sql`
+- `/Users/cshenso/git/presby-platform/presby-baseline/docs/release-notes/v0.49.md`
+- `/Users/cshenso/git/presby-platform/presby-baseline/docs/deployment.md`
+- `/Users/cshenso/git/presby-platform/presby-help/docs/release-notes/v0.50.md`
+- `/Users/cshenso/git/presby-platform/presby-help/src/content/help/roles-who-can-do-what.md`
+
+## Orchestrator follow-up on Phase 6 (2026-10-28)
+
+- **N2 closed:** read-only production count of `active_membership` groups created since 2026-10-28 20:00 UTC = **1** (the presbytery). No other organization was touched; the release note's original sentence stands.
+- **N3 (production part) closed:** production organizations lacking an `organization_settings` row = 0; lacking any event type = 0.
+- **N1 open:** the operator's own founding-administrator invitation walk in production.

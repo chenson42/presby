@@ -509,6 +509,14 @@ test.describe("Sign-in connect and /no-organization", () => {
         await noHorizontalOverflow(page);
 
         // 3. The elder signs in on their own device: authority needs the second factor, then Check again connects.
+        // F343 (DECISION-291): nothing REQUIRES two-factor of this account (own setting off, no flagged key, no
+        // congregation policy), so sign-in never challenges it; the enrolment is voluntary. The /totp step below
+        // is what verifies the session, and Check again connecting proves it set twoFactorVerified for a
+        // not-required account (2b's authority-bearing connect after F343).
+        const [elderRequirement] = (await sql`
+          select two_factor_required as own, presby_two_factor_required(id) as effective
+            from users where id = ${elderAccount.id}::uuid`) as { own: boolean; effective: boolean }[];
+        expect(elderRequirement, "the elder's account is not required").toEqual({ own: false, effective: false });
         const device = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
         try {
           const elderPage = await device.newPage();

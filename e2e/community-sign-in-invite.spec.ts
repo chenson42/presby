@@ -28,9 +28,12 @@
  *   5. a person with no email: the no-address state and no Send button;
  *   6. editing the person's email after sending makes the old link the dead-link
  *      page (R27 end to end), and the card says the address changed;
- *   7. a NEW invitee accepts a seeded row, signs in, enrols two-factor (the
- *      codes panel's Continue lands in the congregation with no second /totp
- *      challenge, F166) and sees the baseline only;
+ *   7. a NEW invitee accepts a seeded row and signs in straight into the
+ *      congregation: since F343 (DECISION-291) a baseline member is not
+ *      required, so there is no /totp and no /account/2fa even with
+ *      `auth.require_2fa` on. A voluntary enrolment then verifies the session
+ *      and the codes panel's Continue returns with no /totp challenge (F166);
+ *      the member sees the baseline only;
  *   8. an existing account accepts through "Sign in to accept";
  *   9. the Community list marker for an elder with no sign-in, its link into the
  *      card, and its absence for a viewer without people.manage (and the Officers
@@ -38,7 +41,8 @@
  *  10. the Session hand-off under the banner, then the state after one is sent.
  *
  * FLAGS. `org_portal.members_create` and `org_portal.officers` (the Community and
- * Officers pages) and `auth.require_2fa` (lane 7's wall) are captured, set and
+ * Officers pages) and `auth.require_2fa` (on, so lane 7 proves a member is not
+ * asked even with enforcement on) are captured, set and
  * restored; the organization's own members_create toggle is written by SQL on
  * the throwaway congregation. No key is added to `e2e-baseline-flags.sql`.
  */
@@ -73,6 +77,7 @@ import {
   type FixtureSender,
 } from "./support/sign-in-invite-fixture";
 import { setupInviteOrg, type InviteOrg } from "./support/invitation-fixture";
+import { recordUrls, sessionClaim } from "./support/enrolment-fixture";
 import { DEAD_LINK_PHRASE } from "./support/invitation-observer";
 import { deadHeading } from "./support/invitation-ui";
 
@@ -392,7 +397,7 @@ test.describe("Community sign-in invitation", () => {
       });
 
       // -----------------------------------------------------------------
-      test("7. a NEW invitee accepts a seeded row, signs in, enrols two-factor with no second challenge and sees the baseline only", async ({ page }) => {
+      test("7. a NEW invitee accepts a seeded row, signs in with no two-factor step (F343), enrols voluntarily with no second challenge and sees the baseline only", async ({ page }) => {
         const o = org!;
         await addBaselineMemberRole(sql, o);
         const person = await personWithAddress("fresh");
@@ -424,10 +429,18 @@ test.describe("Community sign-in invitation", () => {
           select id, two_factor_required, email_verified is not null as verified from users where lower(email) = ${person.email!}`) as {
           id: string; two_factor_required: boolean; verified: boolean;
         }[];
-        expect(user).toMatchObject({ two_factor_required: true, verified: true });
+        // F343 (DECISION-291): the new account's own column takes the default, false, and a baseline member
+        // holds no flagged key at a congregation that does not require two-factor, so nothing requires it.
+        expect(user).toMatchObject({ two_factor_required: false, verified: true });
+        const [requirement] = (await sql`select presby_two_factor_required(${user!.id}::uuid) as required`) as {
+          required: boolean;
+        }[];
+        expect(requirement!.required, "no role or congregation requires two-factor of a baseline member").toBe(false);
         expect(await personOfUser(sql, user!.id), "accepting linked the account to the invited person").toBe(person.personId);
 
-        // Sign in: a new account must use two-factor sign-in, so /totp sends it to enrolment first.
+        // Sign in: with `auth.require_2fa` on, a not-required member still goes through the post-login router
+        // straight into the congregation, with no /totp and no /account/2fa on the way.
+        const signInUrls = recordUrls(page);
         await page.getByRole("link", { name: "Sign in" }).click();
         await page.waitForURL((url) => url.pathname === "/signin", { timeout: 30_000 });
         const email = page.locator('input[name="email"]');
@@ -435,13 +448,19 @@ test.describe("Community sign-in invitation", () => {
         await email.fill(person.email!);
         await page.locator('input[name="password"]').fill(PASSWORD);
         await page.getByRole("button", { name: /sign in with email/i }).click();
-        await page.waitForURL((url) => url.pathname === "/account/2fa", { timeout: 45_000 });
-        expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe("/launch");
-        await enrolOnPage(page);
+        await page.waitForURL((url) => url.pathname === `/o/${o.slug}`, { timeout: 45_000 });
+        await expect(page.getByText(o.name).first()).toBeVisible({ timeout: 30_000 });
+        expect(
+          signInUrls.filter((u) => ["/totp", "/account/2fa"].includes(new URL(u).pathname)),
+          "a not-required member is never sent to a two-factor step (F343)",
+        ).toEqual([]);
+        expect((await sessionClaim(page)).twoFactorRequired, "the session claim agrees").toBe(false);
 
-        // F166 (DECISION-292, replaces E-35): enrolling verifies the session, so the codes panel's Continue goes
-        // through the post-login router straight into the congregation, with no /totp challenge in front of it.
-        await continueFromCodesPanel(page, "/launch", (url) => url.pathname === `/o/${o.slug}`);
+        // F166 (DECISION-292) still holds for a voluntary enrolment: enrolling verifies the session, and the codes
+        // panel's Continue returns to the congregation with no /totp challenge in front of it.
+        await page.goto(`/account/2fa?callbackUrl=${encodeURIComponent(`/o/${o.slug}`)}`);
+        await enrolOnPage(page);
+        await continueFromCodesPanel(page, `/o/${o.slug}`, (url) => url.pathname === `/o/${o.slug}`);
         await expect(page.getByText(o.name).first()).toBeVisible({ timeout: 30_000 });
 
         // Baseline only. The home page's tiles are NAVIGATION, never authority (DECISION-003: the tile

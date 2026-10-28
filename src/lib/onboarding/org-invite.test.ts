@@ -174,7 +174,7 @@ describe("sendSignInInvitation: before the database", () => {
     expect(h.withOrgContext).not.toHaveBeenCalled();
   });
 
-  it("an unconfigured two-factor deployment refuses BEFORE any write (new accounts default to required and would be stranded at the wall)", async () => {
+  it("an unconfigured two-factor deployment refuses BEFORE any write (an invitee whom a congregation policy or a flagged key requires would be stranded at the wall)", async () => {
     h.isTotpConfigured.mockReturnValue(false);
     expect(await org.sendSignInInvitation(ctx, input())).toEqual({ kind: "totp_unavailable" });
     expect(h.withOrgContext).not.toHaveBeenCalled();

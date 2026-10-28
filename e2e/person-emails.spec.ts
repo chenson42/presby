@@ -202,7 +202,7 @@ test.describe("Person emails", () => {
         await addContactEmail(sql, other.personId, { value: shared, isPrimary: true });
 
         await openEdit(page, person.personId);
-        await expect(page.getByText("No email address on file.")).toBeVisible();
+        await expect(page.getByText("No email address on file.", { exact: true })).toBeVisible();
         await page.getByRole("button", { name: /^add an email address$/i }).click();
         await addressInputs(page).first().fill(shared);
         await page.getByRole("button", { name: /^save$/i }).click();

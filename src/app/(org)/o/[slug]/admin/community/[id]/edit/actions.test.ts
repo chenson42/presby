@@ -26,6 +26,15 @@ vi.mock("@/lib/roll", () => ({
   voidParticipantAction: (...args: unknown[]) => mockVoidParticipantAction(...args),
 }));
 
+const mockSend = vi.hoisted(() => vi.fn());
+const mockResend = vi.hoisted(() => vi.fn());
+const mockRevokeSignIn = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/onboarding/org-invite", () => ({
+  sendSignInInvitation: (...args: unknown[]) => mockSend(...args),
+  resendSignInInvitation: (...args: unknown[]) => mockResend(...args),
+  revokeSignInInvitation: (...args: unknown[]) => mockRevokeSignIn(...args),
+}));
+
 const mockRevalidatePath = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => mockRevalidatePath(...args),
@@ -40,6 +49,9 @@ import { PARTICIPANT_COPY } from "../../participant-copy";
 import {
   recordRollActionAction,
   removeParticipantAction,
+  resendSignInInvitationAction,
+  revokeSignInInvitationAction,
+  sendSignInInvitationAction,
   undoParticipantEntryAction,
   updatePersonAction,
 } from "./actions";
@@ -582,6 +594,182 @@ describe("undoParticipantEntryAction", () => {
       });
       expect(mockRevalidatePath).toHaveBeenCalledWith("/o/alder-creek/admin/community");
       expect(mockRevalidatePath).toHaveBeenCalledWith("/o/alder-creek/directory");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sign-in invitations (Community Increment 2b, Batch B2; Phase 3 "Server
+// actions"; F177; DECISION-189). Mocked at the org-invite boundary: the SQL, the
+// rollback and the audit rows are proven in org-invite.test.ts and
+// org-invite.db.test.ts. What this file pins is what the ACTION owns: where the
+// organization, the acting person and the acting USER come from, what it will
+// forward, and every refusal's sentence.
+// ---------------------------------------------------------------------------
+
+describe("sign-in invitation actions", () => {
+  const SEND_INPUT = { personId: "p-1", confirmedAddress: "wendeline@example.invalid", acknowledged: false };
+  const OK = {
+    kind: "ok" as const,
+    invitationId: "inv-1",
+    expiresAt: new Date("2026-10-27T12:00:00Z"),
+    delivery: "sent" as const,
+    address: "wendeline@example.invalid",
+    acknowledged: [],
+  };
+
+  beforeEach(() => {
+    mockAuth.mockResolvedValue({ user: { id: "user-1", email: "clerk@example.invalid" } });
+    mockResolveOrgContext.mockResolvedValue(RESOLVED_OK);
+    mockSend.mockResolvedValue(OK);
+    mockResend.mockResolvedValue(OK);
+    mockRevokeSignIn.mockResolvedValue({ kind: "ok" });
+  });
+
+  const actions = [
+    ["sendSignInInvitationAction", sendSignInInvitationAction, mockSend],
+    ["resendSignInInvitationAction", resendSignInInvitationAction, mockResend],
+  ] as const;
+
+  describe.each(actions)("%s", (_name, action, lib) => {
+    it("not signed in, or no access to this organization: nothing is called", async () => {
+      mockAuth.mockResolvedValueOnce(null);
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({ ok: false, error: "You must be signed in to do that." });
+      mockAuth.mockResolvedValueOnce({ user: { id: "user-1" } });
+      mockResolveOrgContext.mockResolvedValueOnce({ kind: "forbidden" });
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({ ok: false, error: "You don't have access to that organization." });
+      expect(lib).not.toHaveBeenCalled();
+    });
+
+    it("derives the organization, the acting person and the acting USER from the session and the slug, never from the input", async () => {
+      await action("alder-creek", {
+        ...SEND_INPUT,
+        organizationId: "evil-org",
+        actingPersonId: "evil-person",
+        actingUserId: "evil-user",
+      } as never);
+      expect(mockResolveOrgContext).toHaveBeenCalledWith("user-1", "alder-creek");
+      expect(lib).toHaveBeenCalledWith(
+        { organizationId: "org-1", actingPersonId: "person-1", actingUserId: "user-1", actingUserEmail: "clerk@example.invalid" },
+        { personId: "p-1", confirmedAddress: "wendeline@example.invalid", acknowledged: false },
+      );
+    });
+
+    it("rebuilds the input from its known fields: a forged extra property cannot flow through, and a non-true acknowledgement is false", async () => {
+      await action("alder-creek", { ...SEND_INPUT, acknowledged: "yes", to: "attacker@example.invalid", token: "x" } as never);
+      expect((lib.mock.calls[0]![1] as Record<string, unknown>)).toEqual({
+        personId: "p-1",
+        confirmedAddress: "wendeline@example.invalid",
+        acknowledged: false,
+      });
+    });
+
+    it("a non-object input is not_found, with nothing called", async () => {
+      expect(await action("alder-creek", null as never)).toEqual({ ok: false, error: "That person could not be found." });
+      expect(lib).not.toHaveBeenCalled();
+    });
+
+    it("ok returns the address the DATABASE chose, an ISO expiry and the delivery, and revalidates the edit page, the lists, the pending page and Officers", async () => {
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({
+        ok: true,
+        data: { address: "wendeline@example.invalid", expiresAt: "2026-10-27T12:00:00.000Z", delivery: "sent" },
+      });
+      const paths = mockRevalidatePath.mock.calls.map((c) => c[0]);
+      expect(paths).toEqual([
+        "/o/alder-creek/admin/community/p-1/edit",
+        "/o/alder-creek/admin/community",
+        "/o/alder-creek/admin/community/pending",
+        "/o/alder-creek/admin/officers",
+      ]);
+    });
+
+    it("a refusal revalidates nothing", async () => {
+      lib.mockResolvedValue({ kind: "refused", reason: "address_shared" });
+      await action("alder-creek", SEND_INPUT);
+      expect(mockRevalidatePath).not.toHaveBeenCalled();
+    });
+
+    it("a queued delivery is reported as queued (never an error)", async () => {
+      lib.mockResolvedValue({ ...OK, delivery: "queued" });
+      expect(await action("alder-creek", SEND_INPUT)).toMatchObject({ ok: true, data: { delivery: "queued" } });
+    });
+
+    it("needs_acknowledgement is NOT an error: the dialog re-opens with the reasons the server found, and the error string is empty", async () => {
+      lib.mockResolvedValue({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["visitor", "do_not_contact"] });
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({ ok: false, error: "", needsAcknowledgement: ["visitor", "do_not_contact"] });
+    });
+
+    it("a refusal names the person and the congregation from the server's own facts (Copy: {Name}, {Congregation})", async () => {
+      lib.mockResolvedValue({ kind: "refused", reason: "already_signs_in", personName: "Wendeline Ashgrove" });
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({
+        ok: false,
+        error: 'Wendeline Ashgrove can already sign in. If they\'ve forgotten their password, they can use "Forgot password" on the sign-in page.',
+      });
+      lib.mockResolvedValue({ kind: "refused", reason: "membership_ended" });
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({
+        ok: false,
+        error: "This person's connection to Alder Creek Presbyterian Church has ended, so they can't be invited.",
+      });
+    });
+
+    it("a cooldown carries whole minutes, rounded UP, both in the sentence and for the button", async () => {
+      lib.mockResolvedValue({ kind: "refused", reason: "cooldown", nextResendAt: new Date(Date.now() + 61_000) });
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({
+        ok: false,
+        error: "You sent this a moment ago. You can send it again in 2 minutes.",
+        retryAfterMinutes: 2,
+      });
+    });
+
+    it.each([
+      ["forbidden", { kind: "forbidden" }, "You don't have permission to invite people to sign in here."],
+      ["totp_unavailable", { kind: "totp_unavailable" }, "We can't send invitations right now. Send us a support ticket."],
+      ["link_origin_unavailable", { kind: "link_origin_unavailable" }, "We can't send invitations right now. Send us a support ticket."],
+      ["db_error", { kind: "db_error" }, "We couldn't complete that just now. Try again."],
+      ["a confirmation that is not an address", { kind: "invalid_input", field: "confirmedAddress" }, "The address on file changed while you were looking. Check it and send again."],
+      ["not_found", { kind: "refused", reason: "not_found" }, "That person could not be found."],
+      ["address_changed", { kind: "refused", reason: "address_changed" }, "The address on file changed while you were looking. Check it and send again."],
+      ["already_pending", { kind: "refused", reason: "already_pending" }, "An invitation is already out. Send it again or cancel it."],
+      ["rate_limited", { kind: "refused", reason: "rate_limited" }, "Too many invitations right now. Try again later."],
+    ])("%s reads its Copy sentence", async (_n, result, message) => {
+      lib.mockResolvedValue(result);
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({ ok: false, error: message });
+    });
+  });
+
+  describe("revokeSignInInvitationAction", () => {
+    it("not signed in / no access: nothing is called", async () => {
+      mockAuth.mockResolvedValueOnce(null);
+      expect(await revokeSignInInvitationAction("alder-creek", { personId: "p-1" })).toEqual({ ok: false, error: "You must be signed in to do that." });
+      mockAuth.mockResolvedValueOnce({ user: { id: "user-1" } });
+      mockResolveOrgContext.mockResolvedValueOnce({ kind: "forbidden" });
+      expect(await revokeSignInInvitationAction("alder-creek", { personId: "p-1" })).toMatchObject({ ok: false });
+      expect(mockRevokeSignIn).not.toHaveBeenCalled();
+    });
+
+    it("derives its context from the session and revalidates on ok", async () => {
+      expect(await revokeSignInInvitationAction("alder-creek", { personId: "p-1", organizationId: "evil" } as never)).toEqual({ ok: true });
+      expect(mockRevokeSignIn).toHaveBeenCalledWith(
+        { organizationId: "org-1", actingPersonId: "person-1", actingUserId: "user-1", actingUserEmail: "clerk@example.invalid" },
+        { personId: "p-1" },
+      );
+      expect(mockRevalidatePath).toHaveBeenCalledWith("/o/alder-creek/admin/community/p-1/edit");
+    });
+
+    it.each([
+      [{ kind: "forbidden" }, "You don't have permission to invite people to sign in here."],
+      [{ kind: "refused", reason: "not_open" }, "There's no open invitation to change. Reload the page."],
+      [{ kind: "refused", reason: "not_found" }, "That person could not be found."],
+      [{ kind: "db_error" }, "We couldn't complete that just now. Try again."],
+    ])("maps %j and revalidates nothing", async (result, message) => {
+      mockRevokeSignIn.mockResolvedValue(result);
+      expect(await revokeSignInInvitationAction("alder-creek", { personId: "p-1" })).toEqual({ ok: false, error: message });
+      expect(mockRevalidatePath).not.toHaveBeenCalled();
+    });
+
+    it("a missing person id goes to the library as an empty string (which answers not_found with no round trip)", async () => {
+      await revokeSignInInvitationAction("alder-creek", {} as never);
+      expect(mockRevokeSignIn.mock.calls[0]![1]).toEqual({ personId: "" });
     });
   });
 });

@@ -48,6 +48,11 @@ vi.mock("@/lib/roll", () => ({
   getSessionApprovalState: (...args: unknown[]) => getSessionApprovalState(...args),
 }));
 
+const listSessionSignInRows = vi.fn();
+vi.mock("@/lib/onboarding/org-invite", () => ({
+  listSessionSignInRows: (...args: unknown[]) => listSessionSignInRows(...args),
+}));
+
 vi.mock("./actions", () => ({
   approveRollActionAction: vi.fn(),
   approveRollActionsAction: vi.fn(),
@@ -82,6 +87,7 @@ afterEach(() => {
   listPendingRollActions.mockReset();
   listRecentlyDecidedRollActions.mockReset();
   getSessionApprovalState.mockReset();
+  listSessionSignInRows.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -294,6 +300,72 @@ describe("PendingMembersPage — modes, banner, history, pagination", () => {
     getSessionApprovalState.mockResolvedValue(sessionState("no_session"));
     render(await PendingMembersPage({ params: makeParams(), searchParams: makeSearch() }));
     expect(screen.getByText(/no session to approve/i)).toBeTruthy();
+  });
+
+  describe("the Session hand-off (Community Increment 2b)", () => {
+    function readMode() {
+      gates();
+      listPendingRollActions.mockResolvedValue({
+        kind: "ok",
+        mode: "read",
+        actions: [action()],
+        pagination: PAGINATION,
+        viewer: VIEWER_READ,
+      });
+      listRecentlyDecidedRollActions.mockResolvedValue({ kind: "ok", actions: [] });
+      getSessionApprovalState.mockResolvedValue(sessionState("no_sign_in", { recorded: 2 }));
+    }
+
+    it("a viewer with both keys gets the rows, read with the session's user and organization, and the toggle decides the first sentence", async () => {
+      readMode();
+      cachedAuth.mockResolvedValue({ user: { id: "u1", email: "clerk@example.invalid" } });
+      listSessionSignInRows.mockResolvedValue({
+        kind: "ok",
+        rows: [{ personId: "p-1", name: "Nora Ashgrove", state: "not_invited", sentAt: null, action: "invite" }],
+      });
+      isOrgFeatureEnabled.mockImplementation(async (_p: string, _o: string, key: string) => key !== "org_portal.sign_in_connect");
+
+      render(await PendingMembersPage({ params: makeParams(), searchParams: makeSearch() }));
+
+      expect(listSessionSignInRows).toHaveBeenCalledTimes(1);
+      expect(listSessionSignInRows.mock.calls[0][0]).toEqual({
+        organizationId: "org-1",
+        actingPersonId: "person-1",
+        actingUserId: "u1",
+        actingUserEmail: "clerk@example.invalid",
+      });
+      expect(screen.getByTestId("session-sign-in-row").textContent).toContain("Nora Ashgrove");
+      // Toggle off (the mock answers false for it): the rows, not the sentence.
+      expect(screen.queryByText(/is also connected when they sign in/i)).toBeNull();
+    });
+
+    it("toggle on adds the first sentence", async () => {
+      readMode();
+      listSessionSignInRows.mockResolvedValue({ kind: "ok", rows: [] });
+      isOrgFeatureEnabled.mockResolvedValue(true);
+      render(await PendingMembersPage({ params: makeParams(), searchParams: makeSearch() }));
+      expect(screen.getByText(/is also connected when they sign in/i)).toBeTruthy();
+    });
+
+    it("any other viewer (forbidden) and a failed read get the one no-names sentence and no link", async () => {
+      readMode();
+      listSessionSignInRows.mockResolvedValue({ kind: "forbidden" });
+      const { unmount } = render(await PendingMembersPage({ params: makeParams(), searchParams: makeSearch() }));
+      expect(screen.getByText("Ask an administrator to invite your Session members to sign in.")).toBeTruthy();
+      expect(screen.queryByTestId("session-sign-in-rows")).toBeNull();
+      unmount();
+
+      listSessionSignInRows.mockResolvedValue({ kind: "error" });
+      render(await PendingMembersPage({ params: makeParams(), searchParams: makeSearch() }));
+      expect(screen.getByText("Ask an administrator to invite your Session members to sign in.")).toBeTruthy();
+    });
+
+    it("reads the rows only for the no_sign_in banner", async () => {
+      readMode();
+      getSessionApprovalState.mockResolvedValue(sessionState("no_permission", { recorded: 2 }));
+      render(await PendingMembersPage({ params: makeParams(), searchParams: makeSearch() }));
+      expect(listSessionSignInRows).not.toHaveBeenCalled();
+    });
   });
 
   it("?page= reaches the library and the pager links to the next page", async () => {

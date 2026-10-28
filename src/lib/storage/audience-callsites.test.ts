@@ -66,10 +66,12 @@ const ACTIVE: Record<string, string[]> = {
   "src/app/(org)/o/[slug]/tickets/[id]/attachments/[key]/route.ts": ["resolve:private"],
   "src/app/(org)/o/[slug]/tickets/actions.ts": ["store:private"],
   "src/app/(public)/site/[slug]/assets/[key]/route.ts": ["resolvePublic"],
-  // images first, then the bundle JSON (R2: the bundle is private, only a server-side reader uses it)
-  "src/app/api/sites/ingest/route.ts": ["store:public_site", "store:private"],
   "src/lib/brand/read-org-brand.ts": ["resolve:public_site"], // the mark, inlined as data:
   "src/lib/giving/statements.ts": ["store:private"], // the statement PDF
+  // site ingest (DECISION-279): the four routes call no store method; this is the one place that does.
+  // Source order: storeSiteImage (images), findHeldSiteImages (the plan/commit lookup), then
+  // publishSiteBundle (the bundle JSON: R2, private, only a server-side reader uses it)
+  "src/lib/sites-ingest.ts": ["store:public_site", "findByContentHashes:public_site", "store:private"],
   "src/lib/sites.ts": ["resolve:private"], // the content bundle (hydratePublishedSite)
   "src/lib/tenant-branding.ts": ["store:public_site"], // the logo
   "src/lib/tickets.ts": ["resolveMeta:private", "resolveMeta:private", "resolveMeta:private"],

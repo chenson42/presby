@@ -26,6 +26,13 @@ vi.mock("@/lib/db", () => ({
   }),
 }));
 
+// The careers sweep (src/lib/careers/sweep.ts) is its own module with its own
+// tests; here only the route's ISOLATION of that step is under test. The real
+// sweep opens a transaction on the platform connection, which this mock (and
+// the "exactly one platform execute" assertions below) deliberately does not model.
+const mockRunCareersSweep = vi.hoisted(() => vi.fn().mockResolvedValue(0));
+vi.mock("@/lib/careers/sweep", () => ({ runCareersSweep: mockRunCareersSweep }));
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET } from "./route";
 
@@ -42,6 +49,7 @@ function makeRequest(authHeader?: string): Request {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  mockRunCareersSweep.mockResolvedValue(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -97,6 +105,7 @@ describe("GET /api/cron/maintenance — auth", () => {
       deletedEmailVerify: 1,
       deletedTotpPending: 0,
       rollCacheRolledForward: 4,
+      careersPostingsClosed: 0,
     });
   });
 
@@ -173,5 +182,90 @@ describe("GET /api/cron/maintenance - the host-class log line (T6 / A6)", () => 
       expect(line).toHaveProperty("deletedPwdReset");
     }
     log.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Careers sweep (docs/work-log/2026-10-25-careers-inc1.md, Phase 3 T23)
+// ---------------------------------------------------------------------------
+
+describe("GET /api/cron/maintenance - the careers sweep step", () => {
+  it("reports how many postings it closed, in the response and the structured log", async () => {
+    vi.stubEnv("CRON_SECRET", "careers-secret");
+    mockPlatformExecute.mockResolvedValueOnce({ rows: [{ fixed: 2 }] });
+    mockRunCareersSweep.mockResolvedValueOnce(3);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const res = await GET(makeRequest("Bearer careers-secret"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, rollCacheRolledForward: 2, careersPostingsClosed: 3 });
+    const line = JSON.parse(log.mock.calls.at(-1)![1] as string) as Record<string, unknown>;
+    expect(line.careersPostingsClosed).toBe(3);
+    log.mockRestore();
+  });
+
+  it("a throwing sweep still answers 200 with every other count, and logs a fixed label with no error text", async () => {
+    vi.stubEnv("CRON_SECRET", "careers-secret");
+    mockExecute
+      .mockResolvedValueOnce({ rows: [{ id: "a" }, { id: "b" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "c" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    mockPlatformExecute.mockResolvedValueOnce({ rows: [{ fixed: 4 }] });
+    mockRunCareersSweep.mockRejectedValueOnce(
+      new Error('function presby_careers_sweep(integer) does not exist SECRET-SQL password=hunter2'),
+    );
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await GET(makeRequest("Bearer careers-secret"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      deletedPwdReset: 2,
+      deletedEmailVerify: 1,
+      deletedTotpPending: 0,
+      rollCacheRolledForward: 4,
+      careersPostingsClosed: 0,
+    });
+    expect(err).toHaveBeenCalledTimes(1);
+    expect(err).toHaveBeenCalledWith("[cron/maintenance] careers sweep failed");
+    const logged = JSON.stringify(err.mock.calls);
+    expect(logged).not.toContain("SECRET-SQL");
+    expect(logged).not.toContain("hunter2");
+    err.mockRestore();
+  });
+
+  it("runs AFTER the token pruning and the roll reconcile, so a failing sweep cannot stop either", async () => {
+    vi.stubEnv("CRON_SECRET", "careers-secret");
+    const order: string[] = [];
+    mockExecute.mockImplementation(async () => {
+      order.push("tokens");
+      return { rows: [] };
+    });
+    mockPlatformExecute.mockImplementation(async () => {
+      order.push("reconcile");
+      return { rows: [{ fixed: 0 }] };
+    });
+    mockRunCareersSweep.mockImplementation(async () => {
+      order.push("careers");
+      throw new Error("boom");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await GET(makeRequest("Bearer careers-secret"));
+
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["tokens", "tokens", "tokens", "reconcile", "careers"]);
+    // The reconcile is still platform call 0: the sweep opens its own transaction elsewhere.
+    expect(mockPlatformExecute).toHaveBeenCalledTimes(1);
+    mockExecute.mockResolvedValue({ rows: [] });
+    mockPlatformExecute.mockResolvedValue({ rows: [] });
+  });
+
+  it("does not run for an unauthenticated request", async () => {
+    vi.stubEnv("CRON_SECRET", "careers-secret");
+    await GET(makeRequest("Bearer wrong"));
+    expect(mockRunCareersSweep).not.toHaveBeenCalled();
   });
 });

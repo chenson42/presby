@@ -47,7 +47,9 @@ const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_
 const MIGRATION_PATH = path.join(process.cwd(), "drizzle", "0064_presby_person_emails.sql");
 const GUARD_IMMUTABLE = /id, person_id, kind, value and created_at are immutable/;
 const GUARD_ENDED = /is ended and cannot change/;
-const GUARD_VERIFIED = /verified_at is set only by presby_accept_invitation/;
+// drizzle/0065 section 7 (R43) re-states 0064's message: two owner-path
+// writers now, invitation acceptance and sign-in connection.
+const GUARD_VERIFIED = /verified_at is set only on the owner path, by invitation acceptance or by sign-in connection/;
 const NO_MAIN = /has active email addresses and no main address/;
 
 // The driver's transaction object, typed loosely so one helper serves both
@@ -341,18 +343,23 @@ describe.skipIf(!hasDb)("drizzle/0064 contact_methods (Postgres-backed)", () => 
       ]);
     });
 
-    it("preview and accept are still definers with a pinned search_path, executable by presby_app only, and carry ended_at at their four sites (ER3)", async () => {
+    // drizzle/0065 section 13 moved the acceptance body into the owner-only
+    // presby__accept_invitation_core (the token wrapper reads no contact row)
+    // and added three sign_in currency checks (preview's, and the core's
+    // unlocked and FOR SHARE ones): 0064's 3 + 1 sites are now 0 + 5 + 2.
+    it("preview, accept and the accept core are definers with a pinned search_path, carry ended_at at every contact site (ER3; 0065 section 13), and only preview and accept are executable by presby_app", async () => {
       const rows = await q(sql`
         select p.proname, p.prosecdef, array_to_string(p.proconfig, ',') as config,
                has_function_privilege('presby_app', p.oid, 'execute') as app,
                has_function_privilege('presby_platform', p.oid, 'execute') as platform,
                (length(p.prosrc) - length(replace(p.prosrc, 'ended_at is null', ''))) / length('ended_at is null') as sites
           from pg_proc p
-         where p.proname in ('presby_preview_invitation', 'presby_accept_invitation')
+         where p.proname in ('presby_preview_invitation', 'presby_accept_invitation', 'presby__accept_invitation_core')
          order by p.proname`);
       expect(rows).toEqual([
-        { proname: "presby_accept_invitation", prosecdef: true, config: "search_path=public, pg_temp", app: true, platform: false, sites: 3 },
-        { proname: "presby_preview_invitation", prosecdef: true, config: "search_path=public, pg_temp", app: true, platform: false, sites: 1 },
+        { proname: "presby__accept_invitation_core", prosecdef: true, config: "search_path=public, pg_temp", app: false, platform: false, sites: 5 },
+        { proname: "presby_accept_invitation", prosecdef: true, config: "search_path=public, pg_temp", app: true, platform: false, sites: 0 },
+        { proname: "presby_preview_invitation", prosecdef: true, config: "search_path=public, pg_temp", app: true, platform: false, sites: 2 },
       ]);
     });
 

@@ -106,11 +106,17 @@ begin;
   select assert_eq(
     (select count(*) from pg_policies where tablename = 'contact_methods'),
     4, '64a: the same four person-level policies');
+  -- drizzle/0065 section 13 moved the acceptance body into
+  -- presby__accept_invitation_core (the token wrapper reads no contact row)
+  -- and added three sign_in sites: preview's currency check, and the core's
+  -- unlocked (2b) and locked (step 4, FOR SHARE) currency checks. So 0064's
+  -- four sites are now 4 + 3 = 7 across preview, the wrapper and the core.
   select assert_eq(
     (select sum((length(p.prosrc) - length(replace(p.prosrc, 'ended_at is null', ''))) / length('ended_at is null'))
-       from pg_proc p where p.proname in ('presby_preview_invitation', 'presby_accept_invitation')
+       from pg_proc p where p.proname in ('presby_preview_invitation', 'presby_accept_invitation',
+                                          'presby__accept_invitation_core')
         and p.prosecdef and array_to_string(p.proconfig, ',') = 'search_path=public, pg_temp'),
-    4, '64a (ER3, F211): preview and accept are still pinned definers and carry ended_at at exactly four sites');
+    7, '64a (ER3, F211; 0065 section 13): preview, accept and the accept core are pinned definers and carry ended_at at exactly seven sites (0064''s four plus 0065''s three sign_in currency checks)');
   select assert_eq(
     (select count(*) from pg_proc
       where prosrc ilike '%contact_methods%' and prosrc not ilike '%ended_at%'

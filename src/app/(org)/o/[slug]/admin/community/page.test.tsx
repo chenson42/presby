@@ -64,6 +64,11 @@ vi.mock("@/lib/roll", () => ({
   countPendingRollActions: (...args: unknown[]) => countPendingRollActions(...args),
 }));
 
+const getSignInMarkers = vi.fn();
+vi.mock("@/lib/onboarding/org-invite", () => ({
+  getSignInMarkers: (...args: unknown[]) => getSignInMarkers(...args),
+}));
+
 const redirectMock = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
 });
@@ -93,6 +98,7 @@ afterEach(() => {
   listFormerParticipants.mockReset();
   getCommunityBadges.mockReset().mockResolvedValue({});
   hasPermission.mockReset();
+  getSignInMarkers.mockReset().mockResolvedValue({});
   countPendingRollActions.mockReset().mockResolvedValue({ kind: "forbidden" });
   redirectMock.mockClear();
   notFoundMock.mockClear();
@@ -362,6 +368,53 @@ describe("MembersPage — the six views", () => {
     hasPermission.mockResolvedValue(false);
     render(await MembersPage({ params: makeParams(), searchParams: makeSearchParams() }));
     expect(getCommunityBadges).not.toHaveBeenCalled();
+  });
+
+  describe("sign-in markers (Community Increment 2b)", () => {
+    const ENTRY = { personId: "p-1", firstName: "Nora", lastName: "Ashgrove", preferredName: null, email: null };
+    const ROW = { personId: "p-2", displayName: "Bram Okafor", email: null, firstVisitDate: null, positions: [], endedOn: null };
+
+    function arrange(perms: Record<string, boolean>) {
+      cachedAuth.mockResolvedValue({ user: { id: "u1", email: "clerk@example.invalid" } });
+      resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+      isFlagEnabled.mockResolvedValue(true);
+      isOrgFeatureEnabled.mockResolvedValue(true);
+      hasPermission.mockImplementation(async (_p: string, _o: string, key: string) => perms[key] === true);
+    }
+
+    it("one reader call for the page's directory ids, with the viewer's context, and the marker renders beside the card (not inside its link)", async () => {
+      arrange({ "people.manage": true });
+      getDirectory.mockResolvedValue({ kind: "ok", entries: [ENTRY], pagination: PAGINATION });
+      getSignInMarkers.mockResolvedValue({ "p-1": { kind: "expired" } });
+      render(await MembersPage({ params: makeParams(), searchParams: makeSearchParams() }));
+      expect(getSignInMarkers).toHaveBeenCalledTimes(1);
+      expect(getSignInMarkers).toHaveBeenCalledWith(
+        { organizationId: "org-1", actingPersonId: "person-1", actingUserId: "u1", actingUserEmail: "clerk@example.invalid" },
+        ["p-1"],
+      );
+      const marker = screen.getByTestId("sign-in-marker");
+      expect(marker.textContent).toContain("Invitation expired. Send again");
+      expect(marker.getAttribute("href")).toBe("/o/alder-creek/admin/community/p-1/edit#sign-in");
+      // A link is never nested in a link.
+      expect(marker.closest("a:not([data-testid])")).toBeNull();
+    });
+
+    it("the admin lists read their rows' ids too", async () => {
+      arrange({ "people.manage": true });
+      listVisitors.mockResolvedValue({ kind: "ok", rows: [ROW], pagination: PAGINATION });
+      getSignInMarkers.mockResolvedValue({ "p-2": { kind: "not_connected", noEmail: true } });
+      render(await MembersPage({ params: makeParams(), searchParams: makeSearchParams({ view: "visitors" }) }));
+      expect(getSignInMarkers.mock.calls[0][1]).toEqual(["p-2"]);
+      expect(screen.getByTestId("sign-in-marker").textContent).toContain("Not connected yet. No email on file");
+    });
+
+    it("never asked for a viewer without people.manage", async () => {
+      arrange({ "directory.view": true });
+      getDirectory.mockResolvedValue({ kind: "ok", entries: [ENTRY], pagination: PAGINATION });
+      render(await MembersPage({ params: makeParams(), searchParams: makeSearchParams() }));
+      expect(getSignInMarkers).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("sign-in-marker")).toBeNull();
+    });
   });
 
   it("the nav shows the admin views only to a people.manage holder", async () => {

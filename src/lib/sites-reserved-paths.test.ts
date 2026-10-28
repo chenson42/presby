@@ -41,6 +41,29 @@ describe("reservedSitePath", () => {
     },
   );
 
+  describe("careers: descendants only (careers Increment 1, DECISION-264)", () => {
+    it.each(["/careers/x", "/CAREERS/x", "/%63areers/x", "/careers%2Fx", "\\careers\\x", "//careers//x", "careers/x", " /careers/x ", "/careers/./x", "/careers/a/b/c", "/Careers/Music-Director"])(
+      "%j is reserved as careers",
+      (path) => {
+        expect(reservedSitePath(path)).toEqual({ reserved: true, segment: "careers" });
+      },
+    );
+
+    it.each(["/careers", "/Careers/", "/careers//", "/CAREERS", "careers", "/./careers", "/%63areers", " /careers ", "/careers/."])(
+      "%j is allowed (the bundle's own /careers page wins over the list)",
+      (path) => {
+        expect(reservedSitePath(path)).toEqual({ reserved: false });
+      },
+    );
+
+    it.each(["/careers-guide", "/about/careers/x", "/careersx/y", "/career/x", "/about/careers", "/ministries/careers/open"])(
+      "%j is not reserved (only a FIRST segment of exactly careers shadows)",
+      (path) => {
+        expect(reservedSitePath(path)).toEqual({ reserved: false });
+      },
+    );
+  });
+
   it("never throws on a malformed percent-escape or a non-string", () => {
     expect(reservedSitePath("/%E0%A4%A")).toEqual({ reserved: false });
     expect(reservedSitePath(undefined as unknown as string)).toEqual({ reserved: false });

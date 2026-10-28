@@ -23,4 +23,10 @@ export const SLUG_HISTORY: readonly string[] = [
   "roles-who-can-do-what",
   "events-and-the-calendar",
   "your-congregations-website",
+  // Batch 5c (2026-10-28): the approved placeholders. Pending slugs are appended by the commit that publishes them.
+  "worship-planning",
+  "children-check-in",
+  "communications",
+  "event-sign-ups",
+  "presbytery-tools",
 ];

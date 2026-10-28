@@ -14,7 +14,9 @@ describe("config-loadable help files", () => {
   for (const file of FILES) {
     it(`${file} has no @/ runtime import and no non-relative runtime import`, () => {
       const src = readFileSync(path.join(DIR, file), "utf8");
-      const runtime = [...src.matchAll(/^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s*["']([^"']+)["']/gm)].map(
+      // `=` is excluded so `export const X = [ ... ]` is never read as a re-export: a registry label that
+      // ends in the word "from" (the Reimbursements queue has one) would otherwise look like `from "`.
+      const runtime = [...src.matchAll(/^\s*(?:import|export)\s+(?!type\b)[^;=]*?from\s*["']([^"']+)["']/gm)].map(
         (m) => m[1],
       );
       for (const spec of runtime) {

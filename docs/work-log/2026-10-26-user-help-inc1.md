@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (parent log, with Addendum A and the operator rulings) | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete (parent log: R1–R14, C1–C10 for Increment 2, DECISION-293/294/295, F345–F349) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete for Increment 1. Placeholder list and four operator questions await the operator | Design complete; implementers named per batch | 2026-10-26 |
-| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | In progress: Batches 0, 1 (`d6e7bd7`), 2 (`be636c3`), 5a (`a0825c7`) and 3 (`01a4821`) done; Batches 5b, 4 and 5c pending. The auth-touching smoke (MFA-enrolled user, :3660) and the production lane (:3661) ran green at Batch 3 | — | 2026-10-28 |
+| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | In progress: Batches 0, 1 (`d6e7bd7`), 2 (`be636c3`), 5a (`a0825c7`), 3 (`01a4821`) and 5b (`1913918`) done; Batches 4 and 5c pending. The auth-touching smoke (MFA-enrolled user, :3660) and the production lane (:3661) ran green at Batch 3 | — | 2026-10-28 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1057,6 +1057,173 @@ Legend: **W** walked on :3660 as the role named; **W+C** walked and the rule rea
 **Residuals and notes for QA.** (1) `help.spec.ts` imports `../src/lib/help/select` for the page list, so a new page adds its checks automatically; pending and planned entries are exercised only once they exist. (2) The "On this page" check runs with `javaScriptEnabled: false` and clicks the native `<summary>`; it passed on every page that has one. (3) `/docs` and `/docs/x` have no route yet: the proxy admits the prefix, so an anonymous visitor gets the framework 404 at the same URL, which `help.spec.ts` asserts so a later `/docs` tree has to change that test on purpose. (4) The home bar's Help link is a text link (44px); the existing Sign in, Sign out and Continue buttons are 36px as before and were not changed.
 
 **Next.** The architect rules on F-new-g (Option A or B). Then Batch 5b (full-stack-developer): the role walk, then the administrator pages.
+
+
+## Phase 4 — Batch 5b (full-stack-developer)
+
+*2026-10-28, worktree `presby-help`, content commit `1913918`, not pushed. No `.env.local` value or connection string was printed. Dev server `:3660` started from a clean `.next` with `RATE_LIMIT_DISABLED=true`, stopped by PID (73595 and its child 73597) before the build. Global flags were at the production posture 5a left (diffed equal to `flags-after-5a.txt` before and after; this batch changed none). Scratch, walk output and screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/help-5b/` (`w/` walk screens, `shots/` page screenshots).*
+
+**Files.** New: `src/content/help/{first-day-as-administrator,adding-people,officers-and-the-session,roles-who-can-do-what,events-and-the-calendar,your-congregations-website}.md`. Modified: `src/lib/help/registry.ts` (six `published` entries), `slug-history.ts` (six slugs), `coverage-allowlist.ts` (the 13 "Batch 5b" entries and the `LATER_5B` constant deleted), `coverage.test.ts` (`ALLOWLIST_PIN` 29 to **16**, as the design's arithmetic said: 29 minus 13), `docs/product/functionality-map.md` (`Help:` on twelve bullets, the Help index and the Help section's administrator line; "First sixteen pages").
+
+**Markers.** `limitationUntil: signin-invites` on `adding-people` and `officers-and-the-session` (each carries the one sentence "A member of the Session needs a PresbyPortal account to approve. Today the PresbyPortal team sets that up: send a support ticket."; the banner constant `NO_SIGN_IN_INVITE_LINE` says the same and 2b replaces it). The design also named `how-a-congregation-gets-started`, `why-cant-i-see-this` and `using-the-directory` (5a). `verifiedIn` is `0.47.0` on all six (H13 bounds it by this worktree's `package.json`; the orchestrator re-stamps at integration, after a re-walk against 0.48.0, which 2b changes on exactly these two pages).
+
+**Covers and the allowlist.** `first-day-as-administrator`: `route:/o/{slug}`, `route:/o/{slug}/admin`. `adding-people`: `org_portal.members_create`, `tile:members`. `officers-and-the-session`: `tile:officers`. `roles-who-can-do-what`: `tile:roles`. `events-and-the-calendar`: `org_portal.calendar`, `org_portal.public_calendar`, `tile:calendar`, `tile:events`. `your-congregations-website`: `tile:branding`, `org_portal.careers`, `tile:careers`, `org_portal.domains`, `tile:domains`. That is the 13 deleted entries. The 16 left are the deliberate ones of P3-16 (giving x3, mail_domain, sensitive_info, parishes, groups, staff, the five presbytery tiles, the three coming-soon stubs). `tile:groups` and `tile:staff` are mentioned in a table but not covered by a page, so they stay.
+
+**Needs blocks.** `adding-people` (`turnOn` "Community: add people and record roll actions", off by default) and `events-and-the-calendar` (`turnOn` "Member calendar", on by default) are pinned to the catalog by `coverage.test.ts`; the other four carry `who` only (no single toggle applies). No `who` contains a permission key (H11).
+
+### The role walk (precondition; it decided what the pages say)
+
+**Person walked.** A congregation made through the real `/admin/organizations/new` form (invented name, slug `fernhollow-walk`, fixture identities only), a founding administrator designated by an invitation row with a known token (as `e2e/support/invitation-fixture.ts` does), who accepted as a **new account** through the real `/invite` page, signed in, enrolled two-factor through `/account/2fa`, and landed. Walked at 360px as that person with only the per-org defaults (Member calendar on, everything else off), then with the toggles the pages tell a reader to turn on (turned on by that person, through the real Features switches).
+
+**Answers to the Addendum A question.** The founding administrator holds **neither** `branding.manage` nor `events.manage`, and **cannot give either**: "Manage events" and "Branding" tiles are shown on the Administration page, and both pages say "You don't have permission to manage events/branding at <name>. If you think this is a mistake, ask your stated clerk or another administrator there." (event types likewise). Creating a role with either permission is refused ("You can't create a role with permissions you don't hold yourself: events.manage."), as is adding either to the Founding Administrator role ("You can't add permissions you don't hold yourself: events.manage."). The checkboxes are not disabled in the form; the refusal is on save. The role templates (Committee Chair, Giving Recorder, Hiring Committee, Personnel Administrator, Stated Clerk, Treasurer) include no events or branding role. So a first congregation cannot add events or set its colours without the team (a product gap, F-new-i below). Once the team gives the founder a role that carries them (I did this by a database insert, the way the team would, to see those screens), the founder can pass it on: granting that role to another person succeeded.
+
+**What the founding administrator can do (walked):** Features (turned three switches on: "Community: add people and record roll actions", "Public events calendar", "Job openings"); Community (add visitor, participant, member; remove and undo; Pending approvals, approve, see deny and withdraw dialogs); Officers (record, end, self-record); Roles (grant, revoke, create, adopt a template, edit, deactivate); Groups (create a committee, add a member); Staff (record a position); Directory and Calendar (read); Job openings (draft, publish, close, reopen); Tickets tile present (filing walked in 5a). The founder also holds the **Stated Clerk** role from the start (Roles page: two roles held by the person). **Cannot:** events, event types, branding; "Website domain" is not on the Features page and its page says to ask PresbyPortal support.
+
+**Plain member.** The `why-cant-i-see-this` table rests on 5a's member walk (no-role member and Moderator member, tiles shown whatever the role, pages that say "You don't have permission to ..."). This batch re-confirmed the same behaviour as the founder for the two role-gated pages (events, branding): the tile is shown, the page denies. I did not re-walk a plain member of the new congregation separately; no sentence in page 10 contradicts this batch's walk.
+
+**Also walked:** a public website for the walk congregation, provisioned as `e2e/support/public-calendar-fixture.ts` does (a bundle row and a `live` site row; a fixture bundle, no real site), to see the public side: first with no calendar block on any page, then with the calendar and openings blocks placed.
+
+### Page, fact, how verified
+
+Legend as 5a: **W** walked on :3660 as the role named; **C** read in code or the map (not walkable here), listed so QA and Phase 6 can re-check.
+
+**14. first-day-as-administrator** (founding administrator)
+
+| Fact | How verified |
+|---|---|
+| A one-congregation person lands on the congregation's page | W (founder, after sign in); rule from `destination.ts` and 5a page 9 |
+| The page opens with a greeting, "Find a person", "Coming up", and tiles under Community, Worship & Events, Governance & Courts (and Reports & Insights, Communications) | W (360px portal text) |
+| Every tile is shown whatever the role; a tile you cannot use opens a page that says you don't have permission | W: Manage events, Branding, Features pages as founder with and without the role |
+| Three tiles describe an idea and nothing works ("Worship & Service Planning", "Insights & Analytics", "Communications") | W (5a, and the portal text here); their own label is not quoted (H8) |
+| The Administration page is headed "Organization Administration" and, in a new congregation, lists Manage events, Roles, Tickets, Features, Branding | W (before any toggle) |
+| Menu is a three-line button on a phone | W (5a) |
+| What can be used on day one, and what cannot (table became two lists after a 360px look) | W: each page opened or acted on; Directory (shows the recorded member, search and Households views) and Calendar read |
+| The founder also holds the Stated Clerk role | W: Roles page |
+| The calendar is on from the start; Community and Job openings start off | W: Features page |
+| "Job openings turned on." confirmation | W: toast |
+| A sensible order; at least one Session member needs an account; you can record yourself | W: Pending banner states and self-recorded elder (see page 18) |
+| `Website domain` not on Features; the team turns it on | W (5a and here): page text "ask PresbyPortal support to turn it on" |
+
+**16. adding-people**
+
+| Fact | How verified |
+|---|---|
+| Until the toggle is on the page says "Member management isn't turned on" | W |
+| Community page: links "Pending approvals", "Add person"; views Everyone, Members, Participants, Visitors, Staff, Former; "Search people" | W |
+| Visitors are listed under Visitors only, never in the directory | W: visitor appears under Visitors, not under Everyone; wizard text "not listed in the Directory" |
+| Staff view: "No position yet" marker; Former lists a removed participant with the date | W: a staff anchor with no position; a participant removed, then Former showed "Removed 10/20/2026" |
+| Add person steps and fields (Find a matching record, Name & birth date, Contact & address, Household, Connection, Review & submit); "Step 1 of 6" (7 with a match) | W: all six steps, and the match path |
+| "C. Wainwright is already in this community", "Open their record", "No, this is someone new" | W: second search for a recorded visitor; the page prints initials and last name |
+| Email rows: Main address, Add another email address, labels Personal/Work/Other, "Don't send mail to this address" | W: step 3 and the edit page |
+| Three connections, their descriptions, and messages "Visitor added." / "Participant added." / (member: a message that the person appears as a member once the Session approves, not quoted) | W: all three recorded |
+| Remove as participant (end date, effect), Undo last entry (reason, original kept) | W: dialogs read and removal performed |
+| Record a roll action options and the sentence "Enrolling someone as a participant takes effect now. Every other action is proposed and waits for the Session to approve it." | W: person edit page |
+| Pending approvals: Approve (minute reference), Deny (reason, 500), Withdraw (reason, proposal stays), "Recently decided", "You proposed this", "Self-approved" | W: dialogs read; one approval performed by the self-recorded founder |
+| "Select all on this page" and a cap of 50 | W for the checkbox; **C** for 50 (`BULK_APPROVE_MAX`, `src/lib/roll-action-kinds.ts`) |
+| Banner states: empty, term not begun, no account, no permission; no banner when someone can approve | W for empty ("Your Session roster is empty"), term not begun (a future-dated elder), no account (an elder with no sign-in), and ready (no banner); **C** for the no-permission variant (`session-state-banner.tsx`) |
+| A member of the Session needs an account; the team sets that up by ticket (the limitation) | W: banner text; marker `signin-invites` |
+| "No Session to approve" (organizations without a Session) | Not stated: a congregation does not see it; removed from the page |
+
+**18. officers-and-the-session**
+
+| Fact | How verified |
+|---|---|
+| Officers page, "Current roster", "End term", "No officers recorded yet" | W |
+| Offices listed; start date required; Elected on, Installed on, Class year, Minute reference optional; "Officer term recorded." | W |
+| Recording does not change what a person can do except the Session and the Moderator of the Board of Deacons seat; other access under Roles | W: page text |
+| A deacon's form says districts are off when Parish management is off | W: "Districts aren't turned on yet" |
+| Pastors: recorded without a roll membership; add from Staff first; a person on the roll is refused ("... a pastor can't also be recorded on the roll here.") | W: both the notice and the refusal |
+| End term: end date, reason (Completed, Resigned, Removed, Deceased), "it stays on record, it is not deleted" | W: dialog read and a term ended; the roster then shows none |
+| A person's officer history lists every term with dates and reason | W: `/admin/officers/<person>` |
+| The Session roster is built from terms; Groups page "Automatic rosters" lists Session and Board of Deacons | W |
+| A later-dated term seats the person on the start date | W: the banner "The term begins 1/1/2027" |
+| Recording yourself is allowed; roster "Self-recorded"; approvals "Self-approved" | W |
+| Limitation sentence (account needed, team sets it up) | W: banner text; marker `signin-invites` |
+
+**19. roles-who-can-do-what**
+
+| Fact | How verified |
+|---|---|
+| Page parts "Who holds what", "Grant a role", "Role catalog"; the five roles and who holds them at first | W: the table above is the page's own rows |
+| Grant a role (person or group, role, person), "Role granted."; the seat role is refused ("held through the ... seat, so it can't be granted here") | W |
+| Revoke dialog (grant ends, stays on record); the lockout guard on revoking | W: dialog read; revoking the founder's only role-giving role was refused with the quoted sentence |
+| Create role (key rule, name, grouped permission list, "Role created."), adopt template ("Role adopted from template."), Edit, Save changes, Deactivate role (dialog; "Deactivated" in the catalog), Constitutional roles have no Edit | W: created, adopted, edited, deactivated one |
+| Lockout guard on editing ("Removing this would leave nobody able to create or edit roles...") | W |
+| "You can only give what you hold" refusals and wording | W: both messages, for a new role and for an edit |
+| What a founding administrator can and cannot do | W: see the walk summary above |
+| When the team gives you a role that allows them, you can give it on | W: granted the team role to another person as the founder |
+
+**20. events-and-the-calendar**
+
+| Fact | How verified |
+|---|---|
+| Calendar page: Month/List, arrows, "Show filters", "Copy month", event detail; a cancelled event leaves it | W (as founder, 360px); cancelled event absent from `/calendar` and the public calendar |
+| "Copy month" leaves out events not open to everyone | **C**/W: the event form says "It also stays out of Copy month"; the cancelled-event omission and the omitted count are **not stated** (code only) |
+| "Coming up" card on the congregation's page | W for the empty state ("Nothing is on the calendar right now."); the card with events in it was not re-checked, and the page says only "the next events" |
+| Reading comes with the Member role; adding needs a role a founder lacks | W: Roles page ("Member", 2 permissions); event pages deny the founder |
+| "Add an event" and "Manage events" appear on the Calendar page only for a holder | W: absent before the role was given, present after |
+| Event form fields, "Event created.", "Edit event", "Cancel event" (dialog says it stays on record), "Cancelled" in the list | W (as a role-holder) |
+| "Open to everyone, not only members" ticked at first; unticked = member calendar only, out of Copy month, cannot be on the website | W: form text |
+| Repeats: simple interval (Weekly, Every 2 weeks, Monthly (same date)) or a specific day (Which: 1st to last, Day), occurrences 1 to 52 ("Enter a number of occurrences from 1 to 52."), each date its own event, "Part of a series", "Extend this series" | W: created an 8-date weekly series; tried 53. **Design said "weekly or monthly by weekday"; the screen differs, the page follows the screen** |
+| Event types: a set at the start, some "Retired" and with an "Offered" switch; "General" default ("The default type can't be retired."); "Add an event type" (name, colour, icon); arrows reorder | W: the page at 360px |
+| The event-type permission description is quoted | **C** (the string lives in the seeded permission catalog, not in `src/`, so it is not in `labels[]`) |
+| Public calendar needs three things; the event page says it appears once the public calendar is on and the website has a calendar page | W: with toggle on and events marked, a site with no calendar block shows no calendar on `/events`; with the block placed, the calendar shows the marked events month by month with Previous, Today, Next, a cancelled event absent |
+| Series website listing ("Put this and later events on the website"; dialog says how many; "Take this and later events off the website") | W for the put-on action and its dialog; the take-off button was seen, not pressed |
+| Warning text about the public, search engines and archives | W: form text |
+
+**21. your-congregations-website**
+
+| Fact | How verified |
+|---|---|
+| Colour, type pairing (Classic, Modern, Warm, Contemporary), logo (PNG, JPEG, WEBP, up to 2 MB), "Light mode only", "Save brand", "Brand saved." | W as a role-holder |
+| The colour is used in the portal and on the public website | W: after saving, the computed primary colour was the new one on both `/o/<slug>` and `/site/<slug>`. Type pairing and logo on the site are **not stated** |
+| A founder lacks Branding | W |
+| Job openings: toggle, tile under Community, form fields, "Save draft", Publish ("Yes, publish", "Published."), "View on your website", Close and Reopen dialogs, closing date meaning, web address rule, paste-from-Word note | W: drafted, published, closed, reopened |
+| "People are asked to contact the church to apply" | W: the Features card text; no application form exists in the page |
+| The list page's address ends in /careers and the line under the heading says where openings appear; "ask whoever maintains your website" | W for the sentence with a placed block and the list address, and the unknown case; the "no other page shows them" wording is **C** (`placement-line.tsx`) |
+| The list of openings appears on its own page whether or not a block is placed | W: `/careers` on the platform address listed the opening with no block placed |
+| Public Listing switch on Officers, Staff and a group; the confirmation text; the person appears on the website only where the list is placed | W: all three dialogs; a listed staff member appeared on a page that carries the list block and "No one has been listed here yet." before |
+| The Public listing column is not shown on a phone | W: hidden at 360, shown at 1280, on Officers and Staff |
+| Page text, images and menus are not edited in PresbyPortal; support ticket | Operator ruling; no screen edits them |
+| A web address of your own: ask us; the Website domain page text | W (5a and here) |
+| Giving pages, application forms, photos | Not described |
+
+**Neighbour greps for the record (C6 check 4).** `You don't have permission to manage events|branding` found on the two pages quoted (true); toggle-off sentences (true); `NO_SIGN_IN_INVITE_LINE` quoted in prose only (true now, replaced by 2b); the map's "weekly / monthly-by-weekday patterns" on the Events administration bullet is **not** what the form offers (Weekly, Every 2 weeks, Monthly (same date), or the nth weekday): the map bullet is stale, not edited here.
+
+### Findings and deviations
+
+**For numbering (F350 onward, after the design's six and 5a's a to e; I use letters).**
+- **F-new-h.** The "Public listing" and "Display order" columns on Officers and Staff are `hidden sm:table-cell`: on a phone an administrator cannot see or change who is named on the website. The Staff and group roster show the same. The page says "use a wider screen". Product question: show them on a phone.
+- **F-new-i.** A first congregation cannot add events or change its colours without the PresbyPortal team: the founding-administrator bundle has neither key, the role form refuses them, and no role template carries them (`events.manage` has no default binding by DECISION-115). The Features card, the portal tile and the Administration page all offer "Manage events" and "Branding" to that person. The help pages say so plainly and point to the team ({{contact}}). Product question: give the founding administrator the two keys, or add a template. If that ships, edit `roles-who-can-do-what`, `events-and-the-calendar`, `first-day-as-administrator`, `your-congregations-website` (there is no `limitationUntil` for it).
+- **F-new-j.** The Event types page seeds a new congregation with nine types and four already "Retired" (Special Services and Holidays, Music, Meals and Fellowship, Mission and Outreach). Not stated as a list; the page says "a set ... some are switched off at first".
+- **F-new-k.** The Roles page's "Granted by" column shows the platform administrator's address to the congregation's administrator for the two roles the team gave. Not stated in help; a privacy question for the operator.
+- **F-new-l.** The map's Events administration bullet describes recurrence patterns the form does not offer (above).
+- **F-new-m (observation).** A visitor can be recorded as a Ruling Elder, and counts as a Session seat in the banner state ("1 member of the Session is recorded, but none has a PresbyPortal account yet"). Not stated in help.
+
+**Deviations from the outline (each a narrowing or a replacement by what the screen shows, none a reword to sound safer).**
+1. `first-day-as-administrator` states `Branding` and `Manage events` as "cannot yet", from the walk, not as available (the outline left it to the walk).
+2. The first-day, three-connections, banner and website tables became bulleted lists after the first 360px look: three-column tables scroll sideways inside their region at 360px (measured 384 inside 326) and the answer column was off screen. Two-column tables (the roles page) fit.
+3. `officers-and-the-session`: the outline's "Why Pending approvals says no one can approve yet" is one paragraph with a link to the banner list on `adding-people`; the "ordination is lifelong" and "class_year" notes are not stated.
+4. `roles-who-can-do-what`: the outline's "Roles that come from a seat" is the table's group rows plus the refusal for the Moderator seat; I did not describe giving "Session member" by hand (it succeeds, and gives approval rights regardless of the Session, which I do not recommend and did not teach).
+5. The outline's Needs `turnOn` for `events-and-the-calendar` could name only one toggle; it names "Member calendar" and the public calendar switch is in the page body.
+6. `your-congregations-website` says nothing about committee members' public listing beyond "each group's roster" (the dialog was walked on a group roster) and nothing about giving or photos.
+7. Dynamic strings (counts, names, dates, "Step 1 of 6") are quoted in prose where helpful but are not in `labels[]` (H10 needs them literal in `src/`); labels were chosen by running each quoted string against `src/`, and ultra-generic ones ("Edit", "Search", "Close") were left out as vacuous.
+
+**Quoted but not label-checked:** the two permission descriptions ("Create, edit, and cancel calendar events, including repeating series"; "Create, rename, recolor, reorder and retire the event types that color-code the calendar") come from the seeded permission catalog, not `src/`; "Enter a number of occurrences from 1 to 52." is assembled from a constant. They were read on screen in this walk.
+
+**Walk residue on the branch only.** The Fernhollow walk congregation, its users (`founder.fh@example.invalid`), four people, events, a published job opening, a fixture site bundle and row, one custom role (`calendar_and_brand_team`) granted to the founder by database insert (the way the team would) and never revoked, extra custom roles made in the walk, a saved brand colour. Nothing touches `development` or production. The global flags are unchanged.
+
+**Gates (worktree).**
+- `npm run typecheck`: clean. `npm run lint`: clean (`--max-warnings=0`).
+- `npm run test`: 694 files passed, 97 skipped; 10,517 tests passed, 2,862 skipped, 0 failed (Batch 3 was 694 / 10,517: no test added; `coverage.test.ts` now pins 16 and passes).
+- `npm run check`: nine tripwires green; `check:help`: "16 registry entries, 16 published, 16 content files, 0 images".
+- `npm run build`: exit 0 from a clean `.next`; `○ /help`, `● /help/[slug]` with 16 paths (three listed plus "+13 more"), `○ /help/planned`, `○ /help/planned/[slug]`.
+- 360px, light and dark, anonymous (the proxy now bypasses `/help`): the index and each of the six new pages, HTTP 200, one `<h1>`, document overflow 0, every header link 44px, "On this page" present. Three-column tables scroll inside their focusable region; none remains on the six pages except the two-column roles table. Screenshots: `shots/<slug>-{light,dark}-360.png`. Read in full: first-day (light), adding-people (dark), events (dark), roles (light).
+- Not exercised: the "On this page" `<details>` on iOS (jsdom and Batch 3's `help.spec.ts` cover it); a print preview; the Fernhollow pages as a plain member of the new congregation; the no-permission banner and bulk approve in a browser.
+
+**For Phase 5/6.** Re-walk as a founding administrator: the two role-gated pages (events, branding) after any change to the founding-administrator bundle; the banner states after 2b merges; every `limitationUntil` sentence (`adding-people`, `officers-and-the-session`) goes when `signin-invites` is Done. `verifiedIn` is `0.47.0` on all sixteen and must be re-stamped by a walk on 0.48.0.
+
+**Next.** Batch 4 (full-stack-developer): the screenshot capture project and the seven images, then Batch 5c.
 
 
 ---

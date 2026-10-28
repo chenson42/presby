@@ -44,6 +44,7 @@ import {
   type InviteOrg,
 } from "./invitation-fixture";
 import { enterTotpCode } from "./totp-page";
+import { expectPanelSurvives, recordUrls, sessionClaim } from "./enrolment-fixture";
 
 export const COMMUNITY_FLAG = "org_portal.members_create";
 export const OFFICERS_FLAG = "org_portal.officers";
@@ -490,38 +491,51 @@ export async function signInAs(page: Page, account: FixtureAccount, landing: Reg
 
 /**
  * Enrols two-factor sign-in on `/account/2fa` and returns the secret that was
- * accepted. The code is typed through the shared helper; the "Confirm
- * enrollment" press is TOLERANT, because from 0.44.1 (DECISION-257) the sixth
- * digit confirms the enrolment by itself and the button is gone or reads
- * "Verifying": the press is attempted briefly and its failure is the signal that
- * the code already went. The wait that follows ("You enrolled on") is the real
- * assertion either way.
+ * accepted. The code is typed through the shared helper; the sixth digit
+ * confirms the enrolment by itself (DECISION-257), so nothing is pressed.
  *
- * STALE SECRET (a measured defect in the app, not a timing slip; the work-log's
- * Batch D flake verdict has the numbers). The browser fetches
- * `/account/2fa?callbackUrl=...` TWICE at the same millisecond, and
- * `getOrCreatePendingEnrollment` is find-then-upsert, so on a first visit the two
- * concurrent renders can each mint a secret and the last write wins: the page may
- * SHOW a secret that is not the one stored, and the correct code for it is answered
- * "That code did not match. Try again." (about 1 in 20 runs here). A reload renders
- * the one stored secret (the row is reused within its ten-minute life), so this
- * helper reloads and reads again, up to three times, rather than flake. It never
- * hides a different failure: any other outcome still fails on the wait.
+ * F166 (DECISION-292): a first enrolment ends on the one-time recovery-codes
+ * panel, which survives the server-action re-render, and the session is marked
+ * verified through the two-factor grant. This helper waits for that panel, proves
+ * it survives the re-render (the management view's "You enrolled on" never takes
+ * its place) and that the session now reports `twoFactorVerified`. It does NOT
+ * press Continue: the caller does, so it can assert where Continue lands.
+ *
+ * The former reload-and-retry for the stale-secret race is gone: F342 (0.46.2)
+ * fixed the race, so a refused code now fails here loudly instead of being
+ * retried (TODO: the `enrolOnPage` workaround line).
  */
 export async function enrolOnPage(page: Page): Promise<string> {
-  const mismatch = page.getByText("That code did not match. Try again.");
-  const enrolled = page.getByText(/you enrolled on/i);
-  for (let attempt = 1; ; attempt++) {
-    await expect(page.getByRole("heading", { name: /enroll in two-factor authentication/i })).toBeVisible({ timeout: 30_000 });
-    const secret = ((await page.locator("details pre").textContent()) ?? "").trim();
-    expect(secret).toMatch(/^[A-Z2-7]{16,}$/);
-    await enterTotpCode(page, generateSync({ secret }));
-    await page.getByRole("button", { name: "Confirm enrollment" }).click({ timeout: 3_000 }).catch(() => undefined);
-    await expect(enrolled.or(mismatch).first()).toBeVisible({ timeout: 45_000 });
-    if (await enrolled.isVisible()) return secret;
-    expect(attempt, "the enrolment code was refused three times").toBeLessThan(3);
-    await page.reload();
-  }
+  await expect(page.getByRole("heading", { name: /enroll in two-factor authentication/i })).toBeVisible({ timeout: 30_000 });
+  const secret = ((await page.locator("details pre").textContent()) ?? "").trim();
+  expect(secret).toMatch(/^[A-Z2-7]{16,}$/);
+  await enterTotpCode(page, generateSync({ secret }));
+  await expect(page.getByRole("heading", { level: 1, name: "Two-factor authentication enabled" })).toBeVisible({ timeout: 45_000 });
+  await expectPanelSurvives(page);
+  expect((await sessionClaim(page)).twoFactorVerified, "enrolment verified the session (F166)").toBe(true);
+  return secret;
+}
+
+/**
+ * Presses the codes panel's Continue and waits for `landing`, returning every
+ * main-frame URL visited on the way so a caller can assert there was no `/totp`
+ * hop. Continue carries the server-sanitized `callbackUrl` (`expectedHref`).
+ */
+export async function continueFromCodesPanel(
+  page: Page,
+  expectedHref: string,
+  landing: (url: URL) => boolean,
+): Promise<string[]> {
+  const cont = page.getByRole("link", { name: "Continue" });
+  await expect(cont).toHaveAttribute("href", expectedHref);
+  const urls = recordUrls(page);
+  await cont.click();
+  await page.waitForURL(landing, { timeout: 45_000 });
+  expect(
+    urls.filter((u) => new URL(u).pathname === "/totp"),
+    "no second challenge after enrolling (F166)",
+  ).toEqual([]);
+  return urls;
 }
 
 export { inviteAddress, THROWAWAY_PASSWORD };

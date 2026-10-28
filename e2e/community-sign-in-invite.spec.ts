@@ -28,8 +28,9 @@
  *   5. a person with no email: the no-address state and no Send button;
  *   6. editing the person's email after sending makes the old link the dead-link
  *      page (R27 end to end), and the card says the address changed;
- *   7. a NEW invitee accepts a seeded row, enrols two-factor through the real
- *      /totp challenge, signs in and sees the baseline only;
+ *   7. a NEW invitee accepts a seeded row, signs in, enrols two-factor (the
+ *      codes panel's Continue lands in the congregation with no second /totp
+ *      challenge, F166) and sees the baseline only;
  *   8. an existing account accepts through "Sign in to accept";
  *   9. the Community list marker for an elder with no sign-in, its link into the
  *      card, and its absence for a viewer without people.manage (and the Officers
@@ -54,6 +55,7 @@ import {
   backdateInvitation,
   COMMUNITY_FLAG,
   CONNECT_TOGGLE,
+  continueFromCodesPanel,
   enrolOnPage,
   expectTargets44,
   invitationsAt,
@@ -72,7 +74,7 @@ import {
 } from "./support/sign-in-invite-fixture";
 import { setupInviteOrg, type InviteOrg } from "./support/invitation-fixture";
 import { DEAD_LINK_PHRASE } from "./support/invitation-observer";
-import { deadHeading, submitTotp } from "./support/invitation-ui";
+import { deadHeading } from "./support/invitation-ui";
 
 const PASSWORD = "Brindled-Wren-Cordage-42"; // leak-ok: a throwaway password for a `.invalid` fixture account, deleted at teardown (not a credential)
 
@@ -390,7 +392,7 @@ test.describe("Community sign-in invitation", () => {
       });
 
       // -----------------------------------------------------------------
-      test("7. a NEW invitee accepts a seeded row, enrols two-factor through the real challenge, signs in and sees the baseline only", async ({ page }) => {
+      test("7. a NEW invitee accepts a seeded row, signs in, enrols two-factor with no second challenge and sees the baseline only", async ({ page }) => {
         const o = org!;
         await addBaselineMemberRole(sql, o);
         const person = await personWithAddress("fresh");
@@ -434,14 +436,12 @@ test.describe("Community sign-in invitation", () => {
         await page.locator('input[name="password"]').fill(PASSWORD);
         await page.getByRole("button", { name: /sign in with email/i }).click();
         await page.waitForURL((url) => url.pathname === "/account/2fa", { timeout: 45_000 });
-        const secret = await enrolOnPage(page);
+        expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe("/launch");
+        await enrolOnPage(page);
 
-        // Enrolment does not verify the session (E-35): the wall stands in front of the congregation.
-        await page.goto("/launch");
-        await page.waitForURL((url) => url.pathname === "/totp", { timeout: 45_000 });
-        expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe(`/o/${o.slug}`);
-        await submitTotp(page, secret);
-        await page.waitForURL((url) => url.pathname === `/o/${o.slug}`, { timeout: 45_000 });
+        // F166 (DECISION-292, replaces E-35): enrolling verifies the session, so the codes panel's Continue goes
+        // through the post-login router straight into the congregation, with no /totp challenge in front of it.
+        await continueFromCodesPanel(page, "/launch", (url) => url.pathname === `/o/${o.slug}`);
         await expect(page.getByText(o.name).first()).toBeVisible({ timeout: 30_000 });
 
         // Baseline only. The home page's tiles are NAVIGATION, never authority (DECISION-003: the tile

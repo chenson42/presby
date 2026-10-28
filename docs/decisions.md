@@ -20,7 +20,7 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
   - A guard can be widened, so it refuses in more cases, as the membership stop-block did here. That is neutral on environments that applied the file only because the file is not run again. The re-run in (b) is the check, and nothing mechanical enforces it.
   - A hand-applied file's bytes are not hashed anywhere (the ledger holds ten rows), so nothing detects drift between "as applied" and "as in the repo" except this record.
 - **First use.** `0082` (stop-blocks corrected before release; commit `421940c`).
-- **Follow-through.** The matching amendment to the `drizzle/` line in CLAUDE.md awaits the operator's approval; it is not made here.
+- **Follow-through.** The `drizzle/` line in CLAUDE.md carries the exception (operator approved, 2026-10-28).
 
 ---
 

@@ -188,7 +188,10 @@ drizzle/00XX_presby_*.sql  — hand-written: RLS, triggers, functions. Drizzle K
                              does not emit any of these. An unreleased migration
                              (not yet applied to a shipped environment) may be
                              corrected in place, same file and number; once
-                             shipped, fix forward with a new migration instead
+                             shipped, fix forward with a new migration instead,
+                             unless the change is guard-only, writes nothing
+                             where the file already ran, and a forward migration
+                             cannot serve (DECISION-298 lists all five conditions)
 scripts/seed-dev.sql   — synthetic fixture, shaped to exercise the findings
 scripts/test-rls.sql   — isolation suite. MUST run as presby_app
 docs/STATE.md          — start here

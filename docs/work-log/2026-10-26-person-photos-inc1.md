@@ -28,7 +28,7 @@
 | 4 — Phase 5 run 2 fix (copy) | full-stack-developer | Complete: `websiteNotShowing` (unlisted or withheld) drives the remove sentence; `removeIsWebsite`, `removeIsFallback`, `websiteNotListed` verbatim from R-d2/R-d5/R-d4; hidden photo known through the directory answer routes both designate dialogs to `websiteHidden`/`websiteMerged`; `websiteLine` 4th `directoryHidden` parameter; T12-T19 red first (22 failing on c225091), green after; gates, unit 9,954, DB 267, e2e 5/5 and the 360 walk clean; no schema, route, action, flag, permission or e2e change | Complete; to qa for the scoped re-run | 2026-10-26 |
 | 3 — amendment (Phase 5 run 3) | tech-lead | Complete: sentences now chosen by comparing before/after outcomes of a pure mirror of the two SQL functions (`outcome.ts`); claims registry over 720 worlds x 10 intents; Postgres property test pins mirror to SQL and store (website photo = directory photo included); (e) Option A (keep the clearance, say so, name "Stop using in directory"; no operator decision, Option B declined), (f) and "related" ruled, QA notes 1 and 3 fixed, note 2 accepted; four new strings, one removed, two reworded; tests T20-T29; implementer full-stack-developer; no schema, route, action, flag, permission or audit change | Design complete; back to Phase 4 | 2026-10-26 |
 | 4 — Phase 5 run 3 fix (outcome-derived copy) | full-stack-developer | Complete: `outcome.ts` (pure mirror: `outcomesOf`/`applyIntent`/`afterIntent`/`shiftOf`), `consequencesFor` rewritten to pick sentences from before/after outcomes (no per-state predicate), reader extraction (`loadAnswers`, `snapshot.ts`), claims registry over 720 worlds x 10 intents (S1-S5), `outcome-parity.db.test.ts` (P1/P2/P3 + not-live and minor slices, 5 mutations all red), R-e8 strings verbatim, T20-T29; pure claims registry red on 10107d5 first; gates green; 360 px same-photo walk incl. roster after confirm; back to Phase 5 (run 4) | Ready for QA | 2026-10-26 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete; iPhone HEIC + one real Vercel upload block enabling the toggle; sharp preview build a merge condition; housekeeping owed | SHIP WITH NOTES | 2026-10-28 |
 
 ---
 
@@ -2627,3 +2627,311 @@ Everything from this run is in `/private/tmp/claude-501/-Users-cshenso-git-presb
 - **Walk:** `walk/`, `tools/walk-r4b.mts`
 
 I deleted the scratch tree copies at 10107d5, 3f337cb and HEAD, plus the three copies the stopped run left in `qa-photos-r4/`.
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst), Person photos Increment 1
+
+I did not run a browser or server. I'm read-only, and the dev Neon branch and ports belong to other agents. The walk below rests on QA's screenshots and `results.json` in `qa-photos-r4b/walk`, `qa-photos-p5`, `qa-photos-r2` and `photos-fix*`, plus my own reads of the work-logs, `copy.ts`, `tile-controls.tsx`, `page.tsx`, `drizzle/0059`, `drizzle/0078`, the roster DB test and the e2e spec headers. I edited nothing.
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+It delivers what Phase 1 and the operator promised, and every operator ruling is honoured. Nothing found is a false string, an exposure, or a missing gate. The notes are follow-ups and pre-merge housekeeping, listed below. None is a loop-back.
+
+## ONE-LINE TAKE
+
+> A people editor in a congregation that has turned on "Photos of people" can attach up to ten photos to an adult, choose one for the directory and one for the public website, and take either off. The public staff and committee rosters follow those choices through one SQL definition, so the page, the directory and the open web agree.
+
+## What's Working
+
+- **The choose, clear, remove flow reads as an editor's job.**
+  - At 360px the tiles show chips ("Directory", "Website", "Directory, cleared for website"). Each tile has a full-width stack of buttons.
+  - The three status lines under "Where photos show" are chosen by SQL answers, not guessed.
+  - The "Photos" page is a linked sub-screen like Guardians, so it does not crowd the edit form.
+- **The consent step is a real act.**
+  - The website dialog's confirm stays disabled until the permission box is ticked.
+  - "Clear for website" exists because Phase 5 found the remedy line named a control the page lacked.
+- **The dialogs now tell the truth, and it was checked against the live site.**
+  - After confirming each action, QA read the anonymous custom-host roster.
+  - Same-photo "Stop using on website" says "changes nothing on the website", and the roster still serves the image.
+  - Following the tip ("Stop using in directory") makes the roster serve none.
+  - Remove with a cleared directory photo behind it says the website falls back, and the roster serves the other photo.
+  - The claims registry covers 720 worlds × 10 intents. A Postgres property test pins the mirror to the SQL and to the real store.
+- **Isolation is a database property.** I verified the person-photo rows and functions on the branch from the work-log catalog audit and `0078`'s text, not by re-running them.
+  - Photos hang off the membership with composite FKs, and the blob audience is pinned to `private`.
+  - No DELETE is granted, and guard triggers bind the owner connection too.
+  - The toggle, `hide_photo`, the minor test and the merge test are single SQL definitions.
+  - The staff, officer and committee rosters are all covered in `public-roster-photo.db.test.ts`, so "leadership" is not only the staff branch.
+- **A platform admin gets nothing from the role.** `presby_platform` has no grant on the new tables, which fits the two-hierarchies invariant.
+
+## Intent-vs-Shipped Diff
+
+- **Operator request** (multiple photos per person; headshots for staff and leadership; someone designates the directory photo and the website photo; households later).
+  - Shipped: ten photos per person per congregation, two designations, thumbnail in the directory, website photo at the editor's framing (master at most 1200px, no forced crop).
+  - Households are deferred to Increment 3, as ruled.
+  - Verdict: matches.
+- **Photos are per congregation.** Shipped as org-scoped tables on the membership. A person in two bodies needs photos set up in each, and the release note says so. Matches.
+- **Website falls back to a cleared directory photo.**
+  - Phase 1 G3 said "never fall back". The operator overruled that, and Phase 2 added the attestation guard (Q6).
+  - Shipped: the fallback serves a directory photo only if its designation carries the "OK for the public website" tick.
+  - The operator's own word, "cleared", is that guard. Record it as the Q6 confirmation in DECISION-286.
+  - Verdict: acceptable drift, ruled.
+- **People editors manage.** `people.manage` is checked toggle first, then permission, then target, in the same transaction as the write.
+  - Per `drizzle/0059`, a founding administrator holds `people.manage`, `org_features.manage` and `staff.manage`. They can switch the toggle on, add photos and set listing.
+  - So the actor QA walked as is representative of the person that path creates.
+  - Verdict: matches.
+- **Adults only.**
+  - Shipped: refused at add and at designate, and withheld at read for a known under-18 date of birth, a birth-year-only value that could be under 18, or a household role of child.
+  - A null date of birth with no child marker counts as an adult (accepted residual). No string says "adults only".
+  - Verdict: matches.
+- **No separate "withdraw website clearance" control.** Not built, per the operator. The dialogs disclose the two-step way. Honoured.
+- **No new platform flag.** One per-org toggle, `org_portal.person_photos`, self-service and provisioned off.
+  - It also gates the public path. That is a Phase 2 departure from Phase 1, and it is right: an "off" that left faces on the open web would not be off.
+- **No what's-new entry.** None drafted.
+- **Phase 1 "first photo offered as the directory photo".** Shipped as auto-designated for the directory, never for the website. Acceptable drift (Phase 2 R7).
+- **Success toasts for designate, stop and remove.** Not built. The page re-renders with new chips and lines, and QA saw the chips change. Acceptable; refusals do toast.
+- **Phase 1 G12 and Q5** (swap the first customer's leadership and committee pages onto the live roster; the email and phone lines would be lost). Deferred to the operator. It was never asked. It is a TODO line, not a ship condition.
+
+## Edge Cases
+
+- **Empty state: pass, unit-pinned.** "No photos yet / Add the first photo below." I saw no screenshot of it.
+- **Failure microcopy: pass.**
+  - Fixed strings per refusal kind.
+  - Any client rejection maps to "That picture couldn't be uploaded…".
+  - A real over-limit 413 was never posted in e2e (edge case 25). Low risk, since the client downscales and the server refuses over 1,000,000 bytes.
+- **Permission gate: pass.** Toggle off gives a "not turned on" page, forbidden gives the standard state, and an unknown person gives 404. No `loading.tsx` exists in the segment.
+- **Audit event: pass.** Four keys are written in the mutation's transaction, and a failing audit insert rolls the change back. QA mutation-tested these.
+- **Mobile (360px): pass.**
+  - No horizontal scroll, dialogs fit, action buttons measure 44px.
+  - The minor page shows the notice and a greyed "Choose a photo".
+  - Remaining small targets are all pre-existing shared UI (see follow-ups).
+- **Anonymous roster, platform host and custom host.**
+  - `person-photos-roster.spec.ts` runs at 360px on both. The image loads at natural size, and after removal a fresh request returns the neutral 404.
+  - QA's screenshots cover the custom host. The platform-host `/site/<slug>` page redirects to a live custom host, and QA's run 1 screenshot of it is a blank frame.
+  - Real 5:7 portraits in the kit's card boxes are unchecked. That is part of G12.
+- **Member directory at 360px.** The thumbnail renders; a person with none shows initials. The 25-card document is about 234 KB with 3 KB test thumbnails. Real portraits at about 8 KB project to roughly 420 KB, close to the 500 KB revisit trigger (see follow-ups).
+
+## Rulings
+
+### QA N1: four registry claims are weaker than their sentences
+
+`removeBase`, `directoryHidden`, `websiteKeepsOther`, `websiteTakeOffTip`.
+
+- **Does not block.** QA's independent strict probe, written against its own SQL model, found all 7,200 pairs true. The live walk agrees.
+- **It is a tripwire gap, not a lie.**
+- **Ruling: a tracked test-hardening follow-up.**
+  - Do it before the next edit to `consequences.ts` or `copy.ts`, since that is when a green registry would give false confidence.
+  - `removeBase` is the design's own "always", so tightening it needs a one-line Phase 3 ruling first.
+  - Fold in the dead guard: `websiteTakeOffTip` can never withhold itself today, because the after-state always has no website designation.
+
+### QA N2: parity's listing dimension is row presence only
+
+- **Does not block.** The `public_listed` and ended-position predicates are held by F289's `public-asset.db.test.ts` and `public-roster-photo.db.test.ts`. QA's SQL mutation s2 (drop `public_listed`) failed 5 tests there.
+- **The header comment overclaims.** It says a new SQL gate that is not a `Facts` field fails the parity test. For the roster gates that is false. Correct that sentence in the Batch 4 housekeeping commit. It is a comment, so no re-QA is needed.
+- **The coverage extension is the follow-up.** Seed some unlisted worlds as `public_listed = false` or ended, and add one officer and one committee world.
+
+### Notes 2–6 from run 4
+
+- **Note 2, no cache sentence on replace.**
+  - `websiteReplaces` and `directoryWebsiteWillStop` withdraw a shown photo without the "up to a day" sentence.
+  - Accepted: no string denies the residual, and the website dialog body already says archives can't be recalled.
+  - But the amendment line "omitted in exactly one state" is false. Correct it when the orchestrator records the decision text.
+  - Add a small copy follow-up, since S4 only covers stop and remove.
+- **Note 3, the tip presupposes exposure for an unlisted, hidden, merged or minor person.** Accepted. It errs toward more caution, and T22 rules it.
+- **Note 4, unknown hide still gets a hopeful line.**
+  - When the hide is set at another congregation and nothing is designated, the page cannot read it.
+  - Accepted: this is run 1's "unknown is clear" rule, always hedged. State it in the decision text.
+  - The page corrects itself after the click (QA state HO).
+- **Note 5, the dialog close icon is about 16px.** A shared primitive, pre-existing. TODO, below.
+- **Note 6, the tip guard is always true.** Accepted and folded into N1.
+- **Not on QA's list, but I'd add it.** For a minor, the "Use in directory" and "Use on website" buttons still open dialogs whose confirm is disabled, and the checkbox shows above the blocked sentence. It is not false and nothing can be recorded. Extend the existing tech-lead TODO to cover the buttons as well as the checkbox.
+
+### Open items
+
+- **Real-iPhone HEIC check (operator). Does not block merge. It blocks enabling the toggle for the pilot congregation.**
+  - The toggle is off everywhere at deploy.
+  - The failure mode is a fixed, human message. The server re-validates every file, so nothing unsafe depends on the client.
+  - But the first harvest is exactly where iPhone photos arrive. Until one 48 MP HEIC and one 12 MP library JPEG have gone through at 360px, the release note and the help page must not promise that iPhone camera photos work.
+- **Vercel linux `sharp` trace (PR preview). The preview build being green is a merge condition. One real add on a Vercel-built deployment is an enable condition.**
+  - The trace is unverified locally, where it traced darwin binaries.
+  - `sharp` is imported only by `image.ts`, reached only from the photos actions. A missing binary would break the add action, not the directory or the public site.
+  - So a green preview build is enough to merge. Do not turn the toggle on in production until one real upload has succeeded on a Vercel-built deployment.
+
+### Pre-merge and pre-deploy housekeeping (my notes, not QA findings)
+
+1. **Merge `origin/main` first.** The branch is 67 commits behind. A dry-run merge conflicts in 5 files:
+   - `src/lib/db/domain/index.ts`
+   - `src/lib/audit.test.ts`
+   - `src/lib/org-feature-catalog.test.ts`
+   - the community `edit/page.tsx`
+   - the community `edit/page.test.tsx`
+
+   These are mechanical. Re-run typecheck, the person-photos unit and DB sets, and the photos e2e on the merged tree.
+2. **Apply the Rule 16 integration patch.** The journal on main still ends at idx 72, so idx 78 applies cleanly. Then re-run `scripts/test-rls.sql` on the merged `development` branch.
+3. **Write the `docs/deployment.md` "Pre-deploy runbook: 0078".** The diff has no `deployment.md` change, so Batch 4 is not done. This must exist before production is touched:
+   - Apply 0078 before promoting the code. It refuses without 0072. Check first that production has 0 `people.photo_key` values, or the retirement CHECK rolls the file back.
+   - Never re-apply 0072 after 0078 (F335).
+   - 0079 is a later release.
+   - Rehearse on a production-derived Neon branch, as 0072 was.
+4. **Batch 4 housekeeping:**
+   - Record DECISION-285 to 289, plus the proposed text from the three amendments (selection and effect verbs; sentences chosen from before and after outcomes).
+   - Add the `CLAUDE.md` Project Layout line (design P6).
+   - Update the Rule 14 map and TODO entries below, and the release note.
+
+## Help impact for `photos-of-people` (`[help:person-photos]`)
+
+The page is for the administrator audience. It stays `pending` until this merges. Then the help pipeline walks it, publishes it, and moves its token to this feature's Done entry. A token appears once in `docs/TODO.md`, so if the help branch's In Flight line exists at that point it moves, not duplicates.
+
+**Labels (verbatim; `check:help` matches UI strings):**
+- **Toggle**, on the Features page (`/o/<slug>/admin/features`): `Photos of people`. Its off-warning title is `Photos of people will be hidden`.
+- **Path:** Community, then the person, then Edit person, then the link `Photos`. The page heading is `Photos`, with the link `Back to edit person`. It sits under the section `Where photos show`, a counter `N of 10 photos`, and the empty state `No photos yet` / `Add the first photo below.`
+- **Upload:** `Add a photo`, button `Choose a photo`. The helper reads: "Pick a picture or take one with your camera. JPEG, PNG or WebP. It is resized here and stored without location information." Toasts: `Photo added.` and `Photo added. It's now {first}'s directory photo.`
+- **Chips:** `Directory`, `Website`, `Directory, cleared for website`.
+- **Tile buttons:** `Use in directory`, `Stop using in directory`, `Clear for website`, `Use on website`, `Stop using on website`, `Remove`. Links: `View larger`, `Back to all photos`.
+- **Dialogs:**
+  - `Use this photo in the directory?` (confirm `Use in directory`)
+  - `Use this photo on the public website?` (confirm `Use on website`, with a required permission checkbox)
+  - `Clear this photo for the website?` (confirm `Clear for website`)
+  - `Stop using this photo in the directory?` and `Stop using this photo on the public website?` (confirm `Stop using`)
+  - `Remove this photo?` (confirm `Remove photo`)
+  - Each has `Cancel`.
+
+**Facts the page must state:**
+- **Who and how:**
+  - The page is for people holding `people.manage`; a founding administrator has it by default.
+  - The toggle is switched by someone holding `org_features.manage`. Off by default for every congregation.
+  - The "Photos" link sits on the Edit person page, which needs the Community feature on, so the toggle `Community: add people and record roll actions` must also be on (Phase 3 edge case 28; the help author should confirm against the page).
+- **Limits and storage:**
+  - Up to ten per person per congregation, and photos belong to the congregation. A person in two congregations has photos set up in each.
+  - A photo is JPEG, PNG or WebP. It is resized when added, stored without location information, and one person cannot hold the same picture twice.
+  - The first photo added becomes the directory photo automatically; the website photo never does.
+- **Under 18:**
+  - A person who appears to be under 18 can't have photos added or chosen. That is judged from a recorded birth date, a birth year that could be under 18, or a child marking in the household.
+  - Say "appears to be under 18", never "adults only", because a person with no birth date and no child marking is treated as an adult.
+  - Existing photos of a minor are not shown in the directory or on the website.
+- **The two photos:**
+  - Members see the directory photo, or initials.
+  - The website shows the website photo, or else the directory photo if it was cleared for the website. Choosing a website photo requires ticking a permission box, a staff statement that is recorded rather than the person's own consent.
+  - A website photo appears only while the person is listed (set separately under Staff, Officers or Groups by whoever manages those) and the website is published.
+- **Never shown:**
+  - A photo marked hidden: on the website for every congregation the person belongs to, and in the directory of the congregation where it was hidden. Members have no screen to set that yet.
+  - Under 18.
+  - A merged record on the website.
+- **Honest limits:**
+  - Removing a photo stops all use but the file stays in storage and cannot be erased from here. Browsers can keep a saved copy up to a day. Search engines and web archives may keep copies that can't be recalled.
+  - Turning the toggle off hides every photo, including on the public website. Nothing is deleted, and turning it back on restores them.
+  - To keep a photo in the directory but off the website once cleared, stop using it in the directory and choose it again without ticking the box. "Stop using on website" on a photo that is also the cleared directory photo changes nothing, and the dialog says so.
+- **Not available:** members adding their own photo, photos of children, household photos, bulk upload, photos on the Community lists, and a crop tool. The directory thumbnail is a top-biased square.
+- **Not to claim yet:** that iPhone camera photos work. The refusal copy tells people to pick from the library or convert to JPEG.
+
+**Other pages to update (Rule 17 help impact):**
+- `using-the-directory` (#11): delete the `limitationUntil: person-photos` sentence. Add that a card shows a small photo when one is chosen and initials otherwise, and that a hidden photo shows initials.
+- `your-congregations-website` (#21): where it describes "show on the website" for staff, officers and committee membership, add that a photo appears only when a website photo or a cleared directory photo exists, and that it is not shown if the person has hidden it.
+
+## Drafts
+
+### TODO-ready lines (Rule 10)
+
+**Done:**
+
+`- [x] 2026-10-28 — **Person photos Increment 1 (2026-10-26-person-photos-inc1; parent 2026-10-26-person-photos; F330–F338; migration 0078; DECISION-285–289 plus the consequence-copy decision; release number is the orchestrator's) — SHIP WITH NOTES.** A congregation that turns on "Photos of people" lets staff who manage people add up to ten photos to an adult, choose one for the member directory and one for the public website (a directory photo cleared for the website stands in when no website photo is chosen), and remove either. Photos are per congregation, private blobs served only through the one public asset door while a roster lists the person; the toggle, hide-photo, under-18 and merged rules are single SQL definitions that the directory, the rosters, the door and the page all call. \`people.photo_key\` is retired (held null by CHECK; dropped in 0079). Follow-ups are in Ready to build, Blocking a flag flip, Papercuts and Process / tooling. [help:person-photos]`
+
+**Blocking a flag flip / go-live:**
+
+`- [ ] **Before enabling \`org_portal.person_photos\` for the first congregation: (1) the real-iPhone check (a 48 MP HEIC from the camera and a 12 MP JPEG from the library, at 360px; operator), and (2) one real photo add on a Vercel-built deployment (the linux \`sharp\` trace was verified only locally, on darwin).** The PR preview build being green is a merge condition; a successful upload is an enable condition. Do not tell congregations that iPhone camera photos work until (1) passes. — person-photos Phase 6, edge cases 24 and 26`
+
+**Ready to build:**
+
+- `- [ ] **0079 — drop \`people.photo_key\`, \`people.photo_updated_at\` and \`people_photo_key_lower_idx\`** in the release after Increment 1 is live in production, never the same release: old code selects the columns by name. Remove the Drizzle declaration together with the columns (F334), update \`scripts/assets/test-rls-72.sql\` 72a, and note in the file that 0072 must not be re-run after it. — person-photos-inc1, R2`
+- `- [ ] **Consequence-claims registry: tighten four claims (N1).** \`removeBase\` (neither selection names the photo after the remove; needs a one-line Phase 3 ruling because the design said "always"), \`directoryHidden\` ("this photo"), \`websiteKeepsOther\` ("keeps"), \`websiteTakeOffTip\` ("on this photo"; its derived guard can never withhold today). Do before the next edit to \`consequences.ts\` or \`copy.ts\`. — person-photos QA run 4 N1`
+- `- [ ] **Outcome-parity test: seed unlisted worlds as \`public_listed = false\` or ended rows and add one officer and one committee world (N2); correct the \`outcome-parity.db.test.ts\` header, which says any ungated SQL gate fails P1.** Today the roster gates are held by \`public-asset.db.test.ts\` and \`public-roster-photo.db.test.ts\` (QA mutation s2 failed 5 tests there). — person-photos QA run 4 N2`
+- `- [ ] **Person photos Increment 2 (bulk harvest, only if the volume warrants), Increment 3 (photos of minors with consent; \`household_photos\`), and the member self-service profile and privacy page (the first writer of \`hide_photo\`).** — person-photos parent`
+- `- [ ] **Operator (Q5, never asked): move the first customer's leadership and committee pages onto the live rosters (G12).** Decide whether losing the email and phone lines is acceptable, turn on the org's staff and committee directory flags, check real 5:7 portraits at 360px in the kit's card boxes. — person-photos parent`
+- `- [ ] **DECISION-030 revisit watch, person-photo bytes in Postgres.** Revisit at 100 MB platform-wide or 10% of database size (design judgement, unmeasured); add \`select sum(b.byte_size) from blob_assets b join person_photos p on b.id in (p.image_asset_key, p.thumb_asset_key)\` to each retrospective. **Also measure the 25-card directory document with real portrait thumbnails at the pilot:** the e2e measured about 234 KB with 3 KB thumbnails, which projects to roughly 420 KB at 8 KB, close to the 500 KB DECISION-289 trigger (then stream through an authenticated route with a neutral 404). — person-photos-inc1`
+- `- [ ] **Blob adapter \`store()\` check-then-insert races on a simultaneous double submit** (\`23505\` surfaces as a generic failure). Person photos retry once in \`store.ts\`; the logo and ticket-attachment paths do not. Fix once in \`blob-store.ts\` and drop the per-caller retry. — person-photos Batch 2 deviation 7, Phase 5 run 1`
+- `- [ ] **F330 (pre-existing): Server Actions accept 1 MB and nothing configures a higher limit.** The logo forms say "up to 2 MB" and the ticket forms "up to 10MB", which is also above Vercel's 4.5 MB; files between 1 MB and the stated cap probably fail with the framework's 413 rather than the friendly copy. Confirmed from \`next@16.4.2 action-handler.js:513\`, not reproduced. Own bug-fix pipeline. — person-photos Phase 2`
+
+**Papercuts & small fixes:**
+
+- `- [ ] **Photos dialogs for someone under 18: hide the permission checkbox and give the designate buttons nothing to open.** Confirm is already disabled and the store refuses, so nothing is recorded, but "Use in directory" and "Use on website" lead to a dead-end dialog and the checkbox sits above the blocked sentence. \`designate-dialog.tsx\`, \`tile-controls.tsx\`. Raised by tech-lead and QA; operator to confirm priority. — person-photos`
+- `- [ ] **Touch targets under 44px in shared UI, found by the photos walk:** the dialog close icon (about 16px, shared \`dialog\` primitive), the Features page AlertDialog buttons "Keep it on" and "Turn it off" (about 36px settled, \`features-list.tsx\`), and the "Back to portal" link (about 20px, (org) chrome). None is in the photos diff. — person-photos QA runs 2 and 4`
+- `- [ ] **Photos: add the "up to a day" browser-cache sentence when a website photo is replaced** (\`websiteReplaces\`, \`directoryWebsiteWillStop\`). It is withdrawn without it today; no string denies the residual. Extend claim S4 to cover replacement. — person-photos QA run 4 note 2`
+- `- [ ] **A hydration mismatch on the Community edit-person page** (an \`<h2>\` card in \`EditMemberPage\`, pre-existing, dev overlay "1 Issue"). Not investigated. — person-photos Batch 3`
+
+**Close or rewrite the open lines on main:**
+- Mark the line "\`people.photo_key\` becomes \`uuid\`, with the first photo writer" done: "not built, replaced by org-scoped \`person_photos\` (DECISION-285)".
+- Rewrite the "Photo-specific wiring for \`people.photo_key\` is still open" line as done for upload and display.
+- Edit the photo/headshot clause of the "Directory export/output capabilities" line to "photo upload and display done; vCard, PDF and map links open".
+- Move the photo-uploads item out of "Track J" as done.
+
+**No line owed:** the "withdraw website clearance" control (the operator closed it), and the what's-new post (the operator declined).
+
+### Functionality map (Rule 14)
+
+**New bullet, after the Directory bullet:**
+
+`- Photos of people (Increment 1, v<release>; migration 0078, DECISION-285–289) — \`/o/<slug>/admin/community/<id>/edit/photos\`, a sub-screen linked as "Photos" from Edit person. Gated by the per-org toggle \`org_portal.person_photos\` (self-service by \`org_features.manage\`, provisioned off, no platform flag) and \`people.manage\`, checked toggle first. A person holds up to ten photos per congregation (\`person_photos\`, keyed to the membership; \`person_photo_designations\`, end-dated, one active \`directory\` and one active \`website\` designation; a website designation needs a recorded staff attestation). A directory photo carrying the attestation also stands in on the website when no website photo is chosen. Photos are made by \`src/lib/person-photos/image.ts\` (the only \`sharp\` importer): auto-orient, strip metadata, 1200px master and 160px WebP thumbnail, stored as \`private\`. Whether a photo shows is decided by five SQL functions that the directory, both public rosters, the asset door and the page's status lines all call: toggle on, not under 18, not merged, not \`hide_photo\`. The directory inlines the thumbnail as a \`data:\` URI; the public site reads the master through F289's one door, only while a roster lists the person. Dialog sentences are chosen by comparing the outcome of the click before and after (\`outcome.ts\`, a mirror of the SQL, checked by a claims registry and a Postgres property test). Four audit keys (\`tenant.person_photo.*\`). Not built: member self-service, photos of minors, household photos, bulk upload, any way for a member to set \`hide_photo\`. \`src/lib/person-photos/\`, \`docs/work-log/2026-10-26-person-photos-inc1.md\``
+
+**Edits to existing lines:**
+- **Public-sites bullet (line 21):** replace "and ships with no photos yet (\`people.photo_key\` still unwired — tracked in \`docs/TODO.md\`)" with "its photos come from person photos (see Photos of people)".
+- **Staff/leadership/committee primitives bullet (line 106):** replace "ships with photo upload still unwired (\`docs/TODO.md\`)" with "photos come from Photos of people". Also change the sentence "the three 'show on website' confirmations now say a photo appears only if one is on file…" to "a photo may be shown if a website photo has been chosen, or a directory photo cleared for the website, and the person hasn't hidden it".
+- **Directory bullet:** add "A card shows the person's chosen directory photo as a small thumbnail, or initials (\`org_portal.person_photos\` on; a hidden or under-18 photo shows initials)."
+- **Index:** the schema line goes from about 84 to about 86 domain tables, and the org-portal line gains "Photos of people". The version line is the orchestrator's.
+
+### `docs/architecture.md` (Rule 15)
+
+**No architectural change.** The document does not describe the blob audience or the public asset door, which are the same layer. Person photos are a feature on that foundation, not a new subsystem or a new data flow.
+
+**One factual correction is warranted, as a docs accuracy fix and not a Rule 15 update.** Line 23 says "a member can hide their own phone number, address, or photo from other members". The Phase 3 log records that no self-service writer exists for any `hide_*` setting. Now that photos exist, the sentence matters more. Suggested wording: "per-field privacy settings hide a member's phone, address or photo from other members, and are honoured everywhere; a page for members to change them does not exist yet." Land it in the same housekeeping commit.
+
+### Release-note paragraph (non-engineer)
+
+> **Photos of people.** A congregation can now turn on "Photos of people". It is off until someone who manages the congregation's features switches it on. Staff who manage people can then add up to ten photos to a person's record, choose the photo members see in the directory, and choose the photo shown on the public website for people who are listed there. Photos are kept separately for each congregation, so a person who belongs to two congregations has their photos set up in each. A directory photo can also appear on the public website when no separate website photo is chosen, but only if the staff member who chose it ticked the box saying the person agreed. That box is a staff member's recorded statement, not a signed consent from the person, and choosing a website photo needs the same tick. A photo appears on the website only while the person is listed there (listing is still set separately under Staff, Officers or Groups) and the website is published. Photos are resized when they are added (JPEG, PNG or WebP) and stored without location information. A person who appears to be under 18, judged from a recorded birth date or a child marking in their household, has no photo used in the directory or on the website; someone with no birth date and no child marking is treated as an adult, so staff should check before adding. If a person's photo has been marked hidden, it is not shown on the public website for any congregation they belong to, and not in the directory of the congregation where it was hidden. Members cannot change that setting themselves yet, so for now staff removing a photo is how one comes down. Removing a photo, or turning "Photos of people" off, stops it being used on every screen, including the public website, and turning the setting back on restores what was chosen. Neither erases the stored image file, browsers that already saved a photo can keep showing it for up to a day, and copies kept by search engines or web archives cannot be recalled. A photo that is both the directory photo and cleared for the website stays on the website when you stop using it as the website photo; stop using it in the directory, then choose it again without ticking the box. This release does not include photos of children, household photos, uploading in bulk, or members adding their own photo.
+
+This replaces the C9 draft's "are not shown anywhere". That claim overstated a hide set at another congregation, which withholds the website photo person-wide but not this congregation's directory photo. The paragraph does not deny any accepted residual: it keeps the "up to a day" copies, the unrecallable search-engine copies, the files that stay in storage, the null-birth-date adult residual, the unwritable `hide_photo`, and the per-congregation setup. It does not promise that iPhone camera photos work. F289's residual, that a listed person's photo can be fetched by exact link while the site's staff-directory flag is off, is stated in that release and in `docs/deployment.md`; nothing here denies it.
+
+## Follow-Ups (SHIP WITH NOTES)
+
+Each of these is a TODO line above:
+- Before enabling the toggle for the first congregation: the real-iPhone check and one real upload on Vercel (blocking a flag flip, not the merge).
+- 0079, the column drop, in a later release.
+- N1 (tighten four claims) and N2 (seed unlisted worlds, correct the header).
+- The cache sentence on replace.
+- The under-18 dead-end dialogs.
+- The three under-44px shared targets.
+- Q5 and G12 (the operator's leadership-page decision).
+- The DECISION-030 watch, including the 500 KB measurement with real thumbnails.
+- The blob-adapter double-submit race.
+- F330.
+- The Increment 2 and 3 line.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. Walked from QA's 360px artifacts and source reads, with no browser run of my own. Every operator ruling honoured; Phase 1 gaps and Phase 2 rulings addressed in code, deferred with an owner, or tracked. N1, N2 and notes 2–6 ruled; the iPhone HEIC check does not block merge but blocks enabling the toggle; the Vercel `sharp` preview build is a merge condition and one real upload is an enable condition. Pre-merge housekeeping owed: merge `origin/main` (5 conflicting files), the Rule 16 patch, the `docs/deployment.md` 0078 runbook, decisions, and the TODO, map and release-note drafts above. Rule 12 not applicable (no feedback row); Rule 13: operator declined; Rule 15: no architectural change. | SHIP WITH NOTES | 2026-10-28 |
+
+**Handoff:** orchestrator, for the housekeeping cluster (Rules 10, 14, 15 and the release note). Then deployment-engineer for the PR preview `sharp` build, then the operator for the iPhone check before the toggle is enabled. The help pipeline publishes `photos-of-people` after this merges, using the facts and labels above.
+
+Files read (absolute):
+- `/Users/cshenso/git/presby-platform/presby/CLAUDE.md`
+- `/Users/cshenso/git/presby-platform/presby-photos/docs/work-log/2026-10-26-person-photos.md`
+- `/Users/cshenso/git/presby-platform/presby-photos/docs/work-log/2026-10-26-person-photos-inc1.md`
+- `/Users/cshenso/git/presby-platform/presby-photos/docs/work-log/_template.md`
+- `/Users/cshenso/git/presby-platform/presby-photos/docs/work-log/person-photos-inc1.integration.patch`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/person-photos/copy.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/person-photos/limits.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/lib/org-features.ts`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/app/(org)/o/[slug]/admin/community/[id]/edit/photos/page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-photos/src/app/(org)/o/[slug]/admin/community/[id]/edit/photos/tile-controls.tsx`
+- `/Users/cshenso/git/presby-platform/presby-photos/drizzle/0059_presby_account_invitations.sql`
+- `/Users/cshenso/git/presby-platform/presby-photos/drizzle/0078_presby_person_photos.sql`
+- `/Users/cshenso/git/presby-platform/presby-photos/e2e/custom-domains/person-photos-roster.spec.ts`
+- `/Users/cshenso/git/presby-platform/presby-help/docs/work-log/2026-10-26-user-help-inc1.md`
+- `origin/main` copies of `docs/TODO.md`, `docs/product/functionality-map.md` and `docs/architecture.md`, saved in the scratchpad as `todo-main.md`, `fmap-main.md` and `arch-main.md`
+- QA screenshots under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-r4b/walk/` (`360-S-stop-website-dialog.png`, `360-S-roster-after-stop-website.png`, `360-HO-dir-ticked.png`)
+- `…/scratchpad/qa-photos-p5/walk/` (`360-after-upload.png`, `360-directory.png`, `360-roster-platform.png`, `360-remove-dialog.png`)
+- `…/scratchpad/qa-photos-r2/walk/360-features.png`
+- `…/scratchpad/photos-fix/minor-page-360.png`

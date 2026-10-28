@@ -20,7 +20,7 @@
 | 3 — Technical design | tech-lead | Complete for Increment 1. Placeholder list and four operator questions await the operator | Design complete; implementers named per batch | 2026-10-26 |
 | 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4, 5c) | **Complete**: Batches 0, 1 (`d6e7bd7`), 2 (`be636c3`), 5a (`a0825c7`), 3 (`01a4821`), 5b (`1913918`), the help 404 follow-up (`7f4363e`), 4 (`097b43e`) and 5c (`d7e5d39`, plus the `fix(auth)` placeholder `366a1d3`). The auth-touching smoke (MFA-enrolled user, :3660) ran green at Batch 3 and again at Batch 5c; the production lane (:3661) ran green at Batches 3 and 4 | Ready for Phase 5 | 2026-10-28 |
 | 5 — Verification | qa | Complete; chromium 542, custom-hosts 132, prod 100 with MFA user on own servers; 36 mutations red; findings 1–5 non-blocking | PASS | 2026-10-28 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete; four pre-merge gates (preview 404 check, O3 Google, integration re-walk, why-cant-i-see-this table); integration checklist written | SHIP WITH NOTES | 2026-10-28 |
 
 **Phases 1 and 2 are not repeated here.** They bind this design exactly as the parent records them: Phase 1 Gaps 1 to 11 and the adversarial pass, Addendum A (the website section, `/docs`, placeholders), the operator rulings of 2026-10-26 (contact form, the home line, real pages for in-flight features, placeholders only for bigger backlog tracks, the production-truth answer), and the architect's R1 to R14 and C1 to C10. The Carry-forward table below shows where each is handled.
 
@@ -1719,138 +1719,351 @@ Files referenced:
 
 ---
 
-# Phase 6 — Shipped vs Intent (analyst)
+# Phase 6: Shipped vs Intent (analyst): user help, Increment 1
 
-*Pending. The walk repeats for every published page, as its reader, on a dev server at 360px; Help impact is checked against Rule 17.*
+Pipeline `2026-10-26-user-help`, child `2026-10-26-user-help-inc1`. Worktree `/Users/cshenso/git/presby-platform/presby-help`, branch `pipeline/user-help`, HEAD `312805d`. I edited no file, printed no `.env.local` value and started no server.
+
+**How I read it.** I read the parent and child logs in full, all 23 content files, the registry, the allowlist, and the diff against `26fd2d8`. I read QA's walk screenshots (the index, first-day and how-a-congregation-gets-started pages at 360px). I also read the relevant `main` sources: `sign-in-copy.ts`, `no-organization-copy.ts`, `org-features.ts`, `proxy.ts`, `auth.ts` and the email-verify page.
+
+To see what integration breaks, I ran a dry merge of `HEAD` and `main` into the scratch tree `…/scratchpad/p6-merged`. That tree has no `.git`, so the `scripts/pre-push-gate` and `scripts/stats-escape` test failures there are artefacts. The dry merge gave these results:
+- `docs/product/functionality-map.md` conflicts. `docs/TODO.md` and `package.json` auto-merge.
+- `check:help` fails once: H10, `adding-people` label "none has a PresbyPortal account yet".
+- `coverage.test.ts` fails once: `org_portal.sign_in_connect` is uncovered.
+- Nothing else in `src/lib`, `src/components`, `src/app` or `scripts` fails.
+
+**What I did not do.** I did not walk the pages on a live dev server. For the published pages I rely on the implementers' "page, fact, how verified" records and QA's 46-render 360px walk. I therefore do not move any `verifiedIn`. Section "Integration checklist" makes the re-walk of the merged tree an explicit precondition.
 
 ---
 
-## Operator rulings on Phase 3 (2026-10-26)
+## VERDICT
 
-- **O1 placeholders:** approved `worship-planning`, `children-check-in`, `communications`, `event-sign-ups` and `presbytery-tools`. **Struck:** `ledger`, `meeting-minutes`, `directory-export` (operator did not select "Money & records"). No importer placeholder.
-- **O3 Google sign-in:** operator verbatim: "it hasn't been configured yet, but document it still. i'll turn it on and test soon." The `signing-in` page documents Google sign-in. Before that page publishes, the orchestrator confirms with the operator that Google sign-in works in production; until confirmed, the Google section is the one known-unverified claim and Phase 6 must check it.
-- **O5 Rule 17 and the CLAUDE.md / agent-file / template edits:** approved as drafted; the orchestrator applies them at integration.
-- **O2, O4, O6, O7:** defaults taken (link to the public repository until the contact form ships; static header shows "Sign in" to everyone; each in-flight feature's page publishes in its own integration commit, 2b included; add the six "How features are turned on" links).
+**SHIP WITH NOTES.**
+
+Increment 1 delivers what the operator asked for, with the standing instructions drafted rather than yet in force. Four items are gates on the integration, not follow-ups:
+- the Vercel preview check of the help 404;
+- the Google sign-in confirmation (O3);
+- the integration re-walk, as the person each path creates;
+- the one-table fix to `why-cant-i-see-this` (QA finding 3, below).
+
+Everything else becomes a tracked follow-up.
+
+## ONE-LINE TAKE
+
+> A public, static, signed-out-readable help site with 16 live pages, 7 inert pages waiting on their features, 5 labelled placeholders and a tripwire that already catches the two things 2b's merge will break. It is honest about its own gaps, and it will be only as current as Rule 17 is applied, and that rule is drafted but not yet in `CLAUDE.md`.
+
+## What's Working
+
+- **The prospective congregation** reads an honest first page. It says no sign-up form exists and the team sets a congregation up. It admits there is no contact form and points to the public repository with a warning not to post private details. Nothing names a congregation or counts tenants, and the placeholders say "no date".
+- **The member** gets plain-language pages on exactly the support questions: signing in, locked account, password reset, using or losing a code, changing email, and why a tile or congregation is missing.
+  - The best page is `why-cant-i-see-this`. It corrects the design's assumption: a tile is shown whatever the role, and the page then says "you don't have permission".
+  - The deactivated-account text states what people actually see ("Wrong email or password.") rather than the design's unreachable string.
+- **The founding administrator** gets `first-day-as-administrator`, built from a real walk as an accepted-invitation founder. It says plainly what the founder cannot do yet. The Addendum A question is answered by walking, not by memo: the founder holds neither `branding.manage` nor `events.manage` and cannot grant them.
+- **Failure paths.** The help 404 is a real 404 that links to the index. Pending, planned-at-wrong-path, unknown and deeper paths give one identical body. Timing was measured, the response is `no-store`, and a custom host gets the neutral 404 byte for byte. QA proved this on a production build.
+- **Mobile.** Every page and the index pass at 360px in light and dark. Tap targets are 44px, tables sit in focusable regions, and `<details>` keeps `display: list-item`. The home bar signed in was measured at 360. I read three of QA's screenshots and they match the claim.
+- **Images.** All seven were read by QA and show only invented names. The guard refused the real database, with counts only, before anything was written.
+- **Doing it by the book.** QA ran 36 mutations. The unit, chromium, custom-hosts and prod lanes all passed with an MFA-enrolled user on the auth-touching gate.
+
+## Intent-vs-Shipped Diff
+
+| Phase 1 / operator said | Shipped | Verdict |
+|---|---|---|
+| Public `/help`, platform palette, platform hosts only, no session read | Static `(documentation)` group; proxy prefix bypass with no new import; custom host gets the neutral 404; `dynamic = "error"` holds | matches |
+| Organized by task and audience; "Needs" block; "Why can't I see this?" | Index by audience; Needs block pinned to the catalog; the symptom table exists | matches |
+| Only shipped behaviour documented | The operator revised this: in-progress features get real pages, backlog tracks get placeholders. Seven pending pages are written and not rendered. Five approved placeholders ship. The three struck ones appear nowhere | matches the revised intent |
+| Contact channel (Q3): a contact form, no published address | Increment 2 by the architect's split. Interim: "Ask the person who invited you" and the repo's issues page | acceptable drift, with a cost. See finding F374 |
+| Home line replaced; Help links in bar, menu, `/signin`, `/totp`, `/access-pending`, toggle-off states | All present and 44px. `/invite` and `/no-organization` are deferred to the publishing commit by design | matches |
+| Screenshots from fixtures only, human read | Seven images; fail-closed guard G1–G6; QA read all seven | matches |
+| Standing instructions for keeping it up to date | Rule 17 text, agent/skill/template edits and nine tripwires are drafted. `check:help` plus `coverage.test.ts` is real and in CI. `CLAUDE.md`, the agent files and the skills are not edited, by Rule 16, and apply at integration. Not yet in force | partly delivered. See "Rule 17 machinery" |
+| Website section; custom domain only as "ask us"; no giving | Delivered from a role walk. Page says the site's pages are edited by whoever maintains it, not in the portal | matches |
+| Founding-administrator role walk (Addendum A) | Done. It found a real product gap (F362) | matches, and valuable |
+| `/docs` public developer docs | Increment 3. The proxy bypass for `/docs` is live with no route behind it, a framework 404, pinned by test | deferred as planned |
+| Lost phone and codes: say plainly there is no self-serve path and name the channel (Phase 1 Flow 3) | The page says there is no reset button, then "Ask the person who invited you." Most inviters cannot reset it | gap. See F374 |
+
+## Reader walks
+
+**Prospective congregation** (`what-presbyportal-does`, `how-a-congregation-gets-started`). The reader understands what exists and that setup is by invitation. The first page does not mention the website, the public calendar or giving. That is honest, not wrong. The contact path is a public GitHub issue. This is an acceptable interim that the page labels correctly, but it is a thin front door.
+
+**Member.** Strong. Two gaps:
+- A person who loses both phone and codes reads "no button resets it. Ask the person who invited you." The inviter is usually a church administrator who cannot reset it either. Only the platform team can. The page must say so.
+- A member who changes their email may see "Something went wrong" after a successful change. The page documents the bug as a workaround (F357).
+
+**Founding administrator.** The first-day page is accurate and kind about the two dead tiles. Reading it as the person, two of the five Administration cards say "ask the person who invited you". That is true, and it is the weakest part of the first day. The page's step 2 says a Session member needs an account but, until 2b's page publishes, has no way to say how.
+
+## Rule 17 machinery: does it deliver the "standing instructions"?
+
+**What is real.**
+- `check:help` (H1–H19) plus `coverage.test.ts` runs in CI as the ninth tripwire.
+- Verified by QA mutation: banned phrases, a renamed unique label, a pending token moved to Done, literal `/help` hrefs, import boundary, headings, links, images, slug history, `verifiedIn` bound, and the map naming every published slug.
+- A new toggle or tile with no covering page fails the unit suite. That is the genuine forcing function for "a new feature gets a page".
+
+**Gaps in how the standing instructions work.**
+1. **Rule 17 contradicts Rule 16 on the ordinary case (F373).**
+   - Rule 17 says a feature in flight gets a `pending` page tied to a `[help:<token>]` on an open TODO line.
+   - But `docs/TODO.md` is a Rule 16 shared file, edited only at integration. A feature branch cannot add its token mid-pipeline, so H12 would fail on its own CI.
+   - The practical rule is: the feature's own branch adds its page as `published` with no `requires`, and the new-toggle coverage test forces it. `pending` plus a token is only for a page written before its feature's branch merges, by a different pipeline.
+   - The draft does not say this. Add the sentence below.
+2. **The pending-to-published coupling rests on the orchestrator.**
+   - The five token lines are dedicated In Flight lines the help pipeline wrote, not the features' own TODO lines. Treasury and photos can merge, add their own Done line, and leave the dedicated line open. Their pages then silently stay pending, and `check:help` passes.
+   - Mitigation: every integration runs `grep -n "\[help:" docs/TODO.md` and reads each open line against what has merged (added to the checklist and to Rule 17).
+3. **`/pre-push` does not run `check:help`.** It runs four tripwires individually (audit, sql-date, secrets, hydration-gate). Only CI runs `npm run check`, so a red `check:help` is found after the push. The drafted Step 7 bullet is advisory. Add a hard Step 3g (F377).
+4. **Nothing ages the `verifiedIn` stamp (F376).** H13 only bounds it above. Pages will read "Last checked against release 0.47.0" while the app is 0.49.x. That is honest, but nothing tells anyone the stamp is old. Add an advisory when a stamp is more than two minors behind `package.json`.
+5. **The Features table in `turning-features-on-and-off` is not tied to the catalog (F375).** `coverage.test.ts` checks that keys are covered, not that the table lists them. The dry merge shows the page is already stale: "This table lists the features a new congregation sees" is false the moment "Connect people when they sign in" (on by default) exists. Add a test that every non-operator-enabled catalog name appears in that page.
+6. **H10 is satisfied by a label anywhere in `src/` (QA finding 4).** Accepted as R7 defines it. The human walk is the backstop.
+7. **Known defects with a help workaround have no token.** The email-change error, the phone Public-listing column and the founder-keys gap all have help sentences that will outlive their fixes. `limitationUntil` exists for exactly this, so use it (see TODO lines).
+8. **The monthly re-walk of 23 pages is a real load.** It is acceptable at this size.
+
+**Net.** The machinery is sound for what code can see and honest that it cannot see behaviour changes inside a feature. It becomes "standing instructions" only when the CLAUDE.md, agent, skill and template edits land, and with the Rule 17 amendment below. Until then, treasury and photos Phase 6 must be handed their help impact by hand, as F343 did.
+
+**Rule 17 amendment (add after the "A feature in flight" sentence).**
+
+> The ordinary case needs no token: the feature's own branch adds or edits its page as `published`, with no `requires`, in the same PR, and a new toggle or tile with no covering page fails the unit suite until it does. Use `pending` plus a `[help:<token>]` only for a page written before its feature's branch merges. The token goes on a dedicated In Flight line the orchestrator adds at integration (TODO.md is a Rule 16 shared file), and the feature's own integration commit moves that line to Done and publishes the page, so at every integration run `grep -n "\[help:" docs/TODO.md` and read each open line against what has merged. A known defect that a page works around gets its own TODO line carrying a token and a `limitationUntil` on the page, so the fix names the page.
+
+## Edge Cases
+
+- Empty state: pass. The planned page has an empty state and the index omits empty groups. The Features page empty states are not touched.
+- Failure microcopy: pass. The help 404 is human. Residual: with JavaScript off, the 404 body is a blank shell (F367). That matches how `notFound()` behaves elsewhere in the app, so I accept it.
+- Permission gate: pass. There is no gate by design. The bypass is a segment-boundary predicate, `/helpx`, `/helpdesk`, `/HELP` and `/help%2Fx` redirect, and `/help/../admin` normalises to `/signin`. The unverified-2FA reader reaches `/help` but still meets `/totp` on `/o/*`.
+- Audit event: not applicable. There are no mutations.
+- Mobile (360px): pass with one note. `why-cant-i-see-this` and `turning-features-on-and-off` keep three-column tables, and the last column ("Who can fix it" and "Applies to") is off-screen until the reader scrolls. On the page whose job is "who fixes it", that hides the answer. Required fix below.
+- Adversarial: `?next=` and `?callbackUrl=` reflect nothing. External links carry `noreferrer noopener`. Raw HTML and `javascript:` render as text. No real congregation name appears in content. No tenant count appears.
 
 ---
 
-## Phase 2: ruling on the help 404 (after Batch 3)
+## Rulings on QA findings 1–5
 
-*Architect, 2026-10-28. Worktree `/Users/cshenso/git/presby-platform/presby-help`, HEAD `72e0019`. Read-only; no file was written.*
+| # | Ruling |
+|---|---|
+| 1. `you@example.org` placeholder not in a Copy table | Accepted. Record it as a one-line Copy ruling. `example.org` is already used by two sibling admin forms and `example.com` by two others, so no inconsistency is introduced. The fix removed a real-looking starter address from every visitor's sign-in page. No follow-up. |
+| 2. Two aria-labels ("Help site", "More help pages") not in C1 | Accepted. Both are accurate. Add them to the Copy record. No code change. |
+| 3. Three-column tables at 360px | **Required before merge for `why-cant-i-see-this`.** Convert its table to four short entries (what you see, what it means, who can fix it), as Batch 5b did for the same reason. Re-check at 360. For `turning-features-on-and-off` (the "Applies to" column), it is a follow-up (F380). |
+| 4. H10 satisfied by a label elsewhere in `src/` | Accepted as designed. Follow-up (low, F381): let a label optionally name its file for the few most screen-specific ones. |
+| 5. F-new-r, "You can put services on the calendar as events." | Do not ship it as written. It is false for a first congregation's administrator, who cannot add events (F362). Minimal truthful edit: "Someone who holds the events role can put services on the calendar as events." It edits operator-approved copy, so it needs the operator's nod. If F362 is approved and ships, restore the original. |
 
-### Verdict
+## Rulings on the 5a/5b/5c product findings that need the operator
 
-**Approved with suggestions: Option C, a new one.** Add a catch-all segment, `help/[...unmatched]/page.tsx`, that always calls `notFound()` and is `force-dynamic`. Options A and B' are rejected. Option B (accept the framework 404) is the fallback only if the Vercel preview check below fails.
+- **F-new-i (founding administrator lacks `events.manage` and `branding.manage`): recommend yes, give the founder both, plus `event_types.manage`.**
+  - On the first day, two of the five Administration cards are dead ends. This is the largest gap between "what the portal offers" and "what the first user can do".
+  - The founding-administrator bundle is a bootstrap role (DECISION-155), not a constitutional office, so DECISIONS 101 and 115's constitutional-duty test does not govern it. The operator already extended that bundle once (`careers.*`, DECISION-265). All three keys are tier 1, so "No Role Carries a Wildcard" is not engaged.
+  - It is a full Feature: a migration to `presby_founding_administrator_permission_keys` plus a backfill for the two live congregations' existing founding-administrator roles, with an audit row, and a new DECISION.
+  - Help impact is large: `first-day-as-administrator`, `roles-who-can-do-what`, `events-and-the-calendar`, `your-congregations-website`, the F-new-r line and the `admin-hub` image captions.
+  - Register it now with a token and a `limitationUntil` on those four pages, so the fix forces the edits.
+- **F-new-k (Granted-by shows the platform administrator's email): fix.** A congregation's administrator should not read the operator's account address, and it will end up in a screenshot. Render "PresbyPortal team" for any grantor who is a platform actor with no membership in the viewing organization. Bug-fix variant. The help pages say nothing about this column, so there is no help edit.
+- **F-new-m (a visitor can be recorded as a Ruling Elder): fix, as a Phase 1 for a bug-fix pipeline.**
+  - A Session seat should require a current roll member (and a deacon likewise). The pastor exemption stays, since a pastor's membership is the presbytery's.
+  - Today a visitor counts as a Session seat in the banner. With 2b, that visitor can be invited and then holds the approval role without being a member.
+  - It is not an escalation beyond the founder's own power (DECISION-205 already permits self-approval), so it is integrity, not an emergency. Whether a non-member may hold other offices (trustee, treasurer) is the operator's call at that Phase 1.
+- **F-new-j (nine event types, four seeded Retired): no action.** The help says "some are switched off at first" and is true. Revisit only if the operator thinks the default set is wrong.
+- **F-new-h (Public listing and Display order columns hidden on a phone): fix as a small UX change.** An administrator on a phone cannot see or change who is named on the website. Give it a token and a `limitationUntil` on `your-congregations-website`, so the "use a wider screen" sentence leaves with the fix.
+- **F-new-l (map's recurrence text is stale): fix at integration (Rule 14).** The form offers a simple interval (Weekly, Every 2 weeks, Monthly (same date)) or a specific day of the month ("the 1st to 4th or last [weekday]"). The map says "weekly / monthly-by-weekday". No TODO needed.
+- **F-new-r:** see QA finding 5.
+- **Email-change "Something went wrong" bug on main (F-new-c, F357): fix it, on its own small bug-fix pipeline, before or alongside the help merge.** I read `(email-verify)/account/verify-email/[token]/page.tsx` on main. `revalidatePath("/account")` runs during render right before the redirect. That is unsupported in Next 16 and throws after the address is changed, so the person sees an error after a success. Dropping the call is the likely fix, with a failing-first regression test. Put a token and `limitationUntil` on `your-account` so the workaround sentence is deleted with the fix. If the fix does not land first, publish with the sentence.
+- **Deactivated-account message (F-new-a, F356): keep the neutral behaviour, no product change.** Password sign-in returning "Wrong email or password." for a deactivated account matches how the lockout and unknown-address cases behave, and the help states it truthfully. The dead `?error=deactivated` text is reachable only when a session user exists with `isActive === false`, and the jwt callback signs that user out first. A silent sign-out for someone already signed in is a UX wrinkle: low priority, either delete the dead branch or give the signed-out person a message. No help change.
 
-### What Next 16.4.2 actually does (read from `node_modules/next`, version 16.4.2)
+## The open items
 
-- **Why the help 404 is skipped.** In `dist/build/templates/app-page-runtime.js:1092-1096`, if a dynamic page has `prerenderInfo.fallback === false` and the path was not prerendered, the page does not render. Instead it throws `NoFallbackError` (or calls `render404()` when `adapterPath` is set). The page never runs, so `notFound()` is never thrown inside the help segment and `help/not-found.tsx` is never reached. That is the cause of F-new-g.
-- **The router tries the next matching route.** `dist/server/lib/router-server.js:365` catches `NoFallbackError` and calls `handleRequest(handleIndex + 1)`. `dist/server/lib/router-utils/resolve-routes.js:191-197` then moves on to the next matching dynamic route ("when resolving fallback: false the render worker may return a no-fallback response which signals we need to continue resolving"). The framework 404 appears only because nothing else under `/help` matches.
-- **The catch-all can sit beside `[slug]`.** `dist/shared/lib/router/utils/sorted-routes.js` allows `[slug]` and a *required* catch-all `[...x]` at the same level. It sorts `[slug]` first; only an optional catch-all `[[...x]]` would conflict.
-- **What follows from those three:**
-  - `/help/<unknown|pending|planned-slug>`: `[slug]` declines, then the catch-all matches.
-  - `/help/planned/<unknown>`: `planned/[slug]` declines, `[slug]` cannot match two segments, then the catch-all matches.
-  - `/help/a/b/c`: the catch-all matches.
-  - All of them reach `help/not-found.tsx` inside the `(documentation)` layout, so every case gets one body by construction.
-- **Not verified: Vercel.** The `NoFallbackError` throw is guarded by `!isMinimalMode`, and Vercel runs Next in minimal mode. On Vercel, the decision to keep routing after a `fallback: false` miss belongs to the platform's routing config, not to this code. The router-server comment says it mirrors that behaviour, but I have not seen it on Vercel. A preview check is therefore a merge gate (see Tests).
+- **O3, Google sign-in: hold or confirm. The `signing-in` page may not publish its Google section on an unconfirmed claim.**
+  - The operator said (verbatim) the client "hasn't been configured yet, but document it still. I'll turn it on and test soon", and the orchestrator's condition is that the claim is confirmed before the page publishes.
+  - Google appears in four places: `signing-in.md` (the intro, the "Signing in with Google" section, the one-line "no password" note and the screenshot caption), `using-your-code.md` line 7, `your-account.md` line 33, and the `signin-form` image, which depicts the button that every visitor already sees.
+  - The checklist step is binary. Ask the operator whether Google sign-in is configured and tested in production.
+    - **Yes:** publish as is, and re-walk the round trip (button, return, same-address account, "Access Denied" on an unverified or deactivated address, no password for a Google-made account).
+    - **No:** publish `signing-in` with the Google section and the other Google sentences removed, keep the picture's caption factual ("the sign-in page"), and file the restore as a TODO line.
+  - Either way the button is on the live page today. If the client is unset, that is itself a product finding to hand to the operator.
+- **`verifiedIn` re-walk against 0.48.x:** the integration walk is a precondition, not a note. The screens that changed between `26fd2d8` and `main` decide which pages need it:
 
-### Why each option was ruled the way it was
+  | Screens that changed | Pages to re-walk |
+  |---|---|
+  | `no-organization` | `why-cant-i-see-this`, `home-and-switching-congregations` |
+  | `account/2fa`, `verify-email` | `your-account`, `using-your-code` |
+  | `admin/community` (person edit card, Pending approvals) | `adding-people` |
+  | `admin/officers` (session note, roster) | `officers-and-the-session` |
+  | `(invite)` | `how-a-congregation-gets-started` |
+  | the Features page (new card) | `turning-features-on-and-off`, `first-day-as-administrator` |
 
-| Option | Custom-host neutral 404 | Static lock (R3) | Unknown, pending, planned identical | Caching cost | Ruling |
-|---|---|---|---|---|---|
-| A: `dynamicParams = true` | unaffected | weakened on both content routes | yes | **one cache write per distinct URL** (`s-maxage=31536000`, measured), with attacker-chosen URLs | Rejected |
-| B: accept the framework 404 | unaffected | intact | yes | none | Fallback only: leaves the Phase 1 Flow 1 dead end |
-| B': root `src/app/not-found.tsx` (or the experimental `global-not-found`) | **changed** (see below) | intact | yes | none | Rejected |
-| **C: force-dynamic catch-all** | unaffected (the proxy's first branch rewrites custom hosts to `/site/<host>/…` before `/help` routing exists) | intact on all four content routes | yes, one code path | none: a dynamic render is `no-store`; the cost is one function call per miss, the same as a `/site` neutral 404 | **Adopted** |
-
-- **Why B' is rejected.** `(public)/site/[slug]` has no `not-found.tsx`, so today a custom host's neutral 404 is the framework 404 bubbling up to the root. A root `not-found.tsx` would replace that body on every church's domain with platform-authored copy. That is either a platform identity on a church's domain (which "A Custom Host Is a Key, Not an Identity" forbids) or a change to the DECISION-040 reference body that `lockdown.spec.ts` pins byte for byte. Both are global changes outside this feature.
-- **Rejected: a `next.config.ts` fallback rewrite** to a static 404 page. It needs a `has: host` guard (F151), adds an addressable sentinel URL, and leaves more unverified interactions with `fallback: false` and with Vercel than C does.
-
-### Exact implementation (full-stack-developer, Phase 4 follow-up, before Batch 5b)
-
-1. **New file `src/app/(documentation)/help/[...unmatched]/page.tsx`.** The whole file is:
-   ```tsx
-   import { notFound } from "next/navigation";
-
-   // Every /help URL that is not a published page or a planned placeholder lands here after
-   // [slug] / planned/[slug] decline it (dynamicParams = false), so all of them get
-   // help/not-found.tsx. force-dynamic: a miss is never written to the cache (DECISION-293).
-   export const dynamic = "force-dynamic";
-
-   export default function UnmatchedHelpPage(): never {
-     notFound();
-   }
-   ```
-   - No `generateStaticParams`, no `generateMetadata`, no `dynamicParams` export, and no `params` read.
-   - It is not a content route, so the R3 rule (`dynamic = "error"`) does not apply to it. Its lock is the source scan below.
-2. **`help/[slug]/page.tsx` and `help/planned/[slug]/page.tsx` are unchanged.** Keep `dynamic = "error"`, `dynamicParams = false` and `generateStaticParams`. In `[slug]/page.tsx`, change the comment to say that the catch-all answers a slug outside the list.
-3. **No `loading.tsx` (R9 still holds).** `notFound()` is thrown before any flush, so the response is a real 404.
-4. **Unchanged:** `help/not-found.tsx`, `src/proxy.ts`, `next.config.ts`, the root of `src/app/`, and `/docs` (no route yet; the framework 404 there is still what `help.spec.ts` asserts).
-
-### Tests that pin it
-
-- **`src/app/(documentation)/shell-boundaries.test.ts`**
-  - Add `help/[...unmatched]/page.tsx` to the expected file list.
-  - The `dynamic = "error"` test still covers exactly the four content pages, and excludes the catch-all by name.
-  - The `dynamicParams = false` test's regex `\[[^\]]+\][\\/]page\.tsx$` would match the catch-all. Exclude it by name so the count stays 2.
-  - New test: the catch-all source matches `export const dynamic = "force-dynamic"`, imports only `next/navigation`, and contains no `generateStaticParams`, `generateMetadata`, `dynamicParams` or `params`.
-  - New test: no `loading.tsx` and no root `src/app/not-found.tsx` or `global-not-found.tsx` exists. This guards B' from coming back.
-- **`help-routes.test.tsx`**
-  - Keep line 67's `dynamicParams === false`.
-  - Add a test that `UnmatchedHelpPage()` throws the Next not-found error (digest `NEXT_HTTP_ERROR_FALLBACK;404`).
-- **`e2e/help.spec.ts`**
-  - Remove the `test.fixme` (it becomes a real test) and delete the FINDING comment.
-  - Extend the "indistinguishable" test's paths with `/help/planned/no-such` and `/help/no-such-page/deeper`. Every body must equal the reference, and the reference must contain the heading "We couldn't find that page" and the "Go to the help index" link.
-  - Remove the "Status and URL only" restriction from the `/help/planned/<unknown>` test.
-- **New `e2e/help-404.spec.ts`**
-  - It runs in both lanes: `chromium` picks it up by default, and the `prod-build` project's `testMatch` in `playwright.config.ts` widens to `/(hydration\/.*|help-404)\.spec\.ts$/`.
-  - Request `/help/no-such-page` and `/help/planned/no-such` twice each.
-  - Assert: status 404; the help heading; `cache-control` contains `no-store`; no `s-maxage`; and no `x-nextjs-cache` header on either response.
-  - The production lane is what proves the caching claim.
-- **`e2e/custom-domains/lockdown.spec.ts`:** add `/help/no-such-page/deeper` to `PLATFORM_PATHS`. It must stay the neutral 404, byte-identical, in both lanes. This pins that the catch-all cannot be reached from a church's domain.
-- **Merge gate (orchestrator or deployment-engineer, recorded in the work-log before `/merge-pr`).** On the PR's Vercel preview, `curl -sI` and a body read of `/help/no-such-page` and `/help/planned/no-such`, each requested twice:
+  The rest (`signing-in`, `getting-help`, `using-the-directory`, `events-and-the-calendar`, `your-congregations-website`, `roles-who-can-do-what`, `what-presbyportal-does`) keep `0.47.0` unless the walker finds a change. Do not restamp in bulk. The walk is done at 360px on `development` as an accepted-invitation founding administrator, not a seeded user.
+- **Vercel preview check of `/help/no-such-page`:** a merge gate before `/merge-pr`, not a note.
+  - On the PR's preview, `curl -sI` and read the body of `/help/no-such-page` and `/help/planned/no-such`, each twice.
   - Expect 404, the help heading, `no-store`, and no `x-vercel-cache: HIT` on the second request.
-  - **If the preview serves the framework 404,** Vercel's routing does not continue past `fallback: false`. In that case use Option B: delete the catch-all, reword DECISION-293's 404 sentence to "the framework 404, accepted", and restore the `fixme`. Do not fall back to A.
+  - If the preview serves the framework 404, use Option B as ruled:
+    1. Delete `src/app/(documentation)/help/[...unmatched]/page.tsx`.
+    2. Revert the catch-all cases in `shell-boundaries.test.ts` and `help-routes.test.tsx`.
+    3. Change `e2e/help-404.spec.ts` and the "indistinguishable" assertions in `e2e/help.spec.ts` to the framework body.
+    4. Reword DECISION-293's 404 sentence to "the framework 404, accepted".
+  - Never fall back to `dynamicParams = true`.
 
-### DECISION-293: text change (the orchestrator records it)
+---
 
-Add this after "…read only at build (`dynamic = "error"`, `dynamicParams = false`).":
+## Integration checklist (exact, in order)
 
-> Every `/help` URL that is not a published page or a planned placeholder (unknown, pending, retired, a planned slug at the wrong path, or a deeper path) is answered by one `force-dynamic` catch-all, `help/[...unmatched]`, which calls `notFound()`. So each one gets `help/not-found.tsx` with an identical body and no per-URL cache entry. There is no root `not-found.tsx` and no `global-not-found`, because the custom-host neutral 404 (DECISION-040) must not change.
+Preconditions: two-factor by role (0.49.0) is on `main`. Treasury and photos are not, so their pages stay pending. If treasury has merged first, publish its two pages as well (step 7).
 
-Add these to *Revisit if*:
+**0. Gates before touching anything.**
+1. Ask the operator the O3 question. Hold the `signing-in` Google edits until answered.
+2. Get the operator's nod on the F-new-r one-line edit.
+3. Preview check as above; record the result in the work-log.
+4. `git merge-tree` showed one conflict, `functionality-map.md`. Resolve it by taking `main`'s file and re-applying the branch's edits (step 9).
+5. One-time, read-only production check that no organization already holds the slug `help` or `docs` (the Batch 2 note: `reserved-slugs.ts` now reserves both).
 
-> …or if Vercel stops continuing past a `fallback: false` miss to the next matching route (the preview check in `e2e/help-404.spec.ts`'s gate), or if `cacheComponents` is enabled (`dynamic`, `dynamicParams` and `force-dynamic` all go away).
+**1. Merge `main` into `pipeline/user-help`.** Expect `check:help` to report only H10 on `adding-people`, and `coverage.test.ts` to report only `org_portal.sign_in_connect`. Anything else is new. Stop and read it.
 
-**Amendments to R3 and R9.**
-- R3: "every content route" means the four pages that render content; the catch-all renders none.
-- R9: `help/not-found.tsx` is reached through the catch-all, not through the `[slug]` page's own `notFound()`. That call only fires at build, so it is now a guard rather than the path a reader takes.
+**2. Shared files commit (orchestrator).** `chore(integration): user-help shared files`.
+- `docs/decisions.md`: DECISION-293 with the architect's 404 sentence and "Revisit if" additions, DECISION-294, and DECISION-295 (recorded now because the `/docs` bypass is live, though the content ships in Increment 3). The two design decisions (DECISION-new-1, DECISION-new-2) take the next two free numbers after any other pipeline's pre-assigned block. Do not guess; read the head of `docs/decisions.md`.
+- `CLAUDE.md`: Rule 17 plus the amendment above; the Project Layout block; `(documentation)` in the platform-palette list; "eight" becomes "nine" in the Phase 4 gate (line 272) and Common Commands (line 473), plus the three `check:help`, `help:shots`, `check` command lines.
+- `.claude/agents/{analyst,qa,tech-lead,architect}.md`, `.claude/skills/release-notes/SKILL.md` (Step 4 and the Feature and Enhancement templates), `docs/work-log/_template.md` (four edits), and `.claude/skills/pre-push/SKILL.md`. For the last, add the drafted Step 7 bullet and a new hard **Step 3g: `npm run check:help`**. The anchors all exist.
+- `docs/STATE.md`, `docs/reviews/log.md`, `docs/briefings.md`.
+
+**3. Edits to published pages (text only; re-walk each at 360px).**
+- `adding-people`: replace the label "none has a PresbyPortal account yet" with the verbatim substring "none has connected a sign-in yet". Replace line 59's "Today the PresbyPortal team sets that up: send a support ticket" with "A member of the Session approves only after their sign-in is connected to their record. See [Inviting people to sign in](/help/sign-in-invitations)." Rewrite the "no account" banner bullet to match, and add the invite hand-off. Delete `limitationUntil`.
+- `officers-and-the-session`: the same sentence at line 40, and delete `limitationUntil`.
+- `how-a-congregation-gets-started`: delete the `limitationUntil` marker, and optionally one sentence that the administrator can invite the people they record.
+- `why-cant-i-see-this`: delete the marker. In "What to do", mention "Check again", the invitation card ("You're invited to…") and a link to `sign-in-invitations`. **Convert the three-column table to short entries (QA finding 3).**
+- `turning-features-on-and-off`: add the "Connect people when they sign in" row (On, any organization). The table intro says the table lists what a new congregation sees, so it is wrong until this is done.
+- `first-day-as-administrator`: step 2 and step 3 link to `sign-in-invitations` so a Session member can be invited.
+- `your-account`: link the "Two-factor authentication" section to `setting-up-two-factor`. Keep the email-change sentence until the fix ships.
+- `using-your-code` and `setting-up-two-factor`: replace the lost-phone line with the plain truth (F374): "PresbyPortal has no button that resets two-factor sign-in for you. Only the PresbyPortal team can reset it. Ask a church administrator to send the team a support ticket for you. See [Getting help](/help/getting-help)." Also link `setting-up-two-factor` from `using-your-code`.
+- `using-the-directory`: unchanged. `person-photos` is not on `main`, so its marker stays.
+- The F-new-r placeholder line per QA finding 5.
+- If O3 comes back "no": strip the Google sentences listed above.
+
+**4. Publish the pending pages whose features are on `main`, in the publish commit.** `docs(help): publish accepting-your-invitation, setting-up-two-factor, sign-in-invitations and who-is-asked-for-a-code`. Per page: set `status: "published"`, set `verifiedIn` only after the walk (the walked release, not bulk), append the slug to `slug-history.ts`, and add `/help/<slug>` to the map (H15).
+- `recovery-codes` (the F166 token): `accepting-your-invitation` and `setting-up-two-factor` publish together, and `signin-invites` is already Done on `main`.
+- `signin-invites`: publish `sign-in-invitations`. Before it goes out, re-read it against the 2b "do not write" list. One edit is required: change "This option adds no role. It only connects." to "This option adds no role. The person gets whatever access their record already carries." (do-not-write item 6). The operator's hold on real invitations is a hold on sending and on the what's-new entry, not on documentation. Per O6 the page publishes. Add nothing about the hold, and do not publish the what's-new entry.
+- `two-factor-by-role` (F343, if merged first): publish `who-is-asked-for-a-code`, link it from `setting-up-two-factor` and `accepting-your-invitation` (5c note 5), and confirm the platform team is still the only writer of a congregation's policy. Optionally add one sentence and link to `roles-who-can-do-what` for the roles that require a code. F343 listed two platform-admin pages in its own help-impact note. Those are out of scope for `/help` (platform operators are not an audience).
+
+**5. TODO flips (in the same commit as step 4).** Move the dedicated In Flight lines for `signin-invites`, `recovery-codes` and `two-factor-by-role` to `## Done` as `- [x]` with the date, keeping each token. Do the same for `reimbursements` only if treasury has merged. Leave `person-photos`, the five placeholders and any unmerged line open. `npm run check:help` is the checklist: H12(b) names a page that should have gone live, and H12(f) names the four `limitationUntil` pages.
+
+**6. The in-app links (code, the same commit as the page they point to).**
+- `/invite`: "Help with this page" via `helpHref("accepting-your-invitation")` with `rel="noreferrer"`, visible in every state including the dead-link state.
+- `/no-organization`: "Why can't I see this?" via `helpHref("why-cant-i-see-this", "not-connected-to-a-congregation")`.
+- Both are strings outside the design's Copy table, so record them as Copy rows, and add a unit test for each link. Both pages are 2b's rewritten files, so rerun `invitation-new-account`, `invitation-existing-account`, `no-organization-connect` and `community-sign-in-invite` after the links go in.
+- `your-account` also gains its `setting-up-two-factor` link (step 3).
+
+**7. Coverage for `org_portal.sign_in_connect`.** Do not allowlist it. `sign-in-invitations` already lists it in `covers` and publishes in step 4. Only if that page is held, add an allowlist entry and raise `ALLOWLIST_PIN` from 16 to 17. A new toggle that the tripwire says "no page covers" is the signal working. If treasury has merged, its two toggles and tiles (`org_portal.reimbursement`, `tile:reimbursements`, `tile:reimbursements-admin`) follow the same path.
+
+**8. Screenshots.** No new images. The Features-page and admin-hub captions say "this congregation has already turned on its features". After F362 ships or the Features page gains the Connect card, re-capture from a from-scratch database (`HELP_SHOTS_DB_OK=1 … npm run help:shots`, then bump `capturedIn` and sizes).
+
+**9. Functionality map.** See below.
+
+**10. Housekeeping, then QA scoped run and the preview check.** Release notes through `/release-notes` (a minor; I expect 0.50.0 if 0.49.0 lands first, the orchestrator's number), TODO per Rule 10, Rule 12 does not apply (the origin is the operator's request, not a feedback row), and Rule 13 is not required, so I draft no what's-new entry. Run `npm run check`, the unit suite, the chromium MFA smoke and the prod lane on the merged tree. QA's scope for the integration diff is the copy-truthfulness check on the changed pages and the `/invite` and `/no-organization` links, plus the walk below.
+
+**The walk the integration owes (Phase 6 rule, run by whoever integrates, recorded in the work-log).** As an accepted-invitation founding administrator on `development` at 360px, list each page and what it shows, with the help link or page for each:
+1. The `/invite` link page: Help link present, "Create your account".
+2. "Your account is ready", then `/signin`, then `/account/2fa` enrolment, then the ten codes, then Continue (`setting-up-two-factor`).
+3. Landing on `/o/<slug>` (`first-day-as-administrator`): Administration shows the five cards, and Manage events and Branding deny.
+4. Community, recording an elder, the Pending approvals banner, then inviting the elder (`sign-in-invitations`, the card on the person's edit page).
+5. As that elder, `/no-organization` with "Check again" and the second-factor notice.
+
+---
+
+## TODO-ready lines (Rule 10)
+
+Add to `docs/TODO.md`. Tokens only where a page carries a `limitationUntil`.
+
+```
+- [ ] **User help Increment 2: the `/help/contact` form (operator ruling 2026-10-26; numbers assigned at kickoff).** An anonymous drop-box table and an `/admin` inbox, written to the architect's C1–C10 (never a ticket, never mail to the typed address, honeypot then Turnstile then rate limits, content-free operator notification). Raises priority: about 14 help sentences now end "Ask the person who invited you", which is a dead end for a lost phone and for a person with no inviter, and the how-a-congregation-gets-started page sends prospects to public GitHub issues. Changing `HELP_CONTACT_LINE` (`src/lib/help/contact.ts`) and the one GitHub sentence is the whole help edit. — `docs/work-log/2026-10-26-user-help.md` Phase 2
+- [ ] **User help Increment 3: public developer docs at `/docs` (DECISION-295, F345).** The proxy already bypasses `/docs` with no route behind it. Needs its own Phase 1 addendum (privacy review, site-kit truth source), the pure-sibling extractions of the catalog, ingest limits and live-slot names (R8, F345, F347), and the shared renderer. Also move `/admin/docs` off `rehype-raw`. Revisit `docs/architecture.md` then (Rule 15). — Phase 2
+- [ ] **Google sign-in: configure and test in production (operator), then confirm the `signing-in` Google section.** The sign-in page shows the button either way. If the section was stripped at integration, restore it from the user-help commit and re-walk the round trip (same-address account, "Access Denied" on an unverified or deactivated address, no password for a Google-made account). — User help Phase 6 (O3)
+- [ ] **Fix the email-change landing: `revalidatePath` runs during render in `(email-verify)/account/verify-email/[token]/page.tsx`, so a successful change shows "Something went wrong" (F357).** Drop the call; failing-first regression test. Delete the workaround sentence in `your-account` in the same commit. [help:email-change-error]
+- [ ] **Decide whether the founding administrator holds `events.manage`, `event_types.manage` and `branding.manage` (F362; recommended yes).** Today the first user finds two of five Administration cards deny them and cannot grant them. Full Feature: migration to `presby_founding_administrator_permission_keys` plus a backfill for existing founders, an audit row, a DECISION amending 101 and 115 for the bootstrap bundle (the DECISION-265 precedent). Help edits: `first-day-as-administrator`, `roles-who-can-do-what`, `events-and-the-calendar`, `your-congregations-website`, the worship-planning placeholder, and the admin-hub image caption. [help:founder-events-branding]
+- [ ] **Show the Public listing and Display order controls on a phone (F361).** The columns are `hidden sm:table-cell` on Officers and Staff, so an administrator on a phone cannot change who is named on the website. Remove the "use a wider screen" sentence from `your-congregations-website` with the fix. [help:phone-public-listing]
+- [ ] **The Roles page "Granted by" column shows the platform administrator's email to a congregation's administrator (F364).** Render "PresbyPortal team" for a grantor who is a platform actor with no membership in the viewing organization. — User help Batch 5b walk
+- [ ] **A visitor can be recorded as a Ruling Elder and counts as a Session seat (F366).** Phase 1 for a bug-fix pipeline: require a current roll member for the Session-seating offices and deacon (pastors exempt); operator decides the other offices. The banner counts the visitor, and with 2b they can be invited and then approve. — Batch 5b walk
+- [ ] **Dead copy and silent sign-out for a deactivated account (F356).** `/signin?error=deactivated` is reachable only when a session user has `isActive === false`, which the jwt callback signs out first. Delete the branch or give the signed-out person a message. Help stays correct either way. — Batch 5a walk
+- [ ] **Help documentation pass 2.** Written pages for giving and the treasurer (the operator's Q5 deferral predates the live giving congregation: ask whether to revisit), sensitive information, groups, staff and parish management. Each deletes its `coverage-allowlist.ts` entry and lowers `ALLOWLIST_PIN` from 16. — User help Phase 6
+- [ ] **Help machinery follow-ups (Rule 17).** (a) A hard `/pre-push` Step 3g running `npm run check:help` and the Rule 17 amendment (F373, F377); (b) a `coverage.test.ts` rule that every non-operator-enabled catalog name appears in `turning-features-on-and-off` (F375); (c) an advisory in `check:help` when a `verifiedIn` is more than two minors behind `package.json` (F376); (d) let a `labels` entry name its file for screen-specific strings (F381); (e) convert the "Applies to" column of `turning-features-on-and-off` for 360px (F380); (f) a second 360px capture for `admin-hub` (F369); (g) link the `/help` index sentence "tell the person who invited you" to `getting-help` (feedback route). — User help Phase 5 and 6
+- [ ] **Flip help indexing at launch (R11, Q4).** Remove the inherited `noindex` for `/help` pages, add `Allow: /help` and a platform sitemap listing only published help pages. Planned pages keep per-page `noindex`. — Phase 2
+- [ ] **`README.md:14-20` says sign-in is gated off and the site serves public pages only, which contradicts production (F355).** — User help Phase 3 (documentation review)
+- [ ] **Development holds a directory row named like the operator inside the Alder Creek fixture (F359).** No image or committed file uses it, and the capture database is built from scratch. Scrub it on `development`, alongside the real organization profile row already tracked. — Batch 5a walk
+```
+
+Done line (Rule 10): `- [x] 2026-10-28 — **User help Increment 1 (`2026-10-26-user-help-inc1`, DECISION-293/294/295, F345-F381; no migration) — SHIP WITH NOTES.** Public help site at `/help` ...`, written once the preview check, O3 and the integration walk have passed.
+
+**F-number assignments** (next free was F350; the orchestrator confirms against the other pipelines' blocks):
+
+| F | Finding | Status |
+|---|---|---|
+| F345 | five live slots, not four | open, Increment 3 |
+| F346 | `tickets` cannot hold an inquiry | closed by the increment split |
+| F347 | server-only catalog and ingest limits | closed for Increment 1 by P3-1; extraction in Increment 3 |
+| F348 | exact `PUBLIC_PATHS` would 307 a typo to sign-in | closed by R1 |
+| F349 | TODO checkbox grammar | closed by R6 |
+| F350–F355 | design F-new-1 to F-new-6 (catalog not tsx-importable; Table container not focusable; `/no-organization` and `/invite` link collision; private proxy walker; merge-before-help Done line; README) | 350–354 closed, 355 open |
+| F356 | F-new-a deactivated message | open, low |
+| F357 | F-new-c email-change error | open |
+| F358 | F-new-d map's trusted-device cookie (`b` is F344) | closed |
+| F359 | F-new-e real-named row on `development` | open |
+| F360 | F-new-g help 404 | closed (Option C; preview gate open) |
+| F361 | F-new-h phone Public listing | open |
+| F362 | F-new-i founder keys | open, operator |
+| F363 | F-new-j retired default event types | no action |
+| F364 | F-new-k Granted-by email | open |
+| F365 | F-new-l map recurrence text | closed at integration |
+| F366 | F-new-m visitor as elder | open |
+| F367 | F-new-n 404 body client-rendered | accepted |
+| F368 | F-new-o starter placeholder address | closed (`366a1d3`) |
+| F369 | F-new-p `admin-hub` width | open, low |
+| F370 | F-new-q `config-imports` regex | closed |
+| F371 | F-new-r placeholder line | open, operator nod |
+| F372 | F-new-s H10 never reads pending labels | by design |
+| F373 | Rule 17 vs Rule 16; dedicated token lines | amendment above |
+| F374 | lost-phone dead end; `{{contact}}` can't help | integration edit |
+| F375 | Features table not tied to the catalog | follow-up |
+| F376 | `verifiedIn` has no staleness signal | follow-up |
+| F377 | `/pre-push` does not run `check:help` | integration edit |
+| F378 | sign-in-invitations "It only connects" | integration edit |
+| F379 | giving is live, help is silent | operator, Q5 revisit |
+| F380 | QA 3: 3-column tables | `why-cant-i-see-this` at integration, the other a follow-up |
+| F381 | QA 4: H10 label scope | follow-up |
+
+## Functionality map changes
+
+Batch 5a/5b covered the Help bullet, the "Help (public documentation)" section and `Help:` tags on the bullets the 16 pages cover, and corrected the trusted-device cookie. What is still owed at integration:
+1. Resolve the conflict by taking `main`'s file and re-applying those edits.
+2. The section header and the Help bullet say "First sixteen pages". Update the count and list after step 4 (add the pages published at integration).
+3. Add `/help/planned` and the five planned placeholders, the un-brandable `(documentation)` group, the proxy bypass, and that a custom host answers the neutral 404.
+4. Add `Help:` tags: `/help/sign-in-invitations` on the Community and Account-invitations bullets, `/help/accepting-your-invitation` on the `/invite` bullet, `/help/setting-up-two-factor` on the Account (2FA) bullet and `/account/2fa`.
+5. Header-controls bullet: the avatar menu's "Help" item. Landing-page bullet: the Help link and the "PresbyPortal is in early release." line. `/signin`, `/totp`, `/access-pending` and the six toggle-off states carry the in-app help link.
+6. Events administration bullet (F365): replace "weekly / monthly-by-weekday patterns" with "weekly, every two weeks, monthly on the same date, or the nth weekday of the month".
+7. Bump the surveyed stamp to the release.
+
+## `docs/architecture.md`
+
+No change (Rule 15). It does not enumerate public routes or content, and a static, session-free help tree plus a build-time publication gate is a new surface but not a new subsystem or data flow. The architect reached the same conclusion. Revisit at Increment 3, where a public developer surface may merit one sentence.
+
+## Release-note paragraph (non-engineer)
+
+> **Help is now on the website.** PresbyPortal has a help site at presbyportal.org/help, and anyone can read it without signing in. It has plain-language guides for people who sign in, covering signing in, using your code, your account, why a page or button might be missing, and getting help. For church administrators it covers your first day, turning features on and off, adding people, officers and the Session, roles, events and the calendar, your congregation's website, and inviting people to sign in. There is also a short list of things PresbyPortal does not do yet, which is not a promise and has no date. You'll find a Help link on the home page, in the account menu, and on the sign-in, two-factor and no-access pages. Each guide says which release it was last checked against. The guides describe what the app does today, including where it does not yet do what you might expect: a new congregation's first administrator cannot yet add events or set the congregation's colours without asking the PresbyPortal team, and the guides say so. There is no contact form yet, so for now they point you to the person who invited you. The help pages are not yet listed by search engines.
+>
+> **Help:** `/help` (new).
+
+It does not claim every page is current, does not deny the founder's missing keys, and does not promise search listing.
+
+## Follow-Ups
+
+Each is in the TODO lines above. The four items that must close before merge are not follow-ups: the preview check, O3, the integration walk, and the `why-cant-i-see-this` table.
+
+## Red Flags
+
+None (not NEEDS REWORK). Nothing shipped contradicts the build on the pages as they stand on `pipeline/user-help` against 0.47.0. The two things that will become false on merge are named, tested and in the checklist: the `adding-people` label and the Features table row.
 
 ### Per-Phase Status row
 
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
-| 2 — Architectural review (ruling on F-new-g, the help 404) | architect | Complete. Option C (`help/[...unmatched]` force-dynamic catch-all); A and B' rejected; B is the fallback if the Vercel preview check fails; DECISION-293 amended | Approved with suggestions | 2026-10-28 |
+| 6 — Shipped vs intent | analyst | Complete for Increment 1. Verdict carries four pre-merge gates (Vercel preview check, O3 Google confirmation, integration re-walk as the accepted-invitation founding administrator at 360px, `why-cant-i-see-this` table fix). Rule 17 amendment, integration checklist, F-number assignments, TODO lines, map changes and release-note paragraph provided; no what's-new draft; `docs/architecture.md` unchanged | SHIP WITH NOTES | 2026-10-28 |
 
 ### Handoff
 
-Next is **tech-lead**, briefly. Amend the design's e2e item 2 and the Carry-forward rows for R3 and R9 to match this ruling. Then the work goes to **full-stack-developer**, as a Batch 3 follow-up before Batch 5b. The implementer writes the tests above failing first: for example, the `help-404.spec.ts` heading assertion should be red before the catch-all exists. The orchestrator adds the Vercel preview check to the pre-merge list.
+Next: the **orchestrator**, who applies the integration checklist after two-factor by role (0.49.0) merges. Ask the operator the O3 question and the F-new-r wording first, and the F362 and F366 product questions in parallel (neither blocks the merge). Then run the preview check. Hand treasury and photos their help impact by hand until Rule 17 is in `CLAUDE.md`. After the integration walk and the scoped QA run on the merged tree, no further analyst phase is needed for Increment 1. Each of Increments 2 and 3 starts with its own Phase 1 addendum.
 
-**Files read:**
-- `/Users/cshenso/git/presby-platform/presby-help/docs/work-log/2026-10-26-user-help.md` (R1 to R14)
-- `/Users/cshenso/git/presby-platform/presby-help/docs/work-log/2026-10-26-user-help-inc1.md` (Phase 4, Batch 3)
-- `/Users/cshenso/git/presby-platform/presby-help/src/app/(documentation)/` (every file)
-- `/Users/cshenso/git/presby-platform/presby-help/src/lib/help/content.ts`
-- `/Users/cshenso/git/presby-platform/presby-help/e2e/help.spec.ts`
-- `/Users/cshenso/git/presby-platform/presby-help/playwright.config.ts`
-- In `/Users/cshenso/git/presby-platform/presby-help/node_modules/next/dist/`:
-  - `docs/01-app/03-api-reference/03-file-conventions/02-route-segment-config/dynamicParams.md`
-  - `docs/01-app/03-api-reference/03-file-conventions/not-found.md`
-  - `build/templates/app-page-runtime.js`
-  - `server/lib/router-server.js`
-  - `server/lib/router-utils/resolve-routes.js`
-  - `shared/lib/router/utils/sorted-routes.js`
+Files:
+- `/Users/cshenso/git/presby-platform/presby-help/docs/work-log/2026-10-26-user-help.md`
+- `/Users/cshenso/git/presby-platform/presby-help/docs/work-log/2026-10-26-user-help-inc1.md`
+- `/Users/cshenso/git/presby-platform/presby-help/src/lib/help/registry.ts`
+- `/Users/cshenso/git/presby-platform/presby-help/src/lib/help/coverage-allowlist.ts`
+- `/Users/cshenso/git/presby-platform/presby-help/src/content/help/` (all 23 files)
+- `/Users/cshenso/git/presby-platform/presby/src/lib/onboarding/sign-in-copy.ts`
+- `/Users/cshenso/git/presby-platform/presby/src/lib/onboarding/no-organization-copy.ts`
+- `/Users/cshenso/git/presby-platform/presby/src/app/(email-verify)/account/verify-email/[token]/page.tsx`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6-merged` (the scratch dry merge)
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-help-p5/walk/` (QA screenshots I read)
 
-A web search on catch-all fallthrough found nothing that settles the Vercel behaviour, which is why the preview check is a merge gate. Sources returned: [Next.js dynamic routes](https://nextjs.org/docs/app/routing/dynamic-routes), [Next.js 14 generateStaticParams](https://nextjs.org/docs/14/app/api-reference/functions/generate-static-params), [OneUptime: dynamic routing in Next.js](https://oneuptime.com/blog/post/2026-01-24-nextjs-dynamic-routing/markdown).
-
-**Orchestrator note (2026-10-28):** the architect's ruling specifies the implementation, the tests and the DECISION-293 text exactly. The tech-lead amendment it suggested is folded into the implementer's follow-up (it updates the design's e2e item 2 and the R3/R9 Carry-forward rows in its Phase 4 section) rather than run as a separate Phase 3 pass. The Vercel preview check on `/help/no-such-page` and `/help/planned/no-such` is added to the pre-merge list.

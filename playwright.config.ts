@@ -187,7 +187,10 @@ export default defineConfig({
         {
           name: "prod-build",
           use: { ...devices["Desktop Chrome"] },
-          testMatch: /hydration\/.*\.spec\.ts$/,
+          // The hydration specs, plus help-404.spec.ts: the help 404 must be `no-store` with no
+          // cache entry per URL, and only a production build can prove that (a dev server sends
+          // no-store on everything). DECISION-293.
+          testMatch: /(hydration\/.*|help-404)\.spec\.ts$/,
         },
         // The custom-domain specs that must hold on a PRODUCTION build too: the HSTS host split
         // (`headers()` is baked into the routes manifest at build time), the lockdown / no-cookie

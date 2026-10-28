@@ -58,6 +58,8 @@ test.describe("the help index and pages, signed out", () => {
   }) => {
     const paths = [
       "/help/no-such-page",
+      "/help/planned/no-such",
+      "/help/no-such-page/deeper",
       ...pendingPages().map((p) => `/help/${p.slug}`),
       // A planned slug under /help/<x> is not a content page either.
       ...plannedPages().map((p) => `/help/${p.slug}`),
@@ -73,26 +75,20 @@ test.describe("the help index and pages, signed out", () => {
       reference ??= body;
       expect(body, `${path} differs from the first 404 body`).toBe(reference);
     }
+    // ...and that one body is the help 404, not the framework's.
+    expect(reference).toContain("We couldn't find that page");
+    expect(reference).toContain("Go to the help index");
   });
 
   test("/help/planned/<unknown> is a 404 at its own URL, never a sign-in redirect", async ({ page }) => {
-    // Status and URL only: whether the body is the help 404 or the framework's depends on whether
-    // generateStaticParams is empty (see the FINDING below), so this must not pin the body.
     const res = await page.goto("/help/planned/no-such");
     expect(res?.status()).toBe(404);
     expect(new URL(page.url()).pathname).toBe("/help/planned/no-such");
   });
 
-  // FINDING (Batch 3, for the orchestrator): the design (R3, Phase 1 flow 1) says an unknown
-  // slug renders `help/not-found.tsx` (the help chrome and "Go to the help index"). With
-  // `dynamicParams = false` and a non-empty `generateStaticParams`, Next answers a slug outside
-  // the list with the FRAMEWORK's default 404 (no help chrome, no link), in dev and in a
-  // production build. `dynamicParams = true` renders the help 404 but makes Next cache one 404
-  // per distinct URL (s-maxage one year), which `dynamicParams = false` exists to prevent.
-  // (The planned tree shows the help 404 today only because its generateStaticParams is empty,
-  // so it will behave like this one once the first planned page exists.)
-  // Un-fixme this test when the architect rules.
-  test.fixme("an unknown slug renders the help 404: the help chrome and a link to the index", async ({ page }) => {
+  test("an unknown slug renders the help 404: the help chrome and a link to the index", async ({ page }) => {
+    // The catch-all help/[...unmatched] answers it (DECISION-293); help-404.spec.ts pins the
+    // no-store headers and runs in the production lane as well.
     const res = await page.goto("/help/no-such-page");
     expect(res?.status()).toBe(404);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("We couldn't find that page");

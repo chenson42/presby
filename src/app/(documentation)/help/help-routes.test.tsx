@@ -34,6 +34,7 @@ import HelpPage, { dynamic, dynamicParams, generateMetadata, generateStaticParam
 import PlannedIndexPage, { metadata as plannedIndexMetadata } from "./planned/page";
 import PlannedPage, { generateMetadata as plannedMeta, generateStaticParams as plannedParams } from "./planned/[slug]/page";
 import HelpNotFound from "./not-found";
+import UnmatchedHelpPage, { dynamic as unmatchedDynamic } from "./[...unmatched]/page";
 
 afterEach(cleanup);
 
@@ -130,6 +131,23 @@ describe("/help/planned", () => {
 
   it("an unknown planned slug is a notFound", async () => {
     await expect(PlannedPage(params("no-such"))).rejects.toBeTruthy();
+  });
+});
+
+describe("/help/[...unmatched] (the help 404 catch-all, DECISION-293)", () => {
+  it("is force-dynamic, so a miss is never written to the cache", () => {
+    expect(unmatchedDynamic).toBe("force-dynamic");
+  });
+
+  it("throws the Next not-found error for any path, so help/not-found.tsx renders", () => {
+    let thrown: { digest?: string } | undefined;
+    try {
+      UnmatchedHelpPage();
+    } catch (e) {
+      thrown = e as { digest?: string };
+    }
+    expect(thrown, "UnmatchedHelpPage must throw").toBeDefined();
+    expect(String(thrown?.digest)).toContain("NEXT_HTTP_ERROR_FALLBACK;404");
   });
 });
 

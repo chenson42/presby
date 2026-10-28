@@ -123,6 +123,8 @@ const PLATFORM_PATHS = [
   "/help/signing-in",
   "/help/planned",
   "/help/contact",
+  // The help 404 catch-all (help/[...unmatched]) must be unreachable from a church's own domain too.
+  "/help/no-such-page/deeper",
   "/docs",
   "/docs/x",
 ] as const;

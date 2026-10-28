@@ -11,8 +11,10 @@ import { HELP_PAGES } from "@/lib/help/registry";
 import { resolveShot } from "@/lib/help/screenshots";
 import { neighbours, publishedPages } from "@/lib/help/select";
 
-// Static lock (R3): any auth(), headers(), cookies() or searchParams fails the build; a slug
-// outside generateStaticParams (unknown, pending, planned, retired) is the help 404.
+// Static lock (R3): any auth(), headers(), cookies() or searchParams fails the build. A slug
+// outside generateStaticParams (unknown, pending, planned, retired) is declined here
+// (dynamicParams = false) and answered by the help/[...unmatched] catch-all, which renders the
+// help 404 without a per-URL cache entry (DECISION-293).
 export const dynamic = "error";
 export const dynamicParams = false;
 

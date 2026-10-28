@@ -9,7 +9,10 @@
  *      there is no loading state to show.
  *   2. Every content page is locked static: `dynamic = "error"`; a page under a `[param]`
  *      directory also has `dynamicParams = false` and `generateStaticParams`. Any auth(),
- *      headers(), cookies() or searchParams then fails `next build`.
+ *      headers(), cookies() or searchParams then fails `next build`. The one exception is the
+ *      404 catch-all `help/[...unmatched]`, which renders no content and is `force-dynamic`
+ *      so a miss is never cached; it has its own pin, and there is no root `not-found.tsx` or
+ *      `global-not-found` that would change a custom host's neutral 404 (DECISION-293).
  *   3. Nothing under the group, `components/help/` or the shared renderer reaches the
  *      database, the session, request headers, flags or authz, mounts `BrandTokens`, or sets
  *      inner HTML. (check:help H19 walks the import graph; this is the same rule's cheap,
@@ -65,28 +68,49 @@ describe("documentation group boundaries", () => {
       "help/[slug]/page.tsx",
       "help/planned/page.tsx",
       "help/planned/[slug]/page.tsx",
+      "help/[...unmatched]/page.tsx",
       "help/not-found.tsx",
     ]) {
       expect(rel, expected).toContain(expected);
     }
   });
 
-  it('declares dynamic = "error" on every page', () => {
-    const pages = groupFiles().filter((f) => /(^|\/)page\.tsx$/.test(f));
+  // The catch-all renders no content: it only calls notFound(), and it is force-dynamic on purpose
+  // (see the dedicated test below), so the content-route locks do not apply to it.
+  const isCatchAll = (f: string) => relative(GROUP_DIR, f) === join("help", "[...unmatched]", "page.tsx");
+
+  it('declares dynamic = "error" on every content page (the four that render content)', () => {
+    const pages = groupFiles().filter((f) => /(^|\/)page\.tsx$/.test(f) && !isCatchAll(f));
     expect(pages.length).toBe(4);
     for (const f of pages) {
       expect(readFileSync(f, "utf8"), relative(ROOT, f)).toMatch(/export const dynamic = "error"/);
     }
   });
 
-  it("locks every dynamic-segment page with dynamicParams = false and generateStaticParams", () => {
-    const pages = groupFiles().filter((f) => /\[[^\]]+\][\\/]page\.tsx$/.test(f));
+  it("locks every dynamic-segment content page with dynamicParams = false and generateStaticParams", () => {
+    const pages = groupFiles().filter((f) => /\[[^\]]+\][\\/]page\.tsx$/.test(f) && !isCatchAll(f));
     expect(pages.length).toBe(2);
     for (const f of pages) {
       const src = readFileSync(f, "utf8");
       expect(src, relative(ROOT, f)).toMatch(/export const dynamicParams = false/);
       expect(src, relative(ROOT, f)).toMatch(/export function generateStaticParams\(/);
     }
+  });
+
+  it("the help 404 catch-all is force-dynamic, imports only next/navigation, and reads nothing from the request (DECISION-293)", () => {
+    const file = resolve(GROUP_DIR, "help", "[...unmatched]", "page.tsx");
+    const src = stripComments(readFileSync(file, "utf8"));
+    expect(src).toMatch(/export const dynamic = "force-dynamic"/);
+    expect(src).not.toMatch(/generateStaticParams|generateMetadata|dynamicParams|params/);
+    const imports = [...src.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
+    expect(imports).toEqual(["next/navigation"]);
+    expect(src).toMatch(/\bnotFound\(\)/);
+  });
+
+  it("has no root not-found.tsx and no global-not-found.tsx: a custom host's neutral 404 (DECISION-040) must not change", () => {
+    const appDir = resolve(ROOT, "src/app");
+    const present = readdirSync(appDir).filter((n) => /^(global-not-found|not-found)\.(tsx|ts|jsx|js)$/.test(n));
+    expect(present).toEqual([]);
   });
 
   it("reads no session, headers, cookies or search params, and never reaches the database or authz", () => {

@@ -43,7 +43,15 @@ describe("loadHelpPageFrom", () => {
 });
 
 describe("loadHelpPage (the real registry)", () => {
-  it("is null for every slug while the registry is empty", () => {
-    expect(loadHelpPage("signing-in")).toBeNull();
+  it("loads a published page from src/content/help and resolves {{contact}}", () => {
+    const loaded = loadHelpPage("getting-help");
+    expect(loaded?.entry.slug).toBe("getting-help");
+    expect(loaded?.markdown).toContain(HELP_CONTACT_LINE);
+    expect(loaded?.markdown).not.toContain("{{contact}}");
+  });
+
+  it("is null for an unknown slug and a traversal string", () => {
+    expect(loadHelpPage("no-such-page")).toBeNull();
+    expect(loadHelpPage("../../package")).toBeNull();
   });
 });

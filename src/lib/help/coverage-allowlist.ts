@@ -5,7 +5,7 @@
  * pending pages never count as coverage.
  *
  * Entries marked "Written later in this increment" are not decisions: the page that covers
- * them is drafted in Batch 5a or 5b of the user-help pipeline, and the commit that publishes
+ * them is drafted in Batch 5b of the user-help pipeline, and the commit that publishes
  * the page deletes the entry (and lowers the pin).
  */
 export interface CoverageAllowlistEntry {
@@ -13,7 +13,6 @@ export interface CoverageAllowlistEntry {
   reason: string;
 }
 
-const LATER_5A = "Written later in this increment (Batch 5a); deleted in the commit that publishes its page.";
 const LATER_5B = "Written later in this increment (Batch 5b); deleted in the commit that publishes its page.";
 
 export const COVERAGE_ALLOWLIST: readonly CoverageAllowlistEntry[] = [
@@ -34,10 +33,6 @@ export const COVERAGE_ALLOWLIST: readonly CoverageAllowlistEntry[] = [
   { key: "tile:worship", reason: "A coming-soon stub; never documented as a feature." },
   { key: "tile:insights", reason: "A coming-soon stub; never documented as a feature." },
   { key: "tile:communications", reason: "A coming-soon stub; never documented as a feature." },
-  // Batch 5a pages.
-  { key: "tile:directory", reason: LATER_5A },
-  { key: "tile:tickets", reason: LATER_5A },
-  { key: "tile:features", reason: LATER_5A },
   // Batch 5b pages.
   { key: "org_portal.members_create", reason: LATER_5B },
   { key: "org_portal.calendar", reason: LATER_5B },

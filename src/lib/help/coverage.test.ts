@@ -35,7 +35,7 @@ import type { HelpContentEntry, HelpEntry } from "./types";
 
 /** Shrink-only (P3-16): this number may be lowered, never raised. Batch 5a and 5b delete the
  * "written later in this increment" entries as the pages that cover them publish. */
-const ALLOWLIST_PIN = 32;
+const ALLOWLIST_PIN = 29;
 
 const ROOT = path.resolve(__dirname, "../../..");
 

@@ -6,7 +6,7 @@
 > **Flag(s):** not needed
 > **Estimated complexity:** small
 > **Pipeline mode:** Bug-fix variant (production defect; migration `0082` applied to production before the pipeline closed, by the operator's approval)
-> **Release:** 0.49.1 (patch)
+> **Release:** 0.50.1 (patch; first numbered 0.49.1, renumbered after help 0.50.0 merged)
 
 ---
 

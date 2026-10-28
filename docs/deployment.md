@@ -1521,7 +1521,7 @@ not switch the person's own setting on, and nothing in the database refuses it.
 
 ## Organization baseline backfill (0082)
 
-**Applied 2026-10-28** (v0.49.1; `docs/work-log/2026-10-28-org-baseline-backfill.md`).
+**Applied 2026-10-28** (v0.50.1; `docs/work-log/2026-10-28-org-baseline-backfill.md`).
 Migration `0082` adds the derived Active Membership group and the baseline
 `member` role (holding `directory.view` and `events.view`, granted to that
 group) to any organization that lacks them: one presbytery created before
@@ -1556,8 +1556,8 @@ founding-administrator invitation.
   already run (re-run with `-1` on `development`: zero rows inserted). A forward
   migration could not help, since `db:migrate` stops at 0082 before any later
   file. The exception to fix-forward is for a guard-only, provably
-  behaviour-neutral change to an applied file.
-- **Rollback** is a forward migration, never an edit of 0082 once shipped. The
+  behaviour-neutral change to an applied file (DECISION-298).
+- **Rollback** is a forward migration, never an edit of 0082 except as DECISION-298 permits. The
   rows are ordinary tenant rows (a protected group, a protected role); removing
   them would re-create the refusal this fixes.
 - **Regression test:** `src/lib/db/domain/org-baseline-backfill.db.test.ts`

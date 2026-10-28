@@ -181,3 +181,7 @@ stop-block case does not depend on the step.
 Strings added or changed: none (the existing `provisioning_incomplete` copy is unchanged and is still correct for a genuinely unprovisioned organization).
 
 **Next agent:** qa (Phase 5). Nothing to test in a browser beyond the operator's own re-send of the invitation in production, which is theirs to do; the unit and DB suites above are the verification.
+
+## Orchestrator ruling on Phase 5 run 1 (2026-10-28)
+
+**In-place correction of 0082 is permitted, as a guard-only change.** 0082 is applied to production and development, so the normal rule is fix-forward; but a forward migration cannot help a fresh `db:migrate`, which stops at idx 82 before any 0083. The correction changes only the stop-blocks so they raise exactly where the file would otherwise do something wrong (an organization that needs the backfill and no `roster` type; an organization that needs the group and has any membership row at all). On every database that has already run 0082, the corrected file is a no-op exactly as before: no row it writes changes, so re-application and history are unaffected. Recorded as a decision at integration ("an applied migration may be corrected in place only when the change is guard-only and provably behaviour-neutral where it already ran").

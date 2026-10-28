@@ -15,3 +15,18 @@ export function helpHref<S extends PublishedSlug>(slug: S, anchor?: AnchorOf<S>)
 export function plannedHref(slug: PlannedSlug): string {
   return `${HELP_INDEX_HREF}/planned/${slug}`;
 }
+
+/**
+ * For lists driven by the registry itself (the index, previous and next, the planned list):
+ * the slug comes from a registry entry, so the typed overloads above add nothing and could not
+ * be satisfied from a `string`. Never call these with a slug typed by hand; use `helpHref`.
+ */
+export function entryHref(entry: { slug: string }): string {
+  return `${HELP_INDEX_HREF}/${entry.slug}`;
+}
+
+export function plannedEntryHref(entry: { slug: string }): string {
+  return `${HELP_INDEX_HREF}/planned/${entry.slug}`;
+}
+
+export const PLANNED_INDEX_HREF = `${HELP_INDEX_HREF}/planned` as const;

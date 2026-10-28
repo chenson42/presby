@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HELP_INDEX_HREF, helpHref, plannedHref } from "./urls";
+import { HELP_INDEX_HREF, PLANNED_INDEX_HREF, entryHref, helpHref, plannedEntryHref, plannedHref } from "./urls";
 
 describe("help URLs", () => {
   it("exposes the index href", () => {
@@ -19,5 +19,10 @@ describe("help URLs", () => {
     helpHref("no-such-page-anywhere");
     // @ts-expect-error no planned page has this slug
     plannedHref("no-such-plan-anywhere");
+  });
+  it("builds registry-driven hrefs from an entry's slug", () => {
+    expect(entryHref({ slug: "signing-in" })).toBe("/help/signing-in");
+    expect(plannedEntryHref({ slug: "worship-planning" })).toBe("/help/planned/worship-planning");
+    expect(PLANNED_INDEX_HREF).toBe("/help/planned");
   });
 });

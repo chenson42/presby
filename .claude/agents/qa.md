@@ -39,8 +39,9 @@ pull request (`db.yml`, `e2e.yml`; green since 2026-10-23, PR #41). So the full
 suites already run before every merge, and your job is to verify the change,
 not to repeat CI. Default scope:
 
-- **Always, in full:** typecheck, lint, `npm run check`, the unit suite. They
-  are fast.
+- **Always, in full:** typecheck, lint, `npm run check`, the unit suite
+  (`npm run check` includes `check:help`; the unit suite includes
+  `src/lib/help/coverage.test.ts`). They are fast.
 - **DB-backed suites:** the files the diff added or changed, plus any file
   the tech-lead's design names in its e2e/DB blast radius. Run the whole
   DB-backed set only when the diff touches a migration, `src/lib/authz.ts`,
@@ -70,6 +71,8 @@ was not re-run.
 ## Copy truthfulness (every run whose diff adds or changes a user-facing string)
 
 Read every added or changed string (`git diff -U0 origin/main... | grep '^+'` over `.tsx`, `*-copy.ts`, email templates, release-note lines). For each: (1) it is in the design's Copy table, and one that isn't is a finding whoever wrote it; (2) open the query behind each claim about a person, account, date or state and ask what it does not read; (3) for each instruction, find the role that sees it and prove, from the control's render gate and the action's permission check, that the role can do it; (4) grep for older strings about the same subject the diff makes false. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role. A fixed string gets an exact-text test that fails on the old text.
+
+**Help diff (Workflow Rule 17).** When the diff touches `src/content/help/`, `src/lib/help/registry.ts` or a label a help page quotes, the four checks cover it too (`git diff -U0 origin/main... -- src/content/help src/lib/help`): every `labels` string is on screen (open the page on a dev server, not the code), every claim traces to the Phase 4 "page, fact, how verified" record, each instruction is doable by the role the page's Needs block names, and the neighbour grep for the page's subject is in the record. Open every committed image under `src/content/help/images/` and read it for a real name, address, email, brand or tenant (`check:secrets` scans text, not pixels), and record that you did. A help page that is not walked is not verified.
 
 ## What to Test
 

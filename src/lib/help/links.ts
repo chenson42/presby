@@ -16,7 +16,8 @@ export const EXTERNAL_LINK_ALLOWLIST: readonly string[] = [
 ];
 
 export interface ResolvedLink {
-  kind: "internal" | "external";
+  /** "email" is a mailto: link: same tab, no new-window cue. Only the privacy contact address qualifies. */
+  kind: "internal" | "external" | "email";
   href: string;
 }
 
@@ -25,9 +26,11 @@ export interface LinkContext {
   published: ReadonlyMap<string, readonly string[]>;
   pending: ReadonlyMap<string, readonly string[]>;
   planned: ReadonlySet<string>;
+  /** The build-time privacy contact address (env.ts), or null. The one mailto: help may carry. */
+  privacyContact: string | null;
 }
 
-export function linkContext(pages: readonly HelpEntry[]): LinkContext {
+export function linkContext(pages: readonly HelpEntry[], privacyContact: string | null = null): LinkContext {
   const published = new Map<string, readonly string[]>();
   const pending = new Map<string, readonly string[]>();
   const planned = new Set<string>();
@@ -36,7 +39,7 @@ export function linkContext(pages: readonly HelpEntry[]): LinkContext {
     else if (p.status === "pending") pending.set(p.slug, p.anchors ?? []);
     else planned.add(p.slug);
   }
-  return { published, pending, planned };
+  return { published, pending, planned, privacyContact };
 }
 
 const SLUG = "[a-z0-9]+(?:-[a-z0-9]+)*";
@@ -67,6 +70,10 @@ export function resolveLink(
     if (anchor !== undefined && !anchors.includes(anchor)) return null;
     return { kind: "internal", href };
   }
+
+  // Exactly the configured address and nothing else, so a mailto: typed into a content file
+  // (a stray real address) renders as plain text rather than as a link.
+  if (ctx.privacyContact !== null && href === `mailto:${ctx.privacyContact}`) return { kind: "email", href };
 
   if (href.startsWith("https://")) {
     let url: URL;

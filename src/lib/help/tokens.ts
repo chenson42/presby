@@ -1,17 +1,30 @@
-import { HELP_CONTACT_LINE } from "./contact";
+import { HELP_CONTACT_LINE, privacyContactText } from "./contact";
 
 /**
- * Markdown may contain exactly one template token, `{{contact}}` (P3-5). It is replaced
- * before rendering and before every content check; any other `{{` fails H5.
+ * Markdown may contain exactly two template tokens, replaced before rendering and before
+ * every content check; any other `{{` fails H5.
+ *
+ *   {{contact}}         the interim "who to ask" line (P3-5)
+ *   {{privacyContact}}  the privacy policy's contact sentence, built from the build-time
+ *                       address (contact.ts, env.ts); a true fallback when there is none
  */
 const CONTACT_TOKEN = "{{contact}}";
+const PRIVACY_CONTACT_TOKEN = "{{privacyContact}}";
+const KNOWN_TOKENS = [CONTACT_TOKEN, PRIVACY_CONTACT_TOKEN] as const;
 
-export function applyHelpTokens(markdown: string, contact: string = HELP_CONTACT_LINE): string {
-  // split/join, not a RegExp replace: the replacement is inserted verbatim and never re-expanded.
-  return markdown.split(CONTACT_TOKEN).join(contact);
+export function applyHelpTokens(
+  markdown: string,
+  contact: string = HELP_CONTACT_LINE,
+  privacyContact: string | null = null,
+): string {
+  // One pass with a function replacer: the replacement is inserted verbatim (no `$&` handling)
+  // and is never re-scanned, so a replacement that contains braces is not expanded again.
+  return markdown.replace(/\{\{(contact|privacyContact)\}\}/g, (_match, name: string) =>
+    name === "contact" ? contact : privacyContactText(privacyContact),
+  );
 }
 
-/** Every `{{` that is not `{{contact}}`, with its 1-based line and the text from `{{`. */
+/** Every `{{` that is not a known token, with its 1-based line and the text from `{{`. */
 export function unknownTemplateTokens(markdown: string): { line: number; snippet: string }[] {
   const out: { line: number; snippet: string }[] = [];
   markdown.split("\n").forEach((text, i) => {
@@ -19,8 +32,9 @@ export function unknownTemplateTokens(markdown: string): { line: number; snippet
     for (;;) {
       const at = text.indexOf("{{", from);
       if (at === -1) break;
-      if (text.startsWith(CONTACT_TOKEN, at)) {
-        from = at + CONTACT_TOKEN.length;
+      const known = KNOWN_TOKENS.find((t) => text.startsWith(t, at));
+      if (known) {
+        from = at + known.length;
         continue;
       }
       const close = text.indexOf("}}", at);

@@ -2074,3 +2074,83 @@ Files:
 - **F362 founder keys:** approved — give the founding administrator `events.manage`, `event_types.manage` and `branding.manage` by default, with a backfill for existing founders. Its own Feature pipeline; four help pages carry `limitationUntil` on its token.
 - **F366 visitor recorded as Ruling Elder:** approved — fix so Session-seating offices and deacon require a current roll member (pastors exempt); bug-fix pipeline, operator rules on the other offices during it.
 - **F371 worship-planning placeholder:** approved change to "Someone who holds the events role can put services on the calendar as events." (restore the original once F362 ships).
+
+
+## Phase 4 — privacy policy page (operator request 2026-10-28)
+
+**Why.** The operator is publishing PresbyPortal's Google sign-in app, which needs a privacy-policy URL on presbyportal.org. Rulings: the policy names the operator only as "PresbyPortal" ("we"); questions and data requests go to the operator's personal address, which must not be committed (public repository).
+
+**Classification.** Feature (new page, new token, new env var), no schema, no route beyond the existing static `/help/[slug]`, no auth file touched.
+
+### Design and the compliant place for `process.env`
+
+- Page `privacy-policy`, `published`, audience `everyone`, order 80, empty `labels` and `covers` (a policy, not a how-to; the registry type allows both), `verifiedIn: "0.47.0"` (this branch's package version; H13 caps it there).
+- New token `{{privacyContact}}` beside `{{contact}}` (`tokens.ts`). `applyHelpTokens(markdown, contact, privacyContact)` now replaces in one pass with a function replacer (no re-expansion, no `$&` handling).
+- `src/lib/help/env.ts` (new, pure, no imports): `readPrivacyContactEmail(env = process.env)`. Unset or blank is `null`; one plain address is returned trimmed; **set but malformed throws**, so a bad value fails the build instead of publishing a wrong contact. The regex excludes every character that could close a markdown link, so inserting the value as a link destination is safe.
+- **`process.env` question (R8/H19).** H19 bans importing db, auth, flags, authz, headers and sites modules; it does not ban `process.env`. The read still lives in exactly one place: `loadHelpPage()` in `content.ts` (the build-time loader, already `server-only`) calls `readPrivacyContactEmail()`. `loadHelpPageFrom()` takes the address as an option, so the loader's tests are deterministic. Every help route is `dynamic = "error"`, so the value is baked into static HTML at build and never read per request. Not `NEXT_PUBLIC_`.
+- `contact.ts`: `privacyContactText(email)`. Set: `Email us at [addr](mailto:addr).` Unset: `HELP_PRIVACY_CONTACT_FALLBACK`, "Open an issue on the [PresbyPortal repository](https://github.com/chenson42/presby). Issues there are public, so leave personal details out." **The operator's suggested fallback ("Use the contact details on the PresbyPortal website") was not used: the home page carries no contact details.** Its only channel is the public repository (`src/app/page.tsx`, "Get involved"), so the fallback names that and says issues are public.
+- **mailto gate.** `resolveLink` admits `mailto:` only when it equals `mailto:<the configured address>` (`linkContext(pages, privacyContact)`), as a new link kind `"email"`. Any other `mailto:` renders as plain text, so a stray address in a content file is never a link. `MarkdownDocument` renders `"email"` as a plain same-tab anchor (no new-window cue, no external icon).
+- H5's message now reads "only {{contact}} and {{privacyContact}} are template tokens"; `unknownTemplateTokens` knows both. `check:help` runs with the variable unset, so it checks the fallback text (an allowlisted https link).
+- `.env.example` gains `HELP_PRIVACY_CONTACT_EMAIL=` (empty, commented); `docs/deployment.md` env table gains the row; `docs/product/functionality-map.md` and `slug-history.ts` updated (H3, H15).
+
+### Tests (written with the change)
+
+`env.test.ts` (unset/blank/valid/malformed, message never echoes the value); `tokens.test.ts` (set and unset, escape, no re-expansion, near-miss token); `content.test.ts` (loader set and unset with an `example.invalid` address, the real page with `vi.stubEnv` set / unset / malformed, and the committed markdown holds the token once and contains no `@` or `mailto:`); `links.test.ts` (only the configured mailto; query, case, list and no-address refused); `markdown-document.test.tsx` (email kind is a plain anchor; other mailto is text); `checks.test.ts` (H5 accepts the new token, flags a near miss).
+
+### Gates
+
+`npm run typecheck`, `npm run lint`, `npm run test` (696 files passed, 97 skipped as before; 10560 tests passed), `npm run check` (all nine passed, `check:secrets` rerun with the new files staged), `npm run build` (the page is prerendered: `.next/server/app/help/privacy-policy.html`). Browser, production build on :3660 (listener stopped by PID afterwards), 360px, light and dark: variable unset shows the fallback with one external link; built with `HELP_PRIVACY_CONTACT_EMAIL=privacy@example.invalid` shows a same-tab mailto link to exactly that address and the built HTML contains that one address; horizontal overflow 0px in all four. Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/help-privacy/` (`unset-*` and `set-*`, `light`/`dark`, `top`/`contact`/`full`).
+
+### Claims and the code that backs each
+
+| Claim in the policy | Backing |
+|---|---|
+| Account data: name, email, hashed password | `src/lib/db/schema.ts` `users` (name, email, password); `src/auth.ts` `bcrypt.compare` |
+| Authenticator secret stored encrypted; recovery codes stored as hashes | `schema.ts` `userTotp.secretCiphertext` (comment: AES-256-GCM), `userTotpRecoveryCodes.codeHash` |
+| Last sign-in and failed-attempt count, lock after repeated failures | `users.lastLoginAt`, `failedLoginAttempts`, `lockedUntil`; `auth.ts` authorize and jwt callbacks; `USER_ACCOUNT_LOCKED` audit |
+| Account roles | `roles`, `user_roles`; `ensureDefaultRole` in `auth.ts` |
+| Google sends name, email, picture address, account ID; we refuse an unverified address | `node_modules/@auth/core/lib/utils/providers.js` `defaultProfile` (id, name, email, image); `auth.ts` `evaluateSignIn` with `email_verified` (DECISION-246) |
+| We ask only for basic profile | `@auth/core` default scope `"openid profile email"` (`providers.js:48`, `authorization-url.js:90`); `auth.ts` sets no scope or `access_type` |
+| We keep name, email, picture address, Google account ID and the returned tokens | `users.image`; `accounts` table (`providerAccountId`, `access_token`, `id_token`, `refresh_token`, `scope`); adapter `linkAccount` stores the whole account object |
+| **Correction to the operator's brief:** Google sign-in stores more than name, email and the verified claim | the two rows above; the policy says so rather than "only" |
+| The verified flag is checked, not stored | `profile` fn returns no `emailVerified`; `signIn` callback reads the claim |
+| We do not show the Google picture | `grep` of `src` finds `.image` read only in `auth.ts`; avatars are initials |
+| Congregations may keep: people, households, contact details, birth dates | `src/lib/db/domain/people.ts` (`dateOfBirth`), contact methods (`src/lib/contact-methods/`) |
+| Roll and roll actions; officers and groups; privacy settings | domain `roll.ts`, `officers.ts`, `groups.ts`, `privacy.ts`; functionality map |
+| Events, giving records, children's ministry roster with guardians, job openings, public website content | functionality map (events, online giving v0.34.0, children's ministry Increment A, careers v0.47.0, public sites); `src/lib/db/domain/events.ts`, `giving.ts`, `careers.ts`, `sites.ts` |
+| Not named: photos, reimbursements, job applications | in flight or not shipped; the policy ends the list with "other records the organization chooses to keep" |
+| Messages through a congregation's website contact form go to that congregation | `src/app/(public)/site/[slug]/actions.ts` `submitContactMessageAction` ("that org's inbox") |
+| Audit records with IP address and browser type | `audit_events.ip`, `userAgent`; `src/lib/audit.ts` `recordAudit` (lines ~641 to 660) |
+| Request counts by IP, and by email on sign-in forms, for a short time | `src/lib/rate-limit.ts` (in-memory and Upstash, windows of 60 s to 1 h); keys `signin:${ip}:${email}`, `site_contact:${slug}:${ip}`, `invite_accept:${ip}` |
+| Email copy kept; statuses sent, failed, delivered, bounced, spam; opened/clicked if reported | `schema.ts` `emailQueue` (toEmail, subject, htmlBody, status, deliveredAt, bouncedAt, complainedAt, openedAt, clickedAt); `src/app/api/webhooks/resend/route.ts` |
+| Invitations, password resets, email-change emails | `emailQueue.templateKey` comment; invitations (v0.37.0) |
+| Feedback and tickets; feedback inside a congregation goes first to that congregation | `schema.ts` `feedback`; `src/content/help/getting-help.md` (verified in this increment) |
+| Cookies: only sign-in cookies plus short-lived single-step ones | `session: { strategy: "jwt" }` (`src/lib/auth/config.ts`); `cookies()` uses: `FRESH_RECOVERY_CODES_COOKIE` (5-minute TTL, `account/2fa/actions.ts`), the invitation handoff cookie (`(invite)/actions.ts`) |
+| No advertising or analytics cookies; no analytics or tracking tools on our pages | `package.json` has no analytics, ads or tag-manager dependency; `src/app/layout.tsx` loads no third-party script; light/dark choice is the only `localStorage` use and no toggle exists (`theme-provider.tsx`) |
+| We do not sell or rent personal information | no code path or integration that does; stated as policy |
+| Vercel hosts | `docs/deployment.md`, `vercel.json` |
+| Neon, database in the United States | `docs/deployment.md` (project `presby`, aws-us-east-2) |
+| Resend sends our emails | `src/lib/email/`, `RESEND_API_KEY` |
+| Stripe takes online gifts, hosted page, no card number stored | functionality map "online giving" ("no card data on any presby page"); `give-form.tsx` `CHECKOUT_ORIGIN = https://checkout.stripe.com` |
+| Cloudflare Turnstile where turned on; receives IP | `src/lib/turnstile.ts` (no-op without `TURNSTILE_SECRET_KEY`, sends `remoteip`); widget on sign-in, forgot-password and the public give form (`src/components/shared/turnstile.tsx`, `give-form.tsx`) |
+| Upstash request counts where used | `rate-limit.ts` `useUpstash` (only when both env vars set) |
+| Google only if chosen | `auth.ts` providers; `/signin` |
+| Providers keep ordinary technical logs | general property of the host and database services; stated without detail |
+| Congregation records are permanent; people are never deleted, only corrected, merged or ended | CLAUDE.md "Never Hard-Delete a Person"; `drizzle/0009_presby_rls.sql:376` (`revoke delete on people`); roll actions append-only |
+| A deactivated account is kept and blocked | `users.isActive`; jwt callback returns `{}` for an inactive user; `(admin)/admin/users/actions.ts` `deactivateUser`; `USER_DEACTIVATED` |
+| Audit records and email log are not deleted on a schedule | no delete in any cron for `audit_events` or `email_queue` (`src/app/api/cron/maintenance/route.ts`); `deployment`/DECISION text says indefinite retention for `email_queue` |
+| Reset and email-change links expire and are cleared daily | maintenance cron `0 3 * * *` (`vercel.json`) deletes expired `password_reset_tokens`, `email_verification_tokens`, pending TOTP enrolments |
+| "Delete account" records the request but deletes nothing; ask us instead | `(account)/account/actions.ts` `requestAccountDeletion` (stub: writes `USER_DELETION_REQUESTED`, returns ok); `delete-button.tsx` toast "not yet implemented. Contact support" |
+| Users can change name, email, password themselves | `src/content/help/your-account.md`; `/account` |
+| Congregation records about you belong to the congregation | operator ruling (controller/processor split) |
+| Security: two-factor, hashed passwords, encrypted connections, per-congregation isolation | `users.twoFactorRequired` default true, TOTP; bcrypt; HTTPS and HSTS (CLAUDE.md custom-host section); `FORCE ROW LEVEL SECURITY` (CLAUDE.md Isolation). No absolute promise made |
+| Accounts are for adults; children's records are the congregation's | no age gate in code, so the policy says "do not knowingly"; children's ministry roster (functionality map). No photos named (not shipped) |
+
+### Notes for the operator and the orchestrator
+
+1. **Set `HELP_PRIVACY_CONTACT_EMAIL` in the Vercel Production scope, then redeploy.** The address is baked in at build. Until then production shows the repository fallback, which is true but not what Google's reviewers want.
+2. The policy deliberately does not add Google's "Limited Use" compliance sentence. Basic sign-in scopes (`openid profile email`) do not trigger it; if Google's review asks, it is one added sentence and a policy decision for the operator.
+3. Real gap the page is honest about: account deletion is a stub. The page says to ask us and that a deactivated account is kept. If the operator wants true erasure of the account row, that is a feature (DECISION-015 requires a blocklist alongside it).
+4. `verifiedIn` is `0.47.0` because this branch's package version is 0.47.0; the claims were read against this branch and the 0.48.1 changes on main (recovery-codes display) do not alter any of them. Integration may bump it when the page is re-walked.
+5. The "Everyone who signs in" index group now lists the policy last (order 80). Its previous-page link is Getting help.
+6. Docs/TODO.md and the release-notes entry are left to integration (Workflow Rule 16 shared files).

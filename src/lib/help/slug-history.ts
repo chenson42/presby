@@ -29,4 +29,6 @@ export const SLUG_HISTORY: readonly string[] = [
   "communications",
   "event-sign-ups",
   "presbytery-tools",
+  // 2026-10-28: the privacy policy (the Google sign-in app review needs a stable public URL).
+  "privacy-policy",
 ];

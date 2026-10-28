@@ -99,3 +99,31 @@ describe("resolveLink", () => {
     expect(resolveLink(allowed.replace("https://", "https://user:pw@"), ctx)).toBeNull();
   });
 });
+
+describe("resolveLink — the privacy contact mailto", () => {
+  const withContact = linkContext([content("signing-in", "published")], "privacy@example.invalid");
+
+  it("admits exactly mailto:<the configured address>, as an email link", () => {
+    expect(resolveLink("mailto:privacy@example.invalid", withContact)).toEqual({
+      kind: "email",
+      href: "mailto:privacy@example.invalid",
+    });
+  });
+
+  it("refuses any other mailto:, a query on it, and the address with no scheme", () => {
+    for (const href of [
+      "mailto:other@example.invalid",
+      "mailto:privacy@example.invalid?subject=hi",
+      "mailto:privacy@example.invalid,other@example.invalid",
+      "MAILTO:privacy@example.invalid",
+      "privacy@example.invalid",
+    ]) {
+      expect(resolveLink(href, withContact), href).toBeNull();
+    }
+  });
+
+  it("refuses every mailto: when no address is configured", () => {
+    expect(resolveLink("mailto:privacy@example.invalid", ctx)).toBeNull();
+    expect(resolveLink("mailto:privacy@example.invalid", linkContext([], null))).toBeNull();
+  });
+});

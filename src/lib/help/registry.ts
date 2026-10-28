@@ -189,6 +189,18 @@ export const HELP_PAGES = [
     ],
     verifiedIn: "0.47.0",
   },
+  {
+    slug: "privacy-policy",
+    title: "Privacy policy",
+    summary:
+      "What information PresbyPortal keeps, who else handles it, how long it is kept, and how to ask us about it.",
+    order: 80,
+    status: "published",
+    audience: "everyone",
+    covers: [],
+    labels: [],
+    verifiedIn: "0.47.0",
+  },
   // ---- Pending: written against in-flight pipelines, not rendered until their [help:<token>] line is Done -----
   {
     slug: "accepting-your-invitation",

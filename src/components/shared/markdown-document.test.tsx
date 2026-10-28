@@ -141,3 +141,38 @@ describe("MarkdownDocument — type scale and structure", () => {
     expect((container.firstElementChild as HTMLElement).className).toContain("min-w-0");
   });
 });
+
+describe("MarkdownDocument — an email link", () => {
+  const withEmail: MarkdownDocumentProps["resolveLink"] = (href) =>
+    href === "mailto:privacy@example.invalid" ? { kind: "email", href } : null;
+
+  it("renders a plain anchor: same tab, no new-window cue, no external icon", () => {
+    const { container } = render(
+      <MarkdownDocument
+        markdown="Email us at [privacy@example.invalid](mailto:privacy@example.invalid)."
+        resolveLink={withEmail}
+        resolveImage={imagesById}
+        headingBase={2}
+      />,
+    );
+    const a = container.querySelector("a");
+    expect(a?.getAttribute("href")).toBe("mailto:privacy@example.invalid");
+    expect(a?.getAttribute("target")).toBeNull();
+    expect(a?.getAttribute("rel")).toBeNull();
+    expect(a?.querySelector("svg")).toBeNull();
+    expect(a?.textContent).toBe("privacy@example.invalid");
+  });
+
+  it("renders any other mailto: as text with no anchor", () => {
+    const { container } = render(
+      <MarkdownDocument
+        markdown="[someone](mailto:someone@example.invalid)"
+        resolveLink={withEmail}
+        resolveImage={imagesById}
+        headingBase={2}
+      />,
+    );
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toContain("someone");
+  });
+});

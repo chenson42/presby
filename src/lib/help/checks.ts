@@ -238,7 +238,7 @@ function h5(input: HelpCheckInput): HelpViolation[] {
     for (const x of scan.bareUrls) v(x.line, "a bare URL is not allowed; use an inline link", x.snippet);
     for (const x of scan.entities) v(x.line, "an HTML entity is left over; write the character", x.snippet);
     for (const x of scan.setext) v(x.line, "setext headings are not allowed; use #", x.snippet);
-    for (const x of unknownTemplateTokens(raw)) v(x.line, "only {{contact}} is a template token", x.snippet);
+    for (const x of unknownTemplateTokens(raw)) v(x.line, "only {{contact}} and {{privacyContact}} are template tokens", x.snippet);
   }
   return out;
 }

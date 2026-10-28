@@ -271,6 +271,10 @@ describe("H5 closed markdown subset", () => {
   it("does not flag {{contact}} after it is expanded", () => {
     expect(run("H5", withBody("## A\n\n{{contact}}\n"))).toEqual([]);
   });
+  it("does not flag {{privacyContact}} after it is expanded, and still flags a near miss", () => {
+    expect(run("H5", withBody("## A\n\n{{privacyContact}}\n"))).toEqual([]);
+    expect(run("H5", withBody("## A\n\n{{privacycontact}}\n"))).not.toEqual([]);
+  });
 });
 
 // ---- H6 -------------------------------------------------------------------

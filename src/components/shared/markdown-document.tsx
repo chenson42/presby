@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 export interface MarkdownDocumentProps {
   markdown: string;
   /** null renders the link's text and no anchor. */
-  resolveLink: (href: string) => { kind: "internal" | "external"; href: string } | null;
+  resolveLink: (href: string) => { kind: "internal" | "external" | "email"; href: string } | null;
   /** null renders nothing. */
   resolveImage: (src: string) => { src: string; width: number; height: number } | null;
   /** The lowest heading level rendered: markdown "#" clamps to this; "##".."######" render h2..h6. */
@@ -146,6 +146,13 @@ export function MarkdownDocument({ markdown, resolveLink, resolveImage, headingB
                 <Link href={resolved.href} className={DOCUMENT_LINK_CLASS}>
                   {children}
                 </Link>
+              );
+            }
+            if (resolved.kind === "email") {
+              return (
+                <a href={resolved.href} className={DOCUMENT_LINK_CLASS}>
+                  {children}
+                </a>
               );
             }
             return (

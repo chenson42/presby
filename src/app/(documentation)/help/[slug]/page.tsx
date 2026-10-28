@@ -32,8 +32,8 @@ export default async function HelpPage({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const page = loadHelpPage(slug);
   if (!page) notFound();
-  const { entry, markdown } = page;
-  const context = linkContext(HELP_PAGES);
+  const { entry, markdown, privacyContact } = page;
+  const context = linkContext(HELP_PAGES, privacyContact);
   const { previous, next } = neighbours(entry.slug);
 
   return (

@@ -98,6 +98,7 @@ export const HELP_PAGES = [
       "Change password",
     ],
     verifiedIn: "0.50.0",
+    limitationUntil: "email-change-error",
   },
   {
     slug: "home-and-switching-congregations",
@@ -408,6 +409,7 @@ export const HELP_PAGES = [
       "Website domain",
     ],
     verifiedIn: "0.50.0",
+    limitationUntil: "founder-events-branding",
   },
   {
     slug: "adding-people",
@@ -566,6 +568,7 @@ export const HELP_PAGES = [
       "Website domain",
     ],
     verifiedIn: "0.47.0",
+    limitationUntil: "founder-events-branding",
   },
   {
     slug: "events-and-the-calendar",
@@ -616,6 +619,7 @@ export const HELP_PAGES = [
       "Take this and later events off the website",
     ],
     verifiedIn: "0.47.0",
+    limitationUntil: "founder-events-branding",
   },
   {
     slug: "your-congregations-website",
@@ -650,6 +654,7 @@ export const HELP_PAGES = [
       "Website domain",
     ],
     verifiedIn: "0.47.0",
+    limitationUntil: ["founder-events-branding", "phone-public-listing"],
   },
   {
     slug: "sign-in-invitations",

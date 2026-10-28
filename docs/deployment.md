@@ -1536,10 +1536,26 @@ founding-administrator invitation.
   it added the member role to 15 fixture organizations; `scripts/test-rls.sql`
   on `development` shows only the known drift at lines 219 and 7953.
 - **Nothing to run at deploy.** The release carries no schema work that is not
-  already live. A fresh environment gets the file from the journal (idx 82).
-- **It refuses rather than guesses:** an organization with live memberships and
-  no group stops the file (the derived roster would need syncing), the sync
-  being a deliberate step, not part of this one. Production had none.
+  already live. A fresh environment gets the file from the journal (idx 82) and
+  it is a no-op there: with no organizations yet (`db:migrate` runs before
+  `db:seed`), the file inserts nothing and raises nothing, so `db:migrate`
+  completes through idx 82. Proven on a real scratch database on 2026-10-28.
+- **It refuses rather than guesses:** an organization that lacks the group and
+  has ANY membership row (live, ended or future-ended) stops the file, because
+  the sync trigger writes one derived row per membership and the roster would
+  need syncing, a deliberate step, not part of this one. Production had none.
+  It also stops, with "roster missing", only when some organization needs the
+  group and the global `roster` group type is absent.
+- **In-place correction (2026-10-28, before release).** As first applied, the
+  "roster missing" check ran unconditionally, so any database without the seeded
+  `roster` group type (every fresh `db:migrate`) failed at idx 82; and the
+  membership stop-block looked only at live memberships. Both guards were
+  corrected in place, same file and number, guard-only: no row the file writes
+  changed, so it is a no-op on production and `development`, where it had
+  already run (re-run with `-1` on `development`: zero rows inserted). A forward
+  migration could not help, since `db:migrate` stops at 0082 before any later
+  file. The exception to fix-forward is for a guard-only, provably
+  behaviour-neutral change to an applied file.
 - **Rollback** is a forward migration, never an edit of 0082 once shipped. The
   rows are ordinary tenant rows (a protected group, a protected role); removing
   them would re-create the refusal this fixes.

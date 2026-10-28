@@ -18,17 +18,29 @@
 -- alone (a migration never adds authority to a tenant-held role; 0068's
 -- rule). Idempotent: a second run inserts nothing. Apply WITH -1, as owner.
 --
--- Derived group membership is materialized by trigger on memberships; an
--- organization with live memberships and no group would also need its rows
--- synced. The stop-block below refuses that case rather than guess, so the
--- file stays a pure baseline insert. (Production on 2026-10-28: the one
--- affected organization has 0 memberships.)
+-- Derived group membership is materialized by trigger on memberships, one
+-- derived row per membership, ended or not; an organization with any
+-- membership and no group would also need its rows synced. The stop-block
+-- below refuses that case (any membership row, live, ended or future) rather
+-- than guess, so the file stays a pure baseline insert. (Production on
+-- 2026-10-28: the one affected organization has 0 memberships.)
+--
+-- The stop-blocks raise only where the file would otherwise do something
+-- wrong, in the 0062/0068 shape: "roster missing" only when some organization
+-- needs the group and the global roster type is absent, so on an empty
+-- database (db:migrate before db:seed: no organizations, no group types) the
+-- file is a no-op and a fresh environment migrates. (Corrected in place from
+-- the as-first-applied form, which raised on any database without the roster
+-- type; guard-only, no row it writes changes. docs/deployment.md.)
 
 do $$
 declare
   v_needs_sync bigint;
 begin
-  if not exists (select 1 from group_types where key = 'roster') then
+  if exists (select 1 from organizations o
+              where not exists (select 1 from groups g
+                                 where g.organization_id = o.id and g.derived_from = 'active_membership'))
+     and not exists (select 1 from group_types where key = 'roster') then
     raise exception '0082: group type "roster" is missing';
   end if;
   select count(*) into v_needs_sync
@@ -36,9 +48,9 @@ begin
    where not exists (select 1 from groups g
                       where g.organization_id = o.id and g.derived_from = 'active_membership')
      and exists (select 1 from memberships m
-                  where m.organization_id = o.id and m.ended_on is null);
+                  where m.organization_id = o.id);
   if v_needs_sync > 0 then
-    raise exception '0082: % organization(s) lack the active_membership group but have live memberships; sync them deliberately, not here', v_needs_sync;
+    raise exception '0082: % organization(s) lack the active_membership group but have membership rows; sync them deliberately, not here', v_needs_sync;
   end if;
 end $$;
 

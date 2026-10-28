@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (parent log, with Addendum A and the operator rulings) | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete (parent log: R1–R14, C1–C10 for Increment 2, DECISION-293/294/295, F345–F349) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete for Increment 1. Placeholder list and four operator questions await the operator | Design complete; implementers named per batch | 2026-10-26 |
-| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | Pending | — | — |
+| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | In progress: Batches 0 and 1 done (`d6e7bd7`); Batches 2 to 5c pending | — | 2026-10-28 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -771,6 +771,33 @@ Named per batch above: **orchestrator** (Batch 0), **api-developer** (Batch 1), 
 # Phase 4 — Implementation
 
 *Pending. Batches 0 to 5c as above. Each batch records files, deviations, gates with counts, and the "page, fact, how verified" lines for the prose batches.*
+
+## Phase 4 — Batch 1 (api-developer)
+
+*2026-10-28, worktree `presby-help`, commit `d6e7bd7`, not pushed. A previous Batch 1 run was stopped mid-way and left untracked partial work; it was read in full, kept where correct and complete per the spec, and fixed where not (below).*
+
+**Files.** `src/lib/help/`: `types`, `registry` (empty), `select`, `urls`, `contact`, `tokens`, `slug`, `headings`, `markdown-scan`, `checks` (H1 to H18), `todo-grammar`, `slug-history` (empty), `coverage-allowlist`, `example-names`, `links`, `shots-guard`, `screenshots-data` (empty), `coverage.test.ts`, `config-imports.test.ts`, and a `*.test.ts` beside each module. `scripts/lib/import-graph.mjs` (the lift, P3-3), `scripts/lib/help-boundary.mjs` (H19), `scripts/check-help.ts`, a test file for each of the two lib modules. Modified: `scripts/check-proxy-imports.mjs` (imports the primitives, re-exports `stripComments` and `importSpecifiers`; its test file is untouched and green), `scripts/check-brand-scope.mjs` (header comment only), `package.json` (`check:help`, the ninth entry of `check`).
+
+**Red before green.**
+- The two new `scripts/lib` suites were run before their modules existed: `FAIL scripts/lib/help-boundary.test.mjs ... Cannot find module './help-boundary.mjs'` and the same for `./import-graph.mjs` (2 suites failed, 0 tests ran). Then green.
+- The earlier run's red output for `src/lib/help/*` was not preserved, so I did not take those tests on trust: each rule was **mutated** and the suite re-run. With `H1`..`H18` individually replaced by `() => []` in `HELP_RULES`, `checks.test.ts` fails 11, 3, 3, 5, 8, 4, 3, 9, 5, 3, 2, 10, 2, 2, 2, 2, 6, 2 tests respectively (127 tests; every rule has at least two). For the TODO grammar, seven targeted mutations of `todo-grammar.ts` each fail exactly the fixture rows they should (rows 3, 4, 5, 7 and 8, 9, 10, 12, and 1 and 2 together with ten H12 tests). All mutations were reverted; the files match what is committed.
+
+**Deviations and findings (none weakens a rule).**
+1. **The shrink-only allowlist holds 32 entries, not the 16 the design expected.** With an empty registry no published page covers anything, so coverage rule (1) cannot pass unless the keys the Batch 5a and 5b pages will cover are allowlisted too. 16 are the deliberate ones from P3-16; 16 are marked "Written later in this increment (Batch 5a/5b); deleted in the commit that publishes its page" (`tile:directory`, `tile:tickets`, `tile:features`; the calendar, public calendar, careers, domains, members-create toggles and the members, roles, officers, branding, calendar, events, careers, domains tiles). `ALLOWLIST_PIN = 32` in `coverage.test.ts`. **Each Batch 5a/5b commit must delete its entries and lower the pin; the pin must reach 16 by the end of 5b.**
+2. `screenshots-data.ts` (empty) lands here, not in Batch 2, because H7, H17 and H18 read it. `help-boundary.mjs` and `config-imports.test.ts` are additions to the list: the first holds H19 (`checkImportBoundary` plus the ban list) so the tsx runner and a vitest file share it; the second is the "reads `types.ts`, `registry.ts`, `select.ts` and fails on an `@/` runtime import" test the Component Plan asks for.
+3. `helpRedirects(hostPattern, pages?)` takes the platform host as its first argument (as the contract says); Batch 2 passes `next.config.ts`'s own pattern.
+4. `checkImportBoundary` judges an unresolvable specifier against the ban before reporting P4, so a banned module missing from the file list cannot degrade into a mere hole. The proxy walker itself is not rewritten onto it (only its primitives are lifted), to keep "no behaviour change" literal.
+5. Fixes to the earlier run's work: one wrong expectation in `import-graph.test.mjs` (a 3-line input asserted 2 lines); `shots-guard.ts` named the contact table in a comment and `src/lib/contact-methods/scan.test.ts` (which pins its exemptions to exactly three files) failed, so the comment now says "contact-method email" (Batch 4: `src/lib/help/shots-guard.ts` must never name that table; `e2e/help-shots/guard.ts` is outside the scan); ten `check:secrets` soft findings in two test files, fixed with `example.org`/`example.com` and a built URL, no annotation; a `never` type error in the runner for an empty `as const` registry.
+6. H19's entries follow the design list exactly, so `(documentation)/layout.tsx` is not an entry; `shell-boundaries.test.ts` (Batch 2) covers the whole group, as the Component Plan says.
+7. Not exercised until content exists: with an empty registry H2 to H18 are vacuous on the real tree (their fixtures are not). The real-tree run does exercise H12's global token reading against the live `docs/TODO.md` (the ten Batch 0 tokens parse, each once) and H19 over 1,698 source files; a planted `src/lib/help/contact.ts -> select-helper -> src/lib/db` chain was reported as P1 in a scratch run.
+
+**Gates (in the worktree, `.env.local` not read).**
+- `npm run typecheck`: clean. `npm run lint`: clean (`--max-warnings=0`).
+- Help suites: 16 files, 299 tests pass (`src/lib/help` 13 files / 247 tests; `scripts/lib` 2 files; `scripts/check-proxy-imports.test.mjs`).
+- Unit suite `npm run test`: 681 files passed, 97 skipped (the DB-backed set, no database env), 10,424 tests passed, 2,862 skipped, 0 failed.
+- `npm run check`: nine tripwires green on the real repo. `check:help`: "0 registry entries, 0 published, 0 content files, 0 images".
+
+**Contract for Batch 2 (ux-developer).** Import `helpHref`, `plannedHref`, `HELP_INDEX_HREF` from `@/lib/help/urls`; `publishedPages`, `pendingPages`, `plannedPages`, `indexGroups`, `neighbours`, `helpRedirects` from `select`; `applyHelpTokens` from `tokens`; `extractHeadings` from `headings`; `createSlugger` from `slug` (the renderer's heading ids must use it); `resolveLink`, `linkContext`, `EXTERNAL_LINK_ALLOWLIST` from `links`; `HELP_SHOTS` from `screenshots-data`. All are pure and import nothing H19 bans; `content.ts` (Batch 2) may import `server-only` and `node:fs`, which H19 allows. `copy.ts` (Copy C1) is Batch 2's.
 
 ---
 

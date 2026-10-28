@@ -20,7 +20,7 @@
 | 2 — Architectural review | architect | See parent (shared) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete; designed against the F289 0072 **draft** (`presby-assets` worktree, unmerged); three Phase 2 rulings corrected (R3 invoker to definer, R2 Drizzle declaration, R5 dead join); F333–F337 raised; open rulings O1–O4 | Design complete | 2026-10-26 |
 | 4 — Implementation | database-admin, then api-developer, then ux-developer | Batch 1 (database-admin) complete: 0078 hand-written, applied twice on `ep-sweet-scene` (idempotent), R12 recorded (no drift), re-diff vs merged 0072 clean; RLS 78 = 82 passes, RLS 72 = 24, D4 PASS, F331 rewrites green; F338 raised (standalone branch fails one dev-docs test until the integration patch is applied); F338 ruled by the orchestrator (the barrel line and the dev-docs entry are committed on the branch). Batch 2 (api-developer) complete: sharp 0.35.5 installed, image pipeline, store, reader, consequences, copy, four server actions, `resolveMany`, directory swap to `photoThumbKey`, catalog toggle, audit keys and the off-warning; 644 unit files / 9718 tests, 63 DB-backed files / 1351 tests, RLS 78 = 82 and RLS 72 = 24, `npm run check` 8/8, build and typecheck and lint clean. Batch 3 (ux-developer) complete: photos page, upload island with client downscale, designate and remove dialogs, edit-page link, three listing-dialog rewrites, UI copy, unit, e2e and hydration specs, browser walk at 360 and 1280 px; QA next | Batch 3 done | 2026-10-26 |
-| 5 — Verification | qa | Run 1 FAIL (a)(b)(c); run 2 FAIL: (a)(b)(c) fixed, new (d) remove dialog "will leave the public website" for an unlisted person | FAIL (run 3: (e)(f) same-photo state) | 2026-10-26 |
+| 5 — Verification | qa | Run 1 FAIL (a)(b)(c); run 2 FAIL: (a)(b)(c) fixed, new (d) remove dialog "will leave the public website" for an unlisted person | PASS (run 4, outcome-derived copy; N1/N2 test-hardening follow-ups) | 2026-10-28 |
 | 3 — amendment (Phase 5 run 1 copy rulings) | tech-lead | Complete: rulings R-a (withheld-aware consequences; snapshot carries `minor`, `directoryWithheld`, `websiteWithheld`), R-b (new "Clear for website" control and dialog variant), R-c (count distinct photos); tests T1-T11 named; implementer full-stack-developer; no schema, route, flag or permission change. See the amendment at the end of this log | Design complete; back to Phase 4 | 2026-10-26 |
 | 4 — Phase 5 run 1 fix (copy) | full-stack-developer | Complete: snapshot carries `minor`/`directoryWithheld`/`websiteWithheld`; every R-a/R-b/R-c string verbatim; "Clear for website" control and `clear` dialog variant; `countChosenPhotos` (distinct); T1-T11 failing-first; gates green; back to Phase 5 (scoped re-run) | Ready for QA | 2026-10-26 |
 | 3 — ruling on fix-pass deviation | tech-lead | Complete: `websiteIsWithheld` helper (adds `directoryWithheld`) confirmed, no reachable-data change; under-18 checkbox accepted with a TODO candidate; no code change. See the last section of this log | Confirmed; back to Phase 5 (scoped re-run) | 2026-10-26 |
@@ -2398,3 +2398,232 @@ Every other pre-existing row kept its expected output. New rows are listed in th
 - Re-run two mutations from the table (m1 and m5 are the cheapest and cover both files); expect exactly the named test red, then `git status` clean.
 - Re-run the same-photo walk at 360 and 1280 including the anonymous roster after the confirm (the new copy says it is still served) and after the tip (served none). The check QA did in run 3 passes the opposite way now: the dialog no longer lies.
 - Handoff: **qa, Phase 5 run 4.** The proposed decision text and finding in the amendment, the C9 release-note clause and the touch-target TODO candidate remain for the orchestrator.
+
+---
+
+## Phase 5 — Verification (qa), run 4
+
+**Verdict: PASS.** The same-photo defects (e) and (f) are fixed, and the live roster agrees with every dialog I confirmed, at both 360 and 1280.
+
+- All gates and suites I ran are green, with no skips.
+- All five of my own TS mutations went red. One of my two SQL mutations went red in the parity test. The other did not, but another existing DB test caught it (finding N2).
+- Four claims in the registry are weaker than their sentences (N1). An independent check with stricter claims shows every emitted sentence is true at HEAD. None of the findings below blocks.
+
+**Date:** 2026-10-28
+**Verified by:** qa
+**Tree:** `pipeline/person-photos` @ a3e873c, worktree `/Users/cshenso/git/presby-platform/presby-photos`, Neon `pipeline-person-photos`. The worktree is clean before and after. I edited no repo file.
+
+**0078 objects on the branch.** I fingerprinted the 0078 objects before touching anything:
+- the md5 of `pg_get_functiondef` over the 10 functions;
+- the policies and triggers on `person_photos` and `person_photo_designations`;
+- the `relforcerowsecurity` setting on both tables.
+
+I then re-applied 0078 whole, twice (`psql -1 -v ON_ERROR_STOP=1`, owner). Both exited 0 with no errors. The fingerprint was identical before, after the first apply and after the second, so the branch already matched the file. Functions md5 `40432336…9261`, both tables `FORCE` RLS. After each SQL mutation I re-applied 0078 whole and the fingerprint came back identical, and it was still identical at the end of the run.
+
+**Scope.** `git diff 93905a6..HEAD --stat` lists 15 files:
+- `outcome.ts`, `snapshot.ts`, `reader.ts`, `consequences.ts`, `copy.ts`
+- `src/lib/testing/person-photo-world.ts`
+- the tests: `outcome`, `outcome-parity.db`, `consequences.claims`, `consequences`, `copy`, `confirm-dialogs`, `designate-dialog`
+- `e2e/person-photos.spec.ts`
+- the work-log
+
+I filtered the file list for `.sql`, `drizzle/`, `db/domain`, `db/schema`, `route.ts`, `actions.ts`, `proxy.ts`, `auth.ts`, `authz.ts`, `permissions.ts`, flags, `e2e/support`, `playwright.config`, `src/components/` and layouts. Nothing matched: there is no SQL, schema, route, action, flag or permission change.
+
+**Ran:**
+- typecheck, lint, check and build (after `rm -rf .next`), and the unit suite
+- the person-photos DB set, serially
+- my own mutation run: five TS flips and two SQL flips
+- an independent probe with stricter claims than the registry, over 720 worlds × 10 intents, against my own model of the 0078 SQL
+- failing-first on 10107d5 and on 3f337cb
+- the dev e2e lane on my own :3620, after a flag reset
+- the prod lane on :3621
+- a walk at 360 and 1280 that confirms each action and then reads the anonymous custom-host roster
+
+**Not re-run (earlier runs stand):** the full `test:db`, RLS 78/72, the full `test-rls.sql`, and the full chromium, custom-hosts and prod suites. None was owed for this diff.
+
+**Still open, not blocking:** the real-iPhone HEIC check (operator) and the Vercel linux `sharp` trace (PR preview).
+
+## Type Check
+
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS, 0 warnings
+- `npm run check`: 8 of 8 tripwires pass
+- `rm -rf .next && npm run build`: PASS
+
+## Unit Tests
+
+- **Unit suite:** 654 files passed and 97 skipped; 10,027 tests passed and 2,854 skipped, in 33.1 s. The skips are the env-gated DB files, which matches the implementer's numbers.
+- **Person-photos DB set, serial:** I ran `dotenv -e .env.local -- vitest run --no-file-parallelism` over `src/lib/person-photos`, `person-photos.db.test.ts`, `public-roster-photo.db.test.ts` and `src/lib/org-feature-warnings`. 15 files, 341 passed, 0 failed, 0 skipped, in 220 s. That includes `outcome-parity.db.test.ts`, 7 of 7.
+
+## End-to-End Tests
+
+Before the run I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`: COMMIT, 39 seeded flags). A before/after dump showed no difference: the branch was already at baseline. Flags were back at baseline after the walk.
+
+| Lane | Specs | Result |
+|---|---|---|
+| Dev, my own server on :3620 (`next dev -p 3620`, with `AUTH_URL` and `E2E_BASE_URL` on :3620 and the domains fakes), `--project=chromium` | `e2e/person-photos.spec.ts` (360, desktop, E4, toggle-off; includes the new step 5b, T29) and `e2e/hydration/person-photos-upload.spec.ts` | 5/5, 1.4 min |
+| Dev, `--project=custom-hosts` | `e2e/custom-domains/person-photos-roster.spec.ts` | 2/2, 11.9 s |
+| Prod (`PW_PROD_BUILD=1`, `PW_PROD_PORT=3621`), `--project=prod-build` | `e2e/hydration/person-photos-upload.spec.ts` | 1/1, 30.5 s |
+
+There were no skips and no retries. I stopped the dev server by PID: npx 13345, child 13364, listener 13365. Both :3620 and :3621 are free.
+
+### The walk at 360 and 1280
+
+The walk used its own fixture org with a live site and the custom host `qa-photos-r4b.invalid`, with synthetic images. After each confirm I re-read the page and the anonymous roster: is the person listed, and which of their image keys is served and actually loads (`naturalWidth`).
+
+- Both widths produced identical text and identical roster outcomes.
+- Every dialog fit the viewport.
+- There was no horizontal overflow and no native dialog.
+- Action buttons are 44 px.
+
+| State | What the dialog said | Roster before → after confirming | Agrees? |
+|---|---|---|---|
+| **S**, same photo is the website photo and the cleared directory photo; listed. Stop using on website | "This photo is also Samewalk's directory photo, and it was cleared for the website, so this changes nothing on the website." then the tip "To take it off the website, use "Stop using in directory" on this photo as well." No "will no longer use" and no cache line. | Served key K (240) → **still serves K (240)**. The page now reads "Website: the directory photo, because it was cleared for the website." | yes |
+| **S**, following the tip: Stop using in directory | `directoryInitials` + `directoryAlsoOnWebsiteEnds` ("…After this, the website will show no photo.") | K → **serves none**. The person is still listed by name, and no designations remain. | yes |
+| **SU**, same photo, unlisted. Stop using on website | `websiteUnchangedCleared` + tip | Not on the roster before or after | yes |
+| **L**, listed, website photo. Use in directory, ticked, on the website photo | `websiteAlreadyUses`, with no "only if" ((f) is fixed) | Serves A → still serves A | yes |
+| **L**, then Remove (the photo is now both) | `removeBase`, `removeIsDirectory`, `removeIsWebsite`, `removeCaches` | A → none | yes |
+| **L2**, listed, website A and cleared directory B. Remove A | …`removeIsWebsite`, `removeCaches`, then `websiteFallsBack` | A → **serves B**, which the dialog said | yes |
+| **N**, unlisted, website photo. Stop using on website | `websiteStops`, `websiteShowsNone`, `websiteCaches` | Absent → absent | yes |
+| **N**, Use in directory, ticked, no website photo (the "related" state) | `websiteNotListed` | Absent → absent. The page shows the fallback status line and the not-listed listing line | yes |
+| **H**, hidden here, listed. Use on website on the spare | `websiteHidden` + `websiteReplaces` | None → none (the website photo is now B, withheld) | yes |
+| **H**, then Stop using on website | `websiteStops`, `websiteShowsNone`, `websiteCaches` | None → none | yes |
+| **HO**, hidden at another org, which the page cannot read; listed. Use in directory, ticked | Hedged `directoryAlsoOnWebsite` ("can also appear… unless something withholds it, such as Hidother hiding their photo…") | n/a → none. Afterwards the page reads "Website: not shown, because Hidother has hidden their photo." | yes, hedge true |
+| **M**, minor aged 9, listed | Both status lines are the under-18 lines, plus the new `minorNotice`. The directory tile has no "Clear for website". Both designate dialogs show only `minorBlocked`, and confirm stays disabled when ticked. Remove: the withheld sentence. Stop website: stops / shows none / caches. | None → none | yes |
+| **G**, merged, listed | Status "…merged into another." Remove: the withheld sentence. Use on website: `websiteMerged` + `websiteReplaces`. | None → none | yes |
+
+Evidence is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-r4b/walk/`: `results.json` plus 22 screenshots, including `360-S-stop-website-dialog.png`, `360-S-roster-after-stop-website.png` and `360-S-roster-after-tip.png`.
+
+**Fixture cleanup.** My walk script's cleanup failed once on a derived `group_memberships` row of HO at the second org. I removed it with `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-r4b/tools/cleanup-r4b.mts`. Leftovers are now org 0, people 0, memberships 0, group memberships 0, photos 0. The trigger `group_memberships_reject_derived` is re-enabled (`O`). This was my script's fault, not the product's.
+
+## Regression Tests Added
+
+I ran HEAD's new and changed unit files (`outcome.test`, `consequences.claims.test`, `consequences.test`, `copy.test`, `confirm-dialogs.test`, `designate-dialog.test`) against older source, using `git archive` scratch copies that are now deleted.
+
+**On 10107d5:** all 6 files failed; 24 tests failed and 147 passed.
+- `outcome.test` and `consequences.claims.test` fail at import, because the module is absent (the design expected this).
+- The 24 failing tests:
+  - all T22 rows: the four (e) states, the retired-conditional rows, the remove fallback, and the stale pages;
+  - T24 (×6);
+  - T25 (×3);
+  - T26 (×3, plus the body).
+
+**On 3f337cb** (the mirror is present but the old chooser and copy are not, so only the fix is missing): 5 of 6 files failed; 27 tests failed and 190 passed. That matches the implementer's 27.
+- **The claims registry fails three ways:**
+  - S5 (the retired key);
+  - S1, which names `directoryWebsiteConditional has no claim` and "`websiteStops` is false" in no-designation and same-photo worlds;
+  - the named (e) property.
+- **S2 to S4 pass**, as the implementer reported.
+- **`outcome.test` passes**, which is correct, because the mirror was added in 3f337cb.
+
+**On HEAD:** all of these pass inside the 10,027.
+
+### Mutation run (my own flips, not the implementer's m1–m5)
+
+Each flip was made in a scratch copy of HEAD. I then ran `outcome-parity.db`, `consequences.claims`, `outcome` and `consequences`, restored the file, and checked it with `cmp` against the worktree. Afterwards `diff -r src` between the scratch copy and the worktree was identical. The unmutated baseline was 134/134 green.
+
+| # | Flip | File | What went red |
+|---|---|---|---|
+| q1 | The website gate reads `hideHere` instead of `hide` (a person-wide hide becomes org-scoped) | `outcome.ts` (mirror) | **Parity P1 and P3**, plus 13 unit tests. The claims registry stayed green, because its truth is the same mutated mirror. That is exactly the drift the parity test exists to catch. |
+| q2 | A minor's `designate_website` is no longer refused in `applyIntent` | `outcome.ts` | **Parity minor slice**, plus 2 unit tests |
+| q3 | `shiftOf` treats a change of source as "moves" | `outcome.ts` | **Claims S1 and the (e) property**, the four T22 (e) rows, and 2 `outcome.test` rows |
+| q4 | Remove of a shown cleared-directory photo drops `removeCaches` | `consequences.ts` | **Claims S4**, plus 2 rows |
+| q5 | `factsOfSnapshot` reads publication as unknown-false (`published: false`) | `outcome.ts` | **Claims S1, S2 and S4**, plus 11 rows |
+
+| # | SQL flip (applied as owner) | Parity | Restore |
+|---|---|---|---|
+| s1 | `presby_person_public_photo`: hide scoped to `pp.organization_id = p_org` | **Red:** P1, P2 and P3. The first mismatch reported was `hide:other_org … core withheld null != hide_photo` | 0078 re-applied whole; fingerprint identical |
+| s2 | `presby_public_staff_roster`: drop `and sp.public_listed` | **Green, 7/7: not caught (N2).** I re-applied the flip and ran `public-asset.db.test.ts` and `public-roster-photo.db.test.ts`: 5 failed (for example "StaffUnlisted is not served (public_listed = false)") | 0078 re-applied whole; fingerprint identical |
+
+## Coverage on Critical Modules
+
+Not measured. The diff touches none of `permissions.ts`, `two-factor.ts` or `flags.ts`.
+
+## Feature-Gate Audit
+
+No protected routes were touched. No `route.ts` or `actions.ts` is in `git diff 93905a6..HEAD`. The one new instruction (`websiteTakeOffTip`) names a control on the same tile:
+- `tile-controls.tsx:65-67` renders "Stop using in directory" whenever `isDirectory`;
+- the store allows `undesignate` for any `people.manage` holder, including on a minor.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none added or changed | n/a (run 1's audit stands) | n/a, tenant axis (`people.manage`, toggle, membership) | n/a |
+
+## Copy Truthfulness
+
+- [x] **Every changed string is in the design's Copy table.** I checked programmatically against the R-e8 text that these six strings are verbatim in both the design and `copy.ts`:
+  - `websiteAlreadyUses`, `websiteKeepsOther`, `websiteUnchangedCleared`, `websiteTakeOffTip`
+  - the directory body
+  - `minorNotice`
+
+  `directoryWebsiteConditional`, "instead of their initials", "any existing photos are not shown." and "used on the website only if" have no hits in `src`, `e2e`, `docs/release-notes` or `docs/product`, apart from one code comment at `copy.ts:159`.
+- [x] **The query behind each claim was opened, and what it does not read was named.**
+  - `presby_person_public_photo` (0078:380-404): website, else attested directory; withheld in the order toggle_off, minor, merged, hide (hide person-wide).
+  - `presby_person_directory_photo` (0078:430-452): directory only; minor, then hide scoped to this org; no merged reason.
+  - The staff, officer and committee rosters add `public_listed`, `ends_on is null`, `o.status = 'active'`, `s.status = 'live'` and, for committees, `membership_source = 'managed'`. `listingsOf` (`reader.ts:89-109`) matches those predicates branch for branch.
+  - `presby_public_site_asset` serves a photo key only while a roster lists it.
+  - `outcome.ts` mirrors all of this. Its one deliberate asymmetry is that whatever the page cannot read counts as clear.
+- [x] **Each instruction is performable by the role that sees it** (see the gate audit above).
+- [x] **No string is false in a reachable state.**
+  - The registry's S1 to S5 pass over all 7,200 world-and-intent pairs.
+  - My own probe re-checked every emitted line with **stricter** claims, against a model of the 0078 SQL I wrote myself rather than `outcome.ts`, plus my own no-silent-change checks. It passed. The readout is `strict-readout.txt` in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-r4b/`.
+  - The live walk above agrees with every dialog I confirmed.
+  - The status lines (`status-lines.ts`, unchanged) are true in the same-photo states: before, "the photo marked Website"; after stopping the website, "the directory photo, because it was cleared…"; after the tip, "no photo chosen".
+
+**copy truthfulness: PASS**
+
+### Claims registry versus its sentences (asked for: claims weaker than their sentences)
+
+Most claims match their sentence exactly. These are the strong ones:
+- the selection and negative claims: `websiteShowsNone`, `websiteStops`, `websiteAlreadyUses`, `websiteUnchangedCleared`, `removeIsWebsiteWithheld`;
+- the person-fact claims: `minorBlocked`, `websiteHidden`, `websiteMerged`, `websiteNotListed`.
+
+**N1. Four claims are weaker than their sentences.** All four are true at HEAD under my stricter versions, but a green registry would not catch them going false:
+
+| Key | Sentence | Claim at `consequences.claims.test.ts` | What it does not check |
+|---|---|---|---|
+| `removeBase` (:99) | "It will no longer be used anywhere." | `() => true` | Neither selection names P after the remove. If this sentence were ever emitted for another intent, the registry would stay green. |
+| `directoryHidden` (:55) | "…the directory won't show **this photo**…" | `T1.directory` gate is `hide_photo` | `T1.directory.photoId === P` |
+| `websiteKeepsOther` (:67-70) | "has a different website photo, so the website **keeps** using that one" | Checks T1 only | `sel(T0.website) === sel(T1.website)` with source website |
+| `websiteTakeOffTip` (:94-97) | "…use "Stop using in directory" **on this photo** as well" | Checks only the effect of `undesignate_directory` | That the directory photo is the dialog's photo |
+
+`removeBase` is the design's own text (R-e3 says "always"), so tightening it is a design-level follow-up. Today it is covered only indirectly, by P3's pinning of `applyIntentToWorld` to the store and by the SQL's `removed_at` filter.
+
+### Notes (not failures)
+
+1. **N2. The parity test's `listed` dimension is only row presence.**
+   - An unlisted world seeds **no** staff row (`outcome-parity.db.test.ts:169-173`), so P1 never sees `public_listed = false` or an ended position. Officer and committee rosters are not in the product either.
+   - That is why s2 (the staff roster ignores `public_listed`) passed P1. It is caught today by F289's `public-asset.db.test.ts`.
+   - The file header's claim that "a new SQL gate that is not a field of `Facts` fails that test" overstates this.
+   - Suggested follow-up: seed half the unlisted worlds as `public_listed = false` or ended rows, and add one officer and one committee world.
+2. **The cache residual is absent on replacement.** `websiteReplaces` and `directoryWebsiteWillStop` withdraw a shown photo with no browser-cache sentence. No string denies the residual. But the amendment's line "omitted in exactly one state" is too broad, because S4 checks only `undesignate_website` and `remove`.
+3. **The tip can overstate exposure.** For an unlisted, hidden, merged or minor person in the same-photo state, "To take it off the website" presupposes the photo is shown when it is only selected. This overstates exposure, which is the safe direction. T22 rules it for these states.
+4. **Unknown hide still gets a hopeful line.** When the hide is set at another org and nothing is designated, the "unattested" status line and a hedged consequence line still appear, and the page reveals the hide only after the click (state HO in the walk). This is run 1's accepted "unknown is clear" residual.
+5. **The dialog close icon is about 16 px.** It is a pre-existing shared primitive; the TODO candidate from run 2 stands.
+6. **`websiteTakeOffTip` is always shown in the unchanged-selection state.** The implementer reported this: today its guard can never withhold it. I confirm.
+
+## Verdict
+
+**PASS.** The run 3 defects (e) and (f) are fixed and verified live: after confirming each action, the roster agreed with the dialog. The mirror is pinned to the SQL: four of my five TS flips and the SQL flip s1 went red in parity or the registry. Failing-first is confirmed on 10107d5 and 3f337cb, and every gate and lane is green. N1 and N2 go to the orchestrator as test-hardening follow-ups for `docs/TODO.md`; neither is a false string.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification, run 4 (scoped, re-launch) | qa | Complete:<br>• 0078 re-applied twice, fingerprint stable and equal to the branch's state before the run<br>• diff has no SQL, schema, route, action, flag or permission change<br>• typecheck, lint, build, check 8/8<br>• unit 10,027 passed; person-photos DB 341/341 serial, parity included<br>• own TS flips q1–q5 all red (parity P1/P3 and minor slice; claims S1/S2/S4/(e)), restored and cmp-clean<br>• SQL flip s1 red in parity; s2 green in parity but red in `public-asset.db.test.ts` (N2); 0078 restored, fingerprint identical<br>• stricter-claim probe with my own SQL model: 7,200/7,200 true<br>• failing-first: 24 red on 10107d5, 27 red on 3f337cb, green on HEAD<br>• e2e dev 5/5 chromium + 2/2 custom-hosts on :3620, prod 1/1 on :3621; flags reset first (already at baseline)<br>• walk at 360/1280 over S/SU/L/L2/N/H/HO/M/G, confirming each action and checking the roster: same photo stop → still served, tip → none; all dialogs agree<br>• notes: N1 (four weak claims), N2 (parity's listing dimension is row presence only)<br>• open: real-iPhone HEIC (operator), Vercel linux `sharp` trace (PR preview) | PASS | 2026-10-28 |
+
+**Handoff:** analyst, Phase 6. For the orchestrator:
+- record N1 and N2 as test-hardening TODO candidates;
+- the proposed decision text and finding, the C9 release-note clause and the close-icon TODO candidate from the amendment are still waiting.
+
+Everything from this run is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-photos-r4b/`:
+- **Gate logs:** `gates.txt`, `typecheck.log`, `lint.log`, `check.log`, `build.log`, `unit.log`
+- **Suite and red logs:** `db.log`, `red-10107d5.log`, `red-3f337cb.log`
+- **Mutations:** `mut-*.log` and `mut-*.diff`, `mut-summary.txt`; SQL flips in `sqlmut1.sql`, `sqlmut2.sql`, `s1-*` and `s2-*`
+- **Fingerprints:** `fp-*.txt`
+- **e2e:** `e2e-*.txt`
+- **Flag reset:** `flags-*.txt`, `flags-reset.log`
+- **Probe:** `strict-readout.txt`, `tools/qa-strict.test.ts`
+- **Walk:** `walk/`, `tools/walk-r4b.mts`
+
+I deleted the scratch tree copies at 10107d5, 3f337cb and HEAD, plus the three copies the stopped run left in `qa-photos-r4/`.

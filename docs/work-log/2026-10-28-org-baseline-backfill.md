@@ -411,3 +411,155 @@ No real organization is named anywhere in the diff: added lines contain no churc
 | 5 — Verification | qa | Done | FAIL (0082's stop-block raises on a fresh database, so CI's `db:migrate` fails; fix needs an in-place-edit ruling) | 2026-10-28 |
 
 **Handoff:** back to **full-stack-developer** (Phase 4) to fix `drizzle/0082_presby_backfill_org_baseline.sql:31-33` and add the empty-catalog check. **Tech-lead** is copied for the ruling on editing an already-applied migration in place, since a fix-forward cannot reach a fresh `db:migrate`. After the fix, Phase 5 needs to re-run only the 0082 test, the empty-catalog check, `check:schema-parity`, and a confirmed migrate step on the PR's CI (or a local fresh-database migrate). Everything else above stands.
+
+---
+
+# Phase 5 — Verification (qa), run 2
+
+**Date:** 2026-10-28
+**Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-baseline`, `pipeline/org-baseline-backfill` at `0d81c51` (not pushed, so CI has not run)
+
+**Scope run:** This is the run 2 scope from the orchestrator's brief. Everything else stands on run 1.
+- I checked the guard-only diff of 0082 and re-applied it on `development` with `psql -1`.
+- I built a fresh scratch database and ran `drizzle-kit migrate`, then `check:schema-parity`, `seed.ts`, `seed-dev.sql`, and two re-applies of 0082. Then I dropped the database.
+- I ran the 0082 test red against `a0311a7`'s file and green against HEAD's.
+- Gates: typecheck, lint, `npm run check`, `check:schema-parity`, and a serial run of the 0082 test plus `src/lib/onboarding`.
+
+**Not re-run:**
+- The full unit suite (run 1: 10,785 passed, 0 failed; no application code changed since).
+- `scripts/test-rls.sql` (run 1; 0082's writes are byte-identical and `development`'s row counts did not change).
+- The full DB-backed set.
+- e2e: none owed, because there is no route, auth, proxy, layout or UI change.
+
+Production was not touched. I copied `.env.local` in for the DB work and have removed it. No value or connection string was printed, and every log was checked for zero `postgres://` matches. `git status` is clean, and `cmp` confirms 0082 matches HEAD. No repo file was edited and no stash was used.
+
+## Diff scope (`git diff a0311a7..HEAD -- drizzle/0082*`)
+
+- Only the header comment and the first `DO` block changed. `drizzle/meta/` is unchanged.
+- The roster guard is now `if exists (org lacking the active_membership group) and not exists (roster) then raise`. The old version raised whenever `roster` was absent, so the new one raises in fewer cases.
+- The membership stop-block dropped `and m.ended_on is null`, so it now refuses any membership row (a broader refusal). Its message changed from "live memberships" to "membership rows".
+- **Every write statement is byte-identical.** I extracted everything after the first `end $$;` from the `a0311a7` and HEAD files and compared them: `cmp` reports identical, 40 lines each. That covers the group `INSERT … ON CONFLICT` and the role/permission/grant `DO` block.
+- The work-log's handoff names `8a55565` as the first-applied file. `git diff 8a55565 a0311a7` on 0082 is empty, so the two baselines are the same file.
+
+## Behaviour-neutral where it already ran (`development`)
+
+I ran the corrected file with `psql -X -1 -v ON_ERROR_STOP=1` as `neondb_owner` on `neondb`: `DO`, `INSERT 0 0`, `NOTICE: … added for 0 organization(s)`, exit 0.
+
+Row counts before and after were identical:
+- orgs 17, groups 50, active_membership groups 17
+- app_roles 67, app_role_permissions 221, role_grants 58, memberships 61
+- 0 orgs lacking the group, 0 with the group but no `member` role
+
+On production, the ledger records only the first ten migrations (`docs/deployment.md:145`), so 0082 is never re-run by `drizzle-kit` there.
+
+## Fresh-database proof
+
+1. **Create.** `create database scratch_qa_0082` on the `development` branch as owner. It started with 0 public tables.
+2. **Migrate.** `npx drizzle-kit migrate` with the URLs swapped into the environment by a scratch wrapper (`.env.local` not edited): exit 0, "migrations applied successfully". `drizzle.__drizzle_migrations` holds 71 rows, which matches the journal's 71 entries. Its `max(created_at)` = `1793219058000` = idx 82's `when`. After migrate: 0 organizations, 0 groups, 0 `group_types`.
+3. **Parity and seed.** `check:schema-parity` on the scratch DB (as CI runs it, between migrate and seed): 86 tables, 7 allowlisted, 0 failing. `scripts/seed.ts`: exit 0, "seeded 6 platform-wide group_types".
+4. **Fixture.** `seed-dev.sql` with `ON_ERROR_STOP=1`: exit 0.
+5. **Re-apply 0082 on the seeded DB.** Exit 0, and no stop-block raised. **It was not a no-op:** `INSERT 0 4` and "added for 11 organization(s)". Of the 12 fixture orgs, 4 lacked the group and 7 had the group but no `member` role. See the advisory below: this is correct backfill behaviour, not a defect.
+6. **Second re-apply.** `INSERT 0 0`, 0 organizations, all counts unchanged. Idempotent.
+7. **Drop.** `drop database scratch_qa_0082 with (force)`. `pg_database` now lists only `neondb`, `postgres`, `template0` and `template1`.
+
+## Type Check
+
+- `npm run typecheck`: PASS.
+- `npm run lint` (max-warnings 0): PASS.
+- `npm run check`: all eight tripwires pass.
+
+## Unit Tests
+
+The DB-backed run was serial (`--no-file-parallelism`, `development`) over `src/lib/db/domain/org-baseline-backfill.db.test.ts` and `src/lib/onboarding`.
+
+Total: 616 | Passed: 616 | Failed: 0 | Skipped: 0 | Files: 32/32 | Duration: 177.7s
+
+This matches the implementer's reported 32 files / 616 tests.
+
+**Red before, green after.** I used the run 1 harness: vitest with `--root` set to the worktree and the working directory set to a scratch directory, so the test's `process.cwd()/drizzle/0082…` read takes the variant. Both variants were checked with `cmp` against `git show a0311a7:` and `git show HEAD:`.
+
+| Case | `a0311a7` file | HEAD file |
+|---|---|---|
+| empty catalog no-op (`:309`) | **fail**: raised `group type "roster" is missing` | pass |
+| stop-block, ENDED membership (`:219-223`) | **fail**: `refused` was `null`, so the old file did not refuse | pass |
+| stop-block, FUTURE-ended membership | **fail**: `refused` was `null` | pass |
+| stop-block, live membership | fail on the message only: the old text says "live memberships" | pass |
+| `roster missing` still raised (`:315`) | pass (the old file raised unconditionally) | pass |
+| the three original cases | pass | pass |
+| **Total** | 4 failed, 4 passed (exit 1) | 8 passed (exit 0) |
+
+This matches the implementer's claim. The ENDED and FUTURE cases fail because the old file did not refuse, which is the behaviour that matters, not just a wording mismatch. I confirmed that per case with the JSON reporter.
+
+**Trigger window (run 1 advisory 2), resolved.** Each stop-block case (`:229-245`) runs `disable trigger`, the insert, `enable trigger` and the migration inside one `fx.platform.transaction` that always throws `RolledBack`. In Postgres the trigger change and its lock are transactional, so other sessions block on the lock rather than see the window, and the change is undone by the rollback.
+
+After all three runs (red, green, serial), `pg_trigger` on `public.memberships` shows:
+
+| Trigger | `tgenabled` |
+|---|---|
+| `memberships_guard_end` | `O` |
+| `memberships_guard_insert` | `O` |
+| `memberships_sync_derived_group` | `O` |
+
+There are 0 leftover `org-baseline` organizations and 0 leftover `org-baseline-%` email rows, and the `development` row counts are identical to the pre-run counts above.
+
+## End-to-End Tests
+
+Not run and not owed: no route, action, auth path, proxy, layout or component changed.
+
+## Regression Tests Added
+
+- `applies cleanly as a no-op on an empty catalog (no organizations, no group types) — regression for 0082 failing a fresh db:migrate` (`src/lib/db/domain/org-baseline-backfill.db.test.ts:309`). It guards against 0082 stopping `db:migrate` on a fresh database, and it was red on `a0311a7`. It simulates the empty catalog with temp tables, so the real-database proof above is what backs it.
+- `still raises roster missing when an organization needs the group and the roster type is absent` (`:315`). It guards against the corrected guard becoming inert. It cannot be red on the old file, by construction.
+- `the stop-block refuses an organization that has %s and no group` (`:219`), three cases. The ENDED and FUTURE cases were red on `a0311a7` and close run 1 advisory 1.
+- Minor, non-blocking: in the stop-block cases the "writes nothing" assertions (`:251-252`) are already guaranteed by the rollback. The `refused` match is what carries each case.
+
+## Coverage on Critical Modules
+
+n/a. `permissions.ts`, `two-factor.ts` and `flags.ts` are untouched.
+
+## Feature-Gate Audit
+
+No protected routes touched.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none | n/a | n/a | n/a |
+
+## Copy Truthfulness
+
+No user-facing strings changed. I checked the changed doc lines:
+- [x] `docs/deployment.md`, "A fresh environment gets the file from the journal (idx 82) and it is a no-op there … `db:migrate` completes through idx 82": **now true.** Proven above: exit 0, 71 of 71 applied, 0 organizations and 0 group rows afterwards.
+- [x] "an organization that lacks the group and has ANY membership row … stops the file" and "roster missing only when some organization needs the group": both match the HEAD guards and the green cases.
+- [x] "re-run with `-1` on `development`: zero rows inserted": reproduced.
+- [x] `docs/TODO.md`: "live memberships" became "any membership", which is accurate.
+- [ ] "it is a no-op on production" rests on the writes being byte-identical and on production's single affected organization already holding the group. I did not verify it against production, which was out of scope.
+
+## Verdict
+
+**PASS.** The guard-only correction is exactly that: every write is byte-identical, the guards raise in fewer cases (roster) or more cases (memberships), and nothing changes where 0082 already ran. A fresh `db:migrate` now completes through idx 82. The regression tests are red on the first-applied file and green on HEAD, and the trigger toggle is confined to a rolled-back transaction.
+
+**Advisory, for the orchestrator and Phase 6 (not blocking): the brief's "re-applies as a no-op on the seeded database" did not hold, and that exposes fixture drift.**
+- On a fresh database, 0082 runs at migrate time against an empty catalog. `seed-dev.sql` then creates 12 organizations, 4 without the Active Membership group and 7 with the group but no `member` role, because the fixture does not seed the baseline that `createOrganization()` does.
+- A manual re-apply backfills them (4 groups, 11 roles), which is correct behaviour for 0082.
+- **The consequence:** on `development`, 0082 ran after the fixture and gave 15 fixture organizations the baseline `member` role (`directory.view`, `events.view`). CI's fresh databases never get it.
+- So `development` and CI now differ in which fixture members hold those two keys. A future DB or RLS test that depends on the difference will pass locally and fail in CI, or the reverse.
+- Suggested TODO line: give `scripts/seed-dev.sql` the baseline group and `member` role for its organizations, or record the drift as accepted.
+- Separately, the stop-block did not fire on the seeded fixture, so its 4 group-less organizations have no memberships.
+
+Carried from run 1, unchanged: the production-touched claim ("no other organization in production was touched") rests on the operator's rehearsal, and 2 `development` organizations lack `organization_settings` and event types. Both are still for Phase 6 to weigh.
+
+---
+
+**Per-Phase Status row:**
+
+| 5 — Verification | qa | Done | PASS (run 2: 0082 guard-only correction verified; fresh `db:migrate` exit 0 through idx 82; red on `a0311a7` 4/8, green on HEAD 8/8; serial 616/616) | 2026-10-28 |
+
+**Handoff:** to **analyst** (Phase 6). The advisory above needs a ruling or a `docs/TODO.md` line: `development` and CI differ on the fixture `member` role because 0082 ran after `seed-dev.sql` on `development` but before it on every fresh database. At integration, the orchestrator records the "guard-only, behaviour-neutral in-place correction" decision proposed in the Phase 4 fix section.
+
+Files:
+- `/Users/cshenso/git/presby-platform/presby-baseline/drizzle/0082_presby_backfill_org_baseline.sql`
+- `/Users/cshenso/git/presby-platform/presby-baseline/src/lib/db/domain/org-baseline-backfill.db.test.ts`
+- `/Users/cshenso/git/presby-platform/presby-baseline/docs/deployment.md`
+- `/Users/cshenso/git/presby-platform/presby-baseline/docs/work-log/2026-10-28-org-baseline-backfill.md`
+- Scratch evidence (red and green logs, wrapper, count query): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/run2/`

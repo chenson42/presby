@@ -538,6 +538,21 @@ describe("H12 publication against docs/TODO.md", () => {
     const open = base({ pages: [pub("one", { limitationUntil: "in-flight" })], contentFiles: [md("one", "x")], slugHistory: ["one"] });
     expect(run("H12", open)).toEqual([]);
   });
+  it("11e / f: a page may name several limitation tokens; each is read, and a Done one names the page", () => {
+    const todo = todoWith(["- [ ] a [help:in-flight-a]", "- [ ] b [help:in-flight-b]"]);
+    const open = base({ pages: [pub("one", { limitationUntil: ["in-flight-a", "in-flight-b"] })], contentFiles: [md("one", "x")], slugHistory: ["one"], todo });
+    expect(run("H12", open)).toEqual([]);
+    const oneDone = base({ pages: [pub("one", { limitationUntil: ["in-flight", "shipped"] })], contentFiles: [md("one", "x")], slugHistory: ["one"] });
+    const v = run("H12", oneDone);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toMatch(/one: feature shipped: remove the limitation sentence and the marker \(limitationUntil: shipped\)/);
+    const missing = base({ pages: [pub("one", { limitationUntil: ["in-flight", "no-such-token"] })], contentFiles: [md("one", "x")], slugHistory: ["one"] });
+    expect(messages("H12", missing).join()).toMatch(/\[help:no-such-token\] appears on no line/);
+  });
+  it("H1: fails a malformed token inside a limitationUntil list, and an empty list", () => {
+    expect(run("H1", base({ pages: [pub("one", { limitationUntil: ["in-flight", "Bad Token"] })] }))).not.toEqual([]);
+    expect(run("H1", base({ pages: [pub("one", { limitationUntil: [] })] }))).not.toEqual([]);
+  });
   it("(d): fails a token that is missing, or appears twice", () => {
     expect(run("H12", pendingInput(TODO_OK, { requires: "no-such-token" }))).not.toEqual([]);
     const twice = todoWith(["- [ ] a [help:in-flight]", "- [ ] b [help:in-flight]"]);

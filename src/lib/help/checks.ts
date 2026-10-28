@@ -15,7 +15,7 @@ import { extractHeadings } from "./headings";
 import { readTodoTokens, readingFor, type TodoReading } from "./todo-grammar";
 import { HELP_CONTACT_LINE } from "./contact";
 import { applyHelpTokens, unknownTemplateTokens } from "./tokens";
-import type { HelpContentEntry, HelpEntry, HelpPlannedEntry, HelpShot } from "./types";
+import type { HelpContentEntry, HelpEntry, HelpPlannedEntry, HelpShot, HelpToken } from "./types";
 
 export interface HelpFile {
   path: string;
@@ -142,7 +142,11 @@ function h1(input: HelpCheckInput): HelpViolation[] {
     if (e.status === "published" && !e.verifiedIn) v(`${e.slug}: a published entry needs verifiedIn.`);
     if (e.status === "pending" && !e.requires) v(`${e.slug}: a pending entry needs requires (its [help:<token>]).`);
     if (e.requires !== undefined && !SLUG_RE.test(e.requires)) v(`${e.slug}: requires "${e.requires}" is not a token.`);
-    if (e.limitationUntil !== undefined && !SLUG_RE.test(e.limitationUntil)) v(`${e.slug}: limitationUntil "${e.limitationUntil}" is not a token.`);
+    if (e.limitationUntil !== undefined) {
+      const tokens = limitationTokens(e);
+      if (tokens.length === 0) v(`${e.slug}: limitationUntil is an empty list; remove the marker.`);
+      for (const t of tokens) if (!SLUG_RE.test(t)) v(`${e.slug}: limitationUntil "${t}" is not a token.`);
+    }
   }
 
   for (const [slug, n] of slugs) if (n > 1) v(`duplicate slug "${slug}".`);
@@ -418,6 +422,12 @@ function h11(input: HelpCheckInput): HelpViolation[] {
   return out;
 }
 
+/** The limitation tokens an entry names, as a list (none, one, or several). */
+function limitationTokens(e: { limitationUntil?: HelpToken | readonly HelpToken[] }): readonly HelpToken[] {
+  if (e.limitationUntil === undefined) return [];
+  return typeof e.limitationUntil === "string" ? [e.limitationUntil] : e.limitationUntil;
+}
+
 // ---- H12: publication against docs/TODO.md --------------------------------------------------------------------------------------------
 
 function h12(input: HelpCheckInput): HelpViolation[] {
@@ -459,11 +469,11 @@ function h12(input: HelpCheckInput): HelpViolation[] {
         }
       }
     }
-    if (e.limitationUntil !== undefined) {
-      const r = readingFor(read, e.limitationUntil);
-      if (need(e.slug, e.limitationUntil, r.state, r.lines)) {
-        if (r.state === "done") v(`${e.slug}: feature shipped: remove the limitation sentence and the marker (limitationUntil: ${e.limitationUntil}).`);
-        else if (r.state === "declined") v(`${e.slug}: [help:${e.limitationUntil}] is declined; the limitation will not lift, remove the marker.`);
+    for (const token of limitationTokens(e)) {
+      const r = readingFor(read, token);
+      if (need(e.slug, token, r.state, r.lines)) {
+        if (r.state === "done") v(`${e.slug}: feature shipped: remove the limitation sentence and the marker (limitationUntil: ${token}).`);
+        else if (r.state === "declined") v(`${e.slug}: [help:${token}] is declined; the limitation will not lift, remove the marker.`);
       }
     }
   }

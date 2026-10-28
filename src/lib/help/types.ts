@@ -61,7 +61,8 @@ export interface HelpContentEntry extends HelpBase {
   /** Pending: required. Published: optional (its token line must then be Done). */
   requires?: HelpToken;
   /** The prose states a limit that an in-flight feature removes (P3-6). */
-  limitationUntil?: HelpToken;
+  limitationUntil?: HelpToken | readonly HelpToken[];
+  // One token, or several when a page works around more than one open item (integration 0.50.0).
   /** Planned slugs this page retires (P3-7). */
   replaces?: readonly string[];
   /** Counts as coverage only for its own tile, never for a toggle key (P3-16). */

@@ -67,7 +67,10 @@ describe.skipIf(!hasDb)("two-factor default (0080, Postgres-backed)", () => {
     const created = await adapter.createUser!({
       id: crypto.randomUUID(),
       email: email("adapter"),
-      emailVerified: new Date(),
+      // null, as Auth.js's OAuth path passes it: since 0065 (users_guard_email_proof,
+      // DECISION-225) a non-owner role may not stamp email_verified, so a dated value
+      // here is refused by the trigger, not by anything this test is about.
+      emailVerified: null,
       name: "Adapter Created",
     });
     userIds.push(created.id);

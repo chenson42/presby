@@ -2067,3 +2067,10 @@ Files:
 - `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/p6-merged` (the scratch dry merge)
 - `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa-help-p5/walk/` (QA screenshots I read)
 
+
+## Operator rulings on Phase 6 (2026-10-28)
+
+- **O3 Google sign-in:** operator is configuring Google OAuth in production now (instructions given 2026-10-28). The `signing-in` Google section publishes only after the operator confirms a successful Google sign-in; otherwise strip it at integration per the Phase 6 checklist.
+- **F362 founder keys:** approved — give the founding administrator `events.manage`, `event_types.manage` and `branding.manage` by default, with a backfill for existing founders. Its own Feature pipeline; four help pages carry `limitationUntil` on its token.
+- **F366 visitor recorded as Ruling Elder:** approved — fix so Session-seating offices and deacon require a current roll member (pastors exempt); bug-fix pipeline, operator rules on the other offices during it.
+- **F371 worship-planning placeholder:** approved change to "Someone who holds the events role can put services on the calendar as events." (restore the original once F362 ships).

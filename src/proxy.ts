@@ -44,6 +44,21 @@ const PROTECTION_RULES: Array<{ pattern: RegExp; required: string }> = [
 ];
 
 /**
+ * Public documentation (DECISION-293): `/help` and `/docs`, by SEGMENT
+ * boundary - `/help` and `/help/…`, never a bare `startsWith("/help")`, which
+ * would admit `/helpdesk`. Every page under these prefixes is static and
+ * session-free by construction (`dynamic = "error"`), and no token rides these
+ * paths (unlike `/invite`), so a prefix is safe here where it is not for the
+ * exact-path entries in PUBLIC_PATHS. A prefix rather than a registry-derived
+ * list because an anonymous visitor's typo'd or retired slug must reach the help
+ * 404, not be redirected to /signin (F348), and because it keeps content out of
+ * the proxy's import graph. The bypass sits before edgeAuth() and the 2FA gate,
+ * so help stays reachable mid-enrolment. A custom host never gets here.
+ */
+const isDocumentationPath = (p: string) =>
+  p === "/help" || p.startsWith("/help/") || p === "/docs" || p.startsWith("/docs/");
+
+/**
  * `/site/<segment containing a dot>` is the INTERNAL rewrite target of a
  * custom host (`/site/church-one.example/about`). On a platform host it must
  * not be reachable at all: the site key is a lookup key, and a platform-host
@@ -107,6 +122,7 @@ export async function proxy(req: NextRequest) {
   // docs/work-log/2026-08-20-public-sites.md Phase 3, "src/proxy.ts fix —
   // exact diff".
   if (pathname === "/site" || pathname.startsWith("/site/")) return NextResponse.next();
+  if (isDocumentationPath(pathname)) return NextResponse.next();
   if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
 
   const session = await edgeAuth();

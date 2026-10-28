@@ -131,12 +131,13 @@ describe("AvatarMenu — identity block", () => {
 });
 
 describe("AvatarMenu — the entitlement matrix (DECISION-044)", () => {
-  it("neither entitlement: Account and Sign out, and nothing platform", async () => {
+  it("neither entitlement: Account, Help and Sign out, and nothing platform", async () => {
     renderMenu();
 
     await open();
 
     expect(screen.getByRole("menuitem", { name: "Account" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Help" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
     expect(
       screen.queryByRole("menuitem", { name: "Platform admin" }),
@@ -182,6 +183,7 @@ describe("AvatarMenu — the entitlement matrix (DECISION-044)", () => {
       .map((item) => item.textContent);
     expect(labels).toEqual([
       "Account",
+      "Help",
       "Platform admin",
       "Developer",
       "Sign out",
@@ -198,7 +200,7 @@ describe("AvatarMenu — feedbackHref (commit 2, docs/work-log/2026-08-27-produc
     const labels = screen
       .getAllByRole("menuitem")
       .map((item) => item.textContent);
-    expect(labels).toEqual(["Account", "Give feedback", "Sign out"]);
+    expect(labels).toEqual(["Account", "Give feedback", "Help", "Sign out"]);
     expect(
       screen.getByRole("menuitem", { name: "Give feedback" }).getAttribute("href"),
     ).toBe("/o/alder-creek/feedback");
@@ -229,10 +231,25 @@ describe("AvatarMenu — feedbackHref (commit 2, docs/work-log/2026-08-27-produc
     expect(labels).toEqual([
       "Account",
       "Give feedback",
+      "Help",
       "Platform admin",
       "Developer",
       "Sign out",
     ]);
+  });
+});
+
+describe("AvatarMenu — Help (user-help Inc 1, Copy C3)", () => {
+  it("links to /help for any signed-in person, in the same tab, after Account and before Sign out", async () => {
+    renderMenu();
+
+    await open();
+
+    const help = screen.getByRole("menuitem", { name: "Help" });
+    expect(help.getAttribute("href")).toBe("/help");
+    expect(help.getAttribute("target")).toBeNull();
+    const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(labels).toEqual(["Account", "Help", "Sign out"]);
   });
 });
 

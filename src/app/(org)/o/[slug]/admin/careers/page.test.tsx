@@ -130,11 +130,12 @@ describe("CareersAdminPage - T20", () => {
     expect(readPlacement).not.toHaveBeenCalled();
   });
 
-  it("toggle off, viewer cannot: the ask-someone sentence and no link", async () => {
+  it("toggle off, viewer cannot: the ask-someone sentence and only the help link", async () => {
     signedIn();
     listPostings.mockResolvedValue({ kind: "feature_off", canManageFeatures: false });
     render(await CareersAdminPage({ params: params() }));
-    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Turn them on under Features" })).toBeNull();
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["How features are turned on"]);
     expect(screen.getByTestId("careers-feature-off").textContent).toContain("Ask someone who manages");
   });
 

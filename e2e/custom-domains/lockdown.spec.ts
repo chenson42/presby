@@ -117,6 +117,14 @@ const PLATFORM_PATHS = [
   "/o/e2e-alpha/admin/members",
   "/o/e2e-alpha/admin/members/new?x=1",
   "/o/e2e-alpha/admin/community",
+  // Public documentation (DECISION-293, user-help Inc 1): a platform-host-only tree. On a church's own domain the
+  // proxy rewrites these into bundle-path space like any other platform route, so each is the neutral 404.
+  "/help",
+  "/help/signing-in",
+  "/help/planned",
+  "/help/contact",
+  "/docs",
+  "/docs/x",
 ] as const;
 
 // Looping over dozens of paths against a DEV server compiles each route on first touch; allow for it.

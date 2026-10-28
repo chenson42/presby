@@ -10,14 +10,14 @@ const FORBIDDEN = /don.t have permission to manage the website domain/i;
 const UNAVAILABLE = /couldn.t load your domain settings/i;
 
 describe("the three non-data states", () => {
-  it("feature off: a not-here message that names the org, with no permission or error framing and no link", () => {
+  it("feature off: a not-here message that names the org, with no permission or error framing and no link but the help link", () => {
     render(<DomainsFeatureOff name="Alder Creek Church" />);
     const body = document.body.textContent!;
     expect(body).toMatch(OFF);
     expect(body).toContain("Alder Creek Church");
     expect(body).not.toMatch(FORBIDDEN);
     expect(body).not.toMatch(UNAVAILABLE);
-    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["How features are turned on"]);
     expect(screen.getByRole("heading", { level: 1, name: "Website domain" })).toBeTruthy();
   });
 

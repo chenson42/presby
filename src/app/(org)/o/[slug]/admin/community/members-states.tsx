@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { FeaturesHelpLink } from "@/components/help/features-help-link";
 
 /**
  * Shared non-data-bearing states for the whole `/o/<slug>/admin/community*`
@@ -30,6 +31,7 @@ export function MembersFlagOff({
       <p className="mt-3 text-sm text-muted-foreground">
         Member management isn&apos;t turned on for {name} yet.
       </p>
+      <FeaturesHelpLink />
     </section>
   );
 }

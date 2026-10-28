@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (parent log, with Addendum A and the operator rulings) | READY WITH NOTES | 2026-10-26 |
 | 2 — Architectural review | architect | Complete (parent log: R1–R14, C1–C10 for Increment 2, DECISION-293/294/295, F345–F349) | Approved with suggestions | 2026-10-26 |
 | 3 — Technical design | tech-lead | Complete for Increment 1. Placeholder list and four operator questions await the operator | Design complete; implementers named per batch | 2026-10-26 |
-| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | In progress: Batches 0, 1 (`d6e7bd7`) and 2 (`be636c3`) done; Batches 5a to 5c pending | — | 2026-10-28 |
+| 4 — Implementation | orchestrator (Batch 0), api-developer (1), ux-developer (2, 5), full-stack-developer (3, 4) | In progress: Batches 0, 1 (`d6e7bd7`), 2 (`be636c3`) and 5a (`a0825c7`) done; Batches 3, 5b, 4 and 5c pending | — | 2026-10-28 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -835,6 +835,188 @@ All four are `○` (static) with the registry empty (`generateStaticParams` retu
 - `npm run build`: exit 0; help routes static (above).
 
 **For Batch 3 and later.** In-app links use `helpHref` + `HelpLink`. The proxy bypass is still missing, so every manual check of `/help` needs a signed-in session until Batch 3. Batch 4 fills `screenshots.ts`'s `IMAGES` with one `import … from "@/content/help/images/<id>.png"` per manifest entry (H18). `HELP_COPY` and `copy.ts`'s helpers are where Increment 2 and the fork-branding pass look for chrome strings.
+
+## Phase 4 — Batch 5a (full-stack-developer)
+
+*2026-10-28, worktree `presby-help`, commit `a0825c7`, not pushed. No `.env.local` value was printed. Walked on `next dev -p 3660` (stopped by PID before the build), 360x780, fixture identities only (`.invalid` / `example.invalid`).*
+
+**Files.** New: `src/content/help/{what-presbyportal-does,how-a-congregation-gets-started,signing-in,using-your-code,your-account,home-and-switching-congregations,why-cant-i-see-this,using-the-directory,getting-help,turning-features-on-and-off}.md`. Modified: `src/lib/help/registry.ts` (ten `published` entries), `slug-history.ts` (ten slugs), `coverage-allowlist.ts` (`tile:directory`, `tile:tickets`, `tile:features` deleted, `LATER_5A` removed), `coverage.test.ts` (`ALLOWLIST_PIN` 32 to 29; the pin reaches 16 when 5b deletes its 13), `content.test.ts` (the "empty registry" case now loads a real page), `docs/product/functionality-map.md` (a Help Index bullet, a "Help (public documentation)" section, and `Help: /help/<slug>` on the ten bullets the pages cover).
+
+**Markers.** `limitationUntil`: `how-a-congregation-gets-started` and `why-cant-i-see-this` carry `signin-invites`; `using-the-directory` carries `person-photos`. `verifiedIn` is `0.47.0` on all ten, because H13 bounds it by this worktree's `package.json` (main is 0.48.0; the orchestrator re-stamps at integration, after re-walking). `turning-features-on-and-off` is `overview: true` and covers `tile:features`; `getting-help` covers `tile:tickets` and `route:/o/{slug}/feedback` (the design's `route:/feedback` is not a route: `(member)/feedback` holds only actions).
+
+**Gates (worktree).** `npm run typecheck` clean; `npm run lint` clean; `npm run test` after the one fix above: 690 files passed, 97 skipped, 10,500 tests passed, 0 failed (the first run failed once, `content.test.ts`, a test that assumed an empty registry); all nine `npm run check` tripwires green, `check:help` "10 registry entries, 10 published, 10 content files, 0 images"; `npm run build` exit 0 with `○ /help`, `● /help/[slug]` (10 paths), `○ /help/planned`, `○ /help/planned/[slug]`. 360px look at the index and all ten pages, light and dark, as the `member` fixture (the proxy still sends an anonymous `/help` to `/signin` until Batch 3): every page HTTP 200, one `<h1>`, document overflow 0, tables inside a focusable scroll region (`why-cant-i-see-this`, `turning-features-on-and-off`), the Needs block present on the administrator page only. Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/help-5a/` (`page-<slug>-light-360.png` and `-dark-360.png`, plus `page-index-*`; the walk screens `signin-360.png`, `totp-*`, `acct-360.png`, `f-*.png` and others sit beside them). They show fixture screens only; none is committed.
+
+**The walk's environment.** The Neon branch `pipeline-user-help` (a copy of `development`) had most `org_portal.*` flags off. I set the global flags to the production posture of the operator ruling (all `org_portal.*` on except `filings` and `statistical_publication`; `sites.public_render`, `sites.public_staff_directory`, `sites.public_committee_directory`, `ui.brand_theming`, `ui.branded_signin`, `platform.merged_home`, `auth.require_2fa`, `auth.local_login` on; `statistics.submission_grants` off). The before-state is in the scratchpad as `flags-before.txt`. The role walk used a congregation made through the real `/admin/organizations/new` form (name "Hollowbrook Presbyterian Church", an invented name, slug `hollowbrook-walk`) and a founding administrator who accepted an invitation as a **new account** through the real `/invite` page (token seeded with a known value, as `e2e/support/invitation-fixture.ts` does) and enrolled two-factor. That is the person `turning-features-on-and-off` and `getting-help` address; it is also the start of Batch 5b's walk. Plain-member screens were walked as `org1@presby.invalid` (no role at `e2e-alpha`), as an Alder Creek fixture (`moderator.fixture@example.invalid`, a member holding the Moderator seat), and the Alder Creek stated clerk and brand-administrator fixtures. Walk users I created or whose password I set on the branch: `walk.*@example.invalid`, the five `router.*@example.invalid`, the three Alder Creek fixtures, `presbytery-clerk@presby.invalid`. Setting a throwaway password on a fixture row changes only my branch. Dev "sent" email is logged, not delivered (`RESEND_API_KEY` is unset), including the rows queued to the operator's own address when a ticket or feedback was filed (platform admins are notified); nothing left the machine.
+
+### Page, fact, how verified
+
+Legend: **W** walked on :3660 as the role named; **W+C** walked and the rule read in code; **C** code only (not walkable here), named so QA and Phase 6 can re-check; **D** a document (map, catalog) plus the screen.
+
+**1. what-presbyportal-does** (read as a prospective congregation; no screen to walk, every line checked against a screen)
+
+| Fact | How verified |
+|---|---|
+| Each congregation's records are seen only by people with access to it | W: a founding administrator at one congregation opens another and gets "You don't have access to Alder Creek Presbyterian Church" |
+| People are seen as members, participants, visitors, staff or former members | W: Community views Everyone, Members, Participants, Visitors, Staff, Former (founder, Community on) |
+| A new member waits for the Session to approve | W: Pending approvals text "Member proposals wait until your Session can approve them" and "Only members of the Session can approve" |
+| Directory: people connected to the congregation search it, read a household, contact details except private ones | W: Alder Creek member walk, search, households, person page, `hide_email` set and cleared |
+| Officers; Session and deacons' rosters built from terms | W: Officers page ("Current roster"), Groups page "Generated automatically from officer terms and the membership roll" |
+| Roles: an administrator gives and takes away | W: Roles page "Who holds what", "Grant a role", "Revoke" |
+| Groups, Staff | W: Groups page ("New group", automatic rosters), Staff page ("Add a staff position") |
+| Members can read the calendar | W: Alder Creek member opens `/calendar`, October list |
+| Job openings written for the website | W: Job openings page ("New job opening") once the feature is on. **Not walked: that an opening appears on a live website** (no site on the branch), so the line says "writes and manages job openings for the congregation's website", the tile's own words |
+| Colour, type pairing and logo | W: Branding page as the brand-administrator fixture |
+| Tickets and feedback | W: see page 13 |
+| Presbyteries and synods have their own pages | W: presbytery fixture sees Credentials and Congregation Oversight tiles |
+| Link target `/help/planned` | The page exists; it shows its empty state until 5c writes the placeholders |
+| **Not stated, on purpose** | Public websites (not walkable here; Batch 5b's `your-congregations-website` owns it), giving, reimbursements, photos, counts of congregations, "add events" (the founding administrator and the stated clerk fixture both get "You don't have permission to manage events") |
+
+**2. how-a-congregation-gets-started**
+
+| Fact | How verified |
+|---|---|
+| No sign-up form | W: no route; `ls src/app` shows no sign-up or register segment; DECISION-155 |
+| A PresbyPortal administrator adds the congregation | W: `/admin/organizations/new` as the platform-admin fixture, "Create organization" |
+| The first administrator is invited by email and called the founding administrator | W: `/invite` text "A PresbyPortal administrator invited you to be the founding administrator at ..." |
+| The link works once, only for its address; shows part of it | W: first acceptance consumed it; a second visit shows "This link isn't active"; the page shows `i***@example.invalid`; a made-up token shows the same page |
+| The page is headed "You're invited"; create an account (first name, last name, 8+ characters) or sign in and accept | W: `/invite` signed out |
+| "This link isn't active" and no reason given | W: dead token and spent token give the same page |
+| May be asked to set up two-factor sign-in | W: the new account signed in and was sent to `/account/2fa` enrolment. The sentence is rule-neutral (P3-11) on purpose |
+| No contact form; the repository link; GitHub issues are public | D: the marketing home says the same ("open an issue at github.com/chenson42/presby"); the allowlisted URL. No address is published |
+| `limitationUntil: signin-invites` | The page carries the marker and **no** "only an invitation connects you" sentence: that sentence is true on this tree and false on 0.48.0, so I did not write it. The marker still forces a re-walk when the line goes Done |
+
+**3. signing-in**
+
+| Fact | How verified |
+|---|---|
+| Google button first, then "or", then the email form; labels "Sign in with Google", "Sign in with email", "Forgot password?" | W: `/signin` signed out |
+| "Wrong email or password." for a wrong password, an unknown address, a locked account with the right password, and a deactivated account with the right password | W: all four on a disposable account |
+| Five wrong tries lock it for 15 minutes | W: five attempts then `locked_until` about 15 minutes ahead; DB read |
+| Resetting the password unlocks | W: locked the account, reset through the emailed link, `failed_login_attempts` 0 and `locked_until` null |
+| Reset: "Send reset link", "Check your email" (same page for an unknown address), 60 minutes, once-only link, "Set new password", "Password updated. Sign in with your new password.", lands on `/signin` | W: the full flow including reading the link from the queued email; the reused link says "Invalid or expired reset link." |
+| An account made through Google has no password; no reset mail for it | C: `requestPasswordReset` silent no-op when `password` is null; the Account page shows the Password section only when one exists |
+| Google section (see "Open items") | C: `src/auth.ts` (`allowDangerousEmailAccountLinking`, the `signIn` gate refusing an unverified claim or a deactivated account) and `GET /api/auth/error?error=AccessDenied` (HTTP 403, Auth.js page "Access Denied", "You do not have permission to sign in.", a "Sign in" button). The "Access Denied" string is Auth.js's, not in `src/`, so it is quoted in prose and is **not** in `labels[]` |
+| **The design's deactivated label is not stated** | W: "This account has been deactivated. Contact an administrator." exists only at `/signin?error=deactivated`; a deactivated signed-in session is signed out with no message (`jwt` returns an empty token), and a deactivated password sign-in shows "Wrong email or password.". So the page says the latter. See finding F-new-a |
+
+**5. using-your-code** (MFA-enrolled founder, `callbackUrl=/launch`)
+
+| Fact | How verified |
+|---|---|
+| Page headed "Two-factor authentication", group "6-digit code from your authenticator app", six boxes, the sixth digit submits, "Verify" is the fallback | W: typed a wrong code (submitted without a click); DECISION-257 |
+| A wrong code: "That code didn't match. Try again, or use a recovery code." | W |
+| "Use a recovery code instead" shows "Recovery code" and "Use my authenticator app instead" | W |
+| A recovery code works typed lowercase with a space; each works once; a wrong or spent one gives the same message and returns to the six boxes | W: inserted a known code for the throwaway founder, used it, reused it |
+| Landing after the code is the congregation | W: `/o/hollowbrook-walk` |
+| Codes change every 30 seconds | C: `otplib` default step; the e2e helper waits for the next step |
+| No button resets two-factor sign-in | W: the account page offers only "Manage / regenerate codes"; see finding F-new-b |
+| **Not stated** | A "trusted device": the outline asked for it, and there is none (grep of `src`), so the section is deleted; the map's "+ trusted-device cookie" is corrected |
+
+**8. your-account** (new account, founder and a disposable user)
+
+| Fact | How verified |
+|---|---|
+| Menu "Account"; Home "Account settings" under "Quick links" | W |
+| Sections "Profile", "Email address", "Password", "Two-factor authentication"; fields and buttons quoted | W: `/account` text |
+| "Name updated." | W |
+| "Check your new inbox for a verification link."; "Pending change" with "Cancel"; link lasts 24 hours; the mail says "This link expires in 24 hours." | W: token row `expires_at` minus now 23:59:57; queued mail text |
+| Email changes only after the link; "Current email" then shows the new address | W: after the link the page showed the new address; before it, the old one |
+| **After the link the landing page says "Something went wrong"** while the change is made | W: dev log "revalidatePath can't be called during render" at `verify-email/[token]/page.tsx`; `main` has the same call after `case "ok"`. Written as a short note with the workaround. See finding F-new-c |
+| "That email is already in use." | W |
+| "Password updated.", "Current password is incorrect.", "Passwords do not match." | W. "Password must be at least 8 characters." not shown: the input's native `minLength` stops the submit first, so the page says "at least 8 characters" from the card text only |
+| Password section only on accounts with a password | C: `hasPassword`; the founder card shows it |
+| Two-factor card "Active" / "Not set up"; links "Manage / regenerate codes" / "Set up two-factor authentication" | W: enrolled and unenrolled users |
+| Not stated: the delete control, anything about the congregation's own record of your address | by design / unverifiable |
+
+**9. home-and-switching-congregations**
+
+| Fact | How verified |
+|---|---|
+| One congregation goes straight there; more than one lands on Home; none sees the explaining page | W: `org1`, `org1-org2`, `router.none` |
+| A deep link before sign-in returns to that page | W: `/o/e2e-alpha/calendar` signed out, then sign in |
+| Home: "Welcome, name.", "Your organizations" (name and "Congregation"/"Presbytery"), "Still being set up", "Quick links" with "Account settings", "What's new" with "See all", "How are we doing?" | W: several fixtures; `router.invited` for "Still being set up" (opened by URL) |
+| Home never opens an organization for you | W: `org1-org2` stays on `/home` |
+| "Home" link top left of Account settings | W |
+| Switcher: a button with two arrows, menu "Switch organization", other organizations, "Go to your home page"; one organization is plain text | W: `org1-org2` (menu) and `org1` (plain) |
+| Sign out inside a congregation goes to its public website, "Page not found" if none; from Home or Account settings to `/` | W: `/site/<slug>`, `/`, `/`. The branch has no published site, so the 404 was the observed case |
+| The address of a congregation you do not belong to shows "You don't have access" | W |
+
+**10. why-cant-i-see-this**
+
+| Fact | How verified |
+|---|---|
+| Four headings of `/no-organization`: "You're not connected to a congregation yet", "Your organization is being set up" / "Your organizations are being set up", "Your congregation isn't on PresbyPortal yet", "Your access has ended" and what each names | W: `router.none`, `router.invited`, `router.unmanaged`, `router.ended`. **Cross-read against `main` (0.48.0)**: 2b rewrote this page; the four headings and the standing lines are byte-identical there, the default-state body and the "Ask your church administrator" door are not, so those lines are not quoted |
+| Ask your church administrator or the person who invited you; open the link in the invitation email; the account menu shows the address you use | W: account menu opened; the sentence holds on both versions |
+| "Access pending" text; reached by opening the team's own staff pages with a non-team account; Back to home | W: `/admin` and `/admin/organizations/new` as `org1` redirect to `/access-pending?from=...` |
+| Tiles are shown whatever the viewer's role; a tile is absent when its feature is off or for another kind of organization; a page can say "isn't turned on" or "You don't have permission to ..." | W: a no-role member and a Moderator member see the same tiles; Calendar and Job openings tiles disappear and appear with the switch; Giving is absent at a presbytery and present at a congregation; Community stays and says "Member management isn't turned on"; Features, Roles, Officers, Staff, Groups, Branding, Events, Job openings, Website domain and Tickets say "You don't have permission to ..." for a plain member. **Corrects the design's assumption that a missing permission hides the tile** |
+| Those messages name "your stated clerk or another administrator" | W: Features, Roles, Officers and the others. Directory and Tickets word it differently; the page quotes only the shared opening |
+| "Website domain" cannot be found in Features; the team turns it on | W: Features lists seven cards without it; the page says "ask PresbyPortal support to turn it on" |
+| A few tiles open a page that only describes an idea | W: Worship & Service Planning, Insights & Analytics, Communications; the page's own word is not used (H8 bans it) |
+| "You don't have access to <name>" is one message for a managed congregation, an unmanaged one and an invited one | W: three organizations, identical text; an unknown slug is a different 404 |
+| An ended relationship says so with the date | W: `org2-ended` at `/o/e2e-beta` |
+
+**11. using-the-directory** (Alder Creek member)
+
+| Fact | How verified |
+|---|---|
+| Views "Members" and "Households"; "Search the directory"; "Search"; "Status" with All, Active, Baptized, Affiliate, Other participant | W |
+| Search matches a name, email or phone; "Showing N members of N"; a no-match message | W: eleven listed; "renwick" 2, an email 1, "zzzz" 0 |
+| A hidden email never matches, the person is still found by name | W: set `hide_email`, searched the address (0), searched the name (1), cleared it |
+| Hidden-from-directory people and visitors are not listed | W: 13 memberships, 11 listed; the two missing are the hidden one and the visitor, both absent from search |
+| People whose connection ended are not listed | C: `directoryEligibilityWhereSql` (`ended_on`) |
+| Each of email, phone, address, birthday, photo can be hidden | C: the five `person_privacy` columns; only email was toggled in the walk |
+| Status is the roll status | W: Active 9, Baptized 1 match `current_roll` |
+| Household cards, member counts, "Deacon: name"; a person page with contact, household, "View household" | W |
+| Initials, no photo | W: `limitationUntil: person-photos` |
+| Who to ask; edited in "Community" | W: founder, Community on, Edit person page ("Edit person") |
+| "You don't have permission to view the directory." | W: a no-role member |
+
+**13. getting-help** (founder; plain member; Alder Creek)
+
+| Fact | How verified |
+|---|---|
+| Home card "How are we doing?", "Share feedback", "Not today", "Stop asking"; Account "Send feedback"; categories Suggestion, Bug report, General feedback; 2000 characters | W |
+| "Thanks — we read every one." and the team is told | W: toast; a `feedback` row; `feedback_notification` mails queued to the platform administrators |
+| "Not today" hides the card for the day; "Stop asking" after confirming; "Re-enable prompt" in Account settings | W: card gone after a reload; dialog "Stop daily prompts?" with "Yes, stop asking"; Account shows "The daily home page prompt is paused." |
+| Account menu "Give feedback" inside a congregation goes to a role-holder at the congregation; "Promote to ticket", "Dismiss" | W: submitted, then saw it under "Incoming feedback" on the Tickets page with both buttons; page text "A designated role-holder reviews everything shared here." |
+| Tickets are for people whose role allows it, the founding administrator can; others see "Restricted" and the feedback pointer | W: founder files; a plain member sees the restricted page |
+| File a ticket: fields, options, attachment types and 10MB, "File ticket", "Ticket filed.", status "New", reply with "Send reply", confirmation email | W: filed one; ticket page; queued `ticket_filed_confirmation`. Attachment limits read from the form and its label, not exercised |
+| The team is told of every new ticket; no reply time | W: `ticket_new` mails queued to every platform administrator. No reply time is promised and none is stated |
+| Not stated: any AI involvement, who the operators are, the Tickets "Site messages" box | by design |
+
+**15. turning-features-on-and-off** (founding administrator of the walk congregation)
+
+| Fact | How verified |
+|---|---|
+| Path: menu (three-line button on a phone), "Administration", "Organization Administration", "Features" | W at 360: "Open menu" lists Home, Community, ..., Administration |
+| "Features", "Ministry areas" with six switches, all on at first, the sentence about turning one off | W |
+| Seven cards, names, defaults (Off except Member calendar On), what each does | W + D: the Features page text against `ORG_FEATURE_CATALOG` (`provisionedOn`, descriptions); `applies to` from `orgTypes` (Giving: congregation and new worshiping community; Parish management: congregation; Giving tile absent at a presbytery) |
+| A card when a ministry area is off: "Turn on <area> above to enable this."; switches disabled | W: Worship & Events off; code disables the switch |
+| "Last changed" with date and address; message "<name> turned on." | W: "Tiered sensitive information turned on." |
+| Community keeps its tile and says "Member management isn't turned on" until its feature is on; Calendar and Job openings tiles come and go | W |
+| "Website domain" is not in Features; the page says to ask support | W |
+| Turning off hides pages, turning on brings them back; Parish management's card says nothing assigned is removed | W: Community and Member calendar off and on; Parish card text |
+| "You don't have permission to manage features" | W: no-role member |
+| Needs block `who` | W: the founder and the Alder Creek stated clerk both reach Features; the Roles screen describes the permission as "Turn optional portal features on or off for this organization". The Needs block names no key |
+| **Not stated** | "Connect people when they sign in" (a 2b card that exists on 0.48.0, provisioned on); "Email from your domain" (administrators never see it); giving behaviour. The page says "Your Features page may list more" |
+
+**Neighbour greps for the record (C6 check 4).** Strings found and left true: `no-organization/page.tsx` ("Signing in doesn't connect you to a congregation by itself. Only an invitation link does ..." true here, changed by 2b); the six toggle-off sentences (Batch 3 links them); `access-pending` (true); the home page's "Help" and early-release line are Batch 3's.
+
+### Open items, findings and deviations
+
+**Open item for the orchestrator before `signing-in` publishes (operator ruling O3).** The Google section documents Google sign-in as working. It is the one claim I could not walk (no Google client on the branch, none configured in production). The orchestrator must confirm with the operator that Google sign-in works; Phase 6 must re-walk it. What it asserts: the button signs you in and returns you; an existing account with the same address is the one you enter; Google must confirm the address and the account must be active or the page headed "Access Denied" appears; a Google-made account has no password. All of it from `src/auth.ts` and the Auth.js error page, none from a real Google round trip.
+
+**Findings (for numbering, F350 onward after the design's six).**
+- **F-new-a.** The deactivated sign-in message the design quotes is effectively unreachable: a deactivated person sees "Wrong email or password." and a deactivated signed-in session is signed out silently. Not a help defect (the page states the truth); a product question for the operator.
+- **F-new-b.** `/account/2fa` and its "Regenerate recovery codes" are reachable by a password-only, unverified session (observed: enrolled founder, before the code). That is F344, in flight; `using-your-code` states only that there is no reset button, which stays true after the fix.
+- **F-new-c (defect, on `main` too).** Following an email-change link changes the address and then renders "Something went wrong" because `revalidatePath` runs during render in `(email-verify)/account/verify-email/[token]/page.tsx`; the success toast and redirect never happen. `your-account` carries a one-sentence workaround. There is no TODO token for it: either fix it (drop the call, redirect only) and delete the sentence, or add a TODO line. Recommend the fix.
+- **F-new-d.** `docs/product/functionality-map.md` said TOTP verify has a "trusted-device cookie". There is none in `src/`. Corrected in the map; the design's "A trusted device" section is deleted from `using-your-code`.
+- **F-new-e.** The `development` branch holds a person row named like the operator inside the Alder Creek fixture (a directory entry). No screenshot of that page was kept in the repo and none is quoted; the capture branch for Batch 4 must be rebuilt from scratch as designed.
+
+**Deviations from the outline (each is a deletion or a narrowing, none a reword).** `what-presbyportal-does` carries no website and no per-feature links (5b adds the links; `helpHref` cannot yet name an unpublished slug); `how-a-congregation-gets-started` and `why-cant-i-see-this` carry the `signin-invites` marker but no sentence that 2b falsifies, because production is 0.48.0; `why-cant-i-see-this` replaces the design's "absent, not disabled" table with the walked three-case table (tile absent, page says off, page says no permission); `using-your-code` has no trusted-device section; `signing-in` states the deactivated case by the message people actually see; `getting-help` separates the two feedback routes, which the outline merged.
+
+**Integration notes.** (1) When this branch meets 0.48.0, `coverage.test.ts` will see the new catalog key `org_portal.sign_in_connect` ("Connect people when they sign in"); it needs an allowlist entry or the `sign-in-invitations` page's `covers`. (2) `verifiedIn` stays `0.47.0` until someone re-walks against 0.48.0; the `/no-organization` and `/invite` lines were cross-read against `main`'s source, not walked. (3) `README`-style stale text and the marketing home line are untouched (Batch 3). (4) Fixture residue on the branch only: the walk congregation, the walk users, the flag changes above, an invitation row and queued mail. Nothing touches `development` or production.
+
+**Next.** Batch 3 (full-stack-developer): the proxy bypass, the in-app links, the home line, the auth-touching smoke on :3660 and :3661. Until it lands `/help` needs a signed-in session.
 
 ---
 

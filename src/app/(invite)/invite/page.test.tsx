@@ -254,3 +254,30 @@ describe("signed in", () => {
     expect(screen.getByRole("button", { name: /accept invitation/i })).toBeTruthy();
   });
 });
+
+describe("the help link (user-help integration, P3-9)", () => {
+  function expectHelpLink() {
+    const help = screen.getByRole("link", { name: "Help with this page" });
+    expect(help.getAttribute("href")).toBe("/help/accepting-your-invitation");
+    expect(help.getAttribute("rel")).toBe("noreferrer");
+    expect(help.getAttribute("target")).toBeNull();
+    expect(help.className).toContain("min-h-11");
+  }
+
+  it("is on the dead-link page", async () => {
+    await renderPage({});
+    expectHelpLink();
+  });
+
+  it("is on the anonymous page, and its href carries no token", async () => {
+    await renderPage();
+    expectHelpLink();
+    expect(screen.getByRole("link", { name: "Help with this page" }).getAttribute("href")).not.toContain(TOKEN);
+  });
+
+  it("is on the database-failure page", async () => {
+    mockPreview.mockRejectedValue(new Error("boom"));
+    await renderPage();
+    expectHelpLink();
+  });
+});

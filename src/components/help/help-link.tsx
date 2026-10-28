@@ -8,9 +8,20 @@ import { cn } from "@/lib/utils";
  * comes from `helpHref()` / `plannedHref()` at the call site, so a typo or a pending slug is a
  * compile error there; this component only draws it.
  */
-export function HelpLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
+export function HelpLink({
+  href,
+  children,
+  className,
+  rel,
+}: {
+  href: string;
+  children: ReactNode;
+  className?: string;
+  /** `noreferrer` on a page whose URL carries a credential (`/invite`), belt and braces over its own Referrer-Policy. */
+  rel?: string;
+}) {
   return (
-    <Link href={href} className={cn("inline-flex min-h-11 items-center", DOCUMENT_LINK_CLASS, className)}>
+    <Link href={href} rel={rel} className={cn("inline-flex min-h-11 items-center", DOCUMENT_LINK_CLASS, className)}>
       {children}
     </Link>
   );

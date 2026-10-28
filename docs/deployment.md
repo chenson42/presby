@@ -1518,6 +1518,36 @@ not switch the person's own setting on, and nothing in the database refuses it.
 
 ---
 
+## Organization baseline backfill (0082)
+
+**Applied 2026-10-28** (v0.49.1; `docs/work-log/2026-10-28-org-baseline-backfill.md`).
+Migration `0082` adds the derived Active Membership group and the baseline
+`member` role (holding `directory.view` and `events.view`, granted to that
+group) to any organization that lacks them: one presbytery created before
+`src/lib/org-provisioning.ts` seeded them. Nothing else is touched. It was
+applied directly to production by the operator's ruling ("Yes, do it now"),
+before the release, because the operator could not send that organization's
+founding-administrator invitation.
+
+- **Order followed:** rehearsed twice on a production-derived Neon branch (first
+  run added 1 organization, second added 0, an existing, already-provisioned organization
+  unchanged); production snapshot `snap-lingering-heart-axrxc9ch`; applied with
+  `-1` on the direct endpoint as the owner; then applied to `development`, where
+  it added the member role to 15 fixture organizations; `scripts/test-rls.sql`
+  on `development` shows only the known drift at lines 219 and 7953.
+- **Nothing to run at deploy.** The release carries no schema work that is not
+  already live. A fresh environment gets the file from the journal (idx 82).
+- **It refuses rather than guesses:** an organization with live memberships and
+  no group stops the file (the derived roster would need syncing), the sync
+  being a deliberate step, not part of this one. Production had none.
+- **Rollback** is a forward migration, never an edit of 0082 once shipped. The
+  rows are ordinary tenant rows (a protected group, a protected role); removing
+  them would re-create the refusal this fixes.
+- **Regression test:** `src/lib/db/domain/org-baseline-backfill.db.test.ts`
+  (serial; the file is global, so it must not run beside another DB suite).
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.

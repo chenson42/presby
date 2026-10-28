@@ -30,6 +30,7 @@ This table lists the features a new congregation sees. Your Features page may li
 | Feature | What it does | At first | Applies to |
 |---|---|---|---|
 | Community: add people and record roll actions | Lets your administrators add people, record participants and propose roll actions. | Off | Any organization |
+| Connect people when they sign in | Connects a person's sign-in to their record when they sign in with the email address on it, so they don't need an invitation. | On | Any organization |
 | Tiered sensitive information | Lets your congregation enter pastoral notes, demographics, medical and allergy information, and disability records, subject to each viewer's own permissions. | Off | Any organization |
 | Member calendar | Shows the congregation's events to every member who has calendar access. | On | Any organization |
 | Public events calendar | Shows the events your team has marked for the website on your public website. Whoever maintains your website must also place the calendar on a page. | Off | Any organization |

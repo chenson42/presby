@@ -31,4 +31,9 @@ export const SLUG_HISTORY: readonly string[] = [
   "presbytery-tools",
   // 2026-10-28: the privacy policy (the Google sign-in app review needs a stable public URL).
   "privacy-policy",
+  // 2026-10-28, integration (0.50.0): the pages whose features merged before help.
+  "accepting-your-invitation",
+  "setting-up-two-factor",
+  "who-is-asked-for-a-code",
+  "sign-in-invitations",
 ];

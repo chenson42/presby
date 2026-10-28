@@ -31,8 +31,7 @@ export const HELP_PAGES = [
     audience: "prospective",
     covers: [],
     labels: ["You're invited", "This link isn't active"],
-    verifiedIn: "0.47.0",
-    limitationUntil: "signin-invites",
+    verifiedIn: "0.50.0",
   },
   // ---- Everyone who signs in -------------------------------------------------------------
   {
@@ -73,7 +72,7 @@ export const HELP_PAGES = [
       "Use my authenticator app instead",
       "That code didn't match. Try again, or use a recovery code.",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.50.0",
   },
   {
     slug: "your-account",
@@ -98,7 +97,7 @@ export const HELP_PAGES = [
       "Confirm new password",
       "Change password",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.50.0",
   },
   {
     slug: "home-and-switching-congregations",
@@ -145,9 +144,11 @@ export const HELP_PAGES = [
       "You don't have permission to",
       "You don't have access to",
       "Back to your organizations",
+      "You're invited to",
+      "Accept the invitation",
+      "Check again",
     ],
-    verifiedIn: "0.47.0",
-    limitationUntil: "signin-invites",
+    verifiedIn: "0.50.0",
   },
   {
     slug: "using-the-directory",
@@ -199,16 +200,17 @@ export const HELP_PAGES = [
     audience: "everyone",
     covers: [],
     labels: [],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.50.0",
   },
-  // ---- Pending: written against in-flight pipelines, not rendered until their [help:<token>] line is Done -----
+  // ---- Written against in-flight pipelines: a pending page is not rendered until its [help:<token>] line is Done.
+  //      accepting-your-invitation, setting-up-two-factor, who-is-asked-for-a-code and sign-in-invitations published at 0.50.0 -----
   {
     slug: "accepting-your-invitation",
     title: "Accepting your invitation",
     summary:
       "Open the link in your email, create your account or sign in, and set up two-factor sign-in if you are asked.",
     order: 12,
-    status: "pending",
+    status: "published",
     audience: "everyone",
     covers: ["route:/invite"],
     labels: [
@@ -231,7 +233,7 @@ export const HELP_PAGES = [
       "Go to sign in",
       "If you already accepted it, you can sign in. Otherwise ask whoever invited you to send a new one.",
     ],
-    verifiedIn: null,
+    verifiedIn: "0.50.0",
     requires: "recovery-codes",
   },
   {
@@ -240,7 +242,7 @@ export const HELP_PAGES = [
     summary:
       "Link your authenticator app, save your recovery codes, and make new ones.",
     order: 22,
-    status: "pending",
+    status: "published",
     audience: "everyone",
     covers: ["route:/account/2fa"],
     labels: [
@@ -267,7 +269,7 @@ export const HELP_PAGES = [
       "Something went wrong and we could not confirm your code. Reload this page to see whether setup finished.",
       "Confirm it's you with your authenticator app or a recovery code first. Reload this page to see how.",
     ],
-    verifiedIn: null,
+    verifiedIn: "0.50.0",
     requires: "recovery-codes",
   },
   {
@@ -276,11 +278,11 @@ export const HELP_PAGES = [
     summary:
       "Which accounts must use two-factor sign-in, and why.",
     order: 25,
-    status: "pending",
+    status: "published",
     audience: "everyone",
     covers: [],
     labels: [],
-    verifiedIn: null,
+    verifiedIn: "0.50.0",
     requires: "two-factor-by-role",
   },
   {
@@ -365,7 +367,7 @@ export const HELP_PAGES = [
       "Parish management",
       "Website domain",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.50.0",
   },
   {
     slug: "first-day-as-administrator",
@@ -405,7 +407,7 @@ export const HELP_PAGES = [
       "You don't have permission to manage branding",
       "Website domain",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.50.0",
   },
   {
     slug: "adding-people",
@@ -416,7 +418,7 @@ export const HELP_PAGES = [
     status: "published",
     audience: "administrator",
     needs: {
-      who: "A Founding Administrator. Recording participants and members also needs the Stated Clerk role, which a Founding Administrator holds from the start. Approving a member takes a member of the Session who has a PresbyPortal account.",
+      who: "A Founding Administrator. Recording participants and members also needs the Stated Clerk role, which a Founding Administrator holds from the start. Approving a member takes a member of the Session who has connected a sign-in.",
       turnOn: { toggleKey: "org_portal.members_create", name: "Community: add people and record roll actions", defaultOn: false },
     },
     covers: ["org_portal.members_create", "tile:members"],
@@ -462,12 +464,13 @@ export const HELP_PAGES = [
       "Your Session roster is empty",
       "Officers",
       "No one can approve yet",
-      "none has a PresbyPortal account yet",
+      "none has connected a sign-in yet",
+      "Not invited yet",
+      "Ask an administrator to invite your Session members to sign in.",
       "none of them has permission to approve roll actions",
       "Roles",
     ],
-    verifiedIn: "0.47.0",
-    limitationUntil: "signin-invites",
+    verifiedIn: "0.50.0",
   },
   {
     slug: "officers-and-the-session",
@@ -510,8 +513,7 @@ export const HELP_PAGES = [
       "Self-recorded",
       "Self-approved",
     ],
-    verifiedIn: "0.47.0",
-    limitationUntil: "signin-invites",
+    verifiedIn: "0.50.0",
   },
   {
     slug: "roles-who-can-do-what",
@@ -655,7 +657,7 @@ export const HELP_PAGES = [
     summary:
       "Invite a person you have recorded, and how a person connects their sign-in to their record.",
     order: 35,
-    status: "pending",
+    status: "published",
     audience: "administrator",
     needs: {
       who: "A Founding Administrator, or anyone given a role that lets them manage people. Inviting someone who holds a seat on the Session or the Board of Deacons also needs a role that lets you manage officers.",
@@ -693,7 +695,7 @@ export const HELP_PAGES = [
       "Edit person",
       "Community",
     ],
-    verifiedIn: null,
+    verifiedIn: "0.50.0",
     requires: "signin-invites",
   },
   {
@@ -827,7 +829,7 @@ export const HELP_PAGES = [
     order: 10,
     status: "planned",
     forWhom: "Congregations",
-    today: "There is no worship planning tool. You can put services on the calendar as events.",
+    today: "There is no worship planning tool. Someone who holds the events role can put services on the calendar as events.",
     confirmedOn: "2026-10-26",
   },
   {

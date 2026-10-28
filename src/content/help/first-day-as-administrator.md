@@ -53,7 +53,7 @@ A new congregation starts with the calendar on and most other features off. Open
 ## A sensible order
 
 1. Open "Features" and turn on "Community: add people and record roll actions". Turn on "Job openings" too if you want to post them.
-2. Open "Officers" and record the members of your Session. At least one of them needs a PresbyPortal account before anyone can approve a new member. You can record yourself.
-3. Open "Community" and add your people.
+2. Open "Officers" and record the members of your Session. At least one of them needs a connected sign-in before anyone can approve a new member. You can record yourself. To connect the others, invite them. See [Inviting people to sign in](/help/sign-in-invitations).
+3. Open "Community" and add your people. Invite the ones who should sign in. See [Inviting people to sign in](/help/sign-in-invitations).
 4. Open "Roles" and give the roles that help you share the work.
 5. If you need to add events or set your colours, ask for that role. {{contact}}

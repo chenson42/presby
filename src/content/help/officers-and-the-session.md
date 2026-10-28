@@ -35,9 +35,9 @@ You do not add people to the Session directly. Under "Groups", the "Automatic ro
 
 ## Why "Pending approvals" says no one can approve
 
-A new member waits for the Session. Until a member of the Session is in effect and has a PresbyPortal account, "Pending approvals" says no one can approve yet. Record at least one ruling elder, installed pastor, co-pastor or associate pastor, and make sure they have an account. The banner and what to do about each case are in [Adding people and recording members](/help/adding-people).
+A new member waits for the Session. Until a member of the Session is in effect and has connected a sign-in to their record, "Pending approvals" says no one can approve yet. Record at least one ruling elder, installed pastor, co-pastor or associate pastor, and make sure their sign-in is connected. The banner and what to do about each case are in [Adding people and recording members](/help/adding-people).
 
-A member of the Session needs a PresbyPortal account to approve. Today the PresbyPortal team sets that up: send a support ticket. See [Getting help](/help/getting-help).
+A member of the Session approves only after their sign-in is connected to their record. See [Inviting people to sign in](/help/sign-in-invitations).
 
 ## Recording yourself
 

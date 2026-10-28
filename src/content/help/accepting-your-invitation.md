@@ -38,7 +38,7 @@ If the link was already used, has expired, or was replaced by a newer one, the p
 
 ## Two-factor sign-in
 
-Whether you are asked to use two-factor sign-in depends on your account, your role and your congregation. If you are asked, PresbyPortal takes you to the set-up page when you sign in, before it lets you into your congregation's pages. See [Setting up two-factor sign-in](/help/setting-up-two-factor).
+Whether you are asked to use two-factor sign-in depends on your account, your role and your congregation. See [Who is asked for a code](/help/who-is-asked-for-a-code). If you are asked, PresbyPortal takes you to the set-up page when you sign in, before it lets you into your congregation's pages. See [Setting up two-factor sign-in](/help/setting-up-two-factor).
 
 ## Where you land
 

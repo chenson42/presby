@@ -2,7 +2,7 @@ Two-factor sign-in asks for a six-digit code from an app on your phone, called a
 
 ## Where to set it up
 
-Some people are taken to the set-up page when they sign in. Anyone can also open it on their own: select your initials at the top right, choose "Account", and in the "Two-factor authentication" section select "Set up two-factor authentication". The section shows "Not set up" until you have finished, and "Active" afterwards. See [Your account](/help/your-account).
+Some people are taken to the set-up page when they sign in. [Who is asked for a code](/help/who-is-asked-for-a-code) says who. Anyone can also open it on their own: select your initials at the top right, choose "Account", and in the "Two-factor authentication" section select "Set up two-factor authentication". The section shows "Not set up" until you have finished, and "Active" afterwards. See [Your account](/help/your-account).
 
 ## Linking your authenticator app
 
@@ -43,4 +43,4 @@ As with the first set, the new codes are not shown again if you reload or leave 
 - "Something went wrong and we could not confirm your code. Reload this page to see whether setup finished." Reload the page. If it says you enrolled, setup finished, and you can make a new set of codes to see them.
 - "Confirm it's you with your authenticator app or a recovery code first. Reload this page to see how." You pressed "Regenerate recovery codes" before confirming in this sign-in. Reload and use "Confirm it's you".
 
-If you lose your phone and your recovery codes, see [Using your code to sign in](/help/using-your-code). {{contact}}
+If you lose your phone and your recovery codes: PresbyPortal has no button that resets two-factor sign-in for you. Only the PresbyPortal team can reset it. Ask a church administrator to send the team a support ticket for you. See [Getting help](/help/getting-help).

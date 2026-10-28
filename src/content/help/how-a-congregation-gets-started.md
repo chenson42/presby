@@ -6,6 +6,7 @@ There is no sign-up form. A congregation does not make its own account on Presby
 2. The same administrator invites the congregation's first administrator by email. That person is called the founding administrator.
 3. The founding administrator opens the link in the email. They create an account, or sign in if they already have an account that uses the same email address.
 4. The founding administrator turns on the features the congregation wants and adds its people. See [Turning features on and off](/help/turning-features-on-and-off).
+5. The administrator can invite the people they record to sign in. See [Inviting people to sign in](/help/sign-in-invitations).
 
 ## What the invitation is
 

@@ -50,7 +50,7 @@ The organization decides what goes in, who can see it, and what stays on the rol
 
 ## Cookies
 
-We use the cookies needed to sign you in and keep you signed in, and a few short-lived ones for a single step, such as accepting an invitation or showing your recovery codes once. We do not use advertising or analytics cookies.
+We use the cookies needed to sign you in and keep you signed in, and a short-lived one for a single step: accepting an invitation. We do not use advertising or analytics cookies.
 
 ## What we do not do
 

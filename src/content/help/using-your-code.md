@@ -1,6 +1,6 @@
-Some accounts are asked for a six-digit code each time they sign in. The code comes from an authenticator app on your phone. This page covers the "Two-factor authentication" page you see after you enter your password.
+Some accounts are asked for a six-digit code each time they sign in. The code comes from an authenticator app on your phone. This page covers the "Two-factor authentication" page you see after you enter your password. To link the app the first time, see [Setting up two-factor sign-in](/help/setting-up-two-factor).
 
-Whether you are asked for a code depends on your account, your role and your congregation.
+Whether you are asked for a code depends on your account, your role and your congregation. See [Who is asked for a code](/help/who-is-asked-for-a-code).
 
 ## Entering your code
 
@@ -27,4 +27,4 @@ Each recovery code works once. If a recovery code is refused, the page goes back
 
 ## If you lose your phone and your codes
 
-PresbyPortal has no button that resets two-factor sign-in for you. {{contact}}
+PresbyPortal has no button that resets two-factor sign-in for you. Only the PresbyPortal team can reset it. Ask a church administrator to send the team a support ticket for you. See [Getting help](/help/getting-help).

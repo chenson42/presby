@@ -40,4 +40,4 @@ The page says "Password updated." If you see "Current password is incorrect." or
 
 ## Two-factor authentication
 
-The "Two-factor authentication" section shows "Active" when an authenticator app is linked to your account and "Not set up" when it is not. The link beside it, "Manage / regenerate codes" or "Set up two-factor authentication", opens the page for it.
+The "Two-factor authentication" section shows "Active" when an authenticator app is linked to your account and "Not set up" when it is not. The link beside it, "Manage / regenerate codes" or "Set up two-factor authentication", opens the page for it. See [Setting up two-factor sign-in](/help/setting-up-two-factor).

@@ -53,7 +53,7 @@ It does not connect everyone. Among the people it does not connect are:
 - a person whose address is on an open invitation. The invitation comes first;
 - anyone, if you turn "Connect people when they sign in" off. Then invitations still work and people already connected stay connected.
 
-The card says so under its heading for a visitor, a shared address, and when the option is off. This option adds no role. It only connects.
+The card says so under its heading for a visitor, a shared address, and when the option is off. This option adds no role. The person gets whatever access their record already carries.
 
 ### People who hold a role or a seat
 

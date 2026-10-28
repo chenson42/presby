@@ -39,6 +39,14 @@ type OrgRow = {
 
 const STRANDED_LIMIT = 50;
 
+// The module returns tokens (src/lib/admin/two-factor-stranded.ts, first reason
+// found); the page owns the words. An unknown value shows as is.
+const SOURCE_LABEL: Record<string, string> = {
+  "this user": "Own setting",
+  congregation: "Congregation policy",
+  role: "A role",
+};
+
 export default async function TwoFactorPolicyPage() {
   const session = await auth();
   if (!hasFeature(session?.user?.features, FEATURES.ADMIN_TWO_FACTOR)) {
@@ -70,7 +78,8 @@ export default async function TwoFactorPolicyPage() {
   // Required but not enrolled. These are the people who will hit the challenge
   // and cannot answer it — the stranded-member case, which is the whole reason
   // an administrator opens this page. `source` says WHY they are required, so
-  // it is obvious whether to flip a congregation's policy or the user's own row.
+  // it is obvious whether to flip a congregation's policy, look at a role, or
+  // open the user's own row.
   // The predicate is shared with the dashboard's Two-factor card
   // (src/lib/admin/two-factor-stranded.ts), so the card and this list cannot
   // disagree. The per-organization `member_count` above stays in this file.
@@ -83,10 +92,19 @@ export default async function TwoFactorPolicyPage() {
     <div>
       <h1 className="text-2xl font-semibold">Two-factor policy</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Two-factor is opt-in per congregation. A member is required if their own
-        record requires it <em>or</em> any congregation they belong to does —
-        the stricter setting wins, because the requirement is resolved at
-        sign-in, before anyone has chosen an organization.
+        When two-factor enforcement is on for the installation, a person is
+        required to use two-factor sign-in if any one of these is true: their
+        own account setting requires it, they hold a role that requires it
+        (giving, creating and granting roles, or website domains), or a
+        congregation they belong to requires it. The stricter setting wins,
+        because the requirement is resolved at sign-in, before anyone has chosen
+        an organization.
+      </p>
+      <p className="mt-2 text-sm text-muted-foreground">
+        A platform administrator&apos;s own setting is switched on when the role
+        is granted through the application. It can be switched off on their user
+        page; a role or a congregation&apos;s policy cannot be switched off
+        there.
       </p>
       <p className="mt-2 text-sm text-muted-foreground">
         Enrolling in two-factor for your own account is at{" "}
@@ -153,9 +171,11 @@ export default async function TwoFactorPolicyPage() {
         Required, but not enrolled
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        These accounts will be asked for a code they cannot produce. Reset or
-        exempt them from their user page before they are locked out of admin
-        routes.
+        These accounts are required to use two-factor but have not set it up
+        yet. While enforcement is on, they are taken to set it up before they
+        can open the admin area or a congregation&apos;s portal. Open an account
+        to see or change its own setting; a role or a congregation&apos;s policy
+        still applies when its own setting is off.
       </p>
       {stranded.total > strandedRows.length ? (
         <p className="mt-1 text-sm text-muted-foreground">
@@ -186,7 +206,7 @@ export default async function TwoFactorPolicyPage() {
                   {u.name ?? "—"}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
-                  {u.source}
+                  {SOURCE_LABEL[u.source] ?? u.source}
                 </TableCell>
                 <TableCell className="text-right">
                   <Link

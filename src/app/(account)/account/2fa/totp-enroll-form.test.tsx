@@ -10,6 +10,10 @@ vi.mock("@/components/shared/use-hydrated", () => ({
 const completeEnrollment = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({ completeEnrollment }));
 
+// The form hands the finished enrolment to the holder (enrolment-handoff.tsx), which owns the panel.
+const present = vi.hoisted(() => vi.fn());
+vi.mock("./enrolment-handoff", () => ({ useRecoveryCodesHandoff: () => present }));
+
 const toastError = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 
@@ -21,6 +25,7 @@ beforeEach(() => {
   hydrated.value = true;
   completeEnrollment.mockReset();
   toastError.mockReset();
+  present.mockReset();
 });
 afterEach(cleanup);
 
@@ -57,7 +62,7 @@ describe("TotpEnrollForm — one-time-code boxes", () => {
   });
 
   it("submits the joined six digits to completeEnrollment when the button is pressed (fallback)", async () => {
-    completeEnrollment.mockResolvedValue({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"] } });
+    completeEnrollment.mockResolvedValue({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"], sessionVerified: true } });
     renderForm();
     // Seven digits fill six boxes but do not auto-submit; the button is the way out.
     fireEvent.paste(boxes()[0]!, { clipboardData: { getData: () => "1234567" } });
@@ -67,7 +72,12 @@ describe("TotpEnrollForm — one-time-code boxes", () => {
     });
     expect(completeEnrollment).toHaveBeenCalledTimes(1);
     expect(completeEnrollment).toHaveBeenCalledWith({ code: "123456" });
-    await waitFor(() => expect(screen.getByText("AAAA-BBBB")).toBeTruthy());
+    await waitFor(() =>
+      expect(present).toHaveBeenCalledWith({ codes: ["AAAA-BBBB"], sessionVerified: true }),
+    );
+    // F1: the form no longer shows a panel (or a Continue) of its own.
+    expect(screen.queryByText("AAAA-BBBB")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Continue" })).toBeNull();
   });
 
   it("a pasted code with a space fills the boxes and submits by itself", async () => {
@@ -92,9 +102,9 @@ describe("TotpEnrollForm — auto-submit (DECISION-257)", () => {
     const button = screen.getByRole("button", { name: /verifying/i }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     await act(async () => {
-      resolve({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"] } });
+      resolve({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"], sessionVerified: true } });
     });
-    await waitFor(() => expect(screen.getByText("AAAA-BBBB")).toBeTruthy());
+    await waitFor(() => expect(present).toHaveBeenCalledTimes(1));
     expect(completeEnrollment).toHaveBeenCalledTimes(1);
   });
 
@@ -109,7 +119,7 @@ describe("TotpEnrollForm — auto-submit (DECISION-257)", () => {
   });
 
   it("N-3: a paste of more than six digits does not submit; Confirm calls with the first six", async () => {
-    completeEnrollment.mockResolvedValue({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"] } });
+    completeEnrollment.mockResolvedValue({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"], sessionVerified: true } });
     renderForm();
     fireEvent.paste(boxes()[0]!, { clipboardData: { getData: () => "1234567" } });
     await act(async () => {});
@@ -121,7 +131,7 @@ describe("TotpEnrollForm — auto-submit (DECISION-257)", () => {
   });
 
   it("N-3b: three typed digits plus a four-digit paste into box 4 does not submit — regression for O-1", async () => {
-    completeEnrollment.mockResolvedValue({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"] } });
+    completeEnrollment.mockResolvedValue({ ok: true, data: { recoveryCodes: ["AAAA-BBBB"], sessionVerified: true } });
     renderForm();
     "123".split("").forEach((d, i) => fireEvent.change(boxes()[i]!, { target: { value: d } }));
     fireEvent.paste(boxes()[3]!, { clipboardData: { getData: () => "4567" } });
@@ -154,6 +164,19 @@ describe("TotpEnrollForm — auto-submit (DECISION-257)", () => {
     await waitFor(() => expect(boxes().map((b) => b.value).join("")).toBe(""));
     typeCode("000000");
     await waitFor(() => expect(completeEnrollment).toHaveBeenCalledTimes(2));
+  });
+
+  it("F3: a rejected completeEnrollment toasts the 'could not confirm' message and hands nothing to the holder — regression for the silent catch", async () => {
+    completeEnrollment.mockRejectedValueOnce(new Error("network"));
+    renderForm();
+    typeCode("123456");
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Something went wrong and we could not confirm your code. Reload this page to see whether setup finished.",
+      ),
+    );
+    expect(present).not.toHaveBeenCalled();
+    await waitFor(() => expect(boxes().every((b) => !b.disabled)).toBe(true));
   });
 
   it("N-5: a rejected completeEnrollment clears the guard, so a new code submits", async () => {

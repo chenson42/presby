@@ -17,6 +17,8 @@ import {
 } from "@/lib/community";
 import { parseCommunityView } from "@/lib/community-labels";
 import { countPendingRollActions } from "@/lib/roll";
+import { getSignInMarkers } from "@/lib/onboarding/org-invite";
+import type { SignInMarker } from "@/lib/onboarding/sign-in-types";
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
 import { Badge } from "@/components/ui/badge";
@@ -193,6 +195,24 @@ export default async function CommunityPage({
     return <MembersForbidden name={resolved.org.name} heading={HEADING} />;
   }
 
+  // The sign-in markers (Community Increment 2b): one reader call for the whole
+  // page, only for a `people.manage` viewer. `getSignInMarkers` never throws and
+  // answers `{}` on any failure, so a marker (chrome) cannot take the page down.
+  const markers: Record<string, SignInMarker> = canManage
+    ? await getSignInMarkers(
+        {
+          organizationId,
+          actingPersonId: personId,
+          actingUserId: session.user.id,
+          actingUserEmail: session.user.email ?? null,
+        },
+        [
+          ...(directoryResult?.kind === "ok" ? directoryResult.entries.map((e) => e.personId) : []),
+          ...(listResult?.kind === "ok" ? listResult.rows.map((r) => r.personId) : []),
+        ],
+      )
+    : {};
+
   const childrenMinistryFlagOn = await isFlagEnabled(CHILDREN_MINISTRY_FLAG);
   const canViewChildrenRoster = childrenMinistryFlagOn
     ? await hasPermission(personId, organizationId, "children.roster")
@@ -268,6 +288,7 @@ export default async function CommunityPage({
           view={view}
           entries={directoryResult.entries}
           badges={badges}
+          markers={markers}
           canManage={canManage}
           canStaffLink={canStaffLink}
           search={search}
@@ -279,6 +300,7 @@ export default async function CommunityPage({
           view={view}
           rows={listResult.rows}
           badges={badges}
+          markers={markers}
           canManage={canManage}
           canStaffLink={canStaffLink}
           search={search}

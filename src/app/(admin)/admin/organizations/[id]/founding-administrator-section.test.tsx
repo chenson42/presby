@@ -351,7 +351,7 @@ describe("FoundingAdministratorSection — every result variant's copy", () => {
         delivery: "sent",
         inviteeDisplayName: "Marisol Quenby",
       },
-      expected: /invitation sent to clerk@example\.invalid\. it expires on .* the founding administrator designation takes effect when marisol quenby accepts it from the email\. until then nobody holds this role\./i,
+      expected: /invitation sent to clerk@example\.invalid\. it expires on .* the founding administrator designation takes effect when marisol quenby accepts it\. until then nobody holds this role\./i,
     },
   ];
 

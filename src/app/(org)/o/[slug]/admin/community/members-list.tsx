@@ -10,6 +10,8 @@ import { CommunityEmptyState } from "./community-empty-state";
 import { CommunitySearch } from "./community-search";
 import { CommunityRowsList } from "./community-rows-list";
 import type { CommunityRow } from "@/lib/community";
+import type { SignInMarker as Marker } from "@/lib/onboarding/sign-in-types";
+import { SignInMarker } from "./sign-in-marker";
 
 /**
  * The Community list body for every view. The Everyone, Members and
@@ -27,6 +29,7 @@ export function MembersList({
   entries,
   rows,
   badges,
+  markers = {},
   canManage,
   canStaffLink,
   search,
@@ -37,6 +40,8 @@ export function MembersList({
   entries?: DirectoryEntry[];
   rows?: CommunityRow[];
   badges: Record<string, Badge>;
+  /** Sign-in markers by person id; empty unless the viewer holds `people.manage`. */
+  markers?: Record<string, Marker>;
   canManage: boolean;
   canStaffLink: boolean;
   search: string;
@@ -79,6 +84,7 @@ export function MembersList({
                     entry={entry}
                     canEdit={canManage}
                     badge={badges[entry.personId]}
+                    marker={markers[entry.personId]}
                   />
                 </li>
               ))}
@@ -88,6 +94,7 @@ export function MembersList({
               slug={slug}
               view={view as "visitors" | "staff" | "former"}
               rows={rows ?? []}
+              markers={markers}
               canStaffLink={canStaffLink}
             />
           )}
@@ -110,11 +117,13 @@ function MemberCard({
   entry,
   canEdit,
   badge,
+  marker,
 }: {
   slug: string;
   entry: DirectoryEntry;
   canEdit: boolean;
   badge?: Badge;
+  marker?: Marker;
 }) {
   const displayName = `${entry.preferredName ?? entry.firstName} ${entry.lastName}`;
 
@@ -124,16 +133,22 @@ function MemberCard({
        * the existing directory detail page, Edit is its own control alongside
        * it, gated on `people.manage`. */}
       <CardContent className="flex items-center justify-between gap-3">
-        <Link
-          href={`/o/${slug}/directory/${entry.personId}`}
-          className="block min-w-0 flex-1 space-y-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        >
-          <h3 className="break-words text-lg font-medium">{displayName}</h3>
-          {entry.email && (
-            <p className="break-all text-sm text-muted-foreground">{entry.email}</p>
+        <div className="min-w-0 flex-1">
+          <Link
+            href={`/o/${slug}/directory/${entry.personId}`}
+            className="block space-y-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <h3 className="break-words text-lg font-medium">{displayName}</h3>
+            {entry.email && (
+              <p className="break-all text-sm text-muted-foreground">{entry.email}</p>
+            )}
+            {badge && <CommunityBadge badge={badge} />}
+          </Link>
+          {/* A sibling of the link, never inside it (a link in a link is invalid). */}
+          {canEdit && marker && (
+            <SignInMarker marker={marker} slug={slug} personId={entry.personId} personName={displayName} />
           )}
-          {badge && <CommunityBadge badge={badge} />}
-        </Link>
+        </div>
         {canEdit && (
           <Button asChild variant="outline" className="min-h-11 shrink-0">
             <Link href={`/o/${slug}/admin/community/${entry.personId}/edit`}>

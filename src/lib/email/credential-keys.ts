@@ -5,12 +5,17 @@
  * page (no Retry button) all read the SAME set, and a client or a test can
  * import it without pulling `@/lib/db`.
  *
- * Today only `account_invitation`. `password_reset`, `email_change_verify`
- * and `statistics_submission_grant` carry credentials too and are a tracked
+ * Today `account_invitation` (a platform designation) and
+ * `account_sign_in_invitation` (a congregation's sign-in invitation, Community
+ * Increment 2b). `password_reset`, `email_change_verify` and
+ * `statistics_submission_grant` carry credentials too and are a tracked
  * follow-up (F154) - adding a key here redacts its bodies on send/fail AND
  * makes Retry refuse it, in one edit.
  */
-export const CREDENTIAL_TEMPLATE_KEYS: ReadonlySet<string> = new Set(["account_invitation"]);
+export const CREDENTIAL_TEMPLATE_KEYS: ReadonlySet<string> = new Set([
+  "account_invitation",
+  "account_sign_in_invitation",
+]);
 
 /** What a redacted body is replaced with. */
 export const REDACTED_BODY_MARKER =

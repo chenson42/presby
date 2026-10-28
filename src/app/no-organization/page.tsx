@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { cachedAuth } from "@/lib/auth/cached-auth";
+import { db } from "@/lib/db";
+import { userTotp } from "@/lib/db/schema";
 import {
   isEnterableOrganization,
   userOrganizations,
@@ -10,6 +13,12 @@ import {
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { OrganizationsUnavailable } from "@/components/shared/organizations-unavailable";
 import { Button } from "@/components/ui/button";
+import { listInvitationsForAccount, type InPlaceInvitation } from "@/lib/onboarding/in-place";
+import { NO_ORG_COPY } from "@/lib/onboarding/no-organization-copy";
+import { CheckAgainForm } from "./check-again-form";
+import { InvitationCards } from "./invitation-cards";
+import { SwitchAccountForm } from "./switch-account-form";
+import { deriveNoOrganizationView } from "./view";
 
 export const metadata: Metadata = {
   title: "Not connected to a congregation",
@@ -29,6 +38,14 @@ export const metadata: Metadata = {
  * "your only congregation is still being set up" and "you're not connected to a
  * congregation" are different sentences to the person reading them, and only
  * the unfiltered list can tell them apart.
+ *
+ * COMMUNITY INCREMENT 2b: the page is composed by `deriveNoOrganizationView`
+ * (view.ts), a pure function the unit tests drive over every combination. The
+ * open invitations addressed to this proven account are listed and accepted in
+ * place; "Check again" asks the connect definer once more; an account that has
+ * nothing connected and nothing waiting reads N0. The listing failing (N5)
+ * is a line above whichever block renders and never replaces the page: a
+ * failure is "we don't know", never "there is nothing".
  *
  * Naming the organization is safe HERE and only here — the user holds a
  * relationship with every organization named on this page. The access-denied
@@ -76,9 +93,61 @@ export default async function NoOrganizationPage() {
     );
   }
 
+  // The open invitations addressed to this proven account. A failure is N5: the
+  // page still renders, with a line above it, and the view treats the listing as
+  // unknown rather than empty.
+  let invitations: InPlaceInvitation[] = [];
+  let invitationsFailed = false;
+  try {
+    invitations = await listInvitationsForAccount(session.user.id);
+  } catch {
+    invitationsFailed = true;
+  }
+
+  // Is the account enrolled in two-factor sign-in? Picks which of the two
+  // second-factor notices (verify or set up) applies. A failed read falls back to
+  // "not enrolled": that notice leads to /account/2fa, which shows the
+  // management view to someone already enrolled.
+  let enrolled = false;
+  try {
+    const row = await db.query.userTotp.findFirst({
+      where: eq(userTotp.userId, session.user.id),
+      columns: { userId: true },
+    });
+    enrolled = row !== undefined;
+  } catch {
+    enrolled = false;
+  }
+
+  const view = deriveNoOrganizationView({
+    enterable: enterable.length,
+    pending: pending.length,
+    notTenants: notTenants.length,
+    ended: ended.length,
+    invitations,
+    invitationsFailed,
+    session: {
+      twoFactorRequired: session.user.twoFactorRequired === true,
+      twoFactorVerified: session.user.twoFactorVerified === true,
+    },
+    enrolled,
+  });
+
+  const address = session.user.email ?? null;
+
   return (
     <main className="mx-auto max-w-xl px-6 py-24">
-      {pending.length > 0 ? (
+      {(view.kind === "standing" || view.kind === "default") && view.listFailed && (
+        <p
+          role="alert"
+          data-testid="listing-failed"
+          className="mb-6 rounded-md border border-destructive p-3 text-sm"
+        >
+          {NO_ORG_COPY.listingFailed}
+        </p>
+      )}
+
+      {view.kind === "standing" && view.block === "pending" ? (
         <>
           <h1 className="text-2xl font-semibold">
             {pending.length === 1
@@ -87,33 +156,33 @@ export default async function NoOrganizationPage() {
           </h1>
           <ul className="mt-3 space-y-1">
             {pending.map((org) => (
-              <li key={org.organizationId} className="text-sm text-muted-foreground">
+              <li key={org.organizationId} className="break-words text-sm text-muted-foreground">
                 {org.name} is being set up. We&apos;ll email you when it&apos;s
                 ready.
               </li>
             ))}
           </ul>
         </>
-      ) : notTenants.length > 0 ? (
+      ) : view.kind === "standing" && view.block === "not_tenants" ? (
         <>
           <h1 className="text-2xl font-semibold">
             Your congregation isn&apos;t on PresbyPortal yet
           </h1>
           <ul className="mt-3 space-y-1">
             {notTenants.map((org) => (
-              <li key={org.organizationId} className="text-sm text-muted-foreground">
+              <li key={org.organizationId} className="break-words text-sm text-muted-foreground">
                 {org.name} is in our records through its presbytery, but
                 isn&apos;t set up on PresbyPortal yet.
               </li>
             ))}
           </ul>
         </>
-      ) : ended.length > 0 ? (
+      ) : view.kind === "standing" ? (
         <>
           <h1 className="text-2xl font-semibold">Your access has ended</h1>
           <ul className="mt-3 space-y-1">
             {ended.map((org) => (
-              <li key={org.organizationId} className="text-sm text-muted-foreground">
+              <li key={org.organizationId} className="break-words text-sm text-muted-foreground">
                 Your access to {org.name} ended on{" "}
                 {/*
                  * endedOn is a 'YYYY-MM-DD' calendar date, cast to text in SQL
@@ -126,51 +195,57 @@ export default async function NoOrganizationPage() {
             ))}
           </ul>
         </>
-      ) : (
+      ) : view.kind === "default" ? (
         <>
-          <h1 className="text-2xl font-semibold">
-            You&apos;re not connected to a congregation yet
-          </h1>
-          <p className="mt-3 text-sm text-muted-foreground">
-            You&apos;re signed in, but no church, presbytery, or synod has added
-            you to their records.
+          <h1 className="text-2xl font-semibold">{NO_ORG_COPY.heading}</h1>
+          <p className="mt-3 break-words text-sm text-muted-foreground">
+            {address ? NO_ORG_COPY.body(address) : NO_ORG_COPY.bodyNoAddress}
           </p>
+          <p className="mt-2 text-sm text-muted-foreground">{NO_ORG_COPY.secondLine}</p>
+        </>
+      ) : null}
+
+      {/* Open invitations render below a standing block, or as the page itself. */}
+      {view.kind === "standing" && view.cards.length > 0 && (
+        <div className="mt-8">
+          <InvitationCards cards={view.cards} enrolled={view.enrolled} />
+        </div>
+      )}
+      {view.kind === "invited" && (
+        <>
+          <InvitationCards cards={view.cards} enrolled={view.enrolled} headingLevel={1} />
+          <div className="mt-6">
+            <SwitchAccountForm />
+          </div>
         </>
       )}
 
       {/*
-       * TWO DOORS, both static copy in P0.
-       *
-       * There is deliberately no "Request access" button: it needs a pending
-       * request table and, harder, a notification target — and there is no
-       * tenant permission catalog to answer "who at this congregation receives
-       * this?" until P1 (DECISION-040). A button that silently goes nowhere is
-       * worse than a sentence that tells you who to ask.
+       * The "ask" door is the default view's alone: with an invitation open the
+       * answer is on the page, and with a standing block above it the person has
+       * a specific next step. There is deliberately no "Request access" button:
+       * it needs a pending-request table and a notification target (DECISION-040),
+       * and a button that silently goes nowhere is worse than a sentence that
+       * tells you who to ask.
        */}
       <div className="mt-10 space-y-6 border-t border-border pt-8">
-        <section>
-          <h2 className="text-base font-semibold">
-            Ask your church administrator
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            If you were invited, open the link in your invitation email.
-          </p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Signing in doesn&apos;t connect you to a congregation by itself. Only an
-            invitation link does, and it works while you are signed in with the
-            address it was sent to.
-            {session.user.email ? (
-              <>
-                {" "}You are signed in as{" "}
-                <span className="font-medium text-foreground">
-                  {session.user.email}
-                </span>
-                .
-              </>
-            ) : null}
-          </p>
-        </section>
-
+        {view.kind === "default" && (
+          <section aria-labelledby="ask-heading">
+            <h2 id="ask-heading" className="text-base font-semibold">
+              {NO_ORG_COPY.officeHeading}
+            </h2>
+            {address && (
+              <p className="mt-1 break-words text-sm text-muted-foreground">
+                {NO_ORG_COPY.officeBody(address)}
+              </p>
+            )}
+            <p className="mt-2 text-sm text-muted-foreground">{NO_ORG_COPY.invitationLine}</p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+              <CheckAgainForm enrolled={view.enrolled} />
+              <SwitchAccountForm />
+            </div>
+          </section>
+        )}
         <section>
           <h2 className="text-base font-semibold">
             Is your church not on PresbyPortal?
@@ -184,10 +259,9 @@ export default async function NoOrganizationPage() {
           </Button>
         </section>
       </div>
-
       <Link
         href="/home"
-        className="mt-10 inline-block text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        className="mt-10 inline-flex min-h-11 items-center text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         ← Back to home
       </Link>

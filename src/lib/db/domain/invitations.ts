@@ -25,8 +25,12 @@ import { users } from "../schema";
  * their SHA-256 (`tokenHash`).
  *
  * This file is for TypeScript's benefit. The ground truth is
- * drizzle/0059_presby_account_invitations.sql, and most of what makes this
- * table safe is NOT expressible in the table builder:
+ * drizzle/0059_presby_account_invitations.sql as amended by
+ * drizzle/0065_presby_sign_in_and_connect.sql section 5 (Community Increment
+ * 2b: the `sign_in` purpose, the `org` origin, the `person_deceased` blocked
+ * reason, the purpose/origin tie, the sign-in person CHECK, the re-predicated
+ * open-address index and two new indexes), and most of what makes this table
+ * safe is NOT expressible in the table builder:
  *
  *   - FORCE ROW LEVEL SECURITY + `tenant_isolation` (0059 section 4).
  *   - presby_app holds NO table privilege at all (0059 section 4). It reaches
@@ -34,11 +38,14 @@ import { users } from "../schema";
  *     `presby_accept_invitation(text, uuid, text, text, text)` (0059 section
  *     7), both SECURITY DEFINER, both taking the RAW token and hashing it in
  *     SQL (R5). presby_platform holds SELECT. No role holds DELETE.
- *   - `account_invitations_guard_insert` (0059 section 3a): rows are born
- *     OPEN (no terminal timestamp, no redaction); a founding-administrator
- *     row carries no person until acceptance; a resend's parent is in the
- *     same org, already superseded, same purpose/address/person, and
- *     `resendCount = parent + 1` (addendum D-1).
+ *   - `account_invitations_guard_insert` (0059 section 3a, re-created by 0065
+ *     section 5): rows are born OPEN (no terminal timestamp, no redaction); a
+ *     founding-administrator row carries no person until acceptance; a
+ *     sign-in row names its person at creation; a resend's parent is in the
+ *     same org, already superseded, same purpose/origin/person, and
+ *     `resendCount = parent + 1` (addendum D-1), and for every purpose but
+ *     `sign_in` also the same address (R33, F197: a sign-in resend re-reads
+ *     the address from the person's record).
  *   - `account_invitations_guard_update` (0059 section 3b): identity columns
  *     are immutable; terminal states (accepted, revoked, superseded,
  *     blocked) are exclusive and one-way; the accepted and blocked
@@ -51,21 +58,30 @@ import { users } from "../schema";
  *     except by the fixture-teardown cascade from a `deletable_until`
  *     organization.
  *
- * WRITES: src/lib/onboarding/issue.ts (owner connection) inserts rows and
- * performs the revoke / supersede transitions (Batch 2b). Acceptance and
- * blocking happen only inside `presby_accept_invitation()`.
+ * WRITES: src/lib/onboarding/issue.ts (owner connection) inserts the platform
+ * designation rows and performs their revoke / supersede transitions. The
+ * congregation's sign-in rows (`purpose = 'sign_in'`, `origin = 'org'`) are
+ * written only by the 0065 issue / resend / revoke definers, called only from
+ * src/lib/onboarding/org-invite.ts. Acceptance and blocking happen only inside
+ * the shared acceptance core (`presby__accept_invitation_core`), reached
+ * through `presby_accept_invitation()` and `presby_accept_in_place()`.
  *
  * RETENTION: nulling `emailNormalized` 90 days after an invitation ends is
  * POLICY, NOT YET ENFORCED (no sweep exists; S6). Do not claim it in
  * user-facing copy.
  */
 
+/**
+ * The 0059 vocabularies (what the platform designation flow has always
+ * handled). The APPLICATION unions further down (`AccountInvitationPurpose`,
+ * `AccountInvitationOrigin`, `AccountInvitationBlockedReason`) are derived
+ * from the `*_ALLOWED` lists, which add 0065's members; these base lists stay
+ * so the 0059 CHECK pins in invitations.schema.test.ts keep meaning what they
+ * said.
+ */
 export const ACCOUNT_INVITATION_PURPOSES = ["founding_administrator", "treasurer"] as const;
-export type AccountInvitationPurpose = (typeof ACCOUNT_INVITATION_PURPOSES)[number];
 
-/** Increment 2 adds `org`. */
 export const ACCOUNT_INVITATION_ORIGINS = ["platform"] as const;
-export type AccountInvitationOrigin = (typeof ACCOUNT_INVITATION_ORIGINS)[number];
 
 /** The closed list a committed `blockedAt` carries (DECISION-188). */
 export const ACCOUNT_INVITATION_BLOCKED_REASONS = [
@@ -78,7 +94,36 @@ export const ACCOUNT_INVITATION_BLOCKED_REASONS = [
   "not_applicable",
   "provisioning_incomplete",
 ] as const;
-export type AccountInvitationBlockedReason = (typeof ACCOUNT_INVITATION_BLOCKED_REASONS)[number];
+
+/**
+ * The two purposes a platform designation covers: the scope of
+ * `account_invitations_open_designation_uq` (0059 D-2), which 0065 leaves
+ * unchanged. Named separately so widening the purpose union cannot widen the
+ * index's predicate by accident.
+ */
+export const ACCOUNT_INVITATION_DESIGNATION_PURPOSES = ["founding_administrator", "treasurer"] as const;
+
+/**
+ * The full vocabularies the CHECKs admit since drizzle/0065 section 5: the
+ * database's truth, pinned against the migration text by
+ * invitations.schema.test.ts.
+ *
+ * The application unions are derived from these (Community Increment 2b,
+ * Batch B2), in the same commit as the exhaustive copy and routing every new
+ * member needs (labels.ts, invitation-email.ts, invite-summary.tsx, accept.ts,
+ * issue.ts), so each commit typechecks. A `sign_in` / `org` row is created
+ * only by the 0065 definers, called only from `org-invite.ts`.
+ */
+export const ACCOUNT_INVITATION_PURPOSES_ALLOWED = [...ACCOUNT_INVITATION_PURPOSES, "sign_in"] as const;
+export const ACCOUNT_INVITATION_ORIGINS_ALLOWED = [...ACCOUNT_INVITATION_ORIGINS, "org"] as const;
+export const ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED = [
+  ...ACCOUNT_INVITATION_BLOCKED_REASONS,
+  "person_deceased",
+] as const;
+
+export type AccountInvitationPurpose = (typeof ACCOUNT_INVITATION_PURPOSES_ALLOWED)[number];
+export type AccountInvitationOrigin = (typeof ACCOUNT_INVITATION_ORIGINS_ALLOWED)[number];
+export type AccountInvitationBlockedReason = (typeof ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED)[number];
 
 /** Expiry cap (the CHECK). issue.ts's default is 7 days (Q3). */
 export const ACCOUNT_INVITATION_MAX_EXPIRY_DAYS = 30;
@@ -161,16 +206,28 @@ export const accountInvitations = pgTable(
     }),
 
     // Open-row partial uniques (R2, D-2). Expiry is outside the predicate.
+    // open_address_uq: re-predicated by 0065 section 5 (R28): every purpose
+    // except sign_in, same name as 0059 (issue.ts maps it by name).
     uniqueIndex("account_invitations_open_address_uq")
       .on(t.organizationId, t.purpose, t.emailNormalized)
       .where(
-        sql`${t.acceptedAt} is null and ${t.revokedAt} is null and ${t.supersededAt} is null and ${t.blockedAt} is null`,
+        sql`${t.purpose} <> 'sign_in' and ${t.acceptedAt} is null and ${t.revokedAt} is null and ${t.supersededAt} is null and ${t.blockedAt} is null`,
       ),
     uniqueIndex("account_invitations_open_designation_uq")
       .on(t.organizationId, t.purpose)
       .where(
-        sql`${t.purpose} in (${sqlList(ACCOUNT_INVITATION_PURPOSES)}) and ${t.acceptedAt} is null and ${t.revokedAt} is null and ${t.supersededAt} is null and ${t.blockedAt} is null`,
+        sql`${t.purpose} in (${sqlList(ACCOUNT_INVITATION_DESIGNATION_PURPOSES)}) and ${t.acceptedAt} is null and ${t.revokedAt} is null and ${t.supersededAt} is null and ${t.blockedAt} is null`,
       ),
+    // 0065 section 5: one open sign-in invitation per (organization, person).
+    uniqueIndex("account_invitations_open_sign_in_person_uq")
+      .on(t.organizationId, t.personId)
+      .where(
+        sql`${t.purpose} = 'sign_in' and ${t.acceptedAt} is null and ${t.revokedAt} is null and ${t.supersededAt} is null and ${t.blockedAt} is null`,
+      ),
+    // 0065 section 5: the sign-in reader's per-person newest-first scan.
+    index("account_invitations_person_created_ix")
+      .on(t.personId, t.createdAt.desc())
+      .where(sql`${t.personId} is not null`),
     // D-1: at most one successor per superseded row.
     uniqueIndex("account_invitations_resent_from_uq")
       .on(t.resentFromId)
@@ -180,13 +237,20 @@ export const accountInvitations = pgTable(
     index("account_invitations_inviter_created_ix").on(t.createdByUserId, t.createdAt),
     index("account_invitations_org_created_ix").on(t.organizationId, t.createdAt),
 
+    // Vocabulary CHECKs as widened by 0065 section 5 (forward-only once a
+    // widened value is stored).
     check(
       "account_invitations_purpose_allowed",
-      sql`${t.purpose} in (${sqlList(ACCOUNT_INVITATION_PURPOSES)})`,
+      sql`${t.purpose} in (${sqlList(ACCOUNT_INVITATION_PURPOSES_ALLOWED)})`,
     ),
     check(
       "account_invitations_origin_allowed",
-      sql`${t.origin} in (${sqlList(ACCOUNT_INVITATION_ORIGINS)})`,
+      sql`${t.origin} in (${sqlList(ACCOUNT_INVITATION_ORIGINS_ALLOWED)})`,
+    ),
+    // 0065: a sign_in invitation is always the congregation's own (origin org).
+    check(
+      "account_invitations_purpose_origin_tie",
+      sql`(${t.purpose} = 'sign_in') = (${t.origin} = 'org')`,
     ),
     check(
       "account_invitations_email_shape",
@@ -202,11 +266,16 @@ export const accountInvitations = pgTable(
     ),
     check(
       "account_invitations_names_by_purpose",
-      sql`(${t.purpose} <> 'founding_administrator' or (${t.inviteeFirstName} is not null and ${t.inviteeLastName} is not null)) and (${t.purpose} <> 'treasurer' or (${t.inviteeFirstName} is null and ${t.inviteeLastName} is null))`,
+      sql`(${t.purpose} <> 'founding_administrator' or (${t.inviteeFirstName} is not null and ${t.inviteeLastName} is not null)) and (${t.purpose} <> 'treasurer' or (${t.inviteeFirstName} is null and ${t.inviteeLastName} is null)) and (${t.purpose} <> 'sign_in' or (${t.inviteeFirstName} is null and ${t.inviteeLastName} is null))`,
     ),
     check(
       "account_invitations_treasurer_has_person",
       sql`${t.purpose} <> 'treasurer' or ${t.personId} is not null`,
+    ),
+    // 0065 (R34): the sign-in twin of treasurer_has_person.
+    check(
+      "account_invitations_sign_in_has_person",
+      sql`${t.purpose} <> 'sign_in' or ${t.personId} is not null`,
     ),
     check("account_invitations_token_hash_shape", sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
     check(
@@ -236,7 +305,7 @@ export const accountInvitations = pgTable(
     ),
     check(
       "account_invitations_blocked_reason_allowed",
-      sql`${t.blockedReason} in (${sqlList(ACCOUNT_INVITATION_BLOCKED_REASONS)})`,
+      sql`${t.blockedReason} in (${sqlList(ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED)})`,
     ),
     check(
       "account_invitations_redacted_terminal",

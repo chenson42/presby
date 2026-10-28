@@ -1,0 +1,44 @@
+2fa-default (F343, DECISION-291, migration 0080) - Rule 16 integration patch, database-admin batch
+Work-log: docs/work-log/2026-10-26-2fa-default.md (Phase 4, database section)
+
+Everything above the first `diff --git` line is prose; `git apply` skips it.
+The diff below is against the branch's HEAD (main at 0.46.2 plus this
+pipeline). It is NOT applied on the branch: drizzle/meta/_journal.json is a
+Rule 16 shared file, edited only at integration. If main has moved, use
+`git apply --3way` and keep the array ordered by idx (an entry for 0065,
+0066, 0069-0071, 0073-0079 that lands first goes BEFORE this one).
+
+1. drizzle/meta/_journal.json - idx 80, tag 0080_presby_two_factor_default
+   (idx == the migration's own number, the house rule). `when` is
+   1793023086367, greater than idx 72's 1788137573186. If an entry with a
+   larger idx has landed by integration with a larger `when`, re-stamp this
+   one so `when` stays monotonic with idx.
+
+Other Rule 16 items for this pipeline are listed in the work-log's Phase 3
+"Rule 16 integration items" (DECISION-291 text plus P3-10, closing TODO S3,
+the new TODO lines, schema-design-2, STATE, functionality map). This batch
+does not edit scripts/test-rls.sql or scripts/seed-dev.sql. It edits
+scripts/giving/test-rls-46.sql (46j) and scripts/domains/test-rls-47.sql (47n),
+which are per-pipeline section files, not Rule 16 files, and are committed on
+the branch. After the merge, re-run scripts/test-rls.sql as presby_app on the
+merged development branch (Rule 16). If treasury's 0074 merges after this,
+46j's "exactly six" count becomes six plus its own flagged keys.
+
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index f9b85ae..35390eb 100644
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -470,6 +470,13 @@
+       "when": 1788137573186,
+       "tag": "0072_presby_blob_audience",
+       "breakpoints": true
++    },
++    {
++      "idx": 80,
++      "version": "7",
++      "when": 1793023086367,
++      "tag": "0080_presby_two_factor_default",
++      "breakpoints": true
+     }
+   ]
+ }

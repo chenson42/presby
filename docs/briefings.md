@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=224 commit=078fe79 -->
+<!-- covers: decision=231 commit=caad746 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -25,7 +25,15 @@ is checked.*
 
 ---
 
+## 2026-10-28
+
+- [ ] **`decision` · Two-factor sign-in now follows a person's role: new members are not asked, administrators, treasurers and newly made platform administrators still are (0.49.0; DECISION-291).** Migration 0080 makes new accounts default to not required (no existing account changes) and flags `roles.manage`, `role_grants.manage` and `domains.manage`. **Accepted residuals:** a platform role or `is_platform_admin` set by SQL does not switch the setting on, and the app's own database role could write it (`paper`); enrolling voluntarily never brings a challenge, and nothing in the product says so yet (a TODO decision for you). **You must:** re-run the two R8 counts, snapshot, and apply 0080 BEFORE merging (`docs/deployment.md`, "Two-factor by role (0080)"); grant no platform role in between; fill the release note's deploy-day bracket. **Know:** the pipeline-branch passwords that leaked in QA run 1 are the same as `development` and production; you chose not to rotate (TODO line).
+
+- [ ] **`defect` · First two-factor setup now keeps the ten recovery codes on screen and lands without a second code; making new codes needs a confirmed sign-in (0.48.1; DECISION-292).** Before, the codes and Continue vanished within a second and the person was asked for a code again (F166). Separately, a password-only session could make new codes (F344, high; now refused and audited, and the release note is neutral on purpose). **Accepted residuals:** first setup still needs only the password and now counts as confirmed at once; a lost response can leave someone enrolled with unseen codes. **You must:** nothing to apply. **Then:** walk one real invitee in production on a phone; when it passes, lift the 0.48.0 hold on real sign-in invitations and publish 2b's what's-new post. **Open for you:** a "Copy all" button for the codes (not ruled).
+
 ## 2026-10-26
+
+- [ ] **`decision` · A congregation's office can invite a person it has recorded to sign in, and signing in with the address on a record can connect you to it (0.48.0; DECISION-207, DECISION-208 and DECISION-225 to DECISION-228).** Connecting is on by default for every congregation; anyone with a role or a seat first confirms two-factor sign-in. **You ruled:** real sign-in invitations, and the what's-new entry, wait until F166 (recovery codes on first enrolment) ships; the release itself sends nothing. **A gap you accepted (F232):** someone who can edit a person's email can point a record at a mailbox they control, and whoever signs in with it is connected; it is detected by audit, not prevented. **You must:** apply 0065 before merging (`docs/deployment.md`, "Sign-in invitations and connect at sign-in (0065)"), then do the one-time Google sign-in check. **Read in the diff:** one CLAUDE.md sentence beyond your three edits ("a congregation's sign-in invitation is the same mechanism"). **Open question:** whether the new Board of Deacons Moderator seat joins the closed list of seats (a TODO line; it fails safe today).
 
 - [ ] **`decision` · A congregation can publish job openings on its own website; it is off everywhere until a congregation turns on "Job openings" (0.47.0; DECISION-264 to DECISION-266 and DECISION-278).** This is Increment 1 of 3: writing, publishing, closing and reading openings. Applying online, resume storage and retention are Increment 2 (0075), and the cutover runbook and import are Increment 3. **A gap you accepted:** every founding administrator, existing and new, now holds `careers.applicants`, a tier-3 key. It reads nothing until Increment 2, and then the resume-download audit row detects use but cannot prevent it; CLAUDE.md names it the second known violation of "No role carries a wildcard." **You must:** snapshot production and apply 0071 before merging (`docs/deployment.md`, "Careers (0071)"); re-read the live founding-administrator function and count the roles it backfills first; confirm `org_portal.roles` and `org_portal.admin_hub` are on, or the Hiring Committee role cannot be adopted. Before release, three defects the walk found were fixed (open pages were hidden from search, the pay unit defaulted to per hour, a paste glued onto the next line). The first customer's Employment page is a later step for its site's author.
 

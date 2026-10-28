@@ -362,10 +362,14 @@ describe.skipIf(!hasDb)(
           expect(settings).toEqual([
             { timeZone: "America/New_York", requireTwoFactor: false },
           ]);
-          // Only the provisionedOn entry; the two members toggles stay absent
-          // (a missing row is OFF, DECISION-097).
-          expect(toggles).toEqual([
+          // Only the provisionedOn entries (the member calendar and, since
+          // Community Increment 2b, the sign-in connect toggle, R47); the
+          // members toggles stay absent (a missing row is OFF, DECISION-097).
+          expect(
+            [...toggles].sort((a, b) => a.featureKey.localeCompare(b.featureKey)),
+          ).toEqual([
             { featureKey: "org_portal.calendar", enabled: true, updatedBy: null },
+            { featureKey: "org_portal.sign_in_connect", enabled: true, updatedBy: null },
           ]);
           expect(types).toEqual(
             eventTypeSeedPlan("congregation").map((t) => ({
@@ -390,7 +394,10 @@ describe.skipIf(!hasDb)(
           const id = await provisioned("presb", "presbytery");
           const { settings, toggles, types } = await readCalendarRows(id);
           expect(settings).toHaveLength(1);
-          expect(toggles.map((t) => t.featureKey)).toEqual(["org_portal.calendar"]);
+          expect(toggles.map((t) => t.featureKey).sort()).toEqual([
+            "org_portal.calendar",
+            "org_portal.sign_in_connect",
+          ]);
           expect(types).toEqual([
             {
               name: "General",

@@ -2001,3 +2001,7 @@ Files read:
 **Residual:** screenshots were not retained (a scratch filename bug); the numeric computed-style readings above stand in. The e2e spec was run before the final `ResizeObserver` guard edit; the guard is a no-op in browsers.
 
 **Next agent:** the orchestrator; Batch A1 waits on 2b.
+
+## Orchestrator: required Phase 3 edit before 3a Phase 4 (2026-10-25, from parish-management's QA run 1 rulings)
+
+Parish management (0068) adds a fifth derived kind, `deacons_moderator`. 3a's `derived_from` kind CHECK and its stop-block list (arch-A2) name four values and must be widened to five (`active_membership`, `all_memberships`, `session`, `diaconate`, `deacons_moderator`) or 0066/0068 cannot both apply in either order. Also: parish's 0068 now re-creates `presby_sync_derived_group()` as `security definer set search_path = public, pg_temp` so 0066's owner-only guard is not reset; 3a's 0066 body for that function must match (same signature and attributes) or the later of the two wins silently — the 3a Phase 4 writer re-scan (arch-A4) must check it. See /Users/cshenso/git/presby-platform/presby-parish/docs/work-log/2026-10-25-parish-management.md "Phase 3 amendment 1 — QA run 1 rulings".

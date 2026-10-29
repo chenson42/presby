@@ -4,6 +4,26 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-298 — An applied migration may be corrected in place only when the change is guard-only and provably behaviour-neutral where it already ran; otherwise fix forward.**
+
+**Status:** Accepted (orchestrator ruling, 2026-10-28; Phase 6 SHIP WITH NOTES, `2026-10-28-org-baseline-backfill`) · **Date:** 2026-10-28 · **Feature:** `2026-10-28-org-baseline-backfill` (migration 0082; v0.50.1)
+
+- **Rule.** CLAUDE.md's `drizzle/` line allows an in-place correction only before a migration reaches a shipped environment. This adds one exception for a file already applied to production or `development`. All of these must hold:
+  - **(a)** The change touches only guards, meaning conditions on `RAISE`, `IF` and `WHEN`, plus comments. Every statement that writes, alters or grants is byte-identical.
+  - **(b)** On every environment that already ran the file, the corrected file writes nothing. This is proven by a zero-row re-run with `psql -1` there, and the counts are recorded.
+  - **(c)** A forward migration cannot serve. The test is that a fresh `db:migrate` stops at the defective index before any later file.
+  - **(d)** The change has a regression test that is red on the as-applied file and green on the corrected one.
+  - **(e)** The work-log, the migration header and `docs/deployment.md` each say that the file was corrected in place, and why.
+- **Why.** `db:migrate` is the only path to a fresh environment. A defect in an applied file blocks every new environment, and nothing after it can run. A guard that is wrong on an empty catalog can only be fixed at its index.
+- **Not covered.** Any change to a write, a grant, a policy or a function body; any renumbering; any change to the journal's `when`. Those fix forward.
+- **Accepted residual (`paper`).**
+  - A guard can be widened, so it refuses in more cases, as the membership stop-block did here. That is neutral on environments that applied the file only because the file is not run again. The re-run in (b) is the check, and nothing mechanical enforces it.
+  - A hand-applied file's bytes are not hashed anywhere (the ledger holds ten rows), so nothing detects drift between "as applied" and "as in the repo" except this record.
+- **First use.** `0082` (stop-blocks corrected before release; commit `421940c`).
+- **Follow-through.** The `drizzle/` line in CLAUDE.md carries the exception (operator approved, 2026-10-28).
+
+---
+
 **DECISION-297 — Help screenshots come only from a fixture-only database behind a fail-closed guard.**
 
 **Status:** Accepted (tech-lead, Phase 3 as DECISION-new-2; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-28 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)

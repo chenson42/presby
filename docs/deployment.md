@@ -1519,6 +1519,52 @@ not switch the person's own setting on, and nothing in the database refuses it.
 
 ---
 
+## Organization baseline backfill (0082)
+
+**Applied 2026-10-28** (v0.50.1; `docs/work-log/2026-10-28-org-baseline-backfill.md`).
+Migration `0082` adds the derived Active Membership group and the baseline
+`member` role (holding `directory.view` and `events.view`, granted to that
+group) to any organization that lacks them: one presbytery created before
+`src/lib/org-provisioning.ts` seeded them. Nothing else is touched. It was
+applied directly to production by the operator's ruling ("Yes, do it now"),
+before the release, because the operator could not send that organization's
+founding-administrator invitation.
+
+- **Order followed:** rehearsed twice on a production-derived Neon branch (first
+  run added 1 organization, second added 0, an existing, already-provisioned organization
+  unchanged); production snapshot `snap-lingering-heart-axrxc9ch`; applied with
+  `-1` on the direct endpoint as the owner; then applied to `development`, where
+  it added the member role to 15 fixture organizations; `scripts/test-rls.sql`
+  on `development` shows only the known drift at lines 219 and 7953.
+- **Nothing to run at deploy.** The release carries no schema work that is not
+  already live. A fresh environment gets the file from the journal (idx 82) and
+  it is a no-op there: with no organizations yet (`db:migrate` runs before
+  `db:seed`), the file inserts nothing and raises nothing, so `db:migrate`
+  completes through idx 82. Proven on a real scratch database on 2026-10-28.
+- **It refuses rather than guesses:** an organization that lacks the group and
+  has ANY membership row (live, ended or future-ended) stops the file, because
+  the sync trigger writes one derived row per membership and the roster would
+  need syncing, a deliberate step, not part of this one. Production had none.
+  It also stops, with "roster missing", only when some organization needs the
+  group and the global `roster` group type is absent.
+- **In-place correction (2026-10-28, before release).** As first applied, the
+  "roster missing" check ran unconditionally, so any database without the seeded
+  `roster` group type (every fresh `db:migrate`) failed at idx 82; and the
+  membership stop-block looked only at live memberships. Both guards were
+  corrected in place, same file and number, guard-only: no row the file writes
+  changed, so it is a no-op on production and `development`, where it had
+  already run (re-run with `-1` on `development`: zero rows inserted). A forward
+  migration could not help, since `db:migrate` stops at 0082 before any later
+  file. The exception to fix-forward is for a guard-only, provably
+  behaviour-neutral change to an applied file (DECISION-298).
+- **Rollback** is a forward migration, never an edit of 0082 except as DECISION-298 permits. The
+  rows are ordinary tenant rows (a protected group, a protected role); removing
+  them would re-create the refusal this fixes.
+- **Regression test:** `src/lib/db/domain/org-baseline-backfill.db.test.ts`
+  (serial; the file is global, so it must not run beside another DB suite).
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.

@@ -2237,3 +2237,14 @@ Both servers were stopped by PID; :3660 and :3661 are free.
 ## Orchestrator note: the Vercel preview gate (2026-10-28)
 
 The PR's Vercel preview never builds: git-triggered previews are cancelled by the project's Ignored Build Step, and a CLI preview (`vercel deploy`) fails at `next build` because the Preview environment has no `DATABASE_URL` (by design; previews never get a database). So the DECISION-293 preview check cannot run before merge. Ruling: merge on green CI and run the same check on production immediately after deploy (`/help/no-such-page` and `/help/planned/no-such`, twice each: 404, the help heading, `no-store`, no cache HIT). The failure mode is benign (the framework 404, still a 404, no cache entry per URL is the property that matters and is verified on `next start` by `help-404.spec.ts`); if production serves the framework 404, apply Option B as a follow-up per the architect's ruling. The same constraint applies to the treasury and photos `sharp` checks: they move to "one real upload on production with the toggle off for every congregation but a test one".
+
+## Post-deploy production check (2026-10-28)
+
+PR #68 merged (`af7002a`); production deployment Ready. Run against `https://www.presbyportal.org` (the apex 308s to www):
+
+| Path | Run | Status | `cache-control` | `x-vercel-cache` | Help heading |
+|---|---|---|---|---|---|
+| `/help/no-such-page` | 1, 2 | 404, 404 | `private, no-cache, no-store, max-age=0, must-revalidate` | MISS, MISS | "We couldn't find that page" |
+| `/help/planned/no-such` | 1, 2 | 404, 404 | same | MISS, MISS | "We couldn't find that page" |
+
+`/help` 200. `/help/privacy-policy` 200 and shows privacy@presbyportal.org, with no unrendered `{{privacyContact}}` token. The preview gate is closed by this check; Option B is not needed. Worktree `../presby-help` and Neon branch `pipeline-user-help` removed.

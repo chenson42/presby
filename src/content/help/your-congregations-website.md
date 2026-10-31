@@ -17,7 +17,7 @@ This is why a setting in PresbyPortal can be on and nothing shows on your websit
 
 The "Branding" page sets your congregation's colour, a type pairing ("Classic", "Modern", "Warm" or "Contemporary"), an optional logo (PNG, JPEG or WEBP, up to 2 MB) and "Light mode only". Choose "Save brand" and the message is "Brand saved." The colour is used in the portal and on your public website.
 
-A Founding Administrator does not have the role for this at first. The page says "You don't have permission to manage branding". The PresbyPortal team sets it up. {{contact}}
+A Founding Administrator does not have the role for this at first. The page says "You don't have permission to manage branding". The PresbyPortal team sets it up. {{contactAdmin}}
 
 ## Job openings
 
@@ -41,4 +41,4 @@ On a phone the "Public listing" column is not shown. Use a wider screen to chang
 
 ## A web address of your own
 
-A congregation can connect its own web address to its website. It is not something you set up yourself, and it is not on the Features page. The "Website domain" page says that if it is not on, you should ask PresbyPortal support to turn it on. {{contact}}
+A congregation can connect its own web address to its website. It is not something you set up yourself, and it is not on the Features page. The "Website domain" page says that if it is not on, you should ask PresbyPortal support to turn it on. {{contactAdmin}}

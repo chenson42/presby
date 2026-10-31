@@ -20,4 +20,4 @@ After you accept, you may be asked to set up two-factor sign-in with an authenti
 
 ## Asking about PresbyPortal for your congregation
 
-PresbyPortal does not have a contact form. The way to reach the people who run it is the project's public page, [PresbyPortal on GitHub](https://github.com/chenson42/presby), where you can open an issue to ask a question. Opening an issue needs a GitHub account. What you write there is public, so leave out personal details and your congregation's private information.
+There is no sign-up form, but you can write to the PresbyPortal team. Open the [contact form](/help/contact) and choose "Starting a congregation" under "What is this about?". Say your congregation's name and who the first administrator would be; a name is enough. A person reads each message. There is no automatic reply and no promised time, and a message does not create an account or set anything up by itself.

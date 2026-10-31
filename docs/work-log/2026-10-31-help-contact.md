@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (11 operator questions with defaults; FC1–FC10 → F382–F391) | READY WITH NOTES | 2026-10-31 |
 | 2 — Architectural review | architect | Complete (CA1–CA13; amends C1, C3, C5, C6, C10, R9; AF-1–AF-8 = F406–F413; DECISION-300–304 proposed) | Approved with suggestions | 2026-10-31 |
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
-| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batch 4 (admin inbox) complete: 749 files, 11,442 tests; CA10 test 5 passed. Batch 5 in progress | — | 2026-10-31 |
+| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batch 4 (admin inbox) complete: 749 files, 11,442 tests; CA10 test 5 passed. Batch 5 (help content and chrome) complete: 750 files, 11,456 tests; `verifiedIn` untouched (Phase 6 walk). Batch 3b (CA7 fix, DECISION-313) next | — | 2026-10-31 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1800,6 +1800,41 @@ Nav item and dashboard card carry the same key as the page. No flag, no new perm
 1. The dashboard card and the inbox's New list are counting the pre-existing synthetic rows on `pipeline-help-contact` (contact-lane and DB-test rows, all `example.invalid`).
 2. Hostile text is pinned inert at three levels: unit (no element, no anchor), the e2e (`<script>` text shown, `window.__xss` undefined, no `phish` anchor), and the screenshots.
 3. `check:audit` is silent on `messages/actions.ts` by construction (no `db.` call); `inbox.db.test.ts` is the guard (AF-7).
+
+## Batch 5 — full-stack-developer: help content and chrome (2026-10-31)
+
+### Files Modified
+
+- Code: `src/lib/help/contact.ts` (new `HELP_CONTACT_LINE`; new `HELP_CONTACT_ADMIN_LINE`), `tokens.ts` (`{{contactAdmin}}`, a fourth `applyHelpTokens` parameter), `checks.ts` (the H5 message), `links.ts` (`FIXED_INTERNAL` gains `/help/contact`, exactly), `urls.ts` (`HELP_CONTACT_HREF`), `copy.ts` (`footerContactLead`, `footerContactLink`; `switchedOnText(name)` is plain text and no longer takes a contact line), `src/components/help/needs-block.tsx`, `src/app/(documentation)/layout.tsx` (the footer link).
+- Content, from the screens (`src/content/help/`): `getting-help` (four ways; the new "Write to the PresbyPortal team" section; "What to expect"), `how-a-congregation-gets-started` (the GitHub-only sentence replaced), `privacy-policy` (seven edits, Copy I), `using-your-code` and `setting-up-two-factor` (the lost-phone sentence), `accepting-your-invitation` (the trailing token became a literal sentence), and `{{contact}}` to `{{contactAdmin}}` on `why-cant-i-see-this`, `turning-features-on-and-off`, `roles-who-can-do-what`, `your-congregations-website` (2), `first-day-as-administrator` (2), `events-and-the-calendar`. `reimbursements-for-treasurers`, `who-is-asked-for-a-code` and `signing-in` keep `{{contact}}` (the expansion changes). Registry: `getting-help` (summary, `covers` gains `route:/help/contact`, five labels), `how-a-congregation-gets-started`, `using-your-code`, `setting-up-two-factor` (labels).
+- Tests: `tokens.test.ts`, `content.test.ts` (no token survives in any published page), `links.test.ts` (`/help/contact` resolves; `#x`, `/x`, `?x` and a trailing slash do not), `urls.test.ts`, new `contact.test.ts`, `help-components.test.tsx` (the Needs-block sentence is plain text), `help-routes.test.tsx`, `layout.test.tsx` (footer link, 44px, print-hidden); `e2e/help.spec.ts` (footer on the index and a page, 44px, the link opens the form; the 360px tap-target scan now includes `footer a`) and `e2e/help-404.spec.ts` (the 404 has the footer link).
+
+### The 13 readers, as shipped
+
+`getting-help` is prose; eight lines take `{{contactAdmin}}` (`why-cant-i-see-this`, `turning-features-on-and-off`, `roles-who-can-do-what`, `your-congregations-website` x2, `first-day-as-administrator` x2, `events-and-the-calendar`); `reimbursements-for-treasurers`, `who-is-asked-for-a-code` and `signing-in` keep `{{contact}}`; `accepting-your-invitation` is a literal sentence. The Needs block (latent: no entry sets `operatorEnabled`) takes the plain-text `switchedOnText`.
+
+### Gates
+
+- `npm run typecheck`, `eslint src e2e scripts`, `npm run check` (all nine; `check:help`: 29 entries, 21 published, 24 content files, 7 images): pass.
+- `npm run test` (no DB env): **750 files passed, 117 skipped; 11,456 tests passed, 3,232 skipped** (Batch 4 closed at 749 and 11,442).
+- e2e on a keyless dev server (:3670): `help.spec.ts`, `help-404.spec.ts`, `help-contact-unavailable.spec.ts`: **35 passed**.
+
+### Rule 17: what was walked, and what was not
+
+Walked at 360px, light and dark, in a browser against the dev server (0 px horizontal overflow on every page): the help index, the help 404, `getting-help` (read), `how-a-congregation-gets-started`, `privacy-policy`, `first-day-as-administrator` (the `{{contactAdmin}}` expansion), `using-your-code`, `setting-up-two-factor`, `accepting-your-invitation`, `signing-in`, `reimbursements-for-treasurers`, `roles-who-can-do-what`. Shots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/help-contact/shots/help-<slug>-{light,dark}.png`. I opened `getting-help` (light) and `first-day-as-administrator` (dark) and read them; the others were checked for overflow and read as markdown, not each opened as an image. The form labels the pages quote ("What is this about?", "Your email address", "Your message", "Send message", "Your message was sent.", "Starting a congregation", "I can't sign in or I lost my codes") are the ones on the form screens walked in Batch 3.
+
+**`verifiedIn` was not moved on any page.** Phase 3 says it moves only by the Phase 6 walk at ship, so every page keeps the release it had. Pages stay `published`.
+
+### Departures and things the orchestrator must do
+
+1. **`privacy-policy` "Last updated" is `October 31, 2026`, today's date.** Copy I says the ship date in the same format; the ship date is not known to me. The orchestrator sets it at ship (the same sentence `check:help` reads is the first line of the file).
+2. **One footer covers the index, the 404 and every page**, as Phase 3 K ruled; no separate lines were added to the index or the 404 body.
+3. **The retention sentence in `privacy-policy` matches the build**: "Clear details" blanks name, email, congregation and message and leaves topic, dates and status (`inbox.db.test.ts`, `help_contact_cleared_shape`); there is no sweep, so "There is no fixed period" is true today.
+4. **The clear-on-ask promise and "we reply to the email address on that account" are operator duties**, not queries (Phase 3 Copy). Runbook 2 carries them.
+5. **`HELP_PRIVACY_CONTACT_EMAIL` in Production** is still an operator question (Phase 3, handoff note 2): without it, a clear-on-ask request routes to a public GitHub issue.
+6. **Pages other pipelines edit** (`first-day-as-administrator`, `roles-who-can-do-what`, `events-and-the-calendar`, `your-congregations-website`, `reimbursements-for-treasurers`): my edits to them are one-token swaps, so a merge conflict is mechanical.
+
+Audit events: none. Strings: Copy F to K, verbatim (`HELP_CONTACT_LINE`, `HELP_CONTACT_ADMIN_LINE`, `switchedOnText`, the footer, the `getting-help`, `how-a-congregation-gets-started`, `privacy-policy` and lost-phone text).
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

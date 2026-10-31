@@ -44,7 +44,7 @@ You cannot use these yet:
 - "Branding": your colour, type pairing and logo. The page says "You don't have permission to manage branding".
 - "Website domain": your own web address for your website. It is not on the Features page. The PresbyPortal team turns it on.
 
-For these three, the PresbyPortal team sets things up. {{contact}}
+For these three, the PresbyPortal team sets things up. {{contactAdmin}}
 
 ## Turn on what you need
 
@@ -56,4 +56,4 @@ A new congregation starts with the calendar on and most other features off. Open
 2. Open "Officers" and record the members of your Session. At least one of them needs a connected sign-in before anyone can approve a new member. You can record yourself. To connect the others, invite them. See [Inviting people to sign in](/help/sign-in-invitations).
 3. Open "Community" and add your people. Invite the ones who should sign in. See [Inviting people to sign in](/help/sign-in-invitations).
 4. Open "Roles" and give the roles that help you share the work.
-5. If you need to add events or set your colours, ask for that role. {{contact}}
+5. If you need to add events or set your colours, ask for that role. {{contactAdmin}}

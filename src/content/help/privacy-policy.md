@@ -1,4 +1,4 @@
-Last updated October 28, 2026.
+Last updated October 31, 2026.
 
 PresbyPortal is a service that helps Presbyterian congregations, presbyteries and synods keep their records and do their work. This page says what information we hold, who else handles it, how long it is kept, and what you can ask us to do. In this policy, "we" means PresbyPortal.
 
@@ -44,9 +44,9 @@ The organization decides what goes in, who can see it, and what stays on the rol
 ## Other information we record
 
 - **Audit records.** When something important happens, such as a role change, a feature turned on or off, a change to a record, or an account locked after failed sign-ins, we record what happened, who did it and when, along with the IP address and browser type of the request.
-- **Abuse protection.** To slow down guessing and misuse, we count requests by IP address, and on sign-in forms by the email address typed, for a short time.
+- **Abuse protection.** To slow down guessing and misuse, we count requests by IP address, and on sign-in forms by the email address typed, for a short time. This includes messages sent through the contact form.
 - **Email.** We send emails such as invitations, password resets and email-change confirmations. We keep a copy of each one (who it went to, its subject and its content) and its status: sent, failed, delivered, bounced or reported as spam. If our email service reports it, we also learn whether an email was opened or a link in it was clicked.
-- **Messages to us.** Feedback and tickets you send. Feedback sent from inside a congregation goes first to a person at that congregation.
+- **Messages to us.** Feedback and tickets you send. Feedback sent from inside a congregation goes first to a person at that congregation. Messages sent through the PresbyPortal contact form go to the PresbyPortal team, not to a congregation, and you do not need an account to send one. We keep the topic you chose, your email address, your message, the time you sent it, and your name and congregation if you gave them. We do not store your IP address or browser details with the message. Do not put passwords or recovery codes in a message.
 
 ## Cookies
 
@@ -66,7 +66,7 @@ We use these companies to run PresbyPortal, and share information with them only
 - **Neon** hosts our database in the United States. Account information, congregation records, audit records and the log of emails are stored there.
 - **Resend** sends our emails, so it handles the address and content of each one.
 - **Stripe** takes online gifts for congregations that use giving. You leave PresbyPortal for a page hosted by Stripe, and Stripe's own policy applies there. We do not receive or store your card number.
-- **Cloudflare Turnstile** checks that a person, not a bot, is using a form, where we turn it on. Cloudflare receives your IP address and browser details when it does.
+- **Cloudflare Turnstile** checks that a person, not a bot, is using a form, where we turn it on. Cloudflare receives your IP address and browser details when it does. It runs on the contact form.
 - **Upstash** keeps the short-lived request counts for abuse protection, where we use it.
 - **Google** handles your sign-in, only if you choose Google.
 
@@ -78,6 +78,7 @@ Our hosting and database providers also keep ordinary technical logs. We share i
 - **Accounts** are kept until you ask us to deactivate yours. A deactivated account is kept, and stays blocked from signing in.
 - **Audit records and the log of emails sent** are kept. They are not deleted on a schedule.
 - **Password-reset and email-change links** expire, and expired ones are cleared each day.
+- **Messages sent through the contact form** are kept until we clear them. We clear a message when you ask, and when we have finished with it. Clearing removes the name, email address, congregation and message text; a record that a message arrived, with its topic and its dates, stays. There is no fixed period.
 
 ## What you can ask us to do
 
@@ -86,6 +87,7 @@ You can ask us to:
 - tell you what account information we hold about you
 - correct it. You can also change your name, email address and password yourself in "Account settings" (see [Your account](/help/your-account))
 - deactivate your account, so no one can sign in with it
+- clear a message you sent through the contact form. Say which one: its topic and about when you sent it
 
 "Delete account" in "Account settings" records that you asked, but it does not remove anything on its own. Ask us instead, and say what you want. We tell you what we can do.
 
@@ -108,3 +110,5 @@ If we change this policy, we post the new version on this page and change the da
 For questions about this policy, or requests about your account:
 
 {{privacyContact}}
+
+For anything else, use the [contact form](/help/contact).

@@ -20,6 +20,12 @@ describe("visibleAdminNav", () => {
     ).toEqual(["Dashboard", "Tickets", "Feedback", "Contact messages", "Design system"]);
   });
 
+  it("Contact messages follows admin.tickets, not admin.feedback (regression for the unpinned key, QA run 1 M13)", () => {
+    expect(labels([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_FEEDBACK])).not.toContain("Contact messages");
+    expect(labels([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS])).toContain("Contact messages");
+    expect(labels([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS])).not.toContain("Feedback");
+  });
+
   it("shows a door-only viewer Dashboard and Design system (E2)", () => {
     expect(labels([FEATURES.ADMIN_DASHBOARD])).toEqual([
       "Dashboard",

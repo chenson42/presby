@@ -1994,6 +1994,14 @@ Resolves the Phase 3 loop-back raised in Batch 3 ("CA7 does not hold"). Ruled by
 2. **Not proven on Vercel.** Whether Vercel's runtime forwards a custom-host action the same way, and whether it adds the same marker, is unmeasured (the contact lane and the production lane are both `localhost`). The version tripwire guards the marker's name in Next; the behaviour on Vercel needs the Phase 6 or deployment walk (a replay with `Host: <a custom host>` against a preview that has the form configured).
 3. Every other anonymous Server Action on the platform is still reachable on a custom host in the same way (no session or cookie involved, so nothing is exposed beyond what the platform host exposes). Out of scope here (the architect's ruling); `isDirectPlatformActionRequest` is the helper a later pipeline would call.
 
+### Fix pass (QA run 1)
+
+Test-only; no production file changed (`git status` shows only the three test files).
+
+1. **`src/lib/help-contact/submit.test.ts`.** `beforeEach` now also stubs `RATE_LIMIT_DISABLED`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_PLATFORM_HOSTS` and `DEV_ALLOWED_ORIGINS` to empty (the rest of what `isHelpContactConfigured`, `isPlatformHost` and `platformHosts` read; the limiter and Turnstile are mocked). Failing first: `RATE_LIMIT_DISABLED=true npx vitest run submit.test.ts` gave 1 failed / 37 passed (`:135`, `sent` expected, `unavailable` received) before the change. After: 38/38 bare, and 38/38 with `RATE_LIMIT_DISABLED=true UPSTASH_REDIS_REST_URL=x NEXT_PUBLIC_APP_URL=https://x.invalid DEV_ALLOWED_ORIGINS=church-one.invalid`.
+2. **M13 / M14.** Two new tests, each with a fixture holding one of `admin.tickets` / `admin.feedback` without the other: `src/app/(admin)/admin/visible-nav.test.ts` (Contact messages follows `admin.tickets`) and `src/app/(admin)/admin/_dashboard/visible.test.ts` (the `contact_messages` card follows `admin.tickets`). Failing first: with `nav.ts` swapped to `FEATURES.ADMIN_FEEDBACK`, the nav test fails (1 failed / 134 passed across the nav, admin-portal and visible-nav files); with `registry.ts` swapped, the card test fails (1 failed / 64 passed). Both production files restored with `git checkout`; `git diff` afterwards lists only the three test files.
+3. **Gates.** `npm run typecheck` clean; `npm run lint` clean (`--max-warnings=0`); `npm run check` exit 0 (all ten tripwires); touched files plus `src/lib/admin-portal`: 173 passed, 11 skipped (the skips are the DB-backed files, unchanged).
+
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how
 the work went; git history already records it. Judgment output (analyst,

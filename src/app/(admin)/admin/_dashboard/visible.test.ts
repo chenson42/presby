@@ -31,6 +31,11 @@ describe("visibleDashboardZones", () => {
     ]);
   });
 
+  it("the Contact messages card follows admin.tickets, not admin.feedback (regression for the unpinned key, QA run 1 M14)", () => {
+    expect(ids([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_FEEDBACK])).toEqual(["feedback"]);
+    expect(ids([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS])).toEqual(["tickets", "contact_messages"]);
+  });
+
   it("a door-only or featureless viewer sees no zone (E2)", () => {
     expect(visibleDashboardZones([FEATURES.ADMIN_DASHBOARD])).toEqual([]);
     expect(visibleDashboardZones(undefined)).toEqual([]);

@@ -78,6 +78,14 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "dev-site");
   vi.stubEnv("VERCEL_ENV", "");
   vi.stubEnv("TRUST_PROXY_HEADERS", "");
+  // Every other variable the code under test reads, pinned so the result never depends on the runner's
+  // environment (the documented local DB run keeps RATE_LIMIT_DISABLED=true in .env.local, QA run 1).
+  vi.stubEnv("RATE_LIMIT_DISABLED", "");
+  vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
+  vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
+  vi.stubEnv("NEXT_PUBLIC_PLATFORM_HOSTS", "");
+  vi.stubEnv("DEV_ALLOWED_ORIGINS", "");
   logSpies = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
     vi.spyOn(console, m).mockImplementation(() => {}),
   );

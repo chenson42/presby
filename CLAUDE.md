@@ -92,6 +92,9 @@ src/lib/brand/         — the brand token contract (contract.ts, zero runtime
 src/lib/storage/       — the generic tenant-scoped blob adapter (DECISION-030/
                          055/058): store()/resolve() only, no caller queries
                          blob_assets directly. Logo is the first consumer
+src/lib/person-photos/ — org-scoped person photos (DECISION-285..289): image.ts is one
+                         of the two `sharp` importers (DECISION-312); store.ts the only
+                         writer of person_photos/person_photo_designations
 src/components/brand/  — brand-tokens.tsx (the :root-scoped <style> emitter —
                          DECISION-052, it IS the marker check-brand-scope.mjs
                          greps for) and org-mark.tsx (logo/wordmark, G7)

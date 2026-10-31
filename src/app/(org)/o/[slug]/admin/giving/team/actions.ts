@@ -51,7 +51,7 @@ export async function grantGivingRoleAction(slug: string, input: unknown): Promi
     case "not_giving_only":
       return {
         ok: false,
-        error: "That role includes permissions outside Giving. Grant it from Roles instead.",
+        error: "That role includes permissions outside Giving and Reimbursements. An administrator can grant it from Roles.",
       };
     case "escalation_denied":
       return {
@@ -139,7 +139,7 @@ export async function ensureGivingRoleAction(
     case "not_giving_only":
       return {
         ok: false,
-        error: "That role already exists with permissions outside Giving. An administrator can fix it under Roles.",
+        error: "That role already exists with permissions outside Giving and Reimbursements. An administrator can fix it under Roles.",
       };
     case "escalation_denied":
       return {

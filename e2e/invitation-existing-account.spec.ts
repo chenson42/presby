@@ -355,7 +355,16 @@ test("treasurer purpose, existing account (no MFA): accepting links the roster p
     viaInvitationId: invitation.id,
     organizationId: o.orgId,
     personId,
-    permissionKeys: ["giving.manage", "giving.record", "giving.view"],
+    // drizzle/0074 (DECISION-269, F323): the treasurer template also carries the four reimbursement keys.
+    permissionKeys: [
+      "giving.manage",
+      "giving.record",
+      "giving.view",
+      "reimbursement.manage",
+      "reimbursement.pay",
+      "reimbursement.request_for_others",
+      "reimbursement.view",
+    ],
     inviterIsInvitee: false,
   });
 

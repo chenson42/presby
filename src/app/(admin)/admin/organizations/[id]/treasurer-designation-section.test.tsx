@@ -156,6 +156,10 @@ describe("TreasurerDesignationSection — the control", () => {
 
     expect(await screen.findByRole("alertdialog")).toBeTruthy();
     expect(screen.getByText(/invite treasurer@example\.invalid to be alder creek/i)).toBeTruthy();
+    // Copy C12: the confirm text states the reimbursement keys the role now carries, conditionally on the toggle.
+    expect(screen.getByRole("alertdialog").textContent).toMatch(
+      /giving settings, funds and giving team\. Once the congregation turns on Reimbursements they can also view and record payments on reimbursement requests and choose which groups can receive them\. Holding this access requires two-factor sign-in\./,
+    );
     expect(mockDesignate).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /yes, send invitation/i }));

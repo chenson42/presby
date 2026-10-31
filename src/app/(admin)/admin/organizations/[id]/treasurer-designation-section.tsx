@@ -231,8 +231,9 @@ export function TreasurerDesignationSection({
           onConfirm={flow.confirm}
         >
           Once they accept, they will be able to view every gift and donor, record gifts, and manage the
-          organization&apos;s giving settings, funds and giving team. Holding this access requires
-          two-factor sign-in. After this, the treasurer — not the platform — adds and removes everyone
+          organization&apos;s giving settings, funds and giving team. Once the congregation turns on
+          Reimbursements they can also view and record payments on reimbursement requests and choose
+          which groups can receive them. Holding this access requires two-factor sign-in. After this, the treasurer — not the platform — adds and removes everyone
           else.
         </SendInvitationDialog>
       </HydrationGate>

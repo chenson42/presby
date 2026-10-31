@@ -218,6 +218,27 @@ export const ORG_FEATURE_CATALOG = [
     orgTypes: ["congregation", "new_worshiping_community"] as const,
     operatorEnabled: false as const,
   },
+  // Reimbursements (docs/work-log/2026-10-25-treasury-inc1.md, Phase 3
+  // "Permissions & Flags", P3-15; DECISION-267 to 271). TOGGLE-ONLY (`flag:
+  // null`): no platform flag and nothing added to e2e-baseline-flags.sql
+  // (operator: per-org toggles, not new global flags, pre-live). Provisioned
+  // OFF: a missing row is off and `createOrganization()` writes nothing for it.
+  // Same applicability as Giving (a congregation or a new worshiping
+  // community; the tile `orgTypeScope` and TREASURER_DESIGNATION_ORG_TYPES are
+  // set-equal, pinned in tiles.test.ts). The toggle is enforced in TypeScript
+  // only (`src/lib/reimbursement/access.ts`); the database does not read it
+  // (accepted residual 9). Turning it off hides the pages and deletes nothing.
+  {
+    key: "org_portal.reimbursement",
+    name: "Reimbursements",
+    description:
+      "Lets members ask for reimbursement or a vendor payment, lets the chairs and leaders of a group approve it, and lets the treasurer record the payment. It doesn't send money. Turning this off hides every reimbursement page and deletes nothing.",
+    category: "giving" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: ["congregation", "new_worshiping_community"] as const,
+    operatorEnabled: false as const,
+  },
   // Parish management (docs/work-log/2026-10-25-parish-management.md, Phase 3
   // "Permissions & Flags"; DECISION-242 to 245). TOGGLE-ONLY (`flag: null`):
   // the operator's standing rule is a per-org toggle, not a new global flag,

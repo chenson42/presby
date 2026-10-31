@@ -68,6 +68,8 @@ const ACTIVE: Record<string, string[]> = {
   "src/app/(public)/site/[slug]/assets/[key]/route.ts": ["resolvePublic"],
   "src/lib/brand/read-org-brand.ts": ["resolve:public_site"], // the mark, inlined as data:
   "src/lib/giving/statements.ts": ["store:private"], // the statement PDF
+  // a reimbursement receipt: the stored image or PDF, then the read-back (treasury Inc 1, Batch 2b; DECISION-270)
+  "src/lib/reimbursement/receipts.ts": ["store:private", "resolve:private"],
   // site ingest (DECISION-279): the four routes call no store method; this is the one place that does.
   // Source order: storeSiteImage (images), findHeldSiteImages (the plan/commit lookup), then
   // publishSiteBundle (the bundle JSON: R2, private, only a server-side reader uses it)
@@ -77,13 +79,11 @@ const ACTIVE: Record<string, string[]> = {
   "src/lib/tickets.ts": ["resolveMeta:private", "resolveMeta:private", "resolveMeta:private"],
 };
 
-/** Rows for files that land with a later pipeline. Careers adds none (DECISION-263: no blob_assets). */
-const FORWARD: Record<string, { calls: string[]; since: string }> = {
-  "src/lib/reimbursement/receipts.ts": {
-    calls: ["store:private", "resolve:private"],
-    since: "treasury-inc1 (migration 0073, DECISION-270): reimbursement receipts are private",
-  },
-};
+/**
+ * Rows for files that land with a later pipeline. Careers adds none (DECISION-263: no blob_assets).
+ * Treasury's `src/lib/reimbursement/receipts.ts` landed and is ACTIVE above (Batch 2b).
+ */
+const FORWARD: Record<string, { calls: string[]; since: string }> = {};
 
 // ---------------------------------------------------------------------------
 

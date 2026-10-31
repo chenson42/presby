@@ -32,3 +32,6 @@ PDFKit's own AFM data) into the serverless function for the statement routes;
 `serverExternalPackages: ["pdfkit"]` keeps PDFKit out of the bundle so its
 `__dirname`-relative reads resolve. Docs: docs/work-log/2026-10-15-online-giving.md,
 "Batch 5a".
+
+Also used by: the reimbursement print route (src/lib/reimbursement/print.ts, Treasury
+Inc 1 Batch 7), which has its own outputFileTracingIncludes key in next.config.ts.

@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (11 operator questions with defaults; FC1–FC10 → F382–F391) | READY WITH NOTES | 2026-10-31 |
 | 2 — Architectural review | architect | Complete (CA1–CA13; amends C1, C3, C5, C6, C10, R9; AF-1–AF-8 = F406–F413; DECISION-300–304 proposed) | Approved with suggestions | 2026-10-31 |
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
-| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batches 2 to 5 pending | — | 2026-10-31 |
+| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batches 3 to 5 pending | — | 2026-10-31 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1605,6 +1605,55 @@ indexes: help_contact_status_created_ix (status, created_at desc), help_contact_
 Audit events: none in Batch 1 (the triage audit keys are Batch 2/4).
 
 Strings added or changed: none user-facing. The guard and comment texts are operator and developer facing (`drizzle/0083_presby_help_contact.sql` sections 3 and the comments block).
+
+## Batch 2 — full-stack-developer: the server half (2026-10-31)
+
+### Files Created
+
+- `src/lib/text-hygiene.ts` — the lifted `charCount`, `normalizeMultiline`, `cleanText` (CA12); `src/lib/careers/text.ts` is now `export * from "@/lib/text-hygiene"`, its five importers and `careers/text.test.ts` are unedited.
+- `src/lib/help-contact/contract.ts` (pure: topics, limits, field names, the outcome union), `validate.ts` (pure), `configured.ts` (pure, with Cloudflare's eight dummy keys, each `// leak-ok:`), `copy.ts` (section E, the email, only; A to D arrive with the island and inbox), `submit.ts` and `notify.ts` (`server-only`).
+- `src/app/(documentation)/help/contact/actions.ts` — the one export, `submitHelpContactAction(formData)`.
+- Tests: `text-hygiene.test.ts`, `rate-limit-split.test.ts`, `help-contact/{validate,configured,submit,notify,boundaries}.test.ts`.
+
+### Files Modified
+
+- `src/lib/rate-limit.ts` — `consumeRateLimit` (no audit, honours `RATE_LIMIT_DISABLED`), `recordRateLimitBlock` (the audit insert moved verbatim, no `ip` column), `checkRateLimit` is their composition. `rate-limit.test.ts` passes **unedited** (15 tests): the guard for every other caller.
+- `scripts/lib/import-graph.mjs` (`stopAt`, default none), `scripts/lib/help-boundary.mjs` (`EXEMPT` deleted; `SERVER_ACTION_STOPS` with one path; the stop is not an entry; new violations S1 and S2, and a P4 when the segment exists but the stop file does not), and their two test files.
+- `src/app/(documentation)/shell-boundaries.test.ts` — `ownedSources()` excludes exactly `CONTACT_ACTIONS`, plus a dedicated block pinning it (first statement, import allow-list, no auth/cookies/searchParams/getPlatformDb, exactly one export, imported from nowhere outside its segment).
+- `src/lib/audit.ts` (`HELP_CONTACT_STATUS_CHANGED`, `HELP_CONTACT_DETAILS_CLEARED`) and `audit.test.ts`; `src/lib/contact-methods/email-audience.ts` (`help_contact_notification: "account"`) and its test's frozen classification.
+
+### Endpoints and gates
+
+| Action | `auth()` | Gate |
+|---|---|---|
+| `submitHelpContactAction(formData)` | none, by design (anonymous; a signed-in sender is anonymous) | platform host, then `isHelpContactConfigured`, honeypot, validation, per-IP, Turnstile, global hour and day, the definer. No flag, no permission. |
+
+### Gates
+
+- `npm run typecheck`: exit 0. `eslint src scripts`: exit 0. `npm run check`: all nine tripwires pass (`check:secrets` re-run after `git add`, since it scans tracked files only; the dummy keys needed no extra annotation beyond the `// leak-ok:` I put on them).
+- `npm run test` (no DB env, the CI shape): **738 files passed, 116 skipped; 11,322 tests passed, 3,227 skipped** (Batch 1 closed at 731 and 11,205: +117 tests).
+- `help-contact.db.test.ts` (serial): 25 passed, unchanged.
+- **Sign-in regression (rate-limit.ts is on the `src/auth.ts` path):** own dev server on :3670 with the recipe in `docs/testing.md`; `E2E_BASE_URL=http://localhost:3670 npx playwright test e2e/admin-login.spec.ts e2e/totp-full-login.spec.ts e2e/forgot-password.spec.ts --project=chromium`: **7 passed**, including the MFA-enrolled full login (`totp-full-login.spec.ts`). The suite's server runs with `RATE_LIMIT_DISABLED=true` (the standing arrangement), so this proves the module still loads and the sign-in, MFA and forgot-password paths still run through it; the limiter's own behaviour is held by the unedited `rate-limit.test.ts`. Server stopped by PID.
+
+### Departures from the design, with reasons
+
+1. **The `shell-boundaries.test.ts` exclusion and pin ship in Batch 2, not Batch 3.** Phase 3 listed them under Batch 3, but `actions.ts` exists from this batch and calls `headers()`, so the unit suite would be red between batches without the exclusion. The `dynamic = "error"` page count (4 to 5) and the expected-routes entry stay in Batch 3, when `page.tsx` exists.
+2. **`notify` is wrapped in its own try/catch in `submit.ts` as well as swallowing internally.** Phase 3 only required it to never fail the submission; the belt costs five lines and is pinned by a test.
+3. **A non-`FormData` argument returns `not_sent`** (after the host and configured checks). Phase 3 did not name it; every export of a `"use server"` file is callable with any argument.
+4. **`validate.ts` guards a 50,000-unit raw ceiling** before normalizing, so a megabyte is refused as `too_long` rather than processed. Rejects, never truncates; no other behaviour changes.
+5. **The email regex is `/^[^@\s]+@[^@\s]+\.[^@\s]+$/`**: the CHECK's regex plus the CHECK's no-whitespace rule in one expression (Batch 1 note 1). `\s` is wider than Postgres' `[[:space:]]`, which can only make it stricter.
+6. **Co-author trailer.** Commits carry `Co-Authored-By: Claude Sonnet 5.5`, the attribution the session's harness specifies, not the Opus line the brief and Batch 1 used. Not enforced by any hook.
+
+### Notes for QA and the next batch
+
+1. **Not exercised against a real database in this batch:** `submit.ts`'s definer call is tested with `db.execute` mocked. The definer is proven by Batch 1's 25 DB tests; the first real end-to-end write is Batch 3's contact lane.
+2. **`after()` and `headers()` inside `dynamic = "error"` are unproven until Batch 3** (CA13, the production lane).
+3. **`copy.ts` is partial on purpose** (section E only). Batches 3 and 4 add A to D.
+4. **`getRequestIp` is typed `ReadonlyHeaders | Headers`;** `submit.ts` takes `{ get(name) }` for testability and casts at the one call.
+
+Audit events: the two keys are defined; nothing writes them until `inbox.ts` (Batch 4).
+
+Strings added: the notification email (Copy E), verbatim.
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

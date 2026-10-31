@@ -292,6 +292,11 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   CAREERS_POSTING_PUBLISHED: "careers.posting.published",
   CAREERS_POSTING_CLOSED: "careers.posting.closed",
   CAREERS_POSTING_REOPENED: "careers.posting.reopened",
+  // Community Increment 3a (DECISION-234/235): the four community-engagement writes.
+  TENANT_PERSON_ENGAGEMENT_CHANGED: "tenant.person.engagement_changed",
+  TENANT_PERSON_ARCHIVED: "tenant.person.archived",
+  TENANT_PERSON_RESTORED: "tenant.person.restored",
+  TENANT_PERSON_VISIT_DETAILS_UPDATED: "tenant.person.visit_details_updated",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

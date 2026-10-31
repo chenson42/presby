@@ -42,6 +42,18 @@ test.describe("the help index and pages, signed out", () => {
     await expect(header.getByRole("link", { name: "Open PresbyPortal", exact: true })).toBeVisible();
   });
 
+  test("every help page ends with a link to the contact form, and it opens the form (not a 404)", async ({ page }) => {
+    for (const path of ["/help", "/help/getting-help"]) {
+      await page.goto(path);
+      const link = page.locator("footer").getByRole("link", { name: "Write to the PresbyPortal team" });
+      await expect(link, path).toHaveAttribute("href", "/help/contact");
+      expect((await link.boundingBox())!.height, `${path}: footer link height`).toBeGreaterThanOrEqual(43.5);
+    }
+    const res = await page.goto("/help/contact");
+    expect(res?.status()).toBe(200);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Contact the PresbyPortal team");
+  });
+
   for (const entry of publishedPages()) {
     test(`/help/${entry.slug} responds 200 with exactly one h1`, async ({ page }) => {
       const res = await page.goto(`/help/${entry.slug}`);
@@ -167,7 +179,7 @@ test.describe("at 360px", () => {
       expect(await overflow(page), `${path} overflows horizontally`).toBeLessThanOrEqual(0);
       const tooSmall = await page.evaluate(() => {
         const out: string[] = [];
-        for (const el of document.querySelectorAll("header a, nav a")) {
+        for (const el of document.querySelectorAll("header a, nav a, footer a")) {
           // The skip link is visually hidden until focused; it is not a tap target at rest.
           if ((el as HTMLElement).getAttribute("href") === "#help-main") continue;
           const r = (el as HTMLElement).getBoundingClientRect();

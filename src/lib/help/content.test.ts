@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { loadHelpPage, loadHelpPageFrom } from "./content";
-import { HELP_CONTACT_LINE, HELP_PRIVACY_CONTACT_FALLBACK } from "./contact";
+import { HELP_CONTACT_ADMIN_LINE, HELP_CONTACT_LINE, HELP_PRIVACY_CONTACT_FALLBACK } from "./contact";
+import { HELP_PAGES } from "./registry";
 import type { HelpEntry } from "./types";
 
 const entry = (slug: string, status: "published" | "pending"): HelpEntry => ({
@@ -61,10 +62,19 @@ describe("loadHelpPageFrom", () => {
 
 describe("loadHelpPage (the real registry)", () => {
   it("loads a published page from src/content/help and resolves {{contact}}", () => {
-    const loaded = loadHelpPage("getting-help");
-    expect(loaded?.entry.slug).toBe("getting-help");
+    const loaded = loadHelpPage("signing-in");
+    expect(loaded?.entry.slug).toBe("signing-in");
     expect(loaded?.markdown).toContain(HELP_CONTACT_LINE);
     expect(loaded?.markdown).not.toContain("{{contact}}");
+  });
+
+  it("resolves {{contactAdmin}} too, and no token survives in any published page", () => {
+    const loaded = loadHelpPage("first-day-as-administrator");
+    expect(loaded?.markdown).toContain(HELP_CONTACT_ADMIN_LINE);
+    for (const slug of HELP_PAGES.filter((p) => p.status === "published").map((p) => p.slug)) {
+      const page = loadHelpPage(slug);
+      expect(page?.markdown, slug).not.toMatch(/\{\{(contact|contactAdmin)\}\}/);
+    }
   });
 
   it("is null for an unknown slug and a traversal string", () => {

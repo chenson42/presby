@@ -45,7 +45,7 @@ export function linkContext(pages: readonly HelpEntry[], privacyContact: string 
 const SLUG = "[a-z0-9]+(?:-[a-z0-9]+)*";
 const HELP_PAGE_RE = new RegExp(`^/help/(${SLUG})(?:#(${SLUG}))?$`);
 const PLANNED_RE = new RegExp(`^/help/planned/(${SLUG})$`);
-const FIXED_INTERNAL = new Set(["/help", "/help/planned", "/launch", "/signin"]);
+const FIXED_INTERNAL = new Set(["/help", "/help/planned", "/help/contact", "/launch", "/signin"]);
 
 /**
  * `includePending` is for check:help's pass over pending pages only (a pending page may link

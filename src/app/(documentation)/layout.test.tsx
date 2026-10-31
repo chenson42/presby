@@ -43,4 +43,21 @@ describe("documentation layout", () => {
     const { container } = render(<DocumentationLayout>x</DocumentationLayout>);
     expect(container.querySelector("header")?.className).toContain("print:hidden");
   });
+
+  it("ends every help page with a way out: a 44px link to the contact form, named for its destination", () => {
+    const { container } = render(<DocumentationLayout>x</DocumentationLayout>);
+    const footer = container.querySelector("footer") as HTMLElement;
+    expect(footer).toBeTruthy();
+    expect(footer.textContent).toBe("Can't find what you need?Write to the PresbyPortal team");
+    const link = screen.getByRole("link", { name: "Write to the PresbyPortal team" });
+    expect(link.getAttribute("href")).toBe("/help/contact");
+    expect(link.className).toContain("min-h-11");
+    // After <main>, so the skip link and the page body come first.
+    expect(container.querySelector("main")?.nextElementSibling).toBe(footer);
+  });
+
+  it("hides the footer in print, like the header", () => {
+    const { container } = render(<DocumentationLayout>x</DocumentationLayout>);
+    expect(container.querySelector("footer")?.className).toContain("print:hidden");
+  });
 });

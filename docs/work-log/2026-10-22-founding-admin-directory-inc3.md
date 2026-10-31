@@ -18,7 +18,7 @@
 | 2 — Architectural review | architect | Complete; R48–R66; Option 1 via narrowed active_membership + all-live kind + events.view role; one standing classifier; F240 derived-row guard; F240–F244, F266–F268; DECISION-232–236, 247–249; returns F245–F249, F269–F273, DECISION-237/250 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete for 3a; migration 0066, D1 to D8 departures (all accepted; D4 operator-approved); batches 0, A1, A2, B, C, D. Updated 2026-10-25 for the architect's arch-A1 to arch-A4 (F245 closed in 0066; S16 declined) | Design complete (updated) | 2026-10-25 |
 | 3 — Technical design, amendment (rebased on main 0.50.1; see "Phase 3 amendment" at the end of this log) | tech-lead | Complete. Five-kind derived list and the officer sync's attributes specified (orchestrator's required edit); 19 assumptions re-checked against the merged tree; departures D9 to D21 ruled (a 2b fixture that contradicted the kind CHECK found and fixed; 0082 shrinks D4 but 3a's baseline role is still needed; portal tiles are permission-blind; parish consumers of `deriveConnection`; group renamed "All Current Records"); F246 and F247 filed; apply order proven for both journal order and merge order; six help pages and one screenshot; one new e2e spec. One non-blocking operator question | Design complete (amended) | 2026-10-31 |
-| 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Batch 0 done 2026-10-25; A0 done 2026-10-31. **A1 done 2026-10-31** (database-admin): 0066 sections 1 to 8 and 10, hand-written, applied twice to the pipeline branch (digest identical) and rehearsed from empty in journal order; P1 to P12 measured on the dev copy and production (P5 = 0 real organizations on both: the release note drops the widening sentence); T-M 29, T-G 21, T-E 9, test-rls-66 staged, each mechanism proven failing-first. Existing tests that 0066 contradicts fixed minimally in six files (D11 plus a D11-class gap the amendment missed; flagged for the tech-lead). Full DB suite: no 0066 regression beyond the designed ones; 12 environmental failures (treasury's DB without its code; three pre-existing leaked fixtures). A1 alone breaks 2b's auto-connect (test-rls 65.7) until A2's T-list literal lands, proven. Next: A2 database-admin | In progress | 2026-10-31 |
+| 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Batch 0 done 2026-10-25; A0 done 2026-10-31. **A1 done 2026-10-31** (database-admin): 0066 sections 1 to 8 and 10, hand-written, applied twice to the pipeline branch (digest identical) and rehearsed from empty in journal order; P1 to P12 measured on the dev copy and production (P5 = 0 real organizations on both: the release note drops the widening sentence); T-M 29, T-G 21, T-E 9, test-rls-66 staged, each mechanism proven failing-first. Existing tests that 0066 contradicts fixed minimally in six files (D11 plus a D11-class gap the amendment missed; flagged for the tech-lead). Full DB suite: no 0066 regression beyond the designed ones; 12 environmental failures (treasury's DB without its code; three pre-existing leaked fixtures). A1 alone breaks 2b's auto-connect (test-rls 65.7) until A2's T-list literal lands, proven. **A2 done 2026-10-31** (database-admin): section 9 (the core's T list gains all_memberships, deacons_moderator stays in T; check 10 drops the visitor acknowledgement; connect step 10 requires member standing), hand-written, applied twice (second run changes nothing), from-empty journal order rehearsed; **the whole patched test-rls.sql is exit 0 from empty** (65.7 green); on the dev copy only seven data-drift lines stop it (219/222, fresh-db coverage, treasury's template and 2FA keys, the demo statistics.publish role); every section-9 mechanism proven failing-first in test-rls-66 (l) and Vitest; handler mapping in T-G; T-M connect column; 2b-era tests edited minimally (four files, listed). Full DB suite: 13 failures, all environmental (9 treasury, 4 leaked fixtures). Next: B api-developer | In progress | 2026-10-31 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -2420,3 +2420,102 @@ After the apply on the pipeline branch: **P11 = 0 / 0**; P12 adds `all_membershi
 - **Local apply:** `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0066_presby_membership_standing.sql`. A from-empty database also needs the seed include (via the staged `seed-dev.sql` patch).
 - **Not run here:** treasury's and photos' DB suites against 0066 (their code is not on this branch; run at integration, per §A12's dependency line).
 - **Integration (orchestrator):** apply the three patches in `scripts/membership-standing/`; re-run `scripts/test-rls.sql` against the merged `development` after A2 is in.
+
+## Phase 4 — Batch A2 (database-admin, 2026-10-31)
+
+**Scope:** 0066 section 9 (amendment A4.2, D10b; Phase 3 section 4.10), its section-10 ACLs and comments, `MARKERS.closedList` (D11's second half), the 2b connect and issue rows, the handler-mapping test (EC-13, D13 (a)), T-M's connect column and section-9 scans, `test-rls-66.sql` block (l). **Migration mode: hand-written** (`drizzle/0066_presby_membership_standing.sql`), applied with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0066_presby_membership_standing.sql` to the pipeline branch only (`ep-delicate-sun-…`). Nothing was applied to `development` or production. The journal patch is unchanged from A1 (idx 66).
+
+### Section 9, as built
+
+Each body was taken from the live post-2b function. Before writing, `pg_proc.prosrc` of all three was checked against the text of `drizzle/0065` (`:792-869`, `:954-1082`, `:2508-2672`): byte-equal for all three. Section 9 is that text with one change each. Signatures, return shapes, volatility, `SECURITY DEFINER` and `search_path = public, pg_temp` are unchanged; the ACLs (core and check owner-only, connect `EXECUTE` to `presby_app`) are restated in section 10, with new comments. **`pg_get_functiondef` diff, live before against live after the apply:**
+
+```
+presby__person_sign_in_standing
+65c65
+<                 and coalesce(g.derived_from in ('active_membership', 'session', 'diaconate'), false))
+>                 and coalesce(g.derived_from in ('active_membership', 'all_memberships', 'session', 'diaconate'), false))
+presby_sign_in__check
+111,113d110
+<   if v_st.standing = 'visitor' then
+<     v_reasons := v_reasons || 'visitor'::text;
+<   end if;
+presby_connect_signed_in_account
+130c130
+<     if v_st.refusal is not null or v_st.standing is null or v_st.standing = 'visitor' then
+>     if v_st.refusal is not null or v_st.standing is null or not presby_standing_is_member(v_st.standing) then
+```
+
+**In plain English** (self-verification), checked against the design:
+- (a) A grant reaches the set T unless it comes through a derived group of kind Active Membership, All Current Records, Session or Board of Deacons. A grant through the Moderator of the Board of Deacons seat group, or through any future kind, still counts. That matches D10b: All Current Records is added, and the Moderator seat stays in T on purpose.
+- (b) The issue/resend check asks for an acknowledgement only when the address is marked do-not-contact. It no longer asks because the person is a visitor. That matches §4.10 item 2.
+- (c) Auto-connect declines when the core refuses, when there is no live standing, or when the standing is not member standing (listed or staff anchor). Visitor, inactive, moved away and unclassified are all declined, and a null standing never reaches the new function. That matches A4.2 and R55.
+
+### Apply and idempotency (pipeline branch, merge order)
+
+A seven-row md5 digest (groups, group_memberships, app_roles, app_role_permissions, role_grants, memberships, and the three bodies' `prosrc`) was taken before, between and after two whole-file applies. **Both applies exited 0.** The first changed only the `prosrc` row; the second changed nothing, and every statement reported `INSERT 0 0` / `UPDATE 0`. The six tables were identical across all three digests.
+
+### From empty, journal order (EC-36), and the A2 gate
+
+The `db.yml` recipe was run in a scratch database inside the pipeline branch, from copies (no tracked file was touched): `drizzle-kit migrate` with idx 66 in a scratch journal (0066 before 0067 to 0082), then `check-schema-parity` (86 tables, 0 failing), `db:seed`, the patched `seed-dev.sql`, `install-test-helpers.sql`, then two more whole-file applies of 0066 (digest identical). Then **the whole patched `scripts/test-rls.sql` as `presby_app` (guard row `presby_app|f`): exit 0, 1644 passes, no FAIL.** That run includes 65.6 (changed, below), 65.7 ("an authority-free member … connects", A1's stop: now green), 66e (it ran there, not skipped) and 66l. Scratch database dropped afterwards.
+
+**The same patched suite on the pipeline branch (the development copy, merge order)** stops only on data drift. In a scratch copy I set aside each assertion that stopped it, one at a time, and recorded the cause. After seven, the suite exits 0:
+- `test-rls.sql:219` and `:222`: the presbytery sees 3 people and 3 memberships, not 2. This is the documented untracked membership on long-lived dev data; the file comments on it.
+- `test-rls.sql:7402-7406` (Ruling 7 coverage, 82 organisations against 17 canonical names): the assertion calls itself a fresh-database claim; test-created organisations have no canonical row.
+- `test-rls.sql:7930-7932` (eight template roles, not seven: `reimbursement_clerk`) and `46j`/`46m` in `giving/test-rls-46.sql` (9 two-factor keys, not 6; the treasurer template carries reimbursement keys): **treasury's 0073/0074 on this database without treasury's code.** Expected per the brief.
+- `test-rls.sql:7943-7947` (two org-owned `statistics.publish` roles): the `demo_everything` demo role at Alder Creek, the known extra role.
+
+**None is caused by 0066.**
+
+### Failing-first
+
+On the pipeline branch, each mechanism was broken by applying the old (or a wrong) body as owner, the suites were run, and 0066 was re-applied (green after each).
+
+*`test-rls-66.sql` (as `presby_app`):* 0065's core restored → `:685` "66l (D10b): the core's T exclusion list is the four kinds" (with the catalog line stripped in a scratch copy: `:706` "66l (R49): a regular attender holding the calendar_viewer grant connects with NO factor"). 0065's check restored → `:690` "66l (check 10): a visitor is invited with no acknowledgement". 0065's connect restored → `:699` "66l (connect step 10, R55): an inactive person without a roll is declined".
+
+*Vitest* (five files, 198 tests: sign-in-standing, T-M, T-G, sign-in-invitations, org-invite):
+- 0065 core → 17 fail: T-M connect column M1 to M12, M15, M16 (`authority_bearing` true through `calendar_viewer`; M1 to M7 and M12 also `needs_second_factor`), T-M "section 9 (D10b)", sign-in-standing "a grant on All Current Records … is outside T" and its live-catalog marker test.
+- Core with `deacons_moderator` wrongly added to the list → 3 fail: the D11 case "a derived kind outside the T exclusion list counts in T (the Moderator seat; F247)", T-M "section 9 (D10b)", the live-catalog marker test.
+- 0065 check → 6 fail: the visitor rows of the sign-in-standing matrix (both), sign-in-invitations "acknowledgements", org-invite "a visitor sends without an acknowledgement", T-M's `'visitor'`-comparison scan (and its offender sample, which then also saw the real body; changed to `toContain` so the sample stands on its own).
+- 0065 connect → 6 fail: T-M connect column M9 and M10, sign-in-standing "inactive without a roll" and "moved away without a roll", and the visitor scan (twice, as above).
+- The membership sync with its two group checks in the wrong order (A1's mechanism, re-proven for the mapping test) → T-G "with no groups at all … raises the SHIPPED active_membership message first" and "each handler's LIKE pattern matches …".
+
+### Files
+
+- **Modify** `drizzle/0066_presby_membership_standing.sql`: section 9 inserted before section 10; the header's section list and findings line; section 10 restates the three ACLs and replaces the three comments.
+- **Modify (staged, Rule 16 asset)** `scripts/membership-standing/test-rls-66.sql`: new block (l), section 9 as `presby_app` against the Hollinbrook rows that `seed-dev.sql` includes. Block (e) now runs only when its premise can hold (departure 2).
+- **Modify** `src/lib/membership-standing.db.test.ts` (T-M, 29 → 49): a premise check, the connect column for M1 to M16, scan 1's section-9 part (the four-kind T list without `deacons_moderator`; no `standing = 'visitor'` in any body, with an offender sample). `src/lib/db/domain/derived-group-guard.db.test.ts` (T-G, 21 → 24): the handler-mapping describe (EC-13, D13 (a)). `src/lib/testing/membership-standing-fixture.ts`: `addEmail`, `user`, `enableConnect`, and user teardown.
+- **Modify (2b-era tests 0066 section 9 contradicts; each edit commented in place):** `src/lib/db/domain/sign-in-standing.db.test.ts`, `src/lib/db/domain/sign-in-invitations.db.test.ts`, `src/lib/onboarding/org-invite.db.test.ts`, `scripts/sign-in-invitations/test-rls-65.sql` (departure 1).
+- No table, no column, no Drizzle mirror change (functions are not mirrored), no barrel export. `designation-parity.golden.json` is byte-identical to this branch's base (`git diff --exit-code`: 0).
+
+### Departures (each minimal, commented in place, listed for the tech-lead's design check under the orchestrator's provisional ruling on A1's departure 3)
+
+1. **2b-era tests that section 9 contradicts, edited minimally:**
+   - `sign-in-standing.db.test.ts`: `MARKERS.closedList` is now the four-kind literal (D11). Its migration-text scans read 0065 then 0066, last definition wins, as in the database, so the core's body is 0066's; a shared `HOLDERS` map serves the text scan and the catalog scan. The two visitor rows now issue `ok` with `[]`. **Four rows added:** inactive and moved away without a roll (declined), inactive with a roll (listed, connects), regular without a roll. **One case added:** a grant on All Current Records is outside T (EC-12). The D11 row is unchanged from A1.
+   - `sign-in-invitations.db.test.ts`: the visitor case leaves the refusal list. "Acknowledgements": a visitor issues `ok` with `[]`; a do-not-contact visitor needs `["do_not_contact"]` and then sends with it.
+   - `org-invite.db.test.ts` (a DB test of 2b's TypeScript): the visitor sends unacknowledged and is audited `acknowledged: []` (EC-21). The TypeScript is untouched; removing `visitor` from `SIGN_IN_ACK_REASONS` is B's.
+   - `test-rls-65.sql` 65.6: a visitor is invited with no acknowledgement and `ack_reasons = '{}'`; the second send is `already_pending`. **This is 2b's shipped include file, edited in place (not a Rule 16 file by name).** The orchestrator may prefer it staged as a patch at integration.
+2. **`test-rls-66.sql` block (e) (A1's) could not pass on any long-lived branch.** Its premise, that the Southern Fields presbytery has no derived group, is false wherever 0082 ran with organisations present: 0082 gave it an Active Membership group, and 0066 then added the sibling. `presby_app` cannot create a substitute organisation (DECISION-135). The block now reads the premise under the organisation's context and runs when it holds (every from-empty database, so CI). Otherwise it prints `skip  66e: …` and points at T-G test 1, which proves the pair on any database. This would have failed the orchestrator's Rule 16 re-run of `test-rls.sql` against the merged `development`, once that run gets past `:219`.
+3. **The handler-mapping test lives in T-G, not T-W** (the 2026-10-25 design named T-W, Batch B's file). A2 owns it (§A13) and T-W does not exist yet. It proves three things: the live catalog holds exactly the four handlers plus the sync; each handler's `LIKE` pattern, taken from its own `prosrc`, matches the message the 0066 sync raises for a missing Active Membership group and does not match the All Current Records message; and, end to end through the acceptance core, a founding-administrator acceptance at a half-paired organisation fails with `23503` naming `all_memberships` and writes nothing. The two participant functions and the decision are pinned at text level. Their behavioural `provisioning_incomplete` cases are the existing suites (`participant-roll`, `session-approval`), re-run green.
+
+### Gates
+
+- Typecheck exit 0; eslint on every changed file clean; `npm run check` all nine pass.
+- The patched `test-rls.sql`, from empty: **exit 0** (above). On the development copy: exit 0 once the seven drift assertions above are set aside; no other failure.
+- `test-rls-66.sql` standalone as `presby_app` on the pipeline branch: exit 0 (66e skipped there, as designed; 66l passes).
+- Vitest, serial, pipeline branch: sign-in-standing 41/41, T-M 49/49, T-G 24/24, sign-in-invitations and org-invite green (inside the five-file run of 198 tests).
+- **Full DB-backed Vitest suite, serial, pipeline branch:** `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism`, 2325 s: **849 files, 14504 tests: 14490 passed, 13 failed in 6 files, 1 skipped. None is 0066's.** (a) **9 are treasury's 0073/0074 on this database without treasury's code** (A1 saw the same): `designation-parity.db.test.ts` and `designation-parity-in-place.db.test.ts` (3 each, the treasurer golden lacks the reimbursement keys), `giving/team.db.test.ts` (2), `two-factor-default.db.test.ts` (1, 9 flagged keys, not 6). (b) **4 are the leaked fixture organisations A1 named** (two `directory-test-*`, one `e2e-reimby-*`; no leaked row carries this batch's labels `ms66`, `dg66`, `dg66h`, `st65` or a `Standing…` surname): `fixture-deletable.test.ts` (3; A1 saw 2, and the third, "no stamped people row has an EXPIRED window", is the same leak passing its 21:24 UTC deadline) and `parishes.db.test.ts` "the whole file re-applies with no row change" (1). A1's `home-data` H4 failure is gone (fixed in A1). The 2b-era suites (`sign-in-standing`, `sign-in-invitations`, `sign-in-accept`, `connect` (both), `accept-in-place`, `org-invite`, `issue`, `accept`, `invitations`, `email-proof`) all pass; so do `participant-roll`, `session-approval`, `parishes` (bar the leaked-fixture case), `org-baseline-backfill`, T-M, T-G and T-E.
+- The three Rule 16 patches still `git apply --check` clean.
+
+### For the next batch
+
+- **B (api-developer):** section 9 is live on the pipeline branch.
+  - The definer no longer returns a `visitor` acknowledgement reason; `ack_reasons` is `[]` or `["do_not_contact"]`. Remove `visitor` from `SIGN_IN_ACK_REASONS` (`sign-in-types.ts:66`); `ackReasons()` in `org-invite.ts:197` would already drop an unknown value.
+  - `connectOutlook`: auto-connect now declines visitor, inactive, moved away and unclassified, which is `isMemberStanding`'s complement, so the outlook is `not_listed` for exactly those (D13 (d)).
+  - `presby_sign_in_card_standing` is unchanged and still returns `standing`, so the card can derive `connected_not_listed` (D13 (e)) from it.
+  - `presby_connect_signed_in_account`'s signature and outcome set are unchanged (`connected | already_connected | needs_second_factor | declined`).
+  - When `groupSeedPlan` lists `all_memberships` and `baselineRoleSeedPlan` adds `calendar_viewer`, T-M's `beforeAll` re-execution of the calendar block becomes a no-op, so leave it in place. A new organisation then connects authority-free people without a factor because of section 9's list; T-M's connect column proves it on a `createOrganization()` organisation.
+  - T-W (`community-engagement.db.test.ts`) need not repeat the handler mapping; it is in T-G.
+- **Integration (orchestrator):** apply the three patches as A1 said (unchanged). Consider staging the `test-rls-65.sql` edit as a patch if you treat 2b's include as shared. Treasury merged to local `main` as 0.51.0 while this batch ran. After this branch merges main, the treasury-caused lines above (7932, 46j, 46m and the 8 DB-suite failures) should clear, and treasury's DB suites must be re-run against 0066 (F246 is unchanged).
+- **Local apply:** `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0066_presby_membership_standing.sql`; a from-empty database also needs the patched `seed-dev.sql`.
+- **Next agent:** Batch B, api-developer.
+

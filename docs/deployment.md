@@ -992,6 +992,139 @@ hides their photo in the directory is withheld from every public roster.
 
 ---
 
+## Person photos (0078)
+
+Added by the person-photos pipeline, Increment 1 (DECISION-285 to 289; F331,
+F333 to F335). Migration `0078`. Design and rulings:
+`docs/work-log/2026-10-26-person-photos-inc1.md`. Staff add up to ten photos to
+an adult and choose one for the directory and one for the public website. Two
+new org-scoped tables (`person_photos`, `person_photo_designations`) and five
+SQL functions decide, on every surface, whether a photo shows. `0078` also
+switches the two public roster functions and `presby_public_site_asset()` (all
+three created by `0072`) from `people.photo_key` to the new tables, and
+**retires** `people.photo_key`: a validated CHECK holds it, and
+`photo_updated_at`, null. The columns are dropped by `0079`, in a LATER
+release. The per-congregation toggle `org_portal.person_photos` is off
+everywhere after the deploy (no toggle row is written; a missing row is off).
+
+Release order on production: treasury's `0073` and `0074` (release 0.51.0),
+then `0078` (photos, release 0.52.0). Read from `drizzle/0078_presby_person_photos.sql`:
+`0078` references neither `0073` nor `0074`; its only prerequisite is `0072`
+(the `blob_assets_id_org_audience_key` constraint). `0073` and `0074` each need
+`0072` too, so the three are independent of one another, but apply them in the
+order `0073`, `0074`, `0078`, one release each, and run each release's own
+runbook. Do not apply `0078` ahead of treasury's release even though nothing
+forces it.
+
+### Pre-deploy runbook: 0078 (person photos), then the code
+
+Apply `0078` BEFORE promoting the 0.52.0 code. Old code against the new schema
+is harmless: it never writes a photo, its directory still selects
+`people.photo_key` (present, null), the roster functions return no photo, and
+the toggle is off, so nothing visibly changes. The reverse (new code before
+the schema) fails, because the code reads tables that do not exist.
+
+0. **Preconditions (read-only, on production).**
+   - **`0072` is applied.** `select 1 from pg_constraint where conname = 'blob_assets_id_org_audience_key'`
+     returns one row. `0078`'s first statement refuses (`object_not_in_prerequisite_state`)
+     and rolls back whole if it does not. If it returns no row, stop and run the
+     `0072` runbook first.
+   - **No person has a photo key.** `select count(*) filter (where photo_key is not null) as photo_key, count(*) filter (where photo_updated_at is not null) as photo_updated_at from people;`
+     returns `0` and `0`. (The 2026-10-26 read in every environment was 0.) If
+     either is non-zero, **stop**: the retirement CHECK
+     (`people_photo_key_retired`, validated in the same file) would fail and
+     roll the whole file back. Do not null the values to get past it. The
+     values are real photos someone attached, and nothing in this release reads
+     them any more. Work out first where they came from (`select id, photo_key, photo_updated_at from people where photo_key is not null or photo_updated_at is not null`),
+     then bring it back to the pipeline's tech-lead for a migrate-the-values
+     ruling (a copy into `person_photos` and designations) before any apply.
+   - **Treasury is already live** (`0073`, `0074`, release 0.51.0), or the
+     operator has explicitly deferred it. `0078` does not need it, but the
+     order is `0073`, `0074`, `0078`. Also confirm `0078` is not already
+     applied: `select to_regclass('public.person_photos')` is null.
+1. **Rehearse on a production-derived Neon branch, as `0072` was.** Create a
+   throwaway Neon branch from `production` (never `development`), point a shell
+   at its direct endpoint, apply `0078` there with `-1`, run V1 to V6 below
+   against it, then delete the branch. Expected on the branch: exit 0 and every
+   verification as below. Re-run the rehearsal if production changes (a new
+   migration, or any people row written with a photo key) before the apply.
+   Record the date and result here.
+2. **Snapshot** the Neon `production` branch (`pre-0078-<date>`).
+3. **Apply with `-1`, as the owner, on the direct (non-pooler) endpoint:**
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0078_presby_person_photos.sql`.
+   `-1` is mandatory: the file has no transaction of its own, and `-1` is what
+   makes it atomic. It is idempotent, so a failed run can be repeated whole.
+   The two designed failures are the `0072` guard and the retirement CHECK
+   (step 0); each rolls back whole and leaves nothing behind.
+4. **Verify** (all six; run before promoting the code):
+   - **V1.** Tables, forced RLS and grants. `select c.relname, c.relrowsecurity, c.relforcerowsecurity from pg_class c where c.relname in ('person_photos','person_photo_designations')`:
+     two rows, both `t`, `t`. `select has_table_privilege('presby_app','person_photos','DELETE'), has_table_privilege('presby_app','person_photo_designations','DELETE'), has_table_privilege('presby_platform','person_photos','SELECT')`:
+     `f, f, f`.
+   - **V2.** The retirement CHECK is in and validated.
+     `select conname, convalidated from pg_constraint where conname = 'people_photo_key_retired'`:
+     one row, `t`.
+   - **V3.** The five functions and the two triggers.
+     `select proname, prosecdef, proconfig, proacl from pg_proc where proname in ('presby_person_photos_enabled','presby_photo_subject_is_minor','presby_person_public_photo','presby_person_public_photo_status','presby_person_directory_photo')`:
+     five rows; `presby_person_public_photo` and `presby_person_public_photo_status`
+     are `prosecdef`; all five carry `search_path=public, pg_temp`;
+     `presby_person_public_photo`'s ACL names the owner alone (no `presby_app`).
+     `select tgname from pg_trigger where tgname in ('person_photos_guard_write','person_photo_designations_guard_write')`:
+     two rows.
+   - **V4.** The three `0072` functions now use the new tables (F335's silent
+     failure shows here). `select proname, position('person_photos' in prosrc) > 0 as uses_new, position('photo_key' in prosrc) > 0 as mentions_key from pg_proc where proname in ('presby_public_site_asset','presby_public_staff_roster','presby_public_committee_roster')`:
+     `presby_public_site_asset` has `uses_new = t`; the two roster functions
+     return `ph.image_key::text as photo_key` through
+     `presby_person_public_photo` (read `pg_get_functiondef` and confirm there
+     is no `p.photo_key` or `pp.hide_photo` join). All three still `prosecdef`
+     with an ACL naming only the owner and `presby_app`.
+   - **V5.** Nothing was backfilled and nothing shows. `select (select count(*) from person_photos) as photos, (select count(*) from person_photo_designations) as designations, (select count(*) from organization_feature_toggles where feature_key = 'org_portal.person_photos') as toggles`:
+     `0, 0, 0`.
+   - **V6.** The public site is unchanged. `curl -sI https://<platform-host>/site/<slug>/assets/<an imageKeys value>`
+     still returns 200 with `cache-control: public, max-age=31536000, immutable`,
+     and a random uuid still returns the neutral 404 (body `{"error":"Not found"}`,
+     `cache-control: no-store`). The public staff and committee pages still
+     render, with no photos.
+5. **Promote the code** (merge; Vercel builds). The PR preview build being green
+   is a merge condition, not an enable condition (see below).
+6. **Rollback.** Revert the code and redeploy. The schema is additive and
+   compatible with old code, so no schema rollback is needed (fix forward). If
+   the migration itself fails it rolls back whole (`-1`).
+
+**Never re-apply `0072` after `0078` (F335).** `0072`'s `create or replace` of
+the two roster functions and `presby_public_site_asset()` would silently put
+back their `people.photo_key` bodies, and every person photo would vanish from
+the public site (it fails closed, but it is wrong). If `0072` ever must be
+re-run, re-apply `0078` straight after it, in the same sitting.
+`scripts/person-photos/test-0078-migration.sh` proves the sequence `0072`,
+`0078`, `0072`, `0078` ends with `0078`'s bodies. It runs on a scratch
+database only and refuses `development` and production.
+
+**`0079` is a later release, never the same one.** `0079` drops
+`people.photo_key`, `photo_updated_at` and `people_photo_key_lower_idx`. It
+ships only after the 0.52.0 code has been live and no running deployment
+(including a rollback target) still selects `people.photo_key`. Do not apply it
+in this runbook, and do not fold it into the same release.
+
+### Enable conditions (before `org_portal.person_photos` is on for ANY congregation)
+
+Deploying is not enabling: the toggle is off everywhere until an operator turns
+it on for a congregation. Both of these must be satisfied first, in this order:
+
+1. **One real photo add on a Vercel-built deployment.** The image pipeline uses
+   `sharp`, and its linux binary was traced and verified only locally, on
+   darwin. Add one photo to a throwaway adult on a test congregation of the
+   deployed build. Success means the "Photo added." toast, a thumbnail on the
+   tile, and no function error in the Vercel logs. Until then the upload path
+   is unproven where it will run.
+2. **The operator's real-iPhone check, at 360px.** A 48 MP HEIC taken with the
+   iPhone camera, and a 12 MP JPEG chosen from the photo library, each added
+   through "Add a photo". Both must succeed and display correctly. Do not tell
+   any congregation that iPhone camera photos work until this passes.
+
+Record the date and outcome of each here when done.
+
+---
+
 ## Site ingest: the staged transport (DECISION-279, F324)
 
 A content repo's CI publishes through presby-site-kit's `ingest.yml`. Vercel refuses

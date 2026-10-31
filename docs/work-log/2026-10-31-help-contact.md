@@ -20,7 +20,9 @@
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
 | 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batch 4 (admin inbox) complete: 749 files, 11,442 tests; CA10 test 5 passed. Batch 5 (help content and chrome) complete: 750 files, 11,456 tests; `verifiedIn` untouched (Phase 6 walk). Batch 3b (CA7 fix, DECISION-313) complete: 751 files, 11,466 tests; contact lane 12 passed on dev, 4 passed and 1 skipped on the production build. Phase 4 complete | — | 2026-10-31 |
 | 5 — Verification | qa | Complete (run 1). Full DB set: 14,683 passed, 1 failed (this pipeline) plus 13 pre-existing. Chromium: 614 passed, 4 pre-existing. Contact lane dev 12/12; prod 5/5 including (d) and (e). Catalog proof clean. 2 findings | FAIL | 2026-10-31 |
-| 4 — Fix pass (QA run 1) | full-stack-developer | In progress | — | 2026-10-31 |
+| 4 — Fix pass (QA run 1) | full-stack-developer | Complete (`8a10a28`, test-only) | — | 2026-10-31 |
+| 5 — Verification (run 2, scoped) | qa | Complete (run 2, scoped). submit.test 38/38 in 4 envs (pre-fix fails 1/38 with `RATE_LIMIT_DISABLED=true`). M13/M14 plus 4 variants killed. Unit CI shape 11,468 passed / 3,232 skipped. Typecheck, lint, check (9 tripwires on this branch) green. Diff test-only. 13 DB + 4 e2e pre-existing, left for the merge-main re-run | PASS | 2026-10-31 |
+| 6 — Shipped vs intent | analyst | In progress | — | 2026-10-31 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2223,6 +2225,157 @@ Evidence (session scratch):
 
 I removed the scratch copies of the repo and their `.env.local` copies. All servers I started were stopped by PID, and ports 3670 and 3671 are free.
 ---
+
+---
+
+# Phase 5: Verification (qa), run 2 (scoped)
+
+**Date:** 2026-10-31
+**Verified by:** qa (run 2). I edited no project file. The worktree `presby-help-contact` stayed clean at `8a10a28` throughout (`git status --short` shows 0 lines).
+
+**Scope run.** This run covers only what the run 1 handoff named:
+- `submit.test.ts` under four environments.
+- The two touched test files plus `src/lib/admin-portal`.
+- M13 and M14, with two extra variants of each, in a scratch copy.
+- A failing-first check on the pre-fix `submit.test.ts`.
+- The diff scope of `2af2e1f..8a10a28`.
+- Typecheck, lint, `npm run check`, and the unit suite in CI shape.
+
+**Not re-run, and why:**
+- The full DB-backed set, both e2e lanes, the contact lanes, `test-rls-83.sql`, the live-catalog probe, the 360px walk and mutations M1–M21. The fix is test-only, so nothing they cover changed. Those results stand from run 1.
+- The 13 DB and 4 e2e pre-existing failures. They come from the Neon branch carrying treasury 0074 while the code is 76 commits behind `origin/main`. They are left for the orchestrator's merge-main re-run before integration.
+
+**Flag state:** not reset, because no e2e ran in this pass.
+
+**Environment:** the disk has 561 GiB free. I checked that `.env.local` has `RATE_LIMIT_DISABLED=true` by grep count only and printed no values. The shell running the unit suite had no `*DATABASE_URL` or `RATE_LIMIT_DISABLED` variables.
+
+## Type Check
+
+- `npm run typecheck`: PASS (exit 0).
+- `npm run lint`: PASS (exit 0, `--max-warnings=0`).
+- `npm run check`: PASS (exit 0). It ran all **nine** tripwires on this branch. `check:help` reports 29 entries, 21 published, 24 files and 7 images.
+  - The tenth tripwire, `check:treasury-boundaries`, is not in this branch's `package.json`. It arrives with the merge of `main`.
+  - The fix-pass note says "ten tripwires", which is wrong for this branch. It doesn't affect the verdict.
+
+## Unit Tests
+
+**Diff scope (`git diff 2af2e1f..8a10a28 --stat`):** four files, all of them test files or the work-log:
+- `docs/work-log/2026-10-31-help-contact.md`
+- `src/app/(admin)/admin/_dashboard/visible.test.ts` (+5)
+- `src/app/(admin)/admin/visible-nav.test.ts` (+6)
+- `src/lib/help-contact/submit.test.ts` (+8)
+
+No production file changed, and nothing was added with `skip`, `only` or `fail`.
+
+**`src/lib/help-contact/submit.test.ts`, run in four environments:**
+
+| Environment | Result |
+|---|---|
+| Bare (`RATE_LIMIT_DISABLED` unset) | 38/38 |
+| `RATE_LIMIT_DISABLED=true` | 38/38 |
+| Hostile env: `RATE_LIMIT_DISABLED=true`, both Upstash vars, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_PLATFORM_HOSTS`, `DEV_ALLOWED_ORIGINS=church-one.invalid`, `TRUST_PROXY_HEADERS=true`, `VERCEL_ENV=production` | 38/38 |
+| `npx dotenv -e .env.local -- npx vitest run …` | 38/38 |
+
+**Are all the inputs pinned?** I traced every environment variable the code under test reads:
+- `configured.ts` reads the Turnstile pair, `UPSTASH_*` and `RATE_LIMIT_DISABLED`.
+- `domains/host.ts` reads `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_PLATFORM_HOSTS`, `DEV_ALLOWED_ORIGINS`, `VERCEL_ENV` and `NODE_ENV`.
+- `request-ip.ts` reads `TRUST_PROXY_HEADERS`.
+
+`beforeEach` now pins every one of these except `NODE_ENV`, which Vitest sets to `test`. `afterEach` calls `vi.unstubAllEnvs()`, so the stubs don't leak between tests. The hostile-env row above shows the test no longer depends on the runner's environment.
+
+**Touched files plus `src/lib/admin-portal` (with `submit.test.ts`):** 17 files passed and 2 skipped; 173 tests passed and 11 skipped. The two skipped files are `dashboard/readers.db.test.ts` and `dashboard/recent-changes.db.test.ts`. Both are DB-gated and unchanged.
+
+**Unit suite, CI shape (no DB env):** 751 files passed and 117 skipped; 11,468 tests passed and 3,232 skipped, in 36.3s. That is run 1's 11,466 plus the two new tests. The skips are the DB-gated files, the same set as run 1.
+
+## End-to-End Tests
+
+Not re-run. The fix is test-only and touches no spec, server path or component. Run 1's results stand, including the 4 pre-existing chromium failures, which go to the orchestrator's merge-main re-run.
+
+## Regression Tests Added
+
+- `src/app/(admin)/admin/visible-nav.test.ts:23`, "Contact messages follows admin.tickets, not admin.feedback (regression for the unpinned key, QA run 1 M13)".
+- `src/app/(admin)/admin/_dashboard/visible.test.ts:34`, "the Contact messages card follows admin.tickets, not admin.feedback (regression for the unpinned key, QA run 1 M14)".
+- `src/lib/help-contact/submit.test.ts:81-88`: the environment pins in `beforeEach`.
+
+**Failing-first.** I confirmed both fixes independently in a fresh scratch copy (`git archive 8a10a28`), not the worktree:
+- **Pre-fix `submit.test.ts`** (from `2af2e1f`) with `RATE_LIMIT_DISABLED=true`: 1 failed / 37 passed. It fails with `expected { kind: 'unavailable' } to deeply equal { kind: 'sent' }`, which is run 1's failure exactly. Without the variable it passes 38/38. The fixed file passes in every environment above, so this went red, then green.
+- **The two new tests:** the mutations below fail them, and both pass on unmutated code.
+
+**Mutations.** I re-applied run 1's mutations and added variants that try other keys in the same class, to check that the tests pin the property and not only the one swap:
+
+| ID | Mutation | Result |
+|---|---|---|
+| M13 | nav `/admin/messages` key → `ADMIN_FEEDBACK` | **KILLED** (1 failed / 15): the new M13 test |
+| M13b | nav key → `ADMIN_DASHBOARD` (shown to door-only holders) | **KILLED** (4 failed) |
+| M13c | nav key → `ADMIN_USERS` | **KILLED** (2 failed) |
+| M14 | card `contact_messages` key → `ADMIN_FEEDBACK` | **KILLED** (1 failed / 34): the new M14 test |
+| M14b | card key → `ADMIN_DASHBOARD` | **KILLED** (3 failed) |
+| M14c | card key → `ADMIN_USERS` | **KILLED** (2 failed) |
+
+After each mutation I restored `nav.ts` and `registry.ts` from the worktree and byte-compared them (`cmp`: same). The new tests check both directions: a feedback-only holder sees no Contact messages item or card, and a tickets-only holder does. So any key other than `ADMIN_TICKETS` fails at least one assertion.
+
+## Coverage on Critical Modules
+
+Not re-measured. `src/lib/permissions.ts`, `two-factor.ts` and `flags.ts` are untouched.
+
+## Feature-Gate Audit
+
+Run 1's table stands; no route, action or gate file changed in `8a10a28`. Two rows change status:
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| Nav item "Contact messages" (`src/lib/admin-portal/nav.ts:89-90`) | n/a | `requiredFeature` | `FEATURES.ADMIN_TICKETS`, **now test-pinned** (M13, M13b and M13c killed) |
+| Dashboard card `contact_messages` (`src/app/(admin)/admin/_dashboard/registry.ts:58`) | n/a | yes, via `visible.ts` | `FEATURES.ADMIN_TICKETS`, **now test-pinned** (M14, M14b and M14c killed) |
+
+All other rows are unchanged from run 1: the page, detail, both actions, the notification pool and the anonymous action.
+
+## Schema/RLS Audit
+
+Not re-run; no schema, migration or `src/lib/db/` change in `8a10a28`. Run 1's live-catalog proof stands.
+
+## Copy Truthfulness
+
+Not applicable; the fix adds no user-facing string. Run 1's PASS stands.
+
+## Verdict
+
+**PASS.** Both run 1 findings are closed:
+1. **Finding 1 is fixed.** `submit.test.ts` now gives the same result bare, with `RATE_LIMIT_DISABLED=true`, with `.env.local` loaded, and in a hostile environment. The pre-fix file fails exactly as reported.
+2. **Finding 2 is fixed.** M13 and M14 are killed, and so are the `ADMIN_DASHBOARD` and `ADMIN_USERS` variants of each.
+
+Typecheck, lint, `npm run check` and the CI-shape unit suite are green. Run 1's other results stand as verified there:
+- CA1–CA13, with CA7 as amended.
+- The feature gates.
+- Copy.
+- Both contact lanes, including (d) and (e).
+- The MFA sign-in regression.
+- The catalog proof.
+
+**Caveat for the orchestrator (not a FAIL of this pipeline).** 13 DB and 4 e2e failures are pre-existing. They come from the Neon branch carrying treasury 0074 while the code is 76 commits behind `origin/main`. At integration:
+- Merge `main`.
+- Re-run the DB-backed set and those four specs: `community-participants.spec.ts:305`, `invitation-existing-account.spec.ts:299`, and `timezone-safe-dates.spec.ts:36` and `:71`.
+- Confirm `npm run check` then runs ten tripwires, including `check:treasury-boundaries`.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (run 2, scoped). submit.test 38/38 in 4 envs (pre-fix fails 1/38 with `RATE_LIMIT_DISABLED=true`). M13/M14 plus 4 variants killed. Unit CI shape 11,468 passed / 3,232 skipped. Typecheck, lint, check (9 tripwires on this branch) green. Diff test-only. 13 DB + 4 e2e pre-existing, left for the merge-main re-run | PASS | 2026-10-31 |
+
+## Handoff note
+
+**Next agent: analyst (Phase 6, Shipped vs Intent).** Two things carry forward from run 1:
+- Whether Vercel forwards a custom-host action the same way it does locally is still unmeasured (Batch 3b note 2). That belongs to the Phase 6 or deployment walk.
+- The reader walk of the 13 changed help pages is Phase 6's.
+
+**Before integration, for the orchestrator:** merge `main`, re-run the DB-backed set and the four e2e specs above, then run `scripts/test-rls.sql` on the merged `development` branch per Rule 16.
+
+Evidence (session scratch):
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/r2-unit.log`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/r2-check.log`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/r2-typecheck.log`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/r2-lint.log`
+- Mutation scratch copy: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-mut2`
 
 # Phase 6 — Shipped vs Intent (analyst)
 

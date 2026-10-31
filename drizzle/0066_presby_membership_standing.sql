@@ -4,7 +4,7 @@
 -- the derived-row guards, and the vocabulary and cache guards on memberships
 -- (docs/work-log/2026-10-22-founding-admin-directory-inc3.md, Phase 3 section
 -- 4 as amended 2026-10-31, sections A3 to A6; DECISION-232 to DECISION-236;
--- findings F240, F243, F244, F245; F177 Option 1).
+-- findings F240, F243, F244, F245; F247 recorded, not fixed; F177 Option 1).
 --
 -- Apply (owner, DIRECT endpoint, one transaction):
 --   psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0066_presby_membership_standing.sql
@@ -79,7 +79,9 @@
 --                               (re-executable)
 --   8. vocabulary and guards    engagement CHECK (F243), engagement guard,
 --                               roll-cache guard (F244)
---   9. (Batch A2) the three 0065 bodies re-created
+--   9. the three 0065 bodies    the standing core's T list (+all_memberships),
+--      re-created               check 10 (no visitor acknowledgement), connect
+--                               step 10 (member standing)
 --  10. ACLs and comments
 --
 -- WHAT THIS FILE DOES NOT DO, ON PURPOSE:
@@ -608,6 +610,423 @@ create trigger memberships_guard_roll_cache_update
   execute function presby_memberships_guard_roll_cache();
 
 -- ---------------------------------------------------------------------------
+-- 9. the three 0065 bodies re-created (Batch A2; Phase 3 section 4.10,
+--    amendment A4.2, D10b; R49, R55). Each body is the LIVE post-2b body
+--    (pg_proc.prosrc, verified equal to drizzle/0065's text before this
+--    section was written) with exactly one change; signatures, return
+--    shapes, volatility, SECURITY DEFINER and the pinned search_path are
+--    unchanged, so `create or replace` keeps every caller and the ACLs
+--    (restated in section 10 all the same). The recorded diffs are in the
+--    work-log, Phase 4 Batch A2.
+--
+--    (a) presby__person_sign_in_standing, the standing core: the closed list
+--        of derived kinds that do NOT count in the set T gains
+--        all_memberships. Without it the calendar_viewer grant on All Current
+--        Records counts in T, every person at a provisioned organization
+--        becomes authority-bearing, and every auto-connect answers
+--        needs_second_factor (fail closed, but a silent break of 2b; R49).
+--        deacons_moderator is DELIBERATELY ABSENT (D10b): the Board of
+--        Deacons Moderator seat carries parishes.assign, an authority, so it
+--        stays in T and auto-connect still asks for a second factor. Its side
+--        effect, which exists on main already, is F247 (no sender holds the
+--        seat-only key, so an invitation to the Moderator is refused
+--        exceeds_your_access). The list stays in this one body (S13); nothing
+--        in TypeScript copies it. A sixth derived kind (a migration,
+--        groups_derived_kind_check) counts in T until this list names it.
+--    (b) presby_sign_in__check: check 10 no longer adds the `visitor`
+--        acknowledgement reason (F177 condition 1 is retired: a visitor's
+--        sign-in now carries no directory, Option 1). do_not_contact stays;
+--        the order of every other check is unchanged.
+--    (c) presby_connect_signed_in_account: step 10 "the standing is not
+--        visitor" becomes "the standing is member standing"
+--        (presby_standing_is_member, section 2), else declined (R55,
+--        operator-approved): visitor, inactive, moved away and unclassified
+--        are declined alike. The refusal arm and the `standing is null` arm
+--        stay, so a null standing never reaches presby_standing_is_member
+--        (which answers null for null).
+--
+--    After this section `standing = 'visitor'` appears in no function body
+--    (live-catalog scan, membership-standing.db.test.ts).
+-- ---------------------------------------------------------------------------
+-- (a) the standing core (0065 section 11d; header comment there still
+-- describes every column; the closed list is now four kinds).
+create or replace function presby__person_sign_in_standing(p_person uuid, p_org uuid)
+returns table (refusal text, standing text, authority_bearing boolean,
+               session_seat boolean, diaconate_seat boolean,
+               role_keys text[], permission_keys text[])
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+#variable_conflict use_column
+declare
+  v_merged uuid;
+  v_death date;
+  v_m memberships%rowtype;
+  v_has_m boolean;
+  v_elsewhere boolean;
+begin
+  select p.merged_into_id, p.date_of_death into v_merged, v_death
+    from people p where p.id = p_person;
+
+  select * into v_m from memberships m
+   where m.person_id = p_person and m.organization_id = p_org;
+  v_has_m := found;
+
+  -- R31: any membership at another organization, live or ended.
+  v_elsewhere := exists (select 1 from memberships m2
+                          where m2.person_id = p_person and m2.organization_id <> p_org);
+
+  refusal := case
+               when v_merged is not null then 'person_merged'
+               when v_death is not null then 'person_deceased'
+               when not v_has_m or v_m.ended_on is not null then 'membership_ended'
+               when v_elsewhere then 'person_elsewhere'
+               else null
+             end;
+
+  standing := case when v_has_m and v_m.ended_on is null
+                   then presby_membership_standing(v_m.current_roll, v_m.engagement_status)
+              end;
+
+  session_seat := exists (
+    select 1 from group_memberships gm
+      join groups g on g.id = gm.group_id
+     where gm.person_id = p_person and g.organization_id = p_org
+       and g.membership_source = 'derived' and g.derived_from = 'session'
+       and (gm.ends_on is null or gm.ends_on > current_date));
+  diaconate_seat := exists (
+    select 1 from group_memberships gm
+      join groups g on g.id = gm.group_id
+     where gm.person_id = p_person and g.organization_id = p_org
+       and g.membership_source = 'derived' and g.derived_from = 'diaconate'
+       and (gm.ends_on is null or gm.ends_on > current_date));
+
+  with t as (
+    select rg.role_id
+      from role_grants rg
+     where rg.organization_id = p_org and rg.person_id = p_person
+       and (rg.ends_on is null or rg.ends_on > current_date)
+    union
+    select rg.role_id
+      from role_grants rg
+      join groups g on g.id = rg.group_id
+      join group_memberships gm on gm.group_id = g.id and gm.person_id = p_person
+     where rg.organization_id = p_org
+       and (rg.ends_on is null or rg.ends_on > current_date)
+       and (gm.ends_on is null or gm.ends_on > current_date)
+       and not (g.membership_source = 'derived'
+                and coalesce(g.derived_from in ('active_membership', 'all_memberships', 'session', 'diaconate'), false))
+  )
+  select coalesce((select array_agg(distinct r.key order by r.key)
+                     from t join app_roles r on r.id = t.role_id), array[]::text[]),
+         coalesce((select array_agg(distinct rp.permission_key order by rp.permission_key)
+                     from t join app_role_permissions rp on rp.role_id = t.role_id), array[]::text[])
+    into role_keys, permission_keys;
+
+  authority_bearing := session_seat or diaconate_seat or cardinality(role_keys) > 0;
+  return next;
+end $$;
+
+-- (b) the shared issue/resend check (0065 section 12a). Check 10's
+-- acknowledgements: do_not_contact only.
+create or replace function presby_sign_in__check(
+  p_org uuid, p_sender_person uuid, p_sender_user uuid, p_person_id uuid,
+  p_confirmed_address text, p_acknowledged boolean)
+returns table (outcome text, address text, recipient_first_name text, ack_reasons text[])
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+#variable_conflict use_column
+declare
+  v_st record;
+  v_user_id uuid;
+  v_first text;
+  v_addr record;
+  v_has_addr boolean;
+  v_sender_email text;
+  v_reasons text[] := array[]::text[];
+begin
+  -- 1. not_found: no membership of that person at this organization.
+  if p_person_id is null
+     or not exists (select 1 from memberships m
+                     where m.person_id = p_person_id and m.organization_id = p_org) then
+    outcome := 'not_found';
+    return next;
+    return;
+  end if;
+
+  select * into v_st from presby__person_sign_in_standing(p_person_id, p_org);
+
+  -- 2. the core's own-organization refusals.
+  if v_st.refusal in ('person_merged', 'person_deceased', 'membership_ended') then
+    outcome := v_st.refusal;
+    return next;
+    return;
+  end if;
+
+  -- 3. already linked (this also covers the sender's own record).
+  select p.user_id, coalesce(nullif(btrim(p.preferred_name), ''), p.first_name)
+    into v_user_id, v_first
+    from people p where p.id = p_person_id;
+  if v_user_id is not null then
+    outcome := 'already_signs_in';
+    return next;
+    return;
+  end if;
+
+  -- 4. R31, collapsed for the sender.
+  if v_st.refusal = 'person_elsewhere' then
+    outcome := 'needs_support';
+    return next;
+    return;
+  end if;
+
+  -- 5. a Session or diaconate seat needs officers.manage.
+  if (v_st.session_seat or v_st.diaconate_seat)
+     and not presby_has_permission(p_sender_person, p_org, 'officers.manage') then
+    outcome := 'needs_officers_permission';
+    return next;
+    return;
+  end if;
+
+  -- 6. R21: T must be a subset of the sender's own effective permissions today.
+  if exists (select 1 from unnest(v_st.permission_keys) k(key)
+              where not exists (select 1 from presby_effective_permissions(p_sender_person, p_org, current_date) e
+                                 where e.permission_key = k.key)) then
+    outcome := 'exceeds_your_access';
+    return next;
+    return;
+  end if;
+
+  -- 7. the address.
+  select * into v_addr from presby_person_email(p_person_id, 'credential');
+  v_has_addr := found;
+  if not v_has_addr then
+    outcome := 'no_email_on_file';
+    return next;
+    return;
+  end if;
+  if lower(btrim(p_confirmed_address)) is distinct from lower(btrim(v_addr.address)) then
+    outcome := 'address_changed';
+    return next;
+    return;
+  end if;
+
+  -- 8. the sender's own address on someone else's record.
+  select lower(btrim(u.email)) into v_sender_email from users u where u.id = p_sender_user;
+  if p_person_id is distinct from p_sender_person
+     and v_sender_email = lower(btrim(v_addr.address)) then
+    outcome := 'address_is_yours';
+    return next;
+    return;
+  end if;
+
+  -- 9. R29: another unmerged, living person with a live membership at THIS
+  -- organization holds the address as an active email. Own rows only.
+  if exists (select 1 from contact_methods cm
+               join people p2 on p2.id = cm.person_id
+               join memberships m2 on m2.person_id = p2.id and m2.organization_id = p_org
+                                  and m2.ended_on is null
+              where cm.kind = 'email' and cm.ended_at is null
+                and lower(btrim(cm.value)) = lower(btrim(v_addr.address))
+                and p2.id <> p_person_id
+                and p2.merged_into_id is null and p2.date_of_death is null) then
+    outcome := 'address_shared';
+    return next;
+    return;
+  end if;
+
+  -- 10. acknowledgements the DEFINER enforces (F177 condition 1).
+  if v_addr.do_not_contact then
+    v_reasons := v_reasons || 'do_not_contact'::text;
+  end if;
+  if cardinality(v_reasons) > 0 and not coalesce(p_acknowledged, false) then
+    outcome := 'needs_acknowledgement';
+    ack_reasons := v_reasons;
+    return next;
+    return;
+  end if;
+
+  outcome := 'ok';
+  address := v_addr.address;
+  recipient_first_name := v_first;
+  ack_reasons := v_reasons;
+  return next;
+end $$;
+
+-- (c) auto-connect (0065 section 14). Step 10: member standing, else
+-- declined.
+create or replace function presby_connect_signed_in_account(p_user_id uuid, p_second_factor_verified boolean)
+returns table (outcome text, organization_id uuid, organization_slug text, person_id uuid,
+               contact_method_id uuid, contact_method_created_at timestamptz,
+               session_seat boolean, diaconate_seat boolean,
+               role_keys text[], permission_keys text[])
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+#variable_conflict use_column
+declare
+  v_factor_ok boolean;
+  v_pass int;
+  v_active boolean;
+  v_proven boolean;
+  v_addr text;
+  v_cands uuid[];
+  v_person uuid;
+  v_org uuid;
+  v_first_person uuid;
+  v_first_org uuid;
+  v_n int;
+  v_slug text;
+  v_st record;
+  v_bind record;
+begin
+  session_seat := false;
+  diaconate_seat := false;
+  if p_user_id is null then
+    outcome := 'declined';
+    return next;
+    return;
+  end if;
+  v_factor_ok := coalesce(p_second_factor_verified, false)
+                 and exists (select 1 from user_totp t where t.user_id = p_user_id);
+
+  for v_pass in 1 .. 2 loop
+    if v_pass = 2 then
+      perform 1 from organizations o where o.id = v_first_org for update;
+      perform 1 from users u where u.id = p_user_id for update;
+      perform 1 from people p where p.id = v_first_person for update;
+      perform 1 from contact_methods cm
+       where cm.person_id = v_first_person and cm.kind = 'email' and cm.ended_at is null
+         and lower(btrim(cm.value)) = v_addr
+         for share;
+    end if;
+
+    -- 1, 2. active and proven.
+    select u.is_active, u.email_verified is not null, lower(btrim(u.email))
+      into v_active, v_proven, v_addr
+      from users u where u.id = p_user_id;
+    if not found or not coalesce(v_active, false) or not coalesce(v_proven, false) then
+      outcome := 'declined';
+      return next;
+      return;
+    end if;
+
+    -- 3. already linked.
+    if exists (select 1 from people p where p.user_id = p_user_id and p.merged_into_id is null) then
+      if exists (select 1 from people p
+                   join memberships m on m.person_id = p.id and m.ended_on is null
+                   join organizations o on o.id = m.organization_id and o.platform_status = 'managed'
+                  where p.user_id = p_user_id and p.merged_into_id is null) then
+        outcome := 'already_connected';
+      else
+        outcome := 'declined';
+      end if;
+      return next;
+      return;
+    end if;
+
+    -- 4. an open invitation to the address holds auto-connect back (FB5).
+    if exists (select 1 from account_invitations i
+                where i.email_normalized = v_addr
+                  and i.accepted_at is null and i.revoked_at is null and i.superseded_at is null
+                  and i.blocked_at is null and i.redacted_at is null
+                  and i.expires_at > now()) then
+      outcome := 'declined';
+      return next;
+      return;
+    end if;
+
+    -- 5. exactly one candidate, globally.
+    select array_agg(distinct p.id) into v_cands
+      from contact_methods cm
+      join people p on p.id = cm.person_id and p.merged_into_id is null and p.date_of_death is null
+     where cm.kind = 'email' and cm.ended_at is null
+       and lower(btrim(cm.value)) = v_addr
+       and exists (select 1 from memberships m where m.person_id = p.id and m.ended_on is null);
+    if coalesce(cardinality(v_cands), 0) <> 1 then
+      outcome := 'declined';
+      return next;
+      return;
+    end if;
+    v_person := v_cands[1];
+
+    -- 6. the person is not linked to anyone.
+    if exists (select 1 from people p where p.id = v_person and p.user_id is not null) then
+      outcome := 'declined';
+      return next;
+      return;
+    end if;
+
+    -- 7. exactly one live membership, at a managed organization.
+    select count(*) into v_n from memberships m where m.person_id = v_person and m.ended_on is null;
+    select m.organization_id into v_org from memberships m where m.person_id = v_person and m.ended_on is null limit 1;
+    if v_n <> 1
+       or not exists (select 1 from organizations o where o.id = v_org and o.platform_status = 'managed') then
+      outcome := 'declined';
+      return next;
+      return;
+    end if;
+
+    -- Under the locks, the candidate and its organization must be the ones
+    -- that were locked.
+    if v_pass = 2 and (v_person is distinct from v_first_person or v_org is distinct from v_first_org) then
+      outcome := 'declined';
+      return next;
+      return;
+    end if;
+
+    -- 8. the congregation's toggle (R47): an enabled row, or nothing.
+    if not exists (select 1 from organization_feature_toggles t
+                    where t.organization_id = v_org
+                      and t.feature_key = 'org_portal.sign_in_connect' and t.enabled) then
+      outcome := 'declined';
+      return next;
+      return;
+    end if;
+
+    -- 9, 10. the standing core.
+    select * into v_st from presby__person_sign_in_standing(v_person, v_org);
+    if v_st.refusal is not null or v_st.standing is null or not presby_standing_is_member(v_st.standing) then
+      outcome := 'declined';
+      return next;
+      return;
+    end if;
+
+    -- 11. authority needs a second factor (R42).
+    if v_st.authority_bearing and not v_factor_ok then
+      outcome := 'needs_second_factor';
+      return next;
+      return;
+    end if;
+
+    v_first_person := v_person;
+    v_first_org := v_org;
+  end loop;
+
+  select * into v_bind from presby__bind_person_account(v_person, p_user_id, v_addr);
+  select o.slug into v_slug from organizations o where o.id = v_org;
+
+  outcome := 'connected';
+  organization_id := v_org;
+  organization_slug := v_slug;
+  person_id := v_person;
+  contact_method_id := v_bind.contact_method_id;
+  contact_method_created_at := v_bind.contact_method_created_at;
+  session_seat := v_st.session_seat;
+  diaconate_seat := v_st.diaconate_seat;
+  role_keys := v_st.role_keys;
+  permission_keys := v_st.permission_keys;
+  return next;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 10. ACLs and comments. Every ACL this file's objects carry is restated, so
 --     the end state does not depend on history. Firing a trigger needs no
 --     EXECUTE, so every trigger function is revoked from both application
@@ -625,6 +1044,15 @@ revoke all on function presby_reject_derived_group_edit() from public, presby_ap
 revoke all on function presby_memberships_guard_engagement() from public, presby_app, presby_platform;
 revoke all on function presby_memberships_guard_roll_cache() from public, presby_app, presby_platform;
 
+-- Section 9's three re-created bodies: create or replace keeps their ACLs,
+-- restated here anyway (the 0065 section 15 shape). The core and the check
+-- are internal (no EXECUTE for any application role); connect is EXECUTE to
+-- presby_app only, as 0065 left it.
+revoke all on function presby__person_sign_in_standing(uuid, uuid) from public, presby_app, presby_platform;
+revoke all on function presby_sign_in__check(uuid, uuid, uuid, uuid, text, boolean) from public, presby_app, presby_platform;
+revoke all on function presby_connect_signed_in_account(uuid, boolean) from public, presby_app, presby_platform;
+grant execute on function presby_connect_signed_in_account(uuid, boolean) to presby_app;
+
 comment on function presby_standing_is_member(text) is
   'Member standing, defined ONCE (drizzle/0066 section 2, DECISION-233): listed or staff_anchor. Takes a standing from presby_membership_standing (0065). NULL in, NULL out. Mirrored by isMemberStanding (src/lib/membership-standing.ts); pinned by membership-standing.db.test.ts.';
 comment on function presby_membership_is_member_standing(text, text) is
@@ -641,6 +1069,13 @@ comment on function presby_memberships_guard_engagement() is
   'BEFORE UPDATE OF engagement_status on memberships, EVERY role (the owner too): refuses any change on an ended membership, a transition into or out of staff, and visitor while current_roll is set (drizzle/0066 section 8, R53, F243).';
 comment on function presby_memberships_guard_roll_cache() is
   'BEFORE INSERT / UPDATE OF current_roll, current_roll_since on memberships: a non-owner (no role named) may not write the roll cache. The roll projection (presby_sync_current_roll, presby_reconcile_current_roll) runs as the owner (drizzle/0066 section 8, F244, D5).';
+
+comment on function presby__person_sign_in_standing(uuid, uuid) is
+  'THE STANDING CORE (R40; drizzle/0065 section 11d, re-created by drizzle/0066 section 9): refusal (person_merged > person_deceased > membership_ended > person_elsewhere), standing (presby_membership_standing), the Session/diaconate seats and the set T (role and permission keys outside the closed derived list active_membership, all_memberships, session, diaconate; deacons_moderator deliberately counts, D10b, F247), authority_bearing. Every sign-in caller maps its output through one fixed table; nothing re-codes it. Owner only.';
+comment on function presby_sign_in__check(uuid, uuid, uuid, uuid, text, boolean) is
+  'The shared issue/resend eligibility check (drizzle/0065 section 12a, re-created by drizzle/0066 section 9); first failure wins: not_found, the core''s own-organization refusals, already_signs_in, needs_support, needs_officers_permission, exceeds_your_access, no_email_on_file, address_changed, address_is_yours, address_shared, needs_acknowledgement (do_not_contact only since 0066; the visitor acknowledgement is retired). Owner only.';
+comment on function presby_connect_signed_in_account(uuid, boolean) is
+  'Auto-connect (R41, R42, R47; drizzle/0065 section 14, re-created by drizzle/0066 section 9; DECISION-226): link a proven account to the one eligible person carrying its address; since 0066 the person must have member standing (presby_standing_is_member; R55), so visitor, inactive, moved away and unclassified are declined. connected | already_connected | needs_second_factor | declined. Writes only through the bind helper; reads no platform predicate. Residual, paper: identity and factor are caller-asserted (E-30).';
 
 comment on constraint group_memberships_membership_group_key on group_memberships is
   'One derived row per (membership, group): a membership holds one row in all_memberships and at most one in active_membership. Replaced unique (membership_id) (drizzle/0066 section 4).';

@@ -8757,3 +8757,13 @@ rollback;
 --     production. Section 73a/73g assert the receipt FK that 72b also counts.
 -- ===========================================================================
 \ir treasury/test-rls-73.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/person-photos (integration).
+-- 78. Person photos (drizzle/0078_presby_person_photos.sql). Its own file, as
+--     46, 47, 59-73 above; \ir resolves relative to this script. It needs
+--     the test helpers and scripts/seed-dev.sql's Northern Reach and Alder
+--     Creek fixtures (no seed change), plus the org_portal.feature_categories
+--     flag row scripts/seed.ts seeds, so it is never run against production.
+-- ===========================================================================
+\ir person-photos/test-rls-78.sql

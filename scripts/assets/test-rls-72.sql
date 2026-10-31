@@ -141,7 +141,7 @@ begin;
   select assert_eq(
     (select count(*) from pg_constraint c
       where c.contype = 'f' and c.confrelid = 'blob_assets'::regclass),
-    6, '72b: exactly six FKs point into blob_assets (three public references, three private consumers): a new one is a deliberate edit here');
+    8, '72b: exactly eight FKs point into blob_assets (three public references; five private consumers: tickets, statements, treasury receipts from drizzle/0073, and the person-photo master and thumbnail from drizzle/0078): a new one is a deliberate edit here');
   select assert_eq(
     (select count(*) from pg_constraint c
       where c.contype = 'f' and c.confrelid = 'blob_assets'::regclass

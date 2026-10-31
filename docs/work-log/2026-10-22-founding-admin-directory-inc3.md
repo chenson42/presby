@@ -2593,3 +2593,76 @@ EC-1 (T-M: the TS mirror equals SQL across 9 x 9 values, every standing reached;
 - **D (full-stack-developer), the e2e you will meet:** `community-sign-in-invite.spec.ts` lane 4 (the visitor acknowledgement is gone: no paragraph, no checkbox, Send is live; the `do_not_contact` lane keeps the checkbox), `hydration/community-sign-in-controls.spec.ts` (drop the visitor branch), `no-organization-connect.spec.ts` (b) (add inactive and moved-away rows), the card line for a visitor is now `not_listed`'s sentence, the toggle description changed, and a person created through `createOrganization()` now gets All Current Records and `calendar_viewer` (an organization built by raw SQL gets the group by trigger and no role until the 0066 backfill block runs).
 - **Integration (orchestrator):** nothing new from B for Rule 16; `docs/TODO.md`, decisions and the functionality map are Phase 6 housekeeping. Treasury's F246 and the three leaked fixture organizations are unchanged by B.
 - **Next agent: Batch C, ux-developer.**
+
+## Phase 3 acknowledgement (after Batches A1/A2/B) (tech-lead, 2026-10-31)
+
+Read against the live tree (`community-engagement.ts:255-275`, `engagement-copy.ts`, `participant-copy.ts:47`, `0009` `presby_guard_membership_insert`), not the departure lists alone. Where a departure exposes a defect in my own design, the ruling says so. No production code was changed by this section.
+
+### Rulings, Batch A1 (database-admin)
+
+- **A1-1 (D9's type widening in A1, type only): accepted.** Scan 4's set equality cannot pass otherwise; the plan entry and the `calendar_viewer` role stay B's (they landed in `25fcd9f`).
+- **A1-2 (D11 in A1, `MARKERS.closedList` left for A2): accepted.** A2 updated it.
+- **A1-3 (the 0066-contradicted existing cases): all accepted.**
+  - The `sign-in-standing` "unclassified engagement" row replaced by a refusal test: accepted (D3: `unclassified` is unreachable from rows; the classifier arm is still covered by T-M's SQL cross-product).
+  - The live-catalog holders for the `presby_membership_standing(` marker widened to the core plus `presby_membership_is_member_standing`: accepted (§4.3's designed second caller).
+  - `participant-roll.db.test.ts:289` and `session-approval.db.test.ts:373` now read the Active Membership row: accepted. **My Phase 3 was wrong** to say these re-run unedited: §4.5 step 1 ends the one-derived-row-per-membership assumption their scalar subqueries made. Recorded as a Phase 3 miss; no design change follows.
+  - `org-provisioning.test.ts` and `session-approval.db.test.ts:1205`: accepted (the designed effects of §3.3).
+  - `home-data.test.ts` H4 and the one-clause doc comment in `home-data.ts`: accepted (a visitor holds no `directory.view` after 0066; comment only).
+  - `directory.test.ts:775`: accepted. It asserted DECISION-065, which F177 Option 1 reverses; EC-22 now belongs to A1 for this file.
+- **A1-4 (T-G test 3 deferred to B): accepted;** it landed in B (B-4).
+- **A1-5 (T-M database columns only in A1): accepted;** A2 and B extended T-M (67 cases).
+- **A1-6 (EC-4 proven through an approved `roll_actions` row on the owner path): accepted.** It fires the real `presby_sync_current_roll` definer, which is the property EC-4 names.
+
+### Rulings, Batch A2 (database-admin)
+
+- **A2-1 (2b-era tests section 9 contradicts): all accepted.** `sign-in-standing`, `sign-in-invitations` and `org-invite.db.test.ts` edits follow D13 and §4.10 item 2 exactly (visitor issues `ok` with `[]`; `do_not_contact` still needs its acknowledgement). `scripts/sign-in-invitations/test-rls-65.sql` 65.6 edited in place: **accepted, and it stays in place.** It is 2b's shipped include, not a file on the Rule 16 shared list; the orchestrator is not asked to stage a patch. If the orchestrator would rather stage it, that is an integration choice, not a design ruling.
+- **A2-2 (`test-rls-66.sql` block (e) runs only when its premise holds, else prints `skip 66e` and points at T-G test 1): accepted.** Every from-empty database (CI's `db.yml`) runs it, and T-G test 1 proves the pair on any database. Phase 5 must confirm the from-empty run shows `66e` executed, not skipped (A2 reports it did).
+- **A2-3 (handler-mapping test in T-G, not T-W): accepted.** T-G is A2's file and T-W did not exist; B correctly did not repeat it.
+- **Seven assertions set aside on the development copy** (`:219`, `:222`, `:7402-7406`, `:7930-7932`, `46j`/`46m`, `:7943-7947`): accepted as data drift and treasury-without-treasury-code, none caused by 0066. The treasury ones should clear now that main 0.51.0 is merged; Phase 5 re-runs and reports which remain.
+
+### Rulings, Batch B (api-developer)
+
+- **B-1 (`expectedFrom` on `changeEngagement`): accepted, and it corrects a defect in my design. Batch C must send it.** My §5 had `changed_meanwhile` come from a conditional `update ... where engagement_status = $from` with `$from` read under the same `for update` lock; that update can never match zero rows, so EC-8's "the loser gets `changed_meanwhile`" was unreachable by construction. B's field makes it reachable and is the smallest repair. Reading `community-engagement.ts:264`, the check runs after `ended` and `staff_record` and before `unchanged`, and the audit row's `from` is the locked read, never `expectedFrom`, so EC-9's "`from` is ignored" still holds: the field can only refuse, it cannot supply an authority or an audit fact. The Copy sentence "This changed while you were looking" is only true when the writer knows what the page showed, so **every UI entry point sends it** (see For Batch C). An omitted `expectedFrom` stays legal for non-UI callers; the race is then serialized and audited truthfully, as T-W proves.
+- **B-2 (`engagement-copy.ts` reuses Group B's `forbidden` and `not_found` for restore and visit details): accepted. No restore-specific sentence is needed.** Group D's "You don't have permission to archive people here." would be false for Restore, so reuse of "You don't have permission to change this." is the right call. The Copy rows are now written into the design below (Copy added) so Groups D and F have no unlisted outcome. B listed every outcome of the four unions; none is missing a sentence.
+- **B-3 (archive's `holds_position` pre-check has no start-date test, so it is a superset of `memberships_guard_end`): accepted.** Refusing archive while a seat is recorded but not yet started is the safe side (a seat that starts later would materialize onto an ended membership). The guard stays the unreachable backstop through data; its mapping is pinned in the unit file and the future-dated refusal in the DB test, which is what EC-6 needs. **Copy check, residual recorded:** the sentence says "still holds ... here", which for a not-yet-started seat is slightly generous. It is kept verbatim, because the shipped `PARTICIPANT_COPY.holds_position` (`participant-copy.ts:47`) uses the identical sentence under the identical pre-check (its staff arm already refuses unstarted seats), and a second wording for the same state would be worse than a small imprecision. "End that first" is verified for the staff arm (`community-engagement.db.test.ts:343` ends the position and the archive then goes through) and *unverified* for a future-dated officer term or role grant. Accepted by the tech-lead.
+- **B-4 (`groupSeedPlan` exported; T-G test 3 in `org-provisioning.test.ts` and `org-provisioning.plan.test.ts`): accepted.** The export is test-only in effect, with a faked platform database so no production code is edited to prove the throw.
+- **B-5 (minimal edits in Batch C's files): accepted, with a boundary.** `page.tsx`, `community-rows-list.tsx`, `community-empty-state.tsx`, `members-list.tsx`, `sign-in-card.tsx`, `send-sign-in-dialog.tsx` and `grant-role-form.tsx` were touched only to compile and not regress. C owns the rest of every one of them and must build on B's edits, not revert them. The Group C wording B already landed (Inactive headline, detail, search line, "former people") is ruled as Copy and C does not rewrite it.
+- **B-6 (more 2b-era test edits: `sign-in-standing.db.test.ts`, `org-invite.test.ts`, `org-invite.db.test.ts`, `sign-in-types.test.ts`, `sign-in-copy.test.ts`, `sign-in-card.test.tsx`, `[id]/edit/actions.test.ts`, `[id]/edit/page.test.tsx`): accepted.** Each is inside D13's scope. The "list equals classifier with one documented difference" test now expects no difference, with a non-vacuity check: correct, because M11 existed only while the Visitors list used a different predicate from the classifier, and §4.4 removes it. `sign-in-types.test.ts` reading 0066 for a body 0066 re-creates (last definition wins) matches how the database resolves it.
+- **B-7 (the connected-and-not-listed line rendered after `connectedSupport`, derived from `card.outlook`): accepted** (D13 (e); no new field).
+- **B-8 (EC-20's restore-with-a-live-membership-elsewhere case left unwritten): accepted as *unverified*, as the design already labelled it, but B's reason is not accepted.** The state *can* be fixtured: `presby_guard_membership_insert` (`drizzle/0009:164-180`) returns early when `app.person_claim_authorized` equals the person id, so an owner-path transaction that sets that GUC can insert the second membership. It is not required in 3a: the sign-in half is 2b's T-6, and restore's `update` deliberately does not look across organizations (`memberships` is unique on `(person_id, organization_id)` only, so a second live row is legal). Any later edit to T-W may add the case; it is not a Phase 5 gap.
+- **Gates and counts: accepted.** The five DB-suite failures are the three leaked fixture organizations plus the one `sign-in-standing` test B fixed in `8c898b9`. Phase 5 should re-run once with the leaked fixtures gone to see a clean line.
+
+### Copy added (ruled, so nothing outside this design is shipped)
+
+| Where | String | Added because |
+|---|---|---|
+| Restore `forbidden` | You don't have permission to change this. | B-2: Group D listed only the archive sentence for `forbidden` |
+| Restore `not_found` | That person could not be found. | B-2 |
+| Visit details `forbidden` | You don't have permission to change this. | B-2: Group F listed no `forbidden` |
+| Visit details `not_found` | That person could not be found. | B-2 |
+| Visit details `ended` (Group F, as listed) | This person's connection here has ended, so this can't be changed. | unchanged |
+
+1. *Residuals.* None denies an accepted residual or a Phase 2 ruling; neither string says anything about access, listing or a connection.
+2. *Source of truth.* `forbidden`: the `people.manage` check inside the write's own transaction (it fails only if the permission was revoked after the page loaded, or on a forged call). `not_found`: the organization-scoped membership lock returning no row; the sentence says only that the person was not found, which is all that query establishes (another organization's person, a missing id and a non-UUID are deliberately the same answer).
+3. *Audience.* Seen only by a `people.manage` holder whose page is stale, or a forger. The sentences promise nothing to do.
+4. *Neighbours.* Grepped `src` for "You don't have permission" and "could not be found" in the community directory: the strings already exist at `engagement-copy.ts:44-45`, `:83-84`, `:92-93` and, for archive, `:69-70`; nothing is made stale. `holds_position` is also at `participant-copy.ts:47` and stays (B-3).
+
+**Help impact.** Unchanged from the design: no new page from these rulings. The Phase 4 Batch C and D implementers edit `community.md` (or the page the design names) from the screens.
+
+### For Batch C
+
+1. **Send `expectedFrom` on every engagement change**, taken from the engagement the page rendered: the Inactive and Everyone/Members row buttons send the row's `engagementStatus`; `EngagementCard`'s Save sends the card's loaded engagement; the "Mark as regular attender" nudge sends `visitor`. Never derive it at click time from a refetch. On `changed_meanwhile`, show Group B's sentence and refresh the route so the next attempt starts from the current value. Unit-test that each entry point's action call carries it (a stale-form case per entry point).
+2. **Show `unchanged` (`That is already how this person is marked.`) in the refusal style, not as a success.** With `expectedFrom` sent it is reached only by a caller that omitted it, so it should not appear in normal use.
+3. **Build on B's minimal edits in the seven files above; do not revert them.** The Group C strings B landed stay as written.
+4. **Do not add a restore-specific or visit-details-specific `forbidden` or `not_found` sentence;** use `RESTORE_COPY` and `VISIT_DETAILS_COPY` as B built them.
+5. **Archive's "Added when an invitation is open" line:** read `getSignInMarkers` (2b's door); omit the line if the read did not load, per Group D S. Unchanged from the design, repeated because B left the dialog bodies to C.
+6. **Batch C also still owns** every item under B's "What Batch C still has to write", including `groups-list.tsx`'s "Managed from" text through `derivedGroupManagedFromText` and the help-page edits from the screens.
+
+### For Batch D and Phase 5
+
+- D: B's list of e2e specs it will meet stands (`community-sign-in-invite.spec.ts` lane 4, `hydration/community-sign-in-controls.spec.ts`, `no-organization-connect.spec.ts` (b), the card line and toggle description). Add: a two-administrator `changed_meanwhile` e2e is not required (T-W's two-connection race covers the library; Batch C's unit test covers that the form sends `expectedFrom`).
+- Phase 5: confirm `66e` ran (not skipped) on the from-empty run; confirm the treasury-caused lines cleared after the main merge; record the leaked-fixture failures as environmental.
+
+### Carry-forward
+
+Every Phase 1 gap and Phase 2 ruling keeps its prior disposition. New: the `changed_meanwhile` unreachability (EC-8) is **addressed** by B-1 plus For Batch C 1. EC-20's restore-elsewhere row stays *unverified* (B-8), accepted by the tech-lead.

@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=298 commit=745fd6e -->
+<!-- covers: decision=299 commit=37decc2 -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -24,6 +24,10 @@ marker when you write new entries — that is the one piece of discipline this f
 is checked.*
 
 ---
+
+## 2026-10-31
+
+- [ ] **`decision` · Reimbursements are built and stay off until you turn them on (0.51.0; DECISION-267 to DECISION-271 and DECISION-299).** A member asks to be paid back, a chair or leader approves, the treasurer records payment; nobody approves their own request and the approver never pays, enforced by the database. **Before any toggle:** apply 0073 then 0074 to production, prove `sharp` loads in a Vercel function with one real receipt upload for a test congregation (EC42), and do the `development` walk. **You accepted on 2026-10-26:** the database owner can still empty the six tables, a team-page revoke can leave the other module's manage key unheld, no reminders, no similar-request warning. **Still open:** nobody is told when a church has no treasurer (N2), and Deacons Moderators cannot yet approve (N3). The two help pages wait for their walk.
 
 ## 2026-10-28
 

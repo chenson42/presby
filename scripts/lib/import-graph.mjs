@@ -136,17 +136,23 @@ export function resolveSpecifier(spec, fromPath, index) {
  *   entries: string[],
  *   ban: { path?: (rel: string) => (string | null), bare?: RegExp[] },
  *   serverOnly?: boolean,
+ *   stopAt?: string[],
  * }} options
  *   `ban.path(rel)` returns a label when `rel` (a resolved in-repo path) is banned, else null;
  *   `ban.bare` lists banned package specifiers. `serverOnly` makes a reachable
- *   `import "server-only"` a violation (the proxy's rule; help allows it).
+ *   `import "server-only"` a violation (the proxy's rule; help allows it). `stopAt` lists in-repo
+ *   files that are REACHED and counted but whose source is not scanned and whose imports are not
+ *   followed (default none, so check:proxy-imports is unchanged). A stop file is a deliberate,
+ *   named seam, such as a `"use server"` action whose server half the caller guards another way
+ *   (DECISION-304).
  * @returns {Array<{ rule: string, file: string, specifier?: string, chain: string[], message: string }>}
  *   P1 a banned in-repo path; P2 server-only (opt-in); P3 a banned package; P4 a hole in the graph
  *   (an entry or an in-repo specifier that resolves to no file) which must fail loudly rather than
  *   hide a violation behind it.
  */
 export function checkImportBoundary(files, options) {
-  const { entries, ban = {}, serverOnly = false } = options;
+  const { entries, ban = {}, serverOnly = false, stopAt = [] } = options;
+  const stops = new Set(stopAt);
   const banPath = ban.path ?? (() => null);
   const banBare = ban.bare ?? [];
   const index = new Map(files.map((f) => [f.path, f.content]));
@@ -178,6 +184,7 @@ export function checkImportBoundary(files, options) {
 
   while (queue.length > 0) {
     const current = queue.shift();
+    if (stops.has(current)) continue; // reached and counted, never scanned or followed
     const code = stripComments(index.get(current));
 
     if (serverOnly && SERVER_ONLY_RE.test(code)) {

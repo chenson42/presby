@@ -120,4 +120,31 @@ describe("checkImportBoundary", () => {
     expect(checkImportBoundary(files, { entries: ["src/e.ts"], ban: BAN, serverOnly: true }).map((x) => x.rule)).toEqual(["P2"]);
     expect(checkImportBoundary(files, { entries: ["src/e.ts"], ban: BAN })).toEqual([]);
   });
+
+  it("stopAt: a stop file is reached but neither scanned nor followed (DECISION-304)", () => {
+    const files = [
+      f("src/e.ts", 'import "./stop";'),
+      f("src/stop.ts", 'import "@/lib/db/index"; import "server-only"; import "next-auth";'),
+      f("src/lib/db/index.ts", ""),
+    ];
+    expect(checkImportBoundary(files, { entries: ["src/e.ts"], ban: BAN, serverOnly: true, stopAt: ["src/stop.ts"] })).toEqual([]);
+    // without the stop, the same graph is full of violations: the option is what changes it
+    expect(checkImportBoundary(files, { entries: ["src/e.ts"], ban: BAN, serverOnly: true }).length).toBeGreaterThan(0);
+  });
+
+  it("stopAt defaults to none, so a caller that passes nothing (check:proxy-imports) is unchanged", () => {
+    const files = [f("src/e.ts", 'import "./s";'), f("src/s.ts", 'import "next-auth";')];
+    expect(checkImportBoundary(files, { entries: ["src/e.ts"], ban: BAN }).map((x) => x.rule)).toEqual(["P3"]);
+  });
+
+  it("stopAt does not shield a sibling that imports the same banned module", () => {
+    const files = [
+      f("src/e.ts", 'import "./stop"; import "./other";'),
+      f("src/stop.ts", 'import "next-auth";'),
+      f("src/other.ts", 'import "next-auth";'),
+    ];
+    const v = checkImportBoundary(files, { entries: ["src/e.ts"], ban: BAN, stopAt: ["src/stop.ts"] });
+    expect(v).toHaveLength(1);
+    expect(v[0].file).toBe("src/other.ts");
+  });
 });

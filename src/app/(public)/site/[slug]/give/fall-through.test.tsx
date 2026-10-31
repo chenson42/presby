@@ -14,6 +14,10 @@ import { DEFAULT_RATES } from "@/lib/giving/money";
 
 const readPublicGivingConfig = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/giving/public-config", () => ({ readPublicGivingConfig: (...a: unknown[]) => readPublicGivingConfig(...a) }));
+// The eventsCalendar slot (same render path) reads the database server-side; it never runs here.
+vi.mock("@/lib/public-calendar", () => ({ readPublicCalendar: vi.fn() }));
+// So does the careers slot (same render path); it never runs here.
+vi.mock("@/lib/careers/public", () => ({ readPublicCareers: vi.fn() }));
 vi.mock("./actions", () => ({ createPublicGiveSessionAction: Object.assign(vi.fn(), { bind: vi.fn(() => vi.fn()) }) }));
 
 // `getPublishedSite` stays the test's one stub of "what the site read found" (keyed by the slug);

@@ -20,6 +20,7 @@ The canonical directory tree lives in `CLAUDE.md` → Project Layout (do not mai
 - `(password-reset)` / `(email-verify)` — public token-consuming flows; enumeration-safe responses.
 - `(statistics-submit)` — the public, token-consuming SASR filing flow (DECISION-147): the token is the credential; no session, no `FEATURES.*` gate, no org context set by the caller; platform palette; exact paths in `src/proxy.ts`'s public list; one uniform response for every failure state including flag-off.
 - `(invite)` — the public, token-consuming account-invitation flow (DECISION-183/185): the token is the credential; signed-in and anonymous visitors both; exact paths in `src/proxy.ts`'s public list; platform palette; no layout or loading boundary; never imports `getPlatformDb()`.
+- `(documentation)` — public help (`/help`) and, later, public developer docs (`/docs`): static (`dynamic = "error"`), session-free, platform palette, no `loading.tsx` ever, never imports the database, `@/auth`, `next/headers`, flags or authz (`npm run check:help` walks the graph). Content is markdown under `src/content/`; the proxy bypass is a segment-boundary prefix with no new import.
 - `access-pending` — authenticated users with no roles; don't dump them on `/admin`.
 - `api/admin/*` — every handler checks session + the relevant `FEATURES.*` key.
 - `api/webhooks/<provider>` — webhook handlers verify their own signatures; the proxy bypasses them (DECISION-028).

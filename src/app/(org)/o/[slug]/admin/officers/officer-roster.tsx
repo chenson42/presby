@@ -10,7 +10,9 @@ import {
 import { FormattedDate } from "@/components/shared/formatted-date";
 import type { OfficerRosterEntry } from "@/lib/officers";
 import { Badge } from "@/components/ui/badge";
-import { OFFICE_LABELS, OFFICER_OFFICES } from "./office-labels";
+import type { SignInMarker as Marker } from "@/lib/onboarding/sign-in-types";
+import { SignInMarker } from "../community/sign-in-marker";
+import { OFFICE_LABELS, OFFICER_OFFICES, isSessionOffice } from "./office-labels";
 import { EndTermDialog } from "./end-term-dialog";
 import { PublicListingToggle } from "./public-listing-toggle";
 import { DisplayOrderInput } from "./display-order-input";
@@ -60,6 +62,12 @@ import { DisplayOrderInput } from "./display-order-input";
  * most of the remaining overflow after the two columns above were dropped.
  * They revert to a single line at `sm:` and above, where there's room.
  *
+ * SIGN-IN MARKER (Community Increment 2b, Copy group E): a Session row whose
+ * holder has no connected sign-in shows the marker beside "Self-recorded", in the
+ * Office cell. `markers` is empty unless the viewer holds `people.manage`
+ * (`getSignInMarkers` decides), and only Session offices are looked up, so a
+ * deacon row never carries one. The marker links to the person's card.
+ *
  * A Server Component (read-only data), same as `roles-list.tsx` — it embeds
  * `<EndTermDialog>` (a client component) per row without itself needing
  * `'use client'`.
@@ -67,9 +75,12 @@ import { DisplayOrderInput } from "./display-order-input";
 export function OfficerRoster({
   entries,
   slug,
+  markers = {},
 }: {
   entries: OfficerRosterEntry[];
   slug: string;
+  /** Sign-in markers by person id; empty unless the viewer holds `people.manage`. */
+  markers?: Record<string, Marker>;
 }) {
   if (entries.length === 0) {
     return (
@@ -117,6 +128,16 @@ export function OfficerRoster({
                   Self-recorded
                 </Badge>
               )}
+              {isSessionOffice(entry.office) && markers[entry.personId] && (
+                <div className="font-normal">
+                  <SignInMarker
+                    marker={markers[entry.personId]}
+                    slug={slug}
+                    personId={entry.personId}
+                    personName={entry.displayName}
+                  />
+                </div>
+              )}
             </TableCell>
             <TableCell className="max-w-[6rem] whitespace-normal sm:max-w-none sm:whitespace-nowrap">
               <Link
@@ -141,7 +162,11 @@ export function OfficerRoster({
             </TableCell>
             {hasDistrict && (
               <TableCell className="hidden text-muted-foreground sm:table-cell">
-                {entry.orgUnitName ?? "—"}
+                {entry.orgUnitName
+                  ? entry.orgUnitArchived
+                    ? `${entry.orgUnitName} (archived)`
+                    : entry.orgUnitName
+                  : "—"}
               </TableCell>
             )}
             <TableCell className="hidden sm:table-cell">

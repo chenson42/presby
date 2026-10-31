@@ -42,6 +42,7 @@ export async function GET(
   const blob = await getBlobStore().resolve({
     organizationId: gate.org.organizationId,
     key: found.statement.blobAssetId,
+    audience: "private",
   });
   if (!blob) return notFound();
 

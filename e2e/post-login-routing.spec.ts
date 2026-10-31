@@ -80,7 +80,8 @@ test("2 — a signed-in user with no congregation lands on /no-organization", as
     page.getByRole("heading", { name: /not connected to a congregation/i }),
   ).toBeVisible();
   // The funnel, not a dead end: both doors must be on the page.
-  await expect(page.getByText(/ask your church administrator/i)).toBeVisible();
+  // Community Increment 2b reworded the first door (Copy group A).
+  await expect(page.getByText(/ask the office that keeps your records/i)).toBeVisible();
   await expect(page.getByRole("link", { name: /read about presbyportal/i })).toBeVisible();
 });
 

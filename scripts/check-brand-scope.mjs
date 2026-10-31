@@ -3,9 +3,11 @@
  * Brand-scope guard. DECISION-047 says per-org branding reaches exactly two
  * route groups — `(org)/o/[slug]` and `(public)/site/[slug]` — and nothing
  * else. Every other surface (`(auth)`, `(account)`, `(member)`, `(admin)`,
- * `(email-verify)`, `(password-reset)`, `access-pending`, `/launch`,
- * `/no-organization`, `/developer`) renders in the platform palette. That rule
- * is a *paper* invariant otherwise: nothing about the code stops a future
+ * `(documentation)`, `(email-verify)`, `(password-reset)`, `access-pending`,
+ * `/launch`, `/no-organization`, `/developer`) renders in the platform palette
+ * (`(documentation)` is the public help at /help, DECISION-293; it needs no
+ * logic here because the brandable prefixes below are a closed allow-list).
+ * That rule is a *paper* invariant otherwise: nothing about the code stops a future
  * pipeline from painting the access-denied page in a congregation's colours,
  * which tells a prober the org is a configured tenant.
  *

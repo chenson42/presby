@@ -4,6 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import type { CommunityRow } from "@/lib/community";
 import type { CommunityView } from "@/lib/community-labels";
+import type { SignInMarker as Marker } from "@/lib/onboarding/sign-in-types";
+import { SignInMarker } from "./sign-in-marker";
 
 /**
  * Cards for the three admin-only lists (Visitors, Staff, Former). Each links to
@@ -17,11 +19,14 @@ export function CommunityRowsList({
   slug,
   view,
   rows,
+  markers = {},
   canStaffLink = false,
 }: {
   slug: string;
   view: Extract<CommunityView, "visitors" | "staff" | "former">;
   rows: CommunityRow[];
+  /** Sign-in markers by person id; empty unless the viewer holds `people.manage`. */
+  markers?: Record<string, Marker>;
   /** `org_portal.staff` is on and the viewer holds `staff.manage`. */
   canStaffLink?: boolean;
 }) {
@@ -39,6 +44,12 @@ export function CommunityRowsList({
                 <p className="text-sm text-muted-foreground">
                   <Detail view={view} row={row} slug={slug} canStaffLink={canStaffLink} />
                 </p>
+                <SignInMarker
+                  marker={markers[row.personId]}
+                  slug={slug}
+                  personId={row.personId}
+                  personName={row.displayName}
+                />
               </div>
               <Button asChild variant="outline" className="min-h-11 shrink-0">
                 <Link href={`/o/${slug}/admin/community/${row.personId}/edit`}>

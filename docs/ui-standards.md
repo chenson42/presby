@@ -23,6 +23,7 @@ Conventions for building consistent, accessible UI across presby. Every rule bel
 - [Four-State Component Design](#four-state-component-design)
 - [Empty States](#empty-states)
 - [Accessibility](#accessibility)
+- [Linking to Help](#linking-to-help)
 - [CLAUDE.md Invariants (cross-reference)](#claudemd-invariants-cross-reference)
 - [Pre-merge UX Audit Checklist](#pre-merge-ux-audit-checklist)
 
@@ -66,7 +67,7 @@ return (
 );
 ```
 
-**Never add a second layer of `container`, `py-*`, `px-*`, or `mx-auto` inside a layout that already provides outer padding.** The admin layout (`src/app/(admin)/admin/layout.tsx`) injects `p-8` on `<main>` — pages inside it must not wrap their content in another padding container.
+**Never add a second layer of `container`, `py-*`, `px-*`, or `mx-auto` inside a layout that already provides outer padding.** The admin layout (`src/app/(admin)/admin/layout.tsx`) injects `p-4 sm:p-8` on `<main>` — pages inside it must not wrap their content in another padding container. The padding is 16px on a phone (a 328px content width at 360px) and 32px from `sm`; a flat `p-8` left only 296px on a phone, which is why it is responsive. `<main>` is also `min-w-0` so one wide table cannot push the whole column sideways.
 
 ### Choosing the pattern
 
@@ -404,7 +405,7 @@ return (
 
 Wrap the `<form>` element from the outside (or, for a flow with no `<form>` tag such as `member-wizard`, its root element). Never add a `<legend>` to the gate, and never put opacity on it. A checkbox or radio registered under the gate must have a defined default and must not use `defaultChecked`. `npm run check:hydration-gate` fails any file that calls `useForm` without importing and rendering it; a deliberately client-only form carries `// hydration-gate-ok: <reason>` on or above the call. A new pre-hydration behaviour is tested by holding the page's JavaScript with `page.route` (see `docs/testing.md`), never by racing a throttle.
 
-**One-time code entry (DECISION-192/193).** A short numeric code (the TOTP challenge on `/totp`, enrolment on `/account/2fa`) is taken with `OneTimeCodeInput` (`src/components/shared/one-time-code-input.tsx`): one 44px-or-wider box per digit, one hidden `<input name>` carrying the joined value, `inputMode="numeric"` and `autoComplete="one-time-code"` on box 1, no `maxLength` so an autofill or paste that delivers several characters can be spread across the boxes. Backspace and Delete both erase backward across boxes; arrows, Home and End move; nothing auto-submits (a typo would spend a rate-limited attempt), `onComplete` lets the caller move focus to its own Verify button. `autoFocus` is off by default and, when on, focuses box 1 in an effect after hydration, never through the HTML attribute. **Every consumer renders `<HydrationGate>`** even though it is not a `useForm` form: a Verify pressed before hydration posts an empty code. `npm run check:hydration-gate` enforces it as rule H3. Never use the shadcn `InputOTP` primitive (it needs the `input-otp` package).
+**One-time code entry (DECISION-192/193).** A short numeric code (the TOTP challenge on `/totp`, enrolment on `/account/2fa`) is taken with `OneTimeCodeInput` (`src/components/shared/one-time-code-input.tsx`): one 44px-or-wider box per digit, one hidden `<input name>` carrying the joined value, `inputMode="numeric"` and `autoComplete="one-time-code"` on box 1, no `maxLength` so an autofill or paste that delivers several characters can be spread across the boxes. Backspace and Delete both erase backward across boxes; arrows, Home and End move. A complete code is submitted by the consumer when `onComplete(code, { exact: true })` fires (the 6-digit TOTP code; a paste that drops a digit, such as an over-long one, does not submit); recovery-code fields do not auto-submit. The Verify button stays as the fallback. Never submit from the change handler: the hidden value has not committed yet (DECISION-257). `autoFocus` is off by default and, when on, focuses box 1 in an effect after hydration, never through the HTML attribute. **Every consumer renders `<HydrationGate>`** even though it is not a `useForm` form: a Verify pressed before hydration posts an empty code. `npm run check:hydration-gate` enforces it as rule H3. Never use the shadcn `InputOTP` primitive (it needs the `input-otp` package).
 
 **Submit button state:**
 - Show a loading indicator during `pending`. Use ellipsis ("Saving…") or a spinner — not the bare button text.
@@ -538,13 +539,13 @@ Do **not** use a command-palette-style popover for multi-select — it is harder
 
 ## Loading & Error States
 
-No `loading.tsx` or `error.tsx` files exist in the starter yet. Add them to any route segment that does async data fetching:
+Add `loading.tsx` and `error.tsx` to a route segment that does async data fetching, **with one exception: nothing under `src/app/(admin)/admin` has a `loading.tsx`** (see below).
 
 - **`loading.tsx`** — shown by Next.js while the segment's async data resolves. Use skeleton shapes that match the page layout (matching card or table skeleton) rather than a full-page spinner. A skeleton prevents cumulative layout shift.
-- **`error.tsx`** — shown when an unhandled error propagates from the segment. Must be a `'use client'` component; receives `error` and `reset` props. Show a human-readable message and a "Try again" button that calls `reset()`.
+- **`error.tsx`** — shown when an unhandled error propagates from the segment. Must be a `'use client'` component; receives `error` and `reset` props. Show a human-readable message and a "Try again" button that calls `reset()`. Never render `error.message`.
 
 ```tsx
-// src/app/(admin)/admin/users/loading.tsx
+// src/app/(member)/example/loading.tsx  (illustration: a segment that always renders)
 export default function Loading() {
   return (
     <div className="space-y-4">
@@ -555,17 +556,24 @@ export default function Loading() {
   );
 }
 
-// src/app/(admin)/admin/users/error.tsx
+// src/app/(member)/example/error.tsx
 "use client";
-export default function Error({ reset }: { reset: () => void }) {
+import { LoadError } from "@/components/shared/load-error";
+export default function Error({ reset }: { error: Error; reset: () => void }) {
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">Something went wrong loading this page.</p>
-      <button onClick={reset} className="text-sm underline">Try again</button>
-    </div>
+    <LoadError
+      headingLevel={1}
+      title="We couldn't load this page"
+      body="Something went wrong on our end. Try again in a moment."
+      onRetry={reset}
+    />
   );
 }
 ```
+
+**A `loading.tsx` must not sit above a route that can call `notFound()` or `redirect()`.** It opens a Suspense boundary, so Next flushes a 200 before the page resolves: a `notFound()` renders the 404 page at HTTP 200, and a redirect degrades to a client-side one (measured 2026-08-18; the `(org)` contract says the same). That is why the platform console, whose `[id]` routes all call `notFound()`, has **no `loading.tsx` anywhere under `(admin)/admin`** (DECISION-251; `shell-boundaries.test.ts` fails the build if one appears). Loading feedback there is per-card or per-section `Suspense` with a skeleton fallback (`CountCardSkeleton`), and its failure state is `src/app/(admin)/admin/error.tsx`.
+
+Shared pieces for the states: `LoadError` (a calm "we could not load this" block with one 44px retry, as a link for a Server Component or a button for `error.tsx`), `EmptyState` (the dashed-border empty block; the caller chooses "none yet" versus "no matches"), and, for the platform console, `AdminForbidden`. A failed read is its own state, never "zero" or "nothing waiting".
 
 Unauthenticated route groups that do server-side data fetching — `(email-verify)`, `(password-reset)` — require `error.tsx`; the boundary must not redirect to `/account`, as the user may have no session. Link to `/signin` instead.
 
@@ -673,6 +681,12 @@ A single gray sentence in the middle of the page is not an empty state.
 
 ---
 
+## Linking to Help
+
+The public help site lives at `/help` (Workflow Rule 17). Link to it from a screen only through `helpHref("<slug>")` (or `helpHref("<slug>", "<anchor>")`) from `src/lib/help/urls.ts`, rendered by `HelpLink` (`src/components/help/help-link.tsx`): the slug and anchor are typed against the registry, so a typo, a page that is not published yet, or an anchor the page does not declare is a compile error, and `npm run check:help` fails on a hand-built `"/help…"` string anywhere else. Link text names the page it opens ("Help with signing in", not "click here"). `HelpLink` is a same-tab link with a 44px target (`min-h-11`), the standard text-link focus ring with its 2px offset, and no brand styling. Help is not brandable and is session-free, so do not pass it state; a link to it is always safe to show to a signed-out reader.
+
+---
+
 ## CLAUDE.md Invariants (cross-reference)
 
 Two invariants from `CLAUDE.md` apply directly to UI:
@@ -703,8 +717,8 @@ QA runs this in Phase 5 for any change that touches UI. A single unchecked box b
 - [ ] Semantic HTML: `<h1>` on every page, landmark roles (`<main>`, `<nav>`, `<section>`) where applicable
 - [ ] Action bar order: text-labeled buttons left of icon-only buttons
 - [ ] Back links use `?from=` when the page is reachable from multiple origins, with validation on the receiving end
-- [ ] No extra `container`/padding wrapper inside a layout that already provides padding (`p-8` in admin layout)
-- [ ] `loading.tsx` + `error.tsx` present in any new route segment that does async data fetching
+- [ ] No extra `container`/padding wrapper inside a layout that already provides padding (`p-4 sm:p-8` in admin layout)
+- [ ] `loading.tsx` + `error.tsx` present in any new route segment that does async data fetching — except under `(admin)/admin`, which has no `loading.tsx` (a `loading.tsx` above a `notFound()` route turns its 404 into a 200); use per-section `Suspense` there
 - [ ] Page tested at ≥2 viewport widths (desktop 1440px, mobile 375px)
 - [ ] Every clickable surface is recognisable as clickable without hovering it
 - [ ] Every input has a real `<label>`; no placeholder standing in for one

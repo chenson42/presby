@@ -1055,7 +1055,7 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
       const tr = await fx.insertInvitation({ organizationId: orgId, purpose: "treasurer", email: trAddress, createdByUserId: operator, personId: person });
       const other = await fx.insertInvitation({ organizationId: bystander, purpose: "founding_administrator", email: fx.email("ra-other"), createdByUserId: operator });
 
-      const r = await issue.revokeAllOpenInvitations({ organizationId: orgId, actor: actor() });
+      const r = await issue.revokeAllOpenInvitations({ organizationId: orgId, scope: "designations", actor: actor() });
       expect(r).toEqual({ kind: "ok", revoked: 2 });
       const rows = await invitationsOf(orgId);
       expect(rows.every((x) => x.revoked_at !== null && x.revoked_by_user_id === inviter)).toBe(true);
@@ -1074,7 +1074,7 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
 
     it("an organization with nothing open revokes zero and writes no audit row", async () => {
       const orgId = await org();
-      expect(await issue.revokeAllOpenInvitations({ organizationId: orgId, actor: actor() })).toEqual({ kind: "ok", revoked: 0 });
+      expect(await issue.revokeAllOpenInvitations({ organizationId: orgId, scope: "designations", actor: actor() })).toEqual({ kind: "ok", revoked: 0 });
       expect(await auditRows("invitation.revoked", orgId)).toHaveLength(0);
     });
 
@@ -1082,7 +1082,7 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
       const orgId = await org();
       const inv = await fx.insertInvitation({ organizationId: orgId, purpose: "founding_administrator", email: fx.email("ra-rb"), createdByUserId: operator });
       auditControl.fail = true;
-      expect(await issue.revokeAllOpenInvitations({ organizationId: orgId, actor: actor() })).toEqual({ kind: "db_error" });
+      expect(await issue.revokeAllOpenInvitations({ organizationId: orgId, scope: "designations", actor: actor() })).toEqual({ kind: "db_error" });
       expect((await invitationsOf(orgId))[0]!.revoked_at).toBeNull();
       expect(await fx.preview(inv.token)).toHaveLength(1);
     });

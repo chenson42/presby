@@ -3,7 +3,7 @@
 // module in the cycle to load (see organizations/[id]/actions.test.ts).
 import "@/lib/db/schema";
 import { describe, expect, it } from "vitest";
-import { ACCOUNT_INVITATION_BLOCKED_REASONS } from "@/lib/db/domain/invitations";
+import { ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED as ACCOUNT_INVITATION_BLOCKED_REASONS } from "@/lib/db/domain/invitations";
 import { deriveInvitationStatus, deliveryState, type InvitationStatusInput } from "./status";
 import {
   BLOCKED_REASON_OPERATOR_COPY,

@@ -13,6 +13,7 @@ function entry(overrides: Partial<EventListEntry> = {}): EventListEntry {
     startsAt: "2027-03-01T19:00:00",
     endsAt: null,
     isPublic: true,
+    websiteListed: false,
     allowsCheckin: false,
     cancelledAt: null,
     isRecurringSeries: false,
@@ -87,7 +88,27 @@ describe("EventsList — populated", () => {
         ]}
       />,
     );
-    expect(screen.getByText("Public")).toBeTruthy();
+    expect(screen.getByText("Open to everyone")).toBeTruthy();
     expect(screen.getByText("Members only")).toBeTruthy();
+    // The old wording claimed a website this column never controlled.
+    expect(screen.queryByText("Public")).toBeNull();
+  });
+
+  it("badges a marked, uncancelled event 'For website' - and nothing else", () => {
+    render(
+      <EventsList
+        slug="alder-creek"
+        entries={[
+          entry({ eventId: "e1", title: "Marked", websiteListed: true }),
+          entry({ eventId: "e2", title: "Unmarked", websiteListed: false }),
+          entry({ eventId: "e3", title: "Marked then cancelled", websiteListed: true, cancelledAt: "2027-02-01T00:00:00Z" }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByText("For website")).toHaveLength(1);
+    const markedRow = screen.getByText("Marked").closest("tr")!;
+    expect(markedRow.textContent).toContain("For website");
+    expect(screen.getByText("Unmarked").closest("tr")!.textContent).not.toContain("For website");
+    expect(screen.getByText("Marked then cancelled").closest("tr")!.textContent).not.toContain("For website");
   });
 });

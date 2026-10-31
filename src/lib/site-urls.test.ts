@@ -21,15 +21,44 @@ describe("slug mode: today's /site/<slug>/... shapes on the platform origin", ()
     expect(u.sitemap()).toBe("/site/alder-creek/sitemap.xml");
     expect(u.give()).toBe("/site/alder-creek/give");
     expect(u.giveReturn("cs_test_a1")).toBe("/site/alder-creek/give/return?session_id=cs_test_a1");
+    expect(u.careers()).toBe("/site/alder-creek/careers");
+    expect(u.careersPosting("music-director")).toBe("/site/alder-creek/careers/music-director");
     expect(u.canonical("/about")).toBe(`${PLATFORM}/site/alder-creek/about`);
     expect(u.canonical("/")).toBe(`${PLATFORM}/site/alder-creek`);
     expect(u.portal()).toBe(`${PLATFORM}/o/alder-creek`);
+    expect(u.portalCalendar()).toBe(`${PLATFORM}/o/alder-creek/calendar`);
   });
 
   it("tolerates a trailing slash on the platform origin", () => {
     const u = buildSiteUrls({ mode: "slug", slug: "alder-creek", platformOrigin: `${PLATFORM}/` });
     expect(u.origin).toBe(PLATFORM);
     expect(u.canonical("/about")).toBe(`${PLATFORM}/site/alder-creek/about`);
+  });
+});
+
+describe("careers URLs (careers Increment 1)", () => {
+  it("encode the posting slug in both modes, and carry no query string", () => {
+    for (const u of [slugUrls(), hostUrls()]) {
+      expect(u.careersPosting("a b/../c?x=1#f")).toContain("a%20b%2F..%2Fc%3Fx%3D1%23f");
+      expect(u.careers()).not.toContain("?");
+      expect(u.careersPosting("ok")).not.toContain("?");
+    }
+  });
+
+  it("the list is page('/careers') and a posting hangs beneath it, so a bundle page cannot be mistaken for one", () => {
+    for (const u of [slugUrls(), hostUrls()]) {
+      expect(u.careers()).toBe(u.page("/careers"));
+      expect(u.careersPosting("x")).toBe(u.page("/careers/x"));
+    }
+  });
+
+  it("canonical() composes with them on the church host and on the platform host", () => {
+    expect(hostUrls().origin + hostUrls().careersPosting("music-director")).toBe(
+      "https://www.church-one.invalid/careers/music-director",
+    );
+    expect(slugUrls().origin + slugUrls().careersPosting("music-director")).toBe(
+      `${PLATFORM}/site/alder-creek/careers/music-director`,
+    );
   });
 });
 
@@ -46,6 +75,8 @@ describe("host mode: CLEAN paths on the canonical host (no /site/, no slug)", ()
     expect(u.sitemap()).toBe("/sitemap.xml");
     expect(u.give()).toBe("/give");
     expect(u.giveReturn("cs_test_a1")).toBe("/give/return?session_id=cs_test_a1");
+    expect(u.careers()).toBe("/careers");
+    expect(u.careersPosting("music-director")).toBe("/careers/music-director");
     expect(u.canonical("/about")).toBe("https://www.church-one.invalid/about");
     expect(u.canonical("/")).toBe("https://www.church-one.invalid/");
   });
@@ -53,6 +84,7 @@ describe("host mode: CLEAN paths on the canonical host (no /site/, no slug)", ()
   it("names the slug in exactly one place: the absolute portal link on the PLATFORM host (G5)", () => {
     const u = hostUrls();
     expect(u.portal()).toBe(`${PLATFORM}/o/alder-creek`);
+    expect(u.portalCalendar()).toBe(`${PLATFORM}/o/alder-creek/calendar`);
     const sameHost = [
       u.home(),
       u.page("/"),
@@ -61,6 +93,8 @@ describe("host mode: CLEAN paths on the canonical host (no /site/, no slug)", ()
       u.sitemap(),
       u.give(),
       u.giveReturn("cs_x"),
+      u.careers(),
+      u.careersPosting("music-director"),
       u.canonical("/about"),
       u.origin,
     ];

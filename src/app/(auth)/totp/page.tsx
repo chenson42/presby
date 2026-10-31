@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { userTotp } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { sanitizeCallbackUrl } from "@/lib/auth/safe-callback";
+import { HelpLink } from "@/components/help/help-link";
+import { helpHref } from "@/lib/help/urls";
 import { TotpChallengeForm } from "./totp-challenge-form";
 
 export default async function TotpPage({
@@ -34,6 +36,12 @@ export default async function TotpPage({
     <main className="mx-auto max-w-sm px-6 py-24">
       <h1 className="text-2xl font-semibold">Two-factor authentication</h1>
       <TotpChallengeForm callbackUrl={callbackUrl} error={error} />
+      {/* Help (user-help Inc 1, Copy C3): only a signed-in person with an enrolment reaches here. */}
+      <div className="mt-6">
+        <HelpLink href={helpHref("using-your-code")} className="text-sm">
+          Help with two-factor sign-in
+        </HelpLink>
+      </div>
     </main>
   );
 }

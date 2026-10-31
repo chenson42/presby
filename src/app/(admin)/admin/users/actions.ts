@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { roles, users, userRoles } from "@/lib/db/schema";
 import { ADMIN_ROLE, FEATURES, hasFeature } from "@/lib/permissions";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
+import { requireTwoFactorForPlatformRole } from "@/lib/auth/platform-role-two-factor";
 
 async function requireAdmin() {
   const session = await auth();
@@ -32,10 +33,23 @@ export async function assignRoleAction(formData: FormData) {
   const userId = String(formData.get("userId"));
   const roleId = String(formData.get("roleId"));
 
-  await db
-    .insert(userRoles)
-    .values({ userId, roleId })
-    .onConflictDoNothing();
+  // The grant and the person's own two-factor setting commit together
+  // (F343, DECISION-291): a platform role switches the setting on, audited as
+  // `user.2fa_required.changed` with this admin as the actor, and ONLY when the
+  // grant row is new - pressing Add on a role the person already holds must not
+  // undo an administrator's deliberate switch-off. The pooled WebSocket driver
+  // supports db.transaction() (F28).
+  const actor = { userId: session.user.id, email: session.user.email ?? null };
+  await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(userRoles)
+      .values({ userId, roleId })
+      .onConflictDoNothing()
+      .returning({ roleId: userRoles.roleId });
+    if (inserted.length > 0) {
+      await requireTwoFactorForPlatformRole(tx, { userId, roleId, actor });
+    }
+  });
 
   await recordAudit({
     action: AUDIT_ACTIONS.USER_ROLE_ASSIGNED,

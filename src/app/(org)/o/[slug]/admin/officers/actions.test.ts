@@ -309,6 +309,16 @@ describe("startOfficerTermAction — OfficersResult → ActionResult mapping", (
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
+  it("district_unavailable → tells the user to choose an active district, writes nothing, revalidates nothing", async () => {
+    mockStartOfficerTerm.mockResolvedValueOnce({ kind: "district_unavailable" });
+    const result = await startOfficerTermAction("alder-creek", startInput());
+    expect(result).toEqual({
+      ok: false,
+      error: "That district is archived. Choose an active district.",
+    });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
   it("an unknown office is a message, never the lib's throw", async () => {
     const result = await startOfficerTermAction("alder-creek", {
       ...startInput(),

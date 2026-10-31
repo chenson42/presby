@@ -1,5 +1,7 @@
 import "server-only";
-import { and, desc, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { AUDIT_ACTIONS } from "@/lib/audit";
+import { insertAuditRow } from "@/lib/audit-tx";
 import { withOrgContext } from "@/lib/authz";
 import { type db } from "@/lib/db";
 import { eventTypes, events } from "@/lib/db/domain/events";
@@ -12,6 +14,12 @@ import {
   seriesTotalWithinCap,
 } from "@/lib/events/recurrence";
 import { formatWallClock, parseWallClock } from "@/lib/events/wall-clock";
+import {
+  deriveListed,
+  inheritedListing,
+  planSeriesListing,
+  type SeriesRow,
+} from "@/lib/events/website-listing";
 import {
   DEFAULT_EVENT_TYPE_ICON,
   isEventTypeColor,
@@ -76,10 +84,23 @@ import { isUuidShaped } from "@/lib/shared/uuid";
  * `updateEvent` edits ONE occurrence, so changing one occurrence's type leaves a
  * mixed series (acceptable for v1, said so in the edit form).
  *
- * NO AUDIT EVENTS ON ANY MUTATION HERE (DECISION-113 ruling 5) — event
- * create/edit/cancel is content configuration, not an identity/access/
- * security-control change, matching the `replaceOrganizationServiceTimes`/
- * `setOrganizationProfile` precedent.
+ * AUDIT, NARROWLY (DECISION-240, amending DECISION-113 ruling 5). Event
+ * create, edit, extend and cancel are content configuration and stay
+ * unaudited - EXCEPT when `website_listed` changes, because putting an event on
+ * the public website is a disclosure change. Every path that can change that
+ * column (`createEvent`, `updateEvent`, `extendSeriesPattern`,
+ * `setSeriesWebsiteListing`) writes exactly one row with `insertAuditRow(tx,
+ * ...)` in the SAME transaction as the change, so the two commit or roll back
+ * together; a call that changes nothing, a cancel, and a refused call write
+ * none. A fifth writer of `website_listed` must audit too.
+ *
+ * WEBSITE LISTING IS DERIVED, NEVER TRUSTED (DECISION-238, F251/F252). The
+ * stored value is `deriveListed(input.websiteListed, input.isPublic)`: a
+ * members-only event is never listed whatever was posted, and the UPDATE that
+ * makes a listed event members-only clears the listing in the same statement so
+ * the `events_website_requires_public` CHECK is never tripped by a routine
+ * edit. New occurrences added to a series inherit from the LATEST non-cancelled
+ * occurrence (`inheritedListing`), never from the parent row alone.
  */
 
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -123,16 +144,48 @@ export type EventsResult<T> =
   | { kind: "invalid_target" }
   | { kind: "invalid_input"; message: string };
 
+/** Who is acting, for the audit row (`actor_user_id`, `actor_email`). */
+export interface EventActor {
+  userId: string;
+  email: string | null;
+}
+
 export interface EventListEntry {
   eventId: string;
   title: string;
   startsAt: string; // ISO, wall-clock (no tz)
   endsAt: string | null;
+  /** True = open to everyone; false = members only. NOT website publication. */
   isPublic: boolean;
+  /** Marked to appear on the public website calendar (when that is turned on). */
+  websiteListed: boolean;
   allowsCheckin: boolean;
   cancelledAt: string | null;
   isRecurringSeries: boolean; // recurrencePattern is non-null on this row
   isSeriesOccurrence: boolean; // parentEventId is non-null
+}
+
+/**
+ * What a series' "Website listing" section needs: the counts for the two
+ * confirmations, computed by the SAME `planSeriesListing` the write uses, so the
+ * number shown is the number of rows changed.
+ */
+export interface SeriesWebsiteSummary {
+  /** The anchor event's start ('YYYY-MM-DDTHH:mm'), for the dialog copy. */
+  fromStartsAt: string;
+  /** "This and later" -> listed. */
+  put: { changes: number; skippedCancelled: number; skippedMembersOnly: number };
+  /** "This and later" -> unlisted. */
+  take: { changes: number };
+  /** What `extendSeriesPattern` would give new occurrences (the series parent's page). */
+  inheritsOnExtend: boolean;
+}
+
+export interface SeriesListingOutcome {
+  changed: number;
+  unchanged: number;
+  skippedCancelled: number;
+  skippedMembersOnly: number;
 }
 
 export interface EventDetail extends EventListEntry {
@@ -149,6 +202,8 @@ export interface EventDetail extends EventListEntry {
     startsAt: string;
     cancelledAt: string | null;
   }>;
+  /** null for a standalone event (a series of fewer than two rows). */
+  seriesWebsite: SeriesWebsiteSummary | null;
 }
 
 interface EventRow {
@@ -160,12 +215,23 @@ interface EventRow {
   startsAt: Date;
   endsAt: Date | null;
   isPublic: boolean;
+  websiteListed: boolean;
   allowsCheckin: boolean;
   cancelledAt: Date | null;
   parentEventId: string | null;
   recurrencePattern: string | null;
   recurrenceCount: number | null;
   eventTypeId: string | null;
+}
+
+function toSeriesRow(row: EventRow): SeriesRow {
+  return {
+    id: row.id,
+    startsAt: row.startsAt,
+    isPublic: row.isPublic,
+    websiteListed: row.websiteListed,
+    cancelled: row.cancelledAt !== null,
+  };
 }
 
 function toListEntry(row: EventRow): EventListEntry {
@@ -175,6 +241,7 @@ function toListEntry(row: EventRow): EventListEntry {
     startsAt: formatWallClock(row.startsAt),
     endsAt: row.endsAt ? formatWallClock(row.endsAt) : null,
     isPublic: row.isPublic,
+    websiteListed: row.websiteListed,
     allowsCheckin: row.allowsCheckin,
     cancelledAt: row.cancelledAt ? row.cancelledAt.toISOString() : null,
     isRecurringSeries: isParentEvent(row),
@@ -191,6 +258,7 @@ const EVENT_COLUMNS = {
   startsAt: events.startsAt,
   endsAt: events.endsAt,
   isPublic: events.isPublic,
+  websiteListed: events.websiteListed,
   allowsCheckin: events.allowsCheckin,
   cancelledAt: events.cancelledAt,
   parentEventId: events.parentEventId,
@@ -347,6 +415,30 @@ export async function getEvent(
       eventType = typeRow ?? null;
     }
 
+    // The "Website listing" section's counts, from the rows this function
+    // already loaded and the SAME planner the write uses. A series of fewer than
+    // two rows (a standalone event) has none: one event is changed in its form.
+    let seriesWebsite: SeriesWebsiteSummary | null = null;
+    const seriesAll: EventRow[] = seriesRows.length > 0 ? [row, ...seriesRows] : [];
+    if (seriesAll.length >= 2) {
+      const planRows = seriesAll.map(toSeriesRow);
+      const seriesParent = isParentEvent(row)
+        ? row
+        : seriesAll.find((r) => r.id === row.parentEventId);
+      const putPlan = planSeriesListing(planRows, row.id, true);
+      const takePlan = planSeriesListing(planRows, row.id, false);
+      seriesWebsite = {
+        fromStartsAt: formatWallClock(row.startsAt),
+        put: {
+          changes: putPlan.ids.length,
+          skippedCancelled: putPlan.skippedCancelled,
+          skippedMembersOnly: putPlan.skippedMembersOnly,
+        },
+        take: { changes: takePlan.ids.length },
+        inheritsOnExtend: !!seriesParent && inheritedListing(planRows) && seriesParent.isPublic,
+      };
+    }
+
     return {
       kind: "ok",
       data: {
@@ -362,6 +454,7 @@ export async function getEvent(
           startsAt: formatWallClock(r.startsAt),
           cancelledAt: r.cancelledAt ? r.cancelledAt.toISOString() : null,
         })),
+        seriesWebsite,
       },
     };
   });
@@ -378,12 +471,30 @@ export interface CreateEventInput {
   /** 'YYYY-MM-DDTHH:mm', wall-clock. */
   startsAt: string;
   endsAt?: string;
+  /** Open to everyone (true) or members only (false). */
   isPublic: boolean;
+  /**
+   * REQUIRED, not optional (DECISION-133: no "undefined means unchanged"
+   * FormData ambiguity). Only a wish: the stored value is
+   * `deriveListed(websiteListed, isPublic)`.
+   */
+  websiteListed: boolean;
   allowsCheckin: boolean;
   /** Present only when creating a repeating series. */
   recurrence?: { pattern: string; count: number };
   /** Optional event type (DECISION-161); null/absent = untyped. Copied to every generated child. */
   eventTypeId?: string | null;
+}
+
+/**
+ * The two switches the listing derives from must be real booleans. A server
+ * action is a public entry point: the TypeScript types do not survive the
+ * wire, and `undefined`/`"false"` would otherwise pick a branch by truthiness
+ * (a false audit row, or a CHECK violation). Phase 5 FAIL-2.
+ */
+const SWITCH_INVALID = "Choose whether this event is open to everyone and whether it appears on the website.";
+function switchesAreBooleans(input: { isPublic: unknown; websiteListed: unknown }): boolean {
+  return typeof input.isPublic === "boolean" && typeof input.websiteListed === "boolean";
 }
 
 /**
@@ -399,12 +510,16 @@ export interface CreateEventInput {
 export async function createEvent(
   viewerPersonId: string,
   organizationId: string,
-  actingUserId: string,
+  actor: EventActor,
   input: CreateEventInput,
 ): Promise<EventsResult<{ eventId: string; occurrenceIds: string[] }>> {
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasEventsManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
+    }
+
+    if (!switchesAreBooleans(input)) {
+      return { kind: "invalid_input", message: SWITCH_INVALID };
     }
 
     const lengthError = validateFieldLengths(input);
@@ -447,6 +562,8 @@ export async function createEvent(
       pattern = input.recurrence.pattern;
     }
 
+    const listed = deriveListed(input.websiteListed, input.isPublic);
+
     const [parent] = await tx
       .insert(events)
       .values({
@@ -457,12 +574,13 @@ export async function createEvent(
         startsAt,
         endsAt,
         isPublic: input.isPublic,
+        websiteListed: listed,
         allowsCheckin: input.allowsCheckin,
         eventTypeId: input.eventTypeId ?? null,
         parentEventId: null,
         recurrencePattern: pattern ?? null,
         recurrenceCount: input.recurrence?.count ?? null,
-        createdBy: actingUserId,
+        createdBy: actor.userId,
       })
       .returning({ id: events.id });
 
@@ -489,16 +607,32 @@ export async function createEvent(
             startsAt: date,
             endsAt: childEndsAt,
             isPublic: input.isPublic,
+            websiteListed: listed,
             allowsCheckin: input.allowsCheckin,
             eventTypeId: input.eventTypeId ?? null,
             parentEventId: parent!.id,
             recurrencePattern: null,
             recurrenceCount: null,
-            createdBy: actingUserId,
+            createdBy: actor.userId,
           })
           .returning({ id: events.id });
         occurrenceIds.push(child!.id);
       }
+    }
+
+    if (listed) {
+      await insertAuditRow(tx, {
+        action: AUDIT_ACTIONS.EVENT_LISTED_ON_WEBSITE,
+        actor,
+        resourceType: "event",
+        resourceId: parent!.id,
+        metadata: {
+          organizationId,
+          via: "create",
+          changed: occurrenceIds.length,
+          rootEventId: parent!.id,
+        },
+      });
     }
 
     return { kind: "ok", data: { eventId: parent!.id, occurrenceIds } };
@@ -516,7 +650,10 @@ export interface UpdateEventInput {
   location?: string;
   startsAt: string;
   endsAt?: string;
+  /** Open to everyone (true) or members only (false). */
   isPublic: boolean;
+  /** REQUIRED (see `CreateEventInput`); the stored value is derived from it and `isPublic`. */
+  websiteListed: boolean;
   allowsCheckin: boolean;
   /** `undefined` leaves the type unchanged; `null` clears it; an id sets it. */
   eventTypeId?: string | null;
@@ -532,6 +669,7 @@ export interface UpdateEventInput {
 export async function updateEvent(
   viewerPersonId: string,
   organizationId: string,
+  actor: EventActor,
   input: UpdateEventInput,
 ): Promise<EventsResult<{ eventId: string }>> {
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
@@ -539,11 +677,16 @@ export async function updateEvent(
       return { kind: "forbidden" };
     }
 
+    if (!switchesAreBooleans(input)) {
+      return { kind: "invalid_input", message: SWITCH_INVALID };
+    }
+
     const [existing] = await tx
       .select({
         id: events.id,
         cancelledAt: events.cancelledAt,
         eventTypeId: events.eventTypeId,
+        websiteListed: events.websiteListed,
       })
       .from(events)
       .where(and(eq(events.id, input.eventId), eq(events.organizationId, organizationId)))
@@ -578,6 +721,11 @@ export async function updateEvent(
       return { kind: "invalid_input", message: EVENT_TYPE_UNAVAILABLE };
     }
 
+    // Derived, never the posted value alone (F251): `is_public` and
+    // `website_listed` are written in the SAME statement, so making a listed
+    // event members-only clears the listing and the CHECK is never tripped.
+    const listed = deriveListed(input.websiteListed, input.isPublic);
+
     await tx
       .update(events)
       .set({
@@ -587,13 +735,32 @@ export async function updateEvent(
         startsAt,
         endsAt,
         isPublic: input.isPublic,
+        websiteListed: listed,
         allowsCheckin: input.allowsCheckin,
         // undefined = leave the column out of the SET entirely (unchanged).
         ...(input.eventTypeId !== undefined
           ? { eventTypeId: input.eventTypeId }
           : {}),
       })
-      .where(eq(events.id, input.eventId));
+      .where(and(eq(events.id, input.eventId), eq(events.organizationId, organizationId)));
+
+    if (listed !== existing.websiteListed) {
+      await insertAuditRow(tx, {
+        action: listed
+          ? AUDIT_ACTIONS.EVENT_LISTED_ON_WEBSITE
+          : AUDIT_ACTIONS.EVENT_UNLISTED_FROM_WEBSITE,
+        actor,
+        resourceType: "event",
+        resourceId: input.eventId,
+        metadata: {
+          organizationId,
+          via: "update",
+          changed: 1,
+          // The listing was cleared because the event became members-only.
+          ...(!listed && !input.isPublic ? { clearedBecauseMembersOnly: true } : {}),
+        },
+      });
+    }
 
     return { kind: "ok", data: { eventId: input.eventId } };
   });
@@ -630,6 +797,7 @@ export interface ExtendSeriesInput {
 export async function extendSeriesPattern(
   viewerPersonId: string,
   organizationId: string,
+  actor: EventActor,
   input: ExtendSeriesInput,
 ): Promise<EventsResult<{ occurrenceIds: string[] }>> {
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
@@ -675,15 +843,26 @@ export async function extendSeriesPattern(
       return { kind: "invalid_input", message: "Choose a valid repeat pattern." };
     }
 
-    const [latest] = await tx
-      .select({ startsAt: events.startsAt })
+    // Every row of the series (parent plus children, at most MAX_SERIES_TOTAL),
+    // read once: the latest start for the date math, and what the new
+    // occurrences inherit for the website listing.
+    const children = await tx
+      .select(EVENT_COLUMNS)
       .from(events)
       .where(
         and(eq(events.organizationId, organizationId), eq(events.parentEventId, parent.id)),
       )
-      .orderBy(desc(events.startsAt))
-      .limit(1);
-    const latestStart = latest?.startsAt ?? parent.startsAt;
+      .orderBy(events.startsAt);
+    const latestStart = children.reduce(
+      (latest, c) => (c.startsAt.getTime() > latest.getTime() ? c.startsAt : latest),
+      children.length > 0 ? children[0]!.startsAt : parent.startsAt,
+    );
+
+    // F252: from the LATEST non-cancelled occurrence, never the parent row
+    // alone (the parent is usually the oldest and still listed after a "this and
+    // later" unlisting), and never listed when the series is members-only.
+    const inheritsListed =
+      parent.isPublic && inheritedListing([parent, ...children].map(toSeriesRow));
 
     const durationMs =
       parent.endsAt ? parent.endsAt.getTime() - parent.startsAt.getTime() : null;
@@ -707,6 +886,7 @@ export async function extendSeriesPattern(
           startsAt: date,
           endsAt: childEndsAt,
           isPublic: parent.isPublic,
+          websiteListed: inheritsListed,
           allowsCheckin: parent.allowsCheckin,
           eventTypeId: parent.eventTypeId,
           parentEventId: parent.id,
@@ -722,7 +902,131 @@ export async function extendSeriesPattern(
       .set({ recurrencePattern: input.pattern, recurrenceCount: totalCount })
       .where(eq(events.id, parent.id));
 
+    if (inheritsListed && occurrenceIds.length > 0) {
+      await insertAuditRow(tx, {
+        action: AUDIT_ACTIONS.EVENT_LISTED_ON_WEBSITE,
+        actor,
+        resourceType: "event",
+        resourceId: parent.id,
+        metadata: {
+          organizationId,
+          via: "extend",
+          changed: occurrenceIds.length,
+          rootEventId: parent.id,
+        },
+      });
+    }
+
     return { kind: "ok", data: { occurrenceIds } };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// setSeriesWebsiteListing
+// ---------------------------------------------------------------------------
+
+export interface SetSeriesWebsiteListingInput {
+  /** The ANCHOR occurrence: it and every later occurrence of its series are changed. */
+  eventId: string;
+  listed: boolean;
+}
+
+/**
+ * Puts an event and all LATER events of its series on the public website, or
+ * takes them off, in one transaction (DECISION-238/240/241; Phase 2 R5). The
+ * rest of a repeating series' editing is one occurrence at a time, so this is
+ * the one series-wide action. A standalone event is a series of one and works
+ * the same way.
+ *
+ * ONE job, ONE gate: `events.manage` first, inside this transaction. The anchor
+ * is loaded scoped to `(id, organizationId)` - a foreign or missing id is
+ * `invalid_target`, indistinguishably. The whole series is read `FOR UPDATE`,
+ * the pure `planSeriesListing` (the very function `getEvent` counts with)
+ * picks the ids, one UPDATE writes them, and ONE audit row records the change
+ * (none when nothing changed). The table CHECK is the backstop; the rows are
+ * locked, so it cannot fire here, and if it ever did the whole transaction
+ * would roll back, never a partial change.
+ *
+ * Returns the ACTUAL counts, which the caller reports instead of the earlier
+ * confirmation's (a concurrent edit may have moved them).
+ */
+export async function setSeriesWebsiteListing(
+  viewerPersonId: string,
+  organizationId: string,
+  actor: EventActor,
+  input: SetSeriesWebsiteListingInput,
+): Promise<EventsResult<SeriesListingOutcome>> {
+  return withOrgContext(viewerPersonId, organizationId, async (tx) => {
+    if (!(await hasEventsManage(tx, viewerPersonId, organizationId))) {
+      return { kind: "forbidden" };
+    }
+
+    if (typeof input.listed !== "boolean") {
+      return { kind: "invalid_input", message: "Choose whether to put these events on the website or take them off." };
+    }
+    if (typeof input.eventId !== "string" || !isUuidShaped(input.eventId)) {
+      return { kind: "invalid_target" }; // a garbage id must not reach Postgres as a 22P02
+    }
+
+    const [anchor] = await tx
+      .select({ id: events.id, parentEventId: events.parentEventId })
+      .from(events)
+      .where(and(eq(events.id, input.eventId), eq(events.organizationId, organizationId)))
+      .limit(1);
+    if (!anchor) {
+      return { kind: "invalid_target" };
+    }
+
+    const rootId = anchor.parentEventId ?? anchor.id;
+    const seriesRows = await tx
+      .select(EVENT_COLUMNS)
+      .from(events)
+      .where(
+        and(
+          eq(events.organizationId, organizationId),
+          or(eq(events.id, rootId), eq(events.parentEventId, rootId)),
+        ),
+      )
+      .orderBy(events.startsAt)
+      .for("update");
+
+    const plan = planSeriesListing(seriesRows.map(toSeriesRow), anchor.id, input.listed);
+
+    if (plan.ids.length > 0) {
+      await tx
+        .update(events)
+        .set({ websiteListed: input.listed })
+        .where(and(eq(events.organizationId, organizationId), inArray(events.id, plan.ids)));
+
+      await insertAuditRow(tx, {
+        action: input.listed
+          ? AUDIT_ACTIONS.EVENT_LISTED_ON_WEBSITE
+          : AUDIT_ACTIONS.EVENT_UNLISTED_FROM_WEBSITE,
+        actor,
+        resourceType: "event",
+        resourceId: rootId,
+        metadata: {
+          organizationId,
+          via: "series",
+          scope: "this_and_later",
+          changed: plan.ids.length,
+          skippedCancelled: plan.skippedCancelled,
+          skippedMembersOnly: plan.skippedMembersOnly,
+          rootEventId: rootId,
+          anchorEventId: anchor.id,
+        },
+      });
+    }
+
+    return {
+      kind: "ok",
+      data: {
+        changed: plan.ids.length,
+        unchanged: plan.unchanged,
+        skippedCancelled: plan.skippedCancelled,
+        skippedMembersOnly: plan.skippedMembersOnly,
+      },
+    };
   });
 }
 

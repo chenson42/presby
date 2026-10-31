@@ -22,7 +22,8 @@ import {
 } from "../members-states";
 import { PendingWorklist } from "./pending-worklist";
 import { RecentlyDecided } from "./recently-decided";
-import { SessionStateBanner } from "./session-state-banner";
+import { SessionStateBanner, type SessionHandOff } from "./session-state-banner";
+import { listSessionSignInRows } from "@/lib/onboarding/org-invite";
 
 const MEMBERS_CREATE_FLAG = "org_portal.members_create";
 
@@ -148,6 +149,33 @@ export default async function PendingMembersPage({
   const showBanner =
     state !== null && (mode === "read" || state.kind === "no_session");
 
+  // The Session hand-off (Community Increment 2b): read only when the banner is
+  // the `no_sign_in` one. `listSessionSignInRows` answers `forbidden` unless the
+  // viewer holds BOTH `people.manage` and `officers.manage`, and everyone else
+  // (and any failure) gets the one sentence with no names and no link.
+  let handOff: SessionHandOff = { kind: "other" };
+  if (showBanner && state?.kind === "no_sign_in") {
+    const rows = await listSessionSignInRows({
+      organizationId: resolved.org.organizationId,
+      actingPersonId: resolved.org.personId,
+      actingUserId: session.user.id,
+      actingUserEmail: session.user.email ?? null,
+    });
+    if (rows.kind === "ok") {
+      let connectEnabled = false;
+      try {
+        connectEnabled = await isOrgFeatureEnabled(
+          resolved.org.personId,
+          resolved.org.organizationId,
+          "org_portal.sign_in_connect",
+        );
+      } catch (err) {
+        if (err instanceof OrgAccessError) throw err;
+      }
+      handOff = { kind: "rows", rows: rows.rows, connectEnabled };
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div>
@@ -163,7 +191,7 @@ export default async function PendingMembersPage({
         )}
       </div>
 
-      {showBanner && state && <SessionStateBanner slug={slug} state={state} />}
+      {showBanner && state && <SessionStateBanner slug={slug} state={state} handOff={handOff} />}
 
       <section aria-labelledby="waiting-heading" className="space-y-3">
         <h2 id="waiting-heading" className="text-lg font-semibold">

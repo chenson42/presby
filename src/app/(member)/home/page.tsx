@@ -167,7 +167,7 @@ export default async function HomePage() {
                     href="/admin"
                     title="Admin"
                     badge="Platform"
-                    description="Users, roles, flags, and the platform operations shell."
+                    description="Organizations, support, accounts and platform settings."
                   />
                 )}
                 {isPlatformAdmin && (
@@ -175,7 +175,7 @@ export default async function HomePage() {
                     href="/developer"
                     title="Developer"
                     badge="Platform"
-                    description="Schema reference, tables, and entity diagrams."
+                    description="Data model, diagrams and where the engineering docs live."
                   />
                 )}
               </div>

@@ -59,10 +59,12 @@ Password for every fixture: **`e2e-fixture-only-not-a-secret`**
 |---|---|---|
 | `admin@presby.invalid` | Platform admin, no congregation | `/admin` |
 | `member@presby.invalid` | Platform member, no congregation | `/no-organization` |
-| `admin-2fa@presby.invalid` | Admin with 2FA required, **not enrolled** | `/totp` → `/account/2fa` to enrol |
+| `admin-2fa@presby.invalid` | Admin with 2FA required, **not enrolled** | `/totp` → `/account/2fa` to enrol (the shared fixture: specs that actually ENROL use a throwaway user, below) |
 | `admin-2fa-enrolled@presby.invalid` | Admin with 2FA required, **already enrolled** (fixed test secret, see `e2e/support/totp-fixture.ts`) | `/totp`, and a real 6-digit code lands it on `/admin` |
 
-**Entering a code on `/totp`.** The challenge is six digit boxes in a named group with a toggle to one recovery-code field, so specs never locate it by placeholder. Use `e2e/support/totp-page.ts`: `enterTotpCode(page, code)` (waits for box 1 to be enabled, which also waits out the `HydrationGate`, then types through the keyboard and relies on auto-advance), `enterRecoveryCode(page, code)` (presses the toggle, then fills the field), and the locators `totpGroup`, `totpBox`, `verifyButton`, `recoveryToggle`, `recoveryField`. Neither helper presses Verify. The fixture seeds one unused recovery code for the enrolled user (`E2E_RECOVERY_CODE` in `totp-fixture.ts`); it is single-use, so a spec that consumes it calls `seedRecoveryCode()` in `beforeEach`. `e2e/totp-code-entry.spec.ts` covers focus, advance, Backspace/Delete, paste and autofill and the 360px layout; `e2e/totp-recovery-code.spec.ts` covers the recovery path (F164).
+**Enrolling in a spec (F166, DECISION-292).** Finishing enrolment ends in a **verified** session (the confirmation is a possession proof and marks the session through the same grant `/totp` uses), keeps the ten recovery codes on screen until the person chooses Continue, and never sets a recovery-code cookie. So a spec that enrols does not answer a second `/totp` challenge afterwards, and it must not use the shared `mfa-admin` / `mfa-enrolled` fixtures (a spec that enrols or regenerates would poison every sign-in after it): it mints a throwaway `.invalid` user with `e2e/support/enrolment-fixture.ts` (`createThrowawayUser`, `sweepStaleUsers`, `deleteThrowawayUsers`, `signInViaApi` to reset a session's claim, `typeEnrolmentCode` to read the manual key and type a real code, `expectPanelSurvives` to prove the codes outlive the post-enrolment re-render, `recordUrls` for a "no `/totp` hop" assertion, `expectNoFreshCodesCookie`). Specs: `e2e/hydration/totp-enrol-handoff.spec.ts` (the codes survive the re-render, session verified, in **both lanes**: the `chromium` dev server and the `prod-build` production lane, because the property belongs to the built app), `e2e/totp-first-enrolment.spec.ts` (administrator via `/admin`, voluntary, reload, hostile `callbackUrl`), `e2e/totp-regenerate-gate.spec.ts` (F344: regenerating needs a verified session; a stale tab is refused), the two-tab case in `e2e/totp-enrol-concurrency.spec.ts`, and the new-invitee and treasurer walks in `e2e/invitation-new-account.spec.ts` / `e2e/invitation-existing-account.spec.ts`. Recovery codes are shown from client memory only, so a spec that wants to prove "a reload does not show them again" reloads and asserts none of the earlier strings is in `page.content()`.
+
+**Entering a code on `/totp`.** The challenge is six digit boxes in a named group with a toggle to one recovery-code field, so specs never locate it by placeholder. Use `e2e/support/totp-page.ts`: `enterTotpCode(page, code)` (waits for box 1 to be enabled, which also waits out the `HydrationGate`, then types through the keyboard and relies on auto-advance), `enterRecoveryCode(page, code)` (presses the toggle, then fills the field), `waitForTotpVerified(page, destination?)`, and the locators `totpGroup`, `totpBox`, `verifyButton`, `recoveryToggle`, `recoveryField`. Typing the sixth digit submits the code (DECISION-257), so `enterTotpCode` is the whole act: no helper presses Verify and a caller must not click it (a click on the "Verifying…" button waits 30 seconds and fails); wait for the outcome with `waitForTotpVerified` or the URL the spec expects. Recovery mode and a paste that drops a digit (an over-long one, or a short one that overflows the remaining boxes) still need the button. The fixture seeds one unused recovery code for the enrolled user (`E2E_RECOVERY_CODE` in `totp-fixture.ts`); it is single-use, so a spec that consumes it calls `seedRecoveryCode()` in `beforeEach`. `e2e/totp-code-entry.spec.ts` covers focus, advance, Backspace/Delete, paste and autofill, the auto-submit (once per code, re-arm after a failure, the pending state) and the 360px layout; `e2e/totp-recovery-code.spec.ts` covers the recovery path (F164).
 | `org1@presby.invalid` | One congregation | straight into `/o/e2e-alpha` — no chooser |
 | `org1-org2@presby.invalid` | A congregation **and** a presbytery | the chooser, two cards |
 | `org3-unmanaged@presby.invalid` | Only an `unmanaged` congregation | `/no-organization` |
@@ -180,10 +182,13 @@ menu is P1.
 - `/account` — profile, email change with re-verification, password change
 - `/account/2fa` — TOTP enrolment, recovery codes
 - `/admin` — users and roles, feature flags, audit log, feedback triage,
-  what's-new, email queue, **2FA policy** (per-congregation, DECISION-033)
-- `/developer` — generated schema reference. Requires
-  `users.is_platform_admin`, which **nothing currently seeds** — so it is
-  unreachable by every fixture above until you set that column by hand.
+  what's-new, email queue, **2FA policy** (per-congregation, DECISION-033; by role and per person, DECISION-291)
+- `/developer` — the developer portal (home, data model, documentation).
+  Requires `users.is_platform_admin`, which **nothing currently seeds** — so it
+  is unreachable by every fixture above until you set that column by hand.
+  `e2e/developer-portal.spec.ts` and `e2e/developer-2fa-gate.spec.ts` create
+  their own throwaway administrators (`example.invalid`) and remove them
+  afterwards.
 
 ---
 
@@ -253,6 +258,44 @@ cd /; rm -rf "$SCRATCH"; lsof -nP -iTCP:3800 -sTCP:LISTEN   # nothing listening
 ```
 
 If the build ever flakes anyway, `rm -rf "$SCRATCH/app/.next"` and retry. A negative control is part of the job: with the form under test reverted to its pre-gate version, the spec must go red at the pre-release `toBeDisabled()`.
+
+---
+
+## Running Playwright from a worktree
+
+Workflow Rule 16: a pipeline starts its own server on its assigned port and never
+attaches to `:3000`, which belongs to the main checkout (or to whichever sibling
+started a server there first). `playwright.config.ts` now enforces it: from a
+linked git worktree, with the resolved base URL on a loopback host at port 3000
+and `PW_ALLOW_3000` unset, loading the config throws with the remedy. The main
+checkout and CI are unaffected, and the production-build lane
+(`npm run test:e2e:prod`) has its own stricter checks.
+
+```bash
+# 1. Your own server, on the port the orchestrator assigned (here 3480), with the
+#    fakes the specs expect. The config injects these only into a server IT starts;
+#    one you start yourself needs them in its own environment. Note the pid.
+# <!-- leak-ok: non-key-shaped test literals, not credentials -->
+export CRON_SECRET=giving-e2e-cron-secret STRIPE_WEBHOOK_SECRET=giving-e2e-signing-secret
+RATE_LIMIT_DISABLED=true DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake \
+  DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE="$PWD/.tmp/domains-fake-state.json" \
+  npx next dev -p 3480 &
+
+# 2. Point Playwright at it.
+E2E_BASE_URL=http://localhost:3480 npx playwright test e2e/admin-login.spec.ts --project=chromium
+
+# 3. Stop it by pid (never `pkill -f next`: that kills your siblings' servers).
+kill <pid>
+```
+
+The config's own `webServer` entry runs `npm run dev`, which binds `:3000`, so do
+not rely on it to start a server on another port: start yours first, as above.
+A sign-in run on `:3480` worked without setting `AUTH_URL` when `.env.local` does
+not define one; if yours sets `AUTH_URL=http://localhost:3000` and sign-in bounces
+to `:3000`, start the server with `AUTH_URL=http://localhost:3480` as well.
+`PW_ALLOW_3000=1` accepts the shared-server risk knowingly (for example, the only
+checkout running anything). The giving and custom-domain recipes below list the
+extra variables those specs need.
 
 ---
 
@@ -388,6 +431,23 @@ database lacks and the suites assume: `scripts/ci/e2e-baseline-flags.sql`
 shards only, never the rls job). A spec that asserts against a flag it does not
 set belongs in the first file.
 
+**Before a QA e2e run on a pipeline branch**, reset the global flags: a branch
+inherits `development`'s flags plus whatever earlier runs left, so a spec can pass
+there that CI's from-empty database fails. `scripts/ci/e2e-reset-flags.sql` sets
+every `feature_flags` row to its `scripts/seed.ts` value and then applies the
+baseline, in one transaction. It refuses unless you pass `-v pipeline_branch=1`
+(it would switch off flags an operator turned on for a demo if run against
+`development`), and `scripts/e2e-reset-flags.test.mjs` fails `npm test` if its
+list drifts from the seed. Run it with `psql -f` (so `\ir` resolves), keeping
+the connection string in the environment:
+
+```bash
+npx dotenv -e .env.local -- sh -c 'psql "$PLATFORM_DATABASE_URL" -v ON_ERROR_STOP=1 -v pipeline_branch=1 -f scripts/ci/e2e-reset-flags.sql'
+```
+
+It resets global `feature_flags.enabled` only; `rollout_percent` and the
+per-organization toggles are not touched. State in the verdict that you ran it.
+
 `db-tests` deliberately does **not** set `RATE_LIMIT_DISABLED` — it is the
 one place in this repo's test suites where the sign-in limiter is exercised
 live, for real, under the standard config. `e2e` keeps `RATE_LIMIT_DISABLED=
@@ -416,6 +476,52 @@ change is harmless because nothing else authenticates against that database
 — or, if you must run the statement against a shared branch's existing
 database for some reason, (b) set the password back to the exact value
 `.env.local` already documents before you finish.
+
+---
+
+## Fixture database calls: `withDbRetry`
+
+Fixtures talk to Neon over its HTTP driver, which now and then answers `fetch failed`
+or `Connection terminated`. `withDbRetry(label, step)` in `e2e/support/db.ts` retries
+a step five times (0.5, 1, 2, 4 s) **only** for a dropped connection (SQLSTATE class
+08, `57P01`-`57P03`, `53300`, or a reset/refused/connect-timeout message); a unique
+violation, a missing table, a statement or lock timeout, or a bug throws at once, and
+the original error is rethrown after the last attempt. Only the outermost call retries.
+
+The catch: a dropped reply can mean the statement **landed**, so a step may be wrapped
+only if repeating it ends in the same state.
+
+- **R1** Wrap a step only if a repeat after "committed but the reply was lost" leaves the same end state.
+- **R2** Wrap whole units: disable-trigger / work / enable-trigger is one step with the re-enable in `finally`.
+- **R3** Safe by shape: reads, `delete`, `update ... set x = <constant>`, `insert ... on conflict ... do nothing|update`, `insert ... where not exists`, a `delete`-then-`insert` that re-clears first.
+- **R4** Never wrap a unit that reads a value and overwrites it when the read is kept as "prior state" (the retry would capture the new value); wrap the read and the write separately.
+- **R5** Never wrap a plain `insert` or a state-machine edge (`set state = '<next>'`).
+- **R6** Wrap inside the fixture function so no spec changes. Spec-inline `afterAll` SQL is not covered.
+
+Teardown and sweeps are wrapped in every fixture; setup is wrapped only where the
+rules allow, so setup functions that insert plainly (`setupGivingFixture`,
+`setupInviteOrg`, `buildWorld` ...) are deliberately not. A real drop cannot be
+induced on demand, so the retry path is pinned by injected-failure tests
+(`scripts/with-db-retry.test.mjs`) and each wrapped step's idempotence rests on this reading.
+
+---
+
+## Reports for the retrospective
+
+`npm run stats:escape` prints the escape-rate breakdown for the last 30 days.
+The retrospective cadence is 14 days, so `npm run stats:escape -- --since=<date>`
+(or `"N days ago"`) counts from the last retrospective instead of double-counting
+the overlap; the header then reads "since <date>". git compares the committer
+date, so an amended or rebased commit counts from when it was rewritten.
+
+`npm run worktrees:report` prints the free disk space and, for each git worktree,
+its branch, whether it has commits of its own and, if so, whether all of them are
+on `origin/main` ("merged"), whether it has uncommitted or untracked files, and
+its `node_modules` / `.next` sizes, with suggested cleanup commands. It suggests
+`git worktree remove` only for a merged, clean worktree: never for a new pipeline
+worktree, a squash-merged or fast-forwarded one, or one with changes. It deletes
+nothing (`--no-sizes` skips the slow `du`). Below 20 GiB free it says so: a full
+disk has surfaced as a Neon `fetch failed`.
 
 ---
 

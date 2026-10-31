@@ -65,6 +65,7 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   FEATURE_FLAG_TOGGLED: "feature_flag.toggled",
   TOTP_ENROLLED: "totp.enrolled",
   TOTP_RECOVERY_CODES_REGENERATED: "totp.recovery_codes.regenerated",
+  TOTP_RECOVERY_CODES_REGENERATE_REFUSED: "totp.recovery_codes.regenerate_refused",
   TOTP_RESET: "totp.reset",
   USER_ROLE_ASSIGNED: "user.role.assigned",
   USER_ROLE_REMOVED: "user.role.removed",
@@ -263,6 +264,21 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   INVITATION_ACCEPTED: "invitation.accepted",
   INVITATION_ACCEPT_BLOCKED: "invitation.accept_blocked",
   USER_CREATED_VIA_INVITATION: "user.created_via_invitation",
+  // Parish management (2026-10-25, DECISION-245).
+  DISTRICT_CREATED: "tenant.district.created",
+  DISTRICT_RENAMED: "tenant.district.renamed",
+  DISTRICT_ARCHIVED: "tenant.district.archived",
+  DISTRICT_RESTORED: "tenant.district.restored",
+  HOUSEHOLD_DISTRICT_CHANGED: "tenant.household.district_changed",
+  HOUSEHOLD_DISTRICT_BULK_MOVED: "tenant.household.district_bulk_moved",
+  EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
+  EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  // Community Increment 2b (DECISION-225/226): address proof and auto-connect.
+  TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected",
+  USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded",
+  CAREERS_POSTING_PUBLISHED: "careers.posting.published",
+  CAREERS_POSTING_CLOSED: "careers.posting.closed",
+  CAREERS_POSTING_REOPENED: "careers.posting.reopened",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

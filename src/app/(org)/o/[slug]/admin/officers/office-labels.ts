@@ -11,10 +11,12 @@
  * list to drift.
  */
 export {
+  AUTHORITY_OFFICES,
   OFFICER_OFFICES,
   OFFICE_LABELS,
   PASTOR_OFFICES,
   SESSION_OFFICES,
+  isAuthorityOffice,
   isPastorOffice,
   isSessionOffice,
 } from "@/lib/officer-offices";

@@ -15,6 +15,11 @@
  * own lifetime. That is exactly the scenario F140 worries about: a future
  * tier-3 extension (S2) would put such keys on those arms.
  *
+ * F343 (DECISION-291, S1) adds scenarios with the three REAL administration keys
+ * 0080 flagged (roles.manage direct, role_grants.manage on a commission,
+ * domains.manage on a delegation and through a group), so the agreement is
+ * proven for the keys that matter in production and not only the temporary one.
+ *
  * Every number here is asserted twice: against the resolver (agreement) and
  * against the scenario's known answer (so the matrix cannot pass vacuously).
  *
@@ -240,6 +245,48 @@ describe.skipIf(!hasDb)("presby_two_factor_required() arm B agrees with presby_e
       add("delegation arm, revoked", r.userId, false);
     }
 
+    // F343 / DECISION-291 (S1): the same arms with REAL flagged keys - the three
+    // administration keys 0080 marks requires_two_factor - not only the throwaway
+    // key above. Arms 3 and 4 refuse giving keys (DECISION-175) but not these.
+    {
+      const s = await personWithUser("Roles", "Manager");
+      await fx.addMember(orgT, s.personId);
+      const rolesRole = await role(orgT, "fx_roles_manage", ["roles.manage"]);
+      await directGrant(orgT, rolesRole, s.personId, "2020-01-01", null);
+      add("real key: direct roles.manage", s.userId, true);
+    }
+    {
+      const commissionRole = await role(orgP, "fx_commission_real", ["role_grants.manage"]);
+      const g = await group(orgP, "Real-Key Commission");
+      const s = await personWithUser("RealCommission", "Current");
+      await fx.addMember(orgT, s.personId);
+      await addAnotherMembership(orgP, s.personId);
+      await joinGroup(orgP, g, s.personId);
+      await q(sql`insert into administrative_commissions (parent_org_id, target_org_id, scope, role_id, starts_on, group_id)
+                  values (${orgP}, ${orgT}, 'full', ${commissionRole}, '2020-01-01', ${g})`);
+      add("real key: commission arm carrying role_grants.manage", s.userId, true);
+    }
+    {
+      const delegationRole = await role(orgP, "fx_delegation_real", ["domains.manage"]);
+      const g = await group(orgP, "Real-Key Delegates");
+      const s = await personWithUser("RealDelegation", "Current");
+      await fx.addMember(orgT, s.personId);
+      await addAnotherMembership(orgP, s.personId);
+      await joinGroup(orgP, g, s.personId);
+      await q(sql`insert into org_delegations (grantor_org_id, grantee_org_id, role_id, starts_on, group_id)
+                  values (${orgT}, ${orgP}, ${delegationRole}, '2020-01-01', ${g})`);
+      add("real key: delegation arm carrying domains.manage", s.userId, true);
+    }
+    {
+      const g = await group(orgT, "Domain Managers");
+      const domainsRole = await role(orgT, "fx_domains_manage", ["domains.manage"]);
+      const s = await personWithUser("Domains", "ViaGroup");
+      await fx.addMember(orgT, s.personId);
+      await joinGroup(orgT, g, s.personId);
+      await q(sql`insert into role_grants (organization_id, role_id, group_id, starts_on) values (${orgT}, ${domainsRole}, ${g}, '2020-01-01')`);
+      add("real key: group arm carrying domains.manage", s.userId, true);
+    }
+
     // Membership-level cases.
     {
       const g = await group(orgT, "Ended Members Team");
@@ -288,8 +335,8 @@ describe.skipIf(!hasDb)("presby_two_factor_required() arm B agrees with presby_e
   }, 120_000);
 
   it("covers every resolver arm with a current and a lapsed case", () => {
-    expect(scenarios.length).toBeGreaterThanOrEqual(17);
-    expect(scenarios.filter((s) => s.expected).length).toBeGreaterThanOrEqual(6);
+    expect(scenarios.length).toBeGreaterThanOrEqual(21);
+    expect(scenarios.filter((s) => s.expected).length).toBeGreaterThanOrEqual(10);
   });
 
   it("each scenario: the predicate equals the scenario's known answer AND the real resolver's", async () => {

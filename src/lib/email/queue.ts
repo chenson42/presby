@@ -89,6 +89,13 @@ export async function recordDeliveryEvent(
 // ----- Types ---------------------------------------------------------------
 
 export type EnqueueEmailInput = {
+  /**
+   * Optional row id, chosen by the caller (Community Increment 2b): a sign-in
+   * invitation's id is handed to the issue definer BEFORE the queue row is
+   * written, so the definer can store it in `email_queue_id` in the same
+   * transaction. Backward compatible: absent means the database default.
+   */
+  id?: string;
   to: string;
   /**
    * The laid-out message (DECISION-191). Only `renderEmail()` can produce a
@@ -278,6 +285,7 @@ export async function insertQueueRowInTx(
   const [row] = await tx
     .insert(emailQueue)
     .values({
+      ...(input.id ? { id: input.id } : {}),
       toEmail: input.to,
       fromEmail: input.from ?? null,
       replyTo: input.replyTo ?? null,

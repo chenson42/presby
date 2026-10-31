@@ -59,3 +59,28 @@ export async function getPersonEmail(
     doNotContact: row.do_not_contact,
   };
 }
+
+/**
+ * Which of `personIds` have a credential address on file at all (Community
+ * Increment 2b, the Community markers and the Session hand-off rows: "No email
+ * on file"). One statement for the whole page, through the same SQL function as
+ * `getPersonEmail()`, so "has an address" can never mean something different
+ * from "an invitation would go to an address". Reads nothing but the id: no
+ * address leaves the database. Like `getPersonEmail` it is RLS-scoped (a person
+ * with no membership at the current organization is simply absent).
+ *
+ * Bounded: the caller passes at most one page of ids (the reader behind the
+ * markers caps at 500).
+ */
+export async function personIdsWithCredentialEmail(tx: OrgTx, personIds: readonly string[]): Promise<Set<string>> {
+  const ids = [...new Set(personIds)];
+  if (ids.length === 0) return new Set();
+  const list = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
+  const result = await tx.execute(sql`
+    select u.id::text as id
+      from unnest(array[${list}]::uuid[]) as u(id)
+     where exists (select 1 from presby_person_email(u.id, 'credential'))
+  `);
+  const rows = (result as unknown as { rows?: Array<{ id: string }> }).rows ?? [];
+  return new Set(rows.map((r) => r.id));
+}

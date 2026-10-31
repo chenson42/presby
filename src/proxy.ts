@@ -44,6 +44,21 @@ const PROTECTION_RULES: Array<{ pattern: RegExp; required: string }> = [
 ];
 
 /**
+ * Public documentation (DECISION-293): `/help` and `/docs`, by SEGMENT
+ * boundary - `/help` and `/help/…`, never a bare `startsWith("/help")`, which
+ * would admit `/helpdesk`. Every page under these prefixes is static and
+ * session-free by construction (`dynamic = "error"`), and no token rides these
+ * paths (unlike `/invite`), so a prefix is safe here where it is not for the
+ * exact-path entries in PUBLIC_PATHS. A prefix rather than a registry-derived
+ * list because an anonymous visitor's typo'd or retired slug must reach the help
+ * 404, not be redirected to /signin (F348), and because it keeps content out of
+ * the proxy's import graph. The bypass sits before edgeAuth() and the 2FA gate,
+ * so help stays reachable mid-enrolment. A custom host never gets here.
+ */
+const isDocumentationPath = (p: string) =>
+  p === "/help" || p.startsWith("/help/") || p === "/docs" || p.startsWith("/docs/");
+
+/**
  * `/site/<segment containing a dot>` is the INTERNAL rewrite target of a
  * custom host (`/site/church-one.example/about`). On a platform host it must
  * not be reachable at all: the site key is a lookup key, and a platform-host
@@ -107,6 +122,7 @@ export async function proxy(req: NextRequest) {
   // docs/work-log/2026-08-20-public-sites.md Phase 3, "src/proxy.ts fix —
   // exact diff".
   if (pathname === "/site" || pathname.startsWith("/site/")) return NextResponse.next();
+  if (isDocumentationPath(pathname)) return NextResponse.next();
   if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
 
   const session = await edgeAuth();
@@ -141,8 +157,18 @@ export async function proxy(req: NextRequest) {
   // and is deliberately outside this gate, and it must stay outside: it
   // renders no tenant data and it is the one page a user with a lost or
   // pending organization can reach.
+  //
+  // /developer is 2FA-gated here too (F284), by SEGMENT boundary: `/developer`
+  // and `/developer/…`, never `/developerx`. The check runs before the
+  // ADMIN_ROLE shortcut below, so an admin-role holder who is required and
+  // unverified is challenged as well. Like /o/*, it has NO PROTECTION_RULES
+  // entry: whether the viewer may read it is the page gate's live read of
+  // users.is_platform_admin (DECISION-044), which the Edge cannot make.
   const isTwoFactorGated =
-    pathname.startsWith("/admin") || pathname.startsWith("/o/");
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/o/") ||
+    pathname === "/developer" ||
+    pathname.startsWith("/developer/");
   if (
     isTwoFactorGated &&
     session.user.twoFactorRequired &&
@@ -180,7 +206,9 @@ export async function proxy(req: NextRequest) {
   //
   // Auth-only routes (no feature gate): /home, /account, /account/2fa,
   // /launch, /no-organization, /o/* (the last one additionally 2FA-gated
-  // above, and authorized per-organization in the RSC layer — never here).
+  // above, and authorized per-organization in the RSC layer — never here),
+  // and /developer (likewise 2FA-gated above, and authorized per request by
+  // the page gate's live read — never by the Edge).
   // /orgs no longer reaches here — it 308s to /home before edgeAuth() ever
   // runs (next.config.ts redirects(), DECISION-124).
   return NextResponse.next();

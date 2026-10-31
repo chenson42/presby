@@ -35,8 +35,7 @@
  */
 import bcrypt from "bcryptjs";
 import { mintInvitationToken } from "../../src/lib/onboarding/invitation-token";
-import type { Sql } from "./db";
-import { withDbRetry } from "./domains-ui-fixture";
+import { withDbRetry, type Sql } from "./db";
 import { E2E_USERS, type E2ERole } from "./users";
 
 export const INVITE_NAMES = {

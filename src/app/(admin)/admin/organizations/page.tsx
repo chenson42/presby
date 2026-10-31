@@ -1,3 +1,4 @@
+import { AdminForbidden } from "@/components/admin-portal/admin-forbidden";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { eq } from "drizzle-orm";
@@ -81,14 +82,7 @@ export default async function OrganizationsListPage({
 }) {
   const session = await auth();
   if (!hasFeature(session?.user?.features, FEATURES.ADMIN_ORGANIZATIONS)) {
-    return (
-      <div>
-        <h1 className="text-2xl font-semibold">Organizations</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
-          You don&apos;t have permission to manage organization branding.
-        </p>
-      </div>
-    );
+    return <AdminForbidden title="Organizations" area="managing organizations" />;
   }
 
   const filters = parseOrgFilters(await searchParams);
@@ -153,9 +147,8 @@ export default async function OrganizationsListPage({
     <div>
       <h1 className="text-2xl font-semibold">Organizations</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Set a congregation&apos;s brand colour, logo and type pairing —
-        typically done once, on the onboarding call. This is also where an
-        abusive tenant&apos;s brand is neutralised.
+        Find an organization, see how it is set up, and open it to manage its
+        administrators, brand, public site and domains.
       </p>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">

@@ -85,6 +85,9 @@ const PLATFORM_PATHS = [
   "/api/webhooks/stripe",
   "/api/webhooks/resend",
   "/api/sites/ingest",
+  "/api/sites/ingest/plan",
+  "/api/sites/ingest/images",
+  "/api/sites/ingest/commit",
   "/api/cron/email-queue",
   "/api/cron/domains",
   "/api/does-not-exist",
@@ -105,6 +108,8 @@ const PLATFORM_PATHS = [
   "/admin",
   "/admin/organizations",
   "/developer",
+  "/developer/tables/roll_actions",
+  "/developer/schema.json",
   "/o/e2e-alpha",
   "/o/e2e-alpha/admin",
   // The Community route move (DECISION-201): the old path is redirected ONLY on a platform host (F151),
@@ -112,6 +117,16 @@ const PLATFORM_PATHS = [
   "/o/e2e-alpha/admin/members",
   "/o/e2e-alpha/admin/members/new?x=1",
   "/o/e2e-alpha/admin/community",
+  // Public documentation (DECISION-293, user-help Inc 1): a platform-host-only tree. On a church's own domain the
+  // proxy rewrites these into bundle-path space like any other platform route, so each is the neutral 404.
+  "/help",
+  "/help/signing-in",
+  "/help/planned",
+  "/help/contact",
+  // The help 404 catch-all (help/[...unmatched]) must be unreachable from a church's own domain too.
+  "/help/no-such-page/deeper",
+  "/docs",
+  "/docs/x",
 ] as const;
 
 // Looping over dozens of paths against a DEV server compiles each route on first touch; allow for it.
@@ -147,7 +162,16 @@ test.describe("platform routes on a church's own domain", () => {
   });
 
   test("a POST to a platform route is also nothing: credentials sign-in, webhooks, ingest", async ({ request, baseURL }) => {
-    for (const path of ["/api/auth/callback/credentials", "/api/auth/signout", "/api/webhooks/stripe", "/api/webhooks/resend", "/api/sites/ingest"]) {
+    for (const path of [
+      "/api/auth/callback/credentials",
+      "/api/auth/signout",
+      "/api/webhooks/stripe",
+      "/api/webhooks/resend",
+      "/api/sites/ingest",
+      "/api/sites/ingest/plan",
+      "/api/sites/ingest/images",
+      "/api/sites/ingest/commit",
+    ]) {
       const res = await rawPost(request, baseURL, HOSTS.oneCanonical, path, {
         headers: { "content-type": "application/x-www-form-urlencoded" },
         data: "email=a%40b.invalid&password=x",

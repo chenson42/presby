@@ -71,7 +71,6 @@ test.describe("2FA callback-bypass regression", () => {
     // re-navigation above, still completes sign-in normally.
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
     await enterTotpCode(page, code);
-    await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
     // Not a literal "Welcome" match — /admin's greeting band is time-of-day
     // personalized (src/components/shared/greeting-band.tsx, DECISION-125),
@@ -125,7 +124,6 @@ test.describe("2FA callback-bypass regression", () => {
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
     await enterTotpCode(page, code);
-    await page.getByRole("button", { name: /^verify$/i }).click();
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
     // Not a literal "Welcome" match — /admin's greeting band is time-of-day
     // personalized (src/components/shared/greeting-band.tsx, DECISION-125),
@@ -181,7 +179,6 @@ test.describe("2FA callback-bypass regression", () => {
     // per the security review: the victim has just proven their identity.
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
     await enterTotpCode(page, code);
-    await page.getByRole("button", { name: /^verify$/i }).click();
 
     // mfa-enrolled carries no organizations, so /launch's matrix lands it on
     // /admin — the same control shape as Test 1 — reached via /launch, never
@@ -223,7 +220,6 @@ test.describe("2FA callback-bypass regression", () => {
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
     await enterTotpCode(page, code);
-    await page.getByRole("button", { name: /^verify$/i }).click();
 
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -263,7 +259,6 @@ test.describe("2FA callback-bypass regression", () => {
 
     const code = generateSync({ secret: E2E_TOTP_TEST_SECRET });
     await enterTotpCode(page, code);
-    await page.getByRole("button", { name: /^verify$/i }).click();
 
     await page.waitForURL(/\/admin$/, { timeout: 10_000 });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();

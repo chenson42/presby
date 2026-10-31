@@ -15,7 +15,8 @@ import {
   type InviteOrg,
 } from "./support/invitation-fixture";
 import { DEAD_LINK_PHRASE } from "./support/invitation-observer";
-import { signInOnPage, submitTotp } from "./support/invitation-ui";
+import { signInOnPage } from "./support/invitation-ui";
+import { expectPanelSurvives, readPanelCodes, recordUrls } from "./support/enrolment-fixture";
 import { enterTotpCode } from "./support/totp-page";
 
 /**
@@ -27,8 +28,10 @@ import { enterTotpCode } from "./support/totp-page";
  *   short password and a refused mismatch (inline, nothing created) -> create the
  *   account -> "Your account is ready" -> sign in through the standard form ->
  *   the /totp wall walks the new account into /account/2fa ENROLMENT (the secret
- *   is read from the page, the code computed from it) -> lands in the
- *   congregation WITH AUTHORITY -> the same link is now dead.
+ *   is read from the page, the code computed from it) -> the ten recovery codes
+ *   stay on screen through the re-render (F166) -> Continue lands in the
+ *   congregation WITH AUTHORITY and NO second /totp challenge (enrolling marked
+ *   the session verified, DECISION-292) -> the same link is now dead.
  *
  * It asserts the PERSISTED outcome, not just the DOM: the account (verified,
  * 2FA required, bcrypt-hashed), the invitation row, the linked person and
@@ -126,7 +129,12 @@ test("a new invitee: preview consumes nothing, bad passwords are refused inline,
   expect(users).toHaveLength(1);
   const user = users[0];
   expect(user.verified, "the address is verified by the act of using the link").toBe(true);
-  expect(user.two_factor_required, "a new account defaults to 2FA required").toBe(true);
+  // F343 (DECISION-291): a new account's own setting is OFF by default. A founding administrator is required
+  // THROUGH THE ROLE (roles.manage and role_grants.manage are flagged requires_two_factor), which is why the
+  // sign-in walk below still reaches enrolment.
+  expect(user.two_factor_required, "a new account's own setting defaults to off").toBe(false);
+  const [viaRole] = (await sql`select presby_two_factor_required(${user.id}::uuid) as required`) as { required: boolean }[];
+  expect(viaRole.required, "required through the founding-administrator role, not the column default").toBe(true);
   expect(user.is_active).toBe(true);
   expect(user.password, "stored as a bcrypt hash, never the password").toMatch(/^\$2[aby]\$\d{2}\$/);
   expect(user.password).not.toContain(PASSWORD);
@@ -194,26 +202,26 @@ test("a new invitee: preview consumes nothing, bad passwords are refused inline,
   // The secret is in the <pre> under "Can't scan? Enter manually" (in the DOM whether or not the <details> is open).
   const secret = ((await page.locator("details pre").textContent()) ?? "").trim();
   expect(secret).toMatch(/^[A-Z2-7]{16,}$/);
-  // Six labelled digit boxes (review-polish Batch B), typed through the shared helper.
+  // Six labelled digit boxes (review-polish Batch B), typed through the shared helper. The sixth digit confirms the
+  // enrolment by itself (DECISION-257): no button press, and the assertion below is the wait.
   await enterTotpCode(page, generateSync({ secret }));
-  await page.getByRole("button", { name: "Confirm enrollment" }).click();
-  // The enrolment persists, and the page settles on the management view ("You enrolled on ..."). (The one-time
-  // "enabled" panel with the recovery codes is replaced by that view as soon as the revalidated server tree
-  // arrives, and the callbackUrl goes with it: a pre-existing behaviour of /account/2fa recorded as F166 in the
-  // work-log, not something this spec papers over - so the next step is the post-login router, as a user would.)
-  await expect(page.getByText(/you enrolled on/i)).toBeVisible({ timeout: 20_000 });
+  // F166: the one-time panel with the ten recovery codes stays on screen (the server re-render that follows enrolment
+  // no longer replaces it), and the enrolment is persisted.
+  await expect(page.getByRole("heading", { level: 1, name: "Two-factor authentication enabled" })).toBeVisible({ timeout: 30_000 });
+  await expectPanelSurvives(page);
+  expect(await readPanelCodes(page)).toHaveLength(10);
   const enrolled = (await sql`select 1 from user_totp where user_id = ${user.id}::uuid`) as unknown[];
   expect(enrolled, "the enrolment was persisted").toHaveLength(1);
 
   // --- landing, with authority -----------------------------------------------------------------------
-  // Enrolling does not verify the session: the post-login router lands on /o/<slug>, the proxy puts the
-  // 2FA challenge in front of it (destination preserved), and the new account answers it with a code from
-  // the secret it just enrolled.
-  await page.goto("/launch");
-  await page.waitForURL((url) => url.pathname === "/totp", { timeout: 30_000 });
-  expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe(`/o/${o.slug}`);
-  await submitTotp(page, secret);
+  // Enrolling marked the session verified: Continue (the sanitized callbackUrl, /launch) goes to the post-login router,
+  // which lands on /o/<slug> with NO /totp challenge in front of it.
+  const cont = page.getByRole("link", { name: "Continue" });
+  await expect(cont).toHaveAttribute("href", "/launch");
+  const urls = recordUrls(page);
+  await cont.click();
   await page.waitForURL((url) => url.pathname === `/o/${o.slug}`, { timeout: 30_000 });
+  expect(urls.filter((u) => new URL(u).pathname === "/totp"), "no second challenge after enrolling").toEqual([]);
   await expect(page.getByText(o.name).first()).toBeVisible({ timeout: 15_000 });
   await page.goto(`/o/${o.slug}/admin/roles`);
   await expect(page.getByRole("heading", { level: 1, name: "Roles" })).toBeVisible({ timeout: 20_000 });

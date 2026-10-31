@@ -217,6 +217,9 @@ describe("HomePage — platform.merged_home ON", () => {
     expect(screen.getByRole("heading", { name: "Platform" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /^Admin\b/ })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /^Developer\b/ })).toBeNull();
+    // The card describes the console as it is now, not as "the platform operations shell".
+    expect(screen.getByText("Organizations, support, accounts and platform settings.")).toBeTruthy();
+    expect(screen.queryByText(/operations shell/i)).toBeNull();
   });
 
   it("isPlatformAdmin alone (zero organizations) renders the Developer card but not Admin, and no org section — Developer-card independence (DECISION-044)", async () => {
@@ -233,6 +236,21 @@ describe("HomePage — platform.merged_home ON", () => {
     expect(screen.getByRole("heading", { name: "Platform" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /^Developer\b/ })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /^Admin\b/ })).toBeNull();
+  });
+
+  it("the Developer card describes the sections that exist, not an API or a schema reference", async () => {
+    cachedAuth.mockResolvedValue({ user: sessionUser() });
+    isFlagEnabled.mockResolvedValue(true);
+    cachedUserOrganizations.mockResolvedValue([]);
+    cachedIsPlatformAdmin.mockResolvedValue(true);
+    sessionCanAccessAdmin.mockReturnValue(false);
+
+    render(await HomePage());
+
+    expect(
+      screen.getByText("Data model, diagrams and where the engineering docs live."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Schema reference/)).toBeNull();
   });
 
   it("holding both platform predicates renders both cards", async () => {

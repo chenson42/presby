@@ -16,8 +16,8 @@ import {
   features,
 } from "@/lib/db/schema";
 import { authConfig } from "@/lib/auth/config";
-import { evaluateSignIn } from "@/lib/auth/sign-in-gate";
-import { ADMIN_ROLE, FEATURES, MEMBER_ROLE } from "@/lib/permissions";
+import { evaluateSignIn, isEmailClaimVerified } from "@/lib/auth/sign-in-gate";
+import { ADMIN_ROLE, FEATURES } from "@/lib/permissions";
 import { getRequestIp } from "@/lib/request-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import {
@@ -31,6 +31,10 @@ import {
   computeEffectiveTwoFactor,
 } from "@/lib/auth/local-login";
 import { verifyTurnstile } from "@/lib/turnstile";
+import { takeTwoFactorGrant } from "@/lib/auth/two-factor-grant";
+import { ensureDefaultRole } from "@/lib/auth/default-role";
+import { recordGoogleEmailProof } from "@/lib/auth/email-proof";
+import { connectSignedInAccount } from "@/lib/onboarding/connect";
 
 const INITIAL_ADMIN_EMAILS = (process.env.INITIAL_ADMIN_EMAILS ?? "")
   .split(",")
@@ -38,41 +42,6 @@ const INITIAL_ADMIN_EMAILS = (process.env.INITIAL_ADMIN_EMAILS ?? "")
   .filter(Boolean);
 
 const FEATURE_KEYS = Object.values(FEATURES) as string[];
-
-/**
- * Bind a freshly-signed-in user to a default role if they have none.
- *
- * Two reasons we do this here rather than relying on `events.createUser`:
- *
- *   1. `events.createUser` is fire-and-forget — the JWT callback can run
- *      before its async role insert completes, leaving the user with an
- *      empty `roles` array on first request.
- *   2. Credentials users skip the adapter entirely, so `events.createUser`
- *      never fires for them at all (this is why the seed script binds the
- *      local admin's role directly).
- *
- * Idempotent: returns early if the user already holds at least one role.
- */
-async function ensureDefaultRole(
-  userId: string,
-  email: string | null,
-): Promise<void> {
-  const existing = await db.query.userRoles.findFirst({
-    where: eq(userRoles.userId, userId),
-  });
-  if (existing) return;
-  const desiredRoleName = email && INITIAL_ADMIN_EMAILS.includes(email.toLowerCase())
-    ? ADMIN_ROLE
-    : MEMBER_ROLE;
-  const role = await db.query.roles.findFirst({
-    where: eq(roles.name, desiredRoleName),
-  });
-  if (!role) return;
-  await db
-    .insert(userRoles)
-    .values({ userId, roleId: role.id })
-    .onConflictDoNothing();
-}
 
 export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ...authConfig,
@@ -86,11 +55,14 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
-      // Google verifies email ownership at sign-in, so linking an existing
-      // user record by email is safe with Google alone. If a fork adds a
-      // second OAuth provider (GitHub, Microsoft, etc.) that does NOT verify
-      // email, set this to `false` or the second provider can impersonate a
-      // Google user by claiming their email.
+      // Linking an existing user record by email is only safe because the signIn
+      // callback refuses any sign-in whose provider did not assert
+      // `email_verified === true` (evaluateSignIn, DECISION-246). Google verifies
+      // an address only when that claim says so; Auth.js does not check it. Do
+      // not remove the gate without removing this flag. The gate refuses any
+      // provider that does not assert `email_verified === true`, and that claim
+      // is only as trustworthy as its issuer: design any second provider in, and
+      // consider setting this to `false`, before registering it.
       allowDangerousEmailAccountLinking: true,
     }),
     Credentials({
@@ -214,28 +186,44 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ],
   callbacks: {
     ...authConfig.callbacks,
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       // Delegate to the extracted gate so all branches are unit-testable.
       // See src/lib/auth/sign-in-gate.ts and DECISION-015 for rationale:
       //   - credentials → true unconditionally (authorize() already checked isActive)
+      //   - OAuth, email_verified not strictly true → false (DECISION-246),
+      //     logged without PII
       //   - OAuth, no row → true (adapter will create the user row after this)
       //   - OAuth, isActive=false → false (soft-deactivation block)
       //   - OAuth, no email → false (fail-safe)
-      return evaluateSignIn(
-        account?.provider ?? "credentials",
-        user,
-        (email) =>
-          db.query.users
-            .findFirst({
-              where: eq(users.email, email),
-              columns: { isActive: true },
-            })
-            .then((row) => row ?? null),
+      const provider = account?.provider ?? "credentials";
+      const claims = { emailVerified: profile?.email_verified };
+      const allowed = await evaluateSignIn(provider, user, claims, (email) =>
+        db.query.users
+          .findFirst({
+            where: eq(users.email, email),
+            columns: { isActive: true },
+          })
+          .then((row) => row ?? null),
       );
+      if (
+        !allowed &&
+        provider !== "credentials" &&
+        !isEmailClaimVerified(claims.emailVerified)
+      ) {
+        // Refusal is otherwise invisible (the user sees only Auth.js's generic
+        // Access Denied page). Provider and claim type only: never the email,
+        // subject id or name. No audit row: a refusal is not a mutation, and
+        // an unauthenticated party would be writing it.
+        console.warn("signIn refused: provider email not verified", {
+          provider,
+          claimType: typeof claims.emailVerified,
+        });
+      }
+      return allowed;
     },
     // The `session` callback lives in the shared authConfig so the edge
     // runtime (proxy.ts) sees the same projection.
-    async jwt({ token, user, trigger, session }) {
+    async jwt({ token, user, account, profile, trigger, session }) {
       // `user` is only present on the initial sign-in (Google callback or a
       // successful Credentials authorize). Subsequent requests carry the JWT
       // cookie only, so this block runs exactly once per session.
@@ -246,29 +234,66 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         // event runs fire-and-forget for OAuth users (the JWT callback can
         // race ahead of it), and Credentials sign-ins never fire it at all,
         // so we ensure the default role assignment + role load happen here
-        // synchronously below.
+        // synchronously below. For an INITIAL_ADMIN_EMAILS address the same
+        // call also switches the person's own two-factor setting on (F343,
+        // DECISION-291), which is why it must stay ABOVE the `dbUser` read.
         token.roles = undefined;
-        await ensureDefaultRole(user.id, user.email ?? null);
+        await ensureDefaultRole(user.id, user.email ?? null, INITIAL_ADMIN_EMAILS);
+
+        // Community Increment 2b (DECISION-225/226): record address proof, then
+        // connect the sign-in to the one person its proven address identifies.
+        // This is the ONLY place either runs at sign-in (R39), and both run
+        // BEFORE `token.twoFactorRequired` is computed below, so a
+        // congregation's two-factor requirement applies to a new link in the
+        // same cookie. Two independent try/catch blocks: a failure of either
+        // NEVER fails sign-in, and logs an error class only (no address, no id).
+        //
+        // Nothing here changes a session claim. `twoFactorVerified` stays false
+        // (a connect at sign-in therefore carries no factor flag: the type makes
+        // passing one a compile error), and this branch reads nothing from the
+        // update payload (DECISION-230). It runs only from a real provider or
+        // Credentials callback, never from a browser-supplied payload.
+        let proof: "google" | "account" = "account";
+        try {
+          // `isEmailClaimVerified` is the same predicate the signIn gate used
+          // (F231, DECISION-246), re-checked here as a post-condition: proof is
+          // never recorded from a claim that is not the boolean `true`.
+          if (
+            account?.provider === "google" &&
+            isEmailClaimVerified(profile?.email_verified) &&
+            profile?.email
+          ) {
+            if (await recordGoogleEmailProof({ userId: user.id, address: profile.email })) {
+              proof = "google";
+            }
+          }
+        } catch {
+          console.error("[auth] email proof failed");
+        }
+        try {
+          await connectSignedInAccount({
+            userId: user.id,
+            via: "sign_in",
+            proof,
+            actorEmail: user.email ?? null,
+          });
+        } catch {
+          console.error("[auth] connect failed");
+        }
+
         await db
           .update(users)
           .set({ lastLoginAt: new Date(), failedLoginAttempts: 0, lockedUntil: null })
           .where(eq(users.id, user.id));
       }
 
-      // Server-action-triggered updates (e.g. 2FA verified, role assigned)
-      // call `unstable_update`; we merge the partial session payload back into
-      // the token here so subsequent requests see the new state.
-      if (trigger === "update" && session?.user) {
-        if (typeof session.user.twoFactorVerified === "boolean") {
-          token.twoFactorVerified = session.user.twoFactorVerified;
-        }
-        if (Array.isArray(session.user.roles)) {
-          token.roles = session.user.roles;
-        }
-        if (Array.isArray(session.user.features)) {
-          token.features = session.user.features;
-        }
-      }
+      // An update (`trigger === "update"`) reads NOTHING from its payload: the
+      // same trigger arrives from a server action's `unstable_update()` and
+      // from a request a browser can make itself, and the callback cannot tell
+      // them apart. Everything an update changes is re-derived below from the
+      // database (activity, 2FA requirement, roles, features); the one claim
+      // that is not derivable, `twoFactorVerified`, is set only inside a
+      // server-side verification grant (DECISION-230).
 
       // Stale-JWT defense + role refresh.
       //
@@ -277,7 +302,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
       // only thing standing between a deleted/deactivated user and a still-
       // valid signed cookie. For role + feature changes to apply mid-session,
       // call `unstable_update({})` from the mutating action; this re-runs
-      // the role lookup below.
+      // the role lookup below (an update never carries data into the token).
       if (!token.sub) return token;
 
       const userId = token.sub;
@@ -291,12 +316,22 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         return {};
       }
       token.isActive = dbUser.isActive;
-      // Effective twoFactorRequired: (this user's column OR any congregation
-      // they belong to requiring it) AND the auth.require_2fa master switch.
-      // The per-church arm goes through a SECURITY DEFINER function — no org
-      // GUC exists at sign-in, so a plain query would be filtered to zero rows
-      // for exactly the users it protects (F26). Falls back on DB error so a
-      // blip neither ungates nor strands anyone. See DECISION-026.
+      // The only writer of `twoFactorVerified` besides the sign-in reset above:
+      // the TOTP / recovery-code action wraps its `unstable_update({})` in a
+      // single-use grant for this user. A request with no grant, or one for
+      // another user, leaves the claim exactly as it was.
+      if (trigger === "update" && takeTwoFactorGrant(userId)) {
+        token.twoFactorVerified = true;
+      }
+      // Effective twoFactorRequired: (this user's own column OR a congregation
+      // they belong to requiring it OR a role they hold that carries a flagged
+      // key) AND the auth.require_2fa master switch. The last two arms go
+      // through one SECURITY DEFINER function, presby_two_factor_required() -
+      // no org GUC exists at sign-in, so a plain query would be filtered to
+      // zero rows for exactly the users it protects (F26). New accounts default
+      // to a false column (DECISION-291), so most of them now pay that call on
+      // every request. Falls back on DB error so a blip neither ungates nor
+      // strands anyone. See DECISION-026.
       token.twoFactorRequired = await computeEffectiveTwoFactor(
         dbUser.twoFactorRequired,
         userId,

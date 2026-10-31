@@ -28,8 +28,10 @@ import { neon } from "@neondatabase/serverless";
 import { E2E_EMAILS, E2E_USER_LIST } from "./users";
 import { seedE2EUsers } from "./seed-users";
 import { seedE2EOrgs } from "./seed-orgs";
+import { withDbRetry } from "./db";
 import { sweepStaleDomainsUiFixtures } from "./domains-ui-fixture";
 import { sweepStaleInvitationFixtures } from "./invitation-fixture";
+import { sweepStaleParishFixtures } from "./parish-fixture";
 
 const AUTH_DIR = path.resolve(__dirname, ".auth");
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -84,13 +86,16 @@ async function cleanupTestFeedback(dbUrl: string): Promise<void> {
 
   try {
     const sql = neon(dbUrl);
-    const deleted = await sql`
-      DELETE FROM feedback
-      WHERE user_id IN (
-        SELECT id FROM users WHERE email = ANY(${E2E_EMAILS})
-      )
-      RETURNING id
-    `;
+    const deleted = await withDbRetry(
+      "delete test feedback",
+      () => sql`
+        DELETE FROM feedback
+        WHERE user_id IN (
+          SELECT id FROM users WHERE email = ANY(${E2E_EMAILS})
+        )
+        RETURNING id
+      `,
+    );
     console.log(
       `[globalSetup] cleanup: deleted ${deleted.length} test feedback rows`
     );
@@ -126,6 +131,18 @@ async function sweepStaleInvitationFixtureOrgs(platformDbUrl: string): Promise<v
   if (!platformDbUrl) return;
   const removed = await sweepStaleInvitationFixtures(neon(platformDbUrl));
   if (removed > 0) console.warn(`[globalSetup] swept ${removed} stale e2e-invite-* organization(s) left by an earlier run`);
+}
+
+/**
+ * The parish-management specs (e2e/parishes.spec.ts, e2e/hydration/parishes-controls.spec.ts) build a throwaway
+ * congregation (`e2e-parish-*`) in which the `mfa-enrolled` user is a member. If teardown lost to a Neon connection
+ * drop, that membership would change the user's post-login landing for every later spec. Sweep any leftover (and its
+ * fixed-range people) before a session is acquired, exactly as the invitation and custom-domains fixtures do.
+ */
+async function sweepStaleParishFixtureOrgs(platformDbUrl: string): Promise<void> {
+  if (!platformDbUrl) return;
+  const removed = await sweepStaleParishFixtures(neon(platformDbUrl));
+  if (removed > 0) console.warn(`[globalSetup] swept ${removed} stale e2e-parish-* organization(s) left by an earlier run`);
 }
 
 async function signInAndSave(
@@ -318,10 +335,16 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     "";
 
   // The suite owns its users. Any failure here throws — see the file header.
-  await seedE2EUsers(dbUrl);
-  await seedE2EOrgs(platformDbUrl);
+  // Both re-run on every start against a populated database (idempotent by header), so a
+  // dropped connection mid-seed is retried as a whole.
+  // The OWNER connection: since drizzle/0065 (users_guard_email_proof, Community
+  // Increment 2b) a non-owner role may not write users.email_verified, and the
+  // fixture roster is stamped proven. Proof is an owner-path fact.
+  await withDbRetry("seed e2e users", () => seedE2EUsers(platformDbUrl));
+  await withDbRetry("seed e2e orgs", () => seedE2EOrgs(platformDbUrl));
   await sweepStaleDomainsUiFixtureOrgs(platformDbUrl);
   await sweepStaleInvitationFixtureOrgs(platformDbUrl);
+  await sweepStaleParishFixtureOrgs(platformDbUrl);
   await cleanupTestFeedback(dbUrl);
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });

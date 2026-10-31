@@ -19,15 +19,26 @@
  *      - docs/decisions.md   every DECISION-NNN is numbered and permanent
  *      - git log             every feat:/fix: commit is a fact
  *
- *    If a decision has been recorded or a feature or fix has shipped since the
- *    newest briefing entry, the digest is behind and this says so with numbers.
- *    That converts "remember to write it up" from discipline into a signal.
+ *    If a decision has been recorded that the digest does not name, or a
+ *    feature or fix has shipped since the marker commit, the digest is behind
+ *    and this says so with numbers. That converts "remember to write it up"
+ *    from discipline into a signal.
+ *
+ *    The decision half counts recorded DECISION numbers ABOVE the marker that
+ *    briefings.md does NOT name (`DECISION-0*N`, or inside a range written
+ *    `DECISION-215–219`, `DECISION-215-219` or `DECISION-215 to DECISION-219`).
+ *    It is deliberately not `max - marker`: numbers are pre-assigned out of
+ *    order (Workflow Rule 16) and some are never assigned, so a high-water
+ *    mark overcounts the gaps and goes blind to a late-landing number below
+ *    the highest one. The marker stays at the contiguous floor. A number
+ *    mentioned in passing silences it (accepted): the check measures naming,
+ *    not prose.
  *
  * Always exits 0. Informational only; never blocks session startup.
  * Silent when there is nothing unread and nothing missing.
  */
-import { readFileSync, existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -35,15 +46,85 @@ const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BRIEFINGS = join(projectRoot, "docs", "briefings.md");
 const DECISIONS = join(projectRoot, "docs", "decisions.md");
 
-/** Highest DECISION-NNN recorded in the decisions log. */
-function highestDecision(text) {
+/** Widest `DECISION-A–B` range read as a range; wider is a date or a typo. */
+const MAX_RANGE = 60;
+
+/**
+ * Distinct DECISION numbers recorded in the decisions log, sorted.
+ *
+ * @param {string} text
+ * @returns {number[]}
+ */
+export function recordedDecisions(text) {
   // Two heading styles coexist: `## DECISION-NNN:` (through 121) and the
   // bold paragraph `**DECISION-NNN` (122 onward). Count both, or the
   // decision half of the staleness signal goes silent.
   const nums = [...text.matchAll(/^(?:## |\*\*)DECISION-(\d+)/gm)].map((m) =>
     Number(m[1]),
   );
-  return nums.length ? Math.max(...nums) : 0;
+  return [...new Set(nums)].sort((a, b) => a - b);
+}
+
+/**
+ * Every DECISION number the briefings text names, ranges expanded inclusively.
+ * A reversed range or one wider than MAX_RANGE expands to nothing (only its
+ * first endpoint, and its second when written with its own `DECISION-`, count).
+ *
+ * @param {string} text
+ * @returns {Set<number>}
+ */
+export function namedDecisions(text) {
+  const named = new Set();
+  const re = /DECISION-0*(\d+)(?:\s*(?:–|-|to)\s*(DECISION-)?0*(\d+))?/g;
+  for (const m of text.matchAll(re)) {
+    const first = Number(m[1]);
+    named.add(first);
+    if (m[3] === undefined) continue;
+    const second = Number(m[3]);
+    if (second >= first && second - first <= MAX_RANGE) {
+      for (let n = first; n <= second; n++) named.add(n);
+    } else if (m[2] !== undefined) {
+      named.add(second);
+    }
+  }
+  return named;
+}
+
+/**
+ * Recorded numbers above the marker's floor that no entry names.
+ *
+ * @param {number[]} recorded
+ * @param {Set<number>} named
+ * @param {number} floor
+ * @returns {number[]}
+ */
+export function unnamedAboveFloor(recorded, named, floor) {
+  return recorded.filter((n) => n > floor && !named.has(n));
+}
+
+/**
+ * The behind-line for the session banner, or null when nothing is behind.
+ *
+ * @param {number[]} unnamed - sorted unnamed decision numbers
+ * @param {number | null} commits - feat/fix commits since the marker commit
+ * @returns {string | null}
+ */
+export function renderBehindLine(unnamed, commits) {
+  const parts = [];
+  const pad = (n) => `DECISION-${String(n).padStart(3, "0")}`;
+  if (unnamed.length > 0) {
+    const n = unnamed.length;
+    parts.push(
+      n <= 5
+        ? `${n} decision${n === 1 ? "" : "s"} not yet named (${unnamed.map(pad).join(", ")})`
+        : `${n} decisions not yet named (newest ${pad(unnamed[n - 1])})`,
+    );
+  }
+  if (commits && commits > 0) {
+    parts.push(`${commits} feat/fix commit${commits === 1 ? "" : "s"}`);
+  }
+  if (!parts.length) return null;
+  return `briefings are BEHIND by ${parts.join(" and ")} — write them up and name each DECISION in an entry, then move the covers: marker`;
 }
 
 /**
@@ -58,8 +139,9 @@ function readCoverage(text) {
 
 function shippedSince(commit) {
   try {
-    const out = execSync(
-      `git log ${commit}..HEAD --oneline --format=%s -- . 2>/dev/null`,
+    const out = execFileSync(
+      "git",
+      ["log", `${commit}..HEAD`, "--format=%s", "--", "."],
       { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
     return out
@@ -89,28 +171,15 @@ function main() {
   // Staleness: has anything happened since the digest was last updated?
   const coverage = readCoverage(text);
   if (coverage) {
-    const stale = [];
-
-    if (existsSync(DECISIONS)) {
-      const latest = highestDecision(readFileSync(DECISIONS, "utf8"));
-      const behind = latest - coverage.decision;
-      if (behind > 0) {
-        stale.push(
-          `${behind} decision${behind === 1 ? "" : "s"} (through DECISION-${String(latest).padStart(3, "0")})`,
-        );
-      }
-    }
-
-    const commits = shippedSince(coverage.commit);
-    if (commits && commits > 0) {
-      stale.push(`${commits} feat/fix commit${commits === 1 ? "" : "s"}`);
-    }
-
-    if (stale.length) {
-      lines.push(
-        `briefings are BEHIND by ${stale.join(" and ")} — write them up, then move the covers: marker`,
-      );
-    }
+    const unnamed = existsSync(DECISIONS)
+      ? unnamedAboveFloor(
+          recordedDecisions(readFileSync(DECISIONS, "utf8")),
+          namedDecisions(text),
+          coverage.decision,
+        )
+      : [];
+    const behind = renderBehindLine(unnamed, shippedSince(coverage.commit));
+    if (behind) lines.push(behind);
   } else {
     lines.push(
       "briefings.md has no covers: marker — staleness cannot be measured",
@@ -124,4 +193,6 @@ function main() {
   console.log("==========================");
 }
 
-main();
+// Run only when invoked directly (not imported by tests).
+const invoked = process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (invoked) main();

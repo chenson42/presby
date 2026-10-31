@@ -39,6 +39,10 @@ const PERMISSION_LABELS: Record<string, string> = {
   "tickets.file": "support tickets",
   "staff.manage": "staff",
   "domains.manage": "website domains",
+  // careers Inc 1, Copy D1: the second label names the accepted residual
+  // (DECISION-265) in plain words rather than hiding it.
+  "careers.manage": "job openings",
+  "careers.applicants": "job applications and resumes",
   "congregation_oversight.manage": "congregation oversight",
 };
 

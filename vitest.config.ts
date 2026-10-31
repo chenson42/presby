@@ -17,6 +17,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // next-auth's ESM build imports "next/server" without an extension, which
+    // Node's resolver rejects when the package is externalized. Inlining it
+    // lets Vite resolve it, so a test can drive the real NextAuth handlers
+    // (src/auth.session-update.test.ts).
+    server: { deps: { inline: [/next-auth/] } },
     include: [
       "src/**/*.test.ts",
       "src/**/*.test.tsx",

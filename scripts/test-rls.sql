@@ -147,7 +147,9 @@ begin;
   -- carries no officer_terms row by design (no PC(USA) office corresponds to it).
   -- Portal home + directory v2, Increment 4: +2 district-scoped deacon terms
   -- for Priya Balakrishnan (one ended/South, one active/North) = 9.
-  select assert_eq((select count(*) from officer_terms), 9, 'alder: sees own officer terms');
+  -- Parish management (drizzle/0068, scripts/parishes/seed-dev-parishes.sql):
+  -- +1 Moderator of the Board of Deacons seat for Wren Thackeray = 10.
+  select assert_eq((select count(*) from officer_terms), 10, 'alder: sees own officer terms');
 commit;
 
 begin;
@@ -1091,8 +1093,10 @@ commit;
 -- ---------------------------------------------------------------------------
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  select assert_eq((select count(*) from org_units), 2,
-                   'alder: sees its own two districts');
+  -- Parish management (drizzle/0068, scripts/parishes/seed-dev-parishes.sql):
+  -- +1 archived district (East District) = 3.
+  select assert_eq((select count(*) from org_units), 3,
+                   'alder: sees its own three districts (one archived)');
 commit;
 
 begin;
@@ -1123,14 +1127,25 @@ rollback;
 
 -- Composite FK (F2): a deacon term at Alder Creek must not reference a
 -- district that belongs to another org, even one that genuinely exists.
+--
+-- F262 (drizzle/0068, R2): DELETE on org_units is revoked from presby_app
+-- (districts are archived, never deleted), so the fixture district can no
+-- longer be created in one transaction and deleted in another. ONE
+-- transaction now inserts it under Bramblewood's context, switches to Alder
+-- Creek's, asserts the refusals (each do-block's exception handler is its own
+-- savepoint), and rolls everything back: nothing is ever deleted.
+--
+-- Two assertions where there was one: since 0068 an OPEN term naming a
+-- district is checked first by officer_terms_org_unit_target_guard, which
+-- (looking the district up by Alder Creek's organization_id) refuses it as
+-- missing with the same foreign_key_violation. A CLOSED term is history the
+-- guard deliberately skips, so it reaches the composite FK itself, and that
+-- is the case that still proves F2 by the constraint's own name.
 begin;
   select set_config('app.current_org_id', :BRAMBLE, true);
   insert into org_units (id, organization_id, unit_type, name)
   values ('a2000000-0000-0000-0000-0000000000ff', '33333333-3333-3333-3333-333333333333',
           'district', 'Bramblewood Fixture District');
-commit;
-
-begin;
   select set_config('app.current_org_id', :ALDER, true);
   do $$
   begin
@@ -1141,14 +1156,25 @@ begin;
             '2026-01-01');
     raise exception 'FAIL F2 — an alder-creek officer term referenced another org''s district';
   exception when foreign_key_violation then
+    raise notice 'pass  open term: cross-org district reference rejected (target guard or FK, F2)';
+  end $$;
+  do $$
+  declare v_c text;
+  begin
+    insert into officer_terms (organization_id, person_id, office, org_unit_id, starts_on, ends_on)
+    values ('22222222-2222-2222-2222-222222222222',
+            'c0000000-0000-0000-0000-000000000002', -- Tobias Renwick
+            'deacon', 'a2000000-0000-0000-0000-0000000000ff', -- Bramblewood's district
+            '2019-01-01', '2020-01-01');
+    raise exception 'FAIL F2 — a closed alder-creek officer term referenced another org''s district';
+  exception when foreign_key_violation then
+    get stacked diagnostics v_c = constraint_name;
+    if v_c is distinct from 'officer_terms_org_unit_fk' then
+      raise exception 'FAIL F2 — expected officer_terms_org_unit_fk, got %', v_c;
+    end if;
     raise notice 'pass  officer_terms_org_unit_fk: cross-org district reference rejected (F2)';
   end $$;
 rollback;
-
-begin;
-  select set_config('app.current_org_id', :BRAMBLE, true);
-  delete from org_units where id = 'a2000000-0000-0000-0000-0000000000ff';
-commit;
 
 -- The derivation itself: North District has an open ('vacant'-free) deacon
 -- term; South District's term ENDED with no successor recorded, so the same
@@ -7909,7 +7935,7 @@ begin;
     1, 'DECISION-152: and that permission is statistics.publish — the same authority that files a return retracts it (no statistics.withdraw)');
   select assert_eq(
     (select count(*) from app_roles where organization_id is null),
-    6, 'DECISION-152: there are now SIX template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), and treasurer + giving_recorder (drizzle/0055)');
+    7, 'DECISION-152: there are now SEVEN template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), treasurer + giving_recorder (drizzle/0055), and hiring_committee (drizzle/0071, DECISION-265)');
   select assert_eq(
     (select count(*) from app_role_permissions rp
        join app_roles r on r.id = rp.role_id
@@ -8033,8 +8059,15 @@ begin;
   -- 'staff', current_roll null, NO roll_actions row — the platform must not
   -- fabricate a roll fact, and a pending roll action at an org with no
   -- seated Session is unapprovable by construction.
-  insert into people (id, user_id, first_name, last_name)
-  values (:FA_PERSON, :FOUNDING_USER, 'Fixture', 'FoundingAdmin44');
+  --
+  -- drizzle/0065 (F186, Community Increment 2b): presby_app may no longer
+  -- write people.user_id at all — people_guard_user_link refuses every
+  -- non-owner role. Every assertion in 44a/44b is about the PERSON's
+  -- permissions (presby_has_permission(:FA_PERSON, ...)), never the account,
+  -- so the designee is inserted unlinked; the link is acceptance's to write
+  -- (presby__bind_person_account / the accept core), and section 65 proves it.
+  insert into people (id, first_name, last_name)
+  values (:FA_PERSON, 'Fixture', 'FoundingAdmin44');
   insert into memberships (organization_id, person_id, engagement_status, current_roll)
   values (:ALDER, :FA_PERSON, 'staff', null);
 
@@ -8223,26 +8256,35 @@ rollback;
 --      assume it") the next free migration number is NOT shipped by that pipeline and is recorded as a
 --      follow-up instead.
 --
---      So (iv) is written here as its own negative: a live demonstration
---      that a second live people row sharing a user_id is currently
---      ACCEPTED. This is the failing-first half of (iv), preserved in the
---      suite rather than in a work-log paragraph. WHEN THE FOLLOW-UP LANDS
---      THE INDEX, this block is what flips: replace the assert_eq below with
---      a `do $$ … exception when unique_violation …` block and (iv) becomes
---      the positive assertion Ruling 9 asked for.
+--      So (iv) was written here as its own negative: a live demonstration
+--      that a second live people row sharing a user_id was ACCEPTED from
+--      presby_app.
+--
+--      drizzle/0065 (F186, Community Increment 2b) changed what presby_app
+--      can do: people_guard_user_link refuses EVERY non-owner write of
+--      people.user_id, so presby_app can no longer create a link at all, let
+--      alone a second one. The demonstration therefore splits:
+--        - from presby_app, the duplicate cannot be created: the very first
+--          linked insert is refused (asserted below);
+--        - the F110 index is STILL deferred: the owner path (fixtures,
+--          getPlatformDb()) can still create two live rows sharing a user_id,
+--          and the seeded router.dup@ pair at fernwood is that state, pinned
+--          by 44e below (and proven from the owner side in
+--          src/lib/db/domain/sign-in-invitations.db.test.ts).
+--      WHEN THE FOLLOW-UP LANDS THE INDEX, 44e is what flips.
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  insert into people (id, user_id, first_name, last_name)
-  values (:FA_DUP_A, :FOUNDING_USER, 'Fixture', 'DupA44');
-  insert into memberships (organization_id, person_id, engagement_status)
-  values (:ALDER, :FA_DUP_A, 'staff');
-  insert into people (id, user_id, first_name, last_name)
-  values (:FA_DUP_B, :FOUNDING_USER, 'Fixture', 'DupB44');
-  insert into memberships (organization_id, person_id, engagement_status)
-  values (:ALDER, :FA_DUP_B, 'staff');
-  select assert_eq(
-    (select count(*) from people where user_id = :FOUNDING_USER and merged_into_id is null),
-    2, '44d (iv) DEFERRED: two live people rows still share one user_id — people_user_id_unique_idx does not exist yet (F110 follow-up; see this section''s header)');
+  do $$
+  begin
+    insert into people (id, user_id, first_name, last_name)
+    values ('fa000000-0000-0000-0000-00000000000a', 'e0000000-0000-0000-0000-0000000000f5', 'Fixture', 'DupA44');
+    raise exception 'FAIL 44d (iv): presby_app inserted a person linked to an account';
+  exception when insufficient_privilege then
+    if sqlerrm <> 'people: user_id is bound only on the owner path, by invitation acceptance or by sign-in connection' then
+      raise exception 'FAIL 44d (iv): wrong refusal: %', sqlerrm;
+    end if;
+    raise notice 'pass  44d (iv): presby_app cannot create a linked person, so cannot create a second live people row on one user_id (F186, drizzle/0065 section 6); the F110 index stays deferred and 44e pins the owner-made fixture';
+  end $$;
 rollback;
 
 -- 44e. The blocker, pinned. The suite cannot take a global inventory of
@@ -8653,3 +8695,54 @@ rollback;
 --     fixture, so it is never run against production.
 -- ===========================================================================
 \ir person-emails/test-rls-64.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/public-events-calendar (integration).
+-- 67. Public events calendar (drizzle/0067_presby_public_events_calendar.sql).
+--     Its own file, as 46, 47, 59-62 and 64 above; \ir resolves relative to
+--     this script. It needs the test helpers and the seed's public-calendar
+--     fixture (Fernwood's live site), so it is never run against production.
+-- ===========================================================================
+\ir public-calendar/test-rls-67.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/parish-management (integration).
+-- 68. Parish (deacon-district) management (drizzle/0068_presby_parishes.sql).
+--     Its own file, as 46, 47, 59, 60, 61, 62 and 64 above; \ir resolves
+--     relative to this script. It needs the test helpers and the seed's
+--     parishes fixture (scripts/parishes/seed-dev-parishes.sql, included at
+--     the end of scripts/seed-dev.sql), so it is never run against production.
+-- ===========================================================================
+\ir parishes/test-rls-68.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/careers (integration).
+-- 71. Careers, Increment 1: job postings (drizzle/0071_presby_careers.sql).
+--     Its own file, as 46, 47, 59, 60, 61, 62, 64 and 67 above; \ir resolves
+--     relative to this script. It needs the test helpers and the seed's
+--     careers fixture (two live sites), so it is never run against
+--     production.
+-- ===========================================================================
+\ir careers/test-rls-71.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/public-asset-allowlist (integration).
+-- 72. Public asset audience (drizzle/0072_presby_blob_audience.sql). Its own
+--     file, as 46, 47 and 59-64 above; \ir resolves relative to this script.
+--     It needs the test helpers and scripts/seed-dev.sql's Alder Creek
+--     fixture (no seed change), so it is never run against production.
+-- ===========================================================================
+\ir assets/test-rls-72.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/signin-invites (integration).
+-- 65. Sign-in invitations, address proof, accept in place and auto-connect
+--     (drizzle/0065_presby_sign_in_and_connect.sql). Its own file, as 46, 47,
+--     59-62, 64, 67, 68, 71 and 72 above; \ir resolves relative to this
+--     script. It needs the test helpers and the seed's sign-in fixture
+--     (scripts/sign-in-invitations/seed-dev-sign-in.sql), so it is never run
+--     against production. Section 44's presby_app link writes were converted
+--     in the same integration (F186: presby_app no longer writes
+--     people.user_id).
+-- ===========================================================================
+\ir sign-in-invitations/test-rls-65.sql

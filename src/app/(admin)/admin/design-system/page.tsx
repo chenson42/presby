@@ -1,5 +1,10 @@
 "use client";
 
+// NO PAGE-LEVEL PERMISSION KEY, BY DESIGN (F281): this is a reference page,
+// door-level like the Dashboard. Anyone `ADMIN_DASHBOARD` admits may read it,
+// and the console nav lists it for them (`requiredFeature: null` in
+// src/lib/admin-portal/nav.ts).
+//
 // A static review page for P0.5 slice a — every primitive and token in one
 // screen so the operator can sign off without clicking through a dozen admin
 // pages. 'use client' for the whole file rather than three small wrapper

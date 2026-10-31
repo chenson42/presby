@@ -17,7 +17,9 @@
  *      connectional diagram's labels.
  *   4. The copy names congregations, presbyteries, and synods as distinct
  *      served levels, and uses "PresbyPortal" (not "presby") in prose.
- *   5. The honest pre-release note survives.
+ *   5. The honest early-release line ("PresbyPortal is in early release.")
+ *      replaces the old pre-release note, which became false when
+ *      congregations went live (user-help Inc 1, R13).
  *   6. The sponsor line, architecture teaser (with its GitHub doc link), and
  *      get-involved section (with its GitHub repo link, no invented
  *      contribution process) all render.
@@ -51,6 +53,15 @@ describe("/ — signed out", () => {
     expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
     expect(screen.queryByText(/welcome back/i)).toBeNull();
   });
+
+  it("shows a Help link to /help", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    const el = await Home();
+    render(el);
+
+    expect(screen.getByRole("link", { name: "Help" }).getAttribute("href")).toBe("/help");
+  });
 });
 
 describe("/ — signed in", () => {
@@ -65,6 +76,17 @@ describe("/ — signed in", () => {
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
     expect(screen.getByText(/welcome back/i).textContent).toMatch(/Jamie/);
+  });
+
+  it("shows the same Help link to /help beside Continue and Sign out", async () => {
+    mockAuth.mockResolvedValue({ user: { name: "Jamie" } });
+
+    const el = await Home();
+    render(el);
+
+    expect(screen.getByRole("link", { name: "Help" }).getAttribute("href")).toBe("/help");
+    expect(screen.getByRole("link", { name: "Continue" }).getAttribute("href")).toBe("/launch");
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
   });
 
   it("falls back to email when no name is on the session", async () => {
@@ -154,15 +176,15 @@ describe("/ — copy content", () => {
     expect(screen.queryByText(/worship/i)).toBeNull();
   });
 
-  it("keeps the honest pre-release note", async () => {
+  it("says PresbyPortal is in early release, and no longer claims to be pre-release", async () => {
     mockAuth.mockResolvedValue(null);
 
     const el = await Home();
     render(el);
 
-    expect(
-      screen.getByText(/pre-release\. nothing here is a live congregation\./i),
-    ).toBeTruthy();
+    expect(screen.getByText("PresbyPortal is in early release.")).toBeTruthy();
+    expect(screen.queryByText(/pre-release/i)).toBeNull();
+    expect(screen.queryByText(/nothing here is a live congregation/i)).toBeNull();
   });
 
   it("uses the settled PresbyPortal name in prose, not the bare 'presby' placeholder", async () => {

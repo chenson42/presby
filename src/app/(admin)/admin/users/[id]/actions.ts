@@ -68,14 +68,20 @@ export async function setTwoFactorRequired(input: {
 // Wipe all TOTP state for a user: enrolled secret, recovery codes, and pending
 // enrollment. Does NOT clear a trusted-device cookie — this starter has none.
 //
-// The three DELETEs are sequential and idempotent. The Neon HTTP driver does
-// not support db.transaction() on the pooled connection, so we follow the same
-// pattern as resetEnrollmentAction in src/app/(admin)/admin/2fa/actions.ts.
-// For atomic multi-write, use db.batch() instead — see DECISION-014 in docs/decisions.md.
+// The three DELETEs are sequential and idempotent; each is safe to repeat, so a
+// partial failure is fixed by pressing the button again. db.transaction() IS
+// available here (the pooled WebSocket driver, F28 - the Neon HTTP driver this
+// comment used to blame is long gone), so a write that must be atomic with
+// another, like the platform-role grant and its two-factor setting in
+// ../actions.ts, uses it; do not copy this sequential shape for that.
 //
 // Known gap: the target user's twoFactorVerified JWT claim stays true until
 // their JWT expires (typically 30 days). There is no session DB to invalidate
-// the token. The user will be required to re-enroll on their next sign-in.
+// the token, and the claim can only be set by the verification action's
+// server-side grant (DECISION-230), never cleared from here. If something
+// requires two-factor of this user (their own setting, a role or a
+// congregation's policy), they are asked to enrol again at their next sign-in;
+// if nothing does, they are not.
 export async function forceResetTwoFactor(input: {
   userId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {

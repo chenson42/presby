@@ -3,11 +3,166 @@
 **Read this first.** Then `docs/schema-design.md` for rationale and the
 findings log, and the newest file in `docs/work-log/`.
 
-Updated 2026-10-24 (zod 4 integrated at v0.42.2; v0.41.0, v0.42.0 and v0.42.1 are live).
+Updated 2026-10-28: v0.49.0 is on `main`; user help Increment 1 is integrated on its branch as v0.50.0 (see the `2al` line below). Earlier, 2026-10-25: v0.43.0 (platform admin dashboard, PR #55) is merged to `main`; the public events calendar (events Increment 4) has `main` merged into its branch and is integrated as v0.44.0, waiting for migration 0067 to be applied to production BEFORE it merges.
 
 ---
 
-## RESUME HERE — 2026-10-24: v0.41.0, v0.42.0 and v0.42.1 are live; zod 4 is integrated at v0.42.2, PR pending
+## RESUME HERE — 2026-10-25 (latest): 0.43.0 is merged; the public events calendar is integrating as v0.44.0; apply 0067 to production BEFORE merging
+
+`main` is at `2a25584`: v0.42.5 plus **v0.43.0** (platform admin redesign Increment 1, PR #55: the `/admin` dashboard, grouped nav, phone menu,
+`error.tsx`, no `loading.tsx` under `(admin)`; DECISION-251/252/253/255; F274-F276 and F281 in `docs/schema-design-2.md` section 2aa; no
+migration). `pipeline/public-events-calendar` (worktree `presby-cal`, Neon `pipeline-public-events-calendar`, port 3500) has merged `main` and
+stays **v0.44.0**: the release-note chain is v0.42 to v0.43 to v0.44, and its findings are section **2ab** (F250-F256; DECISION-238-241). QA run 2
+PASS, Phase 6 SHIP WITH NOTES.
+
+**The calendar's deploy order is unchanged: apply 0067 to production BEFORE merging.** Every merge to `main` auto-deploys and the new code selects
+`events.website_listed`. The runbook is `docs/deployment.md` "Public events calendar (0067)". Nothing is public until the
+`org_portal.public_calendar` toggle is on, the site's maintainer places the `eventsCalendar` slot, and an editor ticks the per-event box. The three
+not-done items (real-iPhone check before any toggle goes on; the FPCW public-site integration; the custom-host check and the Track K event import
+before DNS moves) are `docs/TODO.md` lines; the detail is in the previous handoff below.
+
+**Next:** `/pre-push`, snapshot production, apply 0067, `/merge-pr`, deploy, smoke the events admin page and an anonymous public-site page, then
+remove the worktree and Neon branch. Platform admin redesign Increment 2 Phase 3 proceeds from `main` in `presby-padmin`.
+
+**Next free numbers:** DECISION-**262**, F**289**, migration **0071** (these are the platform-admin handoff's figures and already count this
+pipeline's DECISION-238-241, F250-F256 and 0067). Findings subsection `2ab` is now taken (public events calendar); the next is `2ac`.
+Parish management (0068, DECISION-242-245, F258-F265) took `2ac`; the next findings subsection is `2ad`. Its numbers were pre-assigned, so the figures above are unchanged.
+Developer portal Increment 1 (v0.46.0, DECISION-258/261, F283-F285 and F288, no migration) took `2ad`; the next findings subsection is `2ae`. The public asset allowlist (0072, DECISION-277, F289, F340, F341) took `2ae`; the next findings subsection is `2af`. Its numbers were pre-assigned, so the figures above are unchanged. Its numbers were pre-assigned (DECISION-259/260, F286/F287 are Increments 2 and 3), so the figures above are unchanged.
+The two-factor enrolment secret race (v0.46.2, DECISION-290, F342, no migration) took `2af`; the next findings subsection is `2ag`.
+Site ingest over the request-size limit (v0.46.3, DECISION-279, F324, no migration) took `2ag` (`2af` is the two-factor enrolment secret race, v0.46.2, F342); the next findings subsection is `2ah`. Its numbers were pre-assigned, so the figures above are unchanged.
+Careers Increment 1 (v0.47.0, migration 0071, DECISION-264/265/266 and 278, F290, F292-F295 and F311-F320; DECISION-262/263 and migration 0075 are Increment 2's) took `2ah`; the next findings subsection is `2ai`. Integration is on `pipeline/careers` (worktree `presby-careers`, Neon `pipeline-careers`, port 3580), merged with main at 0.46.3 and not yet pushed; the apply order and the production runbook are `docs/deployment.md` "Careers (0071)". F291 (the ticket forms' 10 MB claim) is queued as its own bug-fix.
+Community Increment 2b (v0.48.0, migration 0065, DECISION-207/208 amended and 225-228, F186, F187, F192-F198 and F230-F233; F199 was closed in v0.42.0) took `2ai`; the next findings subsection is `2aj`. Integration is on `pipeline/signin-invites` (worktree `presby-2b`, Neon `ep-delicate-tree`, port 3540), merged with main at 0.47.0 and not yet pushed; the apply order and the production runbook are `docs/deployment.md` "Sign-in invitations and connect at sign-in (0065)": snapshot production, apply 0065 on the direct endpoint, then merge and deploy. **Operator ruling 2026-10-26: real sign-in invitations are held until F166 (recovery codes and landing on first enrolment) ships, and the what's-new entry is published only after F166;** the release is otherwise complete, and F232 (a `people.manage` holder can address an authority-bearing record to a mailbox they control; detect-only) is an accepted open `paper` residual. Two-factor becomes role-based in F343 (`2026-10-26-2fa-default`, migration 0080, unmerged): when the second of the two merges, the TODO line on re-checking 2b's new-account walks applies.
+F166 recovery codes and F344 regenerate bypass (`2026-10-26-recovery-codes`, v0.48.1, DECISION-292 amending DECISION-230, no migration) took `2aj`; the next findings subsection is `2ak`. Integration is on `pipeline/recovery-codes` (worktree `presby-f166`, Neon `pipeline-recovery-codes`, port 3650), merged with main at 0.48.0 and not yet pushed; it updates 2b's E-35 e2e lines and the `enrolOnPage` helper. No production step (no migration). **After 0.48.1 is deployed and one real invitee is walked in production (the invitations checklist item), the operator may lift the 2026-10-26 hold on real sign-in invitations and publish 2b's what's-new entry.**
+F343 two-factor by role (`2026-10-26-2fa-default`, v0.49.0, migration 0080, DECISION-291, no new F-number beyond F343) took `2ak`; the next findings subsection is `2al`. Integration is on `pipeline/2fa-default` (worktree `presby-2fa`, Neon `pipeline-2fa-default`, port 3640), merged with main at 0.48.1 and not yet pushed. **Apply 0080 to production BEFORE merging** (the runbook is `docs/deployment.md` "Pre-deploy runbook: 0080": re-run R8 Query 1 and Query 2 read-only, snapshot, apply, verify, then merge in the same sitting, with no platform-role grant or `INITIAL_ADMIN_EMAILS` first sign-in in between); fill the release note's deploy-day count from R8 Query 1. Phase 6 follow-ups 1 to 12 are `docs/TODO.md` lines, including the credential-exposure line (the leaked pipeline-branch passwords are the same as `development` and production; the operator chose not to rotate) and the 360px re-walk on `development`.
+User help Increment 1 (`2026-10-26-user-help-inc1`, v0.50.0, no migration, DECISION-293 to 297, F345-F381) took `2al`; the next findings subsection is `2am`. **Next free numbers: DECISION-298, F382, migration 0082** (0081 was reserved for F166, which shipped without a migration; treasury and photos keep their pre-assigned blocks). Integration is on `pipeline/user-help` (worktree `presby-help`, Neon `pipeline-user-help`, port 3660), merged with main at 0.49.0 and not yet pushed. No production step (no migration). **Merge gates:** the Vercel preview check of `/help/no-such-page` and `/help/planned/no-such` (each twice: 404, the help heading, `no-store`, no `x-vercel-cache: HIT`; if the preview serves the framework 404, apply Option B as DECISION-293 records), and the operator's Google sign-in confirmation (otherwise apply the prepared strip commit). After deploy, set `HELP_PRIVACY_CONTACT_EMAIL` in Vercel Production and redeploy so the privacy policy shows the address instead of the repository fallback. Workflow Rule 17 is now in `CLAUDE.md`: treasury and photos publish their pending help pages (`[help:reimbursements]`, `[help:person-photos]`) in their own integration commits.
+
+---
+
+## Previous handoff — 2026-10-25 (late): v0.42.5 is live; platform admin redesign Increment 1 is integrated as v0.43.0 (now merged, PR #55)
+
+**Live in production:** v0.42.3 (session handling hardening; the production sign-in smoke passed 2026-10-25 22:49 UTC, `totp.verify_succeeded`,
+no failures), v0.42.4 (a non-credentials sign-in must carry `email_verified === true`, F231, DECISION-246) and v0.42.5 (the new-organization form
+waits until the page is ready, F275(a)). The retro workflow-efficiency guardrails (DECISION-231) are merged with no version bump.
+
+`pipeline/platform-admin-redesign` (worktree `presby-padmin`, no migration) is merged up to `main` (`b903154`, 0.42.5) and integrated as **v0.43.0**,
+Increment 1 of 4: `/admin` is a dashboard (nine count cards in three zones plus "Recent operator changes"), behind a grouped, permission-filtered
+nav with a phone menu and the shared avatar menu; `error.tsx` is added and no `loading.tsx` may exist under `(admin)` (CLAUDE.md now says so).
+DECISION-251, 252, 253, 255; F274, F276, F281 in `docs/schema-design-2.md` §2aa (F275 is recorded there too: (a) closed by 0.42.5, (b)
+permanence of type and slug open for Increment 3). QA PASS on run 5 after four loop-backs, all on the dashboard boundaries scan; Phase 6 SHIP
+WITH NOTES, the notes are `docs/TODO.md` lines. **The limit to remember (DECISION-252):** the scan guards against a careless reader, not a
+deliberately evasive one, and the two-factor card is the recorded exception that reads through people and memberships. Next: `/pre-push`, then
+`/merge-pr`, then deploy; then Increment 2's Phase 3 (the organization workspace and the first-administrator cards, carrying R3, R8 and the
+deferred R1a, R1b, R1e, R1f, R7c and R7d).
+
+**Open pipelines (each has its own worktree and Neon branch; numbers are pre-assigned in the work-log headers):**
+
+| Pipeline | Worktree | Phase | Numbers | Next |
+|---|---|---|---|---|
+| Platform admin redesign, Increment 1 (`2026-10-25-platform-admin-redesign-inc1`) | `presby-padmin` | Integrated on its branch as **0.43.0** (Phase 6 SHIP WITH NOTES) | DECISION-251/252/253/255; F274/F276/F281; no migration; port 3530 | `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
+| Platform admin redesign, Increments 2 to 4 (`-inc2`, `-inc3`, `-inc4`) | `presby-padmin` | Not started | DECISION-254, 256; F277-F280; migration 0070 only if S3 is adopted | Increment 2 Phase 3 |
+| Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Phase 5, QA run 2 | migration 0067; DECISION-238-241; F250-F257; port 3500 | QA run 2 |
+| Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Integrated on its branch as **0.45.0** (Phase 6 SHIP WITH NOTES; merged `main` 0.44.1) | migration 0068; DECISION-242-245; F258-F265 (`docs/schema-design-2.md` section 2ac); port 3510 | Production runbook for 0068 (work-log), `/pre-push`, `/merge-pr`, then remove the worktree and Neon branch |
+| Community Increment 2b, sign-in invitations (`2026-10-22-founding-admin-directory`) | `presby-2b` | Phase 4, Batch A1 | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Batch A1 |
+| TOTP auto-submit (`2026-10-25-totp-autosubmit`) | `presby-otp` | Integrated on its branch as **0.44.1** (Phase 6 SHIP WITH NOTES) | no migration; DECISION-257; F282; port 3560 | `/pre-push`, `/merge-pr`, then remove the worktree and Neon branch |
+| Developer portal, Increment 1 (`2026-10-25-developer-portal-inc1`) | `presby-devportal` | Integrated on its branch as **0.46.0** (Phase 6 SHIP WITH NOTES; merged `main` 0.45.0) | no migration; DECISION-258, 261; F283-F285, F288 (`docs/schema-design-2.md` section 2ad); port 3570 | `/pre-push`, `/merge-pr`, then Increment 2's Phase 3 (the `developer` role; DECISION-259, F286, F287) |
+| Public asset allowlist (`2026-10-25-public-asset-allowlist`, F289) | `presby-assets` | Integrated on its branch as **0.46.1** (Phase 6 SHIP WITH NOTES; merged `main` 0.46.0) | migration 0072; DECISION-277; F289, F340, F341 (`docs/schema-design-2.md` section 2ae); port 3600 | **Apply 0072 to production BEFORE merging** (`docs/deployment.md` "Public asset audience (0072)"; rehearsed 2026-10-26), `/pre-push`, `/merge-pr`, then V1-V6 and remove the worktree and Neon branch |
+| Two-factor enrolment secret race (`2026-10-26-totp-enroll-race`, F342) | `presby-enroll` | Integrated on its branch as **0.46.2** (Phase 6 SHIP IT; merged `main` 0.46.1) | no migration; DECISION-290; F342 (`docs/schema-design-2.md` section 2af); port 3630 | `/pre-push`, `/merge-pr`, then remove the worktree and the Neon branch `pipeline-totp-enroll-race`; no production step (no migration). After it is on `main`, remove the 2b `enrolOnPage` workaround (TODO) |
+| Site ingest over the request-size limit (`2026-10-26-site-ingest-size`, F324) | `presby-ingest` | Integrated on its branch as **0.46.3** (Phase 6 SHIP WITH NOTES; merged `main` 0.46.1; takes the number after F342's 0.46.2) | no migration; DECISION-279; F324 (`docs/schema-design-2.md` section 2ag); port 3610; presby-site-kit branch `fix/staged-ingest` (tip `ea9e78a`, v4.1.0; not merged, not tagged) | `/pre-push`, `/merge-pr` after F289 is promoted and 0072 applied to production; then the operator's rollout (`docs/deployment.md` "Site ingest: the staged transport": probe the new routes for 401, read-only prediction for `fpcw`, merge site-kit and tag `v4.1.0` on `ea9e78a`, the first `site-fpcw` push); then remove the worktree and Neon branch |
+| Developer portal, Increments 2 to 4 (`-inc2`, `-inc3`, `-inc4`) | `presby-devportal` | Not started | DECISION-259, 260; F286, F287; migration 0071 only if needed | Increment 2 Phase 3 (give it the promoted `shared/console-*` paths; Increment 3 waits on nothing from the operator now: the API page is an internal inventory, ruled 2026-10-26) |
+| Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Waits on 2b | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | after 2b |
+
+**Next free numbers:** DECISION-**262**, F**289**, migration **0071**. Findings subsection `2aa` is taken (platform admin redesign), so the next
+is `2ab`. Integration is serialized one PR at a time through `/merge-pr` (Workflow Rule 16).
+
+**Not forgotten:** the F166 bug-fix pipeline, the operator questions in `docs/TODO.md`, the sibling hand-off for the 0.42.3 session fix, and the
+overdue periodic reviews.
+
+---
+
+---
+
+## Previous handoff — 2026-10-25 (later): the public events calendar is integrated as v0.44.0; apply 0067 to production BEFORE merging (superseded by the block above)
+
+`pipeline/public-events-calendar` (worktree `presby-cal`, Neon `pipeline-public-events-calendar`, port 3500) is merged up to `main` at v0.42.5 and
+integrated as **v0.44.0** (v0.43.0 was PR #55, the platform admin dashboard, open at the time; it has since merged and the v0.42/v0.43/v0.44
+release-note links are resolved). QA run 2 PASS, Phase 6 **SHIP WITH NOTES**. A congregation's public website can show an
+events calendar (a month grid on a computer, a list on a phone) through a new `eventsCalendar` live slot. Nothing is public until all three
+happen: an administrator turns on the `org_portal.public_calendar` toggle (seeded off, self-service), the site's maintainer places the slot on a
+page, and an editor ticks the new per-event box `events.website_listed` ("Show on our website's public calendar", off by default, only possible on
+an "open to everyone" event). DECISION-238-241; findings F250-F256 in `docs/schema-design-2.md` §2ab (F257 returned unused); migration **0067**
+(journal idx 67, with idx 65 and 66 left for Community 2b and 3a).
+
+**Deploy order matters: apply 0067 to production BEFORE merging.** Every merge to `main` auto-deploys, and the new code selects
+`events.website_listed`, so the events admin pages would error until the column exists. Old code against the new schema is unaffected. The runbook
+is `docs/deployment.md` "Public events calendar (0067)". Also apply 0067 and `scripts/public-calendar/seed-dev-public-calendar.sql` to the shared
+`development` branch, then run the full `scripts/test-rls.sql` as `presby_app` there (section 67 adds 58 passes; the three known drift failures at
+lines 217, 516 and 7927 are pre-existing).
+
+**Not done, and not a code change (the integration step, operator-owned):** (1) a real iPhone check of the `<details>` rows; it gates turning the
+toggle on for a congregation, not merging. (2) The FPCW public-site integration: replace `site-fpcw/content/upcoming-events.json`'s Google
+Calendar `prose` block with `{ "type": "liveSlot", "props": { "slot": "eventsCalendar" } }` on a branch; `site-fpcw` has no repository
+variables and has never ingested, and the first real ingest publishes the whole migrated site, so it needs the operator's explicit go. (3) The
+custom-host check at FPCW's cutover (only simulated on `*.invalid` hosts today), and the Track K event import must land before DNS moves or the
+calendar is empty on day one. All three are `docs/TODO.md` lines. The what's-new post is drafted and deferred until the first toggle goes on.
+
+**Next:** `/pre-push`, snapshot production, apply 0067, `/merge-pr`, deploy, smoke the events admin page and an anonymous public-site page, then
+remove the worktree and Neon branch.
+
+**Numbers:** this pipeline used DECISION-238-241, F250-F256 and migration 0067; F257 was reserved and returned unused. The next-free numbers in the section below are unchanged by it.
+
+---
+
+---
+
+## Previous handoff — 2026-10-25 (earlier): v0.42.4 integrated; v0.42.3 live; five other pipelines open (superseded by the block above)
+
+`pipeline/google-email-verified` (worktree `presby-gauth`, no migration) is merged up to `main` (`77be511`: 0.42.3 plus PR #52 workflow-efficiency)
+and integrated as **v0.42.4**, F231 **closed in code and tests**. `evaluateSignIn()` now refuses every non-credentials sign-in unless the provider
+asserted `email_verified === true`, before any user lookup, so an unverified claim can neither link to an existing account nor create one (and the
+`INITIAL_ADMIN_EMAILS` bootstrap is unreachable through it). DECISION-246 amends DECISION-015 point 2 and fulfils the `evaluateSignIn()` clause of
+DECISION-187. QA PASS, Phase 6 SHIP WITH NOTES. **The limit:** no real Google exchange has happened anywhere (Google is configured in no environment,
+production `accounts` has 0 rows); the claim's arrival rests on `src/auth.sign-in.test.ts` and a tripwire on the installed `@auth/core`. The
+`Invitations Increment 3: Google` TODO line now carries the first-exchange check. **Community Increment 2b's Phase 4 is unblocked on this fix**
+(it was blocked on 0.42.3 and F231). Next: `/pre-push`, then `/merge-pr`, then deploy.
+
+`pipeline/session-update-hardening` (worktree `presby-sess`, Neon `pipeline-session-update`, no migration) is merged up to `main` (`ce661d7`,
+the 2026-10-24 retrospective's agent edits) and integrated as **v0.42.3**, a security patch with neutral wording. The server now accepts that
+the second sign-in factor is complete only from its own verification screens (TOTP and recovery code); other requests to change a session's
+state are refused, and the session-update path reads nothing from the request. DECISION-230, F237 (`docs/schema-design-2.md` §2y), one
+CLAUDE.md sentence under *The Proxy Does Not Reach the Database* (operator-approved). QA PASS, Phase 6 SHIP WITH NOTES; the notes are
+`docs/TODO.md` lines. **Operator ruling 2026-10-25: existing sessions are not rotated** (two active production accounts, both the operator's).
+The release note, commit titles and PR stay neutral until deploy.
+
+**Deployed 2026-10-25.** Still owed: the production sign-in smoke (an MFA-enrolled account signs in, enters a code and reaches its destination;
+the grant relies on async context reaching the jwt callback, proven on `next start`, not yet on Vercel) and the sibling hand-off
+(`/downstream-sync` and a neutral heads-up to repos seeded from the same starter). Both are TODO lines. The held test-coverage review
+(`docs/reviews/2026-10-24-test-coverage.md`, finding C-1) is now committed and logged.
+
+**Retro workflow-efficiency** (`pipeline/retro-workflow-efficiency`, worktree `presby-wf`) is merged up to `main` at 0.42.3 and integrated:
+DECISION-231, F239 (`docs/schema-design-2.md` §2z), TODO lines for its residuals and follow-ups, and the briefings backlog (13 entries, marker
+`decision=224`). QA run 2 PASS, Phase 6 SHIP WITH NOTES. Tooling and docs only, so no version bump and no release note. Next: `/pre-push`, then
+`/merge-pr`. Heads-up: the new push gate refuses one command that commits and pushes, so commit and push stay two separate calls.
+
+**Open pipelines (each has its own worktree and Neon branch; numbers are pre-assigned in the work-log headers):**
+
+| Pipeline | Worktree | Phase | Numbers | Next |
+|---|---|---|---|---|
+| Community Increment 2b, sign-in invitations (`pipeline/signin-invites`, `docs/work-log/2026-10-22-founding-admin-directory.md` in `../presby-2b`) | `presby-2b` | Phase 3 amendment 2 done | migration 0065; DECISION-207/208, 225-228; F186/187, F192-F199, F230-F233 | Phase 4 is unblocked once 0.42.4 merges (0.42.3 is live; F231 is fixed on `pipeline/google-email-verified`) |
+| F231, refuse an unverified Google email claim (`2026-10-25-google-email-verified`) | `presby-gauth` | Integrated on its branch as **0.42.4** (Phase 6 SHIP WITH NOTES) | DECISION-246; F231; no migration; port 3520 | `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
+| Retro workflow-efficiency (`2026-10-25-retro-workflow-efficiency`, promoted to a full Feature by QA run 1) | `presby-wf` | Integrated on its branch (Phase 6 SHIP WITH NOTES) | DECISION-231; F239; no migration; port 3480 | `/pre-push`, `/merge-pr`, then remove the worktree |
+| Community Increment 3a, visitor follow-ups, and 3b (`2026-10-22-founding-admin-directory-inc3`) | `presby-inc3` | Phase 3 (3a) running | migration 0066; DECISION-232-237, 247-250; F240-F249, F266-F273; port 3490 | Phase 3, then Phase 4 |
+| Public events calendar, events Increment 4 (`2026-10-25-public-events-calendar`) | `presby-cal` | Integrated on its branch as **0.44.0** (Phase 6 SHIP WITH NOTES) | migration 0067; DECISION-238-241; F250-F256; port 3500 | Snapshot production, apply 0067, `/pre-push`, `/merge-pr`, deploy, then remove the worktree |
+| Parish (deacon-district) management (`2026-10-25-parish-management`) | `presby-parish` | Phase 3 done | migration 0068; DECISION-242-245; F258-F265; port 3510 | Phase 4 queued |
+
+**Next free numbers:** DECISION-**251**, F**274**, migration **0070**. F234-F236 and F238 were returned unused. Integration of these branches is
+serialized one PR at a time through `/merge-pr` (Workflow Rule 16); `docs/schema-design-2.md` §2y (0.42.3) and §2z (retro workflow-efficiency) are
+taken, so the next findings subsection is `2aa`.
+
+**Not forgotten:** the F166 bug-fix pipeline, the operator questions in `docs/TODO.md`, and the overdue periodic reviews.
+
+---
+
+## Previous handoff — 2026-10-24 (later): v0.41.0, v0.42.0 and v0.42.1 are live; zod 4 is integrated at v0.42.2
 
 **Live in production:** v0.41.0 (Community Increment 2), v0.42.0 (several email addresses per person) and v0.42.1 (the invitation screens say
 who has to accept; PR #48).
@@ -38,7 +193,7 @@ arm of F176 closed); removing the Main promotes the oldest remaining address, au
 key; the platform invitation screen warns when the address is on a signed-in person. Migration `0064`, DECISION-215–219, F210–F217
 (`docs/schema-design-2.md` §2w). QA PASS (run 2), Phase 6 SHIP WITH NOTES; every note is a `docs/TODO.md` line. Two CLAUDE.md edits are
 for operator review in the diff (a Project Layout line for `src/lib/contact-methods/` and one sentence under Permissions vs Flags: a contact
-email authenticates nothing).
+email authenticates nothing); **amended by Community 2b, v0.48.0 (DECISION-227):** a contact email still authenticates nothing, but inside a definer it may also identify the one person an authenticated, address-proven account belongs to, and proof of an address is `users.email_verified` bound to the current address (DECISION-225), never `contact_methods.verified_at`).
 
 **What is and is not true of it.** Giving statement notices stay on the donor record (operator, 2026-10-23: "keep giving on the donor record
 for now"); the personal-address fallback is a TODO. A staff member who is only a staff anchor shows no Work address to members (told to the

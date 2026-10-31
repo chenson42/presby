@@ -55,4 +55,36 @@ export async function insertAuditRow(
   });
 }
 
+/**
+ * The multi-row variant of `insertAuditRow()` (parish management, bulk move:
+ * one row per household plus one batch row, DECISION-245). ONE multi-row
+ * insert inside the caller's transaction, so a hundred rows are one round trip
+ * and a failure of any of them fails the change. An empty list writes nothing.
+ */
+export async function insertAuditRows(
+  tx: OrgTx,
+  inputs: Array<{
+    action: AuditAction;
+    actor: AuditActor;
+    resourceType: string;
+    resourceId: string;
+    metadata: Record<string, unknown>;
+  }>,
+): Promise<void> {
+  if (inputs.length === 0) return;
+  const meta = await requestMeta();
+  await tx.insert(auditEvents).values(
+    inputs.map((input) => ({
+      actorUserId: input.actor?.userId ?? null,
+      actorEmail: input.actor?.email ?? null,
+      action: input.action,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      metadata: input.metadata,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })),
+  );
+}
+
 export { AUDIT_ACTIONS };

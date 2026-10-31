@@ -48,12 +48,25 @@ export interface SiteUrls {
   sitemap(): string;
   /** The platform-owned give page. */
   give(): string;
+  /**
+   * The platform-owned job openings list, as a path (`/careers`). A bundle page
+   * at exactly `/careers` wins over it. Careers Increment 1, DECISION-264.
+   */
+  careers(): string;
+  /** One job opening, as a path (`/careers/<posting-slug>`); the slug is percent-encoded. */
+  careersPosting(postingSlug: string): string;
   /** Where Stripe sends a donor back, as a path (the origin is `donorOrigin()`'s business). */
   giveReturn(sessionId: string): string;
   /** `origin` + `page(bundlePath)`: the absolute, canonical URL of a page. */
   canonical(bundlePath: string): string;
   /** The absolute link to the church's member portal, always on the platform. */
   portal(): string;
+  /**
+   * The absolute link to the member calendar, always on the platform host (where
+   * sign-in lives). Carries no visitor-controlled input: the proxy sends an
+   * unauthenticated visitor to /signin with the right callbackUrl itself.
+   */
+  portalCalendar(): string;
 }
 
 export type SiteUrlsInput =
@@ -100,6 +113,7 @@ export function buildSiteUrls(input: SiteUrlsInput): SiteUrls {
   const slug = input.slug;
   const platformOrigin = input.platformOrigin.replace(/\/+$/, "");
   const portal = () => `${platformOrigin}/o/${slug}`;
+  const portalCalendar = () => `${platformOrigin}/o/${slug}/calendar`;
 
   if (input.mode === "host") {
     assertHost(input.host);
@@ -113,9 +127,12 @@ export function buildSiteUrls(input: SiteUrlsInput): SiteUrls {
       asset: (key) => `/assets/${encodeURIComponent(key)}`,
       sitemap: () => "/sitemap.xml",
       give: () => "/give",
+      careers: () => "/careers",
+      careersPosting: (postingSlug) => `/careers/${encodeURIComponent(postingSlug)}`,
       giveReturn: (sessionId) => `/give/return?session_id=${encodeURIComponent(sessionId)}`,
       canonical: (bundlePath) => `${origin}${page(bundlePath)}`,
       portal,
+      portalCalendar,
     };
   }
 
@@ -128,8 +145,11 @@ export function buildSiteUrls(input: SiteUrlsInput): SiteUrls {
     asset: (key) => `${slugSitePath(slug)}/assets/${encodeURIComponent(key)}`,
     sitemap: () => `${slugSitePath(slug)}/sitemap.xml`,
     give: () => `${slugSitePath(slug)}/give`,
+    careers: () => page("/careers"),
+    careersPosting: (postingSlug) => page(`/careers/${encodeURIComponent(postingSlug)}`),
     giveReturn: (sessionId) => `${slugSitePath(slug)}/give/return?session_id=${encodeURIComponent(sessionId)}`,
     canonical: (bundlePath) => `${platformOrigin}${page(bundlePath)}`,
     portal,
+    portalCalendar,
   };
 }

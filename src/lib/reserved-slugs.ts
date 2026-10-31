@@ -60,6 +60,11 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // The account-invitation route group's path (DECISION-185); reserved ahead
   // of the route landing so no organization can take the slug first.
   "invite",
+  // The public documentation group (DECISION-293): `help` is live, `docs` is
+  // bypassed by the proxy now and gets its route in Increment 3, so it is
+  // reserved ahead of landing like `invite`.
+  "help",
+  "docs",
   // Infra labels reserved for P5's <slug>.presby.app subdomain scheme, not
   // yet live app routes.
   "www",

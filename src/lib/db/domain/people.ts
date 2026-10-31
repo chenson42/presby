@@ -60,7 +60,13 @@ export const people = pgTable(
   "people",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    // One human, one login.
+    // One human, one login: the identity binding presby_user_organizations
+    // resolves. Written only on the owner path, by invitation acceptance and
+    // by sign-in connection (DECISION-208 as amended). The trigger
+    // people_guard_user_link (drizzle/0065 section 6; not expressible here)
+    // refuses any link write by a role that is not the table owner, so never
+    // `.set({ userId })` / insert a `userId` on `db`. The owner path is not
+    // bound (paper residual; the boundaries.test.ts scan is the mitigation).
     userId: uuid("user_id").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -199,12 +205,19 @@ export const households = pgTable(
   },
   (t) => [
     index("households_org_name_idx").on(t.organizationId, t.name),
+    // Households per district and the Unassigned query (F263, drizzle/0068
+    // section 3).
+    index("households_org_unit_idx").on(t.organizationId, t.orgUnitId),
     unique("households_id_org_key").on(t.id, t.organizationId),
     foreignKey({
       columns: [t.orgUnitId, t.organizationId],
       foreignColumns: [orgUnits.id, orgUnits.organizationId],
       name: "households_org_unit_fk",
     }),
+    // NOT EXPRESSIBLE HERE: trigger households_org_unit_target_guard
+    // (drizzle/0068 section 6) refuses a newly set archived, campus or
+    // missing district. org_unit_id means deacon district only
+    // (DECISION-243) and is written only by src/lib/parishes.ts.
   ],
 );
 

@@ -1,3 +1,4 @@
+import { AdminForbidden } from "@/components/admin-portal/admin-forbidden";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
@@ -24,7 +25,12 @@ import { listDesignationHolders } from "@/lib/onboarding/designation-holders";
 import { listIngestHealth, type IngestHealthRow } from "@/lib/admin/giving-ingest-health";
 import { isLocalLoginEnabled } from "@/lib/auth/local-login";
 import { isTotpConfigured } from "@/lib/two-factor";
-import { listInvitationsForOrg, type InvitationListRow } from "@/lib/onboarding/issue";
+import {
+  listInvitationsForOrg,
+  summarizeOrgSentInvitations,
+  type InvitationListRow,
+  type OrgSentSummary,
+} from "@/lib/onboarding/issue";
 import { getOrganizationAffiliationAdminDetail } from "@/lib/org-provisioning";
 import { readOrgDomainsForPlatform } from "@/lib/domains/platform-read";
 import { BrandForm } from "./brand-form";
@@ -38,6 +44,7 @@ import { IngestHealthSection } from "./ingest-health-section";
 import { AffiliationSection } from "./affiliation-section";
 import { DomainsSection } from "./domains-section";
 import { RevokeAllInvitations } from "./revoke-all-invitations";
+import { OrgSentInvitations } from "./org-sent-invitations";
 
 // officeTemplateKey -> display name. Not exported by
 // `@/lib/onboarding/founding-administrator` — that module returns the key only
@@ -75,14 +82,7 @@ export default async function OrganizationBrandDetailPage({
 
   const session = await auth();
   if (!hasFeature(session?.user?.features, FEATURES.ADMIN_ORGANIZATIONS)) {
-    return (
-      <div>
-        <h1 className="text-2xl font-semibold">Organization</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
-          You don&apos;t have permission to manage organization branding.
-        </p>
-      </div>
-    );
+    return <AdminForbidden title="Organization" area="managing organizations" />;
   }
 
   if (!UUID_RE.test(id)) notFound();
@@ -150,6 +150,15 @@ export default async function OrganizationBrandDetailPage({
   } catch {
     invitations = null;
   }
+  // The congregation's own sign-in invitations, masked in SQL (Community
+  // Increment 2b). A failed read is `null`: the panel says so rather than
+  // showing an all-clear list, and the page does not fail.
+  let orgSent: OrgSentSummary | null;
+  try {
+    orgSent = await summarizeOrgSentInvitations(id);
+  } catch {
+    orgSent = null;
+  }
   const localLoginEnabled = await isLocalLoginEnabled();
   const totpConfigured = isTotpConfigured();
   const inviterEmail = session?.user?.email ?? null;
@@ -198,6 +207,7 @@ export default async function OrganizationBrandDetailPage({
     const resolved = await getBlobStore().resolve({
       organizationId: id,
       key: brand.markAssetKey,
+      audience: "public_site",
     });
     if (resolved) {
       markSrc = `data:${resolved.contentType};base64,${resolved.bytes.toString("base64")}`;
@@ -281,6 +291,8 @@ export default async function OrganizationBrandDetailPage({
           openCount={openInvitationCount}
         />
       )}
+
+      <OrgSentInvitations organizationId={id} summary={orgSent} />
 
       {treasurerApplies && <IngestHealthSection rows={ingestHealth} />}
 

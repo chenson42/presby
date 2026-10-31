@@ -14,6 +14,10 @@ export const AUDIT_ACTIONS = {
   FEATURE_FLAG_TOGGLED: "feature_flag.toggled",
   TOTP_ENROLLED: "totp.enrolled",
   TOTP_RECOVERY_CODES_REGENERATED: "totp.recovery_codes.regenerated",
+  // F344 (DECISION-292): minting new recovery codes needs a session that has
+  // passed the second factor. A refusal is the one observable sign that a
+  // first-factor-only session tried to escalate. Metadata: { twoFactorRequired }.
+  TOTP_RECOVERY_CODES_REGENERATE_REFUSED: "totp.recovery_codes.regenerate_refused",
   TOTP_RESET: "totp.reset",
   USER_ROLE_ASSIGNED: "user.role.assigned",
   USER_ROLE_REMOVED: "user.role.removed",
@@ -480,14 +484,18 @@ export const AUDIT_ACTIONS = {
   // audit row commit or roll back together. `check:audit` walks only
   // `src/app/**/actions.ts` and cannot see these writes; Rule 7 is proven by
   // the per-outcome DB tests instead.
-  //   - INVITATION_CREATED / _RESENT / _REVOKED: actor = the platform operator.
+  //   - INVITATION_CREATED / _RESENT / _REVOKED: actor = the platform operator,
+  //     or, for origin `org` (a congregation's sign-in invitation, Increment 2b),
+  //     the congregation's sender.
   //     created: { invitationId, organizationId, purpose, personId, expiresAt,
   //       selfAddressed, acknowledgedDoNotContact }.
   //     resent: { invitationId (new), supersededInvitationId, organizationId,
   //       purpose, resendCount }.
   //     revoked: { invitationId, organizationId, purpose, via:
   //       'single' | 'revoke_all' }.
-  //   - INVITATION_ACCEPTED: actor = the accepting user. { invitationId,
+  //   - INVITATION_ACCEPTED: actor = the accepting user (for an in-place
+  //     acceptance, 2b, the account itself, with `via` and `secondFactor` added).
+  //     { invitationId,
   //     organizationId, purpose, personId, mode: 'new_account' |
   //     'existing_account', invitedByUserId, inviterIsInvitee }.
   //   - INVITATION_ACCEPT_BLOCKED: actor = the account when known, else null.
@@ -523,6 +531,83 @@ export const AUDIT_ACTIONS = {
   // invitation.created.selfAddressed and invitation.accepted.inviterIsInvitee.
   ORG_FOUNDING_ADMINISTRATOR_REVOKED: "org.founding_administrator.revoked",
   ORG_TREASURER_REVOKED: "org.treasurer.revoked",
+  // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/parish-management, 2026-10-25 (DECISION-245).
+  // Deacon districts. Written by src/lib/parishes.ts with insertAuditRow(tx, ...)
+  // in the SAME transaction as the change (a failed audit insert undoes it); the
+  // route actions.ts files under directory/parishes/ carry no recordAudit() of
+  // their own. The `tenant.*` axis. District assignment is overwritten, not kept
+  // as dated history, so these rows ARE the history; no household or person name
+  // is ever written (ids and district names only).
+  // Metadata by key:
+  //   DISTRICT_CREATED   { organizationId, name }
+  //   DISTRICT_RENAMED   { organizationId, from, to }
+  //   DISTRICT_ARCHIVED  { organizationId, householdCount, hadOpenDeacon }
+  //   DISTRICT_RESTORED  { organizationId }
+  //   HOUSEHOLD_DISTRICT_CHANGED { organizationId, fromOrgUnitId, toOrgUnitId,
+  //                                viaSeat, undo?, batchId? }
+  //   HOUSEHOLD_DISTRICT_BULK_MOVED (resource: the SOURCE district)
+  //                      { organizationId, batchId, toOrgUnitId, movedCount,
+  //                        skippedCount }
+  DISTRICT_CREATED: "tenant.district.created",
+  DISTRICT_RENAMED: "tenant.district.renamed",
+  DISTRICT_ARCHIVED: "tenant.district.archived",
+  DISTRICT_RESTORED: "tenant.district.restored",
+  HOUSEHOLD_DISTRICT_CHANGED: "tenant.household.district_changed",
+  HOUSEHOLD_DISTRICT_BULK_MOVED: "tenant.household.district_bulk_moved",
+  // APPENDED - pipeline/public-events-calendar, 2026-10-25 (DECISION-240).
+  // An event going onto, or coming off, the congregation's PUBLIC website is a
+  // disclosure change, so `events.website_listed` changing writes one row, on
+  // every path that can change it (the narrow amendment to DECISION-113 ruling 5;
+  // create/edit/cancel stay unaudited otherwise). Written by src/lib/events.ts
+  // with insertAuditRow(tx, ...) in the SAME transaction as the change.
+  // `check:audit` scans only actions.ts, which delegate to those lib functions.
+  // resourceType 'event'; resourceId = the event (or the series root) id.
+  // Metadata (ids, counts, a method tag; never a title or description):
+  // { organizationId, via: 'create' | 'update' | 'extend' | 'series', changed,
+  //   rootEventId?, anchorEventId?, scope?, skippedCancelled?,
+  //   skippedMembersOnly?, clearedBecauseMembersOnly? }.
+  EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
+  EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/signin-invites, 2026-10-25 (Community Increment 2b,
+  // DECISION-225/226). Address proof and auto-connect. Both are written with
+  // insertAuditRow(tx, ...) in the SAME transaction as the change they record,
+  // so a throw from the audit insert rolls the change back. A DECLINE writes
+  // nothing. Metadata is ids, enums and booleans only: never an address, a
+  // name or a token. The actor is the ACCOUNT ITSELF (the signed-in user),
+  // not a platform operator or a congregation's sender.
+  //   - TENANT_PERSON_SIGN_IN_CONNECTED: written by
+  //     src/lib/onboarding/connect.ts (called from src/auth.ts's sign-in branch
+  //     and the Check-again action) when presby_connect_signed_in_account
+  //     returns `connected`. resourceType 'person', resourceId = the person.
+  //     Metadata (a closed list, pinned by test): { organizationId, personId,
+  //     contactMethodId, contactMethodCreatedAt (ISO, so a reviewer can join to
+  //     the tenant.person_email.added row and its actor), via: 'sign_in' |
+  //     'check_again', proof: 'google' | 'account' | null, secondFactor,
+  //     authority: { sessionSeat, diaconateSeat, roleKeys, permissionKeys } }.
+  //     The R21 detection chain for F232 is tenant.person_email.added |
+  //     primary_changed, then this row, joined on personId.
+  //   - USER_EMAIL_PROOF_RECORDED: written by src/lib/auth/email-proof.ts when
+  //     presby_record_google_email_proof actually stamps. resourceType 'user',
+  //     resourceId = the user. Metadata: { source: 'google' }.
+  TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected",
+  USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded",
+  // Careers, Increment 1 (docs/work-log/2026-10-25-careers-inc1.md, Phase 3
+  // "Audit"; DECISION-264/265). One row per status change that changes what the
+  // PUBLIC can read: publish, close, reopen, and the cron's close of a posting
+  // past its closing date. Written with `insertAuditRow(tx, ...)` in the SAME
+  // transaction as the change (src/lib/careers/postings.ts and sweep.ts), so a
+  // failed audit insert fails the change. NOT written for create, edit, reorder
+  // or discarding a draft (nothing was ever public). `check:audit` scans only
+  // actions.ts, which delegate to those lib functions.
+  // resourceType 'job_posting'; resourceId = the posting id. Metadata is ids
+  // and an enum only - never a title, a slug or any text:
+  // { organizationId, postingId, via: 'staff' | 'closing_date' }; the cron's
+  // rows have a null actor.
+  CAREERS_POSTING_PUBLISHED: "careers.posting.published",
+  CAREERS_POSTING_CLOSED: "careers.posting.closed",
+  CAREERS_POSTING_REOPENED: "careers.posting.reopened",
   // ---------------------------------------------------------------------------
 } as const;
 

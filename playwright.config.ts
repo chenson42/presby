@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 import dotenv from "dotenv";
+import { assertDevLaneAllowed } from "./e2e/support/dev-port-guard";
 
 dotenv.config({ path: path.resolve(__dirname, ".env.local") });
 
@@ -44,6 +45,19 @@ const isVisualRun = process.env.PW_VISUAL === "1";
  * HTML the server returns.
  */
 const isProdBuildRun = process.env.PW_PROD_BUILD === "1";
+
+/**
+ * True only when `npm run help:shots` sets `PW_HELP_SHOTS=1` (user-help Inc 1, Batch 4). Environment
+ * variable, NOT argv, for the reason `isVisualRun` gives. The `help-shots` project is appended ONLY
+ * when this is true, and the `chromium` project ignores `e2e/help-shots/`, so a bare `playwright test`
+ * never captures. The capture writes the PNGs under src/content/help/images/ and is never part of CI.
+ * Its globalSetup runs the fail-closed fixture-database guard before anything else (see
+ * e2e/help-shots/global-setup.ts).
+ */
+const isHelpShotsRun = process.env.PW_HELP_SHOTS === "1";
+if (isHelpShotsRun && (isVisualRun || isProdBuildRun)) {
+  throw new Error("PW_HELP_SHOTS=1 is mutually exclusive with PW_VISUAL=1 and PW_PROD_BUILD=1.");
+}
 const PROD_PORT = Number(process.env.PW_PROD_PORT ?? 3800);
 const PROD_BASE_URL = `http://localhost:${PROD_PORT}`;
 
@@ -67,6 +81,14 @@ if (isProdBuildRun) {
       `PW_PROD_PORT must be an integer 1024-65535 other than 3000 (got "${process.env.PW_PROD_PORT}").`,
     );
   }
+}
+
+// Workflow Rule 16: a pipeline never attaches to :3000. From a linked worktree
+// this throws unless E2E_BASE_URL names your own port or PW_ALLOW_3000=1
+// (e2e/support/dev-port-guard.ts). Covers the dev lane and the visual run; the
+// production lane has its own, stricter checks above.
+if (!isProdBuildRun) {
+  assertDevLaneAllowed({ baseUrl: process.env.E2E_BASE_URL, projectDir: __dirname });
 }
 
 const baseURL = isProdBuildRun
@@ -100,7 +122,7 @@ const DOMAINS_TEST_ENV = {
 };
 
 export default defineConfig({
-  globalSetup: "./e2e/support/global-setup.ts",
+  globalSetup: isHelpShotsRun ? "./e2e/help-shots/global-setup.ts" : "./e2e/support/global-setup.ts",
   testDir: "./e2e",
   // Unset in CI and by default locally — "test-results" (the literal
   // e2e.yml's trace-upload step and .gitignore already expect). Only a
@@ -178,15 +200,20 @@ export default defineConfig({
         {
           name: "prod-build",
           use: { ...devices["Desktop Chrome"] },
-          testMatch: /hydration\/.*\.spec\.ts$/,
+          // The hydration specs, plus help-404.spec.ts: the help 404 must be `no-store` with no
+          // cache entry per URL, and only a production build can prove that (a dev server sends
+          // no-store on everything). DECISION-293.
+          testMatch: /(hydration\/.*|help-404)\.spec\.ts$/,
         },
         // The custom-domain specs that must hold on a PRODUCTION build too: the HSTS host split
         // (`headers()` is baked into the routes manifest at build time), the lockdown / no-cookie
-        // matrix and the serving matrix. `npm run test:e2e:prod` runs both projects.
+        // matrix, the serving matrix and the public asset allowlist (F289: an exact single
+        // `x-content-type-options: nosniff` is a property of the built server, not the dev one).
+        // `npm run test:e2e:prod` runs both projects.
         {
           name: "prod-custom-hosts",
           use: { ...devices["Desktop Chrome"], launchOptions: { args: HOST_RESOLVER_ARGS } },
-          testMatch: /custom-domains\/(headers|lockdown|serving)\.spec\.ts$/,
+          testMatch: /custom-domains\/(assets|headers|lockdown|serving)\.spec\.ts$/,
         },
       ]
     : [
@@ -196,7 +223,7 @@ export default defineConfig({
           // The visual project owns visual-parity.spec.ts's per-route viewport /
           // colorScheme matrix via test.use(); running it here too would collide
           // with that spec's own storageState/viewport overrides for no benefit.
-          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//],
+          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//, /help-shots\//],
         },
         // Custom domains (see HOST_RESOLVER_ARGS above). The first test of the first spec is a
         // CANARY proving the `*.invalid` mapping works, so every later failure is real.
@@ -205,6 +232,16 @@ export default defineConfig({
           use: { ...devices["Desktop Chrome"], launchOptions: { args: HOST_RESOLVER_ARGS } },
           testMatch: /custom-domains\/.*\.spec\.ts$/,
         },
+        ...(isHelpShotsRun
+          ? [
+              {
+                name: "help-shots",
+                // The scheme, reduced motion, scale factor and viewport are fixed per shot in the spec.
+                use: { ...devices["Desktop Chrome"], colorScheme: "light" as const },
+                testMatch: /help-shots\/capture\.spec\.ts$/,
+              },
+            ]
+          : []),
         ...(isVisualRun
           ? [
               {

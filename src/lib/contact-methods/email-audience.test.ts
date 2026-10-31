@@ -38,6 +38,8 @@ const isTest = (file: string) => /\.(test|spec)\.(ts|tsx)$/.test(file);
 const NAMED: Readonly<Record<string, string>> = {
   // src/lib/onboarding/invitation-email.ts: `export const ACCOUNT_INVITATION_TEMPLATE_KEY = "account_invitation"`
   ACCOUNT_INVITATION_TEMPLATE_KEY: "account_invitation",
+  // src/lib/onboarding/invitation-email.ts: `export const ACCOUNT_SIGN_IN_TEMPLATE_KEY = "account_sign_in_invitation"`
+  ACCOUNT_SIGN_IN_TEMPLATE_KEY: "account_sign_in_invitation",
   // src/lib/giving/statements/notice.ts: `buildStatementNotice()` returns STATEMENT_NOTICE_TEMPLATE
   "notice.templateKey": "giving.statement.notice",
 };
@@ -147,12 +149,19 @@ describe("the audience registry is closed and complete (ER14)", () => {
       ticket_feedback_promoted: "account",
       account_invitation: "typed",
       statistics_submission_grant: "typed",
+      account_sign_in_invitation: "person:credential",
       "giving.statement.notice": "donor",
     });
   });
 
-  it("no existing sender addresses a person's contact email: nothing is person:*  yet (giving is not wired, D7)", () => {
-    expect(Object.values(EMAIL_AUDIENCE).filter((a) => a.startsWith("person:"))).toEqual([]);
+  it("exactly one sender addresses a person's contact email, and it is the congregation's sign-in invitation (person:credential; giving is not wired, D7)", () => {
+    const personKeys = Object.entries(EMAIL_AUDIENCE).filter(([, a]) => a.startsWith("person:"));
+    expect(personKeys).toEqual([["account_sign_in_invitation", "person:credential"]]);
+  });
+
+  it("the sign-in invitation is sent by org-invite.ts alone, through the definer-chosen address (the registry entry and the sender land together)", () => {
+    const senders = FOUND.filter((f) => f.key === "account_sign_in_invitation");
+    expect(senders.map((f) => f.file)).toEqual(["src/lib/onboarding/org-invite.ts"]);
   });
 
   it("audienceFor is exact: inherited object keys are not classified", () => {

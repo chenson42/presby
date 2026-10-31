@@ -679,6 +679,57 @@ describe.skipIf(!hasDb)("role-grants.ts (Postgres-backed, real dev database)", (
       });
       expect(result).toEqual({ kind: "invalid_target" });
     });
+
+    // DECISION-242, F260: a role carrying a seat-only key (parishes.assign) is
+    // held through the recorded Moderator seat, never granted by hand - to a
+    // person OR a group. The drizzle/0068 grant guard is the backstop; this is
+    // the typed refusal in front of it.
+    it("seat_only_role: a role carrying parishes.assign is refused for a person and for a managed group, and no grant row is written", async () => {
+      const platform = getPlatformDb();
+      const [seatRole] = await platform
+        .insert(appRoles)
+        .values({
+          organizationId: orgA,
+          key: "deacons_moderator",
+          name: "Moderator of the Board of Deacons (fixture)",
+          roleKind: "constitutional",
+          isProtected: true,
+        })
+        .returning({ id: appRoles.id });
+      await platform
+        .insert(appRolePermissions)
+        .values({ roleId: seatRole!.id, permissionKey: "parishes.assign" });
+
+      const toPerson = await grantRole(clerkPerson, orgA, grantingUserId, {
+        roleId: seatRole!.id,
+        target: { kind: "person", personId: targetPerson },
+      });
+      expect(toPerson).toEqual({ kind: "seat_only_role" });
+      const toGroup = await grantRole(clerkPerson, orgA, grantingUserId, {
+        roleId: seatRole!.id,
+        target: { kind: "group", groupId: groupA },
+      });
+      expect(toGroup).toEqual({ kind: "seat_only_role" });
+
+      const rows = await platform
+        .select({ id: roleGrants.id })
+        .from(roleGrants)
+        .where(eq(roleGrants.roleId, seatRole!.id));
+      expect(rows).toHaveLength(0);
+    });
+
+    it("seat_only_role is decided before the target is validated: the same answer for a real and a nonexistent target (no oracle)", async () => {
+      const platform = getPlatformDb();
+      const [seatRole] = await platform
+        .select({ id: appRoles.id })
+        .from(appRoles)
+        .where(sql`${appRoles.organizationId} = ${orgA}::uuid and ${appRoles.key} = 'deacons_moderator'`);
+      const result = await grantRole(clerkPerson, orgA, grantingUserId, {
+        roleId: seatRole!.id,
+        target: { kind: "person", personId: randomUUID() },
+      });
+      expect(result).toEqual({ kind: "seat_only_role" });
+    });
   });
 
   // ---------------------------------------------------------------------

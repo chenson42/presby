@@ -388,19 +388,28 @@ describe.skipIf(!hasDb)("drizzle/0072 blob_assets.audience (Postgres-backed)", (
          order by c.conname`);
       const offenders = fks.filter((f) => !PUBLIC_REFERENCE_ALLOWLIST.includes(String(f.conname)) && f.pins_private !== true);
       expect(offenders, "an FK into blob_assets that is neither public-allowlisted nor pinned to 'private'").toEqual([]);
-      // Not vacuous: the three private consumers exist and pin (treasury's
-      // receipts joined in drizzle/0073 section 1d); the allowlist names real
-      // constraints.
+      // Not vacuous: the five private consumers exist and pin (treasury's
+      // receipts joined in drizzle/0073 section 1d, the person-photo master and
+      // thumbnail in drizzle/0078 section 1); the allowlist names real constraints.
       const byName = Object.fromEntries(fks.map((f) => [f.conname, f.pins_private]));
       expect(byName).toMatchObject({
         ticket_messages_attachment_fk: true,
         giving_statements_blob_fk: true,
         reimbursement_attachments_blob_fk: true,
+        person_photos_image_fk: true,
+        person_photos_thumb_fk: true,
       });
       // Every FK into blob_assets is accounted for by name: a new consumer is a
       // deliberate edit here (public allowlist or a private pin), never a silent pass.
       expect(Object.keys(byName).sort()).toEqual(
-        [...PUBLIC_REFERENCE_ALLOWLIST, "giving_statements_blob_fk", "reimbursement_attachments_blob_fk", "ticket_messages_attachment_fk"].sort(),
+        [
+          ...PUBLIC_REFERENCE_ALLOWLIST,
+          "giving_statements_blob_fk",
+          "person_photos_image_fk",
+          "person_photos_thumb_fk",
+          "reimbursement_attachments_blob_fk",
+          "ticket_messages_attachment_fk",
+        ].sort(),
       );
       for (const n of PUBLIC_REFERENCE_ALLOWLIST) expect(Object.keys(byName), n).toContain(n);
     });

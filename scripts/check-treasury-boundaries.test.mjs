@@ -357,9 +357,9 @@ describe("the wiring", () => {
     expect(steps.indexOf("npm run check:treasury-boundaries")).toBeGreaterThan(steps.indexOf("npm run check:giving-boundaries"));
   });
 
-  it("runs all nine tripwires", () => {
+  it("runs all ten tripwires (check:help joined at 0.50.0)", () => {
     const steps = pkg.scripts.check.split("&&").map((s) => s.trim());
-    expect(steps).toHaveLength(9);
+    expect(steps).toHaveLength(10);
     for (const step of steps) expect(step).toMatch(/^npm run check:[a-z-]+$/);
   });
 });

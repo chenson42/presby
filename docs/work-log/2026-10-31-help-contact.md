@@ -19,7 +19,8 @@
 | 2 — Architectural review | architect | Complete (CA1–CA13; amends C1, C3, C5, C6, C10, R9; AF-1–AF-8 = F406–F413; DECISION-300–304 proposed) | Approved with suggestions | 2026-10-31 |
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
 | 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batch 4 (admin inbox) complete: 749 files, 11,442 tests; CA10 test 5 passed. Batch 5 (help content and chrome) complete: 750 files, 11,456 tests; `verifiedIn` untouched (Phase 6 walk). Batch 3b (CA7 fix, DECISION-313) complete: 751 files, 11,466 tests; contact lane 12 passed on dev, 4 passed and 1 skipped on the production build. Phase 4 complete | — | 2026-10-31 |
-| 5 — Verification | qa | In progress (run 1) | — | 2026-10-31 |
+| 5 — Verification | qa | Complete (run 1). Full DB set: 14,683 passed, 1 failed (this pipeline) plus 13 pre-existing. Chromium: 614 passed, 4 pre-existing. Contact lane dev 12/12; prod 5/5 including (d) and (e). Catalog proof clean. 2 findings | FAIL | 2026-10-31 |
+| 4 — Fix pass (QA run 1) | full-stack-developer | In progress | — | 2026-10-31 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2002,57 +2003,217 @@ architect, qa) is still recorded verbatim.*
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
-**Verified by:** qa
+**Date:** 2026-10-31
+**Verified by:** qa (run 1). Read-only: no project file was edited. Worktree `presby-help-contact` stayed clean at `2af2e1f` throughout.
+
+**Scope run.** Typecheck, lint, `npm run check`, the unit suite in CI shape, and a production build. The full DB-backed set, run serially, because the diff adds migration 0083 and touches `src/lib/db/`. `test-rls-83.sql` as `presby_app` and a live-catalog probe. The full `--project=chromium` e2e suite, because the diff touches `playwright.config.ts` and `(documentation)/layout.tsx`. The `custom-hosts` lockdown spec, the contact lane on dev (3670), and the contact lane on a production build (3671). A 360px browser walk, light and dark, and 21+3 sampled mutations in a scratch copy.
+
+**Not re-run:** `test:e2e:prod` hydration lane, `scripts/test-rls.sql` in full (the documented `:219` drift; it's the orchestrator's Rule 16 step at integration), and coverage.
+
+**Flag state:** I ran `scripts/ci/e2e-reset-flags.sql` (pipeline branch, `COMMIT`) before e2e.
+
+**Environment:** `.env.local` points all four URLs at `ep-odd-mud-…` (checked by grep, never printed). The disk had 555 GiB free.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: PASS. `npm run lint`: PASS. `npm run check`: PASS, all nine tripwires; `check:help` reports 29 entries, 21 published, 24 files, 7 images.
+
+`npm run build`: the worktree hit the documented turbopack font error (`@vercel/turbopack-next/internal/font/google/font`). The scratch-copy build per `docs/testing.md` passed. `/help/contact` builds static (○), and `/admin/messages` and `/admin/messages/[id]` build dynamic (ƒ).
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Unit, CI shape (no DB env):** 751 files passed, 117 skipped. 11,466 tests passed, 3,232 skipped, in 36.6s. The skips are the DB-gated files; no new non-DB test carries `skip`, `only` or `fail`.
+
+**Full DB-backed set** (`npx dotenv -e .env.local -- npx vitest run --no-file-parallelism`, 868 files): 14,683 passed, 14 failed, 1 skipped, in 2,814s.
+
+- **This pipeline: 1 failure.**
+  - `src/lib/help-contact/submit.test.ts:135`, in the test "is unavailable in a production deployment without Upstash, and sent with it" (`:129`). The error is `expected { kind: 'unavailable' } to deeply equal { kind: 'sent' }`.
+  - It is deterministic. It fails whenever `RATE_LIMIT_DISABLED=true` is in the process environment: it fails with `.env.local` loaded, and fails with only `RATE_LIMIT_DISABLED=true` set. It passes bare.
+  - The cause: the test stubs `VERCEL_ENV=production` but never clears `RATE_LIMIT_DISABLED`, so `isHelpContactConfigured` correctly refuses. `beforeEach` (`:77-80`) stubs the Turnstile pair and `VERCEL_ENV` but not that variable.
+  - Every developer following the documented DB-run recipe gets this red, because the e2e globalSetup refuses to run unless `.env.local` holds `RATE_LIMIT_DISABLED=true`. CI's `db.yml` doesn't set it, so CI passes only by accident of environment.
+- **Pre-existing, not this pipeline: 13 failures in 6 files.**
+  - The files: `fixture-deletable.test.ts` (3), `giving/team.db.test.ts` (2), `designation-parity.db.test.ts` (3), `designation-parity-in-place.db.test.ts` (3), `parishes.db.test.ts` (1), `two-factor-default.db.test.ts` (1).
+  - Evidence: run from a `git archive` of the merge base (`f77c6b8`) against the same database, the same 13 fail identically.
+  - The cause is the database being ahead of the branch's code. The branch is 76 commits behind `origin/main`, and the Neon branch already carries treasury 0074: six `reimbursement*` tables exist, while the branch's `drizzle/` has no 0074. `origin/main`'s `0d474c3` ("nine flagged keys once 0074 adds the three reimbursement keys") is the matching code change.
+  - **Integration must merge `main` and re-run the DB set.**
+
+**Named suites, all green within the full run:** `help-contact.db.test.ts` (25), `inbox.db.test.ts` (5), `rate-limit.test.ts` (unedited, confirmed by `git diff`), `rate-limit-split.test.ts`, `shell-boundaries.test.ts`, `help-boundary.test.mjs`, `import-graph.test.mjs`, `help-contact/boundaries.test.ts`.
+
+`psql "$APP_DATABASE_URL" -f scripts/help-contact/test-rls-83.sql`: exit 0.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+| Lane | Server | Result |
+|---|---|---|
+| Full `--project=chromium` | own dev server on :3670, documented fakes, keyless | 614 passed, 4 failed, 0 skipped (27.6 min) |
+| `custom-hosts` `lockdown.spec.ts` | own :3670 | 30 passed (includes `/help/contact` as the neutral 404) |
+| Contact lane, dev (`test:e2e:contact`) | lane-owned :3670, limiter on | 12 passed, including test 4 (live limiter, one audit row, no IP) and test 8 (CA7 replay) |
+| Contact lane, prod run 1 (`test:e2e:contact:prod`) | scratch copy, :3671 | 4 passed, (d) skipped (window held until 23:47:55 UTC by the DB suite's committed race test) |
+| Contact lane, prod run 2 (after the window freed) | scratch copy, :3671 | **5 passed, including (d)**. `after()` ran and the queue rows were attempted. (e) custom-host replay: HTTP 200, `sent=false`, rows=1 |
+
+- **Sign-in regression** (`rate-limit.ts` changed): `admin-login`, `totp-full-login` (MFA-enrolled full path) and `forgot-password` all passed inside the chromium run.
+- **New and changed specs at 360px:** `admin-contact-messages.spec.ts` (360px viewport), `help-contact-unavailable.spec.ts`, `help.spec.ts` (every published page at 360) and `help-404.spec.ts` all passed.
+- **The 4 chromium failures are pre-existing.** Each repeated on a re-run against the worktree, and all four failed identically on a merge-base export served from its own dev server against the same database.
+  - `community-participants.spec.ts:305` (F172 degrade text).
+  - `invitation-existing-account.spec.ts:299`: the treasurer bundle now also has `reimbursement.*`, which is the 0074 drift again.
+  - `timezone-safe-dates.spec.ts:36` and `:71`: timeouts on `/admin/users`.
+- **CA13 is proven on `next build && next start`.** `headers()` is live inside the action in the `dynamic = "error"` segment (test (c): the fourth submission from one `x-real-ip` was busy, and another IP still got in), and `after()` ran (test (d)).
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+- `action-host.test.ts:24`, "refuses a forwarded action, with any value…": guards against the CA7 defect (DECISION-313).
+- `action-host.test.ts:80`: the version tripwire on Next's `'x-action-forwarded'` literal.
+- `submit.test.ts:107`, "a forwarded action is unavailable … (DECISION-313 regression: the CA7 defect)".
+- `e2e/help-contact/form.spec.ts:334` test 8 and `prod-build.spec.ts:154` (e): the custom-host replay stores nothing, answers `unavailable` and sets no cookie, on both lanes.
+- `inbox.db.test.ts`: CA10, one audit row per mutation and no personal field anywhere in the row.
+- `help-contact.db.test.ts`: the CA1 guards, CHECKs, coalescing and ceilings.
+
+**Failing-first.**
+- CA7: Batch 3 measured it on both lanes (before the fix the replay returned `sent` and stored a row), and Batch 3b restored the Host-only check to watch test 8 fail. I confirmed the unit pair independently: mutation M1 (dropping the forwarded check) fails both `:24` and `:107`.
+- CA1 and CA10: failing-first is implementer-reported (Batch 1 and Batch 4 tables). I did not re-mutate the database. I did re-probe the live catalog (below).
+
+**Sampled mutations** (scratch copy, each file restored and byte-compared afterwards). 22 killed, 2 survived. M11 was invalid as first written, because it hit a comment; I redid it as M11b on the gate line.
+
+- **Killed:**
+  - M1: forwarded check.
+  - M2: honeypot.
+  - M3: IP-shape rule.
+  - M4: audit gate.
+  - M5: configured check.
+  - M6: 42501 → unavailable.
+  - M7: production limiter-off.
+  - M8: dummy secret.
+  - M9: 2,000 limit.
+  - M10 and M10b: the action gate removed, and swapped to `ADMIN_FEEDBACK`.
+  - M11b: page gate swapped to `ADMIN_FEEDBACK`.
+  - M12 and M12b: detail gate.
+  - M15: the `checkRateLimit` audit.
+  - M16: footer link.
+  - M17: `FIXED_INTERNAL`.
+  - M18: honeypot attributes.
+  - M19: token kept after `invalid`.
+  - M20: notify `to`.
+  - M21: the privacy notice sentence.
+- **Survived:**
+  - **M13:** the nav item's `requiredFeature` for `/admin/messages` changed to `FEATURES.ADMIN_FEEDBACK` (`src/lib/admin-portal/nav.ts:87-91`). It survives `visible-nav.test.ts` and `nav.test.ts`.
+  - **M14:** the dashboard card `contact_messages` changed to `FEATURES.ADMIN_FEEDBACK` (`src/app/(admin)/admin/_dashboard/registry.ts:58`). It survives `visible.test.ts`, `visible-nav.test.ts` and `cards.test.tsx`.
+  - Why they survive: the only fixture is a support operator holding both `admin.tickets` and `admin.feedback`. Phase 1 ("the nav item and the dashboard card carry the **same** key as the page (`visible-nav.test`)") and the Phase 3 test plan ("the card, the nav item and the registry entry carry the same key") both name this property. **It is not pinned.**
+  - Today's code is correct (see the audit below). The gap is that a wrong key would ship green: a feedback-only holder would see a nav item that answers "no permission", and a card exposing the count of new messages.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+Not re-measured. `src/lib/permissions.ts`, `src/lib/two-factor.ts` and `src/lib/flags.ts` are untouched by this diff.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+I verified this by reading each file, then confirmed the page and action gates by mutation (M10b, M11b and M12b killed).
 
 | Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+|---|---|---|---|
+| `GET /admin/messages` (`messages/page.tsx`) | yes (redirect to sign-in) | yes, before any read | `FEATURES.ADMIN_TICKETS` |
+| `GET /admin/messages/[id]` (`[id]/page.tsx`) | yes | yes, before `isMessageId` and `notFound()` (no existence leak) | `FEATURES.ADMIN_TICKETS` |
+| `setContactMessageStatus` (`messages/actions.ts`) | yes, on every call | yes | `FEATURES.ADMIN_TICKETS` |
+| `clearContactMessageDetails` (`messages/actions.ts`) | yes, on every call | yes | `FEATURES.ADMIN_TICKETS` |
+| Nav item "Contact messages" (`nav.ts`) | n/a | `requiredFeature` | `FEATURES.ADMIN_TICKETS` (correct, **not test-pinned**, M13) |
+| Dashboard card `contact_messages` (`registry.ts:58`, filtered by `visible.ts` `hasFeature`) | n/a | yes | `FEATURES.ADMIN_TICKETS` (correct, **not test-pinned**, M14) |
+| Notification recipients (`notify.ts` → `getTicketOperatorPool()`) | n/a | `role_features.feature_key = admin.tickets` | `FEATURES.ADMIN_TICKETS` |
+| `submitHelpContactAction` (`help/contact/actions.ts`) | none, by design (anonymous) | n/a | n/a. Gated by `isDirectPlatformActionRequest`, then `isHelpContactConfigured`, in the CA2 order (read in `submit.ts:114-182`) |
+
+The `/admin` proxy edge gate stays a complement, not a substitute. No `loading.tsx` or `error.tsx` exists under `messages/` or `help/contact/`.
+
+## Schema/RLS Audit (live catalog, `pipeline-help-contact`)
+
+Read on the owner connection under `default_transaction_read_only=on`:
+- `help_contact_messages`: `relrowsecurity = t`, `relforcerowsecurity = t`, with **0** `pg_policies` rows.
+- `aclexplode(relacl)` shows `neondb_owner` only. There is no `presby_app`, no `presby_platform` and no PUBLIC entry, and `has_table_privilege` is false for both roles on every verb.
+- `pg_trigger`: `help_contact_guard_delete` and `help_contact_guard_update`, both BEFORE ROW and both enabled (`O`).
+- `presby_submit_help_contact(text×5)`: `prosecdef = t`, `proconfig` pins `search_path=public, pg_temp`, and `proacl` is `{neondb_owner=X, presby_app=X}`.
+- `has_function_privilege` for EXECUTE: public `f`, `presby_app` `t`, `presby_platform` `f`.
+- The guards are invoker, owner-only.
+- The columns contain no IP, user-agent, organization or person column, which is what backs "We do not store your IP address or browser details with the message".
+
+Probed **as `presby_app`**:
+- SELECT, INSERT, UPDATE and DELETE each fail with `permission denied for table`. **The refusing layer is the grant.** The zero-policy FORCE RLS is the second wall: Batch 1 showed that a stray `grant select` still reads 0 rows. I did not re-mutate grants.
+- A bad topic through the definer is refused by the CHECK `help_contact_topic_allowed`, inside the definer.
 
 ## Copy Truthfulness
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
+- [x] **Every added or changed string is in the design's Copy table.** `copy.ts` sections A to E match Phase 3 verbatim. There is one documented extra, "Back to contact messages" (Batch 4 departure 2), plus an `aria-label`. The help-diff sentences match Copy F to K, and the privacy-policy edits match Copy I items 1 to 7.
+- [x] **The query behind each claim was opened.**
+  - "We keep …" is the 0083 column list, and "not store your IP … with the message" is the absence of such a column (catalog read).
+  - "at most once an hour" is `c_window = 60 minutes`, pinned by the DB test.
+  - "your account can work tickets" is the same `getTicketOperatorPool()` query that picks the recipients.
+  - The retention sentence is the guard plus `help_contact_cleared_shape`, plus audit metadata that holds ids and statuses only (CA10 test).
+  - Not read by any query, and stated as operator duties: "a person reads each message" and "we reply to the email address on that account".
+- [x] **Each instruction traced to a role that can do it.**
+  - `{{contactAdmin}}` "open Administration, then Tickets" matches `getting-help` steps 1–2, and its readers are administrators.
+  - The inbox guidance points to "Users & roles", a real nav label (`nav.ts:104`). It hands the lookup to "an administrator" because a `support_operator` may lack `admin.users`.
+  - `signing-in` (deactivated account): the form is public and session-free, so that reader can use it.
+- [x] **Older strings grepped.** I found no remaining "does not have a contact form", "three ways" or GitHub-only route. The `{{contact}}` survivors are exactly the three the design kept. The "support ticket" sentences in `adding-people`, `your-congregations-website`, `sign-in-invitations`, `using-your-code` and `setting-up-two-factor` stay true.
+- [x] **"No instant shutdown" and no IP-protection promise.** No user-facing string says "instant", "immediately" or "we never record your IP". The notice and the privacy policy describe IP counting as practice, not a guarantee.
+- [~] **Help diff.**
+  - There are no committed images in the diff.
+  - Form labels quoted by pages: "What is this about?", "Your email address", "Your message", "Send message" and "Your message was sent." were all seen on screen in my walk. "Starting a congregation" and "I can't sign in or I lost my codes" are select options, present in `copy.ts` and the DOM.
+  - I read every changed help sentence against the code. I did **not** open each of the 13 help pages in a browser myself: `help.spec.ts` loaded every published page at 360px (passed), and the reader walk is Phase 6's.
 
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
-- [ ] Help diff covered: every labels string is on screen, every claim walked at 360px, every committed image opened
+**Copy truthfulness: PASS.** No defect found.
+
+## 360px Browser Walk (my own, scratch, light and dark)
+
+**Form**, every state at 360×800:
+- States: form with the real Cloudflare test widget, over-limit counter, field errors (the summary takes focus), busy, check_failed, not_sent, unavailable, sent (with the `signing_in` paragraph), Turnstile blocked, and no JavaScript.
+- Horizontal overflow was **0 px in all 20 shots**.
+- I read the form (light), field errors (dark), sent (light), busy (dark), blocked (light), no-JS (dark) and unavailable (dark). Each shows the exit block where the design puts it, keeps the typed text on failure, and gives a visible reason for a disabled button.
+- How the states were produced: the outcome states were rendered by rewriting the action's response payload for a short (invalid) message, so they wrote nothing. The real `sent` and `busy` states are covered by both lanes.
+
+**Inbox**, 360×800 with the admin storage state:
+- Pages: list, detail of a `new` message, detail of a cleared message, and the `/admin` dashboard. All loaded with HTTP 200 and 0 px overflow in light and dark.
+- The detail page shows the "Not verified" caption, the guidance, and the plain-text field containers.
+- I did not open the clear dialog myself: there was no handled, uncleared row, and I didn't create one. `admin-contact-messages.spec.ts` (passed at 360) covers it.
+
+**Observations, not findings:**
+1. A Next dev "1 Issue" badge appeared once on `/admin/messages`. A reload of six pages showed no console errors or page errors, and the server log was clean. Not reproduced.
+2. The no-JavaScript state renders light under a dark preference, because next-themes needs script to apply `.dark`. This is sitewide.
+3. The help footer's "Write to the PresbyPortal team" also appears on `/help/contact` itself, linking to the same page.
+4. Whether Vercel forwards a custom-host action the same way remains unmeasured (Batch 3b note 2). That belongs to Phase 6 and the deployment walk.
+
+**Data:** every `help_contact_messages` row on the branch has an `example.invalid` email (0 others).
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** Hand back to the implementer (full-stack-developer). Neither item is a design flaw, so there's no escalation to Phase 3.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+1. **A red test in the documented DB run.** `src/lib/help-contact/submit.test.ts:135` (test at `:129`) fails whenever `RATE_LIMIT_DISABLED=true` is in the environment, which the documented local setup always has. The test needs to stub `RATE_LIMIT_DISABLED` in its `beforeEach` (`:77-80`) so it doesn't depend on the runner's environment.
+2. **Coverage gap: no test pins the nav item's or the dashboard card's key to `ADMIN_TICKETS`.** M13 (`src/lib/admin-portal/nav.ts:87-91`) and M14 (`src/app/(admin)/admin/_dashboard/registry.ts:58`) survive when either key is swapped to `FEATURES.ADMIN_FEEDBACK`. A fixture holding `admin.feedback` without `admin.tickets` (or a direct pin of both entries' `requiredFeature`) would kill both.
 
+The rest stands as verified in this run: CA1 to CA13 with CA7 as amended, the feature gates, copy, both contact lanes including (d), the sign-in regression, and the catalog proof. After the fix, QA re-runs only the two touched test files, `npm run check` and the unit suite, unless the fix reaches further.
+
+**Pre-existing, for the orchestrator.** These are 13 DB tests and 4 e2e tests, all caused by the Neon branch being ahead of a base that is 76 commits behind `origin/main` (treasury 0074). Merge `main` before integration and re-run the DB-backed set and those four specs.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (run 1). Full DB set: 14,683 passed, 1 failed (this pipeline) plus 13 pre-existing. Chromium: 614 passed, 4 pre-existing. Contact lane dev 12/12; prod 5/5 including (d) and (e). Catalog proof clean. 2 findings | FAIL | 2026-10-31 |
+
+## Handoff note
+
+**Next agent: full-stack-developer (Phase 4 fix pass).**
+- Fix `submit.test.ts:129-141`'s environment dependence.
+- Add a test that fails when the "Contact messages" nav item (`nav.ts:87-91`) or the `contact_messages` card (`registry.ts:58`) is gated by any key other than `FEATURES.ADMIN_TICKETS`.
+- Show each one failing first: run the submit test with `RATE_LIMIT_DISABLED=true`, and swap the key to `ADMIN_FEEDBACK`.
+- Then return to QA for a scoped run 2.
+
+Evidence (session scratch):
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-db-full.log`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-e2e-chromium.log`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-contact-dev.log`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-rls83.log`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-walk/shots/`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-mutate.sh`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-mutate2.sh`
+
+I removed the scratch copies of the repo and their `.env.local` copies. All servers I started were stopped by PID, and ports 3670 and 3671 are free.
 ---
 
 # Phase 6 — Shipped vs Intent (analyst)

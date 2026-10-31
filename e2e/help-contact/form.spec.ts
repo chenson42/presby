@@ -332,14 +332,12 @@ test("7. pre-hydration: every control is disabled until the scripts run, then en
 });
 
 test("8. the custom-host POST (CA7): the same Server Action request that stores on the platform host stores nothing on a church's own host", async ({ browser, request, baseURL }) => {
-  // KNOWN DEFECT, an open Phase 3 loop-back (docs/work-log/2026-10-31-help-contact.md, Phase 4 Batch 3, "CA7 does not hold").
-  // On a church's own host the proxy rewrites the POST into the /site/<host> tree, where this action's id is not
-  // registered, so Next FORWARDS the action to its owning route with an internal fetch that replaces `Host` with the
-  // server's own (`localhost`) and adds `x-action-forwarded`; the original host survives only in `x-forwarded-host`.
-  // submit.ts step 1 reads `Host` alone (R3), sees a platform host, and STORES the message. Measured 2026-10-31 on the
-  // dev server: the replay below returns `{"kind":"sent"}` and writes a row. `test.fail` keeps the lane green while the
-  // ruling is open AND turns red the moment the defect is fixed, so the annotation cannot outlive it.
-  test.fail(true, "CA7 loop-back: Next forwards the Server Action with Host replaced; the host check cannot see the custom host");
+  // DECISION-313 (CA7 as amended). On a church's own host the proxy rewrites the POST into the /site/<host> tree,
+  // where this action's id is not registered, so Next FORWARDS the action to its owning route with an internal fetch
+  // that replaces `Host` with the server's own and adds `x-action-forwarded`. Step 1 of submit.ts therefore refuses a
+  // forwarded action whatever its Host says (isDirectPlatformActionRequest). Measured before the fix: this replay
+  // returned `{"kind":"sent"}` and wrote a row. The answer is now `unavailable`, not a 404: an action result cannot be
+  // one, and it does not vary with tenant state (an accepted residual).
   const { ctx, page } = await phone(browser, "198.51.100.51");
   const capture = captureServerAction(page);
   const mark = marker("custom");
@@ -383,6 +381,7 @@ test("8. the custom-host POST (CA7): the same Server Action request that stores 
   for (const host of ["church-one.invalid", "nobody-home.invalid"]) {
     const attempt = await replay(host, `http://${host}:${port}`);
     expect(attempt.text, host).not.toContain('"kind":"sent"');
+    expect(attempt.text, host).toContain('"kind":"unavailable"');
     expect(attempt.res.headers()["set-cookie"], host).toBeUndefined();
     expect(await rowsFor(sql, mark), host).toHaveLength(2);
     // ...and with the original Origin (a mismatch Next itself refuses): still nothing.

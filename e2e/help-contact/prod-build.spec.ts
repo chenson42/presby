@@ -152,8 +152,8 @@ test("(d) after() ran at request time: the claimed window's queue rows exist and
 });
 
 test("(e) on a production build, is the custom-host POST refused? (the CA7 question, measured, not assumed)", async ({ browser, request, baseURL }) => {
-  // Same KNOWN DEFECT as form.spec.ts test 8, measured on the production server too.
-  test.fail(true, "CA7 loop-back: the same Server Action forwarding applies on `next start` (see form.spec.ts test 8)");
+  // The CA7 defect was measured on the production server too (form.spec.ts test 8): the forwarded action ran as a
+  // platform one. DECISION-313: step 1 refuses a forwarded action, so the replay stores nothing and is not `sent`.
   const { ctx, page } = await phone(browser, "198.51.100.9");
   const capture = captureServerAction(page);
   const mark = marker("prod-custom");
@@ -180,5 +180,7 @@ test("(e) on a production build, is the custom-host POST refused? (the CA7 quest
   const text = await res.text();
   console.log(`[prod-build] custom-host replay: HTTP ${res.status()}, sent=${text.includes('"kind":"sent"')}, rows=${(await rowsFor(sql, mark)).length}`);
   expect(text).not.toContain('"kind":"sent"');
+  expect(text).toContain('"kind":"unavailable"');
+  expect(res.headers()["set-cookie"]).toBeUndefined();
   expect(await rowsFor(sql, mark)).toHaveLength(1); // only the legitimate one
 });

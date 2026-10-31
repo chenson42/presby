@@ -1,7 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { requestHost, isPlatformHost } from "@/lib/domains/host";
+import { isDirectPlatformActionRequest } from "@/lib/domains/action-host";
 import { consumeRateLimit, recordRateLimitBlock } from "@/lib/rate-limit";
 import { getRequestIp } from "@/lib/request-ip";
 import { verifyTurnstile } from "@/lib/turnstile";
@@ -106,10 +106,12 @@ export async function submitHelpContact(
   formData: FormData,
   hdrs: { get(name: string): string | null },
 ): Promise<HelpContactOutcome> {
-  // 1. The platform host. An absent or unparsable Host, an IP literal in a production
-  //    deployment, and every church's custom domain are refused alike.
-  const host = requestHost(hdrs);
-  if (host === null || !isPlatformHost(host)) return { kind: "unavailable" };
+  // 1. A DIRECT request on a platform host (CA7 as amended, DECISION-313): `Host`, read through
+  //    requestHost() (R3), is a platform host AND `x-action-forwarded` is absent. On a church's own host
+  //    Next forwards the action to its owner with the server's own `Host`, so `Host` alone is not
+  //    enough. An absent or unparsable Host, an IP literal in a production deployment, every church's
+  //    custom domain and every forwarded action are refused alike. `x-forwarded-host` is never read.
+  if (!isDirectPlatformActionRequest(hdrs)) return { kind: "unavailable" };
 
   // 2. Configured.
   if (!isHelpContactConfigured(process.env)) return { kind: "unavailable" };

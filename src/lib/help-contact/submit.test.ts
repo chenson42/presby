@@ -104,6 +104,13 @@ describe("step 1: the platform host (CA7)", () => {
     expect(await submitHelpContact(form(), hdrs({ host: "203.0.113.9" }))).toEqual({ kind: "unavailable" });
     expect(calls).toEqual([]);
   });
+  it("a forwarded action is unavailable even when its Host is a platform host (DECISION-313 regression: the CA7 defect)", async () => {
+    // What Next's forwarder sends for an action that arrived on a church's own host: the server's own Host,
+    // the client's host only in x-forwarded-host, and the marker.
+    const h = hdrs({ host: "localhost:3000", "x-forwarded-host": "church-one.invalid", "x-action-forwarded": "1" });
+    expect(await submitHelpContact(form(), h)).toEqual({ kind: "unavailable" });
+    expect(calls).toEqual([]);
+  });
   it("a forwarded host header decides nothing: only Host does", async () => {
     const h = hdrs({ host: "church-one.invalid", "x-forwarded-host": "localhost" });
     expect(await submitHelpContact(form(), h)).toEqual({ kind: "unavailable" });

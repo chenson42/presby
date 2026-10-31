@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (11 operator questions with defaults; FC1–FC10 → F382–F391) | READY WITH NOTES | 2026-10-31 |
 | 2 — Architectural review | architect | Complete (CA1–CA13; amends C1, C3, C5, C6, C10, R9; AF-1–AF-8 = F406–F413; DECISION-300–304 proposed) | Approved with suggestions | 2026-10-31 |
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
-| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batch 4 (admin inbox) complete: 749 files, 11,442 tests; CA10 test 5 passed. Batch 5 (help content and chrome) complete: 750 files, 11,456 tests; `verifiedIn` untouched (Phase 6 walk). Batch 3b (CA7 fix, DECISION-313) next | — | 2026-10-31 |
+| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batch 4 (admin inbox) complete: 749 files, 11,442 tests; CA10 test 5 passed. Batch 5 (help content and chrome) complete: 750 files, 11,456 tests; `verifiedIn` untouched (Phase 6 walk). Batch 3b (CA7 fix, DECISION-313) complete: 751 files, 11,466 tests; contact lane 12 passed on dev, 4 passed and 1 skipped on the production build. Phase 4 complete | — | 2026-10-31 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1835,6 +1835,33 @@ Walked at 360px, light and dark, in a browser against the dev server (0 px horiz
 6. **Pages other pipelines edit** (`first-day-as-administrator`, `roles-who-can-do-what`, `events-and-the-calendar`, `your-congregations-website`, `reimbursements-for-treasurers`): my edits to them are one-token swaps, so a merge conflict is mechanical.
 
 Audit events: none. Strings: Copy F to K, verbatim (`HELP_CONTACT_LINE`, `HELP_CONTACT_ADMIN_LINE`, `switchedOnText`, the footer, the `getting-help`, `how-a-congregation-gets-started`, `privacy-policy` and lost-phone text).
+
+## Batch 3b — full-stack-developer: the CA7 fix (DECISION-313) (2026-10-31)
+
+Resolves the Phase 3 loop-back raised in Batch 3 ("CA7 does not hold"). Ruled by the architect 2026-10-31 (the orchestrator records the full text and DECISION-313 at integration). **Amended CA7:** the action refuses with `'unavailable'` unless the request's `Host` (via `requestHost()`, R3) is a platform host AND `x-action-forwarded` is absent. `x-forwarded-host` is never read (spoofable when self-hosted: `base-server.js` does `??=`).
+
+### Files
+
+- Created: `src/lib/domains/action-host.ts` (pure; imports only `./host`; exports `NEXT_ACTION_FORWARDED_HEADER = "x-action-forwarded"` and `isDirectPlatformActionRequest(headers, env?)`; not imported by `src/proxy.ts`), `src/lib/domains/action-host.test.ts`.
+- Modified: `src/lib/help-contact/submit.ts` (step 1 is now `isDirectPlatformActionRequest(hdrs)`, replacing the bare `isPlatformHost(requestHost(...))`; no other action file changes), `submit.test.ts` (the regression test), `e2e/help-contact/form.spec.ts` test 8 and `prod-build.spec.ts` (e): the `test.fail` annotations are removed and both now assert `"kind":"unavailable"`, no `sent`, no `Set-Cookie`, and no new row.
+
+### Tests
+
+- `action-host.test.ts` (10): direct platform host accepted; forwarded refused for any marker value (`1`, empty, `0`, `true`) even with a platform `Host`; custom host; IP literal in a production deployment; missing Host (dev and production); `x-forwarded-host` can neither grant nor deny; shape (imports only `./host`, not `server-only`, never reads `x-forwarded-host`, not imported by the proxy); **the version tripwire**: reads `node_modules/next/dist/server/app-render/action-handler.js` and asserts it still contains `'x-action-forwarded'`.
+- `submit.test.ts`: "a forwarded action is unavailable even when its Host is a platform host (DECISION-313 regression: the CA7 defect)", and nothing is spent.
+- **Failing first, then passing.** With step 1 put back to a Host-only check on the branch, contact-lane test 8 failed against the live server (`Expected substring: not "kind":"sent"`: the replay stored); with `isDirectPlatformActionRequest` restored it passes. The pre-fix measurement on the production build was Batch 3's: HTTP 200, `sent`, a second row.
+
+### Gates
+
+- `npm run typecheck`, `eslint src e2e scripts`, `npm run check` (all nine; `check:proxy-imports` unchanged): pass. `npm run test`: **751 files passed, 117 skipped; 11,466 tests passed, 3,232 skipped** (Batch 5 closed at 750 and 11,456).
+- Contact lane, dev server (:3670, limiter on): `E2E_BASE_URL=http://localhost:3670 npm run test:e2e:contact`: **12 passed**, with test 8 no longer annotated. Its control still stores on the platform host (two rows); the replay on `church-one.invalid` and `nobody-home.invalid` answers `unavailable`, sets no cookie and writes no row; the mismatched-Origin variants are refused by Next itself (HTTP 500, "Invalid Server Actions request"), still nothing stored.
+- Contact lane, production build (scratch copy, :3671, `PW_PROD_PORT=3671 npm run test:e2e:contact:prod`): **4 passed, 1 skipped**. (e): `custom-host replay: HTTP 200, sent=false, rows=1` (only the legitimate row), answer `unavailable`, no cookie. (d) skipped by its own rule because earlier runs inside the hour had claimed the notification window (it passed at a free moment in Batch 3, and nothing in Batch 3b touches `notify.ts`). Servers stopped by PID; the scratch copy removed.
+
+### Notes for QA
+
+1. **Accepted residual (architect):** the custom-host replay answers `unavailable` (HTTP 200, a Flight payload), not a 404. An action result cannot be a 404, and it does not vary with tenant state. The proxy's neutral 404 still holds for a GET of `/help/contact` on a custom host (`e2e/custom-domains/lockdown.spec.ts:125`, unchanged).
+2. **Not proven on Vercel.** Whether Vercel's runtime forwards a custom-host action the same way, and whether it adds the same marker, is unmeasured (the contact lane and the production lane are both `localhost`). The version tripwire guards the marker's name in Next; the behaviour on Vercel needs the Phase 6 or deployment walk (a replay with `Host: <a custom host>` against a preview that has the form configured).
+3. Every other anonymous Server Action on the platform is still reachable on a custom host in the same way (no session or cookie involved, so nothing is exposed beyond what the platform host exposes). Out of scope here (the architect's ruling); `isDirectPlatformActionRequest` is the helper a later pipeline would call.
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

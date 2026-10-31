@@ -19,7 +19,7 @@
 | 2 — Architectural review | architect | Complete (CA1–CA13; amends C1, C3, C5, C6, C10, R9; AF-1–AF-8 = F406–F413; DECISION-300–304 proposed) | Approved with suggestions | 2026-10-31 |
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
 | 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batch 4 (admin inbox) complete: 749 files, 11,442 tests; CA10 test 5 passed. Batch 5 (help content and chrome) complete: 750 files, 11,456 tests; `verifiedIn` untouched (Phase 6 walk). Batch 3b (CA7 fix, DECISION-313) complete: 751 files, 11,466 tests; contact lane 12 passed on dev, 4 passed and 1 skipped on the production build. Phase 4 complete | — | 2026-10-31 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | In progress (run 1) | — | 2026-10-31 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -741,6 +741,136 @@ Sources:
 - [Vercel: Request headers](https://vercel.com/docs/headers/request-headers)
 - [Vercel: Environment variables](https://vercel.com/docs/environment-variables)
 - Search (inconclusive on Vercel and `cf-connecting-ip`): [ipgeolocation.io guide](https://ipgeolocation.io/guides/get-real-client-ip-address.md), [hono-ip README](https://cdn.jsdelivr.net/npm/hono-ip@2.0.2/README.md), [stackharbor: real client IP at origin](https://stackharbor.com/en/knowledge-base/cfops-real-client-ip-at-origin/)
+
+---
+
+
+## Phase 2 addendum — CA7 loop-back ruling (architect, 2026-10-31)
+
+*Returned as text by the architect (read-only), recorded verbatim by the orchestrator. Orchestrator numbering: the decision is **DECISION-313**; the platform-wide follow-up is **F416** (own bug-fix pipeline, TODO line at integration). The CLAUDE.md sentence was put to the operator.*
+
+### Verdict
+
+**Approved with suggestions.** Take option A in this pipeline, in an amended form: deny on `x-action-forwarded` only, and never read `x-forwarded-host`. Reject option B as framed, because it would break the church contact form and giving on every custom domain. Option C falls with B. The platform-wide fix gets its own bug-fix pipeline, a TODO line and a finding number. Phase 3 takes the CA7 amendment below and Batch 4 then continues. No return to Phase 1 is needed, because the shape of the feature is unchanged.
+
+### Placement
+
+- **New file `src/lib/domains/action-host.ts`.** It is pure and imports only `./host`. It exports:
+  - `NEXT_ACTION_FORWARDED_HEADER = "x-action-forwarded"`
+  - `isDirectPlatformActionRequest(headers, env?)`, which returns `false` when that header is present (any value), when `requestHost()` is null, or when the host is not a platform host.
+- **Why not `host.ts`:** the proxy may import `host.ts`, and it never needs this function. A separate file keeps the proxy's import graph and `check:proxy-imports` unchanged, and keeps the Next-internal header name in one place.
+- **Wiring:** `src/lib/help-contact/submit.ts` step 1 calls the helper in place of the bare `isPlatformHost(requestHost(hdrs))`. This pipeline changes no other action file.
+- **Scope check:** the pipeline does not touch auth. `src/proxy.ts`, `src/app/(auth)/` and `src/lib/auth/` are all unchanged, so the MFA full-login e2e gate does not apply.
+
+### Invariants Touched
+
+**A Custom Host Is a Key, Not an Identity.** The bullet "a custom host has no session, no cookies and no platform routes" is **false for Server Actions** today. It holds for pages and route handlers. The mechanism, from Next 16.4.2 source (`node_modules/next/dist/server/app-render/action-handler.js`):
+
+- **Forwarding.** If the receiving page's worker does not own the action id, `selectWorkerForForwarding` triggers `createForwardedActionResponse`. That function `fetch`es the action to the owning route at the server's own origin. It merges the client's headers, minus `actionsForbiddenHeaders`, and then always does `forwardedHeaders.set('x-action-forwarded', '1')`.
+- **Host is replaced.** The origin comes from `__NEXT_PRIVATE_ORIGIN` or `initURL`. In `next start` or dev, `initURL` is `http://<hostname>:<port>`, so `Host` becomes the server's own host. That matches the implementer's measurement.
+- **Cookies are filtered both ways.** The client's `Cookie` header is forwarded. The hop's `Set-Cookie` is never copied back to the client, because `actionsForbiddenHeaders` includes `set-cookie`. So no cookie is ever set on a custom host through this path.
+
+**Proposed CLAUDE.md wording.** CLAUDE.md edits need the user's approval, so this goes to the orchestrator. Append to that bullet:
+
+> "A Server Action is not a route: Next forwards an action posted to a `/site` page that does not own it to its owning worker with the server's own `Host` (`x-action-forwarded`). Actions outside `(public)/site` therefore refuse a forwarded request as well as a non-platform `Host`; `/site` actions are covered by the resolver's `Host === key`."
+
+Mark it `paper` until the platform-wide pipeline lands its source scan.
+
+**Permissions vs Flags:** not touched.
+
+### Notes
+
+**1. What this pipeline does now.** Take A, amended:
+
+- `submit.ts` step 1 refuses with `unavailable` unless `isDirectPlatformActionRequest(hdrs)`.
+- **Do not read `x-forwarded-host`.** On a self-hosted server it is spoofable. `base-server.js:564` does `req.headers['x-forwarded-host'] ??= req.headers['host']`, so a value the client sends survives. A client on a custom host can send `x-forwarded-host: <platform host>` with a matching `Origin`, which passes Next's CSRF comparison on both hops and defeats any check based on that header. It also breaks R3 for no gain, since `x-action-forwarded` is enough on its own.
+- **Tests:**
+  - Unit test in `action-host.test.ts`: header present, header absent, a custom host, an IP literal, and a missing host.
+  - **Version tripwire:** a test that reads `node_modules/next/dist/server/app-render/action-handler.js` and asserts it still contains the literal `'x-action-forwarded'`. A Next upgrade that renames the header then fails CI instead of silently reopening the hole.
+- **e2e:** remove the `test.fail` annotations on `form.spec.ts` test 8 and `prod-build.spec.ts` (e). Both lanes must show the custom-host replay storing no row, not returning `sent`, and setting no cookie, while the platform-host control still stores a row.
+- **The custom-host replay now gets `unavailable`, not the neutral 404.** An action's result is an RSC body, so the action layer cannot produce the 404. This leaks nothing:
+  - The answer does not depend on tenant state, so it is the same for a live tenant, a lapsed one or an unknown host.
+  - It reveals only that the host routes to this deployment, which the probe already reveals.
+
+  Record it as an accepted residual.
+
+**2. Platform-wide: its own bug-fix pipeline.** It needs a TODO line and an F-number, which the orchestrator assigns. **Severity: Low.** No data crosses between tenants, no credential is exposed, and no victim can be reached. The defect is a false invariant and a gap in defence in depth.
+
+Why B is wrong as framed. The site contact form (`(public)/site/[slug]/contact-form.tsx`, rendered via `render-site-page.tsx`) and giving (`public-giving-slot.tsx`, `give/page.tsx`) are imported inside `/site/[slug]`. On a custom host the rewritten POST lands on a worker that owns the action, so it runs in place, unforwarded, with `Host` equal to the church's domain. A proxy 404 on every non-platform `Next-Action` POST kills both. The proxy cannot tell which action ids it should allow without knowing the action manifest, and it must not import that. **The lock belongs in the action layer, not the proxy.**
+
+Each action that can be reached without a session:
+
+| Action file | Exposure through a custom host | Severity |
+|---|---|---|
+| `(documentation)/help/contact/actions.ts` | The only action whose decision depends on the host (CA7). Fixed in this pipeline. | Low |
+| `(public)/site/[slug]/actions.ts`, `give/actions.ts` | Safe by design. A forwarded hop has `Host ≠ key`, so `resolveSiteOrganization` misses in host mode. Slug mode on a platform `Host` is the legitimate platform route anyway. This shows R1 and R3 are correct. | None |
+| `(password-reset)/actions.ts` | Same effect as on the platform host. Limits are keyed by IP, and links are built from the platform origin, not the request. | Low |
+| `(statistics-submit)/actions.ts` | The token is the credential. Same effect as on the platform host. | Low |
+| `(invite)/actions.ts` (anonymous paths) | The token is the credential. The hand-off cookie cannot be set on the custom host (`set-cookie` is stripped), so the flow breaks closed. | Low |
+| `(auth)/signin/actions.ts` | Credentials are checked, rate limits and audit apply as usual, and no session cookie reaches the client. Same oracle as the platform host. | Low, but auth-touching |
+
+**Authenticated actions: confirmed harmless.** These are `totp`, `account`, `account/2fa`, `feedback`, `no-organization` and `sign-out`.
+
+- The session cookie is host-only: `src/auth.ts` and `src/lib/auth/config.ts` set no `domain`. A browser therefore never sends a platform cookie to a church's domain.
+- A cross-site browser POST fails Next's comparison of `Origin` against the host, which runs on both hops.
+- A non-browser client can only attach its own cookie. The hop then runs the action as that client, which is no more than it can do on the platform host, and no `Set-Cookie` comes back.
+- So "no session on a custom host" is technically pierced only by a client using its own session. Record that as a `paper` residual.
+
+**Scope of the bug-fix pipeline:**
+
+- Apply `isDirectPlatformActionRequest` to every `"use server"` file outside `(public)/site/`.
+- Add a source-scan test so the next action file cannot skip the guard. `/site` actions are exempt and named in the scan.
+- The guard goes into `(auth)/signin` and `(auth)/totp`, so that pipeline **is** auth-touching and needs the MFA full-login e2e.
+- Measure on a Vercel preview whether production forwards at all.
+
+**3. Can the headers be trusted or spoofed?**
+
+- **`x-action-forwarded` can be trusted for a denial, which is the only use here.**
+  - *A client sends it on a direct platform request:* Next treats the request as already forwarded. It does not forward again and skips page rendering, and our guard denies. The client only denies itself.
+  - *A client sends it on a custom host:* the `/site` worker does not forward, the action id is unknown there, and the action is not found. That is not a bypass.
+  - *A client cannot strip it from the hop.* Next creates the forwarded request itself and calls `.set(...)` after merging the client's headers.
+  - *A client cannot make a platform action run unforwarded on a custom host.* Every custom-host path is rewritten into `/site/<host>/…`, and which actions a worker owns is fixed at build time.
+  - *If a future `/site` page imports a platform action,* it runs in place with the church's `Host`, and the helper's `isPlatformHost` half catches it. That is why the helper keeps **both** checks.
+- **Vercel.** The header is set in the one forwarding function for every runtime, so the guard holds however the hop is routed:
+  - If Vercel's `initURL` uses the client's `Host`, the hop goes back through the edge and the proxy, is rewritten to `/site/…`, and fails as not found.
+  - If it uses an internal origin, the hop carries the header and is denied.
+
+  Vercel can change only whether a header the client sends passes through, and that only affects self-denial. Measuring on Vercel is therefore **not** a gate for this pipeline. It belongs in the platform-wide pipeline, which needs it to know whether production forwards at all.
+- **`x-forwarded-host` cannot be trusted** when self-hosted (see note 1). It is unmeasured on Vercel. Do not read it for any decision, including a denial.
+
+**4. Amended CA7 (replaces CA7 in this pipeline's Phase 2 section):**
+
+> **CA7. Custom host (handoff item 9), amended 2026-10-31 (DECISION-313).** The action refuses with `'unavailable'` unless `isDirectPlatformActionRequest(await headers())` (`src/lib/domains/action-host.ts`, pure, not imported by the proxy): the request's `Host` (via `requestHost()`, R3) is a platform host **and** `x-action-forwarded` is absent. The `Host` check alone is insufficient: on a custom host the proxy rewrites the POST into `/site/<host>/…`, where this action is not registered, and Next forwards it to its owning route with the server's own `Host` (measured on dev and on `next build && next start`). `x-forwarded-host` is never read. A unit test covers a forwarded request, a custom host, an IP literal and a missing host. A version-tripwire test asserts that Next's action handler still sets the literal `'x-action-forwarded'`. The e2e replays a captured action POST with `Host: church-one.invalid` on both lanes and asserts no row, no `sent` and no cookie, with the platform-host replay still storing as the control. The custom-host replay answers `unavailable`, not the neutral 404 (an action result cannot be a 404). This is an accepted residual: the answer does not vary with tenant state.
+
+**Proposed decision, for the orchestrator to record:**
+
+> **DECISION-313: A Server Action is not a route; anonymous platform actions refuse forwarded requests.** Next forwards a Server Action posted to a page whose worker does not own it to the owning worker over an internal fetch that replaces `Host` and sets `x-action-forwarded: 1` (Next 16.4.2, `action-handler.js`). Because the proxy rewrites every custom-host path into `/site/<host>/…`, every platform action is reachable on a church's domain through that forward, with the platform's own `Host`. This falsifies "a custom host has no platform routes" for actions while leaving pages and route handlers intact. Ruling: (1) the lock lives in the action, not the proxy. A proxy refusal of non-platform `Next-Action` POSTs would break the `/site` contact form and giving, which legitimately run in place on custom hosts, and the proxy cannot know action ownership without importing the manifest. (2) `src/lib/domains/action-host.ts` exports `isDirectPlatformActionRequest()`: a platform `Host` and no `x-action-forwarded`. The header is trusted only to deny. A client can add it, which only denies itself, but cannot remove it from Next's own hop. `x-forwarded-host` is never read: self-hosted, `base-server` preserves a value the client sends. A test pins the header literal in Next's source so an upgrade cannot silently reopen the forward. (3) `/site` actions are exempt. `resolveSiteOrganization`'s `Host === key` already fails closed on a forwarded hop. (4) The help contact action adopts the helper now (CA7 amended). Every other action outside `(public)/site/` adopts it in a separate bug-fix pipeline (F-NNN, severity Low: no cross-tenant read, no victim reachable, no cookie set, because the hop's `Set-Cookie` is stripped and the session cookie is host-only). That pipeline adds a source scan, is auth-touching because of `(auth)/signin` and `(auth)/totp`, and measures forwarding on Vercel. Accepted residuals: a custom-host action replay answers with the action's own refusal rather than the neutral 404, and a client may exercise its own session through the forward. Both are `paper`.
+
+**TODO line for the orchestrator to add:**
+
+> "F-NNN: anonymous and authenticated Server Actions outside `(public)/site` are reachable on a custom host via Next's action forwarding; adopt `isDirectPlatformActionRequest()` in every `"use server"` file outside `(public)/site/` with a source-scan tripwire, MFA e2e (auth-touching), and a Vercel forwarding measurement (DECISION-313)."
+
+### Per-Phase Status row
+
+| 2 — Architectural review (CA7 loop-back addendum) | architect | Complete | Approved with suggestions | 2026-10-31 |
+
+### Handoff
+
+**To tech-lead (Phase 3 loop-back).** Replace CA7 with the amended text above. Add `action-host.ts` and its two tests to the Batch 3 file plan, and change `submit.ts` step 1. Return to the full-stack-developer, who removes the two `test.fail` annotations and re-runs the contact lane on dev and on the production build. Batch 4 then proceeds.
+
+**To the orchestrator:**
+- Record DECISION-313.
+- Assign the F-number and add the TODO line.
+- Bring the CLAUDE.md sentence to the user for approval. It is not an agent edit.
+
+Files referenced:
+- `/Users/cshenso/git/presby-platform/presby-help-contact/src/proxy.ts`
+- `/Users/cshenso/git/presby-platform/presby-help-contact/src/lib/domains/host.ts`
+- `/Users/cshenso/git/presby-platform/presby-help-contact/src/lib/help-contact/submit.ts` (step 1, lines 111–112)
+- `/Users/cshenso/git/presby-platform/presby-help-contact/src/lib/sites.ts` (lines 593–620)
+- `/Users/cshenso/git/presby-platform/presby-help-contact/node_modules/next/dist/server/app-render/action-handler.js` (lines 79–104, 134–232, 486–504)
+- `/Users/cshenso/git/presby-platform/presby-help-contact/node_modules/next/dist/server/base-server.js` (line 564)
+- `/Users/cshenso/git/presby-platform/presby-help-contact/docs/work-log/2026-10-31-help-contact.md` (CA7 at line 578; Batch 3 finding at line 1689)
 
 ---
 

@@ -78,6 +78,9 @@ describe("documentation group boundaries", () => {
       "help/planned/[slug]/page.tsx",
       "help/[...unmatched]/page.tsx",
       "help/not-found.tsx",
+      "help/contact/page.tsx",
+      "help/contact/contact-form.tsx",
+      "help/contact/actions.ts",
     ]) {
       expect(rel, expected).toContain(expected);
     }
@@ -87,9 +90,9 @@ describe("documentation group boundaries", () => {
   // (see the dedicated test below), so the content-route locks do not apply to it.
   const isCatchAll = (f: string) => relative(GROUP_DIR, f) === join("help", "[...unmatched]", "page.tsx");
 
-  it('declares dynamic = "error" on every content page (the four that render content)', () => {
+  it('declares dynamic = "error" on every content page (the five that render content; the fifth is the contact form)', () => {
     const pages = groupFiles().filter((f) => /(^|\/)page\.tsx$/.test(f) && !isCatchAll(f));
-    expect(pages.length).toBe(4);
+    expect(pages.length).toBe(5);
     for (const f of pages) {
       expect(readFileSync(f, "utf8"), relative(ROOT, f)).toMatch(/export const dynamic = "error"/);
     }

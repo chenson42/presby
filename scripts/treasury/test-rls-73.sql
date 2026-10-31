@@ -394,8 +394,12 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :P73_ALDER, true);
-  insert into users (id, email, name) values ('a7399999-0000-4000-8000-0000000000e1', 'p73.rowan@example.invalid', 'P73 Fixture');
-  update people set user_id = 'a7399999-0000-4000-8000-0000000000e1' where id = :P73_ROWAN;
+  -- Rowan's account (a7399999-...e1) is linked by scripts/treasury/seed-dev-treasury.sql
+  -- on the owner path: since drizzle/0065 (F186) presby_app may not write
+  -- people.user_id. Pin the fixture so a missing seed fails here, by name.
+  select assert_eq((select count(*) from people where id = :P73_ROWAN
+                     and user_id = 'a7399999-0000-4000-8000-0000000000e1'),
+                   1, '73e: the seed links Rowan to the p73.rowan@ account (owner path, F186)');
   select * from presby_reimbursement_save_draft('p73-key-000002', 'vendor', :P73_PROPERTY, null, 'Hardware Co', 900,
            presby_reimbursement_org_today(), 'Hinges', :P73_CATEGORY, null, true, 'a7399999-0000-4000-8000-0000000000e1') \gset p73e_
   select assert_eq((select count(*) from presby_reimbursement_submit(:'p73e_request_id', 1, 'a7399999-0000-4000-8000-0000000000e1') s

@@ -11,9 +11,11 @@ import {
 import type { ImageRefusal } from "./types";
 
 /**
- * THE ONLY FILE IN `src/` THAT IMPORTS `sharp` (a source scan in `scan.test.ts`
- * fails on any other importer). Pure bytes in, bytes out: no database, no
- * filename, no request. docs/work-log/2026-10-26-person-photos-inc1.md, R6/R7.
+ * ONE OF THE TWO FILES IN `src/` THAT IMPORT `sharp`, the other being
+ * `src/lib/storage/image-sanitize.ts` (DECISION-312: a closed list of two; a
+ * source scan in `scan.test.ts` fails on any third importer). Pure bytes in,
+ * bytes out: no database, no filename, no request.
+ * docs/work-log/2026-10-26-person-photos-inc1.md, R6/R7.
  *
  * THE ORDER IS THE SECURITY PROPERTY. Everything that can refuse a hostile or
  * oversized file runs BEFORE a single pixel is decoded:

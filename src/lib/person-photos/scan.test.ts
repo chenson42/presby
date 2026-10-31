@@ -52,9 +52,9 @@ const PHOTOS_PAGE_DIR = at("app", "(org)", "o", "[slug]", "admin", "community", 
 const FEATURE_FILES = APP_FILES.filter((f) => f.startsWith(FEATURE_LIB) || f.startsWith(PHOTOS_PAGE_DIR));
 
 describe("sharp (R6)", () => {
-  it("is imported by image.ts and nothing else", () => {
+  it("is imported by image.ts and image-sanitize.ts and nothing else (DECISION-312)", () => {
     const importers = APP_FILES.filter((f) => /from\s+["']sharp["']|require\(\s*["']sharp["']\s*\)|import\(\s*["']sharp["']\s*\)/.test(code(f)));
-    expect(importers.map(rel)).toEqual(["src/lib/person-photos/image.ts"]);
+    expect(importers.map(rel).sort()).toEqual(["src/lib/person-photos/image.ts", "src/lib/storage/image-sanitize.ts"]);
   });
 
   it("image.ts is server-only", () => {

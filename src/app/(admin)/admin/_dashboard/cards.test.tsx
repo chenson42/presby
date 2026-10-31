@@ -12,6 +12,7 @@ vi.mock("server-only", () => ({}));
 const readers = vi.hoisted(() => ({
   readTicketsCard: vi.fn(),
   readFeedbackCard: vi.fn(),
+  readContactMessagesCard: vi.fn(),
   readEmailCard: vi.fn(),
   readGivingCard: vi.fn(),
   readDomainsCard: vi.fn(),
@@ -23,6 +24,7 @@ const readers = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/admin-portal/dashboard/tickets", () => ({ readTicketsCard: readers.readTicketsCard }));
 vi.mock("@/lib/admin-portal/dashboard/feedback", () => ({ readFeedbackCard: readers.readFeedbackCard }));
+vi.mock("@/lib/admin-portal/dashboard/messages", () => ({ readContactMessagesCard: readers.readContactMessagesCard }));
 vi.mock("@/lib/admin-portal/dashboard/email", () => ({ readEmailCard: readers.readEmailCard }));
 vi.mock("@/lib/admin-portal/dashboard/giving", () => ({ readGivingCard: readers.readGivingCard }));
 vi.mock("@/lib/admin-portal/dashboard/domains", () => ({ readDomainsCard: readers.readDomainsCard }));
@@ -34,6 +36,7 @@ vi.mock("@/lib/admin-portal/dashboard/recent-changes", () => ({ readRecentChange
 
 import {
   AccountsCardView,
+  ContactMessagesCardView,
   DASHBOARD_CARD_VIEWS,
   DomainsCardView,
   EmailCardView,
@@ -63,6 +66,7 @@ describe("card wrappers", () => {
   it.each([
     ["Tickets", TicketsCardView, readers.readTicketsCard, "/admin/tickets"],
     ["Feedback", FeedbackCardView, readers.readFeedbackCard, "/admin/feedback"],
+    ["Contact messages", ContactMessagesCardView, readers.readContactMessagesCard, "/admin/messages"],
     ["Email queue", EmailCardView, readers.readEmailCard, "/admin/email-queue"],
     ["Giving notices", GivingCardView, readers.readGivingCard, "/admin/giving"],
     ["Domains", DomainsCardView, readers.readDomainsCard, "/admin/organizations/domains"],
@@ -81,6 +85,7 @@ describe("card wrappers", () => {
   it.each([
     ["Tickets", TicketsCardView, readers.readTicketsCard, { kind: "ok", newCount: 0, unassignedOpen: 0, oldestNewSeconds: null }, "/admin/tickets"],
     ["Feedback", FeedbackCardView, readers.readFeedbackCard, { kind: "ok", newCount: 0 }, "/admin/feedback"],
+    ["Contact messages", ContactMessagesCardView, readers.readContactMessagesCard, { kind: "ok", newCount: 0 }, "/admin/messages"],
     ["Email queue", EmailCardView, readers.readEmailCard, { kind: "ok", failed: 0, overdue: 0 }, "/admin/email-queue"],
     ["Giving notices", GivingCardView, readers.readGivingCard, { kind: "ok", connections: 0, waiting: 0, deadLetters: 0, restricted: 0 }, "/admin/giving"],
     ["Domains", DomainsCardView, readers.readDomainsCard, { kind: "ok", needAttention: 0 }, "/admin/organizations/domains"],

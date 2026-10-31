@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (11 operator questions with defaults; FC1–FC10 → F382–F391) | READY WITH NOTES | 2026-10-31 |
 | 2 — Architectural review | architect | Complete (CA1–CA13; amends C1, C3, C5, C6, C10, R9; AF-1–AF-8 = F406–F413; DECISION-300–304 proposed) | Approved with suggestions | 2026-10-31 |
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
-| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batches 4 and 5 not started | — | 2026-10-31 |
+| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batch 4 (admin inbox) complete: 749 files, 11,442 tests; CA10 test 5 passed. Batch 5 in progress | — | 2026-10-31 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1746,6 +1746,60 @@ Read in full: the form (light), field errors (light and dark), busy (dark), bloc
 4. The Turnstile "token already spent" answer is unverified (needs the `3x…` dummy secret).
 
 Audit events: none in this batch. Strings added: Copy A, B and C, verbatim.
+
+## Batch 4 — full-stack-developer: the admin inbox (2026-10-31)
+
+### Files Created
+
+- `src/lib/help-contact/inbox.ts` (`server-only`; the ONLY `getPlatformDb()` caller under `src/lib/help-contact/`): `listMessages` (keyset on `created_at`, `limit + 1`), `readMessage` (joins the two operator names), `setMessageStatus`, `clearMessageDetails` (each one transaction: `SELECT ... FOR UPDATE`, the UPDATE, `insertAuditRow(tx, ...)`; metadata is ids and status words only), `isMessageId`, `parseCursor`.
+- `src/app/(admin)/admin/messages/`: `page.tsx` (list, card layout), `[id]/page.tsx` (detail, `notFound()`), `actions.ts` (`setContactMessageStatus`, `clearContactMessageDetails`), `message-triage.tsx`, `clear-details-dialog.tsx` (`AlertDialog`), `status-badge.ts`. No `loading.tsx`.
+- `src/lib/admin-portal/dashboard/messages.ts` (count-only reader, the `feedback.ts` shape).
+- Tests: `inbox.test.ts` (fake runner), `inbox.db.test.ts` (the CA10 test), `messages/{actions,page,message-triage,clear-details-dialog}.test.ts(x)`, `[id]/page.test.tsx`, `dashboard/messages.test.ts`; `e2e/admin-contact-messages.spec.ts`.
+
+### Files Modified
+
+`src/lib/help-contact/copy.ts` (Copy D, verbatim, plus one string: see Departures 2), `src/lib/admin-portal/nav.ts` (a "Contact messages" item in Support, `FEATURES.ADMIN_TICKETS`), `_dashboard/{registry,cards,present}` (card `contact_messages`, zone `support`, `ADMIN_TICKETS`), `dashboard/boundaries.test.ts` (`help_contact_messages` added to the allow-list, on purpose, in review), `src/lib/help-contact/boundaries.test.ts` (three new pins), and the existing tests the new card and nav item change: `page.test.tsx`, `visible.test.ts`, `present.test.ts`, `cards.test.tsx`, `visible-nav.test.ts`.
+
+### Endpoints and gates
+
+| Route or action | `auth()` | Gate |
+|---|---|---|
+| `GET /admin/messages` | yes (redirect to sign-in) | `FEATURES.ADMIN_TICKETS`, checked in the page |
+| `GET /admin/messages/<id>` | yes | `FEATURES.ADMIN_TICKETS`; non-UUID or missing row is `notFound()` |
+| `setContactMessageStatus(id, to)` | yes ("Not signed in.") | `FEATURES.ADMIN_TICKETS` ("Forbidden."), UUID id, closed status list |
+| `clearContactMessageDetails(id)` | yes | `FEATURES.ADMIN_TICKETS`, UUID id |
+
+Nav item and dashboard card carry the same key as the page. No flag, no new permission, no new env var. Audit events: `help_contact.status_changed` (metadata `{messageId, from, to}`), `help_contact.details_cleared` (metadata `{messageId, status}`).
+
+### CA10 proof
+
+`inbox.db.test.ts` (5 tests, real Postgres, every test in a rolled-back transaction): one audit row per mutation with the right action key, resource id and actor; the row's metadata AND the whole row (`to_jsonb(audit_events)`) contain none of the seeded name, email, congregation or message; a refused or no-op mutation writes no row; the guard's stamps are in place. Failing-first, on the branch: (a) adding `email: row.email` to the clear's metadata fails "clearing writes exactly one audit row" with the leak named; (b) deleting the status audit insert fails both mutation tests (`expected [] to have a length of 1`). Both reverted.
+
+### Gates
+
+- `npm run typecheck`, `eslint src e2e scripts`, `npm run check` (all nine): pass.
+- `npm run test` (no DB env): **749 files passed, 117 skipped; 11,442 tests passed, 3,232 skipped** (Batch 3 closed at 741 and 11,363).
+- DB (serial): `inbox.db.test.ts` 5 passed; `help-contact.db.test.ts` 25 passed unchanged.
+- e2e on a keyless dev server (:3670): `admin-contact-messages.spec.ts` 7 passed; `admin-shell.spec.ts` and `admin-audit.spec.ts` 11 passed (the nav and zone changes). The spec clears its own rows in `afterAll` (triage, then clear), so nothing personal stays.
+- The audit log filter groups by prefix from `AUDIT_ACTIONS`; the two new keys need no label map.
+
+### 360px evidence (light and dark; scratch, not committed)
+
+`/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/help-contact/shots/`: `inbox-01-list-{light,dark}.png`, `inbox-02-detail-new-*`, `inbox-03-detail-handled-*`, `inbox-04b-dialog-settled-*` (the `inbox-04-dialog-*` pair was taken mid-animation: ignore), `inbox-05-dashboard-*`, `inbox-06-detail-cleared-*`. Viewport 360 by 800 at 2x; horizontal overflow 0 px in every one. Read: the list (light), the detail with hostile text and 300 unbroken characters (dark), the dialog (light mid-animation, dark settled), the dashboard (dark).
+
+### Departures from the design, with reasons
+
+1. **The `before` cursor is a microsecond ISO string, not a `Date`.** Phase 3 had `before?: Date`. A `Date` rounds to milliseconds, so a row between the rounded cursor and the real one is skipped; the cursor is the `to_char(... 'US')` value the page itself produced, validated by exact shape, and a DB test pins three rows a microsecond apart.
+2. **One string beyond Copy D: "Back to contact messages"** (the Back Navigation standard's link; a phone has the nav behind a Menu button). Plus the detail h1 reuses the existing "Read message", and the filter row has an `aria-label` ("Show messages by status"), which are not claims.
+3. **The filter links and "Older messages" are `<Button asChild>`**, not hand-styled links: `check:brand-scope` rejects a button-shaped class string outside `components/ui/`. The current filter is the default variant.
+4. **The detail page shows the guidance paragraph always**, including on a cleared message (Phase 3 said "under the fields" without a condition).
+5. **A status change to the status the message already has is a no-op that writes no audit row.** Phase 3 did not name it.
+
+### Notes for QA
+
+1. The dashboard card and the inbox's New list are counting the pre-existing synthetic rows on `pipeline-help-contact` (contact-lane and DB-test rows, all `example.invalid`).
+2. Hostile text is pinned inert at three levels: unit (no element, no anchor), the e2e (`<script>` text shown, `window.__xss` undefined, no `phish` anchor), and the screenshots.
+3. `check:audit` is silent on `messages/actions.ts` by construction (no `db.` call); `inbox.db.test.ts` is the guard (AF-7).
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

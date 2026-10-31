@@ -7,17 +7,17 @@ const ids = (features: string[]) =>
   visibleDashboardZones(features).flatMap((z) => z.cards.map((c) => c.id));
 
 describe("visibleDashboardZones", () => {
-  it("a full operator sees four Organizations cards, three Support, two Access and the recent-changes card (E3)", () => {
+  it("a full operator sees four Organizations cards, four Support, two Access and the recent-changes card (E3)", () => {
     const zones = visibleDashboardZones(Object.values(FEATURES));
     expect(zones.map((z) => [z.zone.key, z.cards.length])).toEqual([
       ["organizations", 4],
-      ["support", 3],
+      ["support", 4],
       ["access", 2],
       ["recent", 1],
     ]);
   });
 
-  it("a support operator sees exactly the Support cards Tickets and Feedback (E1)", () => {
+  it("a support operator sees exactly the Support cards Tickets, Feedback and Contact messages (E1)", () => {
     const zones = visibleDashboardZones([
       FEATURES.ADMIN_DASHBOARD,
       FEATURES.ADMIN_TICKETS,
@@ -27,6 +27,7 @@ describe("visibleDashboardZones", () => {
     expect(ids([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS, FEATURES.ADMIN_FEEDBACK])).toEqual([
       "tickets",
       "feedback",
+      "contact_messages",
     ]);
   });
 

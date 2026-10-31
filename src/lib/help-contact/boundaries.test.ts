@@ -99,6 +99,38 @@ describe("inbox.ts is not importable from the public documentation tree (CA9)", 
   });
 });
 
+describe("the admin inbox reaches the platform connection through inbox.ts only (CA1)", () => {
+  const ADMIN_TREE = path.join(SRC, "app/(admin)/admin/messages");
+
+  it("nothing under /admin/messages calls getPlatformDb or the plain db export", () => {
+    const files = walk(ADMIN_TREE).filter((f) => !/\.test\.tsx?$/.test(f));
+    expect(files.length).toBeGreaterThan(4);
+    const offenders = files.filter((f) => {
+      const src = stripComments(read(f));
+      return /\bgetPlatformDb\b/.test(src) || /import\s*\{[^}]*\bdb\b[^}]*\}\s*from\s*["']@\/lib\/db["']/.test(src);
+    });
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it("has no loading.tsx (DECISION-251: the detail route calls notFound())", () => {
+    expect(walk(ADMIN_TREE).filter((f) => /(^|\/)loading\.tsx$/.test(f))).toEqual([]);
+  });
+
+  it("inbox.ts is server-only and the dashboard reader holds the only other read of the table", () => {
+    expect(read(path.join(SRC, "lib/help-contact/inbox.ts"))).toMatch(/^import "server-only";/m);
+    const readers = walk(path.join(SRC, "lib"))
+      .filter((f) => !/\.test\.tsx?$/.test(f) && !/\/db\/domain\/help-contact\.ts$/.test(f))
+      .filter((f) => /help_contact_messages|helpContactMessages/.test(stripComments(read(f))))
+      .map(rel)
+      .sort();
+    expect(readers).toEqual([
+      "src/lib/admin-portal/dashboard/messages.ts",
+      "src/lib/dev-docs.ts",
+      "src/lib/help-contact/inbox.ts",
+    ]);
+  });
+});
+
 describe("the pure files stay pure (the client island walks them)", () => {
   for (const name of ["contract.ts", "copy.ts", "validate.ts", "configured.ts"]) {
     it(`${name} imports no server-only, no database, no next/*`, () => {

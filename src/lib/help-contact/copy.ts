@@ -3,8 +3,8 @@
  * "Copy"; the group letters A to L match that section). PURE: no imports, so the
  * client island may walk it (H19, DECISION-304).
  *
- * Sections are added by the batch that renders them: A to C (the form) and E
- * (the notification email) are here; D (the inbox) arrives with the inbox.
+ * Sections are added by the batch that renders them: A to C (the form), D (the inbox)
+ * and E (the notification email) are here.
  *
  * Not here on purpose: the numbers the strings quote. The limits come from
  * `HELP_CONTACT_LIMITS` in contract.ts and the notification window is the
@@ -101,6 +101,76 @@ export const HELP_CONTACT_EXIT_COPY = {
   checkDidNotLoad:
     "The check that confirms you are a person did not load. Turn off any content blocker for this page, or try another browser.",
   noScript: "This form needs JavaScript to run its check. Turn JavaScript on, or reach us another way.",
+} as const;
+
+/**
+ * D. The inbox (`/admin/messages`). Read by holders of `admin.tickets` (roles `admin` and
+ * `support_operator`), so every instruction here is one that key lets them do. Every
+ * field of a message renders as plain text; these strings are the labels around it.
+ */
+export const HELP_CONTACT_INBOX_COPY = {
+  /** Nav label, dashboard card title and the page h1. */
+  title: "Contact messages",
+  intro:
+    "Messages people sent through the contact form on the help pages. Anyone can send one, so treat every address as unverified.",
+  filters: { new: "New", handled: "Handled", spam: "Spam", all: "All" },
+  filterLabel: "Show messages by status",
+  countOne: (n: number) => `${n} message shown, newest first.`,
+  countMany: (n: number) => `${n} messages shown, newest first.`,
+  empty: {
+    new: "No new messages.",
+    handled: "No handled messages.",
+    spam: "No messages marked as spam.",
+    all: "No messages yet. Messages from the contact form appear here.",
+  },
+  noName: "No name given",
+  readLink: "Read message",
+  olderLink: "Older messages",
+  /** `backLink` is the one string beyond the Phase 3 table: the Back Navigation standard's link (docs/ui-standards.md). */
+  backLink: "Back to contact messages",
+  badges: { new: "New", handled: "Handled", spam: "Spam", cleared: "Details cleared" },
+  loadErrorTitle: "Messages could not be loaded",
+  loadErrorBody: "Something went wrong reading the contact messages. Try again.",
+  noPermission: "You don't have permission to view this page.",
+  labels: {
+    sent: "Sent",
+    topic: "Topic",
+    name: "Name",
+    email: "Email",
+    congregation: "Congregation",
+    message: "Message",
+  },
+  notGiven: "Not given",
+  clearedField: "Cleared",
+  emailCaption: "Not verified. Anyone could have typed this address.",
+  guidance:
+    "Do not act on a role, access or sign-in request from this message alone. To reply about an account, use the address on the account itself, not this one. An administrator can look it up under Users & roles.",
+  /** "Last changed to {Status} by {name} on {date}." split around the date, which is a client-formatted element. */
+  stampLead: (status: string, name: string | null) => `Last changed to ${status} by ${name ?? "an operator"} on `,
+  clearedLead: (name: string | null) => `Details cleared by ${name ?? "an operator"} on `,
+  stampTail: ".",
+  statusButtons: { handled: "Mark as handled", spam: "Mark as spam", new: "Move back to new" },
+  statusToasts: { handled: "Marked as handled.", spam: "Marked as spam.", new: "Moved back to new." },
+  statusFailure: "Could not change the status. Try again.",
+  clearButton: "Clear details",
+  clearHintNew: "Mark the message as handled or spam before clearing its details.",
+  dialogTitle: "Clear this message's details?",
+  dialogBody:
+    "This removes the name, email address, congregation and message text from this record. The record stays, with its topic, its dates and its status. This cannot be undone.",
+  dialogConfirm: "Clear details",
+  dialogCancel: "Keep details",
+  clearToast: "Details cleared.",
+  clearFailure: "Could not clear the details. Try again.",
+  refusals: {
+    notSignedIn: "Not signed in.",
+    forbidden: "Forbidden.",
+    notFound: "That message could not be found.",
+    alreadyCleared: "Its details were already cleared.",
+    needsTriage: "Mark the message as handled or spam before clearing its details.",
+    clearedCannotBeNew: "A message whose details were cleared cannot go back to new.",
+  },
+  /** The dashboard card's headline when there is something new; the all-clear is the other cards' shared one. */
+  cardNew: (n: number) => `${n} new`,
 } as const;
 
 /**

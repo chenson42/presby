@@ -170,7 +170,7 @@ describe("TreasurerDesignationSection — the control", () => {
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
     expect(
       await screen.findByText(
-        /invitation sent to treasurer@example\.invalid\. it expires on .* the treasurer designation takes effect when perpetua accepts it from the email\. until then nobody holds this access\./i,
+        /invitation sent to treasurer@example\.invalid\. it expires on .* the treasurer designation takes effect when perpetua accepts it\. until then nobody holds this access\./i,
       ),
     ).toBeTruthy();
   });

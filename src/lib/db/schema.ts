@@ -18,7 +18,15 @@ import { relations, sql } from "drizzle-orm";
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name"),
+  // Unique exactly (users_email_unique) AND case-insensitively
+  // (users_email_lower_uq below; drizzle/0065 section 4, F187).
   email: text("email").notNull().unique(),
+  // Proof the account controls its CURRENT address (DECISION-225). Recorded
+  // only on the owner path (presby_accept_invitation,
+  // presby_record_google_email_proof, presby_complete_email_change). The
+  // trigger users_guard_email_proof (drizzle/0065 section 3; not expressible
+  // here) refuses a non-owner stamp and clears an unchanged stamp whenever the
+  // address changes. Application code on `db` may clear it, never set it.
   emailVerified: timestamp("email_verified", { withTimezone: true }),
   image: text("image"),
   password: text("password"),
@@ -31,7 +39,13 @@ export const users = pgTable("users", {
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
-  twoFactorRequired: boolean("two_factor_required").notNull().default(true),
+  // The account's OWN two-factor setting; false by default since
+  // drizzle/0080_presby_two_factor_default.sql (DECISION-291). A role or a
+  // congregation requires 2FA separately, through presby_two_factor_required();
+  // the platform-role grant points set this true
+  // (src/lib/auth/platform-role-two-factor.ts). check-schema-parity.ts does not
+  // compare defaults: src/lib/db/domain/two-factor-default{,.db}.test.ts pin it.
+  twoFactorRequired: boolean("two_factor_required").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -39,7 +53,11 @@ export const users = pgTable("users", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
-});
+}, (t) => [
+  // drizzle/0065 section 4 (F187, E1): one account per address regardless of
+  // letter case. Declared here so `db:push` never drops it.
+  uniqueIndex("users_email_lower_uq").on(sql`lower(${t.email})`),
+]);
 
 export const accounts = pgTable(
   "accounts",

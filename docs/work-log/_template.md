@@ -61,6 +61,10 @@
 
 - [Thing the request implies but isn't in scope]
 
+## Help impact
+
+- [The /help pages this change adds, edits or retires (slug each), or the [help:<slug>] placeholder it makes obsolete; or "no help impact" and why. Workflow Rule 17.]
+
 ## Open Questions
 
 - [Question for the user]
@@ -116,6 +120,7 @@
 - Pages to create: [list]
 - Components to create: [list]
 - Files to modify: [list]
+- Help pages to add or edit: [slug and the Copy rows that feed them], or "no help impact"
 
 ## Implementation Order
 
@@ -223,6 +228,7 @@ Failures: [...]
 - [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
 - [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
 - [ ] Older strings about the same subject were grepped for and none is made false
+- [ ] Help diff covered: every labels string is on screen, every claim walked at 360px, every committed image opened
 
 ## Verdict
 
@@ -257,6 +263,7 @@ Failures: [...]
 - Permission gate: [pass | fail]
 - Audit event: [pass | fail | not applicable]
 - Mobile (360px): [pass | fail]
+- Help pages read as their reader (each page named in Help impact): [pass | fail | no help impact]
 
 ## Follow-Ups (if SHIP WITH NOTES)
 

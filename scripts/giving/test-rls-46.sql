@@ -642,8 +642,12 @@ rollback;
 -- Offline record and void (deviation D2: the actor must hold giving.record).
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  -- Desmond (the fixture recorder) has no user; link founding.fixture's user to him for this block.
-  update people set user_id = :U_FOUNDING where id = :DESMOND;
+  -- Desmond (the fixture recorder) has no user; link founding.fixture's user to him for this block
+  -- (through presby_connect_signed_in_account: scripts/giving/test-rls-46-link.sql).
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :DESMOND, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   -- current_date - 1: the guard compares with ORG-LOCAL today (America/New_York),
   -- which trails the session's UTC current_date for several hours a day.
   select presby_giving_record_offline_gift(:G_DONOR_PLATE, :G_GENERAL, current_date - 1, 'cash', 1234, null, null, null,
@@ -936,17 +940,24 @@ rollback;
 --     are in Vitest), the fixture-wide agreement, and the resolver pin.
 -- ===========================================================================
 begin;
-  -- drizzle/0074 (DECISION-269, F323) adds three more: reimbursement.view,
-  -- .pay and .manage (request_for_others does not require it).
-  select assert_eq((select count(*) from permissions where requires_two_factor), 6,
-                   '46j: requires_two_factor is true for exactly six keys (three giving, three reimbursement)');
+  -- Nine: the three giving keys (0055), the three administration keys
+  -- (drizzle/0080, F343, DECISION-291), and the three reimbursement keys
+  -- (drizzle/0074, DECISION-269, F323: reimbursement.view, .pay and .manage;
+  -- request_for_others does not require it). A pipeline that flags another
+  -- key updates this count when it merges.
+  select assert_eq((select count(*) from permissions where requires_two_factor), 9,
+                   '46j: requires_two_factor is true for exactly nine keys (0055 giving, 0074 reimbursement, 0080 administration)');
   select assert_eq((select count(*) from permissions where requires_two_factor
                      and key in ('reimbursement.view','reimbursement.pay','reimbursement.manage')
                      and module = 'reimbursement' and sensitivity_tier = 2),
-                   3, '46j: ...the other three are reimbursement.view, .pay and .manage, tier 2 (drizzle/0074)');
+                   3, '46j: ...three are reimbursement.view, .pay and .manage, tier 2 (drizzle/0074)');
   select assert_eq((select count(*) from permissions where requires_two_factor
                      and key in ('giving.view','giving.record','giving.manage') and module = 'giving' and sensitivity_tier = 2),
                    3, '46j: ...the three giving keys, module giving, tier 2');
+  select assert_eq((select count(*) from permissions where requires_two_factor and sensitivity_tier = 1
+                     and ((key in ('roles.manage','role_grants.manage') and module = 'authz')
+                       or (key = 'domains.manage' and module = 'domains'))),
+                   3, '46j: ...and roles.manage, role_grants.manage (module authz) and domains.manage (module domains), tier 1 (0080)');
   -- F140 drift tripwire. If this fails, presby_effective_permissions() changed:
   -- re-check arm B of presby_two_factor_required() (drizzle/0055 section 18)
   -- against every resolver arm, then update this hash.
@@ -960,7 +971,10 @@ begin;
   -- Isolate arm B: alder's org-wide 2FA policy OFF for this transaction.
   select set_config('app.current_org_id', :ALDER, true);
   update organization_settings set require_two_factor = false;
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select assert_eq((select presby_two_factor_required(:U_FOUNDING)::int), 1,
                    '46j: arm B - the treasurer (giving keys, direct grant) is required to use 2FA with the org policy off');
   update role_grants set ends_on = current_date where role_id = :TREASURER_ROLE and person_id = :PRIYA;
@@ -974,8 +988,39 @@ rollback;
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   update organization_settings set require_two_factor = false;
-  select assert_eq((select presby_two_factor_required(:ELDERUSER)::int), 0,
-                   '46j: baseline - elder.fixture holds no giving key, so with the org policy off she is not required');
+  -- Baseline, computed rather than assumed (F343 P3-8). seed-dev.sql alone
+  -- gives elder.fixture no flagged key, so the expectation is 0 (CI). Where
+  -- scripts/domains/seed-dev-domains.sql is also applied, Alder's brand_admin
+  -- role carries domains.manage (flagged by 0080) and she holds it, so the
+  -- expectation is 1. The expected value comes from the REAL resolver plus the
+  -- org policy (the agreement loop's method below), never from the definer
+  -- under test. On such a database the group-arm assertion that follows
+  -- proves no 0 -> 1 transition; CI's seed-dev-only database still does.
+  do $$
+  declare
+    r record;
+    v_flagged text := null;
+    v_policy boolean := false;
+  begin
+    for r in select * from presby_user_organizations('e0000000-0000-0000-0000-0000000000f2') where ended_on is null loop
+      perform set_config('app.current_org_id', r.organization_id::text, true);
+      v_flagged := coalesce(v_flagged,
+        (select min(e.permission_key) from presby_effective_permissions(r.person_id, r.organization_id) e
+           join permissions pm on pm.key = e.permission_key and pm.requires_two_factor));
+      v_policy := v_policy or coalesce((select s.require_two_factor from organization_settings s
+                                         where s.organization_id = r.organization_id), false);
+    end loop;
+    perform set_config('app.current_org_id', '22222222-2222-2222-2222-222222222222', true);
+    perform set_config('presby.t46j_elder_expected', ((v_flagged is not null) or v_policy)::int::text, true);
+    perform set_config('presby.t46j_elder_reason',
+      case when v_flagged is not null then 'holds flagged key ' || v_flagged
+           when v_policy then 'a congregation policy is on'
+           else 'holds no flagged key and no policy applies' end, true);
+  end $$;
+  select assert_eq((select presby_two_factor_required(:ELDERUSER)::int),
+                   current_setting('presby.t46j_elder_expected')::int,
+                   '46j: baseline - with the org policy off, elder.fixture is required exactly when the resolver says she holds a flagged key ('
+                   || current_setting('presby.t46j_elder_reason') || ')');
   -- Group arm: the recorder role granted to the Session group (Marguerite is an elder).
   insert into role_grants (organization_id, role_id, group_id, starts_on)
   values (:ALDER, :G_RECORDER_ROLE, :ALDER_SESSION_GROUP, current_date - 1);
@@ -992,7 +1037,10 @@ rollback;
 begin;
   select set_config('app.current_org_id', :ALDER, true);
   update organization_settings set require_two_factor = false;
-  update people set user_id = 'e0000000-0000-0000-0000-0000000000f5' where id = 'c0000000-0000-0000-0000-000000000003';
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', 'c0000000-0000-0000-0000-000000000003', true);
+  select set_config('rls_test.link_user', 'e0000000-0000-0000-0000-0000000000f5', true);
+\ir test-rls-46-link.sql
   insert into role_grants (organization_id, role_id, group_id, starts_on)
   values (:ALDER, :G_RECORDER_ROLE, :ALDER_SESSION_GROUP, current_date - 1);
   select set_config('app.current_org_id', '', true);
@@ -1407,7 +1455,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   -- Premise: every fixture gift (and the refund) sits in its FIXED fixture
   -- year, so 46p-46t never depend on today's date or on the day the seed ran.
   select assert_eq(
@@ -1514,7 +1565,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_year', :'G_YEAR_CURRENT', true);
@@ -1554,7 +1608,10 @@ rollback;
 begin;
   -- giving.record alone is not enough: issuing needs giving.manage AND giving.view.
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :DESMOND;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :DESMOND, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
@@ -1572,7 +1629,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_donor', :G_DONOR_LINDEN, true);
@@ -1633,7 +1693,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);
@@ -1690,7 +1753,10 @@ rollback;
 -- ===========================================================================
 begin;
   select set_config('app.current_org_id', :ALDER, true);
-  update people set user_id = :U_FOUNDING where id = :PRIYA;
+  -- drizzle/0065 (F186): presby_app no longer writes people.user_id; link through connect.
+  select set_config('rls_test.link_person', :PRIYA, true);
+  select set_config('rls_test.link_user', :U_FOUNDING, true);
+\ir test-rls-46-link.sql
   select set_config('rls_test.s_org', :ALDER, true);
   select set_config('rls_test.s_issuer', :U_FOUNDING, true);
   select set_config('rls_test.s_year', :'G_YEAR_PRIOR', true);

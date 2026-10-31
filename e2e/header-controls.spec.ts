@@ -314,12 +314,12 @@ test.describe("avatar menu — entitlements (DECISION-044)", () => {
   test.describe("a user with neither entitlement", () => {
     test.use({ storageState: storageStatePath("member") });
 
-    test("sees only Account and Sign out", async ({ page }) => {
+    test("sees only Account, Help and Sign out", async ({ page }) => {
       await page.goto("/home");
       await openAvatar(page);
 
       const labels = await page.getByRole("menuitem").allInnerTexts();
-      expect(labels).toEqual(["Account", "Sign out"]);
+      expect(labels).toEqual(["Account", "Help", "Sign out"]);
     });
   });
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useFormStatus } from "react-dom";
 import { signOutAction } from "@/lib/auth/sign-out-action";
 import { accountLabel, initialsFrom } from "@/lib/initials";
+import { HELP_INDEX_HREF } from "@/lib/help/urls";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -124,6 +125,18 @@ export function AvatarMenu({
             </Link>
           </DropdownMenuItem>
         )}
+
+        {/*
+         * Help (user-help Inc 1, Copy C3): any signed-in person, after Account and
+         * Give feedback and before the platform block. The menu is shared by the org
+         * layout, /home and the console header, so it appears in all three. Same tab:
+         * /help is public and session-free, and the back button returns.
+         */}
+        <DropdownMenuItem asChild className="min-h-11">
+          <Link href={HELP_INDEX_HREF} className="cursor-pointer">
+            Help
+          </Link>
+        </DropdownMenuItem>
 
         {showPlatform && (
           <>

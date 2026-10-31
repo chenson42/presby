@@ -20,6 +20,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "careers.applicants",
+          "careers.manage",
           "domains.manage",
           "groups.manage",
           "officers.manage",
@@ -71,6 +73,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "careers.applicants",
+          "careers.manage",
           "domains.manage",
           "groups.manage",
           "officers.manage",
@@ -114,6 +118,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "careers.applicants",
+          "careers.manage",
           "domains.manage",
           "groups.manage",
           "officers.manage",
@@ -157,6 +163,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "careers.applicants",
+          "careers.manage",
           "congregation_oversight.manage",
           "domains.manage",
           "groups.manage",
@@ -221,6 +229,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "careers.applicants",
+          "careers.manage",
           "domains.manage",
           "groups.manage",
           "officers.manage",
@@ -276,6 +286,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "careers.applicants",
+          "careers.manage",
           "domains.manage",
           "groups.manage",
           "officers.manage",
@@ -339,6 +351,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "careers.applicants",
+          "careers.manage",
           "domains.manage",
           "events.manage",
           "groups.manage",
@@ -391,6 +405,8 @@
         "isProtected": false,
         "active": true,
         "permissions": [
+          "careers.applicants",
+          "careers.manage",
           "congregation_oversight.manage",
           "domains.manage",
           "groups.manage",

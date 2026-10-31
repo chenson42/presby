@@ -752,7 +752,12 @@ describe.skipIf(!hasDb)("drizzle/0059 account_invitations (Postgres-backed)", ()
         administration_role_key: "founding_administrator", office_role_key: "congregation_stated_clerk",
       });
       const [u] = await q(sql`select email, email_verified is not null as verified, name, password, two_factor_required from users where id = ${String(r.user_id)}`);
-      expect(u).toEqual({ email: s.address, verified: true, name: "Marisol Quenby", password: FAKE_BCRYPT, two_factor_required: true });
+      // The account's own column takes the default, false since 0080 (DECISION-291);
+      // a founding administrator is required through the ROLE: the bundle carries
+      // roles.manage, role_grants.manage and domains.manage, which 0080 flags.
+      expect(u).toEqual({ email: s.address, verified: true, name: "Marisol Quenby", password: FAKE_BCRYPT, two_factor_required: false });
+      const [req] = await q(sql`select presby_two_factor_required(${String(r.user_id)}::uuid) as required`);
+      expect(req!.required).toBe(true);
       const [p] = await q(sql`select first_name, last_name, user_id from people where id = ${String(r.person_id)}`);
       expect(p).toEqual({ first_name: "Marisol", last_name: "Quenby", user_id: r.user_id });
       const [m] = await q(sql`select engagement_status, current_roll, ended_on from memberships where person_id = ${String(r.person_id)} and organization_id = ${s.org}`);
@@ -1230,5 +1235,95 @@ describe.skipIf(!hasDb)("drizzle/0059 account_invitations (Postgres-backed)", ()
       const live = await fx.preview(currentToken);
       expect(live).toHaveLength(1);
     });
+  });
+});
+
+// =============================================================================
+// drizzle/0065 (Community Increment 2b, Batch A2, T-8): the live catalog, so a
+// later migration that adds a second writer or widens an ACL fails here.
+// =============================================================================
+describe.skipIf(!hasDb)("drizzle/0065 live-catalog pins (T-8)", () => {
+  let platform: { execute(q: SQL): Promise<unknown> };
+
+  async function q(query: SQL): Promise<Row[]> {
+    const r = await platform.execute(query);
+    return Array.isArray(r) ? (r as Row[]) : (((r as { rows?: Row[] }).rows ?? []) as Row[]);
+  }
+
+  beforeAll(async () => {
+    const { getPlatformDb } = await import("@/lib/db");
+    platform = getPlatformDb();
+  });
+
+  it("R44: across every function in the database, `update people set user_id` is written only by the bind helper and `insert into people (...user_id...)` only by the accept core", async () => {
+    const updates = await q(sql`select proname from pg_proc where pronamespace = 'public'::regnamespace and prosrc ~* 'update\\s+people\\s+set\\s+user_id' order by 1`);
+    const inserts = await q(sql`select proname from pg_proc where pronamespace = 'public'::regnamespace and prosrc ~* 'insert\\s+into\\s+people\\s*\\([^)]*user_id' order by 1`);
+    expect(updates.map((r) => r.proname)).toEqual(["presby__bind_person_account"]);
+    expect(inserts.map((r) => r.proname)).toEqual(["presby__accept_invitation_core"]);
+    // presby_link_person and presby_giving__autolink do not write the column (5.7, read).
+    const others = await q(sql`select proname from pg_proc where proname in ('presby_link_person', 'presby_giving__autolink') and prosrc ~* '(set\\s+user_id\\s*=|insert\\s+into\\s+people\\s*\\([^)]*user_id)'`);
+    expect(others).toEqual([]);
+  });
+
+  it("5.11: presby_app executes the fifteen callables and none of the five internals; presby_platform and PUBLIC execute none", async () => {
+    const callable = [
+      "presby_issue_sign_in_invitation(uuid,text,timestamptz,uuid,text,boolean,uuid)",
+      "presby_resend_sign_in_invitation(uuid,text,timestamptz,uuid,text,boolean,uuid)",
+      "presby_revoke_sign_in_invitation(uuid,uuid)",
+      "presby_sign_in_invitation_states(uuid[],uuid)",
+      "presby_sign_in_card_standing(uuid,uuid)",
+      "presby_accept_invitation(text,uuid,text,text,text)",
+      "presby_accept_in_place(uuid,uuid,boolean)",
+      "presby_preview_invitation(text,uuid)",
+      "presby_list_invitations_for_account(uuid)",
+      "presby_connect_signed_in_account(uuid,boolean)",
+      "presby_record_google_email_proof(uuid,text)",
+      "presby_complete_email_change(text)",
+      "presby_deny_sign_in_invitation()",
+      "presby_membership_standing(text,text)",
+      "presby_person_email(uuid,text)",
+    ];
+    const internal = [
+      "presby__actor_person(uuid,uuid,text)",
+      "presby__person_sign_in_standing(uuid,uuid)",
+      "presby__bind_person_account(uuid,uuid,text)",
+      "presby__accept_invitation_core(uuid,uuid,text,text,text,text,boolean)",
+      "presby_sign_in__check(uuid,uuid,uuid,uuid,text,boolean)",
+    ];
+    for (const f of callable) {
+      const [r] = await q(sql`select has_function_privilege('presby_app', ${f}::regprocedure, 'execute') as app,
+                                     has_function_privilege('presby_platform', ${f}::regprocedure, 'execute') as plat`);
+      expect(r, f).toEqual({ app: true, plat: false });
+    }
+    for (const f of internal) {
+      const [r] = await q(sql`select has_function_privilege('presby_app', ${f}::regprocedure, 'execute') as app,
+                                     has_function_privilege('presby_platform', ${f}::regprocedure, 'execute') as plat`);
+      expect(r, f).toEqual({ app: false, plat: false });
+    }
+    const pub = await q(sql`
+      select p.proname from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+       where a.grantee = 0 and p.oid = any (array[${sql.join([...callable, ...internal].map((f) => sql`${f}::regprocedure`), sql`, `)}]::oid[])`);
+    expect(pub).toEqual([]);
+  });
+
+  it("every 0065 definer is owned by neondb_owner and pins search_path = public, pg_temp", async () => {
+    const rows = await q(sql`
+      select p.proname, pg_get_userbyid(p.proowner) as owner, array_to_string(p.proconfig, ',') as cfg
+        from pg_proc p
+       where p.pronamespace = 'public'::regnamespace and p.prosecdef
+         and p.proname in ('presby__actor_person', 'presby__person_sign_in_standing', 'presby__bind_person_account',
+                           'presby_sign_in__check', 'presby_issue_sign_in_invitation', 'presby_resend_sign_in_invitation',
+                           'presby_revoke_sign_in_invitation', 'presby_sign_in_invitation_states', 'presby_sign_in_card_standing',
+                           'presby__accept_invitation_core', 'presby_accept_invitation', 'presby_accept_in_place',
+                           'presby_list_invitations_for_account', 'presby_preview_invitation', 'presby_connect_signed_in_account')`);
+    expect(rows).toHaveLength(15);
+    for (const r of rows) expect({ owner: r.owner, cfg: r.cfg }, String(r.proname)).toEqual({ owner: "neondb_owner", cfg: "search_path=public, pg_temp" });
+  });
+
+  it("the update guard's two messages name both presentations (ruling 4 on Batch A1)", async () => {
+    const [r] = await q(sql`select prosrc from pg_proc where proname = 'presby_account_invitations_guard_update'`);
+    const src = String(r!.prosrc);
+    expect(src).toContain("'account_invitations: an invitation is accepted only through presby_accept_invitation() or presby_accept_in_place(), by the shared acceptance core'");
+    expect(src).toContain("'account_invitations: an invitation is blocked only through presby_accept_invitation() or presby_accept_in_place(), by the shared acceptance core'");
   });
 });

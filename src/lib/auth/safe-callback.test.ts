@@ -17,6 +17,20 @@ describe("sanitizeCallbackUrl", () => {
     expect(sanitizeCallbackUrl("/o/alder-creek")).toBe("/o/alder-creek");
   });
 
+  it("passes /no-organization through untouched, and the /totp hop's fixed callback survives (Community Increment 2b, E-13)", () => {
+    // `/totp?callbackUrl=/no-organization` is how an account that must confirm
+    // two-factor sign-in to finish connecting (or accepting in place) returns
+    // to the page it left. The value is a fixed same-origin path, so it must
+    // survive the sanitiser exactly; a rewrite to /launch would drop the user
+    // out of the connect flow with no explanation.
+    expect(sanitizeCallbackUrl("/no-organization")).toBe("/no-organization");
+    expect(sanitizeCallbackUrl("/no-organization?checked=1")).toBe("/no-organization?checked=1");
+    // ...and the sanitiser is not loosened for look-alikes of it.
+    expect(sanitizeCallbackUrl("//no-organization")).toBe("/launch");
+    expect(sanitizeCallbackUrl("/\\no-organization")).toBe("/launch");
+    expect(sanitizeCallbackUrl("https://evil.example/no-organization")).toBe("/launch");
+  });
+
   it("passes through a relative path with a query string and fragment", () => {
     // Phase 1 flagged this shape (query + fragment together) as previously
     // untested. The normalized return re-assembles pathname + search + hash,

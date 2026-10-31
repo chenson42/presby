@@ -33,6 +33,15 @@ import { cn } from "@/lib/utils"
  * to nothing on a table that was never going to overflow (verified against
  * `/admin/flags` at desktop, which has no action-column overflow).
  *
+ * DIVERGENCE 2 (docs/work-log/2026-10-26-user-help-inc1.md, P3-2, F-new-2):
+ * `Table` takes an optional `containerProps` merged onto the
+ * `table-container` div. The scroll container is the element that scrolls, so
+ * it is the one that must be focusable for a keyboard user to scroll a wide
+ * table (`tabIndex={0}`, `role="region"`, `aria-label`); a wrapper outside it
+ * would not scroll and the inner `<table>` is the wrong target. Optional, so
+ * every existing caller is unchanged. `className` and `style` on the
+ * container are merged (the scroll-fade `style` stays), never replaced.
+ *
  * `var(--background)` is deliberate over a hardcoded color: the ORG tree
  * this primitive also renders in re-declares `--background` per DECISION-046
  * (bounded token), and the fade must track that override, not fight it.
@@ -47,12 +56,21 @@ const TABLE_SCROLL_FADE_STYLE: React.CSSProperties = {
   backgroundAttachment: "local, scroll",
 }
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  containerProps,
+  ...props
+}: React.ComponentProps<"table"> & {
+  containerProps?: React.ComponentProps<"div">
+}) {
+  const { className: containerClassName, style: containerStyle, ...containerRest } =
+    containerProps ?? {}
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
-      style={TABLE_SCROLL_FADE_STYLE}
+      {...containerRest}
+      className={cn("relative w-full overflow-x-auto", containerClassName)}
+      style={{ ...TABLE_SCROLL_FADE_STYLE, ...containerStyle }}
     >
       <table
         data-slot="table"

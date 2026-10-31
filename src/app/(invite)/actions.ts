@@ -16,7 +16,7 @@ import {
 } from "@/lib/onboarding/invite-cookie";
 import {
   INVITATION_DEAD_LINK_COPY,
-  INVITEE_BLOCKED_COPY,
+  inviteeBlockedCopy,
 } from "@/lib/onboarding/labels";
 
 /**
@@ -140,7 +140,11 @@ function errorFor(result: Exclude<AcceptResult, { kind: "accepted" }>): AcceptFo
     case "account_inactive":
       return failure("account_inactive", MESSAGES.account_inactive);
     case "blocked":
-      return failure("blocked", INVITEE_BLOCKED_COPY[result.reason]);
+      return failure("blocked", inviteeBlockedCopy(result.purpose, result.reason, result.organizationName));
+    case "needs_second_factor":
+      // Only the in-place presentation returns this; the token wrapper never
+      // does. Mapped (not left to fall through) so the switch stays exhaustive.
+      return failure("two_factor_required", MESSAGES.two_factor_required);
     case "invalid_input":
       if (result.field === "firstName") return failure("invalid_input", MESSAGES.first_name, "firstName");
       if (result.field === "lastName") return failure("invalid_input", MESSAGES.last_name, "lastName");

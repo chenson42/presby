@@ -450,15 +450,18 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
     await visiblePortalTiles("operate", "congregation", VIEWER);
     expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
       "org_portal.calendar",
+      "org_portal.careers",
       "org_portal.giving",
       "org_portal.reimbursement",
     ]);
     isOrgFeatureEnabled.mockClear();
     // A presbytery's operate call never reads the giving toggle: orgTypeScope
-    // excludes the tile before any gate read.
+    // excludes the tile before any gate read. (Careers has no orgTypeScope:
+    // presbyteries and synods hire too.)
     await visiblePortalTiles("operate", "presbytery", VIEWER);
-    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2])).toEqual([
+    expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
       "org_portal.calendar",
+      "org_portal.careers",
     ]);
   });
 
@@ -484,11 +487,12 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
     isFlagEnabled.mockResolvedValue(false);
     await visiblePortalTiles("operate", "congregation", VIEWER);
     await visiblePortalTiles("administer", "congregation", VIEWER);
-    // calendar and giving have no flagKey, so their toggles ARE read on the
-    // operate call; giving-admin's and domains' on the administer call.
+    // calendar, careers and giving have no flagKey, so their toggles ARE read on
+    // the operate call; giving-admin's and domains' on the administer call.
     // Nothing else.
     expect(isOrgFeatureEnabled.mock.calls.map((c) => c[2]).sort()).toEqual([
       "org_portal.calendar",
+      "org_portal.careers",
       "org_portal.domains",
       "org_portal.giving",
       "org_portal.giving",

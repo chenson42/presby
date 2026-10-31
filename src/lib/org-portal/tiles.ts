@@ -302,6 +302,23 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     // staff (Phase 1 point 3, no polity asymmetry the way ordination/
     // appointments have).
   },
+  // Job openings (docs/work-log/2026-10-25-careers-inc1.md, Phase 3 "Tile"; Copy
+  // T1). TOGGLE-ONLY (no `flagKey`): the per-org `org_portal.careers` toggle is
+  // the whole gate. Permission-blind like every tile (DECISION-162): the
+  // destination renders its own honest feature-off and forbidden states, so the
+  // description names no permission and no instruction (every member reads it).
+  // `operate` and the people domain (Community): posting an opening is routine
+  // staffing work, the same test staff passes. No `orgTypeScope`: presbyteries
+  // and synods hire too (the catalog entry's `orgTypes` is null).
+  {
+    key: "careers",
+    label: "Job openings",
+    description: "Post and manage job openings for your website.",
+    href: (slug) => `/o/${slug}/admin/careers`,
+    orgFeatureKey: "org_portal.careers",
+    category: "operate",
+    domain: "people",
+  },
   {
     key: "features",
     label: "Features",

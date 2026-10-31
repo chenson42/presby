@@ -5,6 +5,8 @@ import { isLocalLoginEnabled } from "@/lib/auth/local-login";
 import { isFlagEnabled } from "@/lib/flags";
 import { getPublishedSiteBrand } from "@/lib/sites";
 import { BrandTokens } from "@/components/brand/brand-tokens";
+import { HelpLink } from "@/components/help/help-link";
+import { helpHref } from "@/lib/help/urls";
 import { OrgWordmark } from "@/components/brand/org-mark";
 import { cn } from "@/lib/utils";
 import { GoogleSignInButton } from "./google-sign-in-button";
@@ -150,6 +152,17 @@ export default async function SignInPage({
           <SignInCredentialsForm callbackUrl={callbackUrl} />
         </>
       )}
+
+      {/*
+        Help (user-help Inc 1, Copy C3): under the forms and always visible, so it
+        is there whether or not the password form is on. A plain same-tab link to a
+        public page; it carries nothing from this page (no callbackUrl, no error).
+      */}
+      <div className="mt-6">
+        <HelpLink href={helpHref("signing-in")} className="text-sm">
+          Help with signing in
+        </HelpLink>
+      </div>
     </main>
   );
 }

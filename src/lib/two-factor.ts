@@ -88,14 +88,13 @@ export function verifyToken(token: string, secret: string): boolean {
 //
 // Format: 10 codes, each `XXXX-XXXX` (8 alphanumeric chars + a dash for
 // readability). Hashed with SHA-256 (codes are high-entropy and single-use,
-// so a slow hash like bcrypt would buy nothing). The plaintext set is only
-// shown once via the FRESH_RECOVERY_CODES_COOKIE handoff.
+// so a slow hash like bcrypt would buy nothing). The plaintext set is shown
+// once, from client memory only: the action returns it and nothing durable (no
+// cookie, no storage) keeps it (F166, DECISION-292).
 // -----------------------------------------------------------------------------
 
 const RECOVERY_CODE_COUNT = 10;
 const RECOVERY_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
-
-export const FRESH_RECOVERY_CODES_COOKIE = "claudecode_fresh_recovery_codes";
 
 export function generateRecoveryCodes(): string[] {
   const out: string[] = [];

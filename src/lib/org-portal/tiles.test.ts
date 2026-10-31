@@ -202,19 +202,20 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("PORTAL_TILES has exactly 24 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains + 2 reimbursements)", () => {
-    expect(PORTAL_TILES.length).toBe(24);
+  it("PORTAL_TILES has exactly 25 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains + 1 careers + 2 reimbursements)", () => {
+    expect(PORTAL_TILES.length).toBe(25);
   });
 
   it("no tile is keyed 'feedback' — removed entirely, re-surfaces as an avatar-menu item + prompt card (commit 2)", () => {
     expect(PORTAL_TILES.map((t) => t.key)).not.toContain("feedback");
   });
 
-  it("mirrors the full 24-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains + 2026-10-25 reimbursements)", () => {
+  it("mirrors the full 25-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains + 2026-10-25 careers + 2026-10-25 reimbursements)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
         "calendar",
+        "careers",
         "committees",
         "communications",
         "credentials",
@@ -296,6 +297,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
       orgTypeScope: ["presbytery"],
     },
     calendar: { domain: "worship", category: "operate" },
+    careers: { domain: "people", category: "operate" },
     events: { domain: "worship", category: "administer" },
     roles: { domain: "administration", category: "administer" },
     features: { domain: "administration", category: "administer" },
@@ -364,6 +366,19 @@ describe("PORTAL_TILES — flag-key shape", () => {
     expect(Object.keys(EXPECTED).sort()).toEqual(
       PORTAL_TILES.map((t) => t.key).sort(),
     );
+  });
+
+  it("the careers tile is toggle-only (no flagKey), gated by org_portal.careers, with Copy T1 and the staff page as its destination", () => {
+    const tile = PORTAL_TILES.find((t) => t.key === "careers");
+    expect(tile).toBeDefined();
+    expect(tile!.label).toBe("Job openings");
+    expect(tile!.description).toBe("Post and manage job openings for your website.");
+    expect(tile!.href("alder-creek")).toBe("/o/alder-creek/admin/careers");
+    expect(tile!.flagKey).toBeUndefined();
+    expect(tile!.orgFeatureKey).toBe("org_portal.careers");
+    expect(tile!.comingSoon).toBeUndefined();
+    // Every member reads this description on Home: it names no permission and gives no instruction.
+    expect(tile!.description).not.toMatch(/permission|ask |contact/i);
   });
 
   it("DOMAIN_ORDER has exactly 7 unique entries matching DOMAIN_LABELS' keys", () => {

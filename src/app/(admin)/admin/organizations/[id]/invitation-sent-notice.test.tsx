@@ -65,7 +65,7 @@ describe("InvitationSentNotice - who must accept (the copy table)", () => {
       />,
     );
     expect(text()).toContain(
-      "The founding administrator designation takes effect when Marisol Quenby accepts it from the email. Until then nobody holds this role.",
+      "The founding administrator designation takes effect when Marisol Quenby accepts it. Until then nobody holds this role.",
     );
     expect(text()).not.toContain("Nobody holds this role until it is accepted");
   });
@@ -79,21 +79,21 @@ describe("InvitationSentNotice - who must accept (the copy table)", () => {
       />,
     );
     expect(text()).toContain(
-      "The treasurer designation takes effect when Perpetua accepts it from the email. Until then nobody holds this access.",
+      "The treasurer designation takes effect when Perpetua accepts it. Until then nobody holds this access.",
     );
   });
 
   it("no name, address known: the person at the address", () => {
     render(<InvitationSentNotice purpose="treasurer" address="treasurer@example.invalid" result={OK} />);
     expect(text()).toContain(
-      "takes effect when the person at treasurer@example.invalid accepts it from the email. Until then nobody holds this access.",
+      "takes effect when the person at treasurer@example.invalid accepts it. Until then nobody holds this access.",
     );
   });
 
   it("no name, no address: the invitee", () => {
     render(<InvitationSentNotice purpose="founding_administrator" result={OK} />);
     expect(text()).toContain(
-      "takes effect when the invitee accepts it from the email. Until then nobody holds this role.",
+      "takes effect when the invitee accepts it. Until then nobody holds this role.",
     );
   });
 
@@ -125,7 +125,7 @@ describe("InvitationSentNotice - who must accept (the copy table)", () => {
       />,
     );
     expect(text()).toContain("Invitation created for clerk@example.invalid. Email delivery is delayed; we'll keep trying.");
-    expect(text()).toContain("takes effect when Marisol Quenby accepts it from the email");
+    expect(text()).toContain("takes effect when Marisol Quenby accepts it");
   });
 
   it("wraps a long name instead of overflowing (break-words)", () => {

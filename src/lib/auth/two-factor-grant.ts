@@ -15,6 +15,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * Fails closed: if async context ever stopped reaching the callback, the claim
  * would simply not be set and verification would not stick.
  *
+ * Who may open a grant is a closed list (DECISION-292, pinned set-equal by
+ * `two-factor-grant.boundaries.test.ts`): `verifyTotpAction` (a code or a
+ * recovery code at /totp, two call sites) and `completeEnrollment` (confirming a
+ * first enrolment, after the code verified against the caller's own pending
+ * secret and the enrolment row was actually created). `takeTwoFactorGrant` is
+ * called by the jwt callback only. A new caller is a review event.
+ *
  * NEVER export this from, or wrap it in, a `'use server'` module. Every
  * exported async function of such a file is an endpoint the browser can call.
  * `src/lib/auth/config.ts` (reached by the proxy) must not import it either.

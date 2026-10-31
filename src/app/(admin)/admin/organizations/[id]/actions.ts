@@ -35,6 +35,7 @@ import {
   type InvitationWarning,
   type ResendInvitationResult,
 } from "@/lib/onboarding/issue";
+import { REVOKE_ALL_SCOPES, type RevokeAllScope } from "@/lib/onboarding/sign-in-types";
 import { INVITATION_WARNING_COPY } from "@/lib/onboarding/invitation-copy";
 import { INVITATION_RATE_LIMIT_COPY } from "@/lib/onboarding/labels";
 import { revokeDesignationHolder } from "@/lib/onboarding/designation-holders";
@@ -1025,7 +1026,13 @@ export async function revokeInvitationAction(
   }
 }
 
-/** FormData fields: `organizationId`. The abuse takedown: revokes every open invitation of the organization. */
+/**
+ * FormData fields: `organizationId`, `scope` (`designations` | `org_sent`, REQUIRED).
+ * The abuse takedown: revokes every open invitation of the organization within
+ * ONE scope (F198): the platform's own designations, or the congregation's own
+ * sign-in invitations. A missing or unknown scope is refused, never defaulted,
+ * so a caller cannot revoke the other origin by omission.
+ */
 export async function revokeAllInvitationsAction(
   formData: FormData,
 ): Promise<InvitationActionResult> {
@@ -1037,9 +1044,14 @@ export async function revokeAllInvitationsAction(
 
   const organizationId = String(formData.get("organizationId") ?? "");
   if (!UUID_RE.test(organizationId)) return { ok: false, error: "Invalid organization." };
+  const scope = String(formData.get("scope") ?? "");
+  if (!(REVOKE_ALL_SCOPES as readonly string[]).includes(scope)) {
+    return { ok: false, error: "Invalid scope." };
+  }
 
   const result = await revokeAllOpenInvitations({
     organizationId,
+    scope: scope as RevokeAllScope,
     actor: { userId: session.user.id, email: session.user.email ?? null },
   });
   if (result.kind === "db_error") return { ok: false, error: DB_ERROR_COPY };

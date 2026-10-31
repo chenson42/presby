@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { FeaturesHelpLink } from "@/components/help/features-help-link";
 
 /**
  * The three non-data answers `/o/<slug>/calendar` (and its detail page) can
@@ -17,6 +18,7 @@ export function CalendarDisabled({ name }: { name: string }) {
       <p className="mt-3 text-base text-muted-foreground">
         The calendar isn&apos;t turned on for {name} yet.
       </p>
+      <FeaturesHelpLink />
     </section>
   );
 }

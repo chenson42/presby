@@ -124,12 +124,12 @@ repo's `src/...`; `.claude/`, `.github/`, `docs/` map 1:1; `mobile/...` has no s
 **Verify:** unit tests for credentials-path, OAuth-existing-account, OAuth-unknown-email.
 **Class:** `needs-generalization` (strip the invite/closed-beta branch to a config flag).
 
-### B4. 2FA fresh-recovery-codes: cookie mutation out of RSC render
-**Origin:** work-log `2026-06-19-fix-2fa-cookie-in-rsc.md`.
-**Problem:** `cookies().delete()` during a Server Component render is forbidden in Next 16, so in prod the fresh recovery codes re-displayed on every reload.
-**Fix / steps:** split read (`readFreshCodesCookie`, RSC-safe) from mutation (`clearFreshCodesCookieAction`, a Server Action fired from a `<FreshRecoveryCodes>` client component's `useEffect`); carry enrollment-success via a `?enrolled=true` URL param instead of `revalidatePath` (beats the post-action RSC re-render race). Port to both `(account)/account/2fa` and `(admin)/admin/2fa`.
-**Verify:** the two regression specs (codes show once, don't re-display on reload).
-**Class:** `backport-ready`.
+### B4. First 2FA enrolment: recovery codes in client memory, enrolment verifies the session, regenerate needs a verified session
+**Origin:** presby work-log `2026-10-26-recovery-codes.md` (F166, F344; DECISION-292). **Replaces** the earlier B4 (the fresh-codes cookie from `2026-06-19-fix-2fa-cookie-in-rsc.md`), whose mechanism is deleted: the starter's `claudecode_fresh_recovery_codes` cookie carried the plaintext codes to the next load.
+**Problem:** in Next 16 a server action that writes any cookie re-renders the route, and Auth.js `update()` writes one, so the server tree replaced the client "enabled" panel within about a second: the codes and the Continue link (with its `callbackUrl`) vanished, and the account answered one more `/totp` challenge. Separately, `regenerateRecoveryCodes` accepted a session that had not answered the second factor.
+**Fix / steps:** a client holder (`EnrolmentHandoff`) at the root of every `/account/2fa` branch keeps the codes in client memory across the re-render (shown once; a reload loses them); remove the cookie and its helpers; Continue is a plain `<a>` to the server-sanitized `callbackUrl`; `completeEnrollment` runs the enrolment writes in one transaction with an `ON CONFLICT DO NOTHING ... RETURNING` already-enrolled guard, then opens the single-use verification grant (DECISION-230's `withTwoFactorGrant`) around `unstable_update({})`, catching a failure; `regenerateRecoveryCodes` refuses an unverified session with its own audit key and the page shows a "Confirm it's you" link to `/totp`.
+**Verify:** the running-server specs (`totp-first-enrolment`, `totp-regenerate-gate`, `hydration/totp-enrol-handoff` in both lanes) and the set-equal grant allow-list test.
+**Class:** `backport-ready` (the grant helper is a prerequisite; stage with the 0.42.3 session fix at the next `/downstream-sync`).
 
 ### B5. Signed single-use OAuth state token + nonce table
 **Origin:** DECISION-072 Rulings 2/3/5 (module noted "reusable across any OAuth flow").

@@ -43,6 +43,8 @@ const isTest = (file: string) => /\.(test|spec)\.(ts|tsx)$/.test(file);
 const NAMED: Readonly<Record<string, string | readonly string[]>> = {
   // src/lib/onboarding/invitation-email.ts: `export const ACCOUNT_INVITATION_TEMPLATE_KEY = "account_invitation"`
   ACCOUNT_INVITATION_TEMPLATE_KEY: "account_invitation",
+  // src/lib/onboarding/invitation-email.ts: `export const ACCOUNT_SIGN_IN_TEMPLATE_KEY = "account_sign_in_invitation"`
+  ACCOUNT_SIGN_IN_TEMPLATE_KEY: "account_sign_in_invitation",
   // src/lib/giving/statements/notice.ts: `buildStatementNotice()` returns STATEMENT_NOTICE_TEMPLATE
   "notice.templateKey": "giving.statement.notice",
   // src/lib/reimbursement/notify.ts: `buildNotice()` returns one of NOTICE_TEMPLATE_KEYS
@@ -163,6 +165,7 @@ describe("the audience registry is closed and complete (ER14)", () => {
       ticket_feedback_promoted: "account",
       account_invitation: "typed",
       statistics_submission_grant: "typed",
+      account_sign_in_invitation: "person:credential",
       "giving.statement.notice": "donor",
       // Treasury Increment 1, P3-11: approver, treasurer and requester notices
       "reimbursement.notice.needs_approval": "person:role",
@@ -172,15 +175,20 @@ describe("the audience registry is closed and complete (ER14)", () => {
     });
   });
 
-  it("the only senders that address a person's contact email are the four reimbursement notices, all person:role (giving is not wired, D7)", () => {
-    const personal = Object.entries(EMAIL_AUDIENCE).filter(([, a]) => a.startsWith("person:"));
-    expect(personal.map(([key]) => key).sort()).toEqual([
-      "reimbursement.notice.needs_approval",
-      "reimbursement.notice.needs_treasurer",
-      "reimbursement.notice.ready_to_pay",
-      "reimbursement.notice.requester_update",
+  it("the senders that address a person's contact email are the congregation's sign-in invitation (person:credential) and the four reimbursement notices (person:role); giving is not wired, D7", () => {
+    const personKeys = Object.entries(EMAIL_AUDIENCE).filter(([, a]) => a.startsWith("person:"));
+    expect(personKeys.sort(([a], [b]) => a.localeCompare(b))).toEqual([
+      ["account_sign_in_invitation", "person:credential"],
+      ["reimbursement.notice.needs_approval", "person:role"],
+      ["reimbursement.notice.needs_treasurer", "person:role"],
+      ["reimbursement.notice.ready_to_pay", "person:role"],
+      ["reimbursement.notice.requester_update", "person:role"],
     ]);
-    expect(new Set(personal.map(([, a]) => a))).toEqual(new Set(["person:role"]));
+  });
+
+  it("the sign-in invitation is sent by org-invite.ts alone, through the definer-chosen address (the registry entry and the sender land together)", () => {
+    const senders = FOUND.filter((f) => f.key === "account_sign_in_invitation");
+    expect(senders.map((f) => f.file)).toEqual(["src/lib/onboarding/org-invite.ts"]);
   });
 
   it("audienceFor is exact: inherited object keys are not classified", () => {

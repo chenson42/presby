@@ -73,6 +73,14 @@ const db = drizzle(sql, { schema });
 // stays on `db`: those tables keep their full CRUD grant, and running them
 // through the tenant connection is the only part of this script that
 // exercises the grant model a real sign-in depends on.
+//
+// ONE EXCEPTION, and it is the same rule seen from the other side: CREATING
+// one of those three users stamps `users.email_verified`, and since
+// drizzle/0065 section 3 (`users_guard_email_proof`, Community Increment 2b,
+// DECISION-225) a non-owner role may not write a proof stamp - proof is an
+// OWNER-PATH fact. So the three `insert(schema.users)` calls below run on
+// `platformDb`; the lookup, the update branch (which carries no stamp), and the
+// `user_roles` binding stay on `db`.
 const platformSql = neon(process.env.PLATFORM_DATABASE_URL);
 const platformDb = drizzle(platformSql, { schema });
 
@@ -122,11 +130,12 @@ async function seedFlags() {
     },
     {
       key: "auth.require_2fa",
-      // ON: effective twoFactorRequired = dbUser.twoFactorRequired AND this flag.
-      // Seeded ON — required to keep the seeded MFA admin e2e test green (that
-      // user has twoFactorRequired=true in DB; without this flag the proxy gate
-      // does not fire). Turn OFF to globally disable forced 2FA regardless of
-      // per-user column.
+      // ON: effective twoFactorRequired = (the user's own column OR a congregation
+      // that requires it OR a held key flagged requires_two_factor) AND this flag
+      // (DECISION-291). Seeded ON — required to keep the seeded MFA admin e2e
+      // test green (that user has twoFactorRequired=true in DB; without this flag
+      // the proxy gate does not fire). Turn OFF to globally disable forced 2FA
+      // whatever the source.
       description:
         "Org-level 2FA master switch. OFF = no user is TOTP-gated regardless of per-user column.",
       enabled: true,
@@ -934,7 +943,9 @@ async function seedLocalAdmin() {
     userId = existing.id;
     console.log(`[seed] updated local admin: ${email}`);
   } else {
-    const [created] = await db
+    // Owner connection: this insert stamps email_verified (see the platformDb
+    // comment above; drizzle/0065 section 3).
+    const [created] = await platformDb
       .insert(schema.users)
       .values({
         email,
@@ -942,7 +953,9 @@ async function seedLocalAdmin() {
         password: hash,
         emailVerified: new Date(),
         // Disabled on initial seed so /admin loads in one click for testing.
-        // Flip to `true` (or omit) once you've enrolled in 2FA.
+        // Flip to `true` once you've enrolled in 2FA. Leaving the column out
+        // means false now (DECISION-291: the column default changed in 0080),
+        // so omitting it is the same as this line; it used to mean true.
         twoFactorRequired: false,
       })
       .returning({ id: schema.users.id });
@@ -995,7 +1008,9 @@ async function seedMemberUser() {
     userId = existing.id;
     console.log(`[seed] updated local member: ${email}`);
   } else {
-    const [created] = await db
+    // Owner connection: this insert stamps email_verified (see the platformDb
+    // comment above; drizzle/0065 section 3).
+    const [created] = await platformDb
       .insert(schema.users)
       .values({
         email,
@@ -1056,7 +1071,9 @@ async function seedMfaAdminUser() {
     userId = existing.id;
     console.log(`[seed] updated local MFA admin: ${email}`);
   } else {
-    const [created] = await db
+    // Owner connection: this insert stamps email_verified (see the platformDb
+    // comment above; drizzle/0065 section 3).
+    const [created] = await platformDb
       .insert(schema.users)
       .values({
         email,

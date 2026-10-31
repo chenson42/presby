@@ -8,99 +8,43 @@
 // click a verification link in a fresh browser session.
 
 import { redirect } from "next/navigation";
-import { createHash } from "node:crypto";
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { users, emailVerificationTokens, auditEvents } from "@/lib/db/schema";
-import { AUDIT_ACTIONS } from "@/lib/audit";
-import { isUniqueViolation } from "@/lib/db/errors";
 import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-
-function sha256Hex(raw: string): string {
-  return createHash("sha256").update(raw).digest("hex");
-}
+import { completeEmailChange } from "@/lib/auth/email-change";
 
 interface Props {
   params: Promise<{ token: string }>;
 }
 
+// The change itself (consume the token, write the new address AND its proof
+// stamp, audit) is `completeEmailChange` (Community Increment 2b, R38,
+// DECISION-225): since drizzle/0065 a non-owner role cannot write
+// `users.email_verified`, so the page no longer updates `users` itself. The
+// three messages below are the page's long-standing copy, kept byte for byte.
 export default async function VerifyEmailPage({ params }: Props) {
   const { token } = await params;
 
-  // The URL carries the raw token; the DB stores only its SHA-256 hash.
-  // Hash the inbound value before lookup — a DB read cannot forge a link.
-  const tokenHash = sha256Hex(token);
+  const result = await completeEmailChange(token);
 
-  const tokenRow = await db.query.emailVerificationTokens.findFirst({
-    where: eq(emailVerificationTokens.token, tokenHash),
-  });
-
-  if (!tokenRow) {
-    return <ErrorCard message="This verification link is invalid or has already been used." />;
-  }
-
-  if (tokenRow.expiresAt < new Date()) {
-    // Clean up expired row
-    await db
-      .delete(emailVerificationTokens)
-      .where(eq(emailVerificationTokens.id, tokenRow.id));
-    return <ErrorCard message="This verification link has expired. Request a new one from your account settings." />;
-  }
-
-  // Fetch the user's current email for the audit record before we change it
-  const userRow = await db.query.users.findFirst({
-    where: eq(users.id, tokenRow.userId),
-    columns: { email: true },
-  });
-
-  if (!userRow) {
-    return <ErrorCard message="Account not found." />;
-  }
-
-  const oldEmail = userRow.email;
-  const newEmail = tokenRow.newEmail;
-
-  // Apply the email change atomically.
-  // The Neon HTTP driver has no interactive db.transaction(); db.batch()
-  // runs all three statements as a single server-side transaction.
-  // See docs/decisions.md DECISION-014.
-  //
-  // A 23505 unique-constraint violation can occur here if two users concurrently
-  // verify tokens that both target the same email address (TOCTOU on the
-  // requestEmailChange check). Catch it and return a friendly ErrorCard instead
-  // of an unhandled 500. Any other error is re-thrown.
-  try {
-    // A real transaction, not db.batch(): batch was a neon-http affordance and
-    // this driver is the WebSocket pool now (the GUC-based RLS model needs a
-    // session). The upgrade is in our favour — batch pipelined statements
-    // without atomicity, so a failure midway could leave the email changed and
-    // the token un-consumed.
-    await db.transaction(async (tx) => {
-      await tx
-        .update(users)
-        .set({ email: newEmail })
-        .where(eq(users.id, tokenRow.userId));
-      await tx
-        .delete(emailVerificationTokens)
-        .where(eq(emailVerificationTokens.id, tokenRow.id));
-      await tx.insert(auditEvents).values({
-        actorUserId: tokenRow.userId,
-        actorEmail: newEmail,
-        action: AUDIT_ACTIONS.USER_EMAIL_CHANGED,
-        resourceType: "user",
-        resourceId: tokenRow.userId,
-        metadata: { oldEmail, newEmail },
-      });
-    });
-  } catch (err: unknown) {
-    if (isUniqueViolation(err)) {
+  switch (result.kind) {
+    case "invalid":
+      return <ErrorCard message="This verification link is invalid or has already been used." />;
+    case "expired":
+      return <ErrorCard message="This verification link has expired. Request a new one from your account settings." />;
+    case "email_taken":
+      // A 23505 can occur if two users concurrently verify tokens that both
+      // target the same address (TOCTOU on the requestEmailChange check), or if
+      // the address is held in another letter case (users_email_lower_uq).
       return (
         <ErrorCard message="This email address has already been claimed by another account. Request a new verification link from your account settings." />
       );
-    }
-    throw err;
+    case "error":
+      // Unexpected database failure: as before, not a message of its own. The
+      // error boundary answers (the token is still live; nothing was changed).
+      throw new Error("email change could not be completed");
+    case "ok":
+      break;
   }
 
   revalidatePath("/account");

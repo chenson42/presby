@@ -1,12 +1,15 @@
 import { sql } from "drizzle-orm";
 import { db, getPlatformDb } from "@/lib/db";
 import { hostClass } from "@/lib/domains/host";
+import { runCareersSweep } from "@/lib/careers/sweep";
 
 // Vercel cron invokes via GET. See vercel.json for the schedule (0 3 * * *).
 // Runs daily at 03:00 UTC to prune expired tokens from three tables:
 //   - password_reset_tokens     (60-min TTL; one row per user max)
 //   - email_verification_tokens (24-h TTL; one row per user max)
 //   - user_totp_pending_enrollments (10-min TTL; one row per user max)
+// Then, as isolated steps after the roll reconcile: the careers sweep (closes
+// published job postings past their closing date; src/lib/careers/sweep.ts).
 // POST is intentionally omitted — no admin "run now" surface exists yet.
 export async function GET(req: Request) {
   // Guard: CRON_SECRET must be set for the worker to run.
@@ -96,11 +99,29 @@ export async function GET(req: Request) {
     (rollReconcile.rows[0] as { fixed: number } | undefined)?.fixed ?? 0,
   );
 
+  // Careers (docs/work-log/2026-10-25-careers-inc1.md, Phase 3 "Cron"): close the
+  // published job postings whose closing date has passed. ISOLATED: it runs after
+  // the token pruning and the roll reconcile, which have already committed, and a
+  // failure here (the migration not yet applied, a database blip, a failed audit
+  // insert - which rolls the whole step back) is logged as a fixed label and never
+  // changes the response or stops anything else. The log carries counts only: no
+  // error text, which can embed SQL and parameters. It runs on the platform
+  // connection inside runCareersSweep() because presby_careers_sweep() is a
+  // cross-org writer executable by the owner alone; this route is src/app/api/cron/,
+  // not src/app/(org)/, so the (org) contract's getPlatformDb() ban is not crossed.
+  let careersPostingsClosed = 0;
+  try {
+    careersPostingsClosed = await runCareersSweep();
+  } catch {
+    console.error("[cron/maintenance] careers sweep failed");
+  }
+
   const summary = {
     deletedPwdReset: pwdResetResult.rows.length,
     deletedEmailVerify: emailVerifyResult.rows.length,
     deletedTotpPending: totpPendingResult.rows.length,
     rollCacheRolledForward: rolledForward,
+    careersPostingsClosed,
   };
 
   // Structured log for ops observability (Vercel Function logs / Datadog).

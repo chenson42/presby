@@ -22,6 +22,8 @@ import {
 } from "./support/invitation-observer";
 import { deadHeading, signInOnPage, submitTotp } from "./support/invitation-ui";
 import { E2E_TOTP_TEST_SECRET } from "./support/totp-fixture";
+import { expectPanelSurvives, readPanelCodes, recordUrls, typeEnrolmentCode } from "./support/enrolment-fixture";
+import { generateSync } from "otplib";
 import { E2E_USERS, storageStatePath } from "./support/users";
 
 /**
@@ -31,7 +33,9 @@ import { E2E_USERS, storageStatePath } from "./support/users";
  * to accept, and the hand-off cookie carries the token across the sign-in (and,
  * for an MFA account, the /totp challenge) because the token never rides a URL.
  *
- * Case A - no MFA: a throwaway account, invited by the platform operator.
+ * Case A - no MFA: a throwaway account, invited by the platform operator. After
+ *          accepting it is required through the role (F343) and meets the
+ *          enrolment wall; it does not land in the congregation.
  * Case B - MFA-enrolled, SELF-designated: the `mfa-enrolled` fixture invited by
  *          itself (the production-shaped case: the operator is the only platform
  *          admin and will be some churches' first administrator), through the
@@ -133,7 +137,13 @@ test("Case A, no MFA: open the link, sign in to accept, Accept - never the dead-
   expectTokenStayedOffTheWire(invitation.token, afterLink, visited);
   const requestsBeforeAccept = afterLink.urls.length;
   await page.getByRole("button", { name: "Accept invitation" }).click();
-  await page.waitForURL((url) => url.pathname === `/o/${o.slug}`, { timeout: 30_000 });
+  // F343 (DECISION-291, P3-1): the founding-administrator bundle holds roles.manage and role_grants.manage, which
+  // are flagged requires_two_factor, so this column-false account is now required THROUGH THE ROLE (arm B of
+  // presby_two_factor_required) the moment it accepts. The router sends it to the congregation, the proxy stops it
+  // at the wall and, not enrolled, walks it to enrolment with the destination kept - the same wall the treasurer
+  // test below asserts. Before 0080 it landed on /o/<slug> directly.
+  await page.waitForURL((url) => url.pathname === "/account/2fa", { timeout: 40_000 });
+  expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe(`/o/${o.slug}`);
   visited.push(page.url());
   expect(
     afterLink.urls.slice(requestsBeforeAccept).filter((u) => u.includes(invitation.token)),
@@ -150,6 +160,12 @@ test("Case A, no MFA: open the link, sign in to accept, Accept - never the dead-
   expect(personId, "the account is linked to a person at the organization").not.toBeNull();
   expect(row.person_id).toBe(personId);
   expect(await grantedRoleKeys(sql, o, personId!)).toContain("founding_administrator");
+  // The requirement came from the role, not the account's own setting: the column is untouched (false) and the
+  // definer says required. Removing the role is the only thing that would release it.
+  const [twoFactor] = (await sql`
+    select u.two_factor_required as own, presby_two_factor_required(u.id) as via_role
+      from users u where u.id = ${invitee.id}::uuid`) as { own: boolean; via_role: boolean }[];
+  expect(twoFactor, "required through the role, own setting still off").toEqual({ own: false, via_role: true });
 
   const audit = await auditRowsFor(sql, invitation.id);
   const byAction = Object.fromEntries(audit.map((a) => [a.action, a]));
@@ -351,6 +367,21 @@ test("treasurer purpose, existing account (no MFA): accepting links the roster p
     ],
     inviterIsInvitee: false,
   });
+
+  // F166 (DECISION-292): the treasurer, forced into enrolment by arm B, enrols from the page they were sent to. The ten
+  // recovery codes stay up through the re-render, Continue is the sanitized destination (the congregation), and following
+  // it lands on /o/<slug> with NO /totp challenge: enrolling marked the session verified.
+  const urls = recordUrls(page);
+  await expect(page.getByRole("heading", { name: /enroll in two-factor authentication/i })).toBeVisible();
+  await typeEnrolmentCode(page, (secret) => generateSync({ secret }));
+  await expect(page.getByRole("heading", { level: 1, name: "Two-factor authentication enabled" })).toBeVisible({ timeout: 30_000 });
+  await expectPanelSurvives(page);
+  expect(await readPanelCodes(page)).toHaveLength(10);
+  const cont = page.getByRole("link", { name: "Continue" });
+  await expect(cont).toHaveAttribute("href", `/o/${o.slug}`);
+  await cont.click();
+  await page.waitForURL((url) => url.pathname === `/o/${o.slug}`, { timeout: 30_000 });
+  expect(urls.filter((u) => new URL(u).pathname === "/totp"), "no second challenge after enrolling").toEqual([]);
 });
 
 test.describe("signed in as a different account", () => {

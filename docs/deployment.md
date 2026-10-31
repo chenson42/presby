@@ -219,6 +219,7 @@ so no row that predates the CI run can appear in a log or an uploaded trace.
 | `NEXT_PUBLIC_PLATFORM_HOSTS` | **custom domains.** Comma list of the hosts that ARE the platform, e.g. `presbyportal.org,www.presbyportal.org`. **Build time** (`NEXT_PUBLIC_`, inlined into the proxy): set it in the Production scope **before** the build that ships custom domains; changing it needs a redeploy. `*.vercel.app` is always a platform host. Any other host the project serves is treated as a church's custom host and answers the neutral 404 until it is a verified, `live` domain. See "Custom domains" below. |
 | `DOMAINS_PROVIDER` | **custom domains.** Unset (the production default) = *unconfigured*: attaching is "temporarily unavailable" and nothing can reach `live`. `vercel` = the Vercel REST adapter. **Production scope only.** Never `fake` (see below). |
 | `VERCEL_API_TOKEN`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID` | **custom domains. PENDING: not created yet.** A token **scoped to the `presby` project only**, plus the project and team ids. Read only when `DOMAINS_PROVIDER=vercel` in Production; with the provider set and either of the first two missing, the sweep records a configuration error and alerts the operator (it does not fall back to "unconfigured"). Production scope only. |
+| `HELP_PRIVACY_CONTACT_EMAIL` | Production; the privacy-policy contact; set by the operator. **Build time** (read once into the static `/help/privacy-policy` page by `src/lib/help/env.ts`; a change needs a redeploy). Deliberately **not** written down here or anywhere tracked: the repository is public. One plain address; a value that is set but malformed fails the build. Unset (local, CI, previews) the page tells people to open an issue on the public repository. Not `NEXT_PUBLIC_`. |
 | `STRIPE_SECRET_KEY` | **online giving only**, production only — a *restricted* key, never a full-access one. See "Online giving (Stripe)" below |
 | `STRIPE_WEBHOOK_SECRET` | **online giving only** — the signing secret of the one webhook endpoint. See below |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | **deferred** — see below |
@@ -473,8 +474,9 @@ Added at integration (v0.34.0). Production is at `0053` as of 2026-10-07.
 - Upstash (`UPSTASH_REDIS_REST_URL`/`_TOKEN`) and Turnstile configured: the
   in-memory rate limiter is per-instance on Vercel, so the public give form's
   limits are only real with Upstash.
-- `auth.require_2fa` is on. (Holding any giving key already forces 2FA through
-  the permission, but the platform flag is the backstop for everyone else.)
+- `auth.require_2fa` is on. It is the master switch for every requirement (a
+  person's own setting, a role that carries a flagged key, a congregation's
+  policy); with it off, nobody is challenged (DECISION-291).
 - The enforced `Content-Security-Policy` header is verified **in a browser** on
   `/site/<slug>/give`, `/site/<slug>/give/return` and the member equivalents,
   with a clean console (Batch 4 ships it; `next.config.ts`, same string as the
@@ -678,7 +680,7 @@ reserved and unbuilt, so the gap in the numbering is expected. Confirm first:
 Added at integration (v0.41.0). Migrations `0062` and `0063`. Design:
 `docs/work-log/2026-10-22-founding-admin-directory.md` (Increment 2);
 DECISION-202–206. Production is at `0061`; `0064` went to person emails (below) and Increment 2b
-moves to `0065`.
+took `0065` (below, "Sign-in invitations and connect at sign-in (0065)").
 Confirm first: `select to_regclass('roll_actions')` is non-null and
 `select count(*) from information_schema.columns where table_name = 'roll_actions'
 and column_name = 'decided_by'` is 0.
@@ -822,7 +824,7 @@ F250-F256 (`docs/schema-design-2.md` §2ab). Confirm first, on production:
 `select count(*) from information_schema.columns where table_name = 'events'
 and column_name = 'website_listed'` is 0. The migration is independent of
 `0065` and `0066` (Community 2b and 3a): apply it in whatever order the
-branches merge. The journal skips idx 65 and 66 on purpose; do not renumber.
+branches merge. The journal skips idx 66 on purpose (idx 65 is Community 2b's); do not renumber.
 
 ### Pre-deploy runbook: 0067, then the code
 
@@ -990,14 +992,589 @@ hides their photo in the directory is withheld from every public roster.
 
 ---
 
+## Site ingest: the staged transport (DECISION-279, F324)
+
+A content repo's CI publishes through presby-site-kit's `ingest.yml`. Vercel refuses
+any function request body over 4.5 MB before route code runs (a plain-text 413), so
+the ingest has two transports and the client chooses:
+
+- **Legacy, one request:** `POST /api/sites/ingest` with the whole bundle (pages and
+  base64 images). Used when the exact serialized body is at most **4,000,000 bytes**.
+  Unchanged apart from the limit and an added `code` on errors.
+- **Staged:** `POST /api/sites/ingest/plan` (which image sha256 digests the platform
+  still lacks), `/images` (one image's raw bytes per request) and `/commit` (the pages
+  plus `{ manifestKey, sha256 }` per image). Every request carries its own fresh GitHub
+  OIDC token and the header `x-presby-ingest-protocol: 1`. The server derives every blob
+  key itself, and the site changes only at the commit.
+
+The app enforces the 4,000,000-byte per-request limit itself on all four routes (413
+`request_too_large`, after authentication), so a local server behaves like production.
+There are no new environment variables, flags or migrations. The routes need
+`sites.public_render` on and 0072 applied, like the legacy one.
+
+**Rollout order is fixed: the server before the client.**
+
+1. Apply 0072 and promote F289 (see "Public asset audience (0072)"), then promote the
+   release carrying this change. Verify with an unauthenticated `POST` to each of
+   `/api/sites/ingest/plan`, `/images` and `/commit` on the production platform host:
+   each answers **401 with the JSON body** (`{"status":"error","code":"unauthorized",...}`).
+   A 404 means the route did not deploy.
+2. Read-only prediction for `fpcw` (counts only): after 0072, count its `blob_assets`
+   rows with `audience = 'public_site'` and compare the distinct hashes of
+   `site-fpcw/images/`. A hash held only as `private` is reported missing, so the first
+   publish uploads exactly the ones not held as site images; do not promise it uploads
+   nothing. Also confirm in `/admin` that `sites.public_render` is on in production and
+   that `fpcw`'s site is not `suspended` (a suspended site is ingested but never shown).
+3. Merge presby-site-kit's `fix/staged-ingest` (v4.1.0) to its `main` and tag `v4.1.0`
+   on the branch tip `ea9e78a` (not `ad109b1`: that commit still prints "Published commit").
+   This takes effect for every site's next push (the workflow file comes from `@main`;
+   the scripts come from `site_kit_ref`). A site that pins `site_kit_ref` to a tag older
+   than v4.1.0 is unsupported by the new workflow and fails with a readable line.
+4. Not a gate (Phase 6 ruling: FPCW's own run proves the same in the same sitting, and this
+   site has no images; it costs two publishes of a live customer's site). Only if a real
+   need appears, and the operator's call, on a live customer repository: add `transport: staged`
+   to `site-pasturechurch`'s calling workflow for one push and read the log (Built,
+   "Staged ingest was requested", "This site has no images to send.", Publishing,
+   "Sent commit ...; the platform has ingested it."), then remove it. It proves OIDC, the three routes and Vercel's real
+   behavior; it does **not** prove an upload (that site has no images).
+5. The first real `site-fpcw` ingest (see "Deferred by operator decision"). Trigger it with a
+   push to `site-fpcw` `main`; do not re-run the old failed run 40251133138 (a re-run may
+   resolve the old workflow reference; unverified). Expected log
+   shape: `Built 14 page(s) and 81 image(s): 80 distinct, 28.3 MB.` · `The site is 37.8 MB
+   as one request, over the 4.0 MB limit, so images are sent one at a time.` ·
+   `Checking which of the 80 distinct image(s) the platform still needs.` ·
+   `<R> already on the platform; <M> to upload.` (or `All 80 image(s) are already on the
+   platform; nothing to upload.`) · one `Uploaded i of M` line per image · `Publishing ...`
+   · `Sent commit <sha7> to "<slug>" (<n> page(s)); the platform has ingested it.` · `Sent <M> new image(s); <R> already on the
+   platform.` A previously masked failure is possible (the 413 hid everything after it):
+   the client prints a named cause and hint for each (401 variable mismatch, 404
+   unprovisioned repository, 503 flag off or unreadable); fix it and re-run, every step is
+   safe to repeat and a repeat of an ingested sha says so.
+
+**Rollback.** Client: revert the v4.1.0 change on presby-site-kit `main` (both commits, or
+the merge commit with `git revert -m 1`; large sites then fail as before; small ones are
+unaffected). Server: revert the presby release; a staged
+client then gets a non-JSON 404 on `/plan` and prints "the platform does not support
+staged ingest yet". Neither needs a database action.
+
+**Unverified until production.** The plan and commit on Vercel's real stack; whether
+`getIDToken` tolerates about 80 calls in a run; the timing of one upload on a cold
+function; the actual `exp` of a GitHub OIDC token (irrelevant by design, every request
+mints a new one). The first `site-fpcw` run is the evidence; the in-process bridge run
+(real client, real handlers) is the pre-production proxy.
+
+**Accepted residuals.** Images uploaded by a run that never published remain as
+`public_site` rows no bundle uses (fetchable only by uuid, which no ingest response
+discloses; no takedown until F289 Tier 2). Re-running an older failed run after a newer
+one succeeded republishes the older content: re-run only the latest.
+
+---
+
+## Careers (0071)
+
+Added at integration (v0.47.0). Migration `0071`. Design and rulings:
+`docs/work-log/2026-10-25-careers-inc1.md` (Phase 3 and Phase 6) and the parent
+`docs/work-log/2026-10-25-careers.md`; DECISION-264, 265, 266 and 278; findings
+F290, F292 to F295 and F311 to F320 (`docs/schema-design-2.md` section 2ah).
+Increment 1 only: job postings, the staff pages, the public list and posting
+pages and the `careers` slot. **Nothing here accepts an application**; that is
+Increment 2 (migration `0075`), which has its own runbook and a stricter rule
+about production data (point 8). Confirm first, on production:
+`select count(*) from information_schema.tables where table_name = 'job_postings'`
+is 0 and `select count(*) from permissions where key like 'careers.%'` is 0.
+The journal has no idx 69 or 70 (the number is the migration's own, as for 0072);
+do not renumber.
+
+### Pre-deploy runbook: 0071, then the code
+
+1. **Order and method: `0071` first, then merge and deploy the code.** Apply it
+   as the owner, on the direct endpoint, by hand, in one transaction:
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0071_presby_careers.sql`.
+   `db:migrate` stopped tracking past idx 9, so the journal entry (idx 71) is a
+   record, not an applier. The file is idempotent (every statement is `if not
+   exists`, `on conflict do nothing`, `where not exists`, drop-then-add,
+   `create or replace` or revoke-then-grant) and was applied twice in full on the
+   pipeline branch. It shares no object with `0068` (parishes) or `0072` (asset
+   audience), so the three may be applied in either order; each has its own
+   conditions in its own section. **Snapshot `production` first** (Neon). Code
+   before schema is the wrong order: the staff and public pages and the daily
+   sweep call objects that do not exist yet. With the toggle off everywhere
+   (the default) no page is reachable, and the sweep step would only log a
+   counts-only failure, with the token pruning unaffected. Old code against the
+   new schema is safe: the schema is additive, and the one behavioural change is
+   point 2.
+2. **Re-read the live `presby_founding_administrator_permission_keys()` at merge,
+   before applying.** `0071` re-creates it with two more keys. If another
+   migration has re-created it since this branch was cut, the second `create or
+   replace` silently drops the first one's keys, and Postgres records no
+   dependency to warn you. Today the live body is `0059`'s, nine keys
+   (`people.manage`, `roles.manage`, `role_grants.manage`, `groups.manage`,
+   `officers.manage`, `org_features.manage`, `tickets.file`, `staff.manage`,
+   `domains.manage`) plus `congregation_oversight.manage` for a presbytery;
+   `0061` and `0068` say they do not touch it. Check with
+   `select pg_get_functiondef('presby_founding_administrator_permission_keys(text)'::regprocedure)`;
+   if the array is anything other than those nine, stop and merge the new keys
+   into `0071`'s array by hand (and the TypeScript plan, the designation golden
+   and `invitations.db.test.ts` with them). The test that catches a mismatch is
+   `src/lib/db/domain/invitations.db.test.ts` (the SQL-equals-TypeScript parity
+   case, around line 571).
+3. **Count the backfill, read-only, before applying, and tell the operator the
+   number.** `0071` tops up every existing org-owned `founding_administrator`
+   role with both keys, **including `careers.applicants`, a tier-3 key**, so
+   every existing founding administrator holds it from the moment the migration
+   runs. It reads nothing until Increment 2. The count:
+   `select count(*) from app_roles where key = 'founding_administrator' and organization_id is not null`
+   and, for who holds them,
+   `select count(*) from role_grants g join app_roles r on r.id = g.role_id where r.key = 'founding_administrator' and r.organization_id is not null and g.ends_on is null`.
+   Production held zero such roles on 2026-10-25; re-measure. Residual, as
+   `0057`: a re-apply re-adds a key a tenant removed from a designation-minted
+   role. The release note says "existing and new founding administrators".
+4. **Reserved-path check, read-only, immediately before deploy.** Careers
+   reserves `/careers/<anything>` on every site (the bare `/careers` stays a
+   bundle page). A live bundle with a page under it would be stored and never
+   shown. Expected 0 rows (0 on 2026-10-25; the query's syntax was verified on
+   the pipeline branch with a positive control):
+   ```sql
+   select o.slug, p->>'path' as path
+     from organization_sites s
+     join organizations o on o.id = s.organization_id
+     join blob_assets b on b.id = s.content_bundle_key
+    cross join lateral jsonb_array_elements(convert_from(b.bytes, 'UTF8')::jsonb -> 'pages') p
+    where lower(p->>'path') like '/careers/%';
+   ```
+   A row means rename that page in the site's repository before deploying. Ingest
+   refuses new ones by name (and the percent-encoded spellings) from this release.
+5. **Verify against the catalog, not the DDL, and diff against `development`.**
+   - `permissions` holds `careers.manage` at tier 1 and `careers.applicants` at
+     tier 3, module `careers`.
+   - `job_postings` has `relrowsecurity` and `relforcerowsecurity` true, one
+     `tenant_isolation` policy, and **no** `DELETE` grant to `presby_app`; its
+     column-limited `INSERT` and `UPDATE` grants omit `version`, `posted_on`,
+     `first_published_at`, `closed_at` and `updated_at`. The three guard triggers
+     (`job_postings_guard_insert`, `_update`, `_delete`) are present and enabled.
+   - `presby_public_careers(text, text)` and `presby_careers_org_today(uuid)`
+     have `prosecdef` true, `search_path=public, pg_temp`, and execute for
+     `presby_app` only; `presby_careers_sweep(integer)` and
+     `presby_founding_administrator_permission_keys(text)` are executable by
+     neither `public`, `presby_app` nor `presby_platform`
+     (`has_function_privilege` false for all three).
+   - The founding function's array now ends `…, 'domains.manage', 'careers.manage',
+     'careers.applicants'`; the template role `hiring_committee` exists with
+     `organization_id is null` and exactly those two keys; the template count is
+     seven.
+   - The founding-administrator role count from point 3 is unchanged, and each of
+     those roles now has both keys.
+6. **On `development`, after merge:** apply `0071`, then run
+   `scripts/careers/seed-dev-careers.sql` (reached through `scripts/seed-dev.sql`)
+   and the full `scripts/test-rls.sql` as `presby_app`. Section 71 is
+   `scripts/careers/test-rls-71.sql`. Two patches are needed in the shared files
+   (`scripts/careers/*.integration.patch`): the template count goes from 6 to 7
+   at `scripts/test-rls.sql` (`DECISION-152` assertion) and the seed includes the
+   careers fixture (two live sites). Known failures that are not careers: the
+   drift at `scripts/test-rls.sql` lines 217, 516 and 7927, and section 67's seed
+   missing on a pipeline branch. **Do not run the seed or the suite on
+   production** (test helpers and fixture sites).
+7. **Flag prerequisites for the committee role, then the toggle.** The toggle
+   `org_portal.careers` is per organization, off by default, with no row, and is
+   switched on by a founding administrator at `/o/<slug>/admin/features`
+   ("Job openings"). Setting up the hiring committee needs **two global flags
+   that must be on in production**: `org_portal.roles` (Roles, where the "Hiring
+   Committee" template is adopted) and `org_portal.admin_hub` (the Administration
+   hub). Without them `/admin/roles` says "Role administration isn't turned on"
+   and the hub says "Organization administration isn't turned on", and the
+   template cannot be adopted. Check both in `/admin/flags` before telling a
+   congregation to set up a committee. The committee path, as built and walked:
+   the founding administrator adopts "Hiring Committee" at Roles, New role,
+   then grants the role to the committee's group, so membership drives access.
+   Until Increment 2 the committee role grants two keys that read nothing.
+8. **Defaults, rollback, and the production-branch rule.** Defaults: the
+   toggle is off for every organization, `job_postings` is empty, and no site
+   carries the `careers` slot, so merging exposes nothing. There is no rollback
+   file and no data to roll back. The fastest way back is, in this order: the
+   toggle off for the organization (the public pages 404 and the slot shows the
+   one "unavailable" notice), then close the postings, then
+   `sites.public_render`. Do not drop `job_postings`, the function or the
+   permission rows; the code needs them, and a posting is never deleted. **Never
+   branch production for pipeline work**: this increment stores no personal data
+   of an applicant, but Increment 2 does, and a Neon branch of production would
+   be a copy of it outside the retention clock.
+
+**What to tell the operator after merging.** The Employment page for the first
+customer's site is a new content file in its private repository, not part of
+this release and not to be added until the toggle is on and a posting is
+published (otherwise the menu page shows the unavailable notice). The steps are
+the "Post-ship steps" in the Increment 1 work-log; the posting import is Track K.
+
+---
+
+## Sign-in invitations and connect at sign-in (0065)
+
+Added at integration (v0.48.0). Migration `0065`. Design and rulings:
+`docs/work-log/2026-10-22-founding-admin-directory.md` (Increment 2b, Phase 3
+amendment 2 and Phase 6); DECISION-207, 208 (amended) and 225 to 228; findings
+F186, F187, F192 to F198 and F230 to F233 (`docs/schema-design-2.md` section
+2ai). The journal entry is idx 65 (the number is the migration's own, as for
+0072); idx 66 is reserved for Increment 3a. **Operator ruling 2026-10-26: the
+release ships, but real sign-in invitations are held until F166 (recovery codes
+and landing on first enrolment) ships.** Deploying 0065 and the code sends
+nothing by itself; an invitation goes out only when a person with `people.manage`
+presses Send, so the hold is a promise to keep, not a switch. The one thing the
+code does on its own is connect at sign-in (point 4, `org_portal.sign_in_connect`).
+
+**Lifting the hold (F166 ships in v0.48.1, no migration).** After 0.48.1 is
+deployed, walk one real invitee in production on a phone before sending any real
+sign-in invitation: send an invitation to a plus-address on a congregation made
+for testing, accept it as a new account, sign in, set up two-factor, check that
+the ten recovery codes stay on screen and that Continue lands in the congregation
+with no second code prompt. When it passes, real invitations can resume and the
+2b what's-new entry can be published (`docs/TODO.md`).
+
+### Confirm first (read-only, on production)
+
+- `select to_regprocedure('presby_person_email(uuid,text)')` is non-null (0064
+  applied).
+- `select to_regprocedure('presby_connect_signed_in_account(uuid,boolean)')` is
+  null (0065 not yet applied).
+- `select to_regclass('public.user_totp')` is non-null (the file's own
+  precondition, and the second-factor rule reads it).
+- The shipped code is at least v0.42.3 and v0.42.4 (DECISION-230 and 246: the
+  session-claim fix and the unverified-Google-email refusal). Main already has
+  both. Do not apply 0065 under older code.
+
+### Pre-deploy runbook: snapshot, 0065, then merge and deploy
+
+1. **Order: snapshot `production`, apply `0065`, then merge and deploy.** Every
+   merge to `main` auto-deploys production. The new code calls functions that do
+   not exist before `0065`, so code first is the wrong order. **Old code against
+   the new schema keeps working** (the file's header and design section 4):
+   verify-email's `update users set email` is allowed and the new trigger clears
+   the unread stamp; the NextAuth adapter's insert carries a null
+   `email_verified`, which is allowed; founding-administrator and treasurer
+   acceptance is byte-identical; no old code writes `people.user_id`. So the
+   window between the apply and the deploy is safe.
+2. **Pre-reads, counts only (never a value, never an address), re-run just before
+   the apply** (read-only session, `default_transaction_read_only = on`). The
+   queries are Phase 3's section 3.2 (P1 to P8); expected values are from
+   production on 2026-10-25.
+   - **P1, case-duplicate `lower(users.email)` groups. Expect 0.** The file stops
+     on any (`users_email_lower_uq` could not be built). Repair the data, never
+     edit the migration.
+   - **P2, stamped users with a `user.email_changed` audit row. Expect 0.** The
+     file clears those stamps and prints a count. If non-zero, those people lose
+     address proof until they sign in with Google (a stamp at password reset,
+     S11, was declined), so they cannot connect or accept in place and use the
+     emailed link; tell the operator before deploy.
+   - **P6, open invitations of any purpose. Expect 0.** The file drops and
+     re-adds the `account_invitations` CHECKs and re-predicates
+     `account_invitations_open_address_uq`; any open row is unaffected in
+     content but you want to know the number.
+   - **P8, the deploy-day wave: proven, active, unlinked users with exactly one
+     eligible candidate person. Expect 0.** If both "will connect" columns are 0
+     the release note says nothing about a wave (it does not). If either is
+     non-zero, the note must say people "may be connected the next time they sign
+     in" before the release goes out, and the operator should read the count.
+   - The count of `organizations` and of `organization_feature_toggles` rows
+     (11 toggle rows over 2 organizations on 2026-10-25). Section 8 seeds one
+     `org_portal.sign_in_connect` row per existing organization.
+   - The Google-account count: `select count(*) from accounts where provider =
+     'google'` (0 on 2026-10-25). It decides how much the one-time Google check
+     in point 7 matters.
+   - `select count(*) from audit_events` (661 on 2026-10-25). The new partial
+     index `audit_events_sign_in_connected_ix` builds under a brief write lock;
+     at this size it is instant.
+3. **Apply `0065` WITH `-1`, as the owner, on the direct endpoint:**
+   `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0065_presby_sign_in_and_connect.sql`.
+   `db:migrate` stopped tracking past idx 9, so the journal entry is a record,
+   not an applier. The file is idempotent (count-only stop-blocks, an update
+   whose predicate stops matching, drop-then-add constraints, `create or
+   replace` functions, drop-then-create triggers, `on conflict do nothing` for
+   the seed, revoke-then-grant); a second run changes nothing. It shares no
+   object with 0067, 0068, 0071 or 0072, so those may be applied in either order
+   relative to it. Then **merge and deploy the code.**
+4. **What deploy turns on by itself.** `org_portal.sign_in_connect` ("Connect
+   people when they sign in") is seeded **on** for every existing organization
+   and written on for every new one. From the first request after deploy, an
+   account whose proven address sits on exactly one eligible record at a managed
+   congregation is connected at its next sign-in (a record that holds a role or a
+   seat only after a confirmed two-factor sign-in). The wave is P8's number. To
+   hold even that, turn the toggle off per organization at
+   `/o/<slug>/admin/features` (it stops new connections only, and disconnects
+   nobody). There is no global flag, by the operator's standing rule.
+5. **Verify against the catalog, not the DDL, and diff against `development`.**
+   - Both guard triggers are present and enabled: `users_guard_email_proof` on
+     `users` and `people_guard_user_link` on `people`.
+   - Indexes present: `users_email_lower_uq`,
+     `account_invitations_open_sign_in_person_uq`, the re-predicated
+     `account_invitations_open_address_uq` (it excludes the `sign_in` purpose),
+     and `audit_events_sign_in_connected_ix`.
+   - `presby_app` has no privilege on `account_invitations` (`aclexplode`).
+   - `presby_app` holds EXECUTE on exactly the 15 callables and on none of the
+     five internals (`presby__accept_invitation_core`, `presby__actor_person`,
+     `presby__bind_person_account`, `presby__person_sign_in_standing`,
+     `presby_sign_in__check`); `presby_platform` holds none; PUBLIC holds none.
+   - Every definer is owned by the owner role and has `search_path = public,
+     pg_temp`.
+   - `org_portal.sign_in_connect` toggle rows equal the organization count, all
+     enabled.
+   - Row counts are unchanged from point 2, apart from the section-2 clean-up
+     (P2) and the toggle seed.
+6. **On `development`, after merge:** apply `0065`, then
+   `scripts/sign-in-invitations/seed-dev-sign-in.sql` (reached through
+   `scripts/seed-dev.sql`, last) and the full `scripts/test-rls.sql` as
+   `presby_app`. Section 65 is `scripts/sign-in-invitations/test-rls-65.sql`.
+   Section 44's `presby_app` link writes were converted in the same integration
+   (F186). The e2e suite needs the owner connection to seed its users since this
+   migration (`e2e/support/global-setup.ts`, patched at integration): CI's seed
+   step must run as the owner. **Do not run the seed or either test file on
+   production** (test helpers and fixture people).
+7. **After deploy: the operator walks the real path, and does the one-time
+   Google check.**
+   - On a congregation made for testing, with plus-addresses (3 invitations per
+     address per day): send an invitation from a person's edit page, accept it as
+     a new account, and enrol two-factor. **Until F166 ships, do this only as the
+     operator**; a new-account invitee is left on the enrolment page with no
+     recovery codes shown and no Continue link.
+   - **The Google check.** The Google proof path is the one path no automated test
+     exercises (it needs a real Google ID token). Sign in with Google on an address
+     that sits on exactly one eligible record, then confirm the connection and the
+     `user.email_proof_recorded` audit row (metadata `source: google`).
+8. **Down-path.** There is no rollback file. A code rollback is safe: old code
+   works against the new schema (point 1). The widened vocabulary CHECKs on
+   `account_invitations` cannot be narrowed once a `sign_in` row exists (rows are
+   never deleted), and production has none before this file, so the only
+   forward-only edge appears after the first invitation is sent. Do not drop the
+   guards, the triggers or the toggle rows.
+9. **Never run** `scripts/sign-in-invitations/seed-dev-sign-in.sql` or
+   `scripts/sign-in-invitations/test-rls-65.sql` on production.
+
+**What to tell the operator after merging.** Real sign-in invitations wait for
+F166. The what's-new entry is published after F166, not at this release
+(`docs/TODO.md`). F232 (a `people.manage` holder can address an authority-bearing
+record to a mailbox they control; detected by audit, not prevented) is an
+accepted open residual and is named in the release note.
+
+---
+
+## Two-factor by role (0080)
+
+Added at integration (v0.49.0). Migration `0080`. Design and rulings:
+`docs/work-log/2026-10-26-2fa-default.md` (Phase 2 R1 and R8, Phase 3 "Data
+Model" and "Deploy order", Phase 6); DECISION-291; F343
+(`docs/schema-design-2.md` section 2ak). The journal entry is idx 80 (the
+migration's own number). The file changes the `users.two_factor_required`
+default to false (no existing row is touched), flags `roles.manage`,
+`role_grants.manage` and `domains.manage` `requires_two_factor`, and restates
+three comments. It touches no function body and no grant.
+
+### Pre-deploy runbook: 0080
+
+1. **Order: counts, snapshot `production`, apply `0080`, verify, then merge and
+   deploy in the same sitting.** Every merge to `main` auto-deploys production,
+   so **0080 is applied BEFORE the code is merged**. Why this order (Phase 3,
+   "Deploy order"; it follows 0072's precedent):
+   - Between the apply and the deploy, the OLD code runs against the new
+     default. Old code never reads the default except when it creates a user,
+     so the only skew is that a platform role granted through the old code (or
+     the first sign-in of an `INITIAL_ADMIN_EMAILS` address) would not switch
+     that person's own setting on. **Grant no platform role, and let no
+     `INITIAL_ADMIN_EMAILS` address sign in for the first time, between the
+     apply and the deploy.** There is one platform-role holder and no grant is
+     planned.
+   - Merging the code first has the opposite skew (the default is still true,
+     which is conservative), but the three keys are not yet flagged, so the
+     new code's role-based requirement would be missing for organization
+     administrators until the apply, and the new `/admin/2fa` copy would name
+     keys that are not flagged.
+2. **R8 counts, read-only, re-run on the owner connection just before the
+   apply.** Record only the numbers (No Real Data): never an address, a name or
+   an id. Run each inside `begin transaction read only; ... rollback;`. Do
+   **not** use "flag the keys in a rolled-back transaction and call the
+   function": it writes, takes locks, and a read-only transaction refuses it.
+
+   **Query 1, tenant side** (0055 section 18's arm B with the key set replaced).
+   `newly_required_not_enrolled` is the number of people who will be sent into
+   enrolment at their next request. On 2026-10-26: `active_holders` 1,
+   `newly_required` 0, `newly_required_not_enrolled` 0. **If
+   `newly_required_not_enrolled` is not zero, stop and tell the operator the
+   number before applying,** and put it in the release note.
+
+   ```sql
+   begin transaction read only;
+   with k(key) as (values ('roles.manage'),('role_grants.manage'),('domains.manage')),
+   me as (select p.user_id, p.id as person_id, m.organization_id as org_id
+            from people p join memberships m on m.person_id = p.id and m.ended_on is null
+           where p.user_id is not null and p.merged_into_id is null),
+   holders as (
+     select me.user_id, 'direct' arm from me
+       join role_grants rg on rg.organization_id = me.org_id and rg.person_id = me.person_id
+        and rg.starts_on <= current_date and (rg.ends_on is null or rg.ends_on > current_date)
+       join app_roles r on r.id = rg.role_id
+       join app_role_permissions rp on rp.role_id = r.id join k on k.key = rp.permission_key
+     union all
+     select me.user_id, 'group' from me
+       join role_grants rg on rg.organization_id = me.org_id and rg.group_id is not null
+        and rg.starts_on <= current_date and (rg.ends_on is null or rg.ends_on > current_date)
+       join group_memberships gm on gm.group_id = rg.group_id and gm.person_id = me.person_id
+        and gm.starts_on <= current_date and (gm.ends_on is null or gm.ends_on > current_date)
+       join app_roles r on r.id = rg.role_id
+       join app_role_permissions rp on rp.role_id = r.id join k on k.key = rp.permission_key
+     union all
+     select me.user_id, 'commission' from me
+       join group_memberships gm on gm.person_id = me.person_id
+        and gm.starts_on <= current_date and (gm.ends_on is null or gm.ends_on > current_date)
+       join administrative_commissions ac on ac.group_id = gm.group_id and ac.target_org_id = me.org_id
+        and ac.starts_on <= current_date and (ac.ends_on is null or ac.ends_on > current_date)
+       join app_roles r on r.id = ac.role_id
+       join app_role_permissions rp on rp.role_id = r.id join k on k.key = rp.permission_key
+     union all
+     select me.user_id, 'delegation' from me
+       join org_delegations od on od.grantor_org_id = me.org_id and od.revoked_at is null
+        and od.starts_on <= current_date and (od.ends_on is null or od.ends_on > current_date)
+       join group_memberships gm on gm.group_id = od.group_id and gm.person_id = me.person_id
+        and gm.starts_on <= current_date and (gm.ends_on is null or gm.ends_on > current_date)
+       join app_roles r on r.id = od.role_id
+       join app_role_permissions rp on rp.role_id = r.id join k on k.key = rp.permission_key)
+   select count(distinct u.id) as active_holders,
+          count(distinct u.id) filter (where not u.two_factor_required
+                                         and not presby_two_factor_required(u.id)) as newly_required,
+          count(distinct u.id) filter (where not u.two_factor_required
+                                         and not presby_two_factor_required(u.id)
+                                         and not exists (select 1 from user_totp t where t.user_id = u.id)) as newly_required_not_enrolled,
+          count(distinct u.id) filter (where h.arm in ('commission','delegation')) as via_commission_or_delegation
+     from holders h join users u on u.id = h.user_id and u.is_active;
+   rollback;
+   ```
+
+   **Query 2, platform side, for information only** (the column stays
+   unchanged for these accounts). On 2026-10-26: `platform_role_holders` 1,
+   `platform_role_holders_not_required` 0.
+
+   ```sql
+   begin transaction read only;
+   select count(*) as platform_role_holders,
+          count(*) filter (where not u.two_factor_required) as platform_role_holders_not_required
+     from users u
+    where u.is_active and (u.is_platform_admin or exists (
+      select 1 from user_roles ur join roles r on r.id = ur.role_id
+       where ur.user_id = u.id and (r.name = 'admin' or exists (
+         select 1 from role_features rf where rf.role_id = r.id and rf.feature_key = 'admin.dashboard'))));
+   rollback;
+   ```
+
+   Also capture the users fingerprint for point 5 (a count and a hash, never a
+   value):
+
+   ```sql
+   begin transaction read only;
+   select count(*) as users,
+          count(*) filter (where two_factor_required) as required_column_true,
+          md5(string_agg(id::text || ':' || two_factor_required::text, ',' order by id)) as fingerprint
+     from users;
+   rollback;
+   ```
+3. **Snapshot `production`** in Neon (for example
+   `pre-migration-0080-<date>`) before any statement runs; `restore_snapshot`
+   is the emergency rollback.
+4. **Apply `0080` WITH `-1`, as the owner, on the direct endpoint:**
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0080_presby_two_factor_default.sql`.
+   `-1` makes the file's three-row guard roll everything back if a catalog row
+   is missing. The file is idempotent (a replay writes no row). It shares no
+   object with 0065, 0067, 0068, 0071 or 0072.
+5. **Verify** (read-only), then merge and deploy:
+   - The column default is false:
+     `select column_default from information_schema.columns where table_schema = 'public' and table_name = 'users' and column_name = 'two_factor_required';`
+     returns `false`.
+   - Exactly the six flagged keys:
+     `select key from permissions where requires_two_factor order by key;`
+     returns `domains.manage`, `giving.manage`, `giving.record`, `giving.view`,
+     `role_grants.manage`, `roles.manage` (and nothing else, unless a later
+     migration such as treasury's 0074 has added its own).
+   - No user row changed: the users fingerprint query from point 2 returns the
+     same `users`, `required_column_true` and `fingerprint` (a sign-up between
+     the two reads changes all three; re-read and compare the old rows if so).
+   - `presby_two_factor_required(uuid)` is unchanged apart from its comment:
+     `select md5(prosrc) from pg_proc where proname = 'presby_two_factor_required';`
+     matches `development`.
+6. **Merge and deploy the code** in the same sitting (`/merge-pr`). Then fill
+   the release note's deploy-day count from Query 1's
+   `newly_required_not_enrolled` (`docs/release-notes/v0.49.md`).
+7. **On `development`, after merge:** apply `0080` the same way, then re-run
+   `scripts/test-rls.sql` as `presby_app` (Rule 16); sections 46j and 47n
+   assert the six keys. Repeat the 360px walk there (founding administrator and
+   platform administrator; `docs/TODO.md`).
+8. **Rollback** is a forward migration, never an edit of 0080 once shipped:
+   `alter table users alter column two_factor_required set default true;` and
+   `update permissions set requires_two_factor = false where key in ('roles.manage','role_grants.manage','domains.manage');`.
+   Accounts created after 0080 keep `false`, so a rollback also needs a
+   decision about those rows. A code rollback alone is safe against the new
+   schema (old code works with the new default; see point 1).
+
+**What to tell the operator after merging.** New members are no longer asked
+to set up two-factor; church administrators, treasurers, holders of the three
+administration keys and newly made platform administrators still are. Setting
+up two-factor voluntarily does not make sign-in ask for a code (DECISION-291
+residual 5; a `docs/TODO.md` decision). Residual 1 is `paper`: a platform role
+or `is_platform_admin` set by SQL, rather than through the application, does
+not switch the person's own setting on, and nothing in the database refuses it.
+
+---
+
+## Organization baseline backfill (0082)
+
+**Applied 2026-10-28** (v0.50.1; `docs/work-log/2026-10-28-org-baseline-backfill.md`).
+Migration `0082` adds the derived Active Membership group and the baseline
+`member` role (holding `directory.view` and `events.view`, granted to that
+group) to any organization that lacks them: one presbytery created before
+`src/lib/org-provisioning.ts` seeded them. Nothing else is touched. It was
+applied directly to production by the operator's ruling ("Yes, do it now"),
+before the release, because the operator could not send that organization's
+founding-administrator invitation.
+
+- **Order followed:** rehearsed twice on a production-derived Neon branch (first
+  run added 1 organization, second added 0, an existing, already-provisioned organization
+  unchanged); production snapshot `snap-lingering-heart-axrxc9ch`; applied with
+  `-1` on the direct endpoint as the owner; then applied to `development`, where
+  it added the member role to 15 fixture organizations; `scripts/test-rls.sql`
+  on `development` shows only the known drift at lines 219 and 7953.
+- **Nothing to run at deploy.** The release carries no schema work that is not
+  already live. A fresh environment gets the file from the journal (idx 82) and
+  it is a no-op there: with no organizations yet (`db:migrate` runs before
+  `db:seed`), the file inserts nothing and raises nothing, so `db:migrate`
+  completes through idx 82. Proven on a real scratch database on 2026-10-28.
+- **It refuses rather than guesses:** an organization that lacks the group and
+  has ANY membership row (live, ended or future-ended) stops the file, because
+  the sync trigger writes one derived row per membership and the roster would
+  need syncing, a deliberate step, not part of this one. Production had none.
+  It also stops, with "roster missing", only when some organization needs the
+  group and the global `roster` group type is absent.
+- **In-place correction (2026-10-28, before release).** As first applied, the
+  "roster missing" check ran unconditionally, so any database without the seeded
+  `roster` group type (every fresh `db:migrate`) failed at idx 82; and the
+  membership stop-block looked only at live memberships. Both guards were
+  corrected in place, same file and number, guard-only: no row the file writes
+  changed, so it is a no-op on production and `development`, where it had
+  already run (re-run with `-1` on `development`: zero rows inserted). A forward
+  migration could not help, since `db:migrate` stops at 0082 before any later
+  file. The exception to fix-forward is for a guard-only, provably
+  behaviour-neutral change to an applied file (DECISION-298).
+- **Rollback** is a forward migration, never an edit of 0082 except as DECISION-298 permits. The
+  rows are ordinary tenant rows (a protected group, a protected role); removing
+  them would re-create the refusal this fixes.
+- **Regression test:** `src/lib/db/domain/org-baseline-backfill.db.test.ts`
+  (serial; the file is global, so it must not run beside another DB suite).
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.
 
 - **Google OAuth** — presby will support it, but it is not a priority. Until
   `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are set, and with the credentials-login
-  bypass deliberately unseeded, **nobody can sign in to production, including the
-  operator.** Accepted for now; production serves public pages only. Redirect URI
+  bypass deliberately unseeded, Google sign-in is unavailable. Accepted for now.
+  *(Corrected 2026-10-26: this used to say nobody can sign in to production, including
+  the operator. The operator does sign in, with an MFA-enrolled account (the 0.42.3 smoke
+  passed 2026-10-25), and is `fpcw`'s founding administrator.)* Redirect URI
   when it happens: `https://<canonical host>/api/auth/callback/google`.
 - **First real `site-fpcw` ingest** — `organization_sites.last_ingested_commit_sha`
   for `fpcw` is still a scratch placeholder. The two Production OIDC variables

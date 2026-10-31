@@ -20,10 +20,13 @@
  *                      to a person's contact addresses in this pipeline (D7).
  *   person:<purpose>   a person's address chosen by `chooseEmail()` /
  *                      `presby_person_email()` for that purpose (ER12). The
- *                      four reimbursement notices (approver, treasurer and
+ *                      first sender is Community Increment 2b's
+ *                      `account_sign_in_invitation`, `person:credential`: the
+ *                      issue definer resolves the address in SQL and returns
+ *                      it, so the queue row's `to` is never a client string.
+ *                      The four reimbursement notices (approver, treasurer and
  *                      requester; Treasury Increment 1, P3-11) use
- *                      `person:role`; Community Increment 2b adds
- *                      `account_sign_in_invitation` as `person:credential`.
+ *                      `person:role`.
  */
 export type Audience =
   | "account"
@@ -48,6 +51,9 @@ export const EMAIL_AUDIENCE: Readonly<Record<string, Audience>> = {
   // typed: founding-administrator and treasurer invitations both send this key
   account_invitation: "typed",
   statistics_submission_grant: "typed",
+  // person:credential: a congregation's sign-in invitation, addressed to the
+  // person's credential address, chosen by the issue definer in SQL
+  account_sign_in_invitation: "person:credential",
   // donor
   "giving.statement.notice": "donor",
   // person:role - an approver, a treasurer or a requester is often staff with only

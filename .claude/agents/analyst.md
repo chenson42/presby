@@ -44,6 +44,7 @@ The starter has invariants that requests often forget:
 - **Empty state.** What does this surface look like on a brand-new install?
 - **Failure microcopy.** If the network or database is down, what does the user see?
 - **Mobile.** Does the surface work at 360px wide?
+- **Help impact.** Which `/help` pages does this change add, edit or retire (Workflow Rule 17), and which `[help:<slug>]` placeholder does it make obsolete? Name each page by slug, or write "no help impact" and why. A change to sign-in, two-factor, invitations, a toggle's default, a role bundle or any label a help page quotes always has help impact.
 
 Surface every case the request didn't address. "Out of scope" from the user is fine; shipping with a case silently unaddressed is not.
 
@@ -71,6 +72,8 @@ QA has issued PASS. Confirm the shipped feature delivers what Phase 1 promised:
 2. Walk every flow you described against the actual implementation: verbs work as described; failure microcopy is human, not a stack trace; empty state is helpful; the permission gate is enforced (a user without it gets the right redirect/403); the audit event fires for security-sensitive mutations.
 
    For any feature that changes how an account becomes connected to an organization, how a role is granted, or what a newly-created account can reach, the walk is done as the person that path creates (an accepted-invitation founding administrator, not a seeded fixture), on `development` at 360px: list each page that person lands on and what it shows. SHIP IT requires the walk. (The three 2026-10-23 production escapes were found by the operator doing exactly this walk in production; Increment 2's walk found 1f2fa61.)
+
+   Read each help page the work-log's "Help impact" line names, as its target reader, against the shipped feature on a dev server at 360px: every label, step and "What you need" claim must match the build, and every `limitationUntil` sentence the feature removes must be gone. A page that contradicts what shipped is NEEDS REWORK; a feature with a user-visible change and neither a help edit nor a "no help impact" note is SHIP WITH NOTES at minimum; the page's `verifiedIn` is yours to move only by this walk.
 3. For each Phase 1 gap, check it was addressed — in code, an explicit "deferred" note, or a tracked follow-up.
 
 `SHIP IT` is the only verdict that closes the pipeline. `SHIP WITH NOTES` ships, but each note becomes a tracked follow-up (in `docs/TODO.md`, per Workflow Rule 10). `NEEDS REWORK` reopens the pipeline at the appropriate phase. At SHIP IT, also apply Workflow Rules 12 (mark originating feedback row `done`) and 13 (what's-new advisory).

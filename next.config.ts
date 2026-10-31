@@ -5,6 +5,9 @@ import path from "node:path";
 // one of the only src/lib/domains files this config (and src/proxy.ts) may
 // import. Nothing else from src/lib/domains may be imported here.
 import { assertPlatformHostConfig, isProductionDeployment, platformHosts } from "./src/lib/domains/host";
+// select.ts (with registry.ts and types.ts) is PURE and imports one another by RELATIVE path
+// only, because this config is loaded outside the `@/` alias (config-imports.test.ts pins it).
+import { helpRedirects } from "./src/lib/help/select";
 
 // Boot assertion (R2, T8): a production DEPLOYMENT (VERCEL_ENV, not NODE_ENV -
 // `next build` always sets NODE_ENV=production, and CI and local builds use
@@ -180,6 +183,10 @@ const nextConfig: NextConfig = {
         destination: "/o/:slug/admin/community/:path*",
         permanent: true,
       },
+      // Retired help URLs (a page's `aliases` and the planned slugs it `replaces`, P3-7). Each
+      // entry is host-scoped to the platform (F151) by helpRedirects(). None exists at first
+      // release; the rule is that a published help URL never 404s once it has been live.
+      ...helpRedirects(PLATFORM_HOST),
     ];
   },
   async headers() {

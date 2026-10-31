@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (11 operator questions with defaults; FC1–FC10 → F382–F391) | READY WITH NOTES | 2026-10-31 |
 | 2 — Architectural review | architect | Complete (CA1–CA13; amends C1, C3, C5, C6, C10, R9; AF-1–AF-8 = F406–F413; DECISION-300–304 proposed) | Approved with suggestions | 2026-10-31 |
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
-| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batches 3 to 5 pending | — | 2026-10-31 |
+| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batch 2 complete (server half; 738 files, 11,322 tests; sign-in regression 7 passed). Batch 3 built and green (741 files, 11,363 tests; contact lane 12 passed; CA13 proven on the production build) but STOPPED on a Phase 3 loop-back: CA7 does not hold (see Batch 3). Batches 4 and 5 not started | — | 2026-10-31 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1654,6 +1654,98 @@ Strings added or changed: none user-facing. The guard and comment texts are oper
 Audit events: the two keys are defined; nothing writes them until `inbox.ts` (Batch 4).
 
 Strings added: the notification email (Copy E), verbatim.
+
+## Batch 3 — full-stack-developer: the public page, the island and the e2e lane (2026-10-31)
+
+**STOPPED HERE: a design claim is false as written (CA7). Phase 3 loop-back required before Batch 4.** See "CA7 does not hold" below. Everything else in this batch is built and green.
+
+### Files Created
+
+- `src/app/(documentation)/help/contact/page.tsx` (static, `dynamic = "error"`, one build-time `isHelpContactConfigured` decision), `contact-form.tsx` (the island), `contact-exit.tsx` (the shared exit block and the unavailable block); tests `contact-form.test.tsx` (33), `contact-exit.test.tsx` (5), `page.test.tsx` (3).
+- `e2e/help-contact/{global-setup,support,form.spec,prod-build.spec}.ts`, `e2e/help-contact-unavailable.spec.ts`.
+
+### Files Modified
+
+- `src/lib/help-contact/copy.ts` — sections A, B, C (the form, the outcomes, the exit block), verbatim from Phase 3; the limits are repeated there as constants (copy.ts imports nothing) and pinned equal to `contract.ts`'s by `copy.test.ts`.
+- `src/lib/help/contact.ts` — `HELP_REPOSITORY_URL` exported (the privacy fallback now uses it; its text is unchanged).
+- `src/app/(documentation)/shell-boundaries.test.ts` — five `dynamic = "error"` pages, `help/contact/{page,contact-form,actions}` in the expected files.
+- `playwright.config.ts` (`PW_HELP_CONTACT`, the `contact` and `contact-prod` projects, `CONTACT_TEST_ENV`, the lane's own webServer and globalSetup), `package.json` (`test:e2e:contact`, `test:e2e:contact:prod`), `.github/workflows/e2e.yml` (one step per lane, traces uploaded), `.gitignore`, `docs/testing.md` (a section for the lane, the public test values).
+
+### Page and island, as built
+
+- No `useForm`; controlled state; `<HydrationGate>` and `method="post"`. FormData is read from the form element so an autofilled honeypot is sent. Token kept after `invalid` (the server returns before Turnstile), widget remounted after every other outcome.
+- The "check did not load" note: the widget's own `onError`, or no `window.turnstile` after 8 seconds. A `<noscript>` block carries the same exit.
+- `contact-exit.tsx` repeats `DOCUMENT_LINK_CLASS` rather than importing it (the island would otherwise bundle react-markdown); a test pins the two equal.
+
+### Gates
+
+- `npm run typecheck`, `eslint src e2e playwright.config.ts`, `npm run check` (all nine): pass. `check:help` H19 walks `page.tsx` and `contact-form.tsx` and reaches nothing banned.
+- `npm run test`: **741 files passed, 116 skipped; 11,363 tests passed, 3,227 skipped** (Batch 2 closed at 738 and 11,322: +41).
+- **Contact lane (dev server, limiter on), `E2E_BASE_URL=http://localhost:3670 npm run test:e2e:contact`: 12 passed** (the canary, tests 1 to 7 including 2b, 3b, 6b, and the coalescing check). Test 8 is the annotated expected failure.
+- **Default lane, own keyless server on :3670:** `e2e/help-contact-unavailable.spec.ts`, `e2e/help.spec.ts`, `e2e/help-404.spec.ts`: **34 passed**.
+- Project routing checked with `--list`: the default `chromium` project lists no contact spec; the regular `prod-build` project lists none either.
+- The sign-in e2e regression for the `rate-limit.ts` split was Batch 2's (7 passed).
+
+### CA7 does not hold: the action's host refusal cannot see a custom host (Phase 3 loop-back)
+
+**Claim (CA7, Phase 3 Edge Case, e2e case 8):** the action refuses with `unavailable` unless `isPlatformHost(requestHost(await headers()))`, so it is not reachable on a church's own host.
+
+**Measured (dev server, 2026-10-31):** a Server Action request captured from a legitimate submission, replayed with `Host: church-one.invalid:3670` and a matching `Origin`, returned `{"kind":"sent"}` **and stored a row** (`form.spec.ts` test 8, which holds the platform-host replay as its control). A temporary log in the action showed what it received:
+
+```
+host: localhost:3670   x-forwarded-host: church-one.invalid:3670   x-action-forwarded: (present)
+```
+
+**Mechanism:** on a custom host the proxy rewrites the POST into the `/site/<host>/…` tree, where this action's id is not registered, so Next **forwards** the action to its owning route with an internal fetch. That fetch carries the server's own `Host` and keeps the client's only in `x-forwarded-host`. `requestHost()` reads `host` alone (R3, deliberately), sees a platform host, and the action runs. The architect named this as unprovable from source; the running proof says it is false.
+
+**Scope:** not specific to this form. Any anonymous Server Action on the platform is reachable on any church's custom host the same way (no session or cookie is involved, so nothing is exposed that the platform host does not already expose). The form's own harm is bounded (one more anonymous message into the platform's drop box, no cookie set, no tenant data), but the stated lockdown property ("a custom host has no platform routes") is false for actions, and the e2e that was meant to prove it cannot pass.
+
+**Measured, scratch only (reverted; `git diff` empty):** refusing in `submit.ts` step 1 when `x-action-forwarded` is present, or when `x-forwarded-host` is present and is not a platform host, flips test 8 to green with the platform-host control still storing. Neither is a fix to take without a ruling: the first leans on a Next-internal header, the second on a header R3 says never to trust for a decision (here it would only ever deny, and a client that spoofs it only denies itself).
+
+**Options for the ruling (not taken here):**
+1. **The action** also denies on `x-action-forwarded` and/or a non-platform `x-forwarded-host`. Smallest; pipeline stays non-auth-touching; relies on header behaviour that must be re-measured on Vercel (unknown there).
+2. **`src/proxy.ts`** answers the neutral 404 to any `Next-Action` POST on a non-platform host, before the rewrite. The right layer by the "custom host has no platform routes" doctrine and covers every action, not only this one; but it edits the proxy, which makes the pipeline **auth-touching** (Phase 4 gate: MFA full-login e2e smoke before Phase 5), and is a platform-wide change that wants its own bug-fix pipeline and a TODO line.
+3. Both: the proxy as the lock, the action as the belt.
+
+**State of the code:** `actions.ts` and `submit.ts` are as designed (Batch 2). `form.spec.ts` test 8 and `prod-build.spec.ts` (e) carry `test.fail(true, …)` so the lane is green while the ruling is open and goes red the moment the defect is fixed; the annotation must then be removed.
+
+### CA13 (the production-lane proof)
+
+**PASSED on `next build && next start`** (scratch copy, because the worktree build hits the documented turbopack failure; own server on :3671; `PW_PROD_PORT=3671 npm run test:e2e:contact:prod`; run at the first moment the notification window was free, 21:39 UTC): **5 passed** (a to e, where (e) is the annotated expected failure).
+
+- **(a)** `GET /help/contact`: 200, no `Set-Cookie`, the form (not unavailable). The build emits `cache-control: s-maxage=31536000` and `x-nextjs-cache: HIT`: the page is genuinely static.
+- **(b)** a UI submission stores a row and shows the success block.
+- **(c)** `headers()` is non-empty inside the action: from one `x-real-ip` (198.51.100.7) two more were stored and the **fourth was refused as busy**, so the per-IP key was derived from the request header at request time; a different `x-real-ip` still got in.
+- **(d)** `after()` ran at request time: the window was free, the lane's first message claimed it (exactly one `notified_at >= start`), one `help_contact_notification` queue row exists per `admin.tickets` holder, and **every one had `last_attempt_at` stamped** (only `attemptQueuedSend` writes it, only `after()` calls it, and the cron is not running). None of those rows contains a lane marker, and no queue row is addressed to any typed address. This test was **not skipped**.
+- Segment is `dynamic = "error"` throughout; it was never switched to `force-static`. No Phase 2 loop-back is needed for CA13.
+- **(e) measured on the production build too:** the custom-host replay returned HTTP 200, `sent=true`, and a second row. The CA7 defect is therefore not a dev-server artifact.
+
+
+### 360px evidence (light and dark; scratch, not committed)
+
+All under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/help-contact/shots/`, one file per state and scheme (`NN-name-light.png`, `NN-name-dark.png`), viewport 360 by 800 at 2x, each checked for horizontal overflow (0 px in all):
+
+`01-form-real-widget` (Cloudflare's real test widget, 300px, fits), `02-filled`, `03-field-errors` (summary focused, per-field errors), `04-over-limit-counter`, `05-busy` (with the exit block), `05-check_failed`, `05-not_sent`, `06-turnstile-blocked` (note and exit, button off), `07-sent`, `08-unavailable`.
+
+Read in full: the form (light), field errors (light and dark), busy (dark), blocked (light), sent (dark), unavailable (dark). One finding from the walk, not a defect: the page's two intro paragraphs stay visible above the success block; harmless.
+
+### Departures from the design, with reasons
+
+1. **Test 8 and (e) are `test.fail`, not passing** (above). Phase 3 specified them as passing proofs.
+2. **`HELP_REPOSITORY_URL` was added in this batch, not Batch 5**, because the exit block needs it; the privacy fallback keeps its exact text.
+3. **No `HELP_CONTACT_HREF` yet** (Batch 5): nothing in this batch links to the form.
+4. **The lane is dev server on the port in `E2E_BASE_URL`** (`next dev -p`), because the config's default `npm run dev` binds :3000.
+5. **`testIgnore`/`testMatch` are anchored to `e2e/help-contact/`**: an unanchored `help-contact/` matched this worktree's own directory name and made the default lane find no tests.
+6. **The prod-lane build needs the scratch-copy recipe** in `docs/testing.md` (the documented worktree turbopack failure reproduced here); the copy lives in the scratchpad.
+
+### Notes for QA
+
+1. Test 8 and (e) are expected failures; read the annotation, and re-run them after the CA7 ruling.
+2. The contact lane stores about 10 messages a run and the table cannot be cleaned; it refuses to start at 60 in the last hour.
+3. Honeypot against real password managers: unverified (Phase 3 Edge Case 19).
+4. The Turnstile "token already spent" answer is unverified (needs the `3x…` dummy secret).
+
+Audit events: none in this batch. Strings added: Copy A, B and C, verbatim.
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

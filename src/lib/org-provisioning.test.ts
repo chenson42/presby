@@ -457,7 +457,9 @@ describe.skipIf(!hasDb)(
           .from(groups)
           .where(eq(groups.organizationId, result.organizationId));
 
-        expect(groupRows).toHaveLength(4);
+        // Five: drizzle/0066's groups_pair_derived trigger adds All Current
+        // Records whenever Active Membership is inserted (Increment 3a, D1).
+        expect(groupRows).toHaveLength(5);
         const byDerivedFrom = new Map(
           groupRows.map((g) => [g.derivedFrom, g]),
         );
@@ -468,6 +470,9 @@ describe.skipIf(!hasDb)(
         );
         expect(byDerivedFrom.get("active_membership")?.name).toBe(
           "Active Membership",
+        );
+        expect(byDerivedFrom.get("all_memberships")?.name).toBe(
+          "All Current Records",
         );
         for (const g of groupRows) {
           expect(g.membershipSource).toBe("derived");
@@ -581,9 +586,15 @@ describe.skipIf(!hasDb)(
           .from(groups)
           .where(eq(groups.organizationId, result.organizationId));
 
-        expect(groupRows).toHaveLength(1);
-        expect(groupRows[0].derivedFrom).toBe("active_membership");
-        expect(groupRows[0].name).toBe("Active Membership");
+        // Active Membership and, by drizzle/0066's pair trigger, All Current
+        // Records (Increment 3a, D1).
+        expect(groupRows).toHaveLength(2);
+        expect(
+          groupRows.map((g) => `${g.derivedFrom}:${g.name}`).sort(),
+        ).toEqual([
+          "active_membership:Active Membership",
+          "all_memberships:All Current Records",
+        ]);
 
         // Same baseline role seed as the congregation case above — the
         // non-congregation plan has a single group, but the role/permission/
@@ -605,7 +616,9 @@ describe.skipIf(!hasDb)(
           .where(eq(appRoles.organizationId, result.organizationId));
         expect(grantRows).toHaveLength(1);
         expect(grantRows[0].personId).toBeNull();
-        expect(grantRows[0].groupId).toBe(groupRows[0].id);
+        expect(grantRows[0].groupId).toBe(
+          groupRows.find((g) => g.derivedFrom === "active_membership")!.id,
+        );
       });
 
       it("does not leak one organization's baseline role/grant rows into another's (composite-key discipline, F2-style)", async () => {

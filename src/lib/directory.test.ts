@@ -63,7 +63,7 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
   let orgB: string;
 
   let control: string; // no person_privacy row — DECISION-064
-  let visitorPerson: string; // grantee, not content — DECISION-065
+  let visitorPerson: string; // neither grantee nor content since drizzle/0066 (F177; was DECISION-065's grantee)
   let hiddenPerson: string; // directory_hidden — excluded entirely
   let fieldEmail: string;
   let fieldPhone: string;
@@ -772,11 +772,18 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     }
   });
 
-  it("a visitor with no roll status is a grantee but not content", async () => {
-    const result = await getDirectory(visitorPerson, orgA);
-    expect(result.kind).toBe("ok");
-    if (result.kind !== "ok") return;
-    expect(result.entries.map((e) => e.personId)).not.toContain(visitorPerson);
+  // F177 Option 1 (drizzle/0066, Increment 3a; DECISION-232): a visitor's
+  // membership no longer has member standing, so it has no Active Membership
+  // row, the baseline `member` role no longer reaches them, and they are
+  // neither a grantee nor content. (Before 0066, DECISION-065: a grantee but
+  // not content.)
+  it("a visitor with no roll status is neither a grantee nor content (F177)", async () => {
+    const asVisitor = await getDirectory(visitorPerson, orgA);
+    expect(asVisitor.kind).toBe("forbidden");
+    const asMember = await getDirectory(control, orgA);
+    expect(asMember.kind).toBe("ok");
+    if (asMember.kind !== "ok") return;
+    expect(asMember.entries.map((e) => e.personId)).not.toContain(visitorPerson);
   });
 
   it("a directory_hidden row is fully excluded, not just its fields nulled", async () => {
@@ -1093,7 +1100,7 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
       expect(householdResult).toEqual({ kind: "not-found" });
     });
 
-    it("returns not-found for a visitor with no roll status — a grantee, but not content, same as getDirectory()", async () => {
+    it("returns not-found for a visitor with no roll status — not content, same as getDirectory()", async () => {
       const result = await getPersonDetail(control, orgA, visitorPerson);
       expect(result).toEqual({ kind: "not-found" });
     });

@@ -161,8 +161,11 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
       { refusal: null, standing: "visitor", authority: false, ...AUTH_FREE_OK, issue: "needs_acknowledgement", connect: "declined", connectFactor: "declined" }],
     ["staff anchor", () => async () => (await f.person(orgA, { engagement: "staff", roll: null })).id,
       { refusal: null, standing: "staff_anchor", authority: false, ...AUTH_FREE_OK }],
-    ["unclassified engagement", () => async () => (await f.person(orgA, { engagement: "fixture_unknown", roll: null })).id,
-      { refusal: null, standing: "unclassified", authority: false, ...AUTH_FREE_OK }],
+    // "unclassified engagement" left this matrix with drizzle/0066 (Increment
+    // 3a, D3): memberships_engagement_status_allowed refuses any engagement
+    // outside the five, so no stored row can classify as `unclassified`. The
+    // classifier's `unclassified` arm is covered by the SQL cross-product in
+    // src/lib/membership-standing.db.test.ts; the refusal is asserted below.
     ["elder seat", () => async () => { const p = await f.person(orgA); await f.seat(orgA, p.id); return p.id; },
       { refusal: null, standing: "listed", authority: true, session: true, keys: [], issue: "ok", ...AUTH }],
     ["future-dated elder seat (no starts_on bound)", () => async () => { const p = await f.person(orgA); await f.seat(orgA, p.id, "ruling_elder", "2099-01-01"); return p.id; },
@@ -185,7 +188,11 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
       { refusal: null, standing: "listed", authority: false, ...AUTH_FREE_OK }],
     ["ended managed-group membership", () => async () => { const p = await f.person(orgA); await f.groupGrant(orgA, p.id, ["roles.manage"], { memberEndsOn: "2021-01-01" }); return p.id; },
       { refusal: null, standing: "listed", authority: false, ...AUTH_FREE_OK }],
-    ["a derived group of an unclassified kind (A5: fails closed)", () => async () => { const p = await f.person(orgA); await f.groupGrant(orgA, p.id, ["roles.manage"], { derivedFrom: "fixture_new_kind" }); return p.id; },
+    // D11 (Increment 3a): an unclassified kind can no longer be stored
+    // (groups_derived_kind_check, drizzle/0066), so the A5 arm is exercised by
+    // a REAL kind outside the T exclusion list: the Moderator of the Board of
+    // Deacons seat, which carries authority (parishes.assign) and stays in T.
+    ["a derived kind outside the T exclusion list counts in T (the Moderator seat; F247)", () => async () => { const p = await f.person(orgA); await f.groupGrant(orgA, p.id, ["roles.manage"], { derivedFrom: "deacons_moderator" }); return p.id; },
       { refusal: null, standing: "listed", authority: true, keys: ["roles.manage"], issue: "exceeds_your_access", ...AUTH }],
   ];
 
@@ -339,13 +346,35 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
     }
   });
 
-  it("live catalog: the same three markers occur in exactly one function in the database", async () => {
-    for (const [label, marker] of Object.entries(MARKERS)) {
+  it("live catalog: the same three markers occur only in the core (and the classifier call also in 0066's classifier layer)", async () => {
+    // drizzle/0066 section 2 (Increment 3a, DECISION-233) adds ONE other caller
+    // of the classifier, by design: presby_membership_is_member_standing, the
+    // composition member standing is read through. No sign-in caller is added.
+    const LIVE_HOLDERS: Record<keyof typeof MARKERS, string[]> = {
+      classifier: ["presby__person_sign_in_standing", "presby_membership_is_member_standing"],
+      r31: ["presby__person_sign_in_standing"],
+      closedList: ["presby__person_sign_in_standing"],
+    };
+    for (const [label, marker] of Object.entries(MARKERS) as Array<[keyof typeof MARKERS, string]>) {
       const rows = await f.q(sql`
         select p.proname from pg_proc p
-         where p.pronamespace = 'public'::regnamespace and strpos(p.prosrc, ${marker}) > 0`);
-      expect(rows.map((r) => r.proname), label).toEqual(["presby__person_sign_in_standing"]);
+         where p.pronamespace = 'public'::regnamespace and strpos(p.prosrc, ${marker}) > 0
+         order by 1`);
+      expect(rows.map((r) => r.proname), label).toEqual(LIVE_HOLDERS[label]);
     }
+  });
+
+  it("an engagement outside the five can no longer be stored, so `unclassified` is unreachable from rows (drizzle/0066, D3)", async () => {
+    const p = await f.person(orgA);
+    let caught: unknown;
+    try {
+      await f.q(sql`update memberships set engagement_status = 'fixture_unknown' where person_id = ${p.id}`);
+    } catch (err) {
+      caught = err;
+    }
+    const chain: unknown[] = [];
+    for (let cur: unknown = caught; cur && chain.length < 6; cur = (cur as { cause?: unknown }).cause) chain.push(cur);
+    expect(chain.some((e) => (e as { constraint?: unknown }).constraint === "memberships_engagement_status_allowed")).toBe(true);
   });
 
   it("the scan can fail: an offending sample body is detected", () => {

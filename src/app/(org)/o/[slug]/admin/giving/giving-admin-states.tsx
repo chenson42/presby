@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FeaturesHelpLink } from "@/components/help/features-help-link";
 
 /**
  * The non-data answers `/o/<slug>/admin/giving` (and, from Batch 2, every
@@ -57,6 +58,7 @@ export function GivingToggleOff({
           ? " You can turn it on from Features."
           : " Ask an administrator who manages your organization's features to turn it on."}
       </p>
+      <FeaturesHelpLink />
       {canManageFeatures && (
         <Button asChild className="mt-6 min-h-11">
           <Link href={`/o/${slug}/admin/features`}>Go to Features</Link>

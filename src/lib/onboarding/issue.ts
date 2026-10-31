@@ -9,13 +9,18 @@ import { attemptQueuedSend, cancelQueuedEmail, insertQueueRowInTx } from "@/lib/
 import { isTotpConfigured } from "@/lib/two-factor";
 import { platformOrigin } from "@/lib/domains/host";
 import { treasurerDesignationApplies } from "./treasurer-designation";
+import type { RevokeAllScope } from "./sign-in-types";
 import { mintInvitationToken } from "./invitation-token";
 import {
   ACCOUNT_INVITATION_TEMPLATE_KEY,
   renderInvitationEmail,
 } from "./invitation-email";
 import { deriveInvitationStatus, deliveryState, type DeliveryState, type InvitationStatus } from "./status";
-import { deriveInviteeDisplayName, type InvitationWarningCode } from "./invitation-copy";
+import {
+  deriveInviteeDisplayName,
+  type InvitationCopyPurpose,
+  type InvitationWarningCode,
+} from "./invitation-copy";
 import {
   UUID_RE,
   normalizeInvitationEmail,
@@ -77,6 +82,19 @@ import {
  * CONSTRAINT NAME) is `already_pending`, never `db_error` (D-2).
  *
  * Audit metadata is ids only: never the token, its hash or the address.
+ *
+ * PLATFORM ROWS ONLY (Community Increment 2b, F198). Since 0065 the table also
+ * holds a congregation's own sign-in invitations (`origin = 'org'`, sent by a
+ * `people.manage` holder through `org-invite.ts`). This module never sees them
+ * except through the two doors that are deliberately about them:
+ *   - `revokeAllOpenInvitations({ scope: "org_sent" })`, the platform's kill
+ *     lever for a congregation that abuses invitations; and
+ *   - `summarizeOrgSentInvitations()`, a MASKED panel (first character of the
+ *     local part, the domain, a status; no name, no full address).
+ * Every other read and write here is bounded to `origin = 'platform'`: the three
+ * durable-limit counts (a congregation's sends must not spend the platform's
+ * budget, nor the reverse), resend and revoke (a congregation's row is
+ * `not_found` to a platform operator), and the organization's list.
  */
 
 // ---------------------------------------------------------------------------
@@ -387,8 +405,10 @@ async function addressOnSignedInPerson(
 
 /**
  * The durable limits (R8). Evaluated inside the organization lock. Counts
- * every row regardless of state, over a rolling 24 hours bounded ABOVE by
- * `now()`: the dev seed carries rows dated 2099 and they must never count.
+ * every PLATFORM-origin row regardless of state (a congregation's sign-in sends
+ * have their own, separate counters in the issue definer, F198), over a rolling
+ * 24 hours bounded ABOVE by `now()`: the dev seed carries rows dated 2099 and
+ * they must never count.
  * Returns true when any limit is reached.
  */
 async function overLimits(
@@ -398,13 +418,13 @@ async function overLimits(
   const result = await tx.execute(sql`
     select
       (select count(*) from account_invitations
-        where created_by_user_id = ${input.inviterUserId}::uuid
+        where created_by_user_id = ${input.inviterUserId}::uuid and origin = 'platform'
           and created_at > now() - interval '24 hours' and created_at <= now())::int as inviter_n,
       (select count(*) from account_invitations
-        where organization_id = ${input.organizationId}::uuid
+        where organization_id = ${input.organizationId}::uuid and origin = 'platform'
           and created_at > now() - interval '24 hours' and created_at <= now())::int as org_n,
       (select count(*) from account_invitations
-        where email_normalized = ${input.email}
+        where email_normalized = ${input.email} and origin = 'platform'
           and created_at > now() - interval '24 hours' and created_at <= now())::int as address_n
   `);
   const row = rowsOf<{ inviter_n: number; org_n: number; address_n: number }>(result)[0]!;
@@ -413,6 +433,17 @@ async function overLimits(
     Number(row.org_n) >= INVITATION_LIMITS.perOrganizationPer24h ||
     Number(row.address_n) >= INVITATION_LIMITS.perAddressPer24h
   );
+}
+
+/**
+ * Narrow a row's purpose to the two this module handles. A platform-origin row
+ * can only carry one of them (the `purpose = 'sign_in'` <=> `origin = 'org'`
+ * tie is a CHECK), and every query here is bounded to platform rows, so a
+ * `sign_in` purpose reaching this is a defect: throw, which rolls the work back.
+ */
+function designationPurpose(purpose: AccountInvitationPurpose): InvitationCopyPurpose {
+  if (purpose === "founding_administrator" || purpose === "treasurer") return purpose;
+  throw new Error("issue.ts handled a congregation-sent invitation");
 }
 
 function newExpiry(): Date {
@@ -523,8 +554,11 @@ export async function createInvitation(
         greetingName = person.firstName;
       }
 
-      // New accounts default to two_factor_required, so an unconfigured
-      // deployment would strand either invitee at the 2FA wall (D-4, G8).
+      // Both invitation purposes grant a key flagged requires_two_factor (the
+      // treasurer's giving keys, the founding administrator's roles.manage and
+      // role_grants.manage; DECISION-291), so an unconfigured deployment would
+      // strand either invitee at the 2FA wall (D-4, G8). The new account's own
+      // column is false by default; the ROLE is the reason.
       if (!isTotpConfigured()) return { kind: "totp_unavailable" };
 
       if (!input.acknowledgeDoNotContact && (await hasDoNotContact(tx, org.id, email))) {
@@ -620,7 +654,7 @@ export async function createInvitation(
         selfAddressed,
         warnings,
         inviteeDisplayName: deriveInviteeDisplayName({
-          purpose: input.purpose,
+          purpose: designationPurpose(input.purpose),
           firstName,
           lastName,
           rosterFirstName: input.purpose === "treasurer" ? greetingName : null,
@@ -710,6 +744,7 @@ export async function resendInvitation(input: {
             from account_invitations
            where id = ${input.invitationId}::uuid
              and organization_id = ${org.id}::uuid
+             and origin = 'platform'
              for update
         `),
       )[0];
@@ -810,7 +845,7 @@ export async function resendInvitation(input: {
         queueId: queued.id,
         expiresAt,
         inviteeDisplayName: deriveInviteeDisplayName({
-          purpose: found.purpose,
+          purpose: designationPurpose(found.purpose),
           firstName: found.invitee_first_name,
           lastName: found.invitee_last_name,
           rosterFirstName,
@@ -851,6 +886,7 @@ async function revokeRow(
   organizationId: string,
   actor: InvitationActor,
   via: "single" | "revoke_all",
+  extra: Record<string, unknown> = {},
 ): Promise<void> {
   await tx
     .update(accountInvitations)
@@ -862,7 +898,7 @@ async function revokeRow(
     actor: auditActor(actor),
     resourceType: "account_invitation",
     resourceId: row.id,
-    metadata: { invitationId: row.id, organizationId, purpose: row.purpose, via },
+    metadata: { invitationId: row.id, organizationId, purpose: row.purpose, via, ...extra },
   });
 }
 
@@ -886,6 +922,7 @@ export async function revokeInvitation(input: {
             from account_invitations
            where id = ${input.invitationId}::uuid
              and organization_id = ${org.id}::uuid
+             and origin = 'platform'
              for update
         `),
       )[0];
@@ -902,12 +939,21 @@ export async function revokeInvitation(input: {
   }
 }
 
-/** The abuse takedown and the kill lever: revoke every open invitation of an org. */
+/** Which origin each scope revokes (F198: one lever per origin, never a mixed one). */
+const SCOPE_ORIGIN: Record<RevokeAllScope, "platform" | "org"> = {
+  designations: "platform",
+  org_sent: "org",
+};
+
+/** The abuse takedown and the kill lever: revoke every open invitation of an org, within one scope. Refunds no limit. */
 export async function revokeAllOpenInvitations(input: {
   organizationId: string;
   actor: InvitationActor;
+  scope: RevokeAllScope;
 }): Promise<RevokeAllResult> {
   if (!UUID_RE.test(input.organizationId)) return { kind: "ok", revoked: 0 };
+  const origin = SCOPE_ORIGIN[input.scope];
+  if (origin === undefined) return { kind: "db_error" };
   try {
     return await getPlatformDb().transaction(async (tx): Promise<RevokeAllResult> => {
       const org = await lockOrganization(tx, input.organizationId);
@@ -917,6 +963,7 @@ export async function revokeAllOpenInvitations(input: {
           select id, purpose, email_queue_id
             from account_invitations
            where organization_id = ${org.id}::uuid
+             and origin = ${origin}
              and accepted_at is null and revoked_at is null
              and superseded_at is null and blocked_at is null
            order by created_at
@@ -924,7 +971,14 @@ export async function revokeAllOpenInvitations(input: {
         `),
       );
       for (const row of open) {
-        await revokeRow(tx, row, org.id, input.actor, "revoke_all");
+        await revokeRow(
+          tx,
+          row,
+          org.id,
+          input.actor,
+          "revoke_all",
+          input.scope === "org_sent" ? { scope: "org_sent" } : {},
+        );
       }
       return { kind: "ok", revoked: open.length };
     });
@@ -939,10 +993,11 @@ export async function revokeAllOpenInvitations(input: {
 // ---------------------------------------------------------------------------
 
 /**
- * Every non-superseded invitation of an organization, newest first, with
- * derived status and the delivery state joined from `email_queue`. Platform
- * admins see the full address while `redacted_at` is null. Superseded rows are
- * replaced by their successor and never listed.
+ * Every non-superseded PLATFORM invitation of an organization (a congregation's
+ * own sign-in invitations are summarized by `summarizeOrgSentInvitations`,
+ * masked), newest first, with derived status and the delivery state joined from
+ * `email_queue`. Platform admins see the full address while `redacted_at` is
+ * null. Superseded rows are replaced by their successor and never listed.
  */
 export async function listInvitationsForOrg(organizationId: string): Promise<InvitationListRow[]> {
   if (!UUID_RE.test(organizationId)) return [];
@@ -962,7 +1017,11 @@ export async function listInvitationsForOrg(organizationId: string): Promise<Inv
     .leftJoin(emailQueue, eq(emailQueue.id, accountInvitations.emailQueueId))
     .leftJoin(people, eq(people.id, accountInvitations.personId))
     .where(
-      and(eq(accountInvitations.organizationId, organizationId), isNull(accountInvitations.supersededAt)),
+      and(
+        eq(accountInvitations.organizationId, organizationId),
+        eq(accountInvitations.origin, "platform"),
+        isNull(accountInvitations.supersededAt),
+      ),
     )
     .orderBy(desc(accountInvitations.createdAt));
 
@@ -976,7 +1035,7 @@ export async function listInvitationsForOrg(organizationId: string): Promise<Inv
       inviteeFirstName: inv.inviteeFirstName,
       inviteeLastName: inv.inviteeLastName,
       inviteeDisplayName: deriveInviteeDisplayName({
-        purpose: inv.purpose,
+        purpose: designationPurpose(inv.purpose),
         firstName: inv.inviteeFirstName,
         lastName: inv.inviteeLastName,
         rosterFirstName,
@@ -999,4 +1058,79 @@ export async function listInvitationsForOrg(organizationId: string): Promise<Inv
         : null,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// summarizeOrgSentInvitations (the platform's masked view of a congregation's own sends)
+// ---------------------------------------------------------------------------
+
+export interface OrgSentInvitationRow {
+  id: string;
+  status: InvitationStatus;
+  /**
+   * `m***@example.org`: the first character of the local part, `***@`, the
+   * domain. Masked IN SQL (the full address never reaches this code), null once
+   * the address was redacted. No person name, ever: a platform operator holds no
+   * tenant authority over a congregation's people.
+   */
+  maskedAddress: string | null;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+export interface OrgSentSummary {
+  counts: Record<InvitationStatus, number>;
+  /** What "Cancel all open sign-in invitations" would revoke: pending plus expired-but-not-closed. */
+  revocable: number;
+  /** Non-superseded rows, newest first. */
+  rows: OrgSentInvitationRow[];
+}
+
+/**
+ * The platform's view of a congregation's own sign-in invitations: counts by
+ * derived status and one masked row each (Phase 3, F198). Platform connection,
+ * `origin = 'org'` rows only.
+ */
+export async function summarizeOrgSentInvitations(organizationId: string): Promise<OrgSentSummary> {
+  const counts: Record<InvitationStatus, number> = {
+    pending: 0,
+    accepted: 0,
+    expired: 0,
+    revoked: 0,
+    blocked: 0,
+  };
+  if (!UUID_RE.test(organizationId)) return { counts, revocable: 0, rows: [] };
+  const now = new Date();
+  const found = await getPlatformDb()
+    // Named columns, never the whole row: the full address and the token hash
+    // must not reach this process at all ("masked in SQL" means exactly that).
+    .select({
+      id: accountInvitations.id,
+      createdAt: accountInvitations.createdAt,
+      expiresAt: accountInvitations.expiresAt,
+      acceptedAt: accountInvitations.acceptedAt,
+      revokedAt: accountInvitations.revokedAt,
+      supersededAt: accountInvitations.supersededAt,
+      blockedAt: accountInvitations.blockedAt,
+      masked: sql<string | null>`case
+        when ${accountInvitations.redactedAt} is not null or ${accountInvitations.emailNormalized} is null then null
+        else left(${accountInvitations.emailNormalized}, 1) || '***@' || split_part(${accountInvitations.emailNormalized}, '@', 2)
+      end`,
+    })
+    .from(accountInvitations)
+    .where(
+      and(
+        eq(accountInvitations.organizationId, organizationId),
+        eq(accountInvitations.origin, "org"),
+        isNull(accountInvitations.supersededAt),
+      ),
+    )
+    .orderBy(desc(accountInvitations.createdAt));
+
+  const rows: OrgSentInvitationRow[] = found.map((r) => {
+    const status = deriveInvitationStatus(r, now) as InvitationStatus;
+    counts[status] += 1;
+    return { id: r.id, status, maskedAddress: r.masked, createdAt: r.createdAt, expiresAt: r.expiresAt };
+  });
+  return { counts, revocable: counts.pending + counts.expired, rows };
 }

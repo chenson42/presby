@@ -745,8 +745,12 @@ update people
 -- ('e2e-fixture-only-not-a-secret', bcrypt-hashed below), is_active so it can
 -- sign in, and two_factor_required explicitly false so a manual walkthrough
 -- of /o/alder-creek/admin/roles is not gated behind a separate TOTP
--- enrolment detour. Password-bearing (unlike elder.fixture above) on
--- purpose — the point of this row is that it CAN sign in.
+-- enrolment detour. Since 0080 (DECISION-291) the column is only the
+-- account's OWN setting: a role carrying roles.manage, role_grants.manage,
+-- domains.manage or a giving key still requires two-factor through the role,
+-- so with auth.require_2fa on a holder of one of those meets the enrolment
+-- step regardless of this column. Password-bearing (unlike elder.fixture
+-- above) on purpose — the point of this row is that it CAN sign in.
 -- ---------------------------------------------------------------------------
 insert into users (id, email, name, email_verified, password, is_active, two_factor_required)
 values ('e0000000-0000-0000-0000-0000000000f3', 'clerk.fixture@example.invalid',
@@ -1302,7 +1306,9 @@ insert into app_role_permissions (role_id, permission_key) values
 -- congregation_oversight.manage via the fixture grant immediately below).
 -- Same reserved .invalid domain, same shared fixture password
 -- (docs/testing.md), two_factor_required false for the same
--- no-TOTP-detour reasoning as clerk.fixture/elder.fixture above.
+-- no-TOTP-detour reasoning as clerk.fixture/elder.fixture above (subject to
+-- the same DECISION-291 caveat: a flagged key held through a role still
+-- requires two-factor whatever this column says).
 insert into users (id, email, name, email_verified, password, is_active, two_factor_required)
 values ('e0000000-0000-0000-0000-0000000000f4', 'presbytery.clerk.fixture@example.invalid',
         'Fixture Presbytery Clerk', now(),
@@ -1973,3 +1979,16 @@ commit;
 -- congregation, so a database built from empty matches development.
 -- scripts/parishes/test-rls-68.sql needs it.
 \ir parishes/seed-dev-parishes.sql
+
+-- Careers fixture (drizzle/0071). Its own file and transaction, run AFTER the
+-- person-emails and public-calendar includes; owner-only rows (two live sites, the careers toggle,
+-- one posting in each state). scripts/careers/test-rls-71.sql needs it.
+\ir careers/seed-dev-careers.sql
+
+-- Sign-in invitations and auto-connect fixture (drizzle/0065). Its own file and
+-- transaction, run LAST: it writes the org_portal.sign_in_connect toggle row for
+-- EVERY organization (an absent row is off, DECISION-097) and needs the earlier
+-- fixtures (Alder Creek, Fernwood, the invitations and person-emails seeds).
+-- Idempotent. scripts/sign-in-invitations/test-rls-65.sql and
+-- scripts/giving/test-rls-46.sql need it.
+\ir sign-in-invitations/seed-dev-sign-in.sql

@@ -1,5 +1,6 @@
 # Founding administrator cannot reach Add person on the Members page — Work Log
 
+> **Increment 2b numbers (re-assigned 2026-10-24):** migration 0065; DECISION-207/208 (reserved) plus DECISION-225–228; F186, F187, F192–F199 (reserved) plus F230–F233; worktree `presby-2b`, branch `pipeline/signin-invites`.
 > **Slug:** `2026-10-22-founding-admin-directory`
 > **Surface:** (org) — `/o/<slug>/admin/members`
 > **Permission(s):** existing (`people.manage`, `directory.view`); the fix decides which gate is wrong
@@ -32,6 +33,11 @@
 | Inc 2b · 2 — Architect addendum | architect | Complete. R27–R36; F192–F197 (G1 cites F177); defects F196/F197 in the shipped 0059 code to fix in 0064 | Approved with suggestions | 2026-10-22 |
 | Inc 2b · 3 — Technical design | tech-lead | Complete, Phase 3a amendments folded in place (A1-A5, E1, S10, four F177 Option 3 conditions, staff-anchor note, A3 wording; DECISION-207/208, F186/F187 and the test plan updated; F177 Option 3 operator-confirmed). Design to R19-R36 and G1-G9; departures from R21/R23/R24 accepted by the architect with amendments. Batches A database-admin (0064), B api-developer, C+D ux-developer; Phase 4 waits for Increment 2's Phase 4 commits | Design complete, amendments folded in; implementers named | 2026-10-22 |
 | Inc 2b · 3a — Architect review of design departures | architect | Complete. R23/R21 amended (A1–A5), R24 accepted with E1; F177 Option 3 endorsed; operator chose Option 3 | Approved with suggestions | 2026-10-22 |
+| Inc 2b · 1b — Phase 1 addendum 2 (auto-connect, accept in place, reconciliation with v0.41–v0.42.2) | analyst | Complete; G10–G22; four operator questions with defaults; architect addendum needed (G10, G11, G13, G14, G15) | READY WITH NOTES | 2026-10-24 |
+| Inc 2b · 2b — Architect addendum 2 (auto-connect, accept in place) | architect | Complete. R37–R47; F230–F233; DECISION-225–228; 207/208 amended; 0065. Depends on DECISION-230 (v0.42.3). F234–F236 returned unused. | Approved with suggestions | 2026-10-25 |
+| Inc 2b · 3b — Technical design amendment 2 (auto-connect, accept in place, reconciliation with v0.41-v0.42.2) | tech-lead | Complete. Folds R37-R47 and the reconciliation table: migration 0065 (A1 proof, user-link guard, constraints; A2 standing core, bind helper, connect, accept core with in-place presentation, listing, issue/resend/revoke/reader), toggle `org_portal.sign_in_connect`, TypeScript files and scans, copy groups A-I with the four checks, 40 edge cases each pinned or marked unverified, `test-rls-65.sql` outline, batches A1/A2/B1/B2/C/D, release-note do-not-write list, kickoff checklist. S13 accepted, S11 declined, `address_invalid` also deleted. Development counts recorded; production SQL listed for the orchestrator. One CLAUDE.md sentence awaits the operator | Design complete; implementers named | 2026-10-25 |
+| Inc 2b · 4 — Implementation | A1+A2 database-admin, B1+B2 api-developer, C+D ux-developer (serial) | In progress: kickoff steps 3, 6, 7, 8 recorded 2026-10-25 (no contradiction; one design gap: `scripts/seed.ts` stamps proof as `presby_app`); **Batch A1 complete 2026-10-25** (0065 sections 1-10 applied twice to the pipeline branch, digests identical; T-2/T-3/T-4-A1/T-8-A1; failing-first proven; E-33 Vitest identical to baseline, SQL fails only at the 12 predicted F186 lines that A2 converts); **Batch A2 complete 2026-10-25** (0065 sections 11-15 applied twice to the pipeline branch, no row or function changed by the second run; parity golden byte-identical plus the in-place twin; T-1/T-4/T-5/T-6/T-7/T-8; eight failing-first proofs; test-rls-59/-60/-62/-64/-65/-46 green as presby_app; full test-rls.sql with the staged patch 1,330 passed plus the three known drift failures; DB lane 11,308 passed, one 0064 pin re-derived, one intermittent issue.db case passing on re-run)); **Batch B1 complete 2026-10-25** (`509943a`: address-proof writers and the verify-email page behind the definers, `connectSignedInAccount`, the `src/auth.ts` sign-in branch, the two audit keys, the `org_portal.sign_in_connect` catalog entry, the `scripts/seed.ts` owner-connection fix, the source scans; 85 new unit and scan tests and 18 new DB-backed tests, mutation-checked; running-server login smoke on :3540 with an MFA-enrolled user, the 0.42.3 guard specs and the invitation lane green; **one design gap: `e2e/support/seed-users.ts` stamps the roster as `presby_app`, so every e2e run after 0065 needs the staged `e2e-global-setup.integration.patch`**); **Batch B2 complete 2026-10-25** (`a9114da`: the congregation's sign-in invitation library (`org-invite.ts`: send, resend, cancel, card, markers, Session rows), accept in place and the listing, the `/no-organization` and community edit actions, the platform `scope` on revoke-all and the masked org-sent summary, the email registry entry with its sender, the widened vocabulary unions with their exhaustive consumers, `findSharedAddressNotes` and the E-25 tripwire flipped; unit 9,077 -> 9,360 passed, three new DB-backed suites, the DB lane 71 files / 1,703 tests green, `test-rls-65` 92 passes, build and `npm run check` green, mutation-checked; running-server smoke on :3540, 67 passed (the 0.42.3 guards, B1's smoke, `post-login-routing`, the invitation specs and the regression lane); eight derived strings flagged for the orchestrator's ruling); **Batch C complete 2026-10-26** (ux-developer: `/no-organization` (view, cards, Check again, accept in place, second-factor notice), the Community sign-in card with its send, send-again and cancel dialogs, markers on the Community lists and Officers Session rows, the Session hand-off rows and reworded banner, `/invite` sign_in state tests, the platform org-sent panel and second revoke control; unit 9,365 -> 9,528 passed; two hydration specs, both lanes; real-browser walk at 360 and 1280); **Batch D complete 2026-10-26** (`1216f80`: `no-organization-connect` 22 and `community-sign-in-invite` 20 tests at desktop and 360, additive fixture file, two existing specs repaired for 2b's wording; chromium 468 of 491 pass, the 7 failures and 16 not run are all migration 0067 missing on the pipeline branch; custom-hosts 103 pass, prod lane 81 pass (0067 again); the `invitation-new-account` flake is a real race in `getOrCreatePendingEnrollment`; 360px pass clean on every new surface) | — | — |
+| Inc 2b · 3c — Technical design amendment 4 (Copy, QA run 1 findings a-c) | tech-lead | Complete. Three strings ruled with the four checks and exact-text tests; three observations kept as known; implementer named (see the section at the end of this file) | Design complete; implementer named | 2026-10-26 |
 
 ---
 
@@ -5943,3 +5949,3209 @@ The wizard wrote no audit row when it created the person and proposal. A comment
 - **Already tracked:** finding 1 (UTC dates) is Phase 6 follow-up 1.
 - **New TODO lines:** finding 3 (officer roster at 360px: End term off-screen inside a sideways-scrolling table, the Self-recorded badge collides with a wrapped name); finding 4 (roster and queue lag a reload after a success toast on the dev server; confirm on production); finding 5 (the propose-only clerk is not told who sits on the Session; the Officers refusal tells a clerk to "ask your stated clerk").
 
+---
+
+# Increment 2b — Phase 1 addendum 2: auto-connect, accept in place, and reconciliation with v0.41–v0.42.2 (analyst)
+
+*Returned as text for the orchestrator to record verbatim. I wrote nothing and ran nothing against any database or browser. Everything below comes from reading the work-log, the code in `/Users/cshenso/git/presby-platform/presby-2b` (HEAD `5f333eb`, v0.42.2) and the installed Auth.js source. No real names or addresses appear.*
+
+### VERDICT
+
+**READY WITH NOTES.**
+
+The shape holds: the 2b invitation design stands, and both operator additions fit around it. But two things must go to the **architect for a short Phase 2 addendum** before the tech-lead redesigns:
+
+- **Auto-connect (A) contradicts a recorded invariant.** DECISION-216, a sentence in CLAUDE.md and `scan.test.ts` section 3 all say a contact email authenticates nothing, and that auth paths never touch `contact_methods`.
+- **Accept in place (B) is a token-less acceptance path.** That changes the credential model of DECISION-147/183.
+
+Both depend on "verified" meaning something reliable, and today it does not. Four operator questions follow, each with a default that points in the safe direction.
+
+### ONE-LINE TAKE
+
+> When someone signs in with an address they have really proven, and exactly one eligible, authority-free person at a congregation carries that address, we link the sign-in to that person (no membership created, no role conferred). If instead an invitation is open for that address, `/no-organization` offers to accept it right there. Everything with authority, every visitor and every ambiguous match stays on the explicit invitation path.
+
+### Premise checks (facts that change the request)
+
+1. **There is no local self-registration.** `src/auth.ts` credentials sign-in needs an existing `users` row with a password, and the only thing that creates one is invitation acceptance (`email_verified = now()`, `0059:1203` and `0064:812`) or a seed.
+   - "Or just registered" can only mean a first Google sign-in, which the Auth.js adapter turns into a `users` row.
+   - A "verified local registration" does not exist. I assume no registration form is expected; it would be its own pipeline.
+2. **`users.email_verified` is not a reliable fact today.**
+   - Auth.js creates OAuth users with `emailVerified: null` (`handle-login.js:260`), so Google users have it null.
+   - The app never reads Google's `profile.email_verified` claim. `evaluateSignIn` (`sign-in-gate.ts`) checks only "has an email" and `isActive`.
+   - The verify-email flow (`verify-email/[token]/page.tsx`) changes `users.email` and leaves `email_verified` untouched. After an email change the stamp therefore refers to the old address.
+   - Only invitation-created accounts carry a meaningful stamp.
+   - So the premise "an address they've proven" has to be built, not read.
+3. **Linking is not authority-neutral.**
+   - `presby_user_organizations` and the permission resolver both reach a person's grants through `people.user_id`.
+   - Binding a login therefore activates every inert grant on that record: Session seat, person-arm role, managed-group grant.
+   - "Auto-connect must not confer a role" is only true if the eligible set is restricted. The operator's "only connection" intent needs a precondition, not just a promise.
+4. **Where I read the operator's production symptom.** I read "designated treasurer and the invite accepted" as the designation having been sent. A person who had really accepted is linked at accept, because the treasurer path uses `linked_person`, and would not reach `/no-organization`.
+   - If they had truly accepted and still landed there, that is a separate defect. The likeliest cause is an organization that is not `managed`, so the user lands in the "being set up" state.
+   - The orchestrator should confirm which with the operator.
+
+### Pass 1: User verbs
+
+| Surface | Verb | Cadence |
+|---|---|---|
+| Newly authenticated user, not connected | Signs in with Google or a password. Nothing else: the connection happens to them. | each sign-in |
+| Same user, zero congregations | Opens `/no-organization` and reads which of four states applies | on demand |
+| Same | Clicks **Accept the invitation** on a card for an invitation addressed to their signed-in address | once per invitation |
+| Same | Clicks **Continue to verification** (2FA) and returns | when 2FA is required |
+| Same | Clicks **Check again** after their congregation edits a record | on demand |
+| Same | Clicks **Sign in with a different account** (the wrong Google account is the commonest failure) | rare |
+| Admin (`people.manage`) | Types or edits a person's address (existing) and now learns from the card whether that person connects by signing in or only by invitation | on demand |
+| Admin | Sees "Connected on {date}" on the card and marker after a sign-in | on demand |
+| Platform admin | Unchanged: org-sent masked panel, revoke-all by scope | rare |
+
+Surface assignment: A acts on the newly authenticated user (no roles yet), B lives on `/no-organization`, and the admin verbs are on the existing Community edit page.
+
+### Pass 2: Flow audit
+
+**FA1. Google sign-in, first time, address on exactly one eligible record**
+- Entry: `/signin` → Google → the adapter creates the `users` row → the `jwt()` first-sign-in branch.
+- Steps: stamp proof from Google's `email_verified === true` → call the connect definer → it links, and TS writes the audit row in the same transaction → `jwt()` continues. Because it recomputes `twoFactorRequired` after the link, the cookie is correct.
+- Outcome: `/launch` → `/o/<slug>` (or `/home` if more than one org). The user is connected and sees baseline access only.
+- Failure: any decline, DB error or exception is swallowed. Sign-in proceeds exactly as today, the user reaches `/no-organization`, and nothing is logged with an address in it.
+
+**FA2. Password sign-in** is the same, with proof = `users.email_verified is not null`, bound to the current address (G10).
+
+**FA3. Declines.** Every decline looks identical to the user (state N0 below) and writes no audit row. The ordered checks are in "The decline table" below.
+
+**FA4. Check again.** A Server Action on `/no-organization` runs the same definer, calls `unstable_update({user:{}})` and redirects to `/launch`.
+- It must be an action, not a write during render. A Server Component cannot re-issue the cookie, so the proxy's 2FA wall would read a stale `twoFactorRequired` claim.
+- Nothing changed → the page stays, with "Nothing new yet."
+
+**FB1. Accept in place**
+- Entry: `/no-organization`, zero enterable orgs, at least one open invitation addressed to the proven address.
+- Steps: card per invitation (congregation named, role phrase, "you'll be connected as {Name}") → Accept → definer → `/launch?next=/o/<slug>` (the existing redirect).
+- Failures:
+  - Blocked: neutral copy by purpose, from `inviteeBlockedCopy`.
+  - Dead (raced, expired, revoked): the existing uniform dead-link sentence.
+  - 2FA required and unverified: flow FB2.
+  - DB error: "Your invitation is still good. Try again."
+
+**FB2. 2FA parity (G9).** A session with `twoFactorRequired && !twoFactorVerified` gets a card that says to finish verification, with a button to `/totp?callbackUrl=/no-organization`.
+- This matters because a new Google account defaults to `two_factor_required = true` and is unenrolled, and nothing else walks it to enrolment (the proxy gates only `/admin` and `/o/*`).
+- Accept must route through `/totp` exactly as `/invite` does.
+
+**FB3. Several invitations** (different orgs or purposes): one card each, each with its own button, ordered by sent date. Accepting one redirects into that org.
+
+**FB4. No-op after auto-connect.** A `sign_in` invitation that is still open after the person was connected another way is accepted as the harmless same-account/same-person no-op.
+- With A this becomes common, so that page must read as success, never "blocked".
+- The open row is left to expire (the F6 default). The card derives "can sign in" from `people.user_id`.
+
+**FB5. Precedence (my default, G17).** If any open invitation exists for the address, A does not run, and B takes over.
+- The invitation is the explicit, sender-gated, audited path, and it connects and grants in one act.
+- This also fixes the operator's treasurer case with no `/launch` change: the designee lands on `/no-organization` and sees the Accept card, not a half-connected baseline user with no hint that a role is waiting.
+
+### The decline table (ordered; all declines silent and identical to the user)
+
+Preconditions: the session user id comes from the server, never from the client. Run after authentication, never inside `authorize()` or `evaluateSignIn`.
+
+1. `users.is_active` is true. A deactivated account declines. The proxy bounces it before `/launch` anyway, but the definer re-checks.
+2. The address is proven for the account's current address (G10).
+3. The user is not already linked to a live person anywhere.
+   - If they are, there is nothing to do. This is also what protects a shared-household address: the spouse who already signs in is already linked.
+4. No open invitation addressed to this address exists, so FB5 applies.
+5. The candidate set C is the unmerged, not-deceased persons holding this address as an active email who have a live membership at some organization (R29's predicate, plus deceased excluded). `|C| = 1` or decline. Zero is no match; two or more is ambiguous, including a match at two organizations.
+   - Matching is exact on `lower(btrim)`. No fuzzy matching and no dot or plus folding (G3 stands).
+   - Any active address of the person counts, not only the primary. This is consistent with R27.
+6. That person's `user_id` is null. If linked to another account, decline.
+7. R31: the person has no membership at any other organization, live or ended.
+8. The membership is live and the organization is `managed`.
+9. F177: not a visitor with no roll. This is the Community Visitors predicate, pinned equal by the same test as 2b condition 3.
+10. Authority-free (G11): no open or future Session or diaconate seat, and R21's set T (person-arm grants plus non-derived managed-group grants, built per A4 and A5) is empty. Staff anchors and staff positions are eligible, accepted on purpose as in F177.
+11. Under lock in the R27 order (users, person, contact `FOR SHARE`), re-check 3 to 10, then write `people.user_id` and stamp the matched contact's `verified_at`.
+    - Writes nothing else: no membership, role grant, group or officer row.
+    - Returns the organization id and person id so TypeScript writes the audit row in the same transaction.
+
+### Pass 3: Permissions and flags
+
+- **No new `FEATURES.*` key.** Connection is not a permission; it authorizes nothing the person's existing records do not already allow, and the decline table keeps it to the baseline.
+- **Credential model.**
+  - A uses no credential: it is an identity binding gated by proof plus eligibility.
+  - B accepts an invitation by proof of the addressed mailbox instead of the emailed token. That is a new mode of the credential (G15, Q2).
+  - Neither maps into `FEATURES.*`, a session claim or the resolver.
+- **Flags.** No new platform flag, per the operator's standing rule. Connections cannot be undone in 2b (disconnect-after-accept is still deferred). A per-organization toggle, "Let people connect themselves by signing in", default on, is the only compliant way to stop new ones at one congregation. I recommend it as a Phase 3 input.
+- **2FA and the connection.** I recommend A does not wait for 2FA. A fresh unenrolled account has no gated route to enrol from, so requiring a verified challenge before connecting would strand it. The proxy gates the destination as always. This differs from existing-account accept, which requires in-session 2FA, and it is safe only because A connects authority-free people.
+- **Audit (Workflow Rule 7).** Identity binding is security-sensitive. New key `tenant.person.sign_in_connected`, written with `insertAuditRow` in the connecting transaction.
+  - Metadata: `organizationId`, `personId`, `via` (`sign_in` or `check_again`), `proof` (`google` or `account`), `contactMethodId`. No address, name or token.
+  - Actor is the user themselves.
+  - The accept-in-place audit rows are the existing `invitation.accepted` family with `via: 'signed_in_address'` stamped.
+  - Declines write nothing. The `check:audit` tripwire covers `actions.ts`, so the Check-again action must reference an `AUDIT_ACTIONS` key.
+- **Deactivated accounts.** Refused by the definer (check 1) and bounced by the proxy.
+
+### Pass 4: Gaps the request didn't address
+
+**G10. "Verified" must be built (ARCH).** Required property: proof is a database fact bound to the address currently on the account.
+- Suggested mechanism for the architect:
+  - Stamp `users.email_verified` from Google's `email_verified === true` in the `jwt()` first-sign-in branch, where `account` and `profile` are available.
+  - Also stamp it at verify-email completion, keep it at invitation accept, and add a `BEFORE UPDATE OF email` trigger that clears the stamp unless it is re-stamped in the same statement.
+  - The definer then checks the column. That makes A and B independent of the open F187 residual (an application bug rewriting `users.email`).
+- Related and independent of the mechanism: reject (or treat as unproven) a Google sign-in whose claim is not true (Q3).
+- No backfill. Existing Google users re-stamp at their next sign-in.
+- This touches `src/auth.ts`, so the Phase 4 gate applies: a running-server e2e of the full login, including an MFA-enrolled user, before QA.
+
+**G11. Authority-free precondition (ARCH, Q1).** R21's sender ceiling cannot apply because there is no sender. An address is typeable by anyone with `people.manage`, so without the precondition a `people.manage`-only holder could put an accomplice's Google address on an elder's record and bind that elder's Session authority with no invitation, no limit, no confirm dialog and no `invitation.created` row. That is the exact bypass R21 and R31 exist to close. The decline table, step 10, closes it.
+
+**G12. F177 (visitors).** Option 3's acknowledgement is made by a sender at send time. Auto-connect has no sender, so a visitor connecting by sign-in would read the directory with nobody warned. Exclude visitors (Q1). They remain invitable with the acknowledgement.
+
+**G13. DECISION-216 / CLAUDE.md / `scan.test.ts` section 3 (ARCH).**
+- A makes a contact email identify a person for a verified sign-in. It authenticates nothing: Google or the verified account proves the address. But DECISION-216's wording and the CLAUDE.md sentence need an amendment: "a contact email never authenticates; it may identify a person for a verified sign-in only inside the connect definer."
+- The scan forbids auth files from naming `contact_methods`, `presby_person_email` or `getPersonEmail`. The connect call must live outside `src/lib/auth` and `(auth)` (for example `src/lib/onboarding/`), called from `auth.ts` as an opaque function. Naming no contact table keeps the letter of the scan, so the amendment keeps the spirit.
+
+**G14. A second writer of `people.user_id`.** The connect definer is SECURITY DEFINER, so it runs as the owner and `people_guard_user_link` passes it. But DECISION-208's text ("the only legitimate writer is `presby_accept_invitation`"), the F186 text and the 2b release line must name it. The A2 source scan (no non-test `src/` file writes `userId` on `people`) is unchanged and still holds.
+
+**G15. B is token-less acceptance (ARCH, Q2).**
+- The raw token is never stored (hash only), so "accept in place" cannot call `presby_accept_invitation(token, …)`. It needs a mode that proves the invited address by signed-in proof instead.
+- The token adds little on top of a strongly proven session, because existing-account accept already requires the session email to equal the invited address. The token mainly signals intent, and the click supplies that. It carries the whole proof burden only under weak proof, which is exactly today's Google handling.
+- So B is safe only with G10. FA and treasurer grant authority, so this is not a formality.
+- The cleanest mechanism is one more mode of the same accept function (invitation id plus the verified session identity), so every gate, branch and audit row is shared and the parity golden extends rather than forks.
+- The architect should also consider the "resend-and-consume" alternative (mint a fresh token server-side and consume it). I do not recommend it: it fights the resend cooldown and chain cap, and platform resend is an operator action.
+
+**G16. B must keep G9.** See FB2. The `/totp?callbackUrl=/no-organization` hop must be allowed by `sanitizeCallbackUrl` (it is a same-origin path).
+
+**G17. Open invitation versus auto-connect, and stranded rows.** Default FB5. Residual, not solved here: a connected member who is later designated treasurer still accepts through the emailed link, because `/no-organization` is not shown to them. A `/home` card is a follow-up that needs a new row in the `computeDestination` matrix and the CLAUDE.md Post-Login Landing table.
+
+**G18. Candidate resolution rules** (decline table 3 and 5 to 8). Include a DB test matrix of at least: shared address, shared with a deceased or ended person, person linked to another account, two organizations, ended address, unmanaged organization, merged person, a user already linked, an address differing only in case.
+
+**G19. Catch-up and cookie claims.** See FA4. The sign-in hook is correct because the claims are recomputed after the link in the same `jwt()` run.
+
+**G20. Sender-side signals.**
+- (a) A new, low-grade observation: an administrator who adds an address to a record can see the person become "can sign in" after that address's owner signs in. It reveals that an account for the address exists. DECISION-189 forbids reading `users` on the sender screen; this is a derived signal, not a read, and is inherent to the feature. Record it as an accepted residual and keep the reader's `linked` derived from `people` only.
+- (b) The R21 residual widens: a `people.manage`-only admin can bind an accomplice to an authority-free, non-visitor member by typing an address. The baseline is what a `people.manage` holder can already give by recording a participant and inviting them under 2b. It loses the rate limit, the confirm dialog and the `invitation.created` row. Detection chain: `tenant.person_email.added` or `primary_changed`, then `tenant.person.sign_in_connected`, joined on `personId`. This stays `paper`, detected by audit.
+- (c) **Deploy-day effect.** At release, every existing unlinked user whose proven address matches exactly one eligible person connects at their next sign-in, a one-time wave. Measure first (counts only) and say so in the release note.
+
+**G21. The 2b surfaces' copy would now lie.** The reconciliation table lists them. The main ones are "Can't sign in yet", "none has a PresbyPortal account yet" and "accepts it from the email".
+
+**G22. Test and fixture blast radius.**
+- `src/app/no-organization/page.test.tsx` pins the heading and two sentences.
+- `e2e/post-login-routing.spec.ts:73-83` and `e2e/member-home.spec.ts:90` pin the heading and "ask your church administrator".
+- Seeded unlinked users (the e2e `member`) land on `/no-organization` by design. If any seeded user's email also sits on a seeded eligible person, A would connect them and break those specs. Run a read-only join before Phase 4.
+- `scan.test.ts` section 3 and `email-audience.test.ts` also change.
+
+**Reconciliation: what in the 2b design is now stale**
+
+| 2b design says | Now | What must change |
+|---|---|---|
+| Migration 0064, `test-rls-64.sql`, seed and patch names | 0064 is person emails (live, v0.42.0) | **0065**; `test-rls-65.sql`; header chain `…0063 < 0064 < 0065`; diff live preview and accept against **0064's bodies**, not 0059. 0064 already re-created both, and the parity golden stays the gate. |
+| Primary address "read in SQL" and `address_ambiguous` for more than one primary | One active primary is a database property; `presby_person_email(person,'credential')` is the authority | Issue and resend call the reader; no row means `no_email_on_file`; **drop `address_ambiguous`** from `SIGN_IN_REFUSALS`, the copy table, the pins and the tests. |
+| R27, `address_current`, R29 `address_shared`, reader predicates | `contact_methods` has `ended_at` | Every predicate gains `ended_at is null`; "any on-file email" means any active email. |
+| S9 `contact_methods_email_norm_idx` in 0064/0065 | The global lookup index shipped in 0064 (ER17) | Remove it from 2b's migration; A's definer reuses the existing index. |
+| F199 and in-transaction `updatePerson` audit with `emailChanged` (Batch B) | Shipped in 0.42.0 | Delete from Batch B and Test Plan 7. The R21 detection chain now starts at `tenant.person_email.added`, `.ended` or `.primary_changed`. |
+| `EMAIL_AUDIENCE` and `credential-keys.ts` gain the sign-in key | Registry exists and requires a sender for every entry | Add `account_sign_in_invitation: person:credential` in the same batch as the sender, not before. |
+| The card shows the "on-file primary email" from `getPersonForEdit` | A list of emails | The card shows the credential address from the reader. The "Also on file for {Name}" note (ER23b, pinned equal to R29) now carries the A ambiguity predicate in the same equality pin. |
+| DECISION-208: "the only legitimate writer is `presby_accept_invitation`" | A adds a writer | Amend DECISION-208 and F186; the A2 scan is unchanged. |
+| A3 release line "a connection … from a congregation's side only by accepting an invitation" | False once A ships | Rewrite: "…by accepting an invitation, or by signing in with a verified address on exactly one eligible record." |
+| Edge case 9: "the sender cannot learn whether an address has an account" | G20 (a) | Qualify it and record the residual. |
+| F6: leave an open row to expire | Common after A | Keep, and make the no-op accept page read as success (FB4). |
+| Officers roster and Staff get no marker in 2b (Q4 default) | Inc 2 Phase 6 follow-up 4(c): add the R26 marker to the **Session roster rows** on Officers, beside "Self-recorded" | Add it. Staff page stays a follow-up. |
+| Banner: "none has a PresbyPortal account yet", `NO_SIGN_IN_INVITE_LINE` placeholder (`session-state-banner.tsx:11`; the test pins the exact text at `:165`) | The state means `people.user_id` is null, i.e. not connected. A Google user with an authority-bearing record is not connected. | Replace only the constant (follow-up 4a), and reword "has an account" to "has connected a sign-in". Do follow-up 2 here: `no_permission` ("have accounts", the Roles pointer) and `WITHDRAW_COPY.already_decided`. Hand-off only in `no_sign_in`, never `terms_not_started`; e2e seeds a seat in effect (4b). Check the remedy shown to a read-mode viewer is usable (4e). The same "needs a PresbyPortal account" wording sits in the `terms_not_started` banner and the Officers Session note. |
+| Marker "Can't sign in yet" | A Google user can sign in but is unconnected | "Not connected yet". |
+| `invitation-copy.ts`: `InvitationCopyPurpose` lacks `sign_in`; `acceptanceSentence` says "accepts it from the email" | B lets them accept at the site | Add `sign_in`; drop "from the email". Goldens: `designation-holder-copy.golden.test.ts` and `invitation-copy.test.ts`. Tenant senders see the full person name, unlike the platform's first-name-only rule. |
+| "Facts on record at kickoff": Increment 2 Phase 4 not started, referenced by design names | Inc 2 is live (0062/0063, `session-approval-state.ts`) | Drop the rebase item; read the real `session-state-banner.tsx` and `connection-card.tsx`. |
+| Counts (users 95/70, 69 marker, etc.) | Production has had real use since 2026-10-22 | Re-measure the 0065 stop-blocks (`users_email_lower_uq` case-duplicates) and the marker reach before deploy. |
+| Numbers: DECISION-207/208, F186/F187, F192–F199 | 207/208 still unused in `decisions.md`; F210–F217 (emails) and F225–F229 (zod) are taken | Keep the reserved ones. The orchestrator assigns new DECISION and F numbers for G10, G11, G13, G15 and G20. |
+| Release lines on visitors and the "Under the hood" paragraph | A and B add claims | Add the guardrails below. |
+
+**Release-note "do not write"**
+- "Signing in connects you automatically", without the limits (not visitors, not people who hold a role, not shared addresses, not people in two congregations).
+- "No one can be connected without an invitation."
+- "Accepting an invitation always needs the email."
+
+### Pass 5: Adversarial
+
+- **Redirects.** `Check again` and the Accept action take no client redirect target. The post-accept `next` is built from the definer's slug as today. The `/totp` callback uses a fixed same-origin path.
+- **Identity from the client.** The user id comes from `auth()` only. The B action takes an invitation id (UUID-validated) for selection. The definer re-derives the address from `users.email` by the session's id and requires it to equal the row's `email_normalized`. A wrong or foreign id returns the uniform dead bucket, so it is not an existence oracle.
+- **State-machine shortcuts.**
+  - Deep-linking `/o/<slug>` does not skip A, because it runs at sign-in, not at `/launch`.
+  - `/launch` and `/totp` before accept do nothing.
+  - Posting the B action without the page runs the same gates.
+- **Enumeration (DECISION-040/189).**
+  - A runs only after the holder authenticated their own address, and all declines are identical (N0).
+  - Naming a congregation is allowed only for an open invitation addressed to that proven address (the same fact their email states) and for a successful connection.
+  - Dead, expired and revoked rows reveal nothing (the one-bucket rule stays).
+  - The access-denied page at `/o/<slug>` is untouched and stays byte-identical.
+  - The sender screen never reads `users`.
+- **Input boundaries.** No user text reaches the definers. Case differences are handled by `lower(btrim)`. Homograph or IDN addresses match only exactly.
+- **Self-targeting.**
+  - A user already linked to a person cannot be connected to a second (decline 3).
+  - An administrator who adds their own Google address to a different person gets nothing if they already have a person link.
+  - A platform admin connects only as any person does, to an authority-free record, with baseline access. This is consistent with DECISION-183, and the audit row lets a reviewer see it.
+- **Races.**
+  - Two tabs signing in: the second sees linked-to-same and no-ops, with one audit row.
+  - A connect racing an address edit: `FOR SHARE` plus the READ COMMITTED re-check gives `dead` or connect, never a link to a stale address.
+  - A connect racing an accept: the same lock order (users, person, contact).
+- **Wrong mailbox.** A fires only on the holder's own deliberate sign-in. That is stronger evidence than clicking an emailed link, and a stranger who never uses PresbyPortal never connects. The residual is a deliberate attacker (G20 b), bounded to the authority-free baseline.
+- **Unverified Google claim.** With `allowDangerousEmailAccountLinking: true`, an unverified claim can already sign in as an existing local account. With A and B it would also connect, or accept authority, so Q3 closes it.
+- **Irreversibility.** There is no disconnect in 2b. A mistaken connection is recoverable only by ending the membership or a support ticket (Q4).
+
+### Copy for `/no-organization`, by state
+
+The existing "pending (being set up)", "not a tenant" and "ended" blocks are unchanged and sit above these where they apply.
+
+**N0, nothing connected and no open invitation.** Keep the heading "You're not connected to a congregation yet". The e2e and the `/no-organization` test pin its words.
+- Body: "You're signed in as {address}. We couldn't connect this sign-in to a congregation's records."
+- Second line: "Congregations connect people by the email address on their record. If yours has added you, it needs the exact address you signed in with."
+- H2 replaces "Ask your church administrator": **"Ask your congregation's office"**. Body: "Ask them to check that {address} is on your record, or to send you an invitation. Then check again."
+- Buttons: **Check again**; link "Sign in with a different account".
+- Invitation line: "If you were invited, the invitation appears here when it was sent to this address. If it was sent to a different address or has expired, ask the person who invited you to send it again."
+- Do not claim "no record has your address". A decline can occur for a match we chose not to connect.
+
+**N1, one open invitation.** The heading is "You're invited to {Congregation}".
+- `sign_in`: "{Congregation} invited you to sign in. Accepting connects this sign-in to your record there as {Name}. What you can do depends on your role at {Congregation}."
+- FA and treasurer: reuse the existing `labels.ts` role phrases (for example "…invited you to set it up as its founding administrator"), plus "Accepting gives you that role."
+- Button: **Accept the invitation**. Several invitations: "You have {n} invitations" and one card each.
+
+**N2, two-factor needed.** "Your account uses two-step sign-in. Finish verification, then accept the invitation." Button **Continue to verification**.
+
+**N3, blocked at accept.** The existing neutral invitee copy by purpose: "This invitation can't be completed. Contact {Congregation}'s office." and the shared-address variant.
+
+**N4, dead (raced).** The existing `INVITATION_DEAD_LINK_COPY`.
+
+**N5, a read failure.** The page does not fail: "We couldn't check for invitations just now. Reload the page."
+
+**After Check again, nothing new.** "Nothing new yet."
+
+**Admin card additions (Community edit page)**
+- Eligible: "If {Name} signs in with {address}, they are connected automatically. You can still send an invitation."
+- Visitor: "{Name} is a visitor, so signing in won't connect them by itself. Send an invitation if you want them to have access."
+- Holds a role, or other: "{Name} can only be connected by invitation."
+- After a connection: "Connected through sign-in on {date}."
+- Two people sharing an address: extend the existing note to "Neither of you can be connected by signing in while this address is shared."
+
+### Operator questions (each with a default; the pipeline can advance on the defaults)
+
+1. **Who connects automatically?**
+   - You asked that sign-in alone connect a person. I recommend that **visitors, people who hold a role or a Session or diaconate seat, anyone whose address is shared by two people, and anyone at two congregations are not connected automatically.** They use an invitation.
+   - Reasons: a connection activates whatever the record already carries, with no sender to apply the "you can't lend authority you don't hold" rule. Without that rule, a clerk who can only edit people could hand Session authority to anyone who controls an address. Visitors would reach the member directory with nobody warned.
+   - Alternatives: (a) connect those people too and accept the audit-only risk; (b) connect elders but not visitors. The Session hand-off from Increment 2 already gives elders a one-click invitation path.
+2. **May `/no-organization` accept a founding-administrator or treasurer invitation without the emailed link?**
+   - I recommend yes, but only once the sign-in proof in G10 lands in the same increment, with 2FA enforced and the audit stamped.
+   - Fallback if you or the architect want the link to stay the only credential for authority-bearing invitations: Accept in place for `sign_in` invitations only, and an "Email me the link again" button for the other two.
+3. **Reject a Google sign-in whose address Google reports as unverified?**
+   - Today it is allowed, and with account-linking-by-email it can sign in as an existing account. I recommend refusing (fail closed). It is a rare case with a one-line "Google couldn't confirm that email" message on `/signin`.
+4. **Disconnect after accept (your 2b ruling: "not yet").**
+   - That ruling assumed a sender confirmed each connection. A connection by sign-in has no sender. I recommend keeping disconnect out of 2b but making it the first follow-up, because the connected population is authority-free and each connection needs the holder's own deliberate sign-in.
+   - If you would rather ship disconnect with 2b, say so: it needs a definer, because the F186 trigger forbids clearing the link.
+
+### Defaults applied without asking
+
+- Match any active address of the person (not only the primary), exact on `lower(btrim)`.
+- Connect only to `managed` organizations with a live membership.
+- Open invitation takes precedence over auto-connect (FB5).
+- Connect at sign-in (the `jwt()` first-sign-in branch, best-effort, errors swallowed) plus a **Check again** Server Action as the catch-up. No write during render.
+- A does not wait for 2FA. B does (G9).
+- Declines are silent and unaudited. Only connections are audited.
+- No email is sent on connect. `verified_at` is stamped on the matched contact, as accept does.
+- A per-organization on/off toggle is recommended as a Phase 3 input, in place of any new platform flag.
+- No age gate (2b ruling stands). The shared-address refusal covers the child case.
+
+### Out of scope (confirm)
+
+- A registration form or any password self-signup.
+- Disconnect or re-link (Q4).
+- A `/home` card for a connected member's later designation (G17).
+- Notifying the administrator or the person on connect (the card and the audit row update).
+- Bulk connect, and any change to the DECISION-040 access-denied page.
+- Markers on the Staff page.
+
+### Measurements to take before the tech-lead (read-only, counts only, no addresses)
+
+- On production and the pipeline branch: unlinked active users whose proven address matches exactly one eligible person, i.e. the deploy-day connection count (G20 c).
+- Google-created users with a null `email_verified`.
+- People holding an address shared with another live person.
+- Seeded or e2e users whose email would auto-connect (G22).
+- The current `users_email_lower_uq` precondition and the contact-method counts for the 0065 stop-blocks.
+
+### Handoff
+
+Next agent: **architect**, a short Phase 2 addendum (not a full review), on these:
+- G13: the DECISION-216 and CLAUDE.md wording, and the scan-test boundary.
+- G15: the token-less accept mode and the credential model.
+- G10: the proof mechanism, including the `users.email_verified` guard trigger and the Google-claim stamping. This touches `src/auth.ts`, so the full-login e2e gate applies.
+- G14: the second writer of `people.user_id` and the DECISION-208 text.
+- G11: confirm the authority-free precondition and the shared eligibility core, so issue, resend and connect cannot drift.
+- Whether the per-organization toggle is warranted.
+
+Then the **tech-lead** folds the addendum and the reconciliation table into a single Phase 3 amendment. The orchestrator assigns the new DECISION and F numbers, confirms 0065, and puts the operator questions above to the operator. The orchestrator also asks the operator which reading of "the invite accepted" is right (premise check 4).
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 1 — Phase 1 addendum 2 (auto-connect, accept in place, reconciliation with v0.41–v0.42.2) | analyst | Complete. Gaps G10–G22 raised; no local self-registration exists and `email_verified` is unreliable; connection is not authority-neutral (restricted to authority-free, non-visitor, single-match persons); the contact-email invariant and the credential model need an architect addendum; a stale-design reconciliation table supplied; four operator questions with defaults; `/no-organization` copy for each state. | READY WITH NOTES | 2026-10-24 |
+
+---
+
+## Increment 2b — operator rulings on the Phase 1 addendum 2 questions (2026-10-24)
+
+- **Q1, who auto-connects: "Also elders, not visitors"** (the operator chose against the analyst's default). Auto-connect also binds people who hold a role or a Session/diaconate seat. Visitors still need an invitation; shared addresses, two-congregation people, ended or merged records and already-linked records still decline. Accepted residual: a `people.manage` holder who types an address onto an authority-bearing record can bind that authority to whoever controls the address, with no sender ceiling, rate limit or confirm step; detected by audit (`tenant.person_email.*` then `tenant.person.sign_in_connected`), not prevented. `paper`. The architect addendum must address it (e.g. require 2FA before connecting an authority-bearing record, and stamp the audit row with what the record carried).
+- **Q2, accept-in-place for founding administrator and treasurer: yes**, once address proof (G10) lands in the same increment, with two-step sign-in enforced and the acceptance audited as accepted on site.
+- **Q3 (reject an unverified Google address) and Q4 (disconnect stays out of 2b, first follow-up):** not asked separately; the analyst's defaults stand.
+- **Premise check 4 (the treasurer case), confirmed 2026-10-25: the invitation was accepted.** The analyst's other branch ("not `managed`") does not hold either. A read-only production check by the orchestrator (structural columns only, no names or addresses) found: the treasurer invitation (origin `platform`) accepted 2026-10-23 22:21 UTC; its person linked to the accepting account; account active; congregation `managed`; `presby_user_organizations` returns one open membership there; one grant on the person. The account existed before the invitation (password reset and TOTP enrolment earlier that day), and its audit trail shows `totp.verify_succeeded` at 22:16, then `invitation.accepted` and `org.treasurer.designated` at 22:21. The symptom was therefore the ~5-minute window in which a signed-in account had no connection and `/no-organization` gave no hint that a designation was waiting: the FB accept-in-place card's case, not a separate defect. No new finding.
+
+---
+
+# Increment 2b — Phase 2 addendum 2 (architect)
+
+*Returned as text for the orchestrator to record verbatim. I wrote nothing. The only database access was read-only (`default_transaction_read_only=on`) against `development` (`ep-lingering-meadow-axnarpsq`), counts and catalog only. `presby-2b` has no `.env.local`, so I did not read a pipeline branch. Nothing touched production.*
+
+## Verdict
+
+**Approved with suggestions.**
+
+The two operator additions fit the 2b shape. There is no loop-back to Phase 1. This addendum adds rulings **R37–R47**. Phase 3 designs to them alongside R19–R36, A1–A5, E1, G1–G22 and the analyst's reconciliation table. I accept that table as Phase 3 input; my only changes to it are where a ruling below says otherwise.
+
+One dependency is hard, and the rest of this addendum rests on it. Every ruling below that relies on `session.user.twoFactorVerified` (R42 and R45) is only sound once **DECISION-230** (the `presby-sess` fix, v0.42.3) is on `main`. Before that fix, the claim can be written by the client. 2b's Phase 4 must rebase onto v0.42.3 before any connect or in-place code is written.
+
+## Placement
+
+- **Directory placement:**
+  - **`src/lib/auth/email-proof.ts`** (new, `server-only`): records Google proof (R38). It touches only `users`-side definers, so scan section 3 still passes.
+  - **`src/lib/auth/email-change.ts`** (new, `server-only`): verify-email completion through a definer (R38). `(email-verify)/account/verify-email/[token]/page.tsx` becomes a thin caller.
+  - **`src/lib/auth/sign-in-gate.ts`**: gains the refusal of an unverified Google claim. It stays pure.
+  - **`src/lib/onboarding/connect.ts`** (new, `server-only`): `connectSignedInAccount()`, which calls the connect definer and writes the audit row in the same transaction. It must not name `contact_methods`, `presby_person_email` or `@/lib/contact-methods` (R43).
+  - **`src/lib/onboarding/accept.ts`**: gains the in-place entry. The reader that lists open invitations for an account goes in `src/lib/onboarding/in-place.ts`.
+  - **`src/app/no-organization/actions.ts`** (new, `'use server'`): the Check-again and Accept-in-place actions. `no-organization` is not a route group. It stays platform palette, uses `db` definers only, and never imports `getPlatformDb()`. A `boundaries.test.ts` scan pins that. Its existing `loading.tsx` stays, because the page always renders.
+  - **Migration 0065**, with `test-rls-65.sql` staged for the orchestrator (Rule 16).
+  - **Unchanged:** `src/proxy.ts` and `check:proxy-imports` (nothing here enters the proxy), `/launch`'s matrix, and `(invite)`.
+- **Server vs Client split:**
+  - `/no-organization` stays a Server Component.
+  - Check again and Accept are plain `<form action>` server-action forms, so they degrade safely before hydration.
+  - If Phase 3 adds a client confirm (an `AlertDialog` for the founding-administrator and treasurer accept), it gets a hydration spec. Any `useForm` root renders `<HydrationGate>`.
+  - The admin card additions stay inside the existing client card.
+- **Dependencies:** none.
+
+## Rulings
+
+### G10: address proof as a database fact (F230, F231). Accepted, mechanism defined
+
+**R37. Proof means `users.email_verified is not null`, and a trigger binds it to the current address.** On `development`, `users` has no RLS and no trigger. `presby_app` and `presby_platform` both hold full DML on it. So today any statement can stamp proof, and an email change keeps a stale stamp (F230). 0065 adds `users_guard_email_proof`, a BEFORE INSERT OR UPDATE trigger:
+- **Non-owner roles** (the A1 test, `pg_class.relowner` against `current_user`, no role named):
+  - an INSERT with a non-null `email_verified` raises;
+  - an UPDATE that sets the stamp from null, or changes one non-null value to another, raises;
+  - clearing it to null is allowed.
+- **Every role, the owner included:** if `lower(new.email)` differs from `lower(old.email)` and `new.email_verified` equals `old.email_verified` (not distinct), the trigger sets `new.email_verified := null`.
+  - An owner-path definer that changes the address must re-stamp it explicitly with `clock_timestamp()`.
+  - A change in letter case only keeps the stamp.
+- **What this breaks:** nothing today. The Auth.js adapter creates OAuth users with `emailVerified: null` (`handle-login.js:260`). Its non-null writes (`:67–76`) belong to the Email (magic-link) provider, which is not configured. Record in DECISION-225 that adding that provider later needs an owner-path definer.
+
+**R38. Three writers set the stamp, all on the owner path:**
+1. `presby_accept_invitation`'s new-account insert (exists; unchanged).
+2. **`presby_record_google_email_proof(p_user_id uuid, p_address text)`**:
+   - stamps only when the stamp is null, the user is active, and `lower(users.email) = lower(btrim(p_address))`;
+   - a Google address that differs from the account's address stamps nothing;
+   - returns whether it stamped, and TS writes a platform audit row `user.email_proof_recorded {source:'google'}`.
+3. **`presby_complete_email_change(p_token_hash text)`**:
+   - consumes the `email_verification_tokens` row `FOR UPDATE`, checks expiry, then updates `email` and stamps in one statement;
+   - TS writes the existing `USER_EMAIL_CHANGED` row in the same transaction;
+   - this keeps "verify your new address" truthful.
+- **Google claim (F231, analyst Q3 default, which the operator let stand):**
+  - `evaluateSignIn` refuses a Google sign-in unless `profile.email_verified === true`.
+  - That matters today: with `allowDangerousEmailAccountLinking: true`, an unverified claim can sign in as an existing account.
+  - The jwt sign-in branch calls writer 2 only for `account.provider === 'google'`, and re-checks the claim defensively.
+- **One-time clean-up in 0065:** clear any stamp that a later email change may have made stale.
+  - Phase 3 first measures, read-only and as counts, the stamped users who have a `user.email_changed` audit row.
+  - If audit retention cannot prove that no such row exists, clear more broadly. Losing a stamp only fails closed.
+  - No backfill. Google users re-stamp at their next sign-in.
+- **Accepted residual, `paper`:** the database cannot check a Google ID token, so any `presby_app` caller can call writer 2.
+  - That is the F187 class: the same role can already rewrite `users.password`.
+  - Pin by source scan: writer 2 has exactly one call site, in `src/auth.ts`'s sign-in branch, behind the provider check.
+  - Record F187 as narrowed further: proof writes are owner-only.
+
+**R39. `src/auth.ts` placement, compatible with DECISION-230:**
+- Proof recording and the connect call (R41) run **only inside the `if (user?.id)` sign-in branch**, after `ensureDefaultRole`.
+  - A browser cannot reach that branch with a payload. It runs only from a real provider or Credentials callback.
+  - Both calls go inside a try/catch that logs no address. A failure never fails sign-in.
+- **No new session claim.** Connection is derived at `/launch` from the database.
+  - `twoFactorRequired` is already recomputed after the branch, so a congregation's two-step requirement applies to the new link in the same cookie.
+  - `twoFactorVerified` stays `false` at sign-in, as it always is.
+- **Nothing in 2b reads the update payload.** The Check-again and Accept-in-place actions call `unstable_update({})` with an empty payload, as `acceptSignedInAction` does after DECISION-230.
+- **No 2b file imports `two-factor-grant.ts`.** Only verification sets the claim.
+- **The Phase 4 auth gate applies:** a running-server e2e of the full login (password, Google stubbed if needed, and an MFA-enrolled user) before Phase 5.
+
+### G11 / Q1: one standing core, and the mitigation for the Q1 residual
+
+**R40. One internal function decides eligibility: `presby__person_sign_in_standing(p_person uuid, p_org uuid)`.**
+- **Declaration:** no EXECUTE for `public`, `presby_app` or `presby_platform`, so only owner-path definers can call it.
+- **Returns:**
+  - `refusal`: one of `person_merged`, `person_deceased`, `membership_ended`, `person_elsewhere` (R31: any membership at another org, live or ended), or null;
+  - `is_visitor`: the Community Visitors predicate, pinned equal by one test (F177 condition 3);
+  - `authority_bearing`, plus a snapshot: `session_seat`, `diaconate_seat` (open or future-dated), `role_keys text[]` and `permission_keys text[]`.
+  - The snapshot is the set T: person-arm grants plus managed-group grants, with **no `starts_on` bound** (A4) and the closed list of derived kinds (A5).
+- **Callers:**
+  - issue and resend (refusals; visitor gives `needs_acknowledgement`; T is compared against the sender's set for R21);
+  - the token `sign_in` accept branch (re-check);
+  - the in-place accept (R45);
+  - connect (R41);
+  - the R30 reader (card state).
+- **Anti-drift pins:**
+  - **One DB matrix test.** A single fixture table (merged, deceased, ended, two orgs, visitor, staff anchor, elder seat, future seat, person-arm grant, managed-group grant, future-dated managed membership) drives every caller. It asserts each caller's verdict maps from the core's output through one fixed table.
+  - **A migration-text scan.** The visitor CASE, the R31 `exists` and the T query appear only in the core's body.
+
+**R41. The connect definer: `presby_connect_signed_in_account(p_user_id uuid, p_second_factor_verified boolean)`, owner, granted to `presby_app`.**
+- **Order of checks:**
+  1. The account is active.
+  2. It is proven (R37).
+  3. It is not linked to any live person.
+  4. No open invitation is addressed to its address (FB5).
+  5. The candidate set C has exactly one person:
+     - C is every unmerged, non-deceased person who holds the address as an **active** email (`ended_at is null`, exact `lower(btrim)` match) and has a live membership **anywhere**;
+     - the set is global, because sign-in has no organisation context;
+     - two candidates in different organisations decline.
+  6. That person's `user_id` is null.
+  7. The organisation is `managed`.
+  8. The org's self-connect toggle is on (R47).
+  9. The core's `refusal` is null.
+  10. The person is not a visitor.
+  11. The authority rule in R42 holds.
+- **Locking:** resolve the candidate without locks, then lock in **accept's global order: org (`FOR UPDATE`), users, person, contact (`FOR SHARE`)**. Re-run steps 3–11 under the locks. A different order from accept can deadlock the two.
+- **Outcomes:** `connected` (org id, slug, person id, contact-method id, authority snapshot), `already_connected`, `needs_second_factor`, or `declined`. Every other reason collapses into the one `declined` literal.
+- **Two call sites, and only two:** the jwt sign-in branch (`via:'sign_in'`) and the Check-again action (`via:'check_again'`). Pin both with a source scan.
+
+**R42. The Q1 mitigation. Authority needs a second factor, the audit row records what the record carried, and admins can see the connection.**
+- **The rule:** an authority-bearing record connects only when both hold:
+  - (a) the account has a confirmed second factor, a database fact (a `user_totp` row);
+  - (b) TS passes `p_second_factor_verified = session.user.twoFactorVerified`, which only a server-side grant can set (DECISION-230).
+- **This holds whatever `auth.require_2fa` and `two_factor_required` say.** It is a property of the act, not of the session's gate.
+- **Consequence:** at sign-in `twoFactorVerified` is always false, so an authority-bearing record never connects there. It connects through Check again after the user walks `/totp?callbackUrl=/no-organization`, which sends an unenrolled user to `/account/2fa` first. Phase 3 verifies that walk at 360px.
+- **What the user is told:** `needs_second_factor` is the one non-uniform answer. Only the authenticated, address-proven holder sees it. It does not name the congregation or the role (for example "One more step: set up two-step sign-in to finish connecting"). That person learns less than an invitation email would tell them.
+- **Audit row** `tenant.person.sign_in_connected`, written with `insertAuditRow` in the connecting transaction (Rule 7, F180), ids and labels only:
+  - `organizationId`, `personId`, `contactMethodId`;
+  - `contactMethodCreatedAt`, which lets a reviewer join to the `tenant.person_email.added` actor;
+  - `via`;
+  - `proof` (`google`, or `account` for the stamp);
+  - `secondFactor`;
+  - `authority: { sessionSeat, diaconateSeat, roleKeys, permissionKeys }`.
+- **Visible to admins, not only in the audit log:**
+  - the R30 reader gains `connected_via` (`invitation`, `sign_in` or null) and a date, derived from this org's invitation rows and audit rows for that person, never from `users`;
+  - the Community card and the Session roster marker show "Connected by signing in on {date}" to `people.manage` and `officers.manage` holders.
+- **Honest framing for DECISION-226 and the release note.** The second factor makes binding authority a deliberate, multi-step act, and it hardens the account from day one. It stops a stranger with the mailbox from getting authority by an incidental sign-in. It does **not** stop collusion: an accomplice enrols their own factor. Collusion stays a `paper` residual, detected by audit (**F232**). The release note must not imply prevention.
+
+### G13: the contact-email invariant (F233)
+
+**R43. Auto-connect does not contradict "a contact email authenticates nothing".** Proof comes from the account side. The contact email only **identifies** a record. But the recorded wording was already narrower than the code: the founding-administrator branch of `presby_accept_invitation` resolves a person by address match (0064:775–800). That is F233. Corrected wording:
+- **For DECISION-216, via DECISION-227, and the CLAUDE.md Permissions vs Flags paragraph:**
+
+  > A contact email authenticates nothing. Proof of an address comes only from the account: `users.email_verified`, bound to the account's current address (DECISION-225), never from `contact_methods.verified_at` or from an address being on file. Inside a SECURITY DEFINER function a contact email may do exactly two things: address a credential, read through `presby_person_email` (DECISION-216); and identify the one person record that an authenticated, address-proven account belongs to (invitation acceptance's address match, and `presby_connect_signed_in_account`; DECISION-227).
+- **For the CLAUDE.md Two Hierarchies sentence** ("a platform admin acquires tenant authority only … by accepting an invitation addressed to their own email"), which becomes false. Append:
+
+  > …or by signing in with that proven address when a congregation has put it on exactly one eligible record; the platform role confers nothing either way.
+- **Two more rules:**
+  - `contact_methods.verified_at` is an **output** of linking, never an input to any proof. The connect definer must not read it.
+  - 0065 updates the 0064 guard's message and comment, which say "set only by `presby_accept_invitation()`", to name the bind helper (R44).
+- **`scan.test.ts` section 3:**
+  - Keep 3's assertion unchanged.
+  - Retitle it: "…auth paths never read contact emails; they may ask the connect definer to identify a person."
+  - Add **3b**: among the auth roots, only `src/auth.ts` imports `@/lib/onboarding/connect`, exactly once.
+  - Add **3c**: `connect.ts` and `src/app/no-organization/**` name neither the table, the module, `presby_person_email` nor `getPersonEmail`. Identification lives in SQL only.
+
+### G14: the second writer of `people.user_id`
+
+**R44. Both writers go through one bind helper.** `presby__bind_person_account(p_person, p_user, p_address)`:
+- Owner only, with no EXECUTE for application roles.
+- It runs `update people set user_id … where user_id is null`, checks that exactly one row changed, and stamps `verified_at` on the matching active contact.
+- The accept core (`linked_person`) and the connect definer both call it. The accept core's `created_person` insert stays where it is.
+- **Pins:**
+  - a migration-text scan: `user_id` is written in function bodies only by the helper and that insert;
+  - A1's trigger still refuses every non-owner role;
+  - A2's source scan is unchanged.
+
+**Amended DECISION-208 text:**
+> `people.user_id` is written only on the owner path, by invitation acceptance (token or in-place, through the shared accept core) and by `presby_connect_signed_in_account`, both through `presby__bind_person_account`. `people_guard_user_link` refuses every non-owner role. Accepted residual, `paper`: the owner path is unbound (mitigated by the A2 source scan).
+
+- **F186's closing text** names both definers.
+- **A3's release line** becomes: *"…from a congregation's side only when the person accepts an invitation, or signs in with a proven address that is on exactly one eligible record."*
+
+### G15: the token-less accept mode (Q2)
+
+**R45. The credential model does not change. Only how the credential is presented changes.** The `account_invitations` row is still the credential, and still authorizes only the act its row names, inside definers that take org and purpose from the row. In place, the bearer token is replaced by three things: the account's proven address equals the row's address, a verified second factor where R45's table requires it, and the click as the expression of intent.
+- **Mechanism:**
+  - Factor `presby_accept_invitation`'s body into **`presby__accept_invitation_core(p_invitation_id, p_user_id, p_password_hash, p_first, p_last, p_presentation)`**, with no EXECUTE for application roles.
+  - **`presby_accept_invitation(p_token, …)`** keeps its signature and ACL. It hashes the token, resolves the id, and calls the core with `'token'`. The parity golden must stay byte-identical.
+  - **New `presby_accept_in_place(p_invitation_id uuid, p_user_id uuid, p_second_factor_verified boolean)`** calls the core with `'in_place'`.
+  - Every branch on the presentation ends in `else raise` (R35 style).
+- **In-place gates, in this order, so a foreign id is never an oracle:**
+  1. The row is open.
+  2. Lock the user. `lower(users.email) = email_normalized` **and** the account is proven (R37). Any miss returns **`dead`**, not `email_mismatch`.
+  3. Mode is `existing_account` only.
+  4. The second factor:
+
+     | Purpose | Second factor |
+     |---|---|
+     | founding administrator, treasurer | **always** required: R42's (a) + (b) |
+     | `sign_in`, record authority-bearing (per R40) | required |
+     | `sign_in`, authority-free | G9 parity |
+
+     A missing factor returns `needs_second_factor`.
+  5. Then the purpose gates, unchanged.
+- **The principle to record in DECISION-228:** every binding of authority carries two independent proofs beyond the account's password.
+
+  | Path | The two proofs |
+  |---|---|
+  | Token path | the sender's R21 ceiling, and the token |
+  | In place | the sender, and a proven address plus a second factor |
+  | Auto-connect | a proven address plus a second factor; the sender is missing, so its residual is F232 |
+- **Audit:** the existing `invitation.accepted` row, and the founding-administrator and treasurer `org.*.designated` rows, with **`via: 'in_place'`** and `secondFactor` (the operator's "audited as accepted on site").
+- **Listing:** `presby_list_invitations_for_account(p_user_id)`, a definer (`presby_app` has no privilege on the table):
+  - returns open rows only, and only when the account is proven, matching `lower(users.email)`;
+  - the closed shape is invitation id, organisation name, purpose, expiry, and a display name only for `sign_in` (the G5 amendment: the session matches);
+  - it never returns a token hash or the inviter.
+- **Scope:** DECISION-147's statistics tokens are untouched. In-place presentation exists for `account_invitations` only.
+- **Rejected:** "resend-and-consume" (the analyst's reasons).
+
+**R46. Rules for the `/no-organization` surface:**
+- No sender-visible state may depend on another organisation's rows (F155). The admin card's auto-connect line is computed from own-org facts only, and must be worded so that a global decline (an address shared in another organisation) does not make it false.
+- The admin card never reads `users` (DECISION-189). G20(a) is recorded as an accepted residual.
+- G17 (no `/home` card for an already-connected member's later designation) stays a follow-up. The Post-Login Landing table does not change.
+
+**R47. A per-organisation self-connect toggle: warranted.**
+- **Why:** connections cannot be undone in 2b (Q4). This is the only lever that stops new ones at one congregation, and it is a tenant setting, not a platform flag (operator rule).
+- **Where it lives:** in `organization_feature_toggles`, **read inside the connect definer** so the decline stays uniform, as the domains definer reads its toggle.
+- **Default:** on for every existing and future congregation. Honour the store's absent-row convention (seed rows if an absent row means off).
+- **Who may change it:** the same people who change the existing toggles.
+- **Reach:** auto-connect only. It never affects invitations or in-place accept, and it never grants anything.
+
+### Findings and numbers
+
+| # | Finding |
+|---|---|
+| **F230** | `users.email_verified` is not bound to the current address. Verify-email rewrites `users.email` and keeps the old stamp, and any `presby_app` or `presby_platform` statement can set it. Latent today, because nothing reads it. Closed by R37 and R38. |
+| **F231** | An unverified Google email claim is accepted, and with `allowDangerousEmailAccountLinking` it signs in as an existing account. Live today. Closed by R38's gate. |
+| **F232** | Q1 residual (accepted, `paper`): a `people.manage` holder can bind an authority-bearing record to whoever controls a typed address, with no sender ceiling. Mitigated by R42, detected by audit, not prevented. Stays open. |
+| **F233** | DECISION-216 and CLAUDE.md said a contact email only addresses credentials, but acceptance already identified people by address. Closed by R43's wording. |
+
+- **Decisions:**
+  - **DECISION-225:** address proof (R37–R39).
+  - **DECISION-226:** auto-connect, the standing core, second factor for authority, the toggle (R40–R42, R47).
+  - **DECISION-227:** the contact-email wording (R43).
+  - **DECISION-228:** in-place presentation (R45, R46).
+  - **DECISION-207** amended: in-place presentation, and the core replaces predicates that were coded separately.
+  - **DECISION-208** amended (R44).
+- **Migration 0065.**
+- **F234–F236 are unused** and go back to the orchestrator. F237 is untouched.
+
+## Invariants Touched
+
+- **Permissions vs Flags, and credentials:** respected.
+  - No `FEATURES.*` key and no platform flag. R47 is a tenant toggle that grants nothing.
+  - The credential still authorizes only its row's act; only how it is presented is new (R45).
+  - **Changes CLAUDE.md:** the R43 wording. This needs operator approval.
+- **Two Hierarchies:**
+  - No platform predicate takes part in any check.
+  - **Changes CLAUDE.md:** the R43 sentence about how a platform admin acquires tenant authority. This needs operator approval.
+  - F232 joins the named `paper` residuals.
+- **Isolation and F26:**
+  - Every new function is a definer with `search_path = public, pg_temp`.
+  - Internal helpers (R40, R44, the core) have no application grant.
+  - Connect derives its org from the match and locks in accept's order.
+- **The proxy does not reach the database:** unaffected.
+- **No enumeration (DECISION-040/189):**
+  - Declines are uniform.
+  - A foreign invitation id returns `dead`.
+  - `needs_second_factor` is shown only to the address-proven holder and names nothing.
+  - R46 applies the F155 rule to the admin card.
+- **Composite Tenant Keys, never hard-delete:** nothing new is deleted. Linking writes only from null.
+- **The Brand Is a Cascade Override:** `/no-organization` and `(email-verify)` stay platform palette.
+- **Verify in a Browser:** at 360px, test the `/no-organization` states N0–N5, the `/totp` → `/account/2fa` → `/no-organization` walk, and the card additions.
+
+## Notes (Phase 3 must honour)
+
+1. **Rebase onto v0.42.3 (DECISION-230) before Phase 4.** R42 and R45 are void without it.
+2. **Measure before DDL**, read-only, counts only, on production and the pipeline branch:
+   - stale stamps (R38);
+   - unstamped Google users;
+   - the deploy-day wave, **split into authority-free and authority-bearing**;
+   - seeded or e2e users that would auto-connect (G22);
+   - `users_email_lower_uq` case-duplicates.
+
+   On `development` I measured: 30 users, all stamped; 0 Google accounts; 0 case-duplicate groups; no trigger on `users`; `presby_app` and `presby_platform` hold DML on `users`, `accounts` and `email_verification_tokens`; none of those three tables has RLS.
+3. **Pin by test:**
+   - R37 in both directions (non-owner stamp raises; an address change clears the stamp; a case-only change keeps it);
+   - R38's single call site;
+   - the R40 matrix and the migration-text scan;
+   - R41's two call sites and lock order;
+   - R42 (an authority-bearing record without a factor gives `needs_second_factor`, and the audit snapshot is present);
+   - R43 3b and 3c;
+   - R44's writer scan;
+   - R45's gate order (a foreign id gives `dead`);
+   - the parity golden after the core refactor.
+4. **Release-note "do not write":** the analyst's list, plus "two-step sign-in prevents misuse of a typed address".
+5. **Suggestions (Phase 3's call):**
+   - **S11.** Stamp proof at password-reset completion through a definer as well, since the reset token proves the mailbox.
+   - **S12.** Prevent F232 rather than only detect it: record the address author (`contact_methods.created_by_user_id`, set by `store.ts`). Connect would then require that author to pass R21's ceiling for the record. This needs operator assent, because the operator ruled detect-only. The default is not to adopt it.
+
+## Operator questions still open
+
+1. **Premise check 4** (which reading of the treasurer "invite accepted" case is right) is still unanswered.
+2. **Approve the two CLAUDE.md wording changes in R43.** Agents may not edit CLAUDE.md on their own authority.
+3. **S12 (optional):** prevent F232 instead of detecting it. Without an answer, the ruling stands as detect-only.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 2 — Architect addendum 2 (auto-connect, accept in place) | architect | Complete. R37–R47: proof is a trigger-bound database fact with three owner-path writers and the Google claim refused; one standing core for issue, accept, in-place, connect and the reader; an authority-bearing connect needs a database-enrolled and session-verified second factor plus an audit snapshot (F232 residual); contact-email wording corrected (F233); one bind helper for `people.user_id`; in-place presentation through a shared accept core; per-org toggle. F230–F233; DECISION-225–228; 207/208 amended; 0065. Depends on DECISION-230. | Approved with suggestions | 2026-10-25 |
+
+## Handoff
+
+Next agent: **tech-lead**, for a single Phase 3 amendment. It folds in R37–R47 and the analyst's reconciliation table (0065, `test-rls-65.sql`, the 0064 bodies as the diff base), after taking the Note 2 measurements. Before that, the **orchestrator** records F230–F233 and DECISION-225–228, puts the open questions to the operator, and confirms that v0.42.3 is merged.
+
+Files read:
+- `/Users/cshenso/git/presby-platform/presby-2b/docs/work-log/2026-10-22-founding-admin-directory.md`
+- `/Users/cshenso/git/presby-platform/presby-2b/docs/decisions.md`
+- `/Users/cshenso/git/presby-platform/presby-2b/docs/work-log/_template.md`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/auth.ts`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/lib/auth/sign-in-gate.ts`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/lib/auth/safe-callback.ts`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/lib/contact-methods/scan.test.ts`
+- `/Users/cshenso/git/presby-platform/presby-2b/drizzle/0064_presby_person_emails.sql`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/app/(email-verify)/account/verify-email/[token]/page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/app/(auth)/totp/page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/app/no-organization/page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/proxy.ts`
+- `/Users/cshenso/git/presby-platform/presby-2b/src/lib/db/schema.ts`
+- `/Users/cshenso/git/presby-platform/presby-sess` (`git diff main...HEAD`: `src/auth.ts`, `src/lib/auth/two-factor-grant.ts`, `src/app/api/auth/[...nextauth]/route.ts`, `src/app/(auth)/totp/actions.ts`, `src/app/(invite)/actions.ts`)
+- `/Users/cshenso/git/presby-platform/presby/node_modules/@auth/core/lib/actions/callback/handle-login.js`
+
+**Orchestrator note (2026-10-25), recorded with the addendum:** open question 1 (premise check 4) was answered by the operator before this addendum returned; see the operator-rulings section above (accepted; the pre-accept window; no defect). Questions 2 (the two CLAUDE.md wording changes in R43) and 3 (S12) are put to the operator. F231 (unverified Google claim accepted) is live today; the operator is told.
+
+## Increment 2b — operator rulings on architect addendum 2 (2026-10-25)
+
+- **R43 CLAUDE.md wording: approved, both sentences** (Permissions vs Flags and Two Hierarchies), as the architect wrote them. They land in 2b's diff.
+- **S12: declined; detect-only stands** (the operator's 2026-10-24 ruling). F232 stays an accepted `paper` residual, mitigated by R42.
+- **F231 is split out** as its own bug-fix pipeline (`pipeline/google-email-verified`, DECISION-246), to ship right after v0.42.3. 2b's R38 Google-claim gate is then already on `main`; 2b's Phase 3 amendment designs to it rather than re-adding it.
+- Numbers returned unused by the architect: F234–F236 (left unassigned).
+
+
+---
+
+# Increment 2b — Phase 3 amendment 2 (tech-lead)
+
+*Written 2026-10-25 by tech-lead in the `presby-2b` worktree (HEAD `0bc190b`, the v0.42.2 tree) against the live tree there. It folds the architect's R37-R47, the analyst's reconciliation table and G10-G22, and the operator's rulings (Q1 "also elders, not visitors", Q2 accept in place, premise check 4, R43 approved, S12 declined) into the 2b design. Measurements: read-only, counts only, one connection to `development` (`default_transaction_read_only = on`; no name, address, id or connection string was printed or written); nothing touched production, which the orchestrator measures with the SQL in "Measurements". Two upstream changes are not on `main` yet and this design is written to their post-conditions, not their code: the session-claim fix (DECISION-230, branch `pipeline/session-update-hardening`, v0.42.3, read from `git diff main...HEAD`) and the Google-claim gate (F231, branch `pipeline/google-email-verified`, DECISION-246, no commits yet). No implementation code is written; SQL here is contract (signatures, check order, vocabularies), not bodies. No Rule 16 shared file is edited; every edit to one is staged for the orchestrator. Numbers used: migration 0065; DECISION-207 and 208 (amended) and 225-228; F186, F187, F192-F199, F230-F233. F234-F237 are not used.*
+
+**Read order for the implementer.** Phase 3 and the Phase 3a addendum above stand; this section overrides them wherever the two differ, and the "Supersedes" table below is the complete list of overrides. Nothing in Phase 3 or 3a is deleted from the log.
+
+## 1. What this amendment changes
+
+### 1.1 Supersedes (Phase 3 / 3a text that no longer holds)
+
+| Earlier text | Now | Where handled |
+|---|---|---|
+| Migration `0064_presby_org_sign_in_invitations.sql`, `test-rls-64.sql`, chain `...0063 < 0064` | **`0065_presby_sign_in_and_connect.sql`**, `scripts/sign-in-invitations/test-rls-65.sql`, chain `0059 < 0060 < 0061 < 0062 < 0063 < 0064 < 0065`. 0064 is person emails (live, v0.42.0) | §5 |
+| Live preview and accept diffed against 0059 | Diffed against **0064's bodies** (the live definitions), plus `presby_contact_methods_guard_write` | §13.3 |
+| Issue and resend read "the on-file primary email" in SQL; `address_ambiguous`, `address_invalid` | Issue, resend and the card read `presby_person_email(person, 'credential')`; no row is `no_email_on_file`. **`address_ambiguous` is deleted** (one active main is a database property, 0064 section 5 and 7). **`address_invalid` is also deleted**: `contact_methods_value_shape` is a strict subset of `account_invitations_email_shape` (0064 header, ER13, pinned by `contact-methods.db.test.ts`), so the outcome is unreachable and its copy would be dead | §5.8, §10 |
+| Every contact predicate | Every `contact_methods` predicate in 0065 carries `ended_at is null` | §5 |
+| S9 `contact_methods_email_norm_idx` in 0064/0065 | **Removed**: it shipped in 0064 section 5 (ER17); connect reuses it | §5 |
+| F199 and in-transaction `updatePerson` audit in Batch B | **Removed**: shipped in v0.42.0 (`people.ts:1014`, with `emailChanged`; DECISION-219). The R21 detection chain starts at `tenant.person_email.added`, `.ended` or `.primary_changed` | §7, §9 |
+| `EMAIL_AUDIENCE` and `credential-keys.ts` gain the sign-in key | `account_sign_in_invitation: "person:credential"` is added **in the same batch as the sender (B2)**, never before | §6 |
+| Batches A (0064), B, C, D | **A1, A2, B1, B2, C, D**; the auth-path gate moves to the end of B1 | §13.2 |
+| `NO_SIGN_IN_INVITE_LINE` replaced, "none has a PresbyPortal account yet" | Reworded to what `people.user_id` establishes ("connected a sign-in"); the `terms_not_started`, `no_permission` and Officers Session-note strings and `WITHDRAW_COPY.already_decided` are fixed in the same pass (TODO "Session-state and withdraw copy pass") | §10 |
+| Marker "Can't sign in yet"; card `signs_in` "can sign in" | "Not connected yet"; "is connected to a sign-in" (a Google user can sign in and still be unconnected) | §10 |
+| A3 release line: "...from a congregation's side only by accepting an invitation" | R44's line: "...only when the person accepts an invitation, or signs in with a proven address that is on exactly one eligible record" | §14 |
+| Edge Case 9: "the sender cannot learn whether an address has an account" | Qualified: a card that shows "Connected through sign-in on {date}" tells an administrator that an account for that address exists and was used (G20a). Accepted residual; the reader derives `linked` from `people.user_id` only | §9, §11 |
+| Out of Scope: auto-connect, accept in place, "Google claim wiring" | In scope (operator Q1, Q2). "Google claim wiring" becomes R38 (Google's `email_verified` stamps proof) behind F231's gate. Still out of scope: disconnect, bulk, SMS, the 90-day redaction sweep | §15 |
+| `InvitationCopyPurpose` gains `sign_in` (analyst) | **Not added** (departure, see 1.2). `acceptanceSentence` drops "from the email" | §10 |
+
+### 1.2 Departures from the inputs (the architect and analyst should see these)
+
+1. **`address_invalid` deleted** as well as `address_ambiguous` (above). Extends the reconciliation table by one row, same reason.
+2. **`InvitationCopyPurpose` stays `founding_administrator | treasurer`.** The module is the platform-operator designation copy; nothing in it would use a `sign_in` member, so adding one is a dead branch. The exhaustiveness the analyst wanted is delivered where `sign_in` is actually rendered: `PURPOSE_LABEL`, `inviteeBlockedCopy(purpose, reason)`, the email renderer and `sign-in-copy.ts`, each with an exhaustive `never` default.
+3. **Stale-stamp clean-up clears only provably stale stamps** (a stamped user with a `user.email_changed` audit row), not "more broadly". Reason: audit is append-only for the application (`drizzle/0048:76` revokes UPDATE and DELETE from `presby_app`; grep finds no code or cron that deletes from `audit_events`), so absence of a row is proof of absence, and a broader clear would strip proof from password-only accounts (the platform operator's own among them) that have **no re-proof path** (S11 is declined, below). On `development` this clears 0 rows (1 stamped user predates the audit horizon and is kept).
+4. **S11 (stamp at password-reset completion) is declined for 2b.** It would add a third unprovable stamp writer and move a password write behind a definer inside the auth path, for a population (stamped users who changed their email before 0065) that is 0 on `development` and unmeasured on production. If the production count in M2 is not 0, those users fall back to the emailed link and the orchestrator tells the operator; S11 then becomes a small follow-up. Filed in TODO either way.
+5. **`findSharedAddressNotes` (ER23b) gains `p2.date_of_death is null`** so that the "Also on file for" note, `address_shared` (R29) and connect's candidate set all agree on "live person" (the analyst's decline 5 excludes the deceased from C, and a deceased relative's old shared address must not block anyone). One line in `store.ts`, pinned by the equality test (§9, E-25).
+6. **S13 (Increment 3 architect, relayed 2026-10-25) is accepted.** 0065 introduces `presby_membership_standing(p_current_roll text, p_engagement_status text) returns text` exactly as R50 specifies (plain `language sql immutable`, no definer, no `SET`, reads no table; first match wins: `listed` = roll in `active`, `baptized`, `affiliate`, `other_participant` or engagement `regular`; `staff_anchor` = engagement `staff`; `visitor` = engagement `visitor`; `inactive` = `inactive` or `moved_away`; else `unclassified`; EXECUTE to `presby_app`), and the standing core returns `standing` **instead of** `is_visitor` from day one. Reason: it costs one three-line function now, and Increment 3a (0066) then changes only connect's condition (to member standing, R55) and drops the visitor acknowledgement, instead of re-creating 2b's core, issue core and card function. 2b's behaviour is unchanged: every 2b caller tests `standing = 'visitor'`. One documented difference, fail-closed: a visitor-engagement membership with a roll value outside the listed four (none exists on `development`: engagement and roll pairs there are `regular` with a listed roll or null) is `visitor` to the classifier but not to today's Community Visitors list; the equality test (T-5) pins equality over roll null and every listed roll value and asserts the one expected difference by name. Also noted for Increment 3a: it will add a derived kind to the closed list of A5; the list therefore lives in exactly one pinned place, the standing core's body (the migration-text and live-catalog scans of 5.7), and nothing in TypeScript copies it.
+7. **`presby_accept_in_place` takes the same 16 OUT columns as the token path, and the core takes a trailing `p_second_factor_verified boolean default false`.** R45's signature for the core omitted the flag the in-place gate needs; this is the minimum addition.
+
+## 2. Summary
+
+2b now does three things for one reason: a person recorded at a congregation can end up connected to a sign-in without anyone typing a password for them, and every way of getting there rests on the same two proofs. (1) **Invite** (unchanged in intent): a congregation's `people.manage` holder invites a recorded person from the person's edit page, one at a time, to the person's on-file Main address; the sender rule (R21), the visitor acknowledgement (F177 Option 3) and the limits stand. (2) **Auto-connect** (new, R41): when someone signs in with an address the database holds as proven (`users.email_verified`, bound to the current address by a trigger, R37) and exactly one eligible person in one congregation carries that address, the sign-in is linked to that person at once; visitors, shared addresses, people at two congregations and people with an open invitation to that address are declined silently; a person who holds a role or a Session or diaconate seat connects only after a confirmed second factor (R42), and the audit row records what the record carried. A per-congregation toggle (R47, default on) is the only lever that stops new connections at one congregation. (3) **Accept in place** (new, R45): `/no-organization` lists open invitations addressed to the proven account and accepts them without the emailed link, through the same accept core as the token path; the founding-administrator and treasurer invitations always need a confirmed second factor on this path. Underneath: migration 0065 adds the `sign_in` purpose and `org` origin, a trigger that makes `users.email_verified` a fact about the current address, a trigger that makes `people.user_id` writable only on the owner path, one standing core that decides eligibility for every caller, one bind helper that is the only function that writes `people.user_id` for an existing person, an accept core that both presentations call, and the definers for issue, resend, revoke, reader, list, connect, Google proof and email change. The contact-email invariant is restated (R43, operator-approved) and F232 joins the named `paper` residuals.
+
+## 3. Measurements (Note 2)
+
+Read-only, counts only, `development` only (the pipeline's own Neon branch does not exist yet; the orchestrator creates it, §13.3). Production is the orchestrator's: the SQL is below.
+
+### 3.1 `development` results (2026-10-25)
+
+| Id | What | Result |
+|---|---|---|
+| M1 | Users: total / active / stamped (`email_verified` not null) / active and unstamped | 30 / 30 / 30 / 0 |
+| M2 | Stamped users with a `user.email_changed` audit row (the clean-up set) | **0** (that action has 0 rows; the audit table has 827 rows since 2026-08-18) |
+| M3 | Google accounts / Google users with a null stamp | 0 / 0 |
+| M4 | Case-duplicate `lower(users.email)` groups / null or blank emails | **0** / 0 (the 0065 stop-block passes) |
+| M5 | Users linked to a live person / active users still unlinked | 16 / 14 |
+| M6 | Organizations / managed / `organization_feature_toggles` rows | 15 / 12 / 19 |
+| M7 | Open, unexpired invitations, any purpose | 3 |
+| M8 | Active email contacts / people holding one / addresses held by more than one live person | 29 / 28 / **2** |
+| M9 | Stamped users whose stamp predates the earliest audit row | 1 (kept: see 1.2 item 3) |
+| M10 | `user_totp` rows | 2 of 30 active users |
+| M11 | Managed organizations / managed with a derived Session group | 12 / 6 |
+| M12 | Unlinked live people with an active email and a live membership at a managed organization | 14 |
+| Wave | Proven, active, unlinked users: **14**. Of those with exactly one live candidate person (global): **0**. Authority-free / authority-bearing / visitors declined / held back only by an open invitation: **0 / 0 / 0 / 0** | the deploy-day wave on `development` is **0** |
+| G22 | Active unlinked users whose address matches **any** person's active email (the seeded and e2e join) | **0** |
+
+What it decides. M4 = 0 and M2 = 0 mean the stop-block and the clean-up are no-ops here. The wave of 0 and G22 of 0 mean no seeded or e2e user auto-connects on this data, so no existing Playwright spec changes behaviour because of auto-connect on `development`. Statically (read, not run): e2e users are `@presby.invalid` (`e2e/support/users.ts`) and `seed-users.ts` stamps them as the owner; person fixtures use `@example.invalid`; the one fixture that reuses a seeded user's email, `community-fixture.ts` (the clerk), uses a person that is already linked, which connect declines at step 3. `invitation-fixture.ts` creates unlinked, stamped users and persons with the same address, but in organizations created by raw SQL that have **no toggle row**, and an absent row means off (DECISION-097), so connect declines there too. M8's 2 shared addresses are the live proof that the shared-address decline matters.
+
+### 3.2 Production: counts the orchestrator runs (read-only, counts only; do not connect from this pipeline)
+
+Run as one session with `default_transaction_read_only = on`, before Batch A1 is applied anywhere shared and again just before deploy. Nothing below returns a name, address or id.
+
+```sql
+-- P1  The 0065 stop-block (must be 0, or the migration refuses to apply)
+select count(*) as case_duplicate_email_groups
+  from (select 1 from users group by lower(email) having count(*) > 1) x;
+-- P2  The clean-up set: stamped users with an email-change audit row (cleared by 0065)
+select count(*) as stale_stamps
+  from users u
+ where u.email_verified is not null
+   and exists (select 1 from audit_events a
+                where a.action = 'user.email_changed' and a.resource_id = u.id::text);
+-- P3  Users: total / active / stamped / active-unstamped / Google accounts / Google users unstamped
+select count(*), count(*) filter (where is_active), count(*) filter (where email_verified is not null),
+       count(*) filter (where is_active and email_verified is null) from users;
+select count(*), count(*) filter (where u.email_verified is null)
+  from accounts a join users u on u.id = a.user_id where a.provider = 'google';
+-- P4  Audit table size (the new partial index builds under a brief write lock)
+select count(*) from audit_events;
+-- P5  Organizations / managed / toggle rows
+select (select count(*) from organizations),
+       (select count(*) from organizations where platform_status = 'managed'),
+       (select count(*) from organization_feature_toggles);
+-- P6  Open invitations, any purpose (these block auto-connect for their addresses)
+select count(*) from account_invitations
+ where accepted_at is null and revoked_at is null and superseded_at is null
+   and blocked_at is null and redacted_at is null and expires_at > now();
+-- P7  Addresses held by more than one live person
+select count(*) from (
+  select lower(btrim(cm.value)) from contact_methods cm
+    join people p on p.id = cm.person_id and p.merged_into_id is null
+   where cm.kind = 'email' and cm.ended_at is null
+   group by 1 having count(distinct cm.person_id) > 1) s;
+-- P8  THE DEPLOY-DAY WAVE (G20c, split authority-free / authority-bearing)
+with u as (
+  select id uid, lower(btrim(email)) e from users
+   where is_active and email_verified is not null
+     and not exists (select 1 from people p where p.user_id = users.id and p.merged_into_id is null)
+     and not exists (select 1 from audit_events a
+                      where a.action = 'user.email_changed' and a.resource_id = users.id::text)
+), cand as (
+  select distinct u.uid, p.id pid from u
+    join contact_methods cm on cm.kind = 'email' and cm.ended_at is null and lower(btrim(cm.value)) = u.e
+    join people p on p.id = cm.person_id and p.merged_into_id is null and p.date_of_death is null
+   where exists (select 1 from memberships m where m.person_id = p.id and m.ended_on is null)
+), cnt as (select uid, count(*) n from cand group by uid),
+one as (select c.uid, c.pid from cand c join cnt on cnt.uid = c.uid and cnt.n = 1),
+chk as (
+  select o1.uid, o1.pid,
+    (select user_id from people where id = o1.pid) is null as unlinked,
+    (select count(*) from memberships m where m.person_id = o1.pid) as n_memberships,
+    coalesce((select o.platform_status = 'managed' from memberships m join organizations o on o.id = m.organization_id
+               where m.person_id = o1.pid and m.ended_on is null limit 1), false) as managed,
+    coalesce((select (m.engagement_status = 'visitor' and m.current_roll is null) from memberships m
+               where m.person_id = o1.pid and m.ended_on is null limit 1), false) as visitor,
+    exists (select 1 from account_invitations i join u on u.uid = o1.uid
+             where i.email_normalized = u.e and i.accepted_at is null and i.revoked_at is null
+               and i.superseded_at is null and i.blocked_at is null and i.redacted_at is null
+               and i.expires_at > now()) as open_inv,
+    exists (select 1 from group_memberships gm join groups g on g.id = gm.group_id
+             where gm.person_id = o1.pid and g.derived_from in ('session','diaconate')
+               and (gm.ends_on is null or gm.ends_on > current_date)) as seat,
+    ( exists (select 1 from role_grants rg where rg.person_id = o1.pid
+               and (rg.ends_on is null or rg.ends_on > current_date))
+      or exists (select 1 from group_memberships gm join groups g on g.id = gm.group_id
+                   join role_grants rg on rg.group_id = g.id and (rg.ends_on is null or rg.ends_on > current_date)
+                  where gm.person_id = o1.pid and (gm.ends_on is null or gm.ends_on > current_date)
+                    and not (g.membership_source = 'derived'
+                             and g.derived_from in ('active_membership','session','diaconate'))) ) as t_nonempty
+  from one o1)
+select (select count(*) from u)                                                       as proven_unlinked_users,
+       count(*)                                                                       as with_one_live_candidate,
+       count(*) filter (where unlinked and n_memberships = 1 and managed and not open_inv and visitor)
+                                                                                      as declined_visitor,
+       count(*) filter (where unlinked and n_memberships = 1 and managed and not open_inv
+                          and not visitor and not seat and not t_nonempty)           as will_connect_authority_free,
+       count(*) filter (where unlinked and n_memberships = 1 and managed and not open_inv
+                          and not visitor and (seat or t_nonempty))                  as will_need_second_factor,
+       count(*) filter (where unlinked and n_memberships = 1 and managed and open_inv) as held_back_by_open_invitation
+  from chk;
+```
+
+What each count decides: **P1 > 0** the migration stops (repair first; do not edit the migration). **P2 > 0** those users lose proof and have no re-proof path until S11 or a Google sign-in: tell the operator before deploy (1.2 item 4). **P3's** unstamped Google users re-stamp at their next Google sign-in once F231 is live. **P4** is for the index build only. **P8** sets the release-note sentence about the one-time wave (§14): if either connect column is non-zero the note says people "may be connected the next time they sign in"; if both are zero it says nothing about a wave. P8 uses the same eligibility the standing core will use, written as plain SQL for counting; it is not the definer and is not a test of it.
+
+## 4. Feasibility check against the live tree
+
+Done before naming implementers; a defect here is a Phase 3 defect, so each was read, not assumed.
+
+- **Signatures are valid SQL.** The only new defaulted parameter is `presby__accept_invitation_core(..., p_second_factor_verified boolean default false)`, trailing every required parameter. `presby_preview_invitation(text, uuid default null)` and `presby_accept_invitation(text, uuid default null, text default null, text default null, text default null)` keep their shipped signatures, so `create or replace` keeps their ACLs. The wrapper returns the core's rows with `return query select * from presby__accept_invitation_core(...)` (positional, the 16 OUT columns identical in name, type and order); every body keeps `#variable_conflict use_column`, as 0059's and 0064's do. No function returns a column named like a table column it reads without that pragma.
+- **ALTER and DROP against dependents.** Dropped and re-created: `account_invitations_open_address_uq` (same name; the live predicate is `accepted_at/revoked_at/superseded_at/blocked_at is null`, no expiry term, read from the catalog), and the CHECKs `account_invitations_purpose_allowed`, `_origin_allowed`, `_names_by_purpose`, `_blocked_reason_allowed` (drop-then-add, the 0048 idiom). `create or replace`: the 0064 guard `presby_contact_methods_guard_write` (message only), `presby_preview_invitation`, `presby_accept_invitation`, `presby_account_invitations_guard_insert`. No column and no table is dropped. **Function-body dependency check** (Postgres tracks none): Batch A1 runs `select proname from pg_proc where prosrc ~ '<name>'` for each dropped or replaced object name above, plus `users_email_unique` and the `verified_at` message, and records the result; the design's own grep finds `open_address_uq` named only in comments, `issue.ts` (constraint-name mapping, preserved by the same name) and tests, and the CHECK names in no function body. Live catalog at 2026-10-25 (development): `account_invitations` CHECKs are exactly those in 0059 (read, not assumed).
+- **New CHECKs and triggers read against fixtures.** (a) `account_invitations` CHECKs and the tie against `scripts/invitations/seed-dev-invitations.sql`, `src/lib/testing/invitation-fixture.ts`, `e2e/support/invitation-fixture.ts` and the branch's rows: all existing rows are platform-origin founding-administrator or treasurer rows, so the tie `(purpose = 'sign_in') = (origin = 'org')` and the names and person CHECKs pass; the stop-block counts any violation first. (b) **`users_guard_email_proof`** against every writer of `users`: `scripts/seed-dev.sql` (5 `insert into users` statements, owner), `scripts/ci/db-baseline.sql` (owner, no stamp), `e2e/support/seed-users.ts` (owner, stamps), `e2e/support/invitation-fixture.ts:164` (owner), `src/lib/testing/{calendar,giving,invitation}-fixture.ts` (platform connection = `neondb_owner`, no stamp); no `scripts/**/test-rls*.sql` and no `presby_app` Vitest suite inserts or updates `users` with a stamp (grep; the two `email_verified` references in db tests only read). The NextAuth adapter's insert carries `emailVerified` null (`handle-login.js:158-160, 260`; the non-null writes at `:67-77` belong to the Email provider, not configured), which the trigger allows. **Nothing existing breaks.** (c) **`people_guard_user_link`** contradicts the `presby_app` link writes at `scripts/test-rls.sql:8036, 8235, 8239` (section 44) and `scripts/giving/test-rls-46.sql:646, 957, 989, 1402, 1509, 1549, 1567, 1628, 1685` (re-derived against this tree on 2026-10-25; the numbers moved since Phase 3 and the implementer re-derives again after the rebase). Converted in Batch A2 as Phase 3 Test Plan 3 says. (d) The 0064 guard message change breaks one pin: `src/lib/db/domain/contact-methods.db.test.ts:50` (`GUARD_VERIFIED`), updated in A1 with the message.
+- **New FKs.** None. No new tenant table. The sign-in row keeps the existing composite `(person_id, organization_id) -> memberships (person_id, organization_id)`; `organization_feature_toggles` already has the composite primary key `(organization_id, feature_key)` and an FK to `organizations`, and the 0065 seed row carries both. The new `audit_events` index is on JSON text fields of an append-only table and has no FK.
+- **Tenant column on both sides, for every read inside a definer.** A definer runs as the owner and bypasses RLS, so the explicit `organization_id` (or the membership join) on each query is the whole isolation, as in 0061. The new global reads are deliberate and listed: connect's candidate set (global by construction: sign-in has no organization context) and `presby_list_invitations_for_account` (keyed by the proven account's address). Both are reachable only by `presby_app` through a `p_user_id` the application takes from `auth()`.
+- **Seeding order inside 0065.** Stop-blocks, then the stale-stamp clean-up, then the `users` trigger (so the clean-up does not depend on it), then CHECKs and the guard-insert function before any function that inserts a `sign_in` row, then helpers before their callers, then `create or replace` of preview and accept last, then the toggle seed, then comments.
+- **Migration ordering and deploy order.** `0059 < ... < 0064 < 0065`, never reordered. **0065 is applied first, then the code.** Old code against 0065: the verify-email page's `update users set email` is allowed and the trigger just clears the stamp (nothing reads it yet); the Google adapter insert is allowed; FA and treasurer acceptance is byte-identical; no old code writes `people.user_id`. New code before 0065 calls missing functions. Production has no `sign_in` row and 1 person linked at the last count, so any order is survivable; the point is to choose one on purpose (the runbook carries this paragraph).
+- **Upstream dependencies.** DECISION-230 (v0.42.3) must be on `main` before any 2b code: R42 and R45 read `session.user.twoFactorVerified`, which before that fix a browser could write. F231's gate must be on `main` before Batch B1 touches `src/auth.ts`, or B1 edits the file the F231 pipeline is also editing. The kickoff checklist (§13.3) makes both a blocking step.
+
+## 5. Migration 0065: contents and order (Batch A1 then A2, `database-admin`)
+
+**File:** `drizzle/0065_presby_sign_in_and_connect.sql`, hand-written, idempotent (every statement drop-then-add, `create or replace`, `if not exists`, `on conflict do nothing` or revoke-then-grant; applied twice end to end by the implementer, the second run changing no row), a forward fix on top of 0059 and 0064 (both shipped; never an in-place edit of either). Apply: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0065_presby_sign_in_and_connect.sql`. **Header records:** the measured counts with no slug (the §3 table for `development`; production as of the orchestrator's run), the strict chain `0059 < ... < 0064 < 0065`, the deploy order (§4), that F196 and F197 are **latent** defects of shipped code that cannot manifest before a `sign_in` row exists (one `feat` migration, one commit per batch, not a `fix` with trailers), the forward-only caveat (once a `sign_in` row exists the widened vocabulary CHECKs cannot be narrowed back; rows are never deleted), and the three owner-path facts a reader must not miss: proof writes are owner-only, `people.user_id` is written by exactly two functions, and `presby_app` has no privilege on `account_invitations`.
+
+Every new definer: `language plpgsql security definer set search_path = public, pg_temp`, `#variable_conflict use_column`, `revoke all ... from public, presby_app, presby_platform`, then `grant execute ... to presby_app` for the callable ones only. Identity refusals raise one uniform literal (`'account_invitations: this sign-in invitation action is not permitted'`, SQLSTATE `42501`, through `presby_deny_sign_in_invitation()`, the 0052/0061 shape); state refusals are typed outcomes, exactly one row per call, id columns null and booleans false on any non-`ok` outcome.
+
+### 5.1 Sections, in file order
+
+| # | Section | Batch | Notes |
+|---|---|---|---|
+| 1 | Preconditions (stop-blocks, counts only) | A1 | `lower(users.email)` case-duplicates; any `account_invitations` row with `(purpose = 'sign_in') <> (origin = 'org')` (impossible today; states the tie's precondition); `to_regclass('user_totp')` not null (R42a reads it). Raises with counts, never a value |
+| 2 | Stale-proof clean-up | A1 | `update users set email_verified = null where email_verified is not null and exists (select 1 from audit_events a where a.action = 'user.email_changed' and a.resource_id = users.id::text)`; `raise notice` the row count only. No backfill. Idempotent (the predicate stops matching). See 1.2 item 3 |
+| 3 | `users_guard_email_proof` (R37) | A1 | below |
+| 4 | `users_email_lower_uq` (F187) | A1 | `create unique index if not exists users_email_lower_uq on users (lower(email))`, after the stop-block |
+| 5 | `account_invitations`: CHECKs, indexes, insert guard | A1 | `_purpose_allowed` adds `sign_in`; `_origin_allowed` adds `org`; new `_purpose_origin_tie`; `_names_by_purpose` adds `purpose <> 'sign_in' or (both names null)`; new `_sign_in_has_person`; `_blocked_reason_allowed` adds `person_deceased`; `open_address_uq` re-created **under the same name** with `purpose <> 'sign_in' and <open>`; new `open_sign_in_person_uq` on `(organization_id, person_id) where purpose = 'sign_in' and <open>`; new `person_created_ix` on `(person_id, created_at desc) where person_id is not null`; `presby_account_invitations_guard_insert` replaced (for `sign_in`, resend lineage compares organization, purpose, origin, `person_id` and `resend_count = parent + 1`, not the address (R33, F197); every other purpose keeps the address comparison verbatim; a `sign_in` row with no person is refused). `<open>` is the live predicate (`accepted_at, revoked_at, superseded_at, blocked_at` all null; no expiry term, so an expired open row still blocks until superseded, which the card handles) |
+| 6 | `people_guard_user_link` (F186) | A1 | below |
+| 7 | 0064 guard message (R43) | A1 | below |
+| 8 | Toggle seed (R47) | A1 | below |
+| 9 | Audit index | A1 | below |
+| 10 | Proof writers (R38 2 and 3) | A1 | below |
+| 11 | Helpers | A2 | `presby_membership_standing` (S13), `presby__actor_person`, `presby__person_sign_in_standing`, `presby__bind_person_account`, `presby_deny_sign_in_invitation` |
+| 12 | Issue core and callables | A2 | `presby_sign_in__check`, issue, resend, revoke, reader, card standing |
+| 13 | Accept core and presentations | A2 | `presby__accept_invitation_core`, `presby_accept_invitation` (wrapper), `presby_accept_in_place`, `presby_list_invitations_for_account`, `presby_preview_invitation` |
+| 14 | Connect | A2 | `presby_connect_signed_in_account` |
+| 15 | ACLs and comments | A2 | re-states every ACL so the end state does not depend on history; comments on every new object and on the three amended columns |
+
+Batches A1 and A2 are two commits to the same file: A1's end state is a complete, applyable file (sections 1-10), A2 appends 11-15. The file is applied twice at the end of each batch.
+
+### 5.2 `users_guard_email_proof` (section 3, R37)
+
+`presby_users_guard_email_proof()` (invoker, pinned `search_path`, reads only the catalog) and trigger `users_guard_email_proof` BEFORE INSERT OR UPDATE on `users`. The owner test is A1's, with no role named: `pg_class.relowner` for `TG_RELID` against the oid of `current_user`.
+
+- **Non-owner roles** (`presby_app`, `presby_platform`, any role added later): an INSERT with a non-null `email_verified` raises; an UPDATE that sets the stamp from null, or changes one non-null value to another, raises; clearing it to null is allowed. Message: `'users: email_verified is recorded only on the owner path, by presby_accept_invitation, presby_record_google_email_proof or presby_complete_email_change'`, SQLSTATE `insufficient_privilege`.
+- **Every role, the owner included:** if `lower(new.email)` differs from `lower(old.email)` and `new.email_verified` is not distinct from `old.email_verified`, set `new.email_verified := null`. An owner-path definer that changes an address must re-stamp explicitly with `clock_timestamp()` in the same statement (`presby_complete_email_change` does). A change of letter case only keeps the stamp.
+- **Consequence recorded for DECISION-225:** adding Auth.js's Email (magic-link) provider later needs an owner-path definer for its stamp, because the adapter would then write a non-null `emailVerified` as `presby_app`. It is not configured today.
+
+### 5.3 `people_guard_user_link` (section 6, F186, A1)
+
+Unchanged from Phase 3a: BEFORE INSERT OR UPDATE OF `user_id` on `people`; refuses a link transition whenever `current_user` is not the owner of `people`; no role named; no marker. **What changes is the writer list** (R44): after 0065 the function bodies that write `people.user_id` are exactly two, `presby__bind_person_account` (the `update ... where user_id is null`) and `presby__accept_invitation_core` (the `created_person` insert). Both are owner-path definers, so the trigger passes them and the A2 source scan stays as written.
+
+### 5.4 The 0064 guard message (section 7, R43)
+
+`create or replace function presby_contact_methods_guard_write()` from the **live** definition with exactly two message strings changed: both "verified_at is set only by presby_accept_invitation()" become `'contact_methods: verified_at is set only on the owner path, by invitation acceptance or by sign-in connection'`; the function comment and `comment on column contact_methods.verified_at` follow. Behaviour is byte-identical. `contact-methods.db.test.ts:50` (`GUARD_VERIFIED`) is updated in the same commit. R43's rule is pinned: `contact_methods.verified_at` is an **output** of linking and an **input to nothing**; a source scan on the 0065 bodies of connect, list, in-place and the standing core asserts none contains `verified_at`.
+
+### 5.5 Toggle seed and audit index (sections 8 and 9)
+
+- `insert into organization_feature_toggles (organization_id, feature_key, enabled, updated_by) select o.id, 'org_portal.sign_in_connect', true, null from organizations o on conflict (organization_id, feature_key) do nothing`. Explicit rows, not a code default, so DECISION-097's "missing row is off" stays unconditional. `do nothing` means a re-apply never switches back on a congregation that switched it off. Organizations created after 0065 get a row from `createOrganization()` through the catalog's `provisionedOn: true` (`org-provisioning.ts:495` loops the catalog). Organizations created by raw SQL (the e2e and Vitest fixtures) get none and are off, which is what keeps the existing fixtures unchanged.
+- `create index if not exists audit_events_sign_in_connected_ix on audit_events ((metadata->>'organizationId'), (metadata->>'personId')) where action = 'tenant.person.sign_in_connected'`. It serves the reader's `connected_via` date. A plain build on an append-only table takes a brief write lock; P4 gives the size.
+
+### 5.6 The proof writers (section 10, R38)
+
+Both on the owner path, granted to `presby_app`, revoked from `presby_platform`.
+
+```sql
+presby_record_google_email_proof(p_user_id uuid, p_address text) returns boolean
+presby_complete_email_change(p_token_hash text)
+  returns table (outcome text, user_id uuid, old_email text, new_email text)
+```
+
+- **Google proof:** one `UPDATE users SET email_verified = clock_timestamp() WHERE id = p_user_id AND is_active AND email_verified IS NULL AND lower(email) = lower(btrim(p_address))`; returns whether it stamped. A Google address that differs from the account's address stamps nothing; a null address returns false. **Accepted residual, `paper`:** the database cannot check a Google ID token, so any `presby_app` caller can call it. That is F187's class (the same role can already rewrite `users.password`). Mitigations: the single-call-site scan (§9, E-4) and that it only ever sets a stamp the account's own address already satisfies. F187 is recorded as narrowed further: proof writes are owner-only.
+- **Email change:** consumes the `email_verification_tokens` row `FOR UPDATE` (none: `invalid`); `expires_at` passed: deletes the row and returns `expired` (today's behaviour, kept); locks the user row; `UPDATE users SET email = <new_email>, email_verified = clock_timestamp()` in one statement, a `unique_violation` on `users_email_unique` or `users_email_lower_uq` returns `email_taken` and writes nothing (the token stays, as today); deletes the token row; returns `ok` with the old and new address so TypeScript writes the existing `USER_EMAIL_CHANGED` row in the same transaction. `EMAIL_CHANGE_OUTCOMES = invalid | expired | email_taken | ok` is pinned to the SQL literals. This keeps "verify your new address" truthful (the verification token proves the new mailbox) and is the only path that changes `users.email` after 0065 apart from owner-path fixtures.
+
+### 5.7 Helpers and the standing core (section 11, R40, R44)
+
+Owner only, no grant to any application role:
+
+```sql
+presby__actor_person(p_org uuid, p_user_id uuid, p_key text) returns uuid                 -- S6, unchanged
+presby__person_sign_in_standing(p_person uuid, p_org uuid)
+  returns table (refusal text, standing text, authority_bearing boolean,
+                 session_seat boolean, diaconate_seat boolean,
+                 role_keys text[], permission_keys text[])
+presby__bind_person_account(p_person uuid, p_user uuid, p_address text)
+  returns table (contact_method_id uuid, contact_method_created_at timestamptz)
+```
+
+**The standing core is the one place** that knows what makes a person eligible. Its output, and the fixed table every caller maps it through:
+
+- `refusal`, in this precedence: `person_merged` (`merged_into_id` set), `person_deceased` (`date_of_death` set), `membership_ended` (the membership at `p_org` has `ended_on` set; **no membership row at `p_org` is also `membership_ended`**, fail closed; callers that need `not_found` check the row first), `person_elsewhere` (a membership at any other organization, live or ended, R31), else null.
+- `standing`: `presby_membership_standing(m.current_roll, m.engagement_status)` for the person's live membership at `p_org` (S13; the classifier is a plain `language sql immutable` function with no definer and no `SET`, reads no table, EXECUTE to `presby_app`, first match wins: `listed`, `staff_anchor`, `visitor`, `inactive`, else `unclassified`; its values and order are R50's). **2b's callers test `standing = 'visitor'`** (today's semantics; Increment 3a changes only connect's condition and drops the acknowledgement). This is the Community Visitors list's predicate (`community.ts` `listPredicate('visitors')`), pinned equal by one test over roll null and every listed roll value (F177 condition 3); the single documented, fail-closed difference is a visitor-engagement membership carrying an unlisted non-null roll (1.2 item 6).
+- `session_seat`, `diaconate_seat`: an open or future seat (`gm.ends_on is null or gm.ends_on > current_date`, **no `starts_on` bound**) in the organization's derived `session` or `diaconate` group, read from `group_memberships` so whichever offices materialize there, Increment 2's pastors included, are covered.
+- `role_keys`, `permission_keys`: the set T of Phase 3 Refinement 3 as amended by A4 and A5: roles and permissions held through person-arm `role_grants` and through `role_grants` of any group the person belongs to that is **not** `membership_source = 'derived' and derived_from in ('active_membership','session','diaconate')`, every row `ends_on is null or ends_on > current_date`, no `starts_on` bound, `role_grants.organization_id = p_org`. The commission and delegation sources (resolver arms 3 and 4) are not modelled: they reach only people with a membership at another organization, which `person_elsewhere` refuses first.
+- `authority_bearing`: `session_seat or diaconate_seat or cardinality(role_keys) > 0`.
+
+| Core output | Issue and resend | Token accept (`sign_in`) | In-place accept | Connect | Reader |
+|---|---|---|---|---|---|
+| `person_merged` | `person_merged` | blocked `person_merged` | same | declined | `blocked` / `person_merged` |
+| `person_deceased` | `person_deceased` | blocked `person_deceased` | same | declined | `blocked` / `person_deceased` |
+| `membership_ended` | `membership_ended` | blocked `membership_ended` | same | declined | `blocked` / `membership_ended` |
+| `person_elsewhere` | `needs_support` (after `already_signs_in`) | blocked `person_elsewhere` | same | declined | `blocked` / `needs_support` |
+| `standing = 'visitor'` | `needs_acknowledgement` (reason `visitor`) | no re-check (acknowledged at send) | no re-check | declined | card note |
+| `session_seat` / `diaconate_seat` | `needs_officers_permission` unless the sender holds `officers.manage` | n/a | second factor required | second factor required | card note |
+| `permission_keys` | `exceeds_your_access` unless a subset of the sender's own effective permissions today | n/a | n/a (authority-bearing: second factor) | second factor required | card note |
+| `authority_bearing` | (via the two rows above) | n/a | second factor required | second factor required | card note |
+
+**Anti-drift pins:** (1) one DB matrix test drives every caller from one fixture table (merged, deceased, ended, two organizations live, two organizations one ended, visitor with and without a roll, a visitor-engagement membership with an unlisted roll value, staff anchor, elder seat, future-dated seat, person-arm grant, future-dated person-arm grant, managed-group grant, future-dated managed-group membership, ended grant, unclassified derived kind) and asserts each caller's verdict is the mapping above (`sign-in-standing.db.test.ts`); (2) a migration-text scan: `presby_membership_standing`'s call, the other-organization `exists` for R31 and the `derived_from in ('active_membership', 'session', 'diaconate')` closed list each occur in the core's body and in no other function body of 0065, and a **live-catalog scan** (`pg_proc.prosrc`) asserts the same over every function in the database, so a later migration that adds a second copy fails; (3) the same matrix asserts `findSharedAddressNotes`, `address_shared` and connect's candidate count agree on "another live person holds this address" for own-organization fixtures (§9, E-25).
+
+**The bind helper.** Runs `update people set user_id = p_user where id = p_person and user_id is null`, raises if exactly one row did not change (`'presby__bind_person_account: person % could not be linked'`, P0001, re-raised by the accept core's mapping exactly as today's `could not be linked` is, so it surfaces as `db_error`), then stamps `verified_at = now()` on the matching **active** email contact (`ended_at is null and lower(btrim(value)) = lower(btrim(p_address)) and verified_at is null`) and returns that contact's id and `created_at` (the connect audit row needs them). The accept core calls it for `linked_person`; connect calls it. The core's `created_person` insert stays where it is. **Pins:** a **live-catalog scan** asserts the functions whose source matches `update people set user_id` are exactly `{presby__bind_person_account}` and those matching `insert into people (...user_id...)` exactly `{presby__accept_invitation_core}` (checked on `development` today: `presby_accept_invitation` is the only match, which this migration replaces); `presby_link_person` and `presby_giving__autolink` do not write the column (read); the F186 trigger refuses every non-owner role; the A2 `src/` scan is unchanged.
+
+### 5.8 Issue, resend, revoke, reader (section 12)
+
+Signatures, outcomes, limits, lock order and the closed vocabularies are **Phase 3's API Contract section, unchanged**, with these amendments only:
+
+- `presby_sign_in__check` order (first failure wins): `not_found` (no membership at this organization) -> core refusals `person_merged`, `person_deceased`, `membership_ended` -> `already_signs_in` (`people.user_id` not null) -> core `person_elsewhere` as `needs_support` -> `needs_officers_permission` -> `exceeds_your_access` -> address -> `address_is_yours` -> `address_shared` -> `needs_acknowledgement`. The merged/deceased/ended-before-`already_signs_in` precedence of Phase 3 is preserved because the core's `person_elsewhere` is last in its precedence.
+- **Address:** `presby_person_email(person, 'credential')`. No row: `no_email_on_file`. The returned row's `do_not_contact` is the second acknowledgement reason. `address_changed` compares `lower(btrim(p_confirmed_address))` with the returned address. There is no `address_ambiguous` and no `address_invalid`.
+- `address_is_yours`: the resolved address equals the sender's own `users.email` (lowercased) while the person is not the sender; the only `users` row any of these functions reads is the sender's own (DECISION-189).
+- `address_shared` (R29): another person, **unmerged, not deceased, with a live membership at this organization**, holds the address as an **active** email (`ended_at is null`). Own-organization rows only; never `users`.
+- Limits: `SIGN_IN_INVITATION_LIMITS` (30 per organization, 30 per inviter, 3 per `(organization, address)` per rolling 24 hours, 5-minute cooldown, 5 resends per chain, 7 days) count `origin = 'org'` rows only and are bounded `created_at <= now()` (the 2099 fixtures), inside the organization lock. Unchanged.
+- **Reader** `presby_sign_in_invitation_states(p_person_ids uuid[], p_actor_user_id uuid)`: Phase 3's closed shape, plus two columns, `connected_via text` (`invitation`, `sign_in` or null) and `connected_on date`. `connected_via` is derived without reading `users`: `invitation` from this organization's accepted `account_invitations` row for the person, `sign_in` from the `tenant.person.sign_in_connected` audit row for this organization and person (the index in 5.5), whichever is earlier; null when the person was linked another way (a seed, a fixture). `address_current` and `invited_address` use `ended_at is null`. The closed column list is pinned by a source scan and by a `pg_proc` check, as Phase 3 says; `connected_via` and `connected_on` are added to it.
+- **New callable, one person only:** `presby_sign_in_card_standing(p_person_id uuid, p_actor_user_id uuid) returns table (standing text, authority_bearing boolean, address_shared boolean)`. Gate: `presby__actor_person(org, user, 'people.manage')`, else the uniform literal; no membership at this organization returns zero rows (indistinguishable from a missing id). It exists because the card needs the core's answers for its connect line and the batch reader (up to 500 ids, 25 to 50 in practice) must not run the core per row. Own-organization facts only (R46).
+
+### 5.9 The accept core and its two presentations (section 13, R45, Q2)
+
+**Mechanism.** The live `presby_accept_invitation` body (0064) is **moved**, not rewritten, into `presby__accept_invitation_core(p_invitation_id uuid, p_user_id uuid, p_password_hash text, p_first_name text, p_last_name text, p_presentation text, p_second_factor_verified boolean default false)` with the same 16 OUT columns. The implementer takes `pg_get_functiondef` of the live function, does the move, and records `diff` of the core against the live body: the **only** differences allowed are the five below. The parity golden is the gate (Test Plan, T-1).
+
+1. **Token resolution stays in the wrapper.** `presby_accept_invitation(p_token, ...)` keeps its signature, ACL, argument validation (exactly one of `p_user_id`, `p_password_hash`), the null-token `dead`, the hash and the id lookup (step 1); it then `return query select * from presby__accept_invitation_core(<id>, ..., 'token', false)`.
+2. **Presentation routing.** Every branch on `p_presentation` ends in `else raise exception ... using errcode = 'internal_error'` (R35 style). `'token'` runs the live steps 2 and 3 untouched. `'in_place'` runs: step 2 (organization lock, invitation lock and re-validation, `dead` if not open); for `sign_in` the unlocked currency check below; then the **user gate** (below).
+3. **Purpose routing (F196).** Steps 4, 5 and 6 each branch on `purpose` with `founding_administrator`, `treasurer` and `sign_in` named and `else raise ... 'internal_error'`; no branch treats "not X" as "Y". The treasurer and founding-administrator bodies are the live text.
+4. **`linked_person` calls the bind helper** instead of the inline `update people set user_id` and its row-count check (the stamp it performs is the same; the shared stamp statement after the person-mode block stays for the other modes). Observable behaviour is identical, including the failure mode (`db_error`).
+5. **Step 5's `unique_violation` arm names both constraints** (E1): `users_email_unique` and `users_email_lower_uq` map to `account_exists`, for every purpose and both presentations; the mapping-table comment is updated and the two tests that read it (`invitations.schema.test.ts:164-167`, `invitations.db.test.ts:1107`) now read the **core's** body.
+
+**`sign_in` branch** (both presentations), as Phase 3 specified, with the standing core replacing the hand-coded gates: step 2b unlocked currency (the invited address is still an active email, `ended_at is null`, `lower(btrim)`, of `v_inv.person_id`; a miss is `dead`, nothing written, before any honest non-terminal outcome can be reached); step 3 as above; step 4 locks the person `for update`, runs the locked `FOR SHARE` currency re-check on the contact row (R27's race authority; miss: `dead`), then the core: any `refusal` blocks with that reason (`person_merged`, `person_deceased`, `membership_ended`, `person_elsewhere`), then `person_linked_elsewhere` (the person already has a different user), then for an existing account `ambiguous_person` or `person_elsewhere` (the account is already another live person's); the same account on the same person is the harmless no-op (`person_mode = 'existing_person'`). Step 5 writes `people.user_id` through the bind helper and the matching contact's `verified_at`, **nothing else**: no role grant, designation, group or officer row. Step 6 returns `administration_role_key`, `office_role_key`, `permission_keys` and `treasurer_role_id` null.
+
+**In-place presentation.** `presby_accept_in_place(p_invitation_id uuid, p_user_id uuid, p_second_factor_verified boolean)` returns the core's 16-column shape. A null argument returns one `dead` row (no raise: uniform). Gate order, so that a foreign id is never an oracle:
+
+1. The invitation row is open (the core's step 2): any miss is `dead`.
+2. (`sign_in` only) the unlocked currency check: miss is `dead`.
+3. Lock the user row `for update`. `lower(users.email) = email_normalized` **and** `users.email_verified is not null` **and** `users.is_active`; any miss is **`dead`**, never `email_mismatch` or `account_inactive`.
+4. Mode is `existing_account` only (a password hash with an in-place call raises `invalid_parameter_value`).
+5. **Second factor** (R42, R45): for `founding_administrator` and `treasurer` always; for `sign_in` when the standing core says `authority_bearing`; required means a `user_totp` row for the user **and** `p_second_factor_verified`. A missing factor returns `needs_second_factor` (non-terminal, nothing written, the invitation stays open). For `sign_in` with an authority-free record the rule is the token path's G9 parity, enforced in TypeScript from the session claims exactly as `acceptSignedInAction` does today; the definer does not read `two_factor_required`.
+6. The purpose gates, unchanged.
+
+Only the core's step 3 and step 5-gate differ between presentations; everything else is shared, so the audit, the blocked reasons and the apply are one code path. **Audit:** the existing `invitation.accepted` row and, for FA and treasurer, the `org.*.designated` row, with `via: 'in_place'` and `secondFactor` added to the metadata of the in-place path only (the token path's rows are byte-for-byte unchanged, so no existing audit assertion moves).
+
+**Listing.** `presby_list_invitations_for_account(p_user_id uuid) returns table (invitation_id uuid, organization_name text, purpose text, expires_at timestamptz, person_display_name text)`. Open rows only (`accepted_at, revoked_at, superseded_at, blocked_at, redacted_at` null, `expires_at > now()`), and only when the account is active and proven and `lower(users.email) = email_normalized`; ordered by `created_at` (not returned); `person_display_name` only for `sign_in`, from `v_inv.person_id` (the G5 rule: the session matches by construction). It never returns a token hash, the inviter, the address, the person id or any other column. A source scan and a `pg_proc` check pin the closed shape.
+
+**Preview** (`presby_preview_invitation`) is re-created from the live 0064 text with the `sign_in` branch of Phase 3 (person from the token's row only, never resolved by address; `person_display_name` only when `session_matches`; the invitee name columns null; the currency check returns zero rows on a miss) and an explicit `else raise` on purpose.
+
+### 5.10 Connect (section 14, R41, R42)
+
+`presby_connect_signed_in_account(p_user_id uuid, p_second_factor_verified boolean)`, owner, granted to `presby_app`:
+
+```sql
+returns table (outcome text, organization_id uuid, organization_slug text, person_id uuid,
+               contact_method_id uuid, contact_method_created_at timestamptz,
+               session_seat boolean, diaconate_seat boolean,
+               role_keys text[], permission_keys text[])
+```
+
+`outcome` is one of `connected`, `already_connected`, `needs_second_factor`, `declined`; every other reason is the one `declined` literal. Checks, in order, all re-run under the locks:
+
+1. The account exists and is active. 2. It is proven: `users.email_verified is not null` (never `contact_methods.verified_at`). 3. It is not linked to any live person. If it is, the outcome is `already_connected` **only when that person has a live membership at an enterable organization** (so a second tab, or Check again after a sign-in connect, reads as success and `/launch` has somewhere real to go), otherwise `declined` (a user linked only to a not-yet-managed or ended relationship must not be redirected into a loop back to `/no-organization`). 4. No open invitation is addressed to its address (any organization, any purpose: FB5). 5. The candidate set C has **exactly one** person: C is every unmerged, not-deceased person who holds the address as an **active** email (exact `lower(btrim)`), has a live membership **anywhere**, and the set is global; two candidates in different organizations decline; no fuzzy, dot or plus folding. 6. That person's `user_id` is null. 7. The person has exactly one live membership and its organization is enterable in the sense of `isEnterableOrganization` (`platform_status = 'managed'`), pinned equal by a test. 8. `organization_feature_toggles` has an enabled `org_portal.sign_in_connect` row for that organization (an absent row declines). 9. The standing core's `refusal` is null. 10. The person's `standing` is not `visitor` (S13; Increment 3a will change this one condition). 11. If `authority_bearing`: the account has a `user_totp` row **and** `p_second_factor_verified`, else `needs_second_factor`.
+
+**Locking.** Resolve the candidate without locks; then lock in accept's global order, organization `FOR UPDATE`, user, person, matching contact `FOR SHARE`; re-run 3-11 under the locks (READ COMMITTED re-reads). A different order from accept can deadlock the two. Writes: the bind helper only. **Nothing else is written**: no membership, role grant, group or officer row. The function reads no `is_platform_admin` and no platform predicate (pinned by scan); a platform administrator connects only as any person does, to a record the rules allow, and the audit row lets a reviewer see it (DECISION-183).
+
+**Two call sites, and only two** (§7): the `jwt` sign-in branch (`via: 'sign_in'`, `p_second_factor_verified` always false there) and the Check-again action (`via: 'check_again'`).
+
+### 5.11 ACLs
+
+`presby_app` EXECUTE on exactly these fifteen: `presby_issue_sign_in_invitation`, `presby_resend_sign_in_invitation`, `presby_revoke_sign_in_invitation`, `presby_sign_in_invitation_states`, `presby_sign_in_card_standing`, `presby_accept_invitation`, `presby_accept_in_place`, `presby_preview_invitation`, `presby_list_invitations_for_account`, `presby_connect_signed_in_account`, `presby_record_google_email_proof`, `presby_complete_email_change`, `presby_deny_sign_in_invitation`, `presby_membership_standing` (S13), and the 0064 `presby_person_email` (unchanged). None to `presby_platform`. The internal functions (`presby__actor_person`, `presby__person_sign_in_standing`, `presby__bind_person_account`, `presby__accept_invitation_core`, `presby_sign_in__check`) have no EXECUTE for `public`, `presby_app` or `presby_platform`; a test asserts `has_function_privilege` false for each. `presby_app` holds no privilege on `account_invitations` (unchanged).
+
+### 5.12 Drizzle mirrors and staged assets (Rule 16)
+
+`src/lib/db/domain/invitations.ts` (purposes, origins, blocked reasons widened; the new CHECKs and indexes; the re-predicated `open_address_uq`), `src/lib/db/schema.ts` (`users_email_lower_uq`, `users` comment text), `src/lib/db/domain/people.ts` (`user_id` comment). `check:schema-parity` runs; `npm run docs:erd` regenerates `/developer`. Staged for the orchestrator: `scripts/sign-in-invitations/test-rls-65.sql` (§8.2), `scripts/sign-in-invitations/seed-dev-sign-in.sql` (known-token rows, 2099-dated where they must never expire, **and the toggle rows**: `insert into organization_feature_toggles ... select ... from organizations on conflict do nothing`, because `seed-dev.sql` creates organizations after the migration has run on an empty database and would otherwise leave every seeded organization with auto-connect off), `scripts/sign-in-invitations/test-rls.sql.integration.patch` (a unified diff against the **current** `scripts/test-rls.sql`, anchored by content; converts section 44's `presby_app` link writes at `:8036, :8235, :8239`). `scripts/giving/test-rls-46.sql` is not a Rule 16 file and is edited directly in A2 at its nine lines (each block switches to a seeded linked person or the assertion moves to the owner connection; fallback if a block cannot be converted cheaply: the assertion moves to the owner connection and F186's `presby_app` guard still lands). `docs/schema-design.md` gets a section in A2.
+
+## 6. Permissions, flags, audit keys and the email registry
+
+- **No new `FEATURES.*` key and no new tenant permission** (`src/lib/permissions.ts` stays frozen). Used, all existing: `people.manage` (every send, resend, cancel, read, marker and card); `officers.manage` (additionally, to invite a person holding a Session or Board of Deacons seat, and to see the Session hand-off rows); `org_features.manage` (the toggle, on the existing features page); the sender's own effective permissions (R21).
+- **Connect, in-place accept and the listing use no permission at all.** They are an identity binding gated by database facts about the authenticated account (R37 proof, R42 factor) and about the record (R40 standing), not by a role. Neither maps into `FEATURES.*`, a session claim or the resolver (the third mechanism, DECISION-147/183/228). The account's identity is `auth()`'s user id, passed by the application (§9, E-30).
+- **Flags: none new** (operator memory: per-org toggles, no new global flags before go-live). The Community surfaces (card, markers, Session hand-off) keep riding `org_portal.members_create` and its organization toggle; `/no-organization` and its actions are platform pages and ride neither. `auth.local_login` and `auth.require_2fa` are **not read** by connect, the listing or the in-place definer (R42 is a property of the act, not of the session gate). **The one new setting is a tenant toggle (R47):**
+
+  | Field | Value |
+  |---|---|
+  | key | `org_portal.sign_in_connect` |
+  | name | "Connect people when they sign in" |
+  | category / flag / provisionedOn / orgTypes / operatorEnabled | `people` / `null` / **`true`** / `null` (every organization type) / `false` |
+  | who changes it | `org_features.manage`, from the existing features page (it appears there automatically; `toggleOrgFeature` audits `org.feature.toggled`) |
+  | reach | auto-connect only. Never invitations, never in-place accept, never an existing connection. It grants nothing |
+  | read by | the connect definer, from the row only (an absent row declines; the category-curation axis is **not** consulted, DECISION-097 and the R6 precedent that a curation preference never changes a security behaviour); the card and banners read it in TypeScript with `orgFeatureEnabledInTx(tx, org, key, false)` |
+
+- **Default role bindings:** none (nothing is seeded). A founding administrator (`people.manage`, `officers.manage`) can invite everyone the rules allow; a `people.manage`-only holder can invite people who hold no authority beyond the baseline and sees, never sends for, a Session seat.
+- **Audit (Workflow Rule 7).** Two new keys in `AUDIT_ACTIONS`: `TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected"` and `USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded"`; both written with `insertAuditRow(tx, ...)` in the transaction that made the change, so a throw rolls the change back. Reused: `INVITATION_CREATED / RESENT / REVOKED / ACCEPTED / ACCEPT_BLOCKED`, `ORG_FOUNDING_ADMINISTRATOR_DESIGNATED`, `ORG_TREASURER_DESIGNATED`, `USER_CREATED_VIA_INVITATION`, `USER_EMAIL_CHANGED`, `ORG_FEATURE_TOGGLED`. **Declines write nothing.** Metadata is ids, enums and booleans only; the closed key lists are pinned by test (§9, E-29). `audit.ts`'s comment block is updated ("actor = the platform operator, or the congregation's sender for origin `org`, or the account itself for a connection or an in-place acceptance").
+- **Email registry (ER14):** `EMAIL_AUDIENCE` gains `account_sign_in_invitation: "person:credential"` and `CREDENTIAL_TEMPLATE_KEYS` gains the same key, **in the batch that adds the sender (B2)**. `email-audience.test.ts` fails on a sender with no registry entry and on a registry entry no sender uses, so the two must land together.
+- **Rollback:** the toggle stops new connections at one congregation (existing ones stay: there is no disconnect); the platform's `org_sent` revoke-all kills open sign-in links; the functions, triggers and indexes are droppable. Already-sent links still accept (token-only) and in-place cards disappear when their rows are revoked, which is why the revoke lever exists. **Forward-only caveat:** once any `sign_in` row exists the widened vocabulary CHECKs cannot be narrowed back (rows are never deleted); a rollback leaves them, harmlessly.
+
+## 7. TypeScript: files, contracts and boundaries
+
+### 7.1 `src/auth.ts`: the only place proof is recorded and connect runs at sign-in (R39)
+
+Inside the existing `if (user?.id)` branch of `jwt()`, after `ensureDefaultRole(...)` and before the `lastLoginAt` update, so that **both run before `token.twoFactorRequired` is computed further down** and a congregation's two-factor requirement applies to the new link in the same cookie. Two independent `try`/`catch` blocks; a failure of either never fails sign-in and logs an error class only (no address, no id):
+
+```ts
+let proof: "google" | "account" = "account";
+try {
+  if (account?.provider === "google" && profile?.email_verified === true && profile.email) {
+    if (await recordGoogleEmailProof({ userId: user.id, address: profile.email })) proof = "google";
+  }
+} catch { console.error("[auth] email proof failed"); }
+try {
+  await connectSignedInAccount({ userId: user.id, via: "sign_in", proof, actorEmail: user.email ?? null });
+} catch { console.error("[auth] connect failed"); }
+```
+
+- `profile.email_verified === true` is a **defensive re-check** of the claim F231's gate in `evaluateSignIn` already enforces (DECISION-246, shipping first); 2b does not add or change the gate. A browser cannot reach this branch with a payload: it runs only from a real provider or Credentials callback.
+- **No new session claim.** Connection is derived at `/launch` from the database. `twoFactorVerified` stays `false` at sign-in, as it always is; the connect call therefore carries no factor flag here (the type below makes passing one a compile error).
+- **Nothing in 2b reads the `jwt` update payload**, and **no 2b file imports `two-factor-grant.ts`** (DECISION-230): the actions below call `unstable_update({})` with an empty payload. Scans pin both (§9, E-39).
+- This is an auth-touching diff (`src/auth.ts`, `src/lib/auth/`): the Phase 4 login-smoke gate applies at the end of B1 (§13.2).
+
+### 7.2 Server-only modules (new unless marked)
+
+| File | Contract |
+|---|---|
+| `src/lib/auth/email-proof.ts` | `recordGoogleEmailProof({ userId, address }): Promise<boolean>`. One `db.transaction`: calls `presby_record_google_email_proof`; when it returns true, `insertAuditRow` `USER_EMAIL_PROOF_RECORDED { source: "google" }` (resource = the user). Names only `users`-side objects, so scan 3 passes |
+| `src/lib/auth/email-change.ts` | `completeEmailChange(rawToken): Promise<{ kind: "ok" } \| { kind: "invalid" } \| { kind: "expired" } \| { kind: "email_taken" } \| { kind: "error" }>`. Hashes the token (sha256 hex, as the page does today), calls `presby_complete_email_change` in one transaction, and on `ok` writes the existing `USER_EMAIL_CHANGED` row (same shape, same `oldEmail`/`newEmail` metadata) in that transaction. `(email-verify)/account/verify-email/[token]/page.tsx` becomes a thin caller; its three user-facing messages are kept byte for byte |
+| `src/lib/onboarding/connect.ts` | See below. **Must not name** `contact_methods`, `contactMethods`, `contact-methods`, `presby_person_email` or `getPersonEmail` (R43; scan 3c) |
+| `src/lib/onboarding/accept.ts` (modified) | `acceptInvitationInPlace({ invitationId, userId, email, secondFactorVerified }): Promise<AcceptResult>` calls `presby_accept_in_place` in one transaction and writes the audit rows through the **same** writer the token path uses (`writeAcceptedAudit(tx, row, { via, secondFactor })`); the token path's rows are unchanged byte for byte; `AcceptResult` gains `{ kind: "needs_second_factor" }`; `blocked` carries `purpose` (Phase 3 refinement 9); the post-accept audit switch is exhaustive on purpose (`sign_in` writes `INVITATION_ACCEPTED` and, for a new account, `USER_CREATED_VIA_INVITATION`, and **no** `org.*.designated` row; an unknown purpose throws and rolls back, F196's TypeScript half) |
+| `src/lib/onboarding/in-place.ts` | `listInvitationsForAccount(userId): Promise<InPlaceInvitation[]>`; throws on a database error (the page turns that into N5); returns the listing's closed shape only |
+| `src/lib/onboarding/org-invite.ts` etc. | Phase 3's library (send, resend, revoke, card, markers, Session rows) with: the address from the credential reader, the card additions below, no `address_ambiguous` or `address_invalid`, and the queue row's `to` always the address the definer returned |
+| `src/lib/onboarding/sign-in-types.ts`, `sign-in-copy.ts`, `no-organization-copy.ts` | Pure, client-safe. Phase 3's modules, plus the connect-line derivation and the `/no-organization` strings (below) |
+
+**`connect.ts`:**
+
+```ts
+export type ConnectInput =
+  | { userId: string; via: "sign_in"; proof: "google" | "account"; actorEmail?: string | null }
+  | { userId: string; via: "check_again"; secondFactorVerified: boolean; actorEmail?: string | null };
+export type ConnectResult =
+  | { kind: "connected"; organizationSlug: string }
+  | { kind: "already_connected" }
+  | { kind: "needs_second_factor" }
+  | { kind: "declined" }
+  | { kind: "error" };
+connectSignedInAccount(input: ConnectInput): Promise<ConnectResult>
+```
+
+One `db.transaction`: `set local lock_timeout = '3s'` (a connect must never hold up a sign-in; a lock timeout is an `error`, swallowed), call `presby_connect_signed_in_account(userId, secondFactorVerified)` (the `sign_in` variant passes `false`), and on `connected` write `TENANT_PERSON_SIGN_IN_CONNECTED` in the same transaction with exactly these metadata keys: `organizationId`, `personId`, `contactMethodId`, `contactMethodCreatedAt` (ISO, so a reviewer can join to the `tenant.person_email.added` row and its actor), `via`, `proof`, `secondFactor` (the flag passed), and `authority: { sessionSeat, diaconateSeat, roleKeys, permissionKeys }`. No address, no name, no token. The actor is the account itself. A throw from the audit insert rolls the link back. `UUID_RE`-validates `userId` before any call.
+
+### 7.3 `/no-organization` actions (`src/app/no-organization/actions.ts`, `'use server'`)
+
+`no-organization` is a route directly under `app/`, not a route group: platform palette, `db` definers only, no `getPlatformDb()`, its existing `loading.tsx` stays (the page always renders). The actions hold no `db.*` call of their own and write no audit row of their own (the lib functions do), so `check:audit` passes vacuously, as in Increment 2.
+
+```ts
+export type NoOrgActionState =
+  | { status: "idle" }
+  | { status: "nothing_new" }
+  | { status: "needs_second_factor" }
+  | { status: "error"; code: "not_signed_in" | "rate_limited" | "dead" | "blocked" | "invalid_input" | "db_error"; message: string };
+
+checkAgainAction(prev: NoOrgActionState, formData: FormData): Promise<NoOrgActionState>
+acceptInPlaceAction(prev: NoOrgActionState, formData: FormData): Promise<NoOrgActionState>   // field: invitationId
+switchAccountAction(): Promise<void>                                                         // signs out, returns to /signin?callbackUrl=/launch
+```
+
+- **Identity from `auth()` only**; the form supplies only an `invitationId` (UUID-validated; selection, not identity). Neither action takes a redirect target. The post-accept `next` is built from the definer's slug exactly as `acceptSignedInAction` does.
+- `checkAgainAction`: `checkRateLimit('no_org_check:<userId>', { max: 30, windowSeconds: 3600 })`; `connectSignedInAccount({ userId, via: "check_again", secondFactorVerified: session.user.twoFactorVerified === true })`; `connected` or `already_connected` -> `unstable_update({})` (best effort; the connect is committed) -> `redirect("/launch")`; `needs_second_factor` -> that state; `declined` -> `nothing_new`; `error` -> `db_error`.
+- `acceptInPlaceAction`: `checkRateLimit('no_org_accept:<userId>', { max: 20, windowSeconds: 3600 })`; the G9 parity pre-check in TypeScript (`session.user.twoFactorRequired && !session.user.twoFactorVerified` -> `needs_second_factor`, before the database); `acceptInvitationInPlace(...)`; `accepted` -> `unstable_update({})` -> `redirect('/launch?next=' + encodeURIComponent('/o/' + slug))`; `dead` -> `error/dead`; `blocked` -> `error/blocked` with `inviteeBlockedCopy(purpose, reason)`; `needs_second_factor` -> that state; `db_error` -> `error/db_error`.
+- The `/totp` hop is `/totp?callbackUrl=/no-organization`, a fixed same-origin path that `sanitizeCallbackUrl` already allows (pinned by a test in `safe-callback.test.ts`).
+
+### 7.4 Boundaries (source scans)
+
+`scan.test.ts` section 3 (R43): the assertion is **unchanged**; its title becomes "auth paths never read contact emails; they may ask the connect definer to identify a person". New **3b**: among the auth roots, only `src/auth.ts` imports `@/lib/onboarding/connect`, exactly once. New **3c**: `connect.ts` and everything under `src/app/no-organization/` name neither the table, the module, `presby_person_email` nor `getPersonEmail`; identification lives in SQL only. `boundaries.test.ts` gains: `src/app/no-organization/**` never imports `getPlatformDb`; `connectSignedInAccount` is referenced in exactly `src/auth.ts` and `src/app/no-organization/actions.ts` and `presby_connect_signed_in_account` in exactly `connect.ts`; `recordGoogleEmailProof` is referenced only by `src/auth.ts` and its call sits in the same block as the `provider === "google"` test; `presby_record_google_email_proof` is named only in `email-proof.ts`; no non-test file under `src/app/no-organization/`, `connect.ts`, `email-proof.ts`, `email-change.ts` or `in-place.ts` imports `two-factor-grant` or reads an update payload; no connect, standing or listing function body in 0065 contains `is_platform_admin` or `verified_at`; Phase 3's five `org-invite.ts` properties and the A2 `people.userId` write scan stand. Every scan carries a deliberately offending sample string that proves it can fail.
+
+### 7.5 Other library changes
+
+`org-features.ts` (the catalog entry above; `org-provisioning.ts` needs no change, it loops `provisionedOn`); `audit.ts` (two keys, comment block); `store.ts` `findSharedAddressNotes` (`p2.date_of_death is null`, 1.2 item 5); `labels.ts` (`PURPOSE_LABEL.sign_in`, `person_deceased` in both blocked tables, `inviteeBlockedCopy(purpose, reason)` with the neutral `sign_in` variants, new `INVITATION_DEAD_IN_PLACE_COPY`); `invitation-copy.ts` (`acceptanceSentence` drops "from the email"); `invitation-email.ts` (exhaustive per-purpose copy, `senderName`); `issue.ts` (Phase 3's platform-side fixes: `origin = 'platform'` in all three limit counts, resend and revoke select platform rows only, `listInvitationsForOrg` platform rows only, `revokeAllOpenInvitations({ scope })`, `summarizeOrgSentInvitations` masked in SQL); `queue.ts` (optional `id`); `credential-keys.ts`; `src/lib/db/domain/*` mirrors; the community edit page's `actions.ts` (three actions, Phase 3).
+
+### 7.6 The page's pure derivation
+
+`src/app/no-organization/view.ts` (no `server-only`): `deriveNoOrganizationView({ enterable, pending, notTenants, ended, invitations, invitationsFailed, session: { twoFactorRequired, twoFactorVerified }, enrolled })` returns a closed view model: `already_have_access` (unchanged), or the existing heading block (`pending` > `not_tenants` > `ended`, in that precedence, unchanged), or `invited` (one or more cards; the default heading and the "Ask the office" section are hidden, Check again is hidden because an open invitation blocks auto-connect, FB5), or `default` (N0); plus `listFailed` (N5, shown above whichever block renders, never replacing the page), `secondFactorNeeded` per card and the enrolment variant. Each card's second-factor flag is `purpose in (founding_administrator, treasurer) || (session.twoFactorRequired)` and not yet verified. A unit test table covers every combination (§9, E-21).
+
+### 7.7 Card additions (Community edit page)
+
+`getSignInCard` also calls `presby_sign_in_card_standing` and reads the toggle in the same organization transaction, and returns `connectOutlook`, a pure derivation in `sign-in-types.ts` (`connectOutlook({ state, hasAddress, standing, authorityBearing, addressShared, selfConnectEnabled, connectedVia })`) with a closed result: `connected`, `by_sign_in`, `by_sign_in_second_factor`, `visitor`, `shared_address`, `turned_off`, `none`. Own-organization facts only (R46); the card never reads `users` (DECISION-189).
+
+## 8. Component and page plan, and the test plan
+
+### 8.1 Components and pages
+
+**To create** (`src/app/no-organization/` unless noted): `view.ts` (pure, §7.6), `invitation-cards.tsx` (server: one card per open invitation, ordered by the listing), `accept-in-place-form.tsx` and `check-again-form.tsx` (small client islands using `useActionState`, the `(invite)` accept forms' precedent; **no `useForm`**, so `check:hydration-gate` does not apply; both buttons disabled until `useHydrated()` and 44px, so a hydration spec is the guard), `second-factor-notice.tsx` (presentational: the N2 line and the connect line with one `Link` to `/totp?callbackUrl=/no-organization`), `switch-account-form.tsx` (a `<form action={switchAccountAction}>` styled as a link), `actions.ts`, `no-organization-copy.ts` in `src/lib/onboarding/`. Phase 3's list stands: `[id]/edit/sign-in-card.tsx`, `sign-in-marker.tsx`, `pending/session-sign-in-rows.tsx`, the platform org-sent panel.
+
+**To modify:**
+
+- `src/app/no-organization/page.tsx`: composition by `deriveNoOrganizationView`. Reads `listInvitationsForAccount` in a `try`/`catch` (N5), and `user_totp` (is the account enrolled, for the N2 variants). The existing `pending`, `notTenants`, `ended` blocks and the "Is your church not on PresbyPortal?" door are unchanged; the "Ask your church administrator" section is replaced by N0's "Ask the office that keeps your records" and shown only in the `default` view. The page stays a Server Component and platform palette; `loading.tsx` stays.
+- Increment 2's `pending/session-state-banner.tsx`: `NO_SIGN_IN_INVITE_LINE` is replaced (binding constraint 284a) by the hand-off, shown **only in `no_sign_in`, never in `terms_not_started`** (284b); the `no_sign_in`, `terms_not_started` and `no_permission` strings are reworded (§10 group F). The rows and their links render only when `listSessionSignInRows` returned `ok` (the viewer holds `people.manage` **and** `officers.manage`); any other viewer gets the sentence with no link (284e: the invite needs `people.manage`, so a read-mode viewer is never pointed at a page they cannot open).
+- `officers/officer-roster.tsx` and `officers/page.tsx`: the R26 marker on Session roster rows beside "Self-recorded" (284c), fed by `getSignInMarkers` once per page, only when the viewer holds `people.manage`; `officers/session-note.tsx` reworded. The Staff page stays a follow-up.
+- `pending/decision-copy.ts`: `WITHDRAW_COPY.already_decided` (TODO 282b).
+- `community/[id]/edit/page.tsx` and the card: the connect line, the connected line, and the card standing (§7.7). `page.tsx`, `members-list.tsx`, `community-rows-list.tsx`: markers (Phase 3), label "Not connected yet".
+- `(invite)/*`, the platform organization page and its actions, `verify-email/[token]/page.tsx`, `src/lib/onboarding/{accept,issue,invitation-email,invitation-copy,labels}.ts`: as Phase 3 and §7.
+
+### 8.2 `scripts/sign-in-invitations/test-rls-65.sql` outline (as `presby_app`; every block that writes ends in `rollback`)
+
+Header modelled on `scripts/invitations/test-rls-59.sql` and `scripts/person-emails/test-rls-64.sql`; integrated by `\ir sign-in-invitations/test-rls-65.sql`.
+
+1. **Structure and privileges.** `presby_app` has no privilege on `account_invitations`; `has_function_privilege` true for exactly the fifteen callables of 5.11 and false for the five internals; the CHECKs, indexes and both triggers present; `users_email_lower_uq` present.
+2. **F186.** `update people set user_id` and an `insert` with a non-null `user_id` raise the exact literal as `presby_app`; an insert with a null `user_id` passes.
+3. **R37.** `presby_app` inserting a `users` row with `email_verified` raises; stamping from null raises; clearing passes; (the stamped fixture is a user created by the sanctioned new-account accept) a letter-case-only change keeps the stamp, an address change clears it.
+4. **R38.** `presby_record_google_email_proof`: stamps an active unstamped user whose address matches (true), then false on a second call, false for a different address, false for an inactive user. `presby_complete_email_change`: a token row written by `presby_app` -> `ok` (email changed, stamp set, token gone); an expired token -> `expired` and the row is gone; an address held by another account in a different case -> `email_taken`, nothing written.
+5. **Identity refusals** with the exact literal (no organization context, a user without `people.manage`, null actor, another organization's context) for issue, resend, revoke, reader and card standing.
+6. **The sanctioned invitation flow** end to end as the seeded founding administrator (issue to a seeded elder fixture, preview by token, accept as the seeded account, `people.user_id` linked, a second accept is `dead`).
+7. **Connect.** The G18 matrix at the SQL level over seeded fixtures: authority-free connects (`connected`, `user_id` set, the contact stamped, a second call `already_connected`); visitor, shared address, unproven account, inactive account, toggle off, toggle row absent, open invitation to the address, a person at two organizations, an unmanaged organization: each `declined`; an authority-bearing record with `p_second_factor_verified = false` is `needs_second_factor`, with a `user_totp` row and `true` it connects, with `true` and no row it is still `needs_second_factor`. Nothing but `people.user_id` and `contact_methods.verified_at` changes (before and after row-count digests).
+8. **In-place.** The listing returns only the proven account's open rows in the closed shape; a foreign invitation id, an address mismatch, an unproven account and an inactive account each return `dead`; the second-factor table (FA and treasurer always; `sign_in` authority-bearing; `sign_in` authority-free passes) gives `needs_second_factor` or an accept; an accepted `sign_in` writes no `role_grants`, `app_roles`, `group_memberships` or `officer_terms` row.
+9. **Reader and card standing.** The closed shape; `connected_via` and `connected_on` for an accepted invitation and for a connect audit row; an id from another organization is absent; a non-manager raises the literal.
+10. **Isolation.** A `sign_in` row is visible to no other organization's context; limits refuse the 31st send.
+
+What `presby_app` cannot reach (the second-role trigger case, the owner-path behaviour, the stop-blocks, the clean-up, concurrency, the live-catalog scans) is Vitest's.
+
+### 8.3 Implementer-written tests (new or changed; the unchanged Phase 3 Test Plan 1.1 to 1.9 stands with the edits in 1.1 of this amendment)
+
+| Id | File | Batch | Proves |
+|---|---|---|---|
+| T-1 | `designation-parity.db.test.ts` (existing, **unedited**) and new `designation-parity-in-place.db.test.ts` | A2 | The golden is byte-identical with `WRITE_DESIGNATION_GOLDEN` unset (`git diff --exit-code src/lib/onboarding/designation-parity.golden.json` is a gate). The twin runs every golden scenario in place (proven account, factor verified) and requires the result rows to equal the token path's, except `dead` and `needs_second_factor`: the anti-fork test |
+| T-2 | `src/lib/db/domain/email-proof.db.test.ts` | A1 | R37 in both directions (non-owner stamp raises; address change clears; case-only keeps; clear allowed; a second non-owner role, as in A1's test); the clean-up on a scratch copy (a stamped user with a `user.email_changed` row is cleared, an un-audited one kept); the stop-block raises with a count and no address |
+| T-3 | same file | A1 | R38 writers (every condition of 5.6), `presby_complete_email_change` outcomes, two-connection race of two verifies, one token used once |
+| T-4 | `sign-in-invitations.db.test.ts`, `sign-in-accept.db.test.ts` (Phase 3 Test Plan 1.1 to 1.5, adjusted) | A1/A2 | The vocabulary, guards, indexes, R27 both directions, F186 incl. a second non-owner role, F187 and E1 (both orders of a case-variant duplicate; the `users_email_lower_uq` race maps to `account_exists` for every purpose), the reader, with `address_ambiguous`/`address_invalid` removed and `ended_at is null` added to every contact fixture |
+| T-5 | `sign-in-standing.db.test.ts` | A2 | R40: the fixture matrix of 5.7 drives every caller and asserts the mapping table; the classifier-based visitor test equals `listPredicate('visitors')` over roll null and every listed roll value, with the one unlisted-roll difference asserted by name; the three migration-text and live-catalog scans; `findSharedAddressNotes`, `address_shared` and connect's candidate count agree on own-organization fixtures |
+| T-6 | `connect.db.test.ts` | A2 | R41: the whole G18 matrix (shared address; shared with a deceased person and with an ended person; a person linked to another account; a match in two organizations; an ended address; an unmanaged and an `invited` organization, `managed` equal to `isEnterableOrganization`; a merged person; an already-linked user; a different-case address; a lookalike (IDN/homograph) address; a plus-tagged address; a visitor with and without a roll; a staff anchor; a Session seat; a future-dated seat; a person-arm grant; a managed-group grant; an inactive and an unproven account; the toggle off and absent; an open invitation to the address (any purpose, any organization) and an expired one); R42 (no `user_totp` row, flag false, both; the audit snapshot); the lock order and the two-connection races (connect vs address edit, vs token accept, vs in-place accept, vs a second connect); `lock_timeout` surfaces as an error not a hang; nothing but `people.user_id` and `verified_at` changes; no platform predicate |
+| T-7 | `accept-in-place.db.test.ts` | A2 | R45: gate order (a foreign id, an address mismatch, an unproven and an inactive account are each `dead`); the second-factor table; `needs_second_factor` leaves the invitation open and the token live; the listing's closed shape and `pg_proc` check; the in-place audit fields are TypeScript's (T-9) |
+| T-8 | `invitations.schema.test.ts`, `invitations.db.test.ts` (existing, **edited**) | A1/A2 | Constraint, index and purpose lists; the exception-mapping table now read from the **core's** body and naming both constraints; function ACLs; the live-catalog writer scans of 5.7 |
+| T-9 | `connect.test.ts`, `email-proof.test.ts`, `email-change.test.ts`, `src/auth.connect.test.ts`, `accept.test.ts` (in-place) | B1/B2 | The `jwt` branch with mocked modules: proof only for a Google provider with a true claim, connect always attempted, a throw in either never fails sign-in and logs no `@`, both run before `twoFactorRequired` is computed; `connectSignedInAccount` audit keys are the closed list and a forced throw from `insertAuditRow` leaves no link; the in-place audit rows carry `via` and `secondFactor` and the token path's are unchanged; `needs_second_factor` before the database for G9 parity |
+| T-10 | `org-invite.test.ts`, `issue.test.ts`, `people`-side edits | B2 | Phase 3 Test Plan 1.6 to 1.9, minus the F199 items |
+| T-11 | `boundaries.test.ts`, `scan.test.ts` additions | B1/B2 | §7.4, each with an offending sample |
+| T-12 | RTL: `no-organization/page.test.tsx` (rewritten), `view.test.ts`, the two forms, `second-factor-notice`, banner, officer roster, card, markers, `(invite)` states | C | Every string of §10 by exact text from the copy modules; `deriveNoOrganizationView` over every combination |
+| T-13 | `org-feature-catalog.test.ts`, `org-provisioning.test.ts`, `features-list.test.tsx` (edited) | B2 | The new catalog entry; a new congregation gets the row (§8.4) |
+| T-14 | e2e | D | §8.5 |
+
+### 8.4 Existing tests, specs and fixtures this change alters (blast radius)
+
+| Existing | Asserts today | Change |
+|---|---|---|
+| `scripts/test-rls.sql:8036, 8235, 8239`; `scripts/giving/test-rls-46.sql:646, 957, 989, 1402, 1509, 1549, 1567, 1628, 1685` | `presby_app` writes `people.user_id` | Converted in A2 (F186); the first via the staged patch, the second directly |
+| `contact-methods.db.test.ts:50` | the guard message regex | updated with the message (A1) |
+| `invitations.schema.test.ts:164-167`, `invitations.db.test.ts:1107` and the `open_address_uq` predicate pin | the exception-mapping text and index definition | read the core; name both constraints; new predicate (A1/A2) |
+| `designation-parity.db.test.ts` and `.golden.json` | FA and treasurer behaviour | **must not change** (T-1) |
+| `accept.db.test.ts`, `issue.db.test.ts`, `designation-holders.db.test.ts`, `scripts/invitations/test-rls-59.sql`, `scripts/designation-revoke/test-rls-60.sql` | acceptance, platform issue, revoke | re-run unedited as the old-code-against-new-schema lane (E-33), then edited only where Phase 3 Test Plan 3 says (per-origin counts, `scope`) |
+| `org-feature-catalog.test.ts:66-76` | toggle-only keys and `provisionedOn` list (`["org_portal.calendar"]`) | the new key joins both; the provisioned list becomes two |
+| `org-provisioning.test.ts:340` | a congregation gets exactly the calendar toggle row | now two rows |
+| `features-list.test.tsx`, `features/page.test.tsx` | catalog-driven | the new entry renders; re-run, fix by role and name |
+| `src/app/no-organization/page.test.tsx` (3 of 4 tests) | "open the link in your invitation email", "Signing in doesn't connect you to a congregation by itself", "address it was sent to." | rewritten to §10 group A; the PresbyPortal-not-presby test stays |
+| `e2e/post-login-routing.spec.ts:73-83` (case 2) | heading `/not connected to a congregation/i` **and** `/ask your church administrator/i` | the heading is kept (N0 keeps it); the second locator becomes `/ask the office that keeps your records/i` (TODO 137 already names this locator) |
+| `e2e/post-login-routing.spec.ts` case 8 (`org-unmanaged`) | `/isn't set up on PresbyPortal yet/i` | unchanged; re-run |
+| `e2e/member-home.spec.ts:90` | path `/no-organization`, no Admin link | unchanged; re-run (the seeded `member` is unlinked, stamped and matches no person: G22 = 0) |
+| `scan.test.ts` section 3 | auth roots name no contact objects | retitled; 3b and 3c added |
+| `email-audience.test.ts`, `queue-credential.test.ts:117` | registry and credential keys | the sign-in key (B2) |
+| `invitation-copy.test.ts`, `designation-holder-copy.golden.test.ts`, `invitation-list.test.tsx:144,167`, `invitation-sent-notice.test.tsx:68,82,89`, `treasurer-designation-section.test.tsx:169`, `founding-administrator-section.test.tsx:346` | "accepts it from the email" | "accepts it" (§10 group H) |
+| `session-state-banner.test.tsx` (the exact `NO_SIGN_IN_INVITE_LINE` text near `:165`, "have accounts"), `officers/page.test.tsx` and any session-note test, `officer-roster.test.tsx`, `pending/decision-copy` tests | Increment 2's strings | updated with §10 group F |
+| `src/auth.session-update.test.ts` (from the DECISION-230 fix, lands first) | the `jwt` callback with mocks | the new calls inside the sign-in branch must be mockable; the test is extended, not weakened |
+| `src/lib/auth/safe-callback.test.ts` | callback sanitising | one case: `/no-organization` survives |
+| `e2e/invitation-existing-account.spec.ts`, `invitation-new-account.spec.ts`, `invitation-fixture-sweep.spec.ts`, `designation-revoke.spec.ts`, `admin-organizations*.spec.ts`, `community-participants.spec.ts`, `totp-full-login.spec.ts`, `branded-signin.spec.ts`, `account-page.spec.ts` | the invitation, platform, community and login lanes | re-run unedited; they are the regression lane. The fixture orgs have no toggle row, so no auto-connect (§3.1); `invitation-fixture-sweep` must also sweep what the new specs create |
+
+### 8.5 e2e (Batch D; person-id range, port and Neon branch pre-assigned by the orchestrator)
+
+**Dependencies, named per spec.** Every new or changed spec sets what it needs through `e2e/support/flags.ts` (`captureFlags`/`setFlag`/`restore`) and org toggles through the community fixture's SQL helpers, restoring both. **No key is added to `scripts/ci/e2e-baseline-flags.sql`**: no spec asserts against a flag it cannot set. Platform flags used: `org_portal.members_create` (Community surfaces; set on for the specs that open the edit page, the Community list, the Officers marker and the banner hand-off); `auth.require_2fa` only in the specs that assert the `/o/*` two-factor wall (set on, restored); `org_portal.home_v2` and `sites.public_render` are already in the baseline and are not touched. Organization toggles used: `org_portal.members_create` (existing) and `org_portal.sign_in_connect` (set per fixture organization by SQL: on for the connect specs, off or absent for the specs that need no auto-connect). A spec that passes only on a branch whose flags an operator switched on is a defect (CI, 2026-10-23); each spec below states its own.
+
+1. **`e2e/no-organization-connect.spec.ts`** (desktop and 360px). (a) A password sign-in as a stamped, unlinked account whose address is on one authority-free member's record at a toggled-on organization lands on `/o/<slug>` with baseline access only, and the Community card shows "Connected through sign-in on {date}"; (b) a visitor is not connected: N0, then Check again shows "Nothing new yet."; (c) two people sharing the address: neither connects; (d) an authority-bearing person (a ruling elder): sign-in lands on N0, Check again shows "One more step...", a fresh account walks `/totp` to `/account/2fa` to enrolment and back to the verification challenge, Check again connects, and `/o/<slug>` loads through the two-factor wall (needs `auth.require_2fa` on); (e) toggle off: not connected, and an invitation still works; (f) an open `sign_in` invitation: the card shows, Accept connects and lands in the organization, one `invitation.accepted` row with `via: "in_place"`; (g) a founding-administrator or treasurer invitation: N2 first, then after the real TOTP challenge Accept designates, `org.*.designated` carries `via: "in_place"` and `secondFactor: true`; (h) the invitation revoked after the page rendered: Accept shows the in-place dead sentence; (i) N0's copy and "Sign in with a different account". (j) **Bootstrap walk (TODO 291, 2b's e2e 10):** a new congregation's founding administrator records themselves as a ruling elder, sees the Session banner hand-off, connects (second factor), and approves their own proposal; the audit row carries `selfRecorded` and `selfApproved`. The seat must be in effect (284b).
+2. **`e2e/community-sign-in-invite.spec.ts`** (Phase 3's ten lanes, with the copy of §10, the Officers marker added to lane 9 and the connect lines to lane 1).
+3. **`e2e/hydration/no-organization-controls.spec.ts`** and **`community-sign-in-controls.spec.ts`**: with the page's JavaScript held, Check again, Accept, send, send again, cancel and the acknowledgement checkbox are disabled (both lanes; `test:e2e:prod` runs them).
+4. **The Phase 4 login gate (end of B1):** `totp-full-login.spec.ts`, `branded-signin.spec.ts` case 2 (a full TOTP-verified login), `forgot-password.spec.ts`, `account-page.spec.ts` (email-change landing), the new 1(a) and 1(d), run against a real dev server with an MFA-enrolled seeded user. The **Google path is not e2e-able** (no real provider); it is covered by the `jwt` unit test with mocks, the DB tests and, after F231 and 2b ship, a one-time manual production check by the operator (named in the hand-offs). Stated plainly so QA does not mistake it for covered.
+
+### 8.6 The 360px browser check (Batch C, repeated in D)
+
+Real Chromium at 360x740 and 375, screenshots in the scratchpad and never committed: Phase 3's seven items, plus: `/no-organization` in every state (N0, N1 with one card and with three, N2 enrolled and not enrolled, N3, N4, N5, "Nothing new yet", the connect line with its button, and each of pending / not-a-tenant / ended above them), with long congregation names and a long address wrapping and every control at 44px; the walk `/no-organization` to `/totp` to `/account/2fa` to `/totp` to `/no-organization` (enrolment does **not** mark the session verified, so a new account crosses the challenge twice: E-35); the card's new lines; the Session hand-off rows; the Officers roster marker beside a wrapped "Self-recorded" badge.
+
+## 9. Edge cases and risks (each claim cites the test that pins it, or says "unverified")
+
+Phase 3's Edge Cases 1 to 20 stand except where §1.1 supersedes them (9 is qualified, 5 and 6 unchanged). These are the new ones. Test ids are §8.3's.
+
+| # | Case | Pinned by |
+|---|---|---|
+| E-1 | An unverified Google claim never stamps proof and never reaches connect as proof. F231's gate in `evaluateSignIn` refuses the sign-in (F231's own tests); 2b's branch re-checks `profile.email_verified === true` and records nothing otherwise; an unstamped account is `declined` by connect | T-9 (branch with a false and a missing claim); T-6 (unproven account declined). Real-provider behaviour: **unverified in automation** (§8.5 item 4) |
+| E-2 | `email_verified` always refers to the current address: a non-owner cannot stamp; an address change clears the stamp; a letter-case-only change keeps it; an owner-path definer must re-stamp explicitly | T-2; `test-rls-65.sql` section 3 |
+| E-3 | Stale stamps are cleared exactly when provable (a stamped user with a `user.email_changed` audit row); a stamped user with none is kept; the stop-block raises with a count and never an address | T-2 (scratch copy, rolled back) |
+| E-4 | Google proof is written by exactly one call site, in `src/auth.ts` behind the provider test; the definer stamps only an active, unstamped user whose address matches, and returns false otherwise | T-3 (every condition); T-11 (single-call-site scan with an offending sample) |
+| E-5 | Email change through the definer: valid, expired (row deleted), taken in another case (nothing written, token kept), two verifies racing for one address, one token used once; the `USER_EMAIL_CHANGED` row is written in the same transaction and a forced throw rolls the change back; the page's three messages are byte-identical | T-3; T-9 (`email-change.test.ts`); `account-page.spec.ts` (invalid-token landing) |
+| E-6 | The standing core is the only copy of the standing classifier call, the R31 test and the closed derived list; every caller maps its output through one fixed table | T-5 (matrix + text scan + live-catalog scan) |
+| E-7 | Candidate resolution declines silently and identically in every ineligible case of the G18 matrix; connects in the eligible ones; a deceased or ended relative holding the same address does not block, a live one does | T-6 |
+| E-8 | An open invitation to the address (any purpose, any organization) stops auto-connect (FB5); an expired or revoked one does not | T-6 |
+| E-9 | The toggle: off or absent declines uniformly; it does not affect invitations or in-place accept; turning it off does not disconnect anyone; a new congregation gets an enabled row; every existing congregation was seeded; a raw-SQL fixture organization has none and is off | T-6; T-13 (`org-provisioning.test.ts`); `no-organization-connect.spec.ts` (e) |
+| E-10 | An authority-bearing record connects only with a `user_totp` row **and** a verified session; either missing gives `needs_second_factor`; the audit row carries the authority snapshot; at sign-in it can never connect | T-6; T-9 (`connectSignedInAccount` audit keys); `no-organization-connect.spec.ts` (d) |
+| E-11 | Connect at sign-in is best-effort: a database error, a lock timeout (3 s) or an exception never fails sign-in, leaves no partial link, and logs an error class only (no address, no id) | T-9 (a throw from the definer and from `insertAuditRow`; the `console.error` argument contains no `@`); T-6 (`lock_timeout`) |
+| E-12 | The cookie is correct after a connect at sign-in: connect runs before `twoFactorRequired` is computed, so a congregation's two-factor policy (`presby_two_factor_required` arm A) or a held two-factor permission (arm B) applies to the new link in the same cookie; Check again re-signs the cookie with `unstable_update({})` | T-9 (ordering assertion in the branch test); `no-organization-connect.spec.ts` (d) and `totp-full-login.spec.ts` |
+| E-13 | Check again is an action, never a write during render; `nothing_new`, `needs_second_factor`, `connected` and `error` are distinct states; the `/totp?callbackUrl=/no-organization` hop survives sanitising | T-12; `safe-callback.test.ts`; `no-organization-connect.spec.ts` (b), (d) |
+| E-14 | Two tabs, or a double submit: the second is `already_connected` (a redirect to `/launch`), with exactly one connect audit row | T-6 (two-connection) |
+| E-15 | Connect racing an address edit, a token accept, an in-place accept or another connect: lock order organization, user, person, contact; the READ COMMITTED re-check gives `declined` or a connect, never a link to a stale address; no deadlock between connect and accept | T-6 (two-connection races) |
+| E-16 | In-place gate order: a foreign invitation id, an address mismatch, an unproven account and an inactive account are all the one `dead`; the id is never an oracle | T-7 |
+| E-17 | In-place second factor: founding administrator and treasurer always; `sign_in` when `authority_bearing`; `needs_second_factor` leaves the invitation open and the token live; the authority-free `sign_in` follows G9 parity in TypeScript | T-7; T-9 (parity before the database); `no-organization-connect.spec.ts` (f), (g) |
+| E-18 | In-place and token acceptance are one code path: every golden scenario produces equal rows both ways except the presentation-specific outcomes | T-1 (the twin) |
+| E-19 | A `sign_in` row still open after the person was connected another way is accepted as the harmless same-account, same-person no-op and the page reads as success; the row is left to expire (F6). The card derives "connected" from `people.user_id` | T-4 (`existing_person` no-op); T-12 (`/invite` success state) |
+| E-20 | The listing returns only open rows for a proven, active account whose address matches, in the closed shape; it never returns a token hash, the inviter, an address or a person id; a different account's rows are absent | T-7 (including the `pg_proc` column check) |
+| E-21 | `/no-organization` composes correctly: the `pending` > `not_tenants` > `ended` blocks keep their precedence, invitations render below them, the default heading and Check again are hidden while an invitation is open, N5 never replaces the page, the already-have-access branch is unchanged | T-12 (`view.test.ts` table); `page.test.tsx` |
+| E-22 | Both actions are rate limited per user (30 an hour to check, 20 an hour to accept); the limited state names minutes, not a count of attempts | T-9 |
+| E-23 | Enumeration (DECISION-040/189): every decline returns the one `declined` shape; `needs_second_factor` is the only non-uniform answer and is returned only to an authenticated, address-proven holder, and names neither congregation nor role; the access-denied page at `/o/<slug>` is byte-identical (its "ask an administrator ... add you" sentence is still true and the four-way-miss test, `post-login-routing.spec.ts:222`, pins it); a foreign id is `dead`. **Residual, unverified:** declines that exit earlier are faster than ones that exit later, a timing difference visible only to the authenticated holder of a proven address; accepted (the same caller already learns the stronger `needs_second_factor`) | T-6, T-7; existing access-denied test, re-run |
+| E-24 | No platform role confers anything here: neither the standing core nor connect reads `is_platform_admin`; a platform administrator connects only as any person does and the audit row shows it (DECISION-183) | T-11 (text scan); T-6 (a platform-admin account connects exactly as another) |
+| E-25 | "Another live person holds this address" has one meaning in three places: `findSharedAddressNotes` (ER23b), `address_shared` (R29) and connect's candidate count agree for own-organization fixtures, including a deceased and an ended holder | T-5 |
+| E-26 | A child who shares a parent's address is never auto-connected or invited without their own address: shared means decline | T-6 (shared fixture with a minor) |
+| E-27 | Matching is exact on `lower(btrim)`: no dot, plus or Unicode folding; a different-case address matches, a lookalike does not | T-6 |
+| E-28 | An administrator sees the connection ("Connected through sign-in on {date}" or "through an invitation") without any `users` read; `linked` comes from `people.user_id`; Phase 3's Edge Case 9 is qualified accordingly (G20a, accepted residual) | T-4 (reader columns); T-11 (no `from users` in the reader/issue bodies except the sender's own row) |
+| E-29 | Audit rows carry ids, enums and booleans only, from a closed key list; none contains an address, a name or a token; the connect and in-place rows are written in the transaction that made the change | T-9 (key-list assertions; forced-throw rollback) |
+| E-30 | **Residual, `paper`: identity and factor are caller-asserted.** `presby_app` passes the user id and `p_second_factor_verified` to the definers; the database cannot check a session. An application bug on that role could connect or accept for another proven account or assert a factor. The same trust exists in `presby_accept_invitation(…, p_user_id, …)` and `presby_preview_invitation` today. Mitigated by the call-site scans (identity from `auth()` only; the flag from `session.user.twoFactorVerified` only; DECISION-230 makes that claim server-granted) and by the DB-side `user_totp` fact. Not prevented | T-11 (scans); recorded in DECISION-226 and F187 |
+| E-31 | Turning the toggle off, or ending a membership, never disconnects an account: connection is permanent in 2b (disconnect is the first follow-up) | T-6 |
+| E-32 | **Deploy-day wave** (G20c): at release every existing unlinked, proven account that matches exactly one eligible person connects at its next sign-in. The size is P8's. The release note says so only when P8 is non-zero | §3.2 P8; §14 |
+| E-33 | Old code against the new schema, during the window between applying 0065 and deploying: the existing Vitest and SQL suites pass unedited against the migrated database before any 2b code lands, which is the evidence that the verify-email page, the adapter insert, FA and treasurer acceptance and the platform issue path keep working | Batch A1 and A2 gates (run, recorded in the notes) |
+| E-34 | Accounts whose stamp 0065 cleared (the P2 set) cannot connect or accept in place until re-proved, and S11 is declined: they see N0 and use the emailed link. Expected size 0 | T-6 (unproven declines); P2 |
+| E-35 | **Observation, not a 2b change:** completing two-factor enrolment does not mark the session verified (`totp-enroll-form.tsx` links to the callback; only a challenge sets the claim, DECISION-230). A new account therefore crosses `/totp` twice before an authority-bearing connect. Filed in TODO as a follow-up that touches the TOTP path; the copy tells the user to check again afterwards | 360px walk (§8.6); `no-organization-connect.spec.ts` (d) |
+| E-36 | A visitor who later receives a roll (becomes a member) becomes eligible and connects at their next sign-in or Check again | T-6 (visitor with a roll) |
+| E-37 | `managed` in connect equals `isEnterableOrganization`; the two cannot drift | T-6 (a table over `platform_status` values) |
+| E-38 | The Session banner: the hand-off appears only in `no_sign_in`, never in `terms_not_started`; a seat must be in effect in the e2e; a viewer without both keys sees the sentence and no link; the counts say "connected a sign-in" | T-12; `no-organization-connect.spec.ts` (j) |
+| E-39 | Co-existence with DECISION-230: 2b reads no update payload and imports no grant helper; an unauthenticated or forged `session` update cannot make a connect or an in-place accept succeed, because both take the factor flag from `auth()` after the fix | T-11 (scan); `session-claim-integrity.spec.ts` (from the fix) re-run |
+| E-40 | A forwarded invitation to a mailbox the forwardee controls: unchanged from Phase 3 (token path); in place the forwardee must already hold an account whose proven address is the invited one, which is stronger. Not a new residual | T-7 (address mismatch is `dead`) |
+
+**Named residuals this amendment adds** (full text in §11): F232 (a `people.manage` holder can bind an authority-bearing record to whoever controls a typed address; mitigated by R42, detected by audit, not prevented; `paper`), E-30 (caller-asserted identity and factor; `paper`), E-23's timing note, G20a (the card reveals that an account for the address exists and was used), and the Google proof writer's unprovable ID token (F187 class).
+
+## 10. Copy
+
+Every user-facing string this amendment adds or changes. The product's existing vocabulary is **"two-factor sign-in"** (`/totp`, `/account/2fa`, `(invite)/actions.ts` `MESSAGES.two_factor_required`, `invite-summary.tsx`), so the analyst's and architect's "two-step" is replaced by it throughout: one product, one word. Person names, addresses, congregation names and dates are inserted by the component. An implementer who needs a string that is not here **stops for a ruling**. Phase 3's Copy section stands except where group I says otherwise. Each group ends with the four checks: **R** residuals (nothing denies an accepted residual or a Phase 2 ruling), **S** source of truth (the query or field that establishes each claim), **A** audience (who sees it, and that they can do what it says), **N** neighbours (live-tree strings the feature makes stale, file:line, each a modify target, plus those checked and left).
+
+### Group A: `/no-organization`, nothing connected, no open invitation (N0) and its controls
+
+| Where | String |
+|---|---|
+| H1 (kept) | You're not connected to a congregation yet |
+| Body (replaces `page.tsx:135`) | You're signed in as {address}. This sign-in isn't connected to a congregation's records yet. (No address on the session: "You're signed in. This sign-in isn't connected to a congregation's records yet.") |
+| Second line | A congregation can connect you by the email address on your record. If yours has added you, it needs the exact address you signed in with. |
+| H2 (replaces `:153`) | Ask the office that keeps your records |
+| Body | Ask them to check that {address} is on your record, or to invite you. Then check again. |
+| Invitation line (replaces `:156-166`) | If you were invited, the invitation should appear here once it was sent to this address. You can also open the link in your invitation email. If it was sent to a different address, or has expired, ask the person who invited you to send it again. |
+| Buttons | Check again · Sign in with a different account |
+| After Check again, nothing | Nothing new yet. |
+| N5, listing failed (above whichever block renders) | We couldn't check for invitations just now. Reload the page. |
+| Kept unchanged | the `pending`, `not_tenants`, `ended` blocks; "Is your church not on PresbyPortal?" and its button; "Back to home" |
+
+**R.** "A congregation *can* connect you" is hedged on purpose: visitors, shared addresses, people at two congregations, an off toggle and a missing proof all decline, so nothing promises a connection, and the deleted sentence "Only an invitation link does" (false once auto-connect exists) is gone. Nothing says a sender or a typed address is not involved (F232). **S.** "isn't connected" is the `userOrganizations(user)` result that selects this view (no enterable relationship, none pending, none unmanaged, none ended); the address is `session.user.email`; "Nothing new yet" is the action's `declined` outcome, which is the collapse of every decline, so it claims no more than that; "should appear" is the listing's open-and-proven rule, hedged because an unproven account never sees the card. **A.** Any signed-in, unconnected person, including a presbytery or synod person, hence "the office that keeps your records" rather than "church administrator"; "check that {address} is on your record" is something any office can do; "invite you" is available to an office with the Community surface, which is the common case. **N.** Modified: `src/app/no-organization/page.tsx:135-137` (default body), `:153-170` (the doors section: heading, "open the link in your invitation email", "Signing in doesn't connect you ... Only an invitation link does ..."), the tests that pin them (`page.test.tsx` three of four), `e2e/post-login-routing.spec.ts:83`, and TODO 137. Checked and left: `src/app/(org)/o/[slug]/org-states.tsx:68-69` ("If you should have access, ask an administrator at that organization to add you. They will need the email address you signed in with."), still true and byte-pinned by DECISION-040 (`post-login-routing.spec.ts:222`); `/home` text; `authz.ts:306` comment.
+
+### Group B: the connect line and the second-factor notice
+
+| Where | String |
+|---|---|
+| After Check again, account enrolled | One more step: confirm two-factor sign-in to finish connecting. Then come back here and select Check again. Button: **Continue to verification** |
+| After Check again, not enrolled | One more step: set up two-factor sign-in to finish connecting. Then come back here and select Check again. Button: **Set up two-factor sign-in** |
+
+**R.** No sentence says two-factor sign-in prevents misuse of a typed address (R42's honest framing; release-note "do not write"). **S.** The state is the definer's `needs_second_factor` outcome (every earlier check passed, only the factor is missing); the variant is the presence of a `user_totp` row, the same fact the definer tests. **A.** Only the address-proven holder sees it (R42); they can do both steps; it names no congregation and no role. **N.** `/totp` page H1 "Two-factor authentication" and `/account/2fa` H1 "Enroll in two-factor authentication" use the same word; `(invite)/actions.ts` `MESSAGES.two_factor_required` ("Your account uses two-factor sign-in. Finish the verification step, then accept the invitation.") stays true on `/invite`. No string made stale.
+
+### Group C: `/no-organization`, open invitations (N1) and accepting in place
+
+| Where | String |
+|---|---|
+| H1, one invitation | You're invited to {Congregation} |
+| H1, several | You have {n} invitations |
+| Card, `sign_in` | {Congregation} invited you to sign in. Accepting connects this sign-in to your record there as {Name}. What you can do depends on your role at {Congregation}. |
+| Card, `founding_administrator` / `treasurer` | {Congregation} invited you to be its {founding administrator / treasurer}. Accepting gives you that {role / access}. (Built from `PURPOSE_LABEL` and `INVITATION_ROLE_WORD`.) |
+| Under each card | This invitation expires {date}. |
+| Button | Accept the invitation |
+| Second factor needed (before or after the click) | Accepting this invitation needs two-factor sign-in. Finish verification, then accept. Button: **Continue to verification**. Not enrolled: Accepting this invitation needs two-factor sign-in. Set up two-factor sign-in, then accept. Button: **Set up two-factor sign-in** |
+| Blocked (N3) | `inviteeBlockedCopy(purpose, reason)`: the existing neutral invitee strings; for `sign_in`, Phase 3 group "invite page" |
+| Dead (N4), new constant `INVITATION_DEAD_IN_PLACE_COPY` | This invitation is no longer active. Reload the page to see what is current, or ask whoever invited you to send a new one. |
+| Database error | Your invitation is still good. Try again. |
+| Rate limited | Too many attempts. Try again in {n} minutes. |
+| Signed out meanwhile | Sign in to accept this invitation. |
+
+**R.** "Accepting gives you that role" does not deny that a platform operator, not a member, sent the designation; "Accepting connects this sign-in to your record" does not claim the sender confirmed the address, and the card never says the invitation is the only way to be connected. **S.** Congregation, purpose and expiry are the listing's columns; {Name} is the listing's `person_display_name`, returned only for `sign_in` and only to the account whose proven address is the invited one (the G5 rule by construction); "gives you that role" is the apply step in the accept core; "still good" is true because a `db_error` rolls the whole transaction back and leaves the row open; "no longer active" is the definer's `dead`. **A.** The proven account holder; every button is theirs; "ask whoever invited you" is knowable by the invitee (the platform operator for the two designations, the congregation's sender for `sign_in`). **N.** `labels.ts` `INVITATION_DEAD_LINK_COPY` ("This link is no longer active ...") is **kept** for `/invite` where there is a link and stays byte-identical there; the new constant is separate so neither can drift into the other's noun. `(invite)/invite/invite-summary.tsx` `roleSummary` ("This role requires two-factor sign-in") is consistent. No string made stale.
+
+### Group D: the Community edit page card, connect lines (admin, `people.manage`)
+
+| Reader state / outlook | String (below the state copy of Phase 3) |
+|---|---|
+| connected, `connected_via = sign_in` | Connected through sign-in on {date}. |
+| connected, `connected_via = invitation` | Connected through an invitation on {date}. |
+| connected, `connected_via` null | {Name} is connected to a sign-in. |
+| connected (small text, kept from Phase 3) | To change who signs in as this person, send us a support ticket. |
+| `by_sign_in` (none, expired or revoked; address on file; toggle on; authority-free; not a visitor; address not shared) | When {Name} signs in with {address}, PresbyPortal connects them to this record if it can. An invitation also connects them. |
+| `by_sign_in_second_factor` | {Name} holds a role or a seat here. When they sign in with {address}, PresbyPortal connects them once they have confirmed two-factor sign-in. |
+| `visitor` | {Name} is a visitor, so signing in won't connect them by itself. Send an invitation if you want them to have access. |
+| `shared_address` | {Name} shares this email address with someone else here, so signing in won't connect either of them by itself. Each person needs their own address. |
+| `turned_off` | Connecting people when they sign in is turned off for {Congregation}. An invitation still connects them. |
+| `pending` (an open invitation) | While this invitation is open, signing in does not connect {Name} by itself. They accept the invitation instead. |
+| no address on file | (Phase 3's "has no email address on file" state, with "Add one under Contact & address, then come back.") |
+
+**R.** The `by_sign_in*` lines are hedged ("if it can", "once they have confirmed") because global declines (the address shared in another congregation, the account already linked elsewhere, an unproven account) are invisible to this screen by design (R46); no line claims prevention (F232) or that a sender is needed. **S.** Connected lines: the reader's `linked`, `connected_via`, `connected_on` (an accepted invitation row of this organization, or this organization's `tenant.person.sign_in_connected` audit row; never `users`). Outlook lines: `presby_sign_in_card_standing` (`standing`, `authority_bearing`, own-organization `address_shared`), the own-organization toggle row, and the reader's `pending`. The address is the credential address from `presby_person_email`. **A.** `people.manage` holders only (the card's gate). No line tells the viewer to do something they may lack: the invitation promises appear only where the viewer holds what the send needs (`visitor` is invitable with `people.manage`; the authority-bearing line makes no invitation promise because the viewer may lack `officers.manage`; `turned_off` states a fact about the system, not an action). **N.** Modified: Phase 3's `signs_in` row "{Name} can sign in." (not yet in the tree; replaced before it lands), its "Add one under Profile" (the section is named **Contact & address**, `edit-person-form.tsx:161`; fixed), and the Phase 3 refusal-table rows `address_ambiguous` and `address_invalid` (deleted). Checked and left: `person-save-notes.ts:7-13` "Also on file for {Name}" toast (same predicate, E-25); `connection-card.tsx` "Connection" (roll connection, a different noun; its H2 sits above this card, so the card's heading stays "Sign in to PresbyPortal" to avoid two cards both named "connection").
+
+### Group E: markers (Community lists, Officers Session roster)
+
+| State | String (icon plus word, never colour alone; accessible name includes the person's name) |
+|---|---|
+| `pending` | Invitation sent {date} (amber) |
+| `expired` | Invitation expired. Send again (amber) |
+| bounced | Email bounced. Check the address (amber) |
+| not connected, holds inert authority, or `revoked` | Not connected yet (neutral); "No email on file" appended when true |
+
+**R.** "Not connected yet" claims nothing about why or when; it does not say a sign-in is impossible (the 2b-original "Can't sign in yet" was false for a Google user with a proven address). **S.** Reader state plus the TypeScript authority probe (display only; the decision is the core's, §5.7); `people.user_id` null. **A.** `people.manage` holders; the link goes to the card where "Send again" lives. On the Officers roster the viewer may hold only `officers.manage`, in which case no marker renders (the reader gates on `people.manage`). **N.** Modified: `officers/officer-roster.tsx:117` neighbourhood (marker beside "Self-recorded"). None stale.
+
+### Group F: Session banner, hand-off, Officers note, withdraw
+
+| Where | String |
+|---|---|
+| `no_sign_in` line 1 (replaces `session-state-banner.tsx:111-114`) | {n} member(s) of the Session {is/are} recorded, but none has connected a sign-in yet, so no one can approve. |
+| `no_sign_in` hand-off, viewer with `people.manage` and `officers.manage`, toggle on (replaces `NO_SIGN_IN_INVITE_LINE`, `:11`) | A member of the Session is also connected when they sign in with the email address on their record, after confirming two-factor sign-in. Then one row per seat: name, state (No email on file · Not invited yet · Invitation sent {date} · Invitation expired · Email bounced) and a link **Invite** or **Open**. When at least one invitation is out: Invitations sent to {n} of the {m} members of the Session. Waiting for them to accept. |
+| Same, toggle off | the rows and counts, without the first sentence |
+| Any other viewer | Ask an administrator to invite your Session members to sign in. (No names, no link.) |
+| `terms_not_started` second line (`:101`) | To approve, a member of the Session also needs to have connected a sign-in. |
+| `no_permission` (`:123-126`) | Some members of the Session have connected a sign-in, but none of them has permission to approve roll actions. This usually means the Session member role was changed. Ask an administrator to check the Session member role, or send us a support ticket. |
+| Officers Session note (`session-note.tsx:17-19`) | Members of the Session decide who is received onto the roll. Recording a ruling elder, installed pastor, co-pastor or associate pastor here seats them on the Session. They can approve only once they have connected a sign-in, either by signing in with the email address on their record or by accepting an invitation. |
+| `WITHDRAW_COPY.already_decided` (`decision-copy.ts:63-64`) | This one was already decided or withdrawn. Refresh to see what happened. |
+
+**R.** The hand-off sentence is a statement of a rule that holds when nothing else stands in the way, introduced by "also", and shown only while the toggle is on; it does not deny F232 and says nothing of prevention. **S.** Counts: `people.user_id` for "connected a sign-in" (`session-approval-state.ts` `withAccount`); the seat list and states: `listSessionSignInRows` plus the reader; toggle: the organization's row; "Some ... have connected" is `withAccount > 0 and canApprove = 0`, so "some" is true by construction (the old "have accounts" was false for a mixed roster, TODO 282a); "decided or withdrawn" is the definer's single `already_decided` outcome (282b). **A.** The banner's viewers are roll proposers and approvers; the rows and links are rendered only for a viewer holding both `people.manage` and `officers.manage` (284e); the others are told to ask an administrator, which they can; "Check Roles" (a page a clerk cannot open) is removed from `no_permission`. **N.** Modified: the strings above; `session-state-banner.test.tsx` exact-text assertions; `officers/page.test.tsx`/session-note tests; `decision-copy` tests; TODO 282, 284, 296. Checked and left: `DECISION_COPY.already_decided` (`decision-copy.ts:36-37`, "Someone already decided this one", approve and deny, still true); the Officers form hint of the 2026-10-23 disposition ("recording someone here does not change what they can do in the app", still true: recording seats, connecting activates).
+
+### Group G: the toggle (catalog entry, shown on the existing features page)
+
+| Field | String |
+|---|---|
+| Name | Connect people when they sign in |
+| Description | When someone signs in with an email address on their record, PresbyPortal connects their sign-in to that record, so they don't need an invitation. People who hold a role or a seat connect only after confirming two-factor sign-in. Some people are never connected this way, such as visitors and addresses shared by more than one person. Turning this off stops new connections only: invitations still work and people already connected stay connected. |
+
+**R.** Does not call the feature safe, deny F232, or say the toggle undoes a connection (it cannot). **S.** The design's rules (R41, R42, R47); "stay connected" is E-31. **A.** `org_features.manage` holders, who are the ones who can flip it. **N.** The other `ORG_FEATURE_CATALOG` descriptions are the model; `features-list` renders the category label. None stale.
+
+### Group H: the designation sentence
+
+`acceptanceSentence` (`invitation-copy.ts:90`): "The {founding administrator / treasurer} designation takes effect when {who} accepts it. Until then nobody holds this {role / access}." (drops "from the email"). **R.** Now true for both the link and the in-place path. **S.** Acceptance by either route is the single apply step. **A.** The platform operator on the organization page. **N.** Modified, with their tests: `invitation-copy.ts:90`; `invitation-list.test.tsx:144,167`; `invitation-sent-notice.test.tsx:68,82,89`; `treasurer-designation-section.test.tsx:169`; `founding-administrator-section.test.tsx:346`; `designation-holder-copy.golden.test.ts`. Checked and left: `INVITATION_WARNING_COPY` ("will be refused unless the invitee accepts while signed in to that person's own account", still true); `openInvitationLine` / `expiredInvitationLine` ("Resend it if the email went astray").
+
+### Group I: Phase 3's Copy, deltas only
+
+Unchanged from Phase 3: the send, send-again and cancel dialogs and toasts; the `SIGN_IN_REFUSAL_COPY` table **minus** `address_ambiguous` and `address_invalid`; the `/invite` page copy for `sign_in`; the invitation email; the platform organization panel and its two revoke controls; the card's state rows other than `signs_in`. The visitor acknowledgement paragraph and the `do_not_contact` paragraph stand (F177 Option 3; Increment 3a may remove the first). Their four checks were done in Phase 3 and are not repeated, except: the `/invite` anonymous state still never pre-fills a name for `sign_in`; "Accepting takes about a minute: you choose a password" in the `sign_in` email is addressed to a person who may already have an account (a Google user), which is a Phase 3 string, not a regression, and is left for the operator's read.
+
+## 11. Residuals, decisions, findings and the CLAUDE.md edits
+
+### 11.1 Named residuals this amendment records (all `paper` unless stated)
+
+1. **F232.** A `people.manage` holder can put an address they control on an authority-bearing record; whoever then signs in with that proven address and a confirmed second factor is connected to it, with no sender ceiling, no rate limit and no confirm dialog. Mitigated by R42 (a database-enrolled and session-verified second factor, an audit snapshot of what the record carried, and admin-visible "Connected through sign-in"); detected by audit (`tenant.person_email.added | primary_changed` then `tenant.person.sign_in_connected`, joined on `personId`, the second row carrying `contactMethodCreatedAt`); **not prevented**: an accomplice enrols their own factor. S12 (record the address author and apply R21's ceiling) was offered and **declined by the operator**, so detect-only stands. Open.
+2. **Caller-asserted identity and factor (E-30).** Connect, in-place accept and the listing take `p_user_id` and `p_second_factor_verified` from `presby_app`; the database cannot check a session. Same trust as today's accept and preview. Mitigated by scans and by the DB-side `user_totp` fact.
+3. **The Google proof writer cannot verify an ID token** (F187 class). Mitigated by the single call-site scan and by stamping only an address the account already holds.
+4. **G20a.** A card that says "Connected through sign-in" tells a `people.manage` holder that an account for that address exists and was used. Derived from `people.user_id` and an audit row of the administrator's own organization; no `users` read.
+5. **Timing (E-23).** Earlier declines return faster than later ones; visible only to the authenticated holder of a proven address.
+6. **The deploy-day wave (E-32)**, sized by P8.
+7. **The owner path** for `people.user_id` and for `users.email_verified` is unbound (the owner can disable any trigger); mitigated by the A2 `people.userId` source scan and, for proof, by there being no non-test application path that writes the stamp as the owner outside the three definers.
+
+### 11.2 Drafted decisions (for `docs/decisions.md`; newest first at integration; the orchestrator records them)
+
+**DECISION-228 — Accept in place: the credential model is unchanged, only how it is presented; every binding of authority carries two independent proofs beyond the password.** *Resolved, 2026-10-25; feature `2026-10-22-founding-admin-directory` (Increment 2b; R45, R46; Q2).* The `account_invitations` row is still the credential and still authorizes only the act its row names, inside definers that take organization and purpose from the row. `presby_accept_invitation(token, ...)` becomes a wrapper over `presby__accept_invitation_core(invitation id, ..., presentation)`; `presby_accept_in_place(invitation id, user id, factor)` calls the same core with `'in_place'`. In place, the bearer token is replaced by (a) the account's **proven** address equalling the row's address and (b) the click as intent, plus a **confirmed second factor** where required: always for the founding administrator and treasurer, for `sign_in` when the record is authority-bearing, and (TypeScript) G9 parity otherwise. Gates run in an order in which a foreign id is never an oracle (every pre-factor miss is `dead`). The listing is a definer returning a closed shape for a proven account's own open invitations. Audit: the existing rows with `via: 'in_place'` and `secondFactor` on the in-place path only. DECISION-147's statistics tokens are untouched. **The principle:** token path = the sender's R21 ceiling and the token; in place = the sender, a proven address and a second factor; auto-connect = a proven address and a second factor, the sender missing, so its residual is F232. Rejected: resend-and-consume (fights the cooldown and the chain cap). No `/home` card for a connected member's later designation (G17, follow-up; the Post-Login Landing table does not change). The sender-visible card never depends on another organization's rows (R46).
+
+**DECISION-227 — The contact-email wording: a contact email authenticates nothing, and may identify the one person an authenticated, address-proven account belongs to.** *Resolved, 2026-10-25 (R43; F233; operator approved the CLAUDE.md wording).* Amends DECISION-216's sentence. Text, verbatim: "A contact email authenticates nothing. Proof of an address comes only from the account: `users.email_verified`, bound to the account's current address (DECISION-225), never from `contact_methods.verified_at` or from an address being on file. Inside a SECURITY DEFINER function a contact email may do exactly two things: address a credential, read through `presby_person_email` (DECISION-216); and identify the one person record that an authenticated, address-proven account belongs to (invitation acceptance's address match, and `presby_connect_signed_in_account`; DECISION-227)." F233: the recorded wording was already narrower than the code, because the founding-administrator branch of `presby_accept_invitation` identifies a person by address (0064:771-804). `contact_methods.verified_at` is an output of linking and an input to nothing; the connect definer must not read it. `scan.test.ts` section 3 keeps its assertion; 3b and 3c pin that only `src/auth.ts` imports `connect.ts`, and that `connect.ts` and `src/app/no-organization/**` name no contact object.
+
+**DECISION-226 — Auto-connect: one standing core, a connect definer, a second factor for authority, an audit snapshot, a per-congregation toggle.** *Resolved, 2026-10-25 (R40-R42, R47; Q1 "also elders, not visitors"; S12 declined; S13 accepted).* `presby__person_sign_in_standing(person, org)` is the one place that decides eligibility for issue, resend, the token and in-place `sign_in` accepts, connect and the reader (refusal, `standing` through `presby_membership_standing`, authority snapshot); pinned by one matrix test and text and live-catalog scans. `presby_connect_signed_in_account(user, factor)` runs at sign-in and from Check again: active, proven, unlinked, no open invitation, exactly one global candidate, managed organization, toggle on, no refusal, not a visitor, and for an authority-bearing record a `user_totp` row **and** a verified session; every other reason is the one `declined` literal; it writes only `people.user_id` and the stamp, through the bind helper. The audit row `tenant.person.sign_in_connected` is written in the connecting transaction with the authority snapshot. **Honest framing (the release note must match):** the second factor makes binding authority a deliberate, multi-step act and hardens the account from day one; it stops a stranger who merely holds the mailbox from getting authority by an incidental sign-in; it does **not** stop collusion (F232). No disconnect in 2b. Platform administrators connect only as any person does. The toggle `org_portal.sign_in_connect` is a tenant setting (no new platform flag), default on, auto-connect only. Caller-asserted identity and factor are a recorded `paper` residual (E-30). The deploy-day wave is real and is sized before release.
+
+**DECISION-225 — Address proof is a database fact bound to the current address.** *Resolved, 2026-10-25 (R37-R39; F230, F231).* Proof means `users.email_verified is not null`. `users_guard_email_proof` makes it a fact about the current address: a non-owner role cannot insert or set a stamp (clearing is allowed); on every role, an address change clears the stamp unless re-stamped in the same statement; a case-only change keeps it. Three owner-path writers: the new-account insert in `presby_accept_invitation`, `presby_record_google_email_proof` (stamps only an active, unstamped account whose address equals the one passed), and `presby_complete_email_change` (consumes the verification token and stamps in one statement). Google's `email_verified` claim is required at sign-in by F231's gate (DECISION-246), not here. A one-time clean-up in 0065 clears stamps made stale by a recorded email change (provable from the append-only audit table); no backfill; S11 (stamp at password reset) declined. Adding Auth.js's Email provider later would need an owner-path definer. **Residual:** the database cannot check a Google ID token.
+
+**DECISION-208 — amended (R44).** Replace the first bullet's writer sentence with: "`people.user_id` is written only on the owner path, by invitation acceptance (token or in-place, through the shared accept core) and by `presby_connect_signed_in_account`, both through `presby__bind_person_account` (the accept core's `created_person` insert is the one other write). `people_guard_user_link` refuses every non-owner role. Accepted residual, `paper`: the owner path is unbound (mitigated by the A2 source scan)." Everything else in the Phase 3 text of DECISION-208 stands. F187 is recorded as narrowed twice: the case-variant is closed by `users_email_lower_uq` (E1), and proof writes are owner-only (R37/R38); the definer-mediated email *change* now exists for the verified-address case (`presby_complete_email_change`), but an application bug on `presby_app` can still rewrite `users.email` to an unused address (the stamp then clears, which is the safe direction).
+
+**DECISION-207 — amended.** Add: (1) **in-place presentation** (DECISION-228) and **auto-connect** (DECISION-226) are two more ways a `sign_in` record's login is bound, and the standing core replaces predicates that were coded separately in issue, accept and the reader; (2) the address is read through `presby_person_email(person, 'credential')`, so `address_ambiguous` and `address_invalid` are deleted (an active Main is unique by index and its shape is a subset of the invitation's); (3) the visitor test is `presby_membership_standing(...) = 'visitor'` (S13); (4) the sender-rule consequence for Session-bound roles and the staff-anchor acceptance stand.
+
+### 11.3 Findings (for `docs/schema-design-2.md`, same `### F### — title` form, as a lettered review-round subsection)
+
+- **F186, F187, F192-F198:** Phase 3's drafted text stands, with F186's closing text naming both writers (R44) and F187 as above. **F199:** closed in v0.42.0 by the person-emails pipeline (`updatePerson` writes `tenant.person.updated` with `insertAuditRow` and `emailChanged`, `people.ts:1014`; DECISION-219); recorded here only so the number is not reused.
+- **F230 — `users.email_verified` was not bound to the current address.** Verify-email rewrote `users.email` and kept the old stamp, and any `presby_app` or `presby_platform` statement could set the stamp. Latent (nothing read it). **Closed** by `users_guard_email_proof`, the three owner-path writers and the clean-up (DECISION-225).
+- **F231 — an unverified Google email claim was accepted, and with `allowDangerousEmailAccountLinking` it signed in as an existing account.** Live before this work. **Closed by `pipeline/google-email-verified` (DECISION-246), not by 2b**; 2b stamps proof only for a true claim and re-checks it.
+- **F232 — a `people.manage` holder can bind an authority-bearing record to whoever controls a typed address, with no sender ceiling.** Accepted `paper` residual; mitigated by R42; detected by audit; S12 declined. Open.
+- **F233 — DECISION-216 and CLAUDE.md said a contact email only addresses credentials, but acceptance already identified people by address.** **Closed** by the corrected wording (DECISION-227).
+
+### 11.4 CLAUDE.md edits (the operator approved the first two on 2026-10-25; agents do not edit CLAUDE.md, so the orchestrator lands them in 2b's diff, exact text below)
+
+1. **Permissions vs Flags**, the third paragraph: replace its last sentence, "A contact email authenticates nothing; only a definer reading it through `presby_person_email` may address a credential to it (DECISION-216).", with DECISION-227's verbatim text above (the paragraph's earlier sentences stand).
+2. **Two Hierarchies Intersect Nowhere**, the sentence "A platform admin acquires tenant authority only as any person does — by accepting an invitation addressed to their own email; a self-sent designation is permitted and audited as such, and the platform role itself confers nothing (DECISION-183)." becomes: "A platform admin acquires tenant authority only as any person does — by accepting an invitation addressed to their own email, or by signing in with that proven address when a congregation has put it on exactly one eligible record; a self-sent designation is permitted and audited as such, and the platform role confers nothing either way (DECISION-183, DECISION-226)."
+3. **Needs the operator's approval (not yet given): the third sentence.** Phase 3 proposed two other CLAUDE.md sentences ("A congregation's sign-in invitation is the same mechanism..." under Permissions vs Flags, and a Two Hierarchies residual about a `people.manage` holder pointing an invitation at an address they control). The second is now **incomplete in a way that would deny a residual** (it says a person who holds authority the sender lacks cannot be invited, which is true of invitations but not of auto-connect, F232). Proposed replacement for it, after the DECISION-194 residual in Two Hierarchies: "A tenant administrator with `people.manage` can edit a person's email to an address they control. If that person holds no authority the sender lacks, the administrator can then invite them (DECISION-207); whoever signs in with that proven address and a confirmed second factor is also connected to the record directly, authority-bearing records included, with no sender ceiling (F232, DECISION-226). This is `paper`, detected by audit (`tenant.person_email.*`, then `invitation.created` or `tenant.person.sign_in_connected`), and bounded by the second factor, not prevented." The first Phase 3 sentence is kept as written. **Until the operator answers, the orchestrator lands edits 1 and 2 only.**
+
+## 12. Carry-forward (every Phase 1 gap, every Phase 2 ruling, every operator ruling and binding TODO)
+
+| Item | Disposition |
+|---|---|
+| G10 proof must be built | Addressed: §5.2, §5.6 (R37, R38), DECISION-225 |
+| G11 authority-free precondition | Addressed and **changed by the operator's Q1**: the standing core (§5.7) decides; authority-bearing records connect only with a second factor (§5.10); F232 residual (§11.1) |
+| G12 F177 and visitors | Addressed: connect declines `standing = 'visitor'` (§5.10 step 10); the send-time acknowledgement stands; Increment 3a changes the condition (S13) |
+| G13 DECISION-216, CLAUDE.md, scan section 3 | Addressed: §7.4 (3b, 3c), DECISION-227, §11.4 edits 1 and 2 (operator approved) |
+| G14 second writer of `people.user_id` | Addressed: bind helper, writer scans, DECISION-208 amended (§5.3, §5.7) |
+| G15 token-less accept | Addressed: accept core and in-place presentation (§5.9), DECISION-228 |
+| G16 G9 on the in-place path | Addressed: TypeScript parity pre-check and the `/totp?callbackUrl=/no-organization` hop (§7.3); N2 copy (group C) |
+| G17 `/home` card for a later designation of a connected member | **Deferred** to a follow-up (TODO). Accepted by the architect (R46: the Post-Login Landing table does not change) |
+| G18 candidate-resolution test matrix | Addressed: T-6 (the full list, plus a minor sharing a parent's address, E-26) |
+| G19 catch-up and cookie claims | Addressed: §7.1 ordering, §7.3 Check again with `unstable_update({})`, E-12 |
+| G20a sender-side signal | Accepted residual, recorded (§11.1 item 4); reader derives from `people.user_id` and the administrator's own organization's audit row |
+| G20b widened R21 residual | Accepted residual F232, detected by audit, S12 declined by the operator (§11.1 item 1) |
+| G20c deploy-day wave | Addressed: P8 (§3.2), E-32, conditional release-note line (§14) |
+| G21 stale 2b copy | Addressed: §10 (groups D, E, F, H) and §1.1 |
+| G22 test and fixture blast radius | Addressed: §3.1 (join = 0 on `development`), §8.4 (the full table), §8.5 |
+| R37 trigger | §5.2; T-2; test-rls-65 section 3 |
+| R38 three writers, Google claim gate | Writers: §5.6. **The Google-claim gate is F231's (DECISION-246), already shipping before 2b; not re-added.** Single call site pinned (E-4). Clean-up: §5.1 section 2 and 1.2 item 3 |
+| R39 `src/auth.ts` placement | §7.1 |
+| R40 standing core and its pins | §5.7; T-5; E-6 |
+| R41 connect definer | §5.10; §7.2; T-6 |
+| R42 second factor and the audit snapshot | §5.10, §7.2; E-10; honest framing in DECISION-226 and §14 |
+| R43 contact-email wording | §7.4, §11.2, §11.4 |
+| R44 bind helper | §5.7, §5.3; DECISION-208 amended |
+| R45 accept in place, gate order, listing | §5.9; T-7; T-1 |
+| R46 `/no-organization` rules, admin card own-organization only | §5.8 (card standing), §10 group D; G17 deferred |
+| R47 per-organization toggle | §6, §5.5; E-9 |
+| Notes 1 to 4 | 1: §13.3 steps 1 and 2. 2: §3. 3: every pin is a row in §8.3 or §9. 4: §14 |
+| S11 | **Declined** (tech-lead), conditional on P2 (1.2 item 4) |
+| S12 | **Declined by the operator** (detect-only stands) |
+| S13 (Increment 3 architect) | **Accepted** (1.2 item 6) |
+| Operator Q1 "also elders, not visitors" | Honoured: §5.10, F232 |
+| Operator Q2 accept in place for FA and treasurer | Honoured: §5.9 (factor always required for both) |
+| Q3 reject an unverified Google address | F231's pipeline (DECISION-246) |
+| Q4 disconnect stays out; first follow-up | Honoured: nothing disconnects (E-31); first TODO follow-up, needs a definer because F186 forbids clearing the link |
+| Premise check 4 (the treasurer window) | No defect (operator, 2026-10-25). Designed for: in-place covers the pre-accept window |
+| R43 CLAUDE.md approved; the third sentence | §11.4 edits 1, 2 landed by the orchestrator; edit 3 awaits the operator (§17) |
+| TODO 137 (auto-connect; reword heading and locator) | Group A; `post-login-routing.spec.ts:83` in §8.4 |
+| TODO 140 (credential reader, `ended_at`, drop `address_ambiguous`) | §1.1, §5.8 |
+| TODO 282a, 282b (Session-state and withdraw copy) | Group F |
+| TODO 284a to 284e (binding constraints from Increment 2) | §8.1, group F, §8.5 1(j) |
+| TODO 291 (bootstrap e2e) | §8.5 1(j) |
+| TODO 296 (what's-new held until 2b) | §14: publish at SHIP IT, with the sentence "A member of the Session can approve once they have connected a sign-in" |
+| Phase 3 and Phase 3a (A1 to A5, E1, S10, F177 Option 3 and its four conditions, S6 to S9) | Stand; overrides listed in §1.1 |
+
+## 13. Implementation order, batches, implementers, kickoff
+
+### 13.1 Order
+
+Schema (A1, A2: 0065) -> `ORG_FEATURE_CATALOG` entry and the toggle seed (seed in A1, entry in B1) -> server (B1 the auth path, B2 the invitation library and actions) -> UI (C) -> audit events (written inside B1 and B2, not after) -> e2e (D) -> release notes after SHIP IT.
+
+### 13.2 Batches (serial; each committed by explicit path, never `git add -A`; none pushed; no batch edits a Rule 16 file)
+
+| Batch | Scope | Implementer | Commit | Gate |
+|---|---|---|---|---|
+| **A1** | 0065 sections 1-10; the `invitations.ts`, `schema.ts` mirrors; T-2, T-3, the A1 part of T-4; the `contact-methods.db.test.ts:50` edit; the dependency-check query results recorded | `database-admin` | `feat(db): address proof, the user-link guard and sign-in invitation constraints (0065, part 1)` | **Rehearse on a throwaway Neon child of the pipeline branch** (never production or `development`; if `neonctl` cannot branch, as in Increment 2 Batch A, a scratch database created on the pipeline branch and dropped after, or apply twice on the pipeline branch, which is itself a disposable branch of `development`): apply twice, before-and-after counts and md5 digests of `users`, `account_invitations`, `people`, `contact_methods`, `organization_feature_toggles` (the second run changes nothing); then the **existing** Vitest and SQL suites unedited against the migrated database (E-33). `check:schema-parity`, typecheck |
+| **A2** | 0065 sections 11-15; T-1, the rest of T-4, T-5 to T-8; `test-rls-65.sql`, `seed-dev-sign-in.sql`, the `test-rls.sql` patch (staged); direct edits to `scripts/giving/test-rls-46.sql`; `docs/schema-design.md`; `npm run docs:erd` | `database-admin` | `feat(db): standing core, connect, accept in place and sign-in invitation functions (0065, part 2)` | Rehearse as above, then: the **parity golden byte-identical** (`WRITE_DESIGNATION_GOLDEN` unset, `git diff --exit-code` on `designation-parity.golden.json`) and the in-place twin; `accept.db.test.ts`, `issue.db.test.ts`, `designation-holders.db.test.ts`; `test-rls-59.sql`, `-60`, `-62`, `-64` and `-65` as `presby_app`; `test-rls.sql` with the staged patch on a scratch copy; DB-backed Vitest serial. Then apply to the pipeline branch (twice) |
+| **B1** | `email-proof.ts`, `email-change.ts` and the verify-email page, `connect.ts`, the `src/auth.ts` branch, the two audit keys, the catalog entry and its tests (T-13), the scan changes (T-11 for these files), T-9 | `api-developer` | `feat(auth): record address proof and connect a verified sign-in to its person` | Unit and DB tests, typecheck, `npm run check` (all eight tripwires, including `check:proxy-imports`), **and the Phase 4 login gate** (§8.5 item 4) against its own dev server with an MFA-enrolled seeded user. QA treats a skipped e2e as `BLOCKED` |
+| **B2** | `org-invite.ts` and the pure modules, `accept.ts` in place, `in-place.ts`, the community edit actions, the platform `scope`, `no-organization/actions.ts`, `issue.ts` fixes, `queue.ts` id, the email registry (sender and registry entry together), `labels.ts`, `invitation-copy.ts`, `store.ts`, T-9 rest, T-10, T-11 rest | `api-developer` | `feat(invitations): org-issued sign-in invitations, accept in place, send, resend and cancel` | Unit and DB tests, typecheck, `npm run check`, every source scan, **the parity golden re-run** after `accept.ts` changes |
+| **C** | `/no-organization`, the card, dialogs, markers (Community and Officers), Session hand-off and banner strings, `(invite)` sign-in copy, platform org-sent panel and scope control, copy modules wired, T-12 | `ux-developer` | `feat(community): sign-in card, markers, Session hand-off and invitations on /no-organization` | RTL tests, `check:hydration-gate`, typecheck, lint, build, and the 360px browser pass (§8.6) |
+| **D** | The e2e of §8.5, fixtures (`seedSignInInvitation`, the toggle helper, the sweep list), the hydration specs, the existing specs of §8.4; whole suite re-run | `ux-developer` | `test(community): e2e for sign-in connection and invitations` | Full `npm run test:e2e` against a real dev server on the assigned port; `test:e2e:prod` for the hydration specs; a full-login smoke through an MFA-enrolled account created by a `sign_in` acceptance |
+
+A single implementer for A and B was rejected (the migration, its definers and tests are the security core and review apart from the library); A and B are each split in two because 0065 and the auth path are each large enough that one commit would not be reviewable.
+
+### 13.3 Phase 4 kickoff checklist (Phase 4 cannot start until steps 1 to 5 are done)
+
+1. **Rebase onto v0.42.3.** Confirm DECISION-230's fix is merged to `main` (`src/lib/auth/two-factor-grant.ts`, `unstable_update({})` in `(invite)/actions.ts`, `session-claim-integrity.spec.ts`), then rebase `pipeline/signin-invites` onto `main`. R42 and R45 are void without it.
+2. **Rebase onto the F231 fix** (`pipeline/google-email-verified`, DECISION-246) and read its diff before B1: `evaluateSignIn`'s final signature, where `profile` is read, its tests. 2b does not add or change the gate; B1's `jwt` re-check uses `profile.email_verified === true` as the post-condition. If F231 has not merged, B1 does not start (two pipelines editing `src/auth.ts`).
+3. **Re-verify the numbers on `main`:** migration 0065 free (`drizzle/` and `_journal.json`), DECISION-207/208 unused in `decisions.md` and 225-228 free, F186/F187/F192-F199/F230-F233 free; the architect's F234-F236 stay unassigned and F237 is not used.
+4. **Orchestrator (Rule 16):** create the pipeline Neon branch from `development` and a `.env.local` in the `presby-2b` worktree; the dev-server port (`3100 + n`, never 3000); the person-id range for any `e2e/support/*-fixture.ts`; record DECISION-225 to 228, F230 to F233 and the amended 207/208 from §11; run §3.2's SQL on production and record the counts; apply CLAUDE.md edits 1 and 2.
+5. **Operator** reads the Copy (§10), in particular group A, group D, group F and the change of the analyst's "two-step" to the product's "two-factor".
+6. Diff the live `presby_preview_invitation`, `presby_accept_invitation` and `presby_contact_methods_guard_write` (`pg_get_functiondef` on the pipeline branch) against **0064's text** and record any difference before the move into the core; run the dependency-check query for every dropped or replaced object.
+7. Run the G22 join (§3.1) on the pipeline branch; read Increment 2's final `session-state-banner.tsx` and `connection-card.tsx`; re-derive every `scripts/test-rls.sql` anchor against the current file.
+8. Check `git log main -- src/auth.ts` for any other pipeline that touched it since this design.
+
+## 14. Release-note risk lines (for `/release-notes`; written for a non-engineer; the note must not deny a residual the decisions admit, the 0.25.2 lesson)
+
+Phase 3's lines stand (invite; the address is the person; no take-back yet; visitors; who can invite whom; the typed-address residual; limits; staff side) with the "typed-address residual" line replaced and these added:
+
+- **Connecting by signing in:** "When someone signs in with an email address that is on exactly one person's record at a congregation, PresbyPortal connects that sign-in to the record, without an invitation. It does not do this for visitors, for an address two people share, for someone recorded at more than one congregation, or while an invitation to that address is waiting (they accept the invitation instead). A person who holds a role or a seat on the Session or the Board of Deacons is connected only after they confirm two-factor sign-in. A congregation can turn this off under Features; that stops new connections and does not undo any."
+- **Accepting on the site:** "If an invitation was sent to the address you sign in with, you can accept it on the site after you sign in, without opening the email. The founding administrator and treasurer invitations always need two-factor sign-in first."
+- **A residual we record but don't block:** "Someone who can edit a person's email can point a record at an address they control. Anyone who then signs in with that address is connected to the record, and if the record holds a role or a seat they must first confirm two-factor sign-in, but we do not block it. Every edit and every connection is recorded so it can be reviewed."
+- **Only when P8 is non-zero:** "People whose sign-in already matches one person's record may be connected the next time they sign in."
+- **Under the hood, for the record:** "A sign-in can be connected to a person from a congregation's side only when the person accepts an invitation, or signs in with a proven address that is on exactly one eligible record (PresbyPortal's own database access is not bound by that rule; no platform code makes such a connection, and a code check watches for one). Accounts now record whether we have confirmed the email address, and changing the address starts that over. Two accounts can no longer share an address that differs only by capital letters."
+- **What's-new (TODO 296):** "A member of the Session can approve once they have connected a sign-in, either by signing in with the email address on their record or by accepting an invitation."
+
+**Release-note "do not write"** (the analyst's three, the architect's, and the ones this design found):
+
+1. "Signing in connects you automatically", without its limits (not visitors, not shared addresses, not people at two congregations, not while an invitation waits; role and seat holders need two-factor sign-in; a congregation can turn it off).
+2. "No one can be connected without an invitation." / "Only an invitation connects a sign-in to a person."
+3. "Accepting an invitation always needs the email."
+4. "Two-factor sign-in prevents misuse of a typed address." (It hardens the account and stops an incidental connection; it does not stop collusion, F232.)
+5. "Only the person themselves can connect their sign-in." (An administrator's typed address leads there, F232.)
+6. "Connecting never gives you more access." (It activates whatever the record already carries.)
+7. "Nothing changes for existing people when this ships." (The deploy-day wave, when P8 is non-zero.)
+8. "You can undo a connection." (There is no disconnect.)
+9. "Every email address is verified." (Only accounts with a recorded confirmation; password accounts older than the proof column may have none.)
+10. "Visitors can't see member information." (F177; they can, privacy settings applied.)
+11. "Google sign-in is now verified for everyone." (That is F231's own release.)
+12. "We never tell an administrator whether an address has an account." (G20a: the card says when a person connected by signing in.)
+
+## 15. Out of scope (non-goals for the operator to confirm)
+
+Disconnect or re-link after acceptance (Q4; first follow-up); bulk or CSV invitations and any "connect everyone"; a registration form or password self-signup; a `/home` card for a connected member's later designation (G17); notifying the administrator or the person on connect; SMS, free-text messages, auto-send on hire or grant, a "My invitations" card, church-domain mail (DECISION-182), the 90-day redaction sweep; markers on the Staff page; changes to DECISION-040's access-denied page; stamping proof at password reset (S11); making a completed two-factor enrolment mark the session verified (E-35, TOTP path); closing F177 or narrowing `active_membership` (Increment 3a); the remainder of F187; binding the owner connection; consolidating the older actor helpers; an age gate; Google claim enforcement (F231's pipeline).
+
+## 16. Integration hand-offs (orchestrator; nothing below is edited in this pipeline)
+
+- `drizzle/meta/_journal.json`: the entry for `0065_presby_sign_in_and_connect` (idx 65).
+- `scripts/test-rls.sql`: append `\ir sign-in-invitations/test-rls-65.sql`; apply `scripts/sign-in-invitations/test-rls.sql.integration.patch`; re-run against merged `development`.
+- `scripts/seed-dev.sql`: append `scripts/sign-in-invitations/seed-dev-sign-in.sql` after every organization, person and user it references exists; it includes the toggle rows (§5.12).
+- `docs/decisions.md`: DECISION-225 to 228 and the amended 207 and 208 (§11.2). `docs/schema-design-2.md`: F186, F187, F192-F199, F230-F233 as a lettered subsection; F232 joins the `paper` list in `/developer`'s data.
+- `CLAUDE.md`: §11.4 edits 1 and 2 now; edit 3 after the operator answers.
+- `docs/TODO.md`: add or update: disconnect after accept (first follow-up, needs a definer); S11 (conditional on P2); a completed enrolment should mark the session verified (E-35); the `/home` card for a later designation (G17); the `/home` or Officers Staff marker; markers on the Staff page; consolidate the older actor helpers into `presby__actor_person`; definer-izing email change beyond the verified-address case; revisit `needs_support` when a person-claim path exists; the production Google check after F231 and 2b ship; **remove or reword** lines 137, 140, 282, 284, 291 and 296 as Done at SHIP IT; Increment 3's numbering (F200 and DECISION-209 are no longer free of other claims; the orchestrator re-assigns).
+- `docs/product/functionality-map.md`: the Community line gains "invite a person to sign in, the Not-connected-yet marker, the Session hand-off"; the sign-in line gains "connect a verified sign-in to its person"; the `/no-organization` line gains "accept an invitation in place"; the platform organization page gains the org-sent panel (Rule 14, at ship).
+- `docs/architecture.md`: Rule 15 judgement at Phase 6. Auto-connect changes a data flow (sign-in can now write the identity binding), so one sentence under the auth or onboarding section is likely warranted; not drafted here.
+- `docs/deployment.md` runbook: the deploy-order paragraph (§4), the pre-deploy P1 and P2 counts re-run, and the one-time wave note.
+- The work-log header line lists F230-F236 for 2b; F234-F236 were returned unused and F237 is not used, so it should read F230-F233.
+
+## 17. Operator questions and status
+
+**Needs an operator answer:**
+
+1. **Approve or amend CLAUDE.md edit 3** (§11.4): Phase 3's proposed Two Hierarchies sentence would deny F232 once auto-connect ships, so it is replaced. Until you answer, only the two edits you approved land.
+2. **Read the Copy, §10**, especially: the change from "two-step" to the product's "two-factor sign-in"; "Ask the office that keeps your records" in place of "Ask your church administrator"; the hand-off sentence in the Session banner; and the toggle description.
+
+**Conditional (decided by the production counts the orchestrator runs):**
+
+3. If P2 (stale stamps) is not 0, those people lose proof until they sign in with Google or S11 is built; tell me and I will propose S11 as a small follow-up. If P1 (case-duplicate emails) is not 0 the migration stops until they are repaired.
+4. P8 sets whether the release note mentions a one-time wave; no answer needed unless it is large.
+
+**For your information (no answer needed):** `address_invalid` is deleted along with `address_ambiguous`; `InvitationCopyPurpose` is not extended; the stale-stamp clean-up clears only provably stale stamps; S13 is accepted, so Increment 3a changes one condition rather than re-creating 2b's core; a new account crosses the two-factor challenge twice before an authority-bearing connect because completing enrolment does not mark the session verified (E-35, filed, not changed); the Google path cannot be tested end to end and needs a one-time manual check after F231 and 2b ship.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 3b — Technical design amendment 2 (auto-connect, accept in place, reconciliation with v0.41-v0.42.2) | tech-lead | Complete. Folds R37-R47 and the reconciliation table: migration 0065 (A1 proof, user-link guard, constraints; A2 standing core, bind helper, connect, accept core with in-place presentation, listing, issue/resend/revoke/reader), toggle `org_portal.sign_in_connect`, TypeScript files and scans, copy groups A-I with the four checks, 40 edge cases each with a pinning test or "unverified", `test-rls-65.sql` outline, batches A1/A2/B1/B2/C/D, release-note "do not write" list, kickoff checklist. S13 accepted, S11 declined, `address_invalid` also deleted. Measurements: `development` counts recorded; production SQL listed for the orchestrator. Numbers: 0065; DECISION-207/208 (amended), 225-228; F186, F187, F192-F199, F230-F233. Blocks Phase 4: v0.42.3, the F231 fix, the production counts, the operator's read of the Copy | Design complete; implementers named; one CLAUDE.md sentence awaits the operator | 2026-10-25 |
+
+## Handoff
+
+Next: the **orchestrator** records this section and the status row, confirms the numbers, runs §3.2's SQL on production, lands CLAUDE.md edits 1 and 2, creates the pipeline Neon branch and port, and puts §17 to the operator. Then, once v0.42.3 and the F231 fix are on `main` and the branch is rebased (§13.3), **Phase 4**: **A1 then A2 (`database-admin`)**, **B1 then B2 (`api-developer`)**, **C then D (`ux-developer`)**. Increment 3a's Phase 3 builds on 0065's classifier and core (S13).
+
+Files read (design time): the work-log sections named in the task; `drizzle/0064_presby_person_emails.sql`; `src/auth.ts`, `src/lib/auth/sign-in-gate.ts`, `src/lib/contact-methods/{scan.test,email-audience,store}.ts`, `src/lib/onboarding/{accept,labels,invitation-copy}.ts`, `src/lib/{org-features,session-approval-state,people,community}.ts`, `src/app/no-organization/{page,page.test}.tsx`, `src/app/(invite)/{actions.ts,invite/page.tsx,invite/accepted/page.tsx,invite/invite-summary.tsx}`, `src/app/(email-verify)/account/verify-email/[token]/page.tsx`, `src/app/(auth)/totp/page.tsx`, `src/app/(account)/account/2fa/*`, the Session banner, Officers note and `decision-copy.ts`, `e2e/support/*`, `e2e/post-login-routing.spec.ts`, `scripts/check-audit-coverage.mjs`, `scripts/ci/e2e-baseline-flags.sql`; `git -C ../presby-sess diff main...HEAD`; `node_modules/@auth/core/lib/actions/callback/handle-login.js`; and the Increment 3 work-log (R50 to R55, S13) in `presby-inc3`. Database access: read-only, counts and catalog only, `development`.
+
+## Orchestrator: production measurements for amendment 2 §3.2 (2026-10-25, read-only, counts only)
+
+| Id | Result |
+|---|---|
+| P1 case-duplicate email groups | **0** (stop-block passes) |
+| P2 stale stamps (cleared by 0065) | **0** (S11 stays declined; no one loses proof) |
+| P3 users / active / stamped / active-unstamped / Google accounts | 70 / 2 / 27 / 0 / 0 |
+| P4 audit_events rows | 661 |
+| P5 organizations / managed / toggle rows | 2 / 2 / 11 |
+| P6 open invitations | 0 |
+| P7 addresses held by more than one live person | 0 |
+| P8 deploy-day wave: proven unlinked active users / with one live candidate | **0 / 0** (both active accounts are linked; the release note needs no connection-wave line) |
+
+Re-run P1, P2 and P8 just before deploy. Also fixed per the tech-lead's note: the header's 2b F-range should read F230–F233 (F234–F236 unused).
+
+## Operator rulings on Phase 3 amendment 2 (2026-10-25)
+
+- **CLAUDE.md edit 3 (§11.4): approved** as the tech-lead wrote it. All three edits land in 2b's diff.
+- **R55 (Increment 3 architect): approved** — auto-connect requires member standing (listed or staff anchor); lands in 3a (0066). 2b keeps `standing = 'visitor'` until then.
+
+## Operator: Copy read (kickoff step 5), 2026-10-25
+
+> "i'm fine with the copy. it can be adjusted later if need be"
+
+§10 Copy approved as written, including "two-step" → "two-factor". Kickoff step 5 is complete; Batch C may proceed when its turn comes.
+
+---
+
+# Increment 2b — Phase 4
+
+## Phase 4 — kickoff (database-admin, 2026-10-25)
+
+*Worktree `presby-2b`, branch `pipeline/signin-invites` at `f752160` (main `3af650a` merged: v0.42.3, v0.42.4, workflow-efficiency). `.env.local` → Neon branch `pipeline-signin-invites` (endpoint `ep-delicate-tree-axem9ol6`; `MIGRATE_DATABASE_URL`/`DATABASE_URL` direct, `PLATFORM_DATABASE_URL` pooler; `APP_DATABASE_URL` connects as `presby_app`, `rolbypassrls = f`). Steps 1, 2, 4 and the merge are the orchestrator's (recorded above); step 5 (operator reads the Copy) is in progress and does not block A1. Every database read below was catalog or counts only.*
+
+### Step 3: numbers on `main` (`3af650a`)
+
+| Number | Result |
+|---|---|
+| Migration 0065 | Free. `drizzle/` on main ends at `0064_presby_person_emails.sql`; `_journal.json` ends at `idx 64` / `0064_presby_person_emails`. |
+| DECISION-207, -208 | Unused (no heading, no mention). |
+| DECISION-225 to -228 | Free. The only mention is DECISION-229's note "225 to 228 are reserved for Community Increment 2b". Main now has DECISION-229, -230, -231 and -246 (all other pipelines'). |
+| F186, F187, F192-F199, F230, F232, F233 | Free: no `### F…` heading in `schema-design.md` or `schema-design-2.md`. |
+| F231 | Used **as intended**: the split-out F231 pipeline (DECISION-246, v0.42.4) cites it in `decisions.md`, `STATE.md` and `TODO.md` (Done, 2026-10-25), but no `schema-design-2.md` entry exists. Not a collision: the architect assigned F231 to this finding and the operator split it out. At integration, 2b's lettered findings subsection should record F231 as **closed by DECISION-246** rather than re-close it. |
+| F234-F236, F238 | Unassigned (F238 was returned unused by the session-hardening pipeline, `schema-design-2.md` §2y). |
+| F237, F239 | Present on main (§2y, §2z), not used by 2b. |
+
+No contradiction with the design.
+
+### Step 6: live definitions against 0064, and the dependency check
+
+`pg_get_functiondef` / `prosrc` on the pipeline branch, diffed against the dollar-quoted bodies in `drizzle/0064_presby_person_emails.sql`:
+
+| Function | Live body vs 0064 text | Body md5 (live) | Attributes |
+|---|---|---|---|
+| `presby_preview_invitation(text, uuid)` | **Identical** | `43dbf9d3…` | definer, `search_path=public, pg_temp`, EXECUTE `presby_app` |
+| `presby_accept_invitation(text, uuid, text, text, text)` | **Identical** | `bd936e5b…` | definer, same `search_path`, EXECUTE `presby_app` |
+| `presby_contact_methods_guard_write()` | **Identical** | `6ffbf549…` | invoker, same `search_path`, owner-only EXECUTE |
+
+`presby_account_invitations_guard_insert()` (re-created in section 5) was read from the catalog; it is 0059's text. Existing non-internal triggers on the four touched tables: `contact_methods_guard_write`, `contact_methods_primary_required`, `people_guard_delete`, `account_invitations_guard_{insert,update,delete}`, all enabled (`O`); none on `users`.
+
+**Dependency check** (`select proname from pg_proc where prosrc ~* '<name>'`, public schema), for every dropped, replaced or newly named object:
+
+| Name searched | Function bodies naming it |
+|---|---|
+| `open_address_uq`, `purpose_allowed`, `origin_allowed`, `names_by_purpose`, `blocked_reason_allowed`, `purpose_origin_tie`, `sign_in_has_person`, `open_sign_in_person_uq`, `person_created_ix` | none |
+| `presby_account_invitations_guard_insert`, `presby_contact_methods_guard_write`, `presby_preview_invitation` | none |
+| `presby_accept_invitation` | itself; `presby_account_invitations_guard_update` (two refusal **messages**: "accepted/blocked only through presby_accept_invitation()"); `presby_contact_methods_guard_write` (message, replaced in section 7) |
+| `users_email_unique` | `presby_accept_invitation` (the step 5 exception mapping; E1 extends it in A2) |
+| `users_email_lower_uq`, `people_guard_user_link`, `users_guard_email_proof` | none |
+| `verified_at is set only by` | `presby_contact_methods_guard_write` (replaced in section 7) |
+| `email_verified` | `presby_accept_invitation` (the new-account `insert into users (email, email_verified, …)`; runs as the owner, so section 3 passes it) |
+| `update people set user_id` | `presby_accept_invitation` only (as §5.7 says; A2 moves it into the bind helper) |
+
+Nothing in A1 breaks a body. **For A2:** `presby_account_invitations_guard_update`'s two messages name `presby_accept_invitation()`; once the body moves into `presby__accept_invitation_core` the marker is armed there, and the messages stay true only loosely. Not a defect (the guard keys on the marker, not the name); A2 may restate the two messages.
+
+### Step 7: G22, Increment 2's components, `test-rls.sql` anchors
+
+- **G22 on the pipeline branch** (read-only): active users not linked to a live person whose address matches **any** person's active email: **0**. Also: 30 users, 30 stamped, 0 case-duplicate groups, 0 stale stamps, 6 invitations (0 tie violations), 19 toggle rows over 15 organizations, `user_totp` present. Same as the design's `development` figures (the branch is a fresh child).
+- **`pending/session-state-banner.tsx`** (131 lines, last `0e88167`): `NO_SIGN_IN_INVITE_LINE` is the exported constant §10 replaces; `no_sign_in` says "none has a PresbyPortal account yet"; `terms_not_started` ends "To approve, a member of the Session also needs a PresbyPortal account."; `no_permission` says "…recorded and have accounts…". All four match §1.1's "fixed in the same pass" list. Its `state` prop picks `kind | recorded | startingLater | nextStart | viewer` from `SessionApprovalState`; Batch C reads that type before adding the hand-off rows.
+- **`[id]/edit/connection-card.tsx`** (107 lines, last `12bc703`): a server component rendering `status`, pending notices and the participant note; it has no sign-in content, so the sign-in card is a sibling below it, as the design says.
+- **Anchors re-derived** (`scripts/test-rls.sql`, 8655 lines): section 44 starts at `:7975`; the `presby_app` inserts that set `user_id` are still at **`:8036`, `:8235`, `:8239`** (44d(iv) is the "two live people share one user" demonstration at `:8244`). `scripts/giving/test-rls-46.sql`: the nine `update people set user_id` lines are still at **`:646, :957, :989, :1402, :1509, :1549, :1567, :1628, :1685`**. Unchanged from the design.
+
+### Step 8: `src/auth.ts` since the design
+
+`git log main -- src/auth.ts src/lib/auth/` since 2026-10-20: `4a3396f` (DECISION-230, session update hardening), `9e75953` (DECISION-246, F231 gate), `d390f4e` (comment only). What **B1** must account for:
+
+1. **`jwt` does not receive `account` or `profile`.** Its signature is `jwt({ token, user, trigger, session })` (`src/auth.ts:258`). §7.1's sketch reads `account?.provider` and `profile?.email_verified`; B1 must add both to the destructured parameters (Auth.js passes them on sign-in only).
+2. **Use `isEmailClaimVerified(profile?.email_verified)`** from `src/lib/auth/sign-in-gate.ts` (exported, `claim === true`) for the defensive re-check, rather than an inline comparison, so the two places cannot drift.
+3. **Placement:** the sign-in branch is `if (user?.id)` at `:262`; `ensureDefaultRole` at `:271`, the `lastLoginAt` update at `:273-275`; `token.twoFactorRequired` is computed at `:320`. §7.1's "after `ensureDefaultRole`, before `lastLoginAt`" still lands before the requirement is computed.
+4. **The `signIn` callback** now refuses a non-credentials sign-in unless `profile.email_verified === true` and logs a PII-free `console.warn` (`:230-254`); 2b neither adds nor changes the gate.
+5. **`takeTwoFactorGrant`** is imported at `:34` and consumed at `:311` only when `trigger === "update"`; no 2b file may import `two-factor-grant.ts` (E-39).
+6. Tests B1 extends, not weakens: `src/auth.session-update.test.ts` (DECISION-230) and `src/auth.sign-in.test.ts` (DECISION-246, 199 lines, mocks `@/lib/db`); the new `jwt` calls must be mockable in both.
+
+### A design gap found while checking §4(b) (for tech-lead; does not change A1's DDL)
+
+§4(b) lists every writer of `users` and concludes "Nothing existing breaks". It misses **`scripts/seed.ts`**: `seedLocalAdmin` / the local member / the local MFA admin insert a user with `emailVerified: new Date()` (`:943`, `:1004`, `:1065`) on `db`, which is `DATABASE_URL` = **`presby_app`** (checked: `select current_user` on that URL). After section 3, `npm run db:seed` with `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` (or the member / MFA variants) set raises `users: email_verified is recorded only on the owner path…` the first time it **creates** that user (the update branch, which omits the stamp, is unaffected). CI is unaffected (`e2e.yml` sets no `SEED_*`; production deliberately leaves them unset, `docs/deployment.md:226`); a developer following `.env.example` is affected. The fix is TypeScript, outside A1: either create those three users through `platformDb` (owner, the "proof writes are owner-only" shape) or drop the stamp. Proposed owner: B1 (it already edits the auth-adjacent files). Needs a tech-lead ruling; not improvised here.
+
+## Phase 4 — Batch A1 (database-admin, 2026-10-25)
+
+**Commit:** `9e51b21` `feat(db): address proof, the user-link guard and sign-in invitation constraints (0065, part 1)` (by explicit path; not pushed).
+
+**Scope delivered (§13.2 A1):** `drizzle/0065_presby_sign_in_and_connect.sql` sections 1-10; the `invitations.ts` and `schema.ts` mirrors (plus the `people.ts` `user_id` comment, since section 6 lands here); T-2, T-3, the A1 part of T-4 and of T-8; the `contact-methods.db.test.ts:50` pin; the dependency-check results (kickoff step 6 above).
+
+### Migration mode
+
+**Hand-written**, `drizzle/0065_presby_sign_in_and_connect.sql` (sections 1-10; A2 appends 11-15 to the same file). Applied to the pipeline branch `pipeline-signin-invites` with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0065_presby_sign_in_and_connect.sql`. `neonctl` prompts interactively for an organization here (as in Increment 2 Batch A), so the design's fallback was used: **apply twice on the pipeline branch**, itself a disposable child of `development`. **`drizzle/meta/_journal.json` is not edited** (Rule 16): the integration hand-off (§16) adds `{ idx: 65, tag: "0065_presby_sign_in_and_connect" }`.
+
+**Whole-file idempotence proof** (row count | md5 of every row, ordered by key):
+
+| Table | Before (pre-migration) | After apply 1 | After apply 2 |
+|---|---|---|---|
+| `users` | 30 \| `0f567ac1…` | 30 \| `0f567ac1…` | 30 \| `0f567ac1…` |
+| `account_invitations` | 6 \| `d055017c…` | 6 \| `d055017c…` | 6 \| `d055017c…` |
+| `people` | 685 \| `b695184b…` | 690 \| `9db94a46…` | 690 \| `9db94a46…` |
+| `contact_methods` | 40 \| `afece812…` | 46 \| `6c068e34…` | 46 \| `6c068e34…` |
+| `organization_feature_toggles` | 19 \| `2c1dd8c0…` | **34** \| `d6c759e4…` | 34 \| `d6c759e4…` |
+| `audit_events` | 827 \| `701e46ad…` | 831 \| `01f208b6…` | 831 \| `01f208b6…` |
+
+Both applies exit 0; the second changes nothing in any table. The first apply's only write is section 8: +15 toggle rows, one per organization (15 organizations, 15 rows `enabled`). Section 2 cleared **0** stale stamps (notice). The `people`, `contact_methods` and `audit_events` moves between "before" and "after apply 1" are **not** the migration's: the pre-migration digest was taken before the 34-minute baseline Vitest run, which left 5 people (none with `deletable_until`), 6 contact rows and 4 audit rows behind on the branch (pre-existing suite leakage, not 2b's). 0065 contains no statement that writes those tables. Apply 2's notices are the `if not exists` skips only. The file was applied twice more during the failing-first proofs below (exit 0 both times), and `sign-in-invitations.db.test.ts` re-applies it twice inside a rolled-back transaction and asserts the second run changes no digest.
+
+### What 0065 sections 1-10 contain (as built)
+
+1. **Stop-blocks**, counts only: case-duplicate `lower(users.email)` groups, purpose/origin tie violations, `user_totp` present.
+2. **Stale-proof clean-up**: clears a stamp only when a `user.email_changed` audit row exists for that user; idempotent.
+3. **`users_guard_email_proof`** (`presby_users_guard_email_proof()`, invoker, pinned `search_path`, owner = `pg_class.relowner` vs `current_user`, no role named): a non-owner may not set or change `email_verified` (clearing allowed); for every role, a `lower(email)` change clears an unchanged stamp; a case-only change keeps it. Message: `users: email_verified is recorded only on the owner path, by presby_accept_invitation, presby_record_google_email_proof or presby_complete_email_change`, 42501.
+4. **`users_email_lower_uq`** on `lower(email)`.
+5. **`account_invitations`**: `purpose_allowed` + `sign_in`; `origin_allowed` + `org`; new `purpose_origin_tie`; `names_by_purpose` + the sign-in clause; new `sign_in_has_person`; `blocked_reason_allowed` + `person_deceased`; `open_address_uq` dropped and re-created under the same name with `purpose <> 'sign_in'` and the live open predicate; new `open_sign_in_person_uq`, `person_created_ix`; `presby_account_invitations_guard_insert` re-created from the live 0059 body with the sign-in branch (person required; lineage compares organization, purpose, origin, person and count, not the address) and every other purpose verbatim.
+6. **`people_guard_user_link`** (`presby_guard_people_user_link()`, BEFORE INSERT OR UPDATE OF `user_id`): refuses an insert with a non-null `user_id` or any change of `user_id` by a non-owner role.
+7. **`presby_contact_methods_guard_write`** re-created from the live text, two message strings changed (below); function and column comments follow.
+8. **Toggle seed** `org_portal.sign_in_connect`, `on conflict do nothing`.
+9. **`audit_events_sign_in_connected_ix`**, partial on `tenant.person.sign_in_connected`.
+10. **`presby_record_google_email_proof(uuid, text) returns boolean`** and **`presby_complete_email_change(text) returns table (outcome, user_id, old_email, new_email)`**: definers, `#variable_conflict use_column`, revoke from `public, presby_app, presby_platform`, EXECUTE to `presby_app` only. Outcomes `invalid | expired | email_taken | ok`; lock order token then user; `unique_violation` mapped by constraint name (`users_email_unique`, `users_email_lower_uq`) to `email_taken`, anything else re-raised.
+
+Comments sit with each section's objects, so A1's file is complete; A2's section 15 restates ACLs and comments for the whole file as §5.1 says.
+
+### Restating the new triggers in English (self-verification)
+
+- **`users_guard_email_proof`:** "Unless you own the `users` table, you can never put a proof stamp on an account or swap one stamp for another; you may only remove it. And no matter who you are, if you change an account's address to a different address (ignoring letter case) without also writing a new stamp in the same statement, the old stamp is wiped." This matches R37 / §5.2: owner-only stamps, address change clears, case-only change keeps, clearing allowed.
+- **`people_guard_user_link`:** "Unless you own `people`, you cannot create a person already linked to a login, and you cannot change which login (if any) a person is linked to, including unlinking." This matches F186 / A1 (Phase 3 Test Plan 3: "inserts a non-null `user_id` or changes `user_id` at all").
+- **`purpose_origin_tie`:** "A row is a sign-in invitation exactly when the organization sent it." This matches §5.1 `(purpose = 'sign_in') = (origin = 'org')`.
+- **`sign_in_has_person` / the guard's sign-in branch:** "A sign-in invitation must name its person from the start; a sign-in resend must follow a superseded sign-in invitation for the same organization, origin and person, one count higher, and it may go to a different address." This matches R33/R34/F197.
+
+### Tests (implementer-written)
+
+| File | Batch scope | Cases | Result on the migrated branch |
+|---|---|---|---|
+| `src/lib/db/domain/email-proof.db.test.ts` (new) | T-2, T-3, F187/E1 case-variant | 20 | 20 passed |
+| `src/lib/db/domain/sign-in-invitations.db.test.ts` (new; A2 extends it) | A1 part of T-4: CHECKs and indexes from the catalog, vocabulary and shape, open-row uniqueness (incl. expired-still-blocks, R28 shared address, other purposes still address-unique), R33 lineage both ways, F186 (presby_app link / relink / unlink, insert with and without `user_id`, a throwaway second non-owner role, the owner path unbound, a `users` delete as `presby_app` nulling the FK as the owner), section 8 seed semantics, the audit index, whole-file re-apply idempotence | 26 | 26 passed |
+| `src/lib/db/domain/invitations.schema.test.ts` (edited, T-8 A1 part) | names 0059 **and** 0065 create equal what `accountInvitations` declares; 0065 CHECK lists equal the `*_ALLOWED` vocabularies; the open-address predicate; the designation index untouched and pinned to `ACCOUNT_INVITATION_DESIGNATION_PURPOSES`; 0065 structural pins (no begin/commit; only EXECUTE grants, only to `presby_app`; revoke-then-grant for the proof writers; the two guards read `pg_class.relowner` and name no role; definer + pinned `search_path` + `#variable_conflict use_column`; no proof writer reads `contact_methods` or `verified_at`) | 21 | 21 passed |
+| `src/lib/db/domain/contact-methods.db.test.ts:50` (edited) | `GUARD_VERIFIED` now matches the 0065 message | 45 | 45 passed |
+
+Final combined run (restored tree, migrated branch): those four plus `invitations.db.test.ts`, `designation-parity.db.test.ts`, `accept.db.test.ts`, `issue.db.test.ts`, `designation-holders.db.test.ts`: **9 files, 299 passed**; `git diff --exit-code src/lib/onboarding/designation-parity.golden.json` clean.
+
+**The second non-owner role** is a throwaway `NOLOGIN` role created inside the rolled-back test transaction (`grant <role> to current_user with set true`, then `set local role`), because `neondb_owner` has ADMIN but not SET on `presby_platform` (catalog, `pg_auth_members`). For `people` the role is `BYPASSRLS` so its UPDATE reaches the row and the trigger, not RLS, is what refuses.
+
+### Failing-first proofs (pipeline branch; each mechanism removed, suite run, mechanism restored by re-applying the whole file)
+
+1. **Triggers and index removed** (`alter table users disable trigger users_guard_email_proof`, `alter table people disable trigger people_guard_user_link`, `drop index users_email_lower_uq`): **12 failed** of 46 in `email-proof.db.test.ts` and `sign-in-invitations.db.test.ts`: the users trigger structure test; presby_app stamp insert; stamp from null / change; address change clears (presby_app and owner); the second-role case; case-variant duplicate both orders; `email_taken` in a different case; the two-connection race; the people trigger structure test; presby_app link / relink / unlink; presby_app insert carrying `user_id`; the second-role people case.
+2. **0059's insert guard restored** (the body without the sign-in branch): **3 failed**: "a sign_in row with no person is refused" (the CHECK answered 23514 instead of the guard's 42501), "R33: a sign_in resend may change the address", and "a sign_in resend that changes the person, skips a count or follows an open parent is refused". The other-purposes-verbatim case passes under both bodies, as it should.
+3. **Proof writers weakened** (Google writer without `is_active and email_verified is null`; email change writing the address without the stamp): **3 failed**: both Google-writer cases and the email-change `ok` case (the R37 trigger then clears the stamp, which is the proof that the definer's explicit re-stamp is what keeps it).
+4. **Section 7 message:** the pre-migration baseline run (below) shows `contact-methods.db.test.ts` "verified_at write refused…" failing against 0064's message with the new pin, and passing after 0065.
+
+After each removal, the whole file was re-applied (exit 0) and the catalog was confirmed restored: both triggers enabled (`O`), `users_email_lower_uq` present, the guard body containing the sign-in branch. Re-run: 46/46 and T-3 8/8 green.
+
+### E-33: the existing suites, unedited, against the migrated database
+
+- **Vitest, the whole `npm run test:db`** on the **pre-A1 tree** (all of A1's edits stashed, so old code ran against the new schema): **630 files passed, 1 failed; 11064 passed, 1 failed, 1 skipped.** That is identical to the pre-migration baseline (11064 / 1 / 1). The one failure is `contact-methods.db.test.ts` "verified_at write refused as presby_app…", which is the `GUARD_VERIFIED` pin A1 updates, as §4(d) predicts. (In the baseline run it failed for the mirror reason: my edit to the pin landed mid-run before that file executed.) Everything else holds, including `designation-parity`, `accept`, `issue`, `designation-holders`, `invitations.db`, `people*` and the verify-email-adjacent tests, so old code against 0065 behaves as §4 says.
+- **SQL, standalone, unedited, as `presby_app` with `ON_ERROR_STOP`:** `test-rls-59` 36 passed, `-60` 19, `-61` 34, `-62` 53, `-64` 47, `-47` 114. All exit 0.
+- **SQL, the full `scripts/test-rls.sql`** (scratch copy, stop-on-error off, the Increment 2 precedent): baseline before 0065 **1240 passed, 3 failed** (the three pre-existing: presbytery members 3≠2 `:217`, 2fa definer `:516`, DECISION-152 count `:7927`). After 0065: **1161 passed**, the same 3 pre-existing failures, and the **F186 refusal** (`people: user_id is bound only on the owner path…`) at exactly the design-predicted lines: `test-rls.sql:8036` and `:8235` (`:8239` is in the same aborted block), and `giving/test-rls-46.sql:646, 957, 989, 1402, 1509, 1549, 1567, 1628, 1685`. Every other error in the run is a cascade from those blocks (`current transaction is aborted`, and `syntax error at or near ":"` where a `\gset` inside an aborted block left a variable unset; `test-rls-46-issue.sql` is `\ir`-included inside one of them). 79 passes are lost inside those blocks.
+
+### Deviations from the design text (each small; flagged for review)
+
+1. **The TypeScript vocabulary unions are not widened in A1.** Widening `ACCOUNT_INVITATION_PURPOSES` / `_ORIGINS` / `_BLOCKED_REASONS` (and so `AccountInvitationPurpose` etc.) breaks typecheck in eight places that need B2/C copy or routing: `invitation-email.ts:54,59` (`ROLE_PHRASE`/`ROLE_GRANTS`), `labels.ts:37,55` (`person_deceased` copy, which §10 does not give for the operator table), `issue.ts:623,813,979` (`InvitationCopyPurpose`) and `invite-summary.tsx:20`. Measured, then reverted. A1 instead mirrors the database's truth in **`ACCOUNT_INVITATION_PURPOSES_ALLOWED`, `ACCOUNT_INVITATION_ORIGINS_ALLOWED`, `ACCOUNT_INVITATION_BLOCKED_REASONS_ALLOWED`** (used by the Drizzle `check()` declarations and pinned to 0065 by the schema test), and adds **`ACCOUNT_INVITATION_DESIGNATION_PURPOSES`** so the D-2 index predicate cannot widen by accident. **B2 widens the three application unions in the same commit as their exhaustive consumers.** It can then fold the `*_ALLOWED` lists back into the originals or keep them; the schema test pins both.
+2. **The F186 message** is `people: user_id is bound only on the owner path, by invitation acceptance or by sign-in connection` rather than Phase 3's `…bound only by the invitation acceptance function`, which R44 made false (connect is the second writer). The wording parallels §5.4's. `test-rls-65.sql` (A2) asserts this literal.
+3. **Section 7's insert message keeps its 0064 suffix**: `…by invitation acceptance or by sign-in connection; a new address starts unverified`. The update message is exactly §5.4's literal. Both match the new `GUARD_VERIFIED`.
+4. The `people.ts` `user_id` comment (listed in §5.12 without a batch) lands in A1 with the trigger it documents.
+
+### Findings for tech-lead (no DDL change in A1 depends on them)
+
+1. **E-33 cannot hold for `test-rls.sql` / `test-rls-46.sql` between A1 and A2.** §13.2 puts F186's trigger in A1 and the conversion of the twelve `presby_app` link writes in A2, yet asks A1's gate to run the existing SQL suites unedited. The result above shows exactly the predicted lines failing and nothing else. This is consistent with §4(c), so it is not a schema defect, but the A1 gate text overstates it. Proposed ruling: accept for A1 as recorded, and A2's gate re-runs the full file with the staged patch plus the edited `test-rls-46.sql` (already in A2's gate).
+2. **`scripts/seed.ts` stamps proof as `presby_app`** (kickoff, above). `npm run db:seed` with `SEED_*` set fails on first create after 0065. Needs a ruling and an owner (proposed: B1).
+3. **`presby_complete_email_change`'s residual should be named alongside the Google writer's.** `presby_app` holds DML on `email_verification_tokens`, so any `presby_app` statement can mint a token row for any user and address and then call the definer to get a **stamped** address. Same F187 class as the Google writer (the database cannot tell a real verification from a forged one). Recorded in the function's header comment. Suggest DECISION-225 and the F187 "narrowed" text name both writers' residual, not only Google's. Mitigation available later: route token issuance through a definer too (the TODO "definer-izing email change beyond the verified-address case").
+4. **For A2:** `presby_account_invitations_guard_update`'s two refusal messages name `presby_accept_invitation()`. After the move into `presby__accept_invitation_core` they are only loosely true (the marker, not the name, is what the guard checks). A2 may restate them; the parity golden does not read them.
+
+### Other gates
+
+- `npm run check:schema-parity`: 85 domain tables, 7 differences, 7 allowlisted, **0 failing**.
+- `npx tsc --noEmit`: **0 errors**. `eslint` on every touched file: clean.
+- `npm run check`: all eight tripwires pass.
+
+### Files
+
+- New: `drizzle/0065_presby_sign_in_and_connect.sql`, `src/lib/db/domain/email-proof.db.test.ts`, `src/lib/db/domain/sign-in-invitations.db.test.ts`.
+- Edited: `src/lib/db/domain/invitations.ts`, `src/lib/db/schema.ts`, `src/lib/db/domain/people.ts`, `src/lib/db/domain/invitations.schema.test.ts`, `src/lib/db/domain/contact-methods.db.test.ts`.
+- **No Rule 16 file edited** (`_journal.json`, `test-rls.sql`, `seed-dev.sql`, `domain/index.ts`, `decisions.md`, `TODO.md`, `STATE.md` untouched).
+
+### Handoff
+
+**Next: Batch A2 (database-admin)**, sections 11-15 appended to the same file, then T-1, the rest of T-4, T-5 to T-8, `test-rls-65.sql`, `seed-dev-sign-in.sql`, the `test-rls.sql` patch, the `test-rls-46.sql` conversions, `docs/schema-design.md`, `docs:erd`. Available to it now on the pipeline branch: the `sign_in` / `org` / `person_deceased` vocabulary and every CHECK and index for sign-in rows; `users_email_lower_uq` (E1's mapping arm in the accept core must name it); the F186 trigger (every non-owner link write refused, literal above); the R37 trigger (an owner-path definer that changes an address must re-stamp in the same statement); the toggle rows; the audit index; the two proof writers. Local apply: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0065_presby_sign_in_and_connect.sql` (owner, direct endpoint). No seed changed in A1. `test-rls.sql` sections: none added or touched (A2 stages `test-rls-65.sql` and the patch).
+
+## Orchestrator rulings on Batch A1's decisions for tech-lead (2026-10-25)
+
+1. `scripts/seed.ts` creating stamped users on `presby_app`: **B1 owns the fix** (create them on the owner connection).
+2. A1 gate wording: **accepted as recorded**; A2's gate covers the full `test-rls.sql` with the 12 line conversions.
+3. Email-change residual: **DECISION-225 and F187 name both writers** (`presby_record_google_email_proof` and `presby_complete_email_change`) as `paper` residuals of the same class.
+4. A2 **may restate** `presby_account_invitations_guard_update`'s two refusal messages after the move into the accept core.
+
+## Phase 4 — Batch A2 (database-admin, 2026-10-25)
+
+**Commit:** see the commit carrying this section, `feat(db): standing core, connect, accept in place and sign-in invitation functions (0065, part 2)` (by explicit path; not pushed). The orchestrator's rulings on Batch A1 (appended above, previously uncommitted) are committed with it.
+
+**Scope delivered (§13.2 A2):** 0065 sections 11-15; T-1 (the in-place twin), the rest of T-4, T-5 to T-8; `scripts/sign-in-invitations/test-rls-65.sql`, `seed-dev-sign-in.sql` and `test-rls.sql.integration.patch` (all staged, Rule 16); the nine `scripts/giving/test-rls-46.sql` conversions; `docs/schema-design.md`; `npm run docs:erd`. The two `presby_account_invitations_guard_update` messages are restated (ruling 4).
+
+### Migration mode
+
+**Hand-written**, `drizzle/0065_presby_sign_in_and_connect.sql`, sections 11-15 appended to A1's file (now 2,764 lines). Applied to the pipeline branch `pipeline-signin-invites` with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0065_presby_sign_in_and_connect.sql`. `neonctl` still prompts interactively, so the design's fallback stands: **apply twice on the pipeline branch** (a disposable child of `development`). `drizzle/meta/_journal.json` is **not** edited (Rule 16): integration adds `{ idx: 65, tag: "0065_presby_sign_in_and_connect" }`.
+
+**Whole-file idempotence proof** (row count | first 8 of the md5 over every row; the last line covers every 0065 function's body and ACL):
+
+| Object | Before A2 | After apply 1 | After apply 2 |
+|---|---|---|---|
+| `users` | 30 \| `d3c42a26` | 30 \| `d3c42a26` | 30 \| `d3c42a26` |
+| `account_invitations` | 6 \| `1c3cc4d7` | 6 \| `1c3cc4d7` | 6 \| `1c3cc4d7` |
+| `people` | 695 \| `05eb14af` | 695 \| `05eb14af` | 695 \| `05eb14af` |
+| `contact_methods` | 52 \| `9dda4a09` | 52 \| `9dda4a09` | 52 \| `9dda4a09` |
+| `organization_feature_toggles` | 34 \| `4b4ec1e4` | 34 \| `4b4ec1e4` | 34 \| `4b4ec1e4` |
+| `audit_events` | 835 \| `f291e6e9` | 835 \| `f291e6e9` | 835 \| `f291e6e9` |
+| 0065's functions (body + ACL) | 8 \| `bdc7a313` | 23 \| `a4d7ffb9` | 23 \| `a4d7ffb9` |
+
+Both applies exit 0. Neither writes a row (A2 adds functions only; A1's toggle seed already ran), and the second changes no function. The file was applied 10 more times during the failing-first proofs. After each, the catalog hash over every `presby*` function matched the pre-proof hash. `sign-in-invitations.db.test.ts` (A1) still re-applies the whole file twice inside a rolled-back transaction and asserts the second run changes no digest; it now covers sections 11-15 too.
+
+### What 0065 sections 11-15 contain (as built)
+
+11. **Helpers.** `presby_membership_standing(text, text)` (S13/R50: plain `language sql immutable`, no definer, no `SET`; `listed | staff_anchor | visitor | inactive | unclassified`, first match wins). `presby_deny_sign_in_invitation()` (the one literal, invoker, EXECUTE to `presby_app`). `presby__actor_person` (S6). **The standing core** `presby__person_sign_in_standing(person, org)`: refusal `person_merged > person_deceased > membership_ended` (missing membership included) `> person_elsewhere`; the classifier's standing; open-or-future Session and diaconate seats; T as role and permission keys outside the closed derived list, with `coalesce(... in (...), false)` so a derived group of any other (or a null) kind counts (fail closed); `authority_bearing`. It never calls `presby_effective_permissions`, which answers only for the current org, so connect and in-place can use it. **The bind helper** `presby__bind_person_account`: links only from null and raises otherwise, stamps the matching active contact, and returns that contact's id and `created_at`.
+12. **Issue core and callables.** `presby_sign_in__check` (first failure wins, §5.8's order); issue (an open row is `already_pending` with `existing_invitation_expired`); resend (cooldown, chain cap, check, limits, supersede, then insert at the **current** address); revoke; the reader (Phase 3's closed shape plus `connected_via`/`connected_on`); `presby_sign_in_card_standing`. Limits are SQL literals `30 / 30 / 3`, `origin = 'org'`, `created_at <= now()`, identical in issue and resend (pinned by a source test).
+13. **Accept core and presentations.** `presby__accept_invitation_core` is the live 0064 body **moved** (`prosrc` from the branch, identical to 0064's text), with edits made by an asserted, scripted replace so the diff is exactly: (1) step 1 to the wrapper, (2) presentation routing (`token` runs the live steps 2 and 3; `in_place` runs the user gate and the factor; else `internal_error`), (3) explicit purpose routing in steps 3-6 (`else raise`, four sites), (4) `linked_person` through the bind helper, (5) E1's two-constraint arm, plus the `sign_in` branch (2b unlocked currency check; step 4 person lock, `FOR SHARE` re-check, the core, the gates). `diff` of the core against the live `prosrc`: 18 hunks, 34 lines removed, 149 added, every one in those categories (the diff is in the scratchpad, not committed). The token wrapper keeps its signature and ACL. `presby_accept_in_place`, `presby_list_invitations_for_account`, preview re-created from the live text with the `sign_in` branch, and `presby_account_invitations_guard_update` re-created from the 0059 text (identical to live) with two messages restated: `...accepted only through presby_accept_invitation() or presby_accept_in_place(), by the shared acceptance core` (and `blocked`). The existing pins `/accepted only through presby_accept_invitation/` still match.
+14. **Connect.** `presby_connect_signed_in_account`: §5.10's eleven checks. The first pass is unlocked. The second takes locks in acceptance's order (organization, user, person, contact `FOR SHARE`) and re-runs every check; a candidate or organization that moved declines. It writes through the bind helper only. Every non-`connected` outcome returns ids null and booleans false.
+15. **ACLs and comments.** Revoke from `public, presby_app, presby_platform` for every function the file defines (A1's included). EXECUTE to `presby_app` on exactly the fifteen of §5.11. Comments on every new function.
+
+### Restating the new logic in English (self-verification)
+
+- **Standing core:** "A record is refused if merged, else if deceased, else if it has no live membership here, else if it has any membership anywhere else. Its standing is what its roll and engagement say. It bears authority if it holds a Session or deacon seat that has not ended (even one not yet started), or any role here through its own grant or a non-baseline group, counting grants and group memberships that start in the future." Matches R40, A4 and A5.
+- **Connect:** "Link a proven, active account that is linked to nobody, to the single living, unmerged person anywhere who holds that exact address as an active email and has a live membership. Only if that is their only live membership, it is at a managed congregation whose connect toggle row says on, nobody has an open invitation to the address, the core refuses nothing and they are not a visitor. If they bear authority, only when the account has TOTP and the session verified it." Matches §5.10.
+- **In place:** "An open invitation, addressed to the account's own proven address, on an active account, accepts as the token path would. A founding administrator, a treasurer or an authority-bearing sign-in additionally needs TOTP plus a verified session, else 'needs a second factor', changing nothing. Every identity miss looks like a dead link." Matches §5.9.
+
+### Tests (implementer-written)
+
+| File | Plan id | Cases | Result |
+|---|---|---|---|
+| `src/lib/db/domain/sign-in-standing.db.test.ts` (new) | T-5 | 37: the 22-row matrix driving the core, card, issue, connect (with and without a factor), token, in-place (with and without) and the reader's blocked mapping; officers-permission; derived baseline and Session-bound role outside T; the visitor-predicate equality (read from `community.ts` itself, evaluated in SQL, roll null and every `DIRECTORY_STATUSES` value plus one unlisted, the one documented difference asserted by name); the classifier's shape; the three migration-text and live-catalog scans with an offending sample; E-25's three-way agreement | 36 passed + 1 `it.fails` (below) |
+| `src/lib/db/domain/connect.db.test.ts` (new) | T-6 | 51: the eligible cases; a 26-case decline matrix (each the identical uniform row, footprint unchanged); E-37 over every `platform_status`; R42 table and snapshot; E-31; races (connect vs connect, vs an address edit, holding vs in-place and token acceptance, acceptance holding vs connect); `lock_timeout` is `55P03`, not a hang | 51 passed |
+| `src/lib/db/domain/accept-in-place.db.test.ts` (new) | T-7 | 23: gate order (null args, unknown id, mismatch, unproven, inactive, revoked, expired, stale address; each `dead`, nothing written); the second-factor table for FA, treasurer and `sign_in`; `needs_second_factor` leaves the row and token live; R35 footprint; no-op and blocked cases; core ACL and misuse; the listing's catalog shape and contents | 23 passed |
+| `src/lib/db/domain/sign-in-accept.db.test.ts` (new) | T-4 (accept) | 21: R27 both directions and both modes; stale link before `account_exists`/`email_mismatch`; demoted main; mixed case; edit-vs-accept race; seven gates with committed `blocked_at` and nothing else; R35; G5 preview; F196 forced; E1 race for `sign_in`, FA and treasurer | 21 passed |
+| `src/lib/db/domain/sign-in-invitations.db.test.ts` (extended) | T-4 (issue, reader) | +30: identity (5 callables x 6 cases, one literal); issue shape and every refusal with "nothing written"; R29 scope; acknowledgements from the definer only; `already_pending` (+expired); limits (31st, 2099 and platform rows ignored, per-inviter across organizations, per-address F155) and the SQL literals; resend (`not_open`, cooldown, R33 corrected address, refusal leaves the row, chain cap); revoke; the reader (catalog columns, bounds, every state, address withheld, needs_support collapse, delivery columns, `connected_via`/`connected_on`) | 56 passed (A1's 26 + 30) |
+| `src/lib/onboarding/designation-parity-in-place.db.test.ts` (new) | T-1 twin | 12: every golden scenario accepted in place equals the committed golden | 12 passed |
+| `src/lib/db/domain/invitations.schema.test.ts` (extended) | T-8 | +11: the fifteen grants; revoke of every function; pinned `search_path` and pragma; the core's two-constraint mapping; blocked reasons the core can commit (the standing core's included) equal the 0065 list; F196 routing; the marker armed only in the core; the two `user_id` writers; R43/E-24 scans; DECISION-189 (only the sender's own `users` row); `ended_at` on every contact read | 32 passed |
+| `src/lib/db/domain/invitations.db.test.ts` (extended) | T-8 | +4 live-catalog: the two `user_id` writers database-wide; fifteen callables and five internals per role, PUBLIC none; every 0065 definer owned by `neondb_owner` with the pinned path; the guard's restated messages | 70 passed |
+| `src/lib/testing/sign-in-fixture.ts` (new) | support | a managed congregation with the derived groups and toggle, people, a second membership through the claim GUC, owner-stamped users, TOTP, seats, grants of every shape, known-token `sign_in` rows, and presby_app wrappers for every callable | — |
+
+**The B2 tripwire.** E-25's deceased-holder case is `it.fails` for `findSharedAddressNotes` only. That function still counts a deceased holder until B2 adds `p2.date_of_death is null` (Phase 3 amendment 2, 1.2 item 5; B2 owns `store.ts`). The test turns red the moment B2 lands, which is the cue to make it a plain `it`. The three definers already agree, and that is asserted unconditionally.
+
+### Failing-first proofs (pipeline branch; one function weakened, the aimed tests run, the whole file re-applied, the catalog hash compared)
+
+| # | Mechanism removed | Failed | Restored |
+|---|---|---|---|
+| p1 | connect's toggle check (step 8) | `connect.db` "the toggle is off", "the toggle row is absent"; `test-rls-65` 65.7 (R47) | hash matches |
+| p2 | connect's factor check (step 11) | 7 `connect.db` R42 cases; 65.7 (R42) | hash matches |
+| p3 | the in-place user gate's proof condition | `accept-in-place.db` "an unproven account ... is dead" | hash matches |
+| p4 | the standing core's fail-closed `coalesce` on the derived list | `sign-in-standing.db` "a derived group of an unclassified kind" | hash matches |
+| p5 | the check's acknowledgement gate | `sign-in-invitations.db` acknowledgements; 65.6 (F177 condition 1). That assertion was added after p5 first ran clean in SQL, and was proven failing-first then | hash matches |
+| p6 | E1's `users_email_lower_uq` arm | `sign-in-accept.db` E1 race for `sign_in`, FA and treasurer | hash matches |
+| p7 | the reader's `address_current` withholding | `sign-in-invitations.db` "invited_address is withheld" | hash matches |
+| p8 | the listing's proof condition | `accept-in-place.db` listing case; 65.8 | hash matches |
+
+### Gate (§13.2)
+
+- **Rehearse:** above (apply twice, digests unchanged).
+- **Parity golden byte-identical:** `designation-parity.db.test.ts` 12/12 with `WRITE_DESIGNATION_GOLDEN` unset; `git diff --exit-code src/lib/onboarding/designation-parity.golden.json` clean (after the core move, and again at the end). The in-place twin is 12/12.
+- **`accept.db.test.ts`, `issue.db.test.ts`, `designation-holders.db.test.ts`:** unedited, passing (with `invitations.db`, `invitations.schema` and `sign-in-invitations`: 155 + 79 tests, all green right after the core move).
+- **SQL as `presby_app` (`ON_ERROR_STOP`):** `test-rls-59` 36, `-60` 19, `-62` 53, `-64` 47, `-65` 92, `giving/test-rls-46` 263; all exit 0.
+- **Full `scripts/test-rls.sql` with the staged patch, on a scratch copy** (stop-on-error off in every included file, the A1 precedent): **1,330 passed** (A1's post-0065 baseline was 1,240 before section 65; plus 65's 90 at that run), and **the three known drift failures only**, reported separately: presbytery members 3≠2 (`:217`), 2fa definer (`:516`), DECISION-152 count (`:7927`). Every other `ERROR` line is an aborted-transaction cascade inside those three blocks. Section 44 and every `test-rls-46` block that F186 broke in A1 pass.
+- **DB-backed Vitest, serial (`npm run test:db`, the whole lane, 43 minutes):** **638 files, 11,308 passed, 2 failed, 1 expected fail (the B2 tripwire), 1 skipped.** The two failures: (a) `contact-methods.db.test.ts:355`, 0064's Vitest twin of the 64a site-count pin, re-derived exactly as 64a (deviation 1), now 45/45; (b) `issue.db.test.ts:322`, the platform founding-administrator email-worker case ("a failing provider ... a later worker success redacts it", expected status `sent`). It is unrelated to 0065: it passed in the A2 gate run right after the core move and passes on re-run (63/63). Intermittent, recorded here and not fixed in this batch.
+- **Then apply to the pipeline branch twice:** done (above; the branch holds the final file, catalog hash re-verified after the last proof).
+- `npx tsc --noEmit` 0 errors; `eslint` on every touched file clean; `npm run check` all eight tripwires pass; `check:schema-parity` 0 failing (85 tables, 7 allowlisted).
+
+### Deviations from the design text (each small; flagged for review)
+
+1. **0064's two site-count pins re-derived:** `scripts/person-emails/test-rls-64.sql` 64a and its Vitest twin `src/lib/db/domain/contact-methods.db.test.ts:346` pinned "`ended_at` at exactly four sites in preview and accept" (accept 3, preview 1). The body moved into the core and gained three `sign_in` currency checks, so they now count wrapper 0, core 5 and preview 2 (7), and the Vitest one also pins the core as not executable by `presby_app`. These are blast-radius lines §8.4 missed. Same intent, re-derived.
+2. **`test-rls-46` conversion: neither of the two named options.** Each block now links its fixture person through the sanctioned writer: new include `scripts/giving/test-rls-46-link.sql` (secondary email at the account's address, a `user_totp` row, `presby_connect_signed_in_account(user, true)`). Every assertion, actor and expected value is unchanged. A seeded linked person would have changed shared seeds (founding.fixture is deliberately person-less); moving to the owner connection would have moved 46j/46p-46t out of the SQL suite. Consequence: `test-rls-46` now needs the toggle rows `seed-dev-sign-in.sql` seeds (integration order, §16).
+3. **Section 44 (the staged patch).** 44a inserts the designee unlinked: every 44a/44b assertion is about the person, never the account. 44d(iv), "a second live row on one user_id is accepted", cannot be demonstrated from `presby_app` any more, so it now asserts the F186 refusal. The still-deferred F110 state is the seeded `router.dup@` pair 44e already pins (comment rewritten to say so). The patch also appends the section-65 banner and `\ir`.
+4. **The seed uses two new congregations** (Hollinbrook, managed; Saltmarsh, unmanaged), not Alder Creek or Bramblewood. The first full run caught my original choice breaking `bramblewood: sees no alder memberships` (`:156`), and a new organization also needs its open canonical name row (section 42(k)), which the seed writes. The sender is a Hollinbrook fixture holding `people.manage` and `officers.manage`, not "the seeded founding administrator": founding.fixture has deliberately no person. Every seeded account is password-less.
+5. **Per-inviter limit counts across organizations** (`created_by_user_id`, `origin = 'org'`), as the platform's inviter count does. Phase 3 does not say; per-organization would make it identical to the organization limit. It reveals nothing to the sender they do not already know (their own sends).
+6. **Reader edge:** an accepted `sign_in` row whose person is no longer linked (only an owner-path unlink could do that) reads `none`; the vocabulary has no state for it.
+7. **Core step 2 answers `dead` for a missing row**, which is unreachable on the token path (its wrapper resolved the id from a row). It is listed here because §5.9 counts the allowed differences.
+
+### Findings for tech-lead (no A2 DDL depends on them)
+
+1. **Connect holds the organization row, and an invitation insert for that organization waits for it** (the FK takes `FOR KEY SHARE`; connect holds `FOR UPDATE`). Issuance and connect at one congregation serialize, briefly (connect commits with its audit row). Benign, and it means FB5 cannot be raced by a concurrent send. Recorded because the first draft of a race test deadlocked on it client-side.
+2. **The listing shows a `sign_in` invitation whose address has since left the person's record**; accepting it answers `dead` (R27). §5.9 asks for open rows only. Batch C's card should expect a card that turns into the dead-in-place sentence; filtering the listing by the currency check is a one-line change if tech-lead prefers.
+3. **The pipeline branch inherits from `development` an organization row whose name looks like a real congregation's** (not created by `seed-dev.sql`). Nothing in this batch references it; flagged for the orchestrator (No Real Data applies to the repository; this is in the database only).
+4. **Shared scratchpad:** another worktree's agent wrote into this session's scratchpad directory during the run, which corrupted one of my logs (re-run cleanly; my files are now `a2-*`).
+
+### Files
+
+- New: `scripts/sign-in-invitations/test-rls-65.sql`, `scripts/sign-in-invitations/seed-dev-sign-in.sql`, `scripts/sign-in-invitations/test-rls.sql.integration.patch`, `scripts/giving/test-rls-46-link.sql`, `src/lib/testing/sign-in-fixture.ts`, `src/lib/db/domain/{sign-in-standing,connect,accept-in-place,sign-in-accept}.db.test.ts`, `src/lib/onboarding/designation-parity-in-place.db.test.ts`.
+- Edited: `drizzle/0065_presby_sign_in_and_connect.sql`, `scripts/giving/test-rls-46.sql`, `scripts/person-emails/test-rls-64.sql`, `src/lib/db/domain/{sign-in-invitations.db,invitations.db,invitations.schema,contact-methods.db}.test.ts`, `docs/schema-design.md` (new subsection; `docs:erd` refreshed, no diagram changed: A2 adds no table, column or FK), this work-log.
+- **No Rule 16 file edited** (`_journal.json`, `test-rls.sql`, `seed-dev.sql`, `domain/index.ts`, `decisions.md`, `TODO.md`, `STATE.md` untouched). No Drizzle mirror change: A2 adds functions only.
+
+### Handoff
+
+**Next: Batch B1 (`api-developer`).** Available on the pipeline branch now, all EXECUTE-granted to `presby_app`: `presby_record_google_email_proof`, `presby_complete_email_change` (A1); `presby_connect_signed_in_account(user, factor)` (outcomes `connected | already_connected | needs_second_factor | declined`; `connected` carries organization, slug, person, contact id and `created_at`, seats, role and permission keys for the audit row); and for B2, issue / resend / revoke / `presby_sign_in_invitation_states` / `presby_sign_in_card_standing` (organization from `app.current_org_id`, actor = the session's `users.id`; identity refusals raise `account_invitations: this sign-in invitation action is not permitted`, 42501), `presby_accept_in_place` (16 columns, adds `needs_second_factor`) and `presby_list_invitations_for_account`. The SQL outcome literals B2's `SIGN_IN_*` constants must pin are in section 12. The limits are 30 / 30 / 3 per 24 h, 5-minute cooldown, 5 resends. **B1 owns the `scripts/seed.ts` fix** (ruling 1). **B2 flips** the `it.fails` in `sign-in-standing.db.test.ts` when it changes `findSharedAddressNotes`.
+
+Local apply: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0065_presby_sign_in_and_connect.sql`, then `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/sign-in-invitations/seed-dev-sign-in.sql` (owner). Integration (orchestrator, §16): append `seed-dev-sign-in.sql` to `seed-dev.sql` after `seed-dev-invitations.sql`; apply `test-rls.sql.integration.patch` (section 44 conversions plus the section-65 include); journal entry idx 65; then re-run `scripts/test-rls.sql` as `presby_app` against merged `development`. `test-rls.sql` sections touched: 44 (via the patch) and 65 (new).
+
+## Phase 4 — Batch B1 (api-developer, 2026-10-25)
+
+**Commit:** `509943a` `feat(auth): record address proof and connect a verified sign-in to its person` (by explicit path; not pushed). Merged `origin/main` first (`4d01773`, main at 0.44.0); no conflicts. Kickoff check (§13.3 steps 1 and 2) confirmed on the merged tree before touching `src/auth.ts`: DECISION-230 is in (`4a3396f`: `src/lib/auth/two-factor-grant.ts`, `takeTwoFactorGrant` consumed only on `trigger === "update"`, `e2e/session-claim-integrity.spec.ts`) and F231's gate is in (`9e75953`: `evaluateSignIn(provider, user, { emailVerified: profile?.email_verified }, ...)` in the `signIn` callback, `isEmailClaimVerified` exported, `src/auth.sign-in.test.ts`). `git log main -- src/auth.ts` shows nothing newer. Migration 0065 (A1 + A2) is applied to the pipeline branch `pipeline-signin-invites`.
+
+**Scope delivered (§13.2 B1):** `src/lib/auth/email-proof.ts`, `src/lib/auth/email-change.ts` and the verify-email page, `src/lib/onboarding/connect.ts`, the `src/auth.ts` branch, the two audit keys, the catalog entry and its tests (T-13), the scan changes (T-11 for these files), T-9, and (orchestrator ruling 1 on A1) the `scripts/seed.ts` fix.
+
+### Contract the next agents consume
+
+No route handler and no server action is added in B1 (those are B2: `src/app/no-organization/actions.ts`). No `FEATURES.*` key, no tenant permission, no platform flag. The three new entry points are library functions with these gates:
+
+| Function (file) | Gate | Shape |
+|---|---|---|
+| `connectSignedInAccount(input)` (`src/lib/onboarding/connect.ts`) | Identity is the caller's, from `auth()` / the `jwt` callback only. No permission, no feature, no flag read in TypeScript; the definer reads the account's proof, the record's standing and the congregation's `org_portal.sign_in_connect` row. Called from exactly `src/auth.ts` (`via: "sign_in"`) and, in B2, `src/app/no-organization/actions.ts` (`via: "check_again"`) | `ConnectInput = { userId; via: "sign_in"; proof: "google" \| "account"; actorEmail? } \| { userId; via: "check_again"; secondFactorVerified: boolean; actorEmail? }` (passing a factor flag at sign-in is a compile error). `ConnectResult = connected{organizationSlug} \| already_connected \| needs_second_factor \| declined \| error`. Also exports `CONNECT_OUTCOMES`, `CONNECT_AUDIT_METADATA_KEYS`, `CONNECT_AUDIT_AUTHORITY_KEYS`. One `db.transaction`: `set local lock_timeout = '3s'`, `presby_connect_signed_in_account(userId, factor)`, and on `connected` one audit row in the same transaction. Never throws: every failure is `{ kind: "error" }` and logs `"[connect] failed"` plus an error class (name and SQLSTATE, from the `cause` chain), never a message |
+| `recordGoogleEmailProof({ userId, address })` (`src/lib/auth/email-proof.ts`) | One call site, `src/auth.ts`, inside `account?.provider === "google" && isEmailClaimVerified(profile?.email_verified) && profile?.email` | `Promise<boolean>`: true only when the definer stamped. One transaction with the `user.email_proof_recorded` row. Throws on a database error (the caller swallows it) |
+| `completeEmailChange(rawToken)` (`src/lib/auth/email-change.ts`) | None (the link is the credential; the page is reachable without a session, unchanged) | `{ kind: "ok" \| "invalid" \| "expired" \| "email_taken" \| "error" }`; also exports `EMAIL_CHANGE_OUTCOMES` (pinned to the SQL literals) and `sha256Hex`. One transaction with the existing `user.email_changed` row |
+
+**`src/auth.ts`, the `jwt` sign-in branch** (inside `if (user?.id)`): `jwt({ token, user, account, profile, trigger, session })` now receives `account` and `profile` (kickoff step 8, item 1). Order, pinned by a unit test and a source scan: `ensureDefaultRole`, proof (Google only), connect (always), `lastLoginAt` update, then (further down) `computeEffectiveTwoFactor`. Two independent `try`/`catch` blocks that log the fixed strings `"[auth] email proof failed"` / `"[auth] connect failed"`. `token.twoFactorVerified` stays `false`; the update branch is untouched and reads no payload; no new session claim.
+
+**Audit (two keys added to `AUDIT_ACTIONS`, mirrored in `audit.test.ts`):** `TENANT_PERSON_SIGN_IN_CONNECTED = "tenant.person.sign_in_connected"` (resource `person`; metadata exactly `organizationId, personId, contactMethodId, contactMethodCreatedAt (ISO), via, proof, secondFactor, authority{sessionSeat, diaconateSeat, roleKeys, permissionKeys}`; actor = the account) and `USER_EMAIL_PROOF_RECORDED = "user.email_proof_recorded"` (resource `user`; metadata `{ source: "google" }`). Declines write nothing. The existing `user.email_changed` row keeps its shape. `audit.ts`'s comment block is updated for the congregation-sender and in-place actor.
+
+**Catalog:** `org_portal.sign_in_connect` in `ORG_FEATURE_CATALOG` (name and description are §10 group G verbatim; `category: "people"`, `flag: null`, `provisionedOn: true`, `orgTypes: null`, `operatorEnabled: false`). `createOrganization()` therefore writes the row for a new congregation with no code change; `org-feature-catalog.test.ts` and `org-provisioning.test.ts` (now two toggle rows) are updated.
+
+**Verify-email page:** now `await completeEmailChange(token)` and a switch. The three messages (invalid/used, expired, claimed) are byte for byte; success `revalidatePath("/account")` then `redirect("/account?emailChanged=1")`.
+
+### Tests (implementer-written; all green)
+
+| File | Plan id | Cases | What it pins |
+|---|---|---|---|
+| `src/auth.connect.test.ts` (new) | T-9 | 19 | Drives the real `jwt` callback with `next-auth` mocked: proof only for Google with a boolean-true claim and an address (false, missing, `"true"`, `1`, `null` each refused); the provider's address, not the session's; connect always attempted, `via: "sign_in"`, no factor key; a throw in either never fails sign-in and logs no `@` and no id; order after `ensureDefaultRole`, before `lastLoginAt` and `computeEffectiveTwoFactor`; an update runs neither |
+| `src/lib/onboarding/connect.test.ts` (new) | T-9 | 21 | The factor flag (always false at sign-in; exactly the claim at Check again; non-boolean is false); the 3 s lock timeout first; the four outcomes; the audit row's closed key list and authority snapshot; no address; a failed audit insert is `error`; class-only logging including a wrapped SQLSTATE; `CONNECT_OUTCOMES` read from the 0065 body |
+| `src/lib/auth/email-proof.test.ts`, `email-change.test.ts` (new) | T-9 | 9 + 9 | Definer arguments, audit shape and same-transaction write, no audit on a non-stamp, fail-closed on a non-boolean, no database for bad input, hash-only SQL parameter, `EMAIL_CHANGE_OUTCOMES` read from the migration |
+| `src/lib/onboarding/connect.db.test.ts` (new, DB) | T-9 / E-10, E-11, E-14, E-24, E-29 | 8 | Real Postgres as `presby_app`: one audit row from the closed list with the join key to the contact row; second call `already_connected`, still one row; declines write nothing; authority-bearing needs the enrolled factor AND the session claim, and the row snapshots the seat; a forced audit failure leaves no link, no `verified_at`, and the same account connects afterwards; a held organization lock gives `error` in under 15 s with `Error/55P03` and nothing written; a platform administrator connects like anyone |
+| `src/lib/auth/email-proof.db.test.ts` (new, DB) | T-9 / E-4, E-5 | 10 | Stamp and audit row in one transaction (a forced audit failure leaves `email_verified` null); different address and inactive account stamp nothing; case-insensitive; email change writes address AND stamp, deletes the token, writes `user.email_changed`; expired deletes the row; taken in another case keeps the token; forced audit failure rolls the whole change back and the same link then works; two racing verifies give one `ok`, one `email_taken` |
+| `src/app/(email-verify)/.../verify-email/[token]/page.test.tsx` (new) | T-9 | 6 | The three messages byte for byte, the success redirect and revalidate, `error` throws (no new string) |
+| `src/lib/contact-methods/scan.test.ts` (edited) | T-11 | +5 | Section 3 retitled, assertion unchanged, plus an offending-sample test; **3b** only `src/auth.ts` imports `@/lib/onboarding/connect`, exactly once; **3c** `connect.ts` and `src/app/no-organization/**` name no contact object |
+| `src/lib/onboarding/boundaries.test.ts` (edited) | T-11 | +15 | `connectSignedInAccount` referenced only by `auth.ts`, the B2 action and its module; `presby_connect_signed_in_account`, `presby_record_google_email_proof`, `presby_complete_email_change` each named in exactly one file; the proof call sits inside the `provider === "google"` + `isEmailClaimVerified` block; no grant import and no update-payload read in the feature's files; `auth.ts` ordering; **`scripts/seed.ts` inserts users only on `platformDb`**. Every scan has an offending sample |
+| `org-feature-catalog.test.ts`, `org-provisioning.test.ts`, `audit.test.ts` (edited) | T-13 | 1 new + edits | The new entry's every field and its approved wording; two provisioned rows; the audit catalog |
+
+**Mutation checks** (each change made, the aimed tests run, the file restored): dropping the strict claim check fails six tests; moving connect out of its `try` fails two; moving proof and connect after `computeEffectiveTwoFactor` fails the ordering tests and the source scan; passing a true factor at sign-in fails four; removing the email-change audit insert fails two. A negative control on the running server (the connect call disabled) fails the two positive smoke cases. `scripts/seed.ts`: the HEAD version run against the branch with `SEED_MEMBER_*` set fails with the 0065 guard's message at the first create; the fixed version creates the user, and a second run takes the update branch. (The throwaway users were deleted.)
+
+### Gate
+
+- `npx tsc --noEmit` 0 errors; `npm run lint` clean (`--max-warnings=0`); `npm run check` all eight tripwires pass (including `check:proxy-imports`); `npm run build` succeeds.
+- Unit suite (`npm test`): **597 files passed, 90 skipped; 9,077 passed, 2,746 skipped, 0 failed.**
+- DB-backed, serial, the suites I touched or that sit under the change: `org-provisioning`, `org-features`, `domains/toggles.db`, the new `email-proof.db` and `connect.db`, and A1/A2's `sign-in-invitations.db`, `db/domain/email-proof.db`, `db/domain/connect.db`, `accept.db`, `designation-parity.db` and the in-place twin: **11 files, 270 passed**. `git diff --exit-code src/lib/onboarding/designation-parity.golden.json` clean.
+- `scripts/sign-in-invitations/test-rls-65.sql` as `presby_app` (`rolbypassrls = f`, `ON_ERROR_STOP`): exit 0, **92 passes, 0 failures**.
+- **Running-server e2e (the Phase 4 auth gate), own dev server on :3540** (`E2E_BASE_URL`/`AUTH_URL` `http://localhost:3540`; `RATE_LIMIT_DISABLED=true`, `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake`, `DOMAINS_ALLOW_RESERVED_TLDS=1`, `DOMAINS_FAKE_STATE_FILE`, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`, `E2E_ALLOW_SHARED_DB=true`; never :3000; stopped by PID, port verified free after), against the pipeline Neon branch, with the staged global-setup patch applied for the run:
+  - The 0.42.3 guards: `totp-full-login` (MFA-enrolled `mfa-enrolled` fixture: password, `/totp`, a wrong code rejected, the real code), `totp-callback-bypass` (7), `session-claim-integrity`, `branded-signin` (5, including case 2's full TOTP login): **14 passed**.
+  - The new B1 smoke `e2e/sign-in-connect-smoke.spec.ts`: **5 passed** (connect at sign-in lands in the congregation with one closed-list audit row; toggle off and absent decline; a Session seat declines at sign-in; an MFA-required member is connected at sign-in and then crosses the real `/totp` challenge into the congregation, E-12; the verify-email link changes and stamps the address, spends the token, writes `user.email_changed`, and the second visit is the old invalid card). With the connect call disabled, cases 1 and 4 fail (negative control).
+  - Regression lane: `forgot-password`, `account-page` (including the verify-email invalid-token landing), `post-login-routing` (12), `member-home` (8), `totp-code-entry`, `totp-recovery-code`, `invitation-existing-account` (incl. the MFA self-designation), `invitation-new-account`, `invitation-fixture-sweep`: **48 passed**.
+  - The Google path is not e2e-able (no provider); it is covered by `src/auth.connect.test.ts`, `email-proof.db.test.ts` and the definer tests (stated plainly so QA does not mistake it for covered).
+
+### Deviations and decisions inside the design (each small; flagged for review)
+
+1. **Design gap, with a patch: `e2e/support/seed-users.ts` stamps the roster as `presby_app`.** §4(b) lists it as an owner-path writer; it is not. `globalSetup` calls `seedE2EUsers(dbUrl)` with `E2E_DATABASE_URL ?? DATABASE_URL`, the application role, and its `INSERT ... email_verified = now()` hits `users_guard_email_proof` ("users: email_verified is recorded only on the owner path..."), so **every Playwright run after 0065 fails at globalSetup, CI included** (`e2e.yml` sets `E2E_DATABASE_URL` to the app URL). The one-line fix is `seedE2EUsers(platformDbUrl)` (the owner connection, as `seedE2EOrgs` already uses). Both files are Rule 16 (`e2e/support/*`), so I applied it to the working tree only for my run, reverted it, and staged `scripts/sign-in-invitations/e2e-global-setup.integration.patch` (`git apply --check` clean against the committed tree). **QA's e2e run in this worktree, and the orchestrator's integration, need it applied** (or `E2E_DATABASE_URL` set to the owner URL for a local run). It belongs in §16.
+2. **`proof` in the connect audit row is `null` for `via: "check_again"`.** The design lists `proof` among the exact keys but `ConnectInput` has no proof for Check again (proof is a sign-in fact). The key is kept, so the key list is closed.
+3. **The verify-email page loses its "Account not found." message.** It was reachable only for a token whose user row is gone, which the FK cascade prevents; the definer reports that as `invalid`. "Three user-facing messages are kept byte for byte" is honoured. An unexpected failure (`error`) throws to the error boundary, as an unexpected database error did before; no string is invented.
+4. **A B1 smoke spec was added** (`e2e/sign-in-connect-smoke.spec.ts`), though §8.5 assigns the e2e to Batch D. It is the Phase 4 login gate for an auth-touching diff and uses only existing support fixtures read-only (nothing under `e2e/support/` is edited). D's `no-organization-connect.spec.ts` owns the full matrix and may fold this file in.
+5. **Scans live in two files.** 3, 3b, 3c are in `src/lib/contact-methods/scan.test.ts` (where section 3 lives); the call-site, grant and seed scans are in `src/lib/onboarding/boundaries.test.ts`. §7.4's "no connect, standing or listing function body in 0065 contains `is_platform_admin` or `verified_at`" is already pinned by A2's `invitations.schema.test.ts` (R43/E-24 scans) and is not repeated. T-13 is done here (13.2 puts it in B1; 8.3's table says B2).
+6. **`errorClass` walks the `cause` chain** (found by the DB test: Drizzle wraps the driver error, so the lock timeout's SQLSTATE sits on `cause`). It returns the name and SQLSTATE only, never the message (a Drizzle message carries the statement and its parameters).
+7. **`email-proof.ts` and `email-change.ts` write the actor's address into `audit_events.actor_email`** (the account's own, as `accept.ts` does); metadata carries no address except `user.email_changed`'s existing `oldEmail`/`newEmail`, unchanged.
+
+### Findings for tech-lead (no B1 code depends on them)
+
+1. **Deploy-order copy hazard.** With B1 live and Batch C not, a person who is connected at sign-in never reaches `/no-organization`, but one who is not still reads "Signing in doesn't connect you to a congregation by itself" (`page.test.tsx` pins it). The 2b release ships A to D together, so this is a sequencing note, not a defect.
+2. **Every sign-in now costs one extra short transaction** (`set local`, the definer, `already_connected` for a linked user) inside the `jwt` callback. Accepted by the design (the same callback already makes four queries); the lock timeout bounds the worst case at 3 s.
+3. **`already_connected` is returned for every sign-in of a linked user and writes nothing**, as designed; there is no per-sign-in audit row, so the F232 detection chain starts only at an actual connect.
+
+### Files
+
+- New: `src/lib/auth/{email-proof,email-change}.ts` (+ `.test.ts`, `email-proof.db.test.ts`), `src/lib/onboarding/connect.ts` (+ `.test.ts`, `.db.test.ts`), `src/auth.connect.test.ts`, `src/app/(email-verify)/account/verify-email/[token]/page.test.tsx`, `e2e/sign-in-connect-smoke.spec.ts`, `scripts/sign-in-invitations/e2e-global-setup.integration.patch`.
+- Edited: `src/auth.ts`, `src/lib/audit.ts`, `src/lib/audit.test.ts`, `src/lib/org-features.ts`, `src/lib/org-feature-catalog.test.ts`, `src/lib/org-provisioning.test.ts`, `src/lib/contact-methods/scan.test.ts`, `src/lib/onboarding/boundaries.test.ts`, `src/app/(email-verify)/account/verify-email/[token]/page.tsx`, `scripts/seed.ts`.
+- **No Rule 16 file edited** (`domain/index.ts`, `_journal.json`, `test-rls.sql`, `seed-dev.sql`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `docs/reviews/log.md`, `e2e/support/*` all untouched; the one e2e/support edit made for the run was reverted and is staged as a patch).
+
+### Handoff
+
+**Next: Batch B2 (`api-developer`).** What B2 must know:
+
+- **`connectSignedInAccount` is ready for the Check-again action.** The scan in `boundaries.test.ts` engages when `src/app/no-organization/actions.ts` exists and requires the call to read exactly `userId: session.user.id` and `secondFactorVerified: session.user.twoFactorVerified === true` (no form data, query or cookie). On `connected` or `already_connected` the action calls `unstable_update({})` with an empty payload and redirects to `/launch`.
+- **Do not import `two-factor-grant` or pass data to `unstable_update` anywhere under `src/app/no-organization/`, in `connect.ts`, `email-*.ts` or `in-place.ts`** (the scan covers `in-place.ts` when it exists). **Nothing under `src/app/no-organization/` or `connect.ts` may name `contact_methods`, `contactMethods`, `contact-methods`, `presby_person_email` or `getPersonEmail`** (3c); the current `page.tsx` is clean.
+- The audit catalog test (`audit.test.ts`) already lists B1's two keys; B2 adds none. `safe-callback.test.ts`'s `/no-organization` case (§7.3) is B2's and was not added here.
+- Reuse `errorClass` as written in `connect.ts` (name plus SQLSTATE from the `cause` chain) for any new best-effort log.
+- `createSignInFixture()` (A2) plus the `auditControl` mock pattern in `connect.db.test.ts` is the template for a DB-backed test of `acceptInvitationInPlace`'s audit rows (`via: "in_place"`, `secondFactor`).
+- **To run any Playwright spec in this worktree, apply `scripts/sign-in-invitations/e2e-global-setup.integration.patch` first** (item 1 above), or set `E2E_DATABASE_URL` to the owner URL for a local run. The dev-server recipe above works unchanged (port 3540 is this pipeline's).
+- B2 flips the `it.fails` in `sign-in-standing.db.test.ts` when `store.ts`'s `findSharedAddressNotes` gains `p2.date_of_death is null`; B2 also widens the TypeScript vocabulary unions with their exhaustive consumers (A1's deviation 1).
+- Operator-visible release facts B1 creates: a sign-in now connects people without anyone clicking anything (the deploy-day wave, E-32, sized by P8); the congregation's toggle is on the existing Features page already (catalog entry), default on.
+
+## Phase 4 — Batch B2 (api-developer, 2026-10-25)
+
+**Commit:** `a9114da` `feat(invitations): org-issued sign-in invitations, accept in place, send, resend and cancel` (by explicit path, 56 files, not pushed). Branch `pipeline/signin-invites` on top of `6b9d973`; no merge needed (main unchanged since B1). `drizzle/`, `_journal.json`, `test-rls.sql`, `seed-dev.sql`, `docs/TODO.md`, `docs/decisions.md`, `docs/STATE.md`, `docs/reviews/log.md` and `e2e/support/*` are **not** edited (the one e2e/support patch applied for the smoke was reverted; see the gate).
+
+**Scope delivered (§13.2 B2):** `org-invite.ts` and the pure modules; `accept.ts` in place; `in-place.ts`; the community edit actions; the platform `scope`; `src/app/no-organization/actions.ts`; the `issue.ts` fixes; the `queue.ts` id; the email registry (sender and entry together); `labels.ts`; `invitation-copy.ts`; `store.ts`; the widened vocabulary unions with their exhaustive consumers; T-9 (rest), T-10, T-11 (rest). The `it.fails` in `sign-in-standing.db.test.ts` is now a plain `it` (all four agree a deceased holder is not "another live person").
+
+### Contract the next agents consume
+
+No route handler is added. No `FEATURES.*` key, no tenant permission, no platform flag, no seed, no new audit key (`audit.test.ts` unchanged). The org toggle `org_portal.sign_in_connect` is B1's.
+
+**Server actions, community edit page** (`src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts`, `"use server"`; organization, acting person and acting USER come from `auth()` and `resolveOrgContext(user, slug)`, never from input; the input is rebuilt from its known fields):
+
+| Action | Gate | Request | Response |
+|---|---|---|---|
+| `sendSignInInvitationAction(slug, { personId, confirmedAddress, acknowledged? })` | signed in; member of the org; `people.manage` (library pre-check, then the definer re-checks). The page's Community flag/toggle gate is the page's, as for every Community action | the address the sender saw (the DATABASE chooses where the email goes; a different value is `address_changed`) | `SignInActionResult` (below) |
+| `resendSignInInvitationAction(slug, same)` | same | same | same |
+| `revokeSignInInvitationAction(slug, { personId })` | same | | `ActionResult` (`{ ok: true }` or `{ ok: false, error }`) |
+
+```ts
+// src/lib/onboarding/sign-in-types.ts (pure, client-safe)
+type SignInActionResult =
+  | { ok: true; data: { address: string; expiresAt: string /* ISO */; delivery: "sent" | "queued" } }
+  | { ok: false; error: string;                       // empty string when needsAcknowledgement is set
+      needsAcknowledgement?: SignInAckReason[];       // "visitor" | "do_not_contact": the dialog re-opens with these
+      retryAfterMinutes?: number };                   // cooldown, whole minutes rounded up
+```
+
+`needs_acknowledgement` is not an error and has no sentence in the Copy: the dialog shows its own acknowledgement paragraphs and the result carries `error: ""`. Revalidated on success: `/o/<slug>/admin/community/<id>/edit`, `/admin/community`, `/admin/community/pending`, `/admin/officers`.
+
+**`/no-organization` actions** (`src/app/no-organization/actions.ts`, `"use server"`; identity and the factor flag from `auth()` only):
+
+| Action | Gate | Request | Result |
+|---|---|---|---|
+| `checkAgainAction(prev, formData)` | signed in (a lapsed session redirects to `/signin?callbackUrl=%2Fno-organization`); rate limit `no_org_check:<user>` 30 per hour | none read from the form | `NoOrgActionState`; `connected` or `already_connected` -> `unstable_update({})` then `redirect("/launch")` |
+| `acceptInPlaceAction(prev, formData)` | signed in; rate limit `no_org_accept:<user>` 20 per hour; the G9 parity pre-check (`twoFactorRequired && !twoFactorVerified` -> `needs_second_factor`, before the database) | field `invitationId` (a UUID selection, not an identity) | `NoOrgActionState`; `accepted` -> `unstable_update({})` then `redirect("/launch?next=" + encodeURIComponent("/o/" + slug))` with the slug from the definer's row |
+| `switchAccountAction()` | none | none | `signOutAction("/signin?callbackUrl=%2Flaunch")` |
+
+```ts
+type NoOrgActionState =
+  | { status: "idle" } | { status: "nothing_new" } | { status: "needs_second_factor" }
+  | { status: "error"; code: "not_signed_in" | "rate_limited" | "dead" | "blocked" | "invalid_input" | "db_error"; message: string };
+```
+
+(`invalid_input` is in the union for the contract's sake and is never returned: a malformed id is the `dead` bucket.) The `/totp` hop is `/totp?callbackUrl=/no-organization`, pinned to survive `sanitizeCallbackUrl` (`safe-callback.test.ts`).
+
+**Platform:** `revokeAllInvitationsAction(formData)` (gate `FEATURES.ADMIN_ORGANIZATIONS`, unchanged) now REQUIRES `scope` = `designations` | `org_sent`; missing or unknown is `{ ok: false, error: "Invalid scope." }` and the library is not called. The existing control posts `scope=designations` (one-line edit to `revoke-all-invitations.tsx`) so it keeps working until Batch C adds the second control.
+
+**Library for Batch C's server components** (all `server-only`, tenant side through `withOrgContext`):
+
+| Function | Returns |
+|---|---|
+| `getSignInCard(ctx, personId)` | `{ kind: "ok"; card: SignInCardState } \| forbidden \| not_found \| error` |
+| `getSignInMarkers(ctx, personIds)` | `Record<personId, SignInMarker>` (`{}` for a non-manager or any failure; never throws) |
+| `listSessionSignInRows(ctx)` | `{ kind: "ok"; rows: SessionSignInRow[] } \| forbidden \| error` (needs `people.manage` AND `officers.manage`) |
+| `listInvitationsForAccount(userId)` (`in-place.ts`) | `InPlaceInvitation[]`; **throws on a database error** (the page turns that into N5) |
+| `summarizeOrgSentInvitations(orgId)` (`issue.ts`, platform connection) | `{ counts, revocable, rows[{ id, status, maskedAddress, createdAt, expiresAt }] }` masked in SQL, no name |
+| `revokeAllOpenInvitations({ organizationId, actor, scope })` | `scope` now required |
+
+`SignInContext` = `{ organizationId, actingPersonId, actingUserId, actingUserEmail? }` (build it from `resolveOrgContext` and `auth()`, as the actions do).
+
+**Pure modules (client-safe):** `sign-in-types.ts` (limits, closed lists pinned to the migration, `connectOutlook`, `deriveSignInMarker`, `deriveSessionRowState`, `SignInCardState`, `SignInMarker`, `SessionSignInRow`, `REVOKE_ALL_SCOPES`), `sign-in-copy.ts` (refusal table as functions of `{ name, congregation, minutes }`, the card, dialog, marker, Session banner/hand-off, `/invite` sign_in and platform-panel strings), `no-organization-copy.ts` (groups A, B, C), and in `labels.ts` `inviteeBlockedCopy(purpose, reason, congregation?)` and `INVITATION_DEAD_IN_PLACE_COPY`. `PURPOSE_LABEL.sign_in`, `AccountInvitationPurpose` / `Origin` / `BlockedReason` are widened.
+
+**Email registry:** `account_sign_in_invitation` -> `person:credential` in `EMAIL_AUDIENCE` and in `CREDENTIAL_TEMPLATE_KEYS`, in this commit with its one sender (`org-invite.ts`).
+
+### What the TypeScript decides (pinned)
+
+- **Order for a send:** valid context -> valid person id (`not_found`, no round trip) -> valid confirmation (`invalid_input`) -> `platformOrigin()` (`link_origin_unavailable`) -> `isTotpConfigured()` (`totp_unavailable`), all BEFORE a write -> in one `withOrgContext` transaction: `people.manage` pre-check (`forbidden`), the definer (with a token HASH, a pre-minted queue id, the normalized confirmation and the acknowledgement flag), render, `insertQueueRowInTx` with `to` = **the address the definer returned**, the audit row. A non-`ok` definer result aborts the transaction by a throw. After commit `attemptQueuedSend`; a failure is `delivery: "queued"`.
+- **Audit (Rule 7), existing keys, ids and enums only:** `invitation.created` (`invitationId, organizationId, purpose: "sign_in", origin: "org", personId, expiresAt, acknowledged`); `invitation.resent` (adds `resendCount`, read in the same transaction); `invitation.revoked` (`via: "single"`); `acknowledged` is what the **definer** returned, never the client's flag. In place, `invitation.accepted` and `org.*.designated` carry `via: "in_place"` and `secondFactor`; the token path's rows are unchanged byte for byte.
+- **The `blocked` accept result** carries `purpose` and `organizationName` (read after commit, best effort) so the invitee's neutral sentence can name the congregation's office (G6).
+- **Marker rule** (Phase 3): shown for pending (sent date, or bounced), expired, blocked, and for none/revoked only when the person holds authority that is inert while unconnected (an open officer term, staff position or direct role grant). Never for a connected person.
+
+### Tests (implementer-written)
+
+Unit suite: **607 files passed, 93 skipped; 9,360 passed, 2,803 skipped, 0 failed** (B1: 597 / 90; 9,077 / 2,746; +283 tests).
+
+| File | Cases | What it pins |
+|---|---|---|
+| `sign-in-types.test.ts` (new) | 32 | Every closed list read back from `drizzle/0065` section 12 in both directions (issue/resend refusals, resend-only, revoke, ack reasons, reader states, block outcomes, `connected_via`, standings), the limits 30/30/3, 5 minutes, 5 resends, `expiryDays` = `INVITATION_EXPIRY_DAYS`; `connectOutlook`'s precedence table; marker and Session-row derivations |
+| `sign-in-copy.test.ts`, `no-organization-copy.test.ts`, `labels.test.ts` (new) | 21 + 9 + 9 | Exact text of every Copy string transcribed from §10; the refusal table is total; no "two-step", no claim of prevention; the old stale lines are gone; `inviteeBlockedCopy` by purpose |
+| `org-invite.test.ts` (new, DB mocked) | 69 | Order and gates; forged input (organization, person, user, `to`); queue row id/hash/`to`; audit keys and `acknowledged` from the definer; refusals abort and write nothing; resend cancels; revoke; card composition; markers make exactly one reader call, one probe, one address-presence query; Session rows; failures log a class only |
+| `accept.test.ts` (new) | 18 | The in-place call; one audit writer for both presentations; `via`/`secondFactor` on in-place rows only; sign_in writes no designation row; unknown purpose rolls back; blocked carries purpose and name |
+| `in-place.test.ts` (new) | 7 | The call, the closed shape, a DB error throws |
+| `src/app/no-organization/actions.test.ts` (new) | 26 | Identity and factor from `auth()` only; rate limits; G9 parity before the database; empty-payload refresh; every state and string |
+| edit `actions.test.ts` (+) | | The three sign-in actions: context from the session, input rebuilt, every sentence, cooldown minutes, `needsAcknowledgement` |
+| `boundaries.test.ts` (+), `founding-administrator.test.ts`, `email-audience.test.ts`, `queue-credential.test.ts`, `safe-callback.test.ts`, `status.test.ts`, `invitation-email.test.ts` (+8), `invite-summary.test.tsx`, `anonymous-state.test.tsx` (new) | | The scans below; the named tenant-side exemption; the registry entry and its one sender; `/no-organization` survives the sanitiser; the sign_in email; the summary never falls into a designation's text; no name pre-fill |
+
+**Source scans added (T-11), each with an offending sample:** `org-invite.ts` never imports `getPlatformDb` or `./issue`, never reads `users`, the invitation table or the contact table, touches `email_queue` only through the three queue functions, writes audit only with `insertAuditRow(tx, ...)`; the five definers are named in exactly `org-invite.ts`; `presby_accept_in_place` only in `accept.ts`, `presby_list_invitations_for_account` only in `in-place.ts`; `acceptInvitationInPlace` and `listInvitationsForAccount` have the stated callers; `org-invite.ts` is imported only from `src/app/(org)/`; the Check-again and in-place calls read the user id and the factor flag from the session only; `src/app/no-organization/**` never imports `getPlatformDb`; the DECISION-230 scan now covers `in-place.ts`; **no non-test file under `src/` (outside `src/lib/testing/`) writes `people.user_id`** (the A2 owner-path scan); the platform's masked panel selects named columns only; the pure modules import nothing server-side; 0065's only `delete from` is a spent `email_verification_tokens` row.
+
+**DB-backed (serial, pipeline branch):** `org-invite.db.test.ts` (new, 28), `accept-in-place.lib.db.test.ts` (new, 14), `issue-org-origin.db.test.ts` (new, 12), `store.db.test.ts` (+4: the deceased holder; `personIdsWithCredentialEmail`), `sign-in-standing.db.test.ts` (the `it.fails` is a plain `it`). They show what a mock cannot: a FORCED audit failure leaves no invitation, queue row, superseded row, revoked row or link for send, resend, revoke, in-place accept and revoke-all; the queued `to_email` is the on-file address and a typed one is `address_changed` with nothing written; the email's token hashes to `token_hash` and the real preview resolves it (the earlier link stops); resend cancels and scrubs the earlier queued email at the CURRENT address; a visitor is refused until acknowledged and audited `['visitor']` while a client claiming acknowledgement for a non-visitor records `[]`; eleven org-origin rows do not spend the platform's limits; platform resend/revoke of an org row is `not_found`; revoke-all revokes one origin only; the summary shows `i***@example.invalid` and no name.
+
+**Mutation checks (each mutation made, the aimed tests run, the file restored):** `acknowledged` from the client flag fails 3; dropping `...extra` from the accept audit fails 2; removing the G9 pre-check fails 1; removing the sign_in no-pre-fill guard fails 1; swapping the outlook precedence fails 1; adding an unlisted refusal fails 2; dropping `origin = 'platform'` from the limits, the list, or the revoke-all scope fails 1, 1 and 2; removing `date_of_death is null` from `findSharedAddressNotes` fails the E-25 case.
+
+### Gate
+
+- `npx tsc --noEmit` 0 errors; `npm run lint` clean (`--max-warnings=0`); `npm run check` all eight tripwires pass (including `check:audit` and `check:proxy-imports`); `npm run build` succeeds.
+- **DB-backed lane (serial):** `src/lib/onboarding`, `src/lib/contact-methods`, `src/lib/db/domain`, `src/lib/email`: **71 files, 1,703 tests, all passing.** The first run had 8 failures, all the expected blast-radius line `accept.db.test.ts` ("blocked: exactly one invitation.accept_blocked per reason", which asserted `{ kind: "blocked", reason }`); updated to the new result shape and re-run green with `issue-org-origin` (42 passed). The parity golden: `git diff --exit-code src/lib/onboarding/designation-parity.golden.json` clean (the token suite and the in-place twin ran in that lane).
+- `scripts/sign-in-invitations/test-rls-65.sql` as `presby_app` (`rolbypassrls = f`, `ON_ERROR_STOP`): exit 0, **92 passes, 0 failures**.
+- **Running-server smoke (the post-login path), own dev server on :3540** (`E2E_BASE_URL` and `AUTH_URL` `http://localhost:3540`; `RATE_LIMIT_DISABLED=true`, `DOMAINS_PROVIDER=fake`, `DOMAINS_DNS_PROVIDER=fake`, `DOMAINS_ALLOW_RESERVED_TLDS=1`, `DOMAINS_FAKE_STATE_FILE`, `CRON_SECRET`, `STRIPE_WEBHOOK_SECRET`, `E2E_ALLOW_SHARED_DB=true`; never :3000; stopped by PID, port verified free; the DB lane was not running at the same time), against the pipeline Neon branch. **I applied `scripts/sign-in-invitations/e2e-global-setup.integration.patch` to the working tree for the run and reverted it with `git checkout -- e2e/support/global-setup.ts` afterwards (never committed); I did not use `E2E_DATABASE_URL`.** **67 passed, 0 failed:** the 0.42.3 guards (`totp-full-login`, `totp-callback-bypass` 7, `session-claim-integrity`, `branded-signin` 5), B1's `sign-in-connect-smoke` 5, `post-login-routing` 12, the invitation specs (`invitation-existing-account` 4, `invitation-new-account` 1, `invitation-fixture-sweep` 1), and the regression lane (`forgot-password` 2, `account-page` 7, `member-home` 8, `totp-code-entry` 11, `totp-recovery-code` 2). **Stated plainly so QA does not mistake it for covered:** no UI calls the new `/no-organization` or community actions yet (Batch C), so the running server proves the post-login path and the rewritten `(invite)` summary did not regress, not the new actions; those are covered by `actions.test.ts`, the DB-backed suites and Batch D's specs.
+
+### Deviations and decisions inside the design (each small; flagged for review)
+
+1. **The stale `sign_in` listing (A2 finding 2): decided per the design, not filtered.** Reason: the listing returns neither the person id nor the address, so TypeScript has nothing to filter by; the filter is a SQL change in 0065 (`database-admin`'s file). The accepted shape is safe and honest: accepting a stale row answers `dead` with nothing written (R27), and N4 ("This invitation is no longer active...") is the card's copy for exactly that. If tech-lead prefers the filter, it is one predicate in `presby_list_invitations_for_account` and no TypeScript changes.
+2. **`invitation.resent` has `resendCount` but not `supersededInvitationId`.** The resend definer returns the superseded row's queue id, not its invitation id, and `presby_app` cannot read the table. The chain joins through `resent_from_id`. An OUT column would be a DDL change for `database-admin` if the audit row should carry it.
+3. **Markers use one reader call, one probe and one address-presence query** (the design says "one probe including whether an email exists"). The existence check cannot be written in `org-invite.ts` without naming the contact objects or `presby_person_email` (scan sections 1 and 4), so it is `personIdsWithCredentialEmail(tx, ids)` in `src/lib/contact-methods/reader.ts`, the module's own door, and a page still costs three statements regardless of size.
+4. **`listSessionSignInRows` lists the seats in effect today**, the set `getSessionApprovalState` counts as `recorded`, not "open or future": the banner's count and the rows agree, and nobody is waiting on a seat that has not started.
+5. **The `blocked` accept result also carries `organizationName`** (design: `purpose` only), because the neutral sign_in sentence names the office. Read after commit on its own statement so a failure cannot abort the acceptance.
+6. **`REVOKE_ALL_SCOPES` / `RevokeAllScope` live in `sign-in-types.ts`** (pure), not `issue.ts`, so the action and its test import them without the library.
+7. **`SignInSendResult.invalid_input` is narrowed to `confirmedAddress`** (a malformed person id is `refused/not_found` with no round trip). The action maps a confirmation that is not an address to the `address_changed` sentence.
+8. **`founding-administrator.test.ts`'s DECISION-155 boundary** ("no module under `src/lib/onboarding` imports the resolver") now names ONE exemption, `org-invite.ts` (the tenant-side module), with a test that the exemption is exactly that and not vacuous.
+9. **Minimal UI edits outside the design's B2 list, because the widened unions forced them:** `invite-summary.tsx` (exhaustive switch; a sign_in invitation reads its own summary and never the designation's sentence), `anonymous-state.tsx` (no name guess for sign_in), `revoke-all-invitations.tsx` (posts `scope=designations`). Each has a test. Everything else on those pages is Batch C's.
+10. **0065 contains `delete from email_verification_tokens`** (the spent single-use email-change token). Phase 3's "the migration contains no `delete from`" is restated as "its only deletes are spent tokens" and pinned.
+11. **Blast radius not in §8.4** (updated in this commit): `accept.db.test.ts` (blocked result shape), `(invite)/actions.test.ts` (blocked takes a purpose), `revoke-all-invitations.test.tsx` and the platform `actions.test.ts` (scope), `status.test.ts` (blocked reasons now the widened list), `queue-credential.test.ts`, `founding-administrator.test.ts`, and the five "accepts it from the email" tests.
+12. **Test-authoring note:** in this Vitest, a `vi.fn()` whose implementation throws or rejects is reported as the test's own failure when the code under test rethrows it; `in-place.test.ts` injects the failure with a plain function in front of the spy.
+
+### Strings not in the Copy (derived; each is the minimum the type system or a neutral sentence required; the orchestrator rules, nothing was left unfinished)
+
+1. `BLOCKED_REASON_OPERATOR_COPY.person_deceased` = "This person's record can't be invited. Nothing was changed." (the platform panel never lists a sign_in row, so it is unreachable; the table must be total).
+2. `INVITEE_BLOCKED_COPY.person_deceased` = "This invitation can't be completed. Contact the person who invited you." (the Copy's neutral sentence, reused; unreachable for a designation).
+3. The sign_in email's **preheader** reuses the existing "Accept your invitation for {organization}." (the Copy gives no preheader); a blank sender name falls back to "{Congregation} has set up a place for you..." (no "{Sender} at").
+4. The platform action's refusal for a missing or unknown scope: "Invalid scope." (a developer-shaped string beside "Invalid organization."; unreachable from the UI).
+5. Check again's database error reuses the sender table's "We couldn't complete that just now. Try again." (the Copy has no Check-again error; "Your invitation is still good" would be false there). A lapsed session on Check again redirects to `/signin` rather than showing a sentence.
+6. The **blocked** marker reads "Not connected yet" (Group E lists no blocked variant).
+7. **Group E vs Phase 3 on a revoked invitation:** Group E's last row could be read as "revoked always shows the marker"; Phase 3's rule (and the code) shows none/revoked only when the person holds inert authority. If the operator meant the former, it is one line in `deriveSignInMarker`.
+8. `PURPOSE_LABEL.sign_in` = "sign-in" (the record must be total; no surface reads it).
+
+### Findings for tech-lead (no B2 code depends on them)
+
+1. **A concurrent e2e run can flake the DB lane.** The A2 fixture's `footprint()` counts `users` globally, and `globalSetup` creates users; the two lanes must not run at once on one branch. I ran them serially.
+2. **Issuance and connect serialize per organization** (A2 finding 1); unchanged, benign.
+3. **No TypeScript file can write `people.user_id`** and a scan now says so; the owner-path residual (DECISION-208) stays `paper`, mitigated by that scan.
+4. **The `check:audit` tripwire passes vacuously for all four action files** (they call library functions that write audit in the transaction), as for Increment 2.
+
+### Files
+
+- New: `src/lib/onboarding/{org-invite,in-place,sign-in-types,sign-in-copy,no-organization-copy}.ts` (+ `.test.ts` for each, `org-invite.db.test.ts`, `accept-in-place.lib.db.test.ts`, `issue-org-origin.db.test.ts`, `accept.test.ts`, `labels.test.ts`), `src/app/no-organization/actions.ts` (+ test), `src/app/(invite)/invite/{invite-summary,anonymous-state}.test.tsx`.
+- Edited: `src/lib/onboarding/{accept,issue,labels,invitation-email,invitation-copy}.ts`, `src/lib/db/domain/invitations.ts` (unions), `src/lib/email/{queue,credential-keys}.ts`, `src/lib/contact-methods/{store,reader,email-audience}.ts`, `src/app/(org)/o/[slug]/admin/community/[id]/edit/actions.ts`, `src/app/(admin)/admin/organizations/[id]/{actions.ts,revoke-all-invitations.tsx}`, `src/app/(invite)/{actions.ts,invite/invite-summary.tsx,invite/anonymous-state.tsx}`, and the tests listed above.
+- **No Rule 16 file edited.**
+
+### Handoff
+
+**Next: Batch C (`ux-developer`).** What C must know:
+
+- **Wire the Copy from the modules; do not retype it.** Cards, dialogs, markers, the Session hand-off and the platform panel come from `sign-in-copy.ts` (functions taking the name, address, congregation and an already-formatted date); `/no-organization` from `no-organization-copy.ts`. `signInMarkerLabel(marker, formatDate)` and `sessionRowStateLabel` take a string formatter; render dates with `FormattedDate` in the visible text and pass a plain formatter for any `aria-label`. For a marker with `noEmail`, show `SIGN_IN_MARKER_NO_EMAIL` beside "Not connected yet".
+- **Card:** `getSignInCard` once on the edit page as an independent awaited call; `error` renders `SIGN_IN_CARD_COPY.loadFailed` and never blocks the page. State copy by `card.state`, the connect line by `card.outlook` (`CONNECT_OUTLOOK_COPY`), the pending-invitation line (`pendingInvitation`) when `state === "pending"`. Send needs `card.address`; the dialog shows the visitor paragraph up front when `card.isVisitor`, and re-opens with `result.needsAcknowledgement` (the `do_not_contact` paragraph is shown only when the server asks). The toast text for a success is `SIGN_IN_DIALOG_COPY.send.toastSent` / `toastQueued`; the send-again and cancel toasts are in the same object. The cooldown button state uses `card.cooldownMinutes` and `card.chainCapReached`; `card.addressCurrent === false` shows the address-changed line with `card.address`.
+- **`/no-organization`:** the page reads `listInvitationsForAccount` in a `try`/`catch` (N5, shown above whichever block renders) and whether the account is enrolled (a `user_totp` row; `src/lib/two-factor.ts` is the module to read). `deriveNoOrganizationView` is C's (`view.ts`, §7.6). Both forms are `useActionState` islands with `NoOrgActionState`, buttons disabled until `useHydrated()` and 44px, no `useForm`. `needs_second_factor` links to `/totp?callbackUrl=%2Fno-organization` when enrolled and to the existing `/account/2fa` otherwise (Copy group B's two buttons). The per-card second-factor flag is `purpose in (founding_administrator, treasurer) || session.twoFactorRequired`. The page must not name any contact object (scan 3c) and the actions are already importable.
+- **Session hand-off:** `listSessionSignInRows` returns `forbidden` for anyone without BOTH keys: render `SESSION_BANNER_COPY.otherViewers` (no names, no link) for them. Rows link to `.../community/<personId>/edit#sign-in`; `row.action` picks "Invite" or "Open". `SESSION_BANNER_COPY.noSignIn(n)` uses the banner's `recorded` count, which equals the rows' set.
+- **Platform panel:** `summarizeOrgSentInvitations(orgId)` gives the counts, `revocable` (for "Cancel all open sign-in invitations ({n})") and masked rows; the second control posts `scope=org_sent` to the existing action. The designations button's count is `listInvitationsForOrg`'s open rows (now platform-only). Add the panel without a person name or a full address.
+- **`/invite` for `sign_in`:** `invite-summary.tsx` and the no-pre-fill guard are done and tested; the remaining states (mismatch, confirm, blocked via `inviteeBlockedCopy`) and their tests are C's.
+- **The eight derived strings above need the orchestrator's ruling before C ships copy** (items 1 to 8); C should treat them as provisional.
+- **To run any Playwright spec in this worktree, apply `scripts/sign-in-invitations/e2e-global-setup.integration.patch` first** (revert after; never commit it), or set `E2E_DATABASE_URL` to the owner URL; do not run the DB lane and the e2e lane at once.
+
+## 2b Phase 3 — amendment 3 (Copy for B2's derived strings)
+
+**Date:** 2026-10-25 · **Author:** tech-lead · **Class:** Copy amendment inside the 2b Feature (no schema, route, permission, flag or audit change) · **Inputs:** Batch B2's "Strings not in the Copy" (items 1 to 8, above) and the live tree at `06d4198` on `pipeline/signin-invites` (`labels.ts`, `sign-in-copy.ts`, `sign-in-types.ts`, `no-organization-copy.ts`, `invitation-email.ts`, `src/app/no-organization/actions.ts`, the platform `actions.ts`, `drizzle/0065`). Nothing outside this work-log was edited. The operator's Copy read (kickoff step 5) covered §10 as written; this amendment adds strings §10 did not contain and amends one §10 row (Group E, below), which the operator may overturn.
+
+### Rulings at a glance
+
+| # | B2's item | Ruling | B2 code |
+|---|---|---|---|
+| 1 | `BLOCKED_REASON_OPERATOR_COPY.person_deceased` | **Stands** | none |
+| 2 | `INVITEE_BLOCKED_COPY.person_deceased` | **Stands** | none |
+| 3a | sign_in email preheader (reuses "Accept your invitation for {organization}.") | **Stands** | none |
+| 3b | blank-sender lead ("{Congregation} has set up a place for you...") | **Stands** | none |
+| 4 | "Invalid scope." | **Stands** | none |
+| 5 | Check again database error (reuses the sender table's sentence) | **Changes**: its own sentence | `NO_ORG_COPY.checkFailed`; `actions.ts:108` |
+| 6 | blocked marker "Not connected yet" | **Changes**: "Invitation couldn't be completed", as its own marker kind. The same source-of-truth defect is in the Session row ("Not invited yet" over a blocked invitation); fixed the same way | `sign-in-types.ts`, `sign-in-copy.ts` |
+| 7 | revoked marker, Group E vs Phase 3 | **Phase 3's rule wins; Group E's row is amended** (revoked shows a marker only when the person holds inert authority) | none (code already does this) |
+| 8 | `PURPOSE_LABEL.sign_in` = "sign-in" | **Stands**, with a constraint on Batch C | none |
+
+Also checked, no change: Check again's rate-limit sentence is Group C's `Too many attempts. Try again in {n} minutes.` (`no-organization-copy.ts:95`), reused verbatim; it was not on B2's list and stands. A lapsed session on Check again redirects to `/signin?callbackUrl=%2Fno-organization` and shows no sentence; that stands.
+
+### What B2's author must change before Batch C starts (api-developer, one small commit; Batch C wires from the modules and must not retype)
+
+1. `src/lib/onboarding/no-organization-copy.ts`: add to `NO_ORG_COPY` `checkFailed: "We couldn't check just now. Try again."`. `src/app/no-organization/actions.ts:108`: `failure("db_error", NO_ORG_COPY.checkFailed)` in place of `signInRefusalMessage("db_error")`. The accept action's `NO_ORG_INVITATION_COPY.dbError` ("Your invitation is still good. Try again.") is unchanged.
+2. `src/lib/onboarding/sign-in-types.ts`: `SignInMarker` gains `{ kind: "blocked" }`; `deriveSignInMarker` returns it for `facts.state === "blocked"` (unlinked) in place of `not_connected`; update the doc comment at `:259-260`. `SESSION_ROW_STATES` gains `"blocked"`; `deriveSessionRowState` returns `"blocked"` for `facts.state === "blocked"` **before** the address test (a blocked invitation shows as blocked whether or not an address is on file now); `sessionRowAction("blocked")` is already `"open"`.
+3. `src/lib/onboarding/sign-in-copy.ts`: `signInMarkerLabel` -> `"Invitation couldn't be completed"` for `blocked` (no "No email on file" is appended to it; only `not_connected` carries that); `sessionRowStateLabel("blocked", ...)` -> `"Invitation couldn't be completed"`.
+4. Tests (modify, with the blast radius below): the two B2 cases that pinned the old reading, and add `blocked` to the reachable-states case.
+
+Nothing else in B2 changes. `org-invite.ts:650` may keep `blocked` in the probe set (harmless, one wasted lookup for a state that always shows a marker); do not churn it.
+
+### The strings, exact, with the four checks (one paragraph per group)
+
+**Group 1: `person_deceased` (items 1 and 2).**
+
+| Where | String |
+|---|---|
+| Platform panel, `BLOCKED_REASON_OPERATOR_COPY.person_deceased` (`labels.ts:61`) | This person's record can't be invited. Nothing was changed. |
+| Designation invitee, `INVITEE_BLOCKED_COPY.person_deceased` (`labels.ts:83`, `= SIGN_IN_INVITE_COPY.blockedOther`) | This invitation can't be completed. Contact the person who invited you. |
+| `sign_in` invitee (`inviteeBlockedCopy`, `labels.ts:107`; unchanged from Phase 3) | This invitation can't be completed. Contact {Congregation}'s office. |
+| Sender card line (`blockedCardLine`, `sign-in-copy.ts:156`) and refusal (`SIGN_IN_REFUSAL_COPY.person_deceased`, `:69`; unchanged) | This person's record can't be invited. |
+
+**R.** No string says "deceased", "dead" or gives a date: a person who proved an address, or who mistyped one, learns nothing about the record's state (G6's neutrality). Nothing says a sender confirmed an address or that an invitation is the only way in (F232). **S.** The only fact asserted is "can't be invited / completed", which is the core's `person_deceased` refusal (`people.date_of_death is not null`, `drizzle/0065` section 11d, refusal order person_merged > person_deceased > membership_ended) stored as the row's `blocked_reason` or returned as the send outcome; the strings never name the cause. "Nothing was changed" parallels the other eight operator rows (no role or link was applied). **A.** Row 1 is read by a platform operator (`ADMIN_ORGANIZATIONS`) only if a designation row ever carried this reason; it cannot (the platform panel never lists a `sign_in` row, and the designation branches of the accept core never assign `person_deceased`: `drizzle/0065:1758-1874`, against the `sign_in` branch's `v_block := v_st.refusal` at `:1908`), so it is present to keep the table total, and it gives no instruction. Row 2 is read by the proven holder of the link; "contact the person who invited you" is knowable (the platform operator for a designation; the `sign_in` path names the office instead). The sender's lines are read by a `people.manage` holder and give no instruction. **N.** Grepped `person_deceased` and "deceased": `participant-copy.ts:33` and `pending/decision-copy.ts:40` say "recorded as deceased" to roll actors; a different surface and audience (they act on the roll, where the date is already visible), left. No string made stale.
+
+**Group 2: the `sign_in` email preheader and blank-sender lead (item 3).**
+
+| Where | String |
+|---|---|
+| Preheader, every purpose (`invitation-email.ts:121`) | Accept your invitation for {organization}. |
+| Lead paragraph when the sender's name is blank (`invitation-email.ts:164-169`) | {Congregation} has set up a place for you on PresbyPortal, the website your congregation uses to keep its records and do its work. Accepting takes about a minute: you choose a password, and then you can sign in whenever you need to. |
+
+(With a sender name, the lead stays Phase 3's "{Sender} at {Congregation} has set up a place for you...".)
+
+**R.** The preheader promises only what the button does; it does not say who confirmed the address. "You choose a password" is Phase 3's sentence, already flagged for the operator in Group I, and is unchanged. **S.** {organization} is the definer's `organization_name` (`organizations.name`, `NOT NULL`, `src/lib/db/domain/org.ts:41`); the sender is the definer's `sender_name` (the acting person's preferred-or-first name and last name, `drizzle/0065:1170`), read from the definer's return and never from the client. A blank sender needs a person record with blank names, so the fallback is a degenerate-record path, not a normal one. **A.** The person at the address on file; the preheader's verb is the email's own button. **N.** The same preheader serves the two designation emails (`invitation-email.ts:121`) and is true there; `invitation-email.test.ts` pins both. If `organizationName` were blank the preheader would read "Accept your invitation for your congregation." and the `sign_in` subject would start in lower case; unreachable (the column is `NOT NULL`), so no code. No string made stale.
+
+**Group 3: the platform scope refusal (item 4).**
+
+| Where | String |
+|---|---|
+| `revokeAllInvitationsAction`, missing or unknown `scope` (`organizations/[id]/actions.ts:1048`) | Invalid scope. |
+
+**R.** None. **S.** `scope` is not in `REVOKE_ALL_SCOPES` (`:1046-1047`); the library is not called, so "invalid" claims nothing about what was or was not revoked. **A.** A platform operator; reachable only from a stale or forged post (both controls post a scope), and it gives no instruction. **N.** Its siblings in the same file are developer-shaped too ("Invalid organization." at `:230, :407, :464, :510, :583, :639, :865, :912, :1045`); one friendlier outlier among eleven would be less consistent, not more helpful. No string made stale.
+
+**Group 4: Check again, database error (item 5).**
+
+| Where | String |
+|---|---|
+| `NO_ORG_COPY.checkFailed`, returned by `checkAgainAction` as `{ status: "error", code: "db_error" }` | We couldn't check just now. Try again. |
+| Check again, rate limited (unchanged; Group C's `rateLimited`) | Too many attempts. Try again in {n} minutes. |
+
+**R.** The sentence does not say "your invitation is still good" (B2 was right that it would be false here: there may be no invitation) and says nothing about connection state, accounts or two-factor sign-in; "couldn't check" is true whether or not a connection exists. **S.** `connectSignedInAccount` returned `kind: "error"`, a caught database failure whose transaction rolled back; the sentence claims exactly that and no more. **A.** The signed-in, unconnected person (the page's only audience); "Try again" is pressing the same button, which is within their power, and the rate-limit sentence covers the case where they cannot yet. **N.** `NO_ORG_COPY.listingFailed` (`no-organization-copy.ts:48`, "We couldn't check for invitations just now. Reload the page.") is the page-load failure and says reload; this one is the button's failure and says try again. Different action, different instruction, deliberately not merged. Stale: `src/app/no-organization/actions.test.ts:185` pins the old sentence (modify). The sender table's `db_error` (`sign-in-copy.ts:91`) is unchanged and still serves the sender.
+
+**Group 5: markers and Session rows when an invitation was blocked (items 6 and 7).**
+
+Group E (§10), as amended by this section. It replaces §10 Group E's table, with these changes: a `blocked` row is added; the last row is split.
+
+| State | String (icon plus word, never colour alone; accessible name includes the person's name) |
+|---|---|
+| `pending` | Invitation sent {date} (amber) |
+| `expired` | Invitation expired. Send again (amber) |
+| bounced | Email bounced. Check the address (amber) |
+| **`blocked`** (the person's newest `sign_in` invitation was blocked and none is open; unlinked) | **Invitation couldn't be completed (amber)** |
+| `none` or `revoked`, and the person holds authority that is inert while unconnected (an open officer term, staff position or direct role grant) | Not connected yet (neutral); "No email on file" appended when true |
+| `none` or `revoked`, no such authority | no marker |
+
+Group F's Session hand-off row states, as amended: No email on file · Not invited yet · Invitation sent {date} · Invitation expired · Email bounced · **Invitation couldn't be completed**. The link for the new state is **Open** (the card explains and offers the next step).
+
+**R.** "Invitation couldn't be completed" says nothing about why (membership ended, record merged, deceased, or "needs support") and does not say a sign-in is impossible. It replaces B2's "Not connected yet" for blocked, whose "yet" promised a connection that, for a blocked invitation, may never come. Nothing here denies F232. **S.** `blocked`: `account_invitations.blocked_at` is set on the person's newest `sign_in` row and no newer open row exists (`presby_sign_in_invitation_states`, `drizzle/0065` section 12e, `st = 'blocked'`), and `people.user_id` is null (a linked person never gets a marker). "Not connected yet": `people.user_id` is null plus the TypeScript authority probe (display only). Session rows: the same reader state. **A.** `people.manage` holders; the marker and the Session "Open" link both go to the card, whose `blockedCardLine` states the cause and, for `needs_support`, says to send a support ticket, which a `people.manage` holder can do. The Session rows are shown only to a viewer with both `people.manage` and `officers.manage` (Group F); others see the no-names line. **N.** `INVITATION_STATUS_LABEL.blocked` = "Couldn't be completed" (`labels.ts:22`, the platform list) is the same phrase for the same fact; `blockedCardLine` (`sign-in-copy.ts:150`) reads "This invitation couldn't be completed because ..." and agrees. Modified: `sign-in-types.ts:259-260` (doc comment says a blocked invitation reads "Not connected yet"), `:273-274` and `:291-294`; `sign-in-types.test.ts:279-282` and `:298-301`; `sign-in-copy.test.ts:221-228` area and `:265-270` (add the two `blocked` labels; `SESSION_ROW_STATES` is looped at `:270`). Checked and left: a `revoked` seat reading "Not invited yet" with the **Invite** link: it says no invitation is out and names the next step, which the reader supports (`revoked_at` set, nothing open).
+
+Item 7, plainly: §10 Group E's last row ("not connected, holds inert authority, or `revoked`") can be read as "a cancelled invitation always shows a marker". Phase 3's rule, and the code, is the narrower one: none or revoked shows a marker only when the person holds inert authority, because a marker on every ordinary member whose invitation was ever cancelled is noise and says "Not connected yet" about a person the administrator chose not to connect. The row is amended accordingly (above). **For the operator:** if you meant the wider reading, it is one line in `deriveSignInMarker`, and nothing else changes.
+
+**Group 6: `PURPOSE_LABEL.sign_in` (item 8).**
+
+| Where | String |
+|---|---|
+| `PURPOSE_LABEL.sign_in` (`labels.ts:35-40`) | sign-in |
+
+**R.** None. **S.** No claim; it is a type-totality filler. **A.** No surface renders it: its only reader is `invite-summary.tsx:39`, whose `role` is used only in the non-`sign_in` branch (`:52`). **N.** Constraint for Batch C: never interpolate `PURPOSE_LABEL` into a sentence for a `sign_in` invitation (it would read "invited you to be the sign-in"); `sign_in` strings come from `SIGN_IN_INVITE_COPY` and `sign-in-copy.ts`. `labels.test.ts:28` pins totality. No new test.
+
+### Blast radius
+
+Existing tests this amendment alters (modify, not only add): `src/app/no-organization/actions.test.ts:185`; `src/lib/onboarding/sign-in-types.test.ts:279-282` (blocked marker), `:283-295` (every Session row state is reachable, now including `blocked`), `:298-301` (blocked seat); `src/lib/onboarding/sign-in-copy.test.ts:221-228`, `:265-270`. Existing e2e specs asserting any of these strings: none (grepped `e2e/`). Flags: none of the strings is behind a platform flag; Batch D's specs that assert markers and Session rows depend on the org toggle `org_portal.sign_in_connect` as B1 seeded it (default on) and set whatever they need through `e2e/support/flags.ts`; nothing here adds a key to `e2e-baseline-flags.sql`.
+
+### Carry-forward
+
+| Item | Addressed or deferred |
+|---|---|
+| Amendment 2 §10 Group E | Amended above (row split, `blocked` row); operator may overturn item 7 |
+| Amendment 2 §10 Group F (Session row states) | One state added (`blocked`) |
+| G6 neutral invitee strings; DECISION-040-style non-variance | Group 1: no string names a death or a reason; the `sign_in` invitee string is unchanged |
+| F232 and R42 (no claim of prevention; no claim a sender confirmed an address) | Checked on every group; none breached |
+| R46 (the card shows own-organization facts only) | Unchanged; the blocked marker reads the own-organization reader row |
+| Phase 3 Test Plan and §8.3 | Modified tests listed in the blast radius |
+| Group I (the "you choose a password" sentence for a Google user) | Still left for the operator's read; Group 2 does not touch it |
+| Anything deferred | Nothing new |
+
+### Implementer and status
+
+**Implementer:** api-developer (B2's author owns the pure files; one small commit before Batch C). Batch C (ux-developer) consumes the strings from the modules. The Per-Phase Status row for this amendment: tech-lead, Complete, Copy amendment recorded, 2026-10-25; item 7 awaits the operator's confirmation only if the wider reading was intended.
+
+## Phase 4 — B2 copy follow-up
+
+**Date:** 2026-10-26 · **Author:** api-developer · **Commit:** 3423f81 (`fix(invitations): …`, `Caught-By: agent-review`, `Discovered-In: Phase-4`) · **Scope:** amendment 3 items 5, 6 and 7; items 1 to 4 and 8 stand and were not touched.
+
+- **Item 5.** `NO_ORG_COPY.checkFailed` = "We couldn't check just now. Try again." (`no-organization-copy.ts`); `checkAgainAction`'s `db_error` uses it (`actions.ts:108`). The now-unused `signInRefusalMessage` import was removed from `actions.ts`.
+- **Item 6.** `SignInMarker` gains `{ kind: "blocked" }`; `deriveSignInMarker` returns it for an unlinked `blocked` state (no `noEmail` suffix). `SESSION_ROW_STATES` gains `"blocked"`; `deriveSessionRowState` returns it before the address test; `sessionRowAction("blocked")` was already `"open"`. Both labels read "Invitation couldn't be completed" (`sign-in-copy.ts`). Doc comments updated.
+- **Item 7.** No code change (already the behaviour); the revoked-with-and-without-authority cases are now pinned in `sign-in-types.test.ts`.
+- **Tests.** Modified: `actions.test.ts` (the db_error sentence), `sign-in-types.test.ts` (blocked marker; six reachable Session states; blocked seat), `sign-in-copy.test.ts` (marker and row labels), `no-organization-copy.test.ts` (`checkFailed`). Added, failing first (8 failed before the code change): blocked marker with and without authority or address, connected-person-has-no-blocked-marker, revoked with and without authority, blocked Session row with and without an address, plus two cases through `org-invite.test.ts` (`getSignInMarkers`, `listSessionSignInRows`), named "regression for …". `org-invite.db.test.ts` needed no change.
+- **Gate.** typecheck, lint (`--max-warnings=0`) and `npm run check` clean; unit suite 9,360 -> 9,365 passed (607 files, 93 skipped); DB-backed `src/lib/onboarding` + `src/app/no-organization` serial with `.env.local`: 33 files, 625 passed, none skipped.
+- **Handoff.** Batch C (ux-developer) consumes `signInMarkerLabel`/`sessionRowStateLabel` for the new `blocked` kind and state: the marker renders with an amber icon plus the word, and the Session row links to **Open**. `PURPOSE_LABEL.sign_in` constraint (item 8) stands.
+
+## Phase 4 — Batch C (ux-developer, 2026-10-26)
+
+**Scope delivered (section 13.2 C).** Every string comes from `sign-in-copy.ts`, `no-organization-copy.ts` or `labels.ts`; none was retyped. New shared helper `src/components/shared/dated-text.tsx` (`<DatedText dates render>`): the copy modules take dates as strings, so it hands them placeholders and puts a `<FormattedDate>` where each stood (no `toLocale*`). Toasts use `formatDateUTC`.
+
+- **`/no-organization`** (`src/app/no-organization/`): `view.ts` (pure `deriveNoOrganizationView`, 20 table tests), `invitation-cards.tsx`, `accept-in-place-form.tsx`, `check-again-form.tsx`, `second-factor-notice.tsx`, `switch-account-form.tsx`, `page.tsx` recomposed. Old "Signing in doesn't connect you..." copy removed. Verify link `/totp?callbackUrl=%2Fno-organization`, enrol link `/account/2fa?callbackUrl=%2Fno-organization` (both walked in a browser). Enrolment is read from `user_totp` through `db` (a failed read falls back to "not enrolled"). Accept and Check again keep their label while running (button disabled, `aria-busy`) so no wording outside the Copy appears.
+- **Card** (`community/[id]/edit/`): `sign-in-card.tsx`, `send-sign-in-dialog.tsx` (send, send again, send a new one; visitor paragraph up front, server-asked acknowledgement re-opens the dialog with `error: ""`), `cancel-sign-in-dialog.tsx`; `page.tsx` reads `getSignInCard` as an independent awaited call after the `try`; `error` renders the card's load-failed line, `forbidden`/`not_found` no card.
+- **Markers**: `community/sign-in-marker.tsx` (Badge plus icon plus word, link to `#sign-in`, sibling of the row link never inside it), wired into `members-list.tsx`, `community-rows-list.tsx` and `officers/officer-roster.tsx` (Session offices only), one `getSignInMarkers` per page.
+- **Session hand-off**: `pending/session-sign-in-rows.tsx`; `SessionStateBanner` takes `handOff` (`rows` | `other`, absent means `other`); `NO_SIGN_IN_INVITE_LINE` is gone; `terms_not_started`, `no_permission` and `officers/session-note.tsx` reworded from `SESSION_BANNER_COPY`. The page reads rows only for the `no_sign_in` banner and the `org_portal.sign_in_connect` toggle only when rows came back `ok`.
+- **Platform**: `org-sent-invitations.tsx` (counts, masked rows, no names), `revoke-all-control.tsx` (shared button and dialog posting the required `scope`), `revoke-all-invitations.tsx` now labelled "Cancel all open designation invitations (n)" with its dialog text unchanged; page reads `summarizeOrgSentInvitations` in a try/catch (null renders the panel's own load-failed alert).
+- **`/invite`** sign_in: B2 had done the summary; C adds `sign-in-states.test.tsx` (confirm, mismatch, two-factor, neutral blocked sentences). No component change was needed.
+
+**Tests (implementer-written).** New: `view.test.ts` (20), `page.test.tsx` rewritten (19), `check-again-form`, `accept-in-place-form`, `invitation-cards`, `switch-account-form` (+ notice), `sign-in-card.test.tsx` (41), `sign-in-marker.test.tsx`, `dated-text.test.tsx`, `org-sent-invitations.test.tsx`, `sign-in-states.test.tsx`; edited: banner (hand-off cases, group F strings), pending/community/edit/officers page tests, officer roster, platform page and revoke-all tests. Hydration specs `e2e/hydration/no-organization-controls.spec.ts` and `community-sign-in-controls.spec.ts` (pre-hydration the triggers are disabled, a forced click writes nothing, the invitation stays open; mutation check: removing `!hydrated` from Check again fails the spec). `e2e/post-login-routing.spec.ts` case 2's second locator changed to `/ask the office that keeps your records/i` (the design assigned it to D; the gate needed it).
+
+**Gate.** `tsc` clean, `npm run lint` clean, `npm run build` ok, `npm run check` all eight pass (brand-scope forced the Badge/Button primitives for the marker and the row link), `npm test`: 617 files passed, 93 skipped; 9,528 passed, 2,803 skipped (was 9,365). Running server on :3540 (patch applied then `git checkout -- e2e/support/global-setup.ts`, never committed; stopped by PID, ports 3540 and 3541 verified free): `totp-full-login`, `totp-callback-bypass`, `session-claim-integrity`, `branded-signin`, `sign-in-connect-smoke`, `post-login-routing`, `invitation-existing-account`, `invitation-new-account`, `invitation-fixture-sweep`, `member-home`, `account-page`, `forgot-password`: 53 passed with one failure, `invitation-new-account` ("you enrolled on" not seen), which passed on its own re-run (a timing flake on the enrolment landing, not touched by this batch); the two new hydration specs 4 passed in the dev lane and 4 passed in the production lane (:3541, `PW_PROD_BUILD=1`).
+
+**Real-browser walk (Chromium, 360x740 and 1280x800, screenshots in the scratchpad, none committed).** Throwaway congregation with a 78-character name. `/no-organization`: N0, "Nothing new yet.", the connect line for an authority-bearing record not enrolled (Set up two-factor sign-in), one invitation card, N4 dead after a revoke. Card: none, no address, pending (long address), cooldown, expired, address changed, blocked, signs in, visitor; dialogs send, send (visitor acknowledgement, box gates Send), send again, cancel; a real send persisted one row and flipped the card. Community lists (everyone, visitors, staff) with markers, Officers roster, pending page with the Session hand-off at 360 (long surname wraps, rows and links 44px). `/invite` anonymous, confirm, mismatch. Platform panel on the organization page. Programmatic checks on my surfaces: no horizontal overflow at either width, no target under 44px except the 20px acknowledgement checkbox, whose label row is 44px. Not walked in a browser: N5 (server-side failure, unit tested), the enrolled-user `/totp` return trip (E-35, Batch D), the delivery bounced card (unit tested), chain-cap card (unit tested; the seeded chain needs a lineage row).
+
+**Deviations and decisions (each small).**
+1. `NAME_FALLBACK = "you"` in `invitation-cards.tsx` for a `sign_in` row with no name (unreachable by construction; keeps the sentence grammatical). Not in the Copy.
+2. Platform org-sent dialog: title reuses the button text; keep/confirm buttons reuse the existing "Keep them" / "Yes, revoke all". The panel's load-failed line borrows `SIGN_IN_CARD_COPY.loadFailed`. Not in the Copy; flagged for the operator's read.
+3. "Ask the office" body is omitted when the session has no address (the Copy gives no no-address variant); the heading and the invitation line remain.
+4. "Sign in with a different account" also shows in the `invited` view (not in `standing`); Check again only in N0, per the Copy.
+5. Joined marker text "Not connected yet. No email on file" (separator mine).
+6. `invitationsOut` counts sent and bounced rows as "out"; expired is not.
+7. Accessible names: a flex-container link collapses a leading space in the sr-only name, so the name text sits inside one span; tests match `\s*`.
+8. Seeded hydration fixtures: `createParticipantViaSql` n 95 and 96 (person ids 195, 196) at alpha; the spec deletes its own `account_invitations` rows with the delete guard disabled in a retried try/finally (rows are permanent by trigger).
+
+**For Batch D.** The two hydration specs exist (section 8.5 item 3 is done; the in-dialog checkbox cannot exist before hydration, so it is exercised after release only in the unit tests and walk). `e2e/post-login-routing.spec.ts` is already updated. Test ids to use: `sign-in-card`, `sign-in-marker` (`data-marker` kind), `session-sign-in-rows`/`session-sign-in-row`, `invitation-cards`/`invitation-card`, `second-factor-notice`, `listing-failed`, `org-sent-invitations`/`org-sent-row`. Check again with an enrolled account links to `/totp?callbackUrl=%2Fno-organization`; a new account walks `/totp` to `/account/2fa` and back (E-35). A `sign_in` invitation row can be seeded with the owner connection (`origin 'org'`, a person, a created-by user; resent rows need `resent_from_id`); seeding `blocked_at` or `revoked_at` directly needs the guard triggers disabled (re-enable in `finally`). `invitation-new-account` flaked once in the batch run.
+
+## Phase 4 — Batch D (e2e) (full-stack-developer, 2026-10-26)
+
+**Commit:** `1216f80` (`test(e2e): …`). **Scope:** section 8.5 items 1, 2 and 4 (item 3, the two hydration specs, shipped in Batch C), the regression lane, the `invitation-new-account` flake investigation and the 360px pass (8.6). No application code changed; the staged `e2e-global-setup.integration.patch` was applied for every run and reverted (`git checkout -- e2e/support/global-setup.ts`), never committed.
+
+### Files
+
+- **New** `e2e/no-organization-connect.spec.ts` (11 cases x 2 widths = 22 tests): (a) authority-free member connected at sign-in, baseline only, the card says "Connected through sign-in on {date}"; (b) visitor: N0, "Nothing new yet."; (c) shared address: neither connects; (d) elder: a fresh two-factor-required account is walked `/totp` to `/account/2fa` at sign-in, enrols, lands on N0, Check again names the verify step (E-35: enrolment does not verify the session), `/totp?callbackUrl=%2Fno-organization`, Check again connects through the wall (`via: check_again`, `secondFactor: true`, `authority.sessionSeat`); (d2) the not-enrolled "Set up two-factor sign-in" variant and its link; (e) toggle off declines, an invitation still works; (f) an open invitation blocks auto-connect with the toggle on, card text, Accept connects, one `invitation.accepted` row `via: in_place`; (g) a founding-administrator invitation: N2 first, real `/totp`, then Accept designates (`org.founding_administrator.designated` `via: in_place`, `secondFactor: true`); (h) revoked after render: the in-place dead sentence and no second try; (i) N0's words and "Sign in with a different account" signs out; (j) the bootstrap walk (TODO 291 merged with 2b's hand-off): real founding administrator through the definer, empty Session in read mode, an elder recorded with no sign-in shows the banner and hand-off row ("Not invited yet", Invite link), that elder connects through the second factor, the administrator records themselves under Officers (self note) and approves their own proposal; audit rows carry `selfRecorded` and `selfApproved`, `decided_by` is the administrator.
+- **New** `e2e/community-sign-in-invite.spec.ts` (10 lanes x 2 widths = 20 tests), Phase 3's ten lanes with the §10 words: send through the real dialog (toast, pending card, cooldown, one `invitation.created` row with no address, one queued `account_sign_in_invitation` mail); cooldown then Send again after the fixture back-dates `created_at` (guard disabled in a retried try/finally), the earlier link dead, chain recorded; Cancel with Keep it and the dead-link page; visitor acknowledgement refuses Send until ticked; no address; address edited through the real editor after a send (R27 end to end, card says the address changed); a new invitee accepts a seeded row, enrols through the real challenge, lands with the baseline only; an existing account through "Sign in to accept"; the Community-list and Officers markers, their link into `#sign-in`, absent for a viewer without `people.manage`; the Session hand-off before and after one is sent ("Invitations sent to 1 of the 2 members of the Session").
+- **New** `e2e/support/sign-in-invite-fixture.ts`: additive and uniquely named, so no Rule 16 file changed (it composes `invitation-fixture.ts`'s exports). Seeds sign-in rows with a known token (`seedSignInInvitation`, with `resentFromId`, `resendCount`, `emailQueueId`), toggles, senders, the Session group and `session_member` role, elders, proposals, accepts a designation through the definer, back-dates an invitation, `removeSignInOrg` (clears the org's roll actions with the freeze trigger disabled in try/finally, and the queued sign-in mail, which the shared teardown does not), and page helpers. `enrolOnPage` is merge-neutral with 0.44.1 (the Confirm press is tolerant) and retries on the stale-secret race below.
+- **Edited, blast radius the design did not list** (both found by the full run): `e2e/admin-organizations.spec.ts` lines 777 and 981 asserted "accepts it from the email" (group H made it "accepts it"); `e2e/person-emails.spec.ts:205` matched "No email address on file." as a substring, which Batch C's new card sentence ("{Name} has no email address on file.") also contains (now `exact: true`). Both pass (35 passed with the rest of those two files).
+- `invitation-fixture-sweep` needed no change: every org these specs build is `e2e-invite-<stamp>`, so `sweepStaleInvitationFixtures` already removes it, and `removeSignInOrg` adds the mail and roll-action cleanup. `invitation-existing-account`, `invitation-new-account` and `designation-revoke` are unedited.
+
+### Gate
+
+- `tsc --noEmit`, `npm run lint` (`--max-warnings=0`) and `npm run check` (all eight tripwires, with the new files staged so `check:secrets` scans them) are clean.
+- **Dev server on :3540** (own server, `.next/dev` cleared, `RATE_LIMIT_DISABLED`, fakes, `E2E_ALLOW_SHARED_DB`), patch applied: new specs 22 + 20 passed. **Full `chromium` project: 491 tests, 464 passed, 11 failed, 16 not run.** Four of the 11 were mine to fix (above) and pass now, so 468 pass. The other 7 failures and the 16 not run (serial describes after them) all trace to one environmental cause, not to this pipeline: **the pipeline Neon branch does not have migration 0067** (`column "website_listed" of relation "events" does not exist`, `public-calendar-fixture.ts:149`, and `src/lib/events.ts` selects it): `public-calendar.spec.ts` (5), `hydration/public-events-calendar.spec.ts` (1), and `member-calendar.spec.ts:293` (the new-event page reads the column, so the picker never renders). They fail identically without any 2b file. **`custom-hosts`: 103 passed, 1 failed (`custom-domains/public-calendar.spec.ts` canary, same column), 7 not run.** The orchestrator owns applying 0067 to this branch (or a child) to take those 24 specs green; I did not alter the branch's schema. The failed public-calendar fixtures left an `e2e-pubcal-*` org and two `E2E %` event types that then failed `calendar-fixture` teardown in the next lane; I removed that debris (fixture rows only) and the lane re-ran.
+- **Prod lane on :3541** (`PW_PROD_BUILD=1`, build and start by the config, nothing on the port afterwards): **81 passed, 1 failed (`public-events-calendar`, 0067), 1 not run (same file).** Both Batch C hydration specs (4 tests) pass in this lane; `totp-challenge` passes.
+- The regression lane named by the design is inside the full run and green: `invitation-existing-account`, `invitation-new-account`, `invitation-fixture-sweep`, `designation-revoke`, `admin-organizations*` (after the two assertion fixes), `community-participants`, `community-approval`, `totp-full-login`, `totp-callback-bypass`, `session-claim-integrity`, `branded-signin`, `sign-in-connect-smoke`, `post-login-routing`, `member-home`, `account-page`, `forgot-password`.
+- **Mutation checks** (each reverted by `git checkout`; the new specs caught all three): `secondFactorNeededFor` returning false failed (g); the sign-in marker returning null failed lane 9; removing the hand-off sentence failed (j). Note for the next person: Turbopack kept the mutated `sign-in-marker.tsx` for the Officers route for a few runs after the revert, which looked like "no markers on Officers" in my first 360px screenshots; 13 consecutive runs after a clean recompile show the markers every time. It was my mutation, not a defect.
+- Spec-local judgement calls: SQL-seeded rows stand in for sends where the raw token is needed (a sent mail does not carry it in the clear); the Google path is not e2e-able and is stated as such in the spec header.
+
+### The `invitation-new-account` flake: verdict, a real defect (not timing)
+
+It did not reproduce in isolation (10 of 10 passed, 6.7 s each), then reproduced in my own lane 7 and in a probe (1 of 20 runs). The screenshot at failure shows the enrolment form still open with the correct six digits typed and the Confirm button live; the probe captured the server action's answer: `{"ok":false,"error":"That code did not match. Try again."}`, and the decrypted pending-enrolment secret in the database differed from the secret the page displayed (`sameSecret=false`).
+
+**Cause.** The browser fetches `/account/2fa?callbackUrl=…&_rsc=…` **twice in the same millisecond** on arriving there (observed in every run). `getOrCreatePendingEnrollment` (`src/lib/totp-pending.ts`) is find-then-upsert: both concurrent first renders find no row, each mints a different secret, and `onConflictDoUpdate` lets the last write win. The page may show the secret that lost the write; the correct code for it is then refused. A person would see the same and fix it by reloading (the stored secret is stable from then on). It is latent on `/admin/2fa` too (the helper is shared). It is **not** the 0.44.1 auto-submit: this branch has no 0.44.1, and a spec that still clicks Verify there is a separate, additive race on main (which already removed the click from the existing helpers; my helpers are neutral to both).
+**Suggested fix (a new bug-fix pipeline, regression test first):** insert `on conflict (user_id) do nothing` for a fresh row and re-select the stored row (or `do update … where expires_at < now()` returning it), so both renders return the one stored secret; plus a DB-backed test that two concurrent calls return the same secret. Until then `enrolOnPage` reloads and retries up to three times, and `invitation-new-account.spec.ts` (unedited, as asked) will flake at about the same 1 in 20.
+
+### 360px browser pass (real Chromium at 360x740 and 375x812; screenshots in the scratchpad, not committed; programmatic overflow and 44px audit on each page)
+
+No horizontal overflow anywhere and no interactive element under 44px on any new surface at either width. Walked, with 78-character congregation names, a 55-character local part and a 31-character surname: `/no-organization` N1 with three cards (sign-in, founding administrator, treasurer) with the verify variant; N2 not-enrolled; each of pending, not-a-tenant and ended above a card; N0 with a long address, "Nothing new yet" path and the connect-line notice with its button; the E-35 walk (`/no-organization` to `/totp`/`/account/2fa` to `/totp` to `/no-organization`) inside spec (d) at 360; the Community card pending (long address), bounced, chain cap and address changed (cards read well, buttons stacked and full width); send, send-again and cancel dialogs, and the visitor acknowledgement, each measured inside the viewport with 44px buttons (in the lane specs at 360); the Session hand-off after one is sent; the Officers roster with a marker and a Self-recorded badge; `/invite` for sign_in in the anonymous, mismatch and confirm states; the platform org panel. Not walked: N5 (a server-side failure, unit tested) and the blocked card (Batch C walked it).
+Observations, none from this batch: on the Officers roster at 360 the table scrolls sideways, an unbreakable long surname overruns the "Since" column and "Self-recorded" butts against the wrapped name (TODO finding 3 from the Increment 2 walk, still open); the roster's name links measure 17 to 37px tall; the markers themselves fit the 6rem Office cell by wrapping. The platform page's pre-existing brand controls measure 32 to 36px.
+
+### Findings for tech-lead (nothing here blocks Phase 5)
+
+1. **The flake is a real race** (above); needs a bug-fix pipeline. Candidate for the retrospective's escape stats: an e2e flake with a production-shaped cause.
+2. **Design text that does not hold:** Phase 3 lane 7 says the baseline member sees "no admin tiles". The tile registry is flag- and toggle-gated and explicitly never permission-gated (DECISION-003, `visible-tiles.ts` header), so a baseline member sees tiles for every administration page the congregation has switched on and each destination refuses them. The spec asserts the destinations (Officers and Roles refuse; the Community list shows no Add person, no marker, and Visitors, Staff and Former are forbidden; the edit page has no card). Separately, `/admin/community/new` renders the wizard's first step to a baseline member and refuses at submit (pre-existing, same discipline as the old members page); worth a look by the analyst, not changed.
+3. **Two sign-in shapes the design sentence glossed:** a two-factor-REQUIRED account is walked `/totp` to `/account/2fa` or challenged at sign-in, before it reaches `/no-organization`, so the card's N2 notice appears only for an account that is not required (case g uses an enrolled, not-required account) and the Check again "set up" variant needs a not-required account (d2).
+4. **Design 8.4 blast radius was incomplete for e2e:** `admin-organizations.spec.ts` and `person-emails.spec.ts` (now fixed). Worth adding to the checklist of whoever edits wording.
+5. **`email_queue` hygiene:** the shared teardown clears only the platform designation template; 2b's `account_sign_in_invitation` rows leak unless the fixture removes them (mine does, and also clears a crashed run's rows older than an hour). The dev mail provider here marks them sent without delivering (no Resend key in `.env.local`); the addresses are `.invalid` regardless.
+
+### Handoff
+
+**Browser checks for QA:** run `no-organization-connect`, `community-sign-in-invite` and both hydration specs on a server whose database has 0067 (the 24 calendar specs go green there), expect `invitation-new-account` to flake about 1 in 20 until the race is fixed (the verdict above is the evidence, not a regression), and confirm the Google path with the operator's one-time production check named in the hand-offs. **Next agent:** qa (Phase 5), after the orchestrator applies 0067 to the pipeline branch. Nothing is pushed; the integration patch is not in the commit.
+
+---
+
+# Increment 2b — Phase 5: Verification (qa), run 1
+
+**Date:** 2026-10-26
+**Verified by:** qa (read-only). No repository file was edited. The staged `e2e-global-setup.integration.patch` was applied for the e2e runs and reverted with `git checkout -- e2e/support/global-setup.ts`. The tree is clean at `7832730`.
+**Worktree / branch / database:** `presby-2b`, `pipeline/signin-invites` @ `7832730`, Neon `ep-delicate-tree` (0065 and 0067 applied). Own dev server on :3540 (PID 20031, stopped by PID, port confirmed free). Production lane on :3541 (confirmed free afterwards).
+**Flag state:** global flags were reset to the CI baseline first (`scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`, this worktree's `PLATFORM_DATABASE_URL`).
+**Scope run (everything requested, nothing taken from Phase 4's evidence):** typecheck, lint, `npm run check`, `npm run build`, full unit suite, full serial DB lane, `test-rls-65.sql`, full `test-rls.sql` with the staged patch in a scratch copy, full `chromium` and `custom-hosts` projects, prod lane, a real-browser walk at 1280 and 360, independent failing-first checks, live-catalog probes. The DB lane and the e2e lane never ran at the same time.
+**Not verified:** the branch is behind `origin/main` (0.44.1, 0.45.0 / 0068). Nothing here was run against merged `main`.
+
+## Type Check
+
+`npm run typecheck`: **PASS** (exit 0). `npm run lint`: PASS. `npm run check`: all eight tripwires pass. `npm run build`: PASS.
+
+## Unit Tests
+
+- **Unit (`vitest run`):** 617 files passed, 93 skipped. 9,528 passed, 2,803 skipped, 0 failed (30.7 s). The skips are the `skipIf(!hasDb)` DB suites, and every one of them ran in the DB lane below.
+- **DB lane (`npm run test:db`, serial):** 710 files passed. 12,330 passed, 0 failed, 1 skipped (1,935 s). The one skip is pre-existing: A1's pre-migration baseline also had exactly 1. No 2b file contains a skip.
+- **`test-rls-65.sql` as `presby_app`** (`rolbypassrls = f`, `ON_ERROR_STOP`): exit 0, 92 passes. Re-run after all probes: still 92.
+- **Full `scripts/test-rls.sql` (scratch copy, staged patch, stop-on-error off):** 1,390 passes. The only failures are the three known drift failures: `:217` presbytery members 3≠2, `:516` 2fa definer, `:7927` DECISION-152. The 6 "aborted" lines are cascades inside those three blocks. Sections 44, 46, 65 and 67 pass.
+  - **Defect in the staged asset:** `scripts/sign-in-invitations/test-rls.sql.integration.patch` no longer applies to HEAD. `git apply --check` reports "patch failed: scripts/test-rls.sql:8653".
+  - Hunk 3, the section-65 `\ir` append, collides with the section-67 include that the 0.44.0 merge brought in (`5fa2e29`). Hunks 1 and 2 (the section 44 conversions) apply.
+  - I appended the `\ir` by hand in the scratch copy only, so the suite could run.
+
+## End-to-End Tests
+
+| Lane | Total | Passed | Failed | Duration |
+|---|---|---|---|---|
+| `chromium`, :3540 | 491 | 489 | **2** | 21.8 m |
+| `custom-hosts`, :3540 | 111 | 111 | 0 | 3.4 m |
+| prod (`prod-build` + `prod-custom-hosts`), :3541 | 83 | 83 | 0 | 2.2 m |
+
+No test was skipped or left unrun in any lane. With 0067 now on the branch, Batch D's 24 calendar failures are green.
+
+**Failures (deterministic; failed again on a single re-run):**
+
+- `e2e/community-sign-in-invite.spec.ts:390`, lane 7, at desktop **and** at 360px. The assertion at **`:449-451`** expects `/o/<slug>/admin/roles` to say "don't have permission".
+- The page instead renders "Role administration isn't turned on for E2E Invitation Church yet." (`roles/page.tsx:84`, `isFlagEnabled("org_portal.roles")`).
+- `org_portal.roles` is `false` at its seed value and in the CI baseline. The spec's `captureFlags` / `setFlag` list at `:87-88` covers only members_create, officers and require_2fa.
+- So the test passes only on a branch where someone switched that flag on. This is the CI 2026-10-23 defect class, and it would fail in CI.
+- The rest of lane 7 after `:451` (Community list, views, edit page) did not run.
+
+**The auth gate:** the full login path ran against my own dev server. `totp-full-login` (an MFA-enrolled seeded user: password, a real TOTP challenge, landing), `totp-callback-bypass`, `session-claim-integrity`, `branded-signin` case 2, `sign-in-connect-smoke`, `post-login-routing`, `member-home`, `forgot-password` and `account-page` all passed.
+
+**F342 (the TOTP enrolment race):**
+- No 2b spec depends on it. The 2b specs that enrol (`no-organization-connect` (d) and (d2), `community-sign-in-invite` lane 7) go through `enrolOnPage`, which reloads and retries up to three times on "That code did not match".
+- The unedited `invitation-new-account` passed in this run.
+- The lane 7 failure is the flag above, not the race: it fails after enrolment succeeded.
+
+**Google path:** not e2e-able. It is covered by `src/auth.connect.test.ts` (which caught my mutation M1 below) and the DB tests. The operator's one-time production check is still owed.
+
+**Real-browser walk** (scratch spec outside the repo, using the repo fixtures; Chromium at 1280×800 and 360×740; screenshots in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa2b/walk/shots/`). Pages walked:
+- `/no-organization` N0, and "Nothing new yet." after Check again
+- N1 with two cards (a sign-in card, and a founding-administrator card in its not-enrolled two-factor variant)
+- `/invite` for a sign-in invitation, signed out
+- the Community edit card for a seated elder
+- the Session hand-off on the pending page
+- the platform panels and the designation revoke dialog
+
+Results:
+- No horizontal overflow anywhere.
+- No control on a new surface is under 44px.
+- The only small target is the pending page's "Back to portal" link at 20px, which predates 2b.
+- The walk is also where findings (a) to (c) under Copy Truthfulness were seen.
+
+## Regression Tests Added
+
+Fix commit `3423f81`. The regression tests are:
+- `sign-in-types.test.ts:285` (connected person has no blocked marker)
+- `sign-in-types.test.ts:314` (a blocked seat reads blocked and offers Open)
+- `org-invite.test.ts:640` (a blocked invitation reads blocked, not "Not connected yet")
+- `org-invite.test.ts:704` (a blocked seat's row reads blocked with Open)
+
+**Failing-first confirmed independently:** the pre-fix source with the post-fix tests gives 10 failed, including three of the named regressions (the `:285` one is a negative property, so it passes either way). The fix gives 162/162.
+
+**Failing-first for the key mechanisms (my own runs):**
+
+TypeScript, in a `git archive` scratch copy:
+
+| # | Mechanism removed | Result |
+|---|---|---|
+| M1 | Proof recorded for an unverified Google claim | 6 fail (`auth.connect.test.ts` ×5, `boundaries.test.ts` ×1) |
+| M2 | Factor passed as `true` at sign-in | 2 fail (`connect.test.ts`) |
+| M3 | G9 pre-check removed from accept in place | 1 fail (`actions.test.ts`) |
+| M4 | Check again takes the factor from the form | 2 fail |
+| M5 | Accept in place takes the user id from the form | 2 fail |
+| M6 | `unstable_update` given a payload | 4 fail |
+| M7 | Connect moved below the two-factor computation | Inconclusive: my mutation did not compile. B1's ordering mutation stands. |
+
+SQL: one owner transaction, rolled back. It granted itself SET on `presby_app`, applied the mutation, ran `SET ROLE presby_app`, and then ran the implementer's `test-rls-65.sql` with its blocks turned into savepoints. The unmodified baseline gave 92/92.
+
+| # | Mechanism removed | Result |
+|---|---|---|
+| f1 | `people_guard_user_link` disabled | 65.1, 65.2 FAIL |
+| f2 | `users_guard_email_proof` disabled | 65.1, 65.3 FAIL |
+| f3 | Connect's factor check removed | 65.7 (R42) FAIL |
+| f4 | Issue limits raised | 65.10 FAIL ("31st send was ok") |
+| f5 | In-place proof gate removed | 65.8 (E-16) FAIL |
+| f6 | In-place factor gate removed | 65.8 (R45) FAIL |
+| f7 | Connect's proof check removed | 65.7 (R37/E-34) FAIL |
+
+- **Resend cooldown and cancel:** checked by probe only. Unmodified: issue=ok, resend=cooldown, revoke=ok, revoke again=not_open. With the cooldown removed, resend=ok.
+- The Vitest-level failing-first for cooldown and chain cap needs committed DDL, so it rests on A2/B2's record.
+- Afterwards, the grant had not persisted (0 rows), both triggers read `O`, and `test-rls-65` gave 92 again.
+
+## Coverage on Critical Modules
+
+| Module | Coverage |
+|---|---|
+| `src/lib/permissions.ts` | 100% |
+| `src/lib/two-factor.ts` | 91.3% statements |
+| `src/lib/flags.ts` | 100% |
+| `view.ts` | 100% |
+| `no-organization-copy.ts` | 100% |
+| `connect.ts` | 97.6% |
+| `sign-in-types.ts` | 95.7% |
+| `sign-in-copy.ts` | 93.7% |
+
+## Live-catalog probes (0065, the pipeline branch)
+
+**Catalog state:**
+- `people`, `account_invitations`, `contact_methods` and `organization_feature_toggles` are RLS + FORCE.
+- `users`, `user_totp` and `email_verification_tokens` have no RLS (as designed).
+- `presby_app` has no privilege on `account_invitations` (`aclexplode`). EXECUTE is granted to exactly the 15 callables.
+- The five internals and every `presby_platform` grant are false.
+- Every definer is owned by `neondb_owner` and has `search_path=public, pg_temp`.
+- Both guard triggers are present and `O`.
+- Indexes present: `users_email_lower_uq`, `open_sign_in_person_uq`, `open_address_uq` (re-predicated) and the audit index.
+- Database-wide, the only `user_id` writers are `presby__bind_person_account` (update) and `presby__accept_invitation_core` (insert).
+- No connect, standing, listing or in-place body reads `is_platform_admin` or `verified_at`.
+- There are 17 organizations and 17 enabled toggle rows.
+
+**Which layer refuses what**, probed on the `presby_app` connection itself unless stated:
+
+| Probe | Result | Refusing layer |
+|---|---|---|
+| `update people set user_id` with no org context | 0 rows | RLS |
+| Same, with org context (row visible: 1) | refused | trigger `presby_guard_people_user_link` |
+| Stamped `users` insert; stamp from null | refused | trigger `presby_users_guard_email_proof` |
+| Address change | stamp cleared; a case-only change keeps it | trigger |
+| `select` on `account_invitations` | permission denied | grant |
+| Calling `presby__bind_person_account` or `presby__person_sign_in_standing` | permission denied | grant |
+| Case-variant duplicate address | refused | index `users_email_lower_uq` |
+| Owner (`neondb_owner`) updates `people.user_id` | 1 row, not refused | nothing (the recorded `paper` residual of DECISION-208) |
+| Owner changes an address without re-stamping | stamp cleared | the trigger, on every role |
+
+## Feature-Gate Audit
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct key? |
+|---|---|---|---|
+| `checkAgainAction` (`no-organization/actions.ts`) | yes (redirects if signed out) | n/a (DECISION-226: identity binding gated by database facts; the user id and the factor flag come only from `auth()`, pinned by scans and by my M4) | n/a |
+| `acceptInPlaceAction` | yes | n/a (DECISION-228: proven address and factor in the definer; G9 pre-check; M3/M5) | n/a |
+| `switchAccountAction` | n/a (sign-out only) | n/a | n/a |
+| `sendSignInInvitationAction` / `resend…` / `revoke…` (community `[id]/edit/actions.ts`) | yes, plus `resolveOrgContext` | tenant axis: `people.manage` checked in the library, re-checked by the definer through `presby__actor_person`; `officers.manage` for seats in the definer | `people.manage` |
+| `revokeAllInvitationsAction` (admin `organizations/[id]/actions.ts`) | yes | yes | `FEATURES.ADMIN_ORGANIZATIONS`, plus the new required `scope` |
+| `(invite)/actions.ts` | unchanged gates (outcome mapping only) | unchanged | unchanged |
+| `/no-organization` page | yes (`cachedAuth`, redirect) | n/a | n/a |
+| Admin org page (new panel) | yes | yes | `FEATURES.ADMIN_ORGANIZATIONS` |
+| `src/app/api/**` | no route added or changed | | |
+
+Note, not a FAIL: the three community sign-in actions do not re-check the `org_portal.members_create` flag or toggle. Neither does any other action in that file, and Phase 3 named this as the existing paper control.
+
+## Copy Truthfulness — **copy truthfulness: FAIL (3 findings)**
+
+- [x] Every added or changed string checked against the Copy tables (§10 and amendment 3)
+- [x] Queries behind the claims opened
+- [x] Instructions traced to their viewer's render gate and permission
+- [ ] **Older strings made false: no.** Findings (c) and (a) are both of this kind.
+
+**(a) `src/lib/onboarding/no-organization-copy.ts:78-79`, the card for a founding-administrator or treasurer invitation.**
+- It reads "{Congregation} invited you to be its founding administrator / treasurer."
+- **Viewer:** the address-proven account holder on `/no-organization`, view N1. Seen live.
+- Designation rows are `origin = 'platform'` by CHECK (the purpose/origin tie), and the listing reads no origin and no inviter. The email for the same row (`invitation-email.ts:154`) and the `/invite` page (`invite-summary.tsx:48`) both say "A PresbyPortal administrator invited you".
+- The card misattributes who sent it. The string is in the §10 Group C Copy table, so this traces to the design.
+
+**(b) `src/lib/onboarding/sign-in-copy.ts:120`, rendered at `sign-in-card.tsx:251`.**
+- It reads "Accepting lets them sign in as themselves. It doesn't change what they can do here."
+- **Viewer:** a `people.manage` holder on the Community edit card, `none`/`revoked` state, for any record. That includes an elder reached from the Session hand-off's "Invite" link. Seen live.
+- It renders directly above "{Name} holds a role or a seat here…".
+- Connecting activates whatever the record carries. The design's own Group F check says "recording seats, connecting activates", and release-note "do not write" #6 says the same. The banner on the pending page tells the same viewer that no one can approve until a member connects.
+- This is a Phase 3 string that the Q1 ruling (elders connect) and the hand-off made false.
+
+**(c) `src/app/(admin)/admin/organizations/[id]/revoke-all-invitations.tsx:39-48` and `revoke-all-control.tsx:53-54`.**
+- The designation takedown still says:
+  - "This organization has N open invitations. Revoke them all at once…"
+  - "Revoke every open invitation?"
+  - "Every open invitation for {org} stops working immediately, whoever it was sent to."
+  - on success, "All open invitations were revoked." The `org_sent` control shows the same success message.
+- **Viewer:** a platform operator holding `FEATURES.ADMIN_ORGANIZATIONS`.
+- After 2b the control posts `scope=designations`, and N counts platform rows only (`issue.ts:1019`). The congregation's open sign-in invitations survive the takedown.
+- Seen live: 1 open designation and 1 open sign-in invitation, and the dialog claimed every open invitation.
+- §10 told Batch C to keep "its existing confirm unchanged", and the neighbour check missed it. For an abuse takedown, misreporting scope is the costly direction.
+
+**Rulings on Batch C's off-Copy strings** (all acceptable as derivations):
+
+| String | Ruling |
+|---|---|
+| `NAME_FALLBACK = "you"` | Unreachable: `first_name` and `last_name` are NOT NULL and a sign-in row requires a person. Grammatical. |
+| Org-sent dialog title reuses the button text | True. |
+| "Keep them" / "Yes, revoke all" reused | Pre-existing on `main`, and true for the `org_sent` scope. "Cancel"/"revoke" verb mismatch is cosmetic. |
+| Panel load-failed borrows `SIGN_IN_CARD_COPY.loadFailed` ("We couldn't load this just now. Reload the page.") | True and generic. |
+| Marker separator in "Not connected yet. No email on file" | Fine. |
+| "Address removed" and "Sent {date}" in the org-sent rows (not reported, but reused from `invitation-list.tsx:116,135`) | Fine. |
+
+The success message in the shared control is **not** acceptable; see (c).
+
+**Observations, not FAIL (the operator approved these strings):**
+- "One more step: set up two-factor sign-in to finish connecting" leads to a second step, because enrolment does not verify the session (E-35, recorded in the design).
+- The sign-in email's "you choose a password" is false for a recipient who already has an account (Group I, which the operator read).
+- The Session hand-off sentence is unhedged, whereas the card's `by_sign_in` line says "if it can".
+
+## Verdict
+
+**FAIL.**
+
+1. **e2e flag dependency.** `e2e/community-sign-in-invite.spec.ts:449-451` (lane 7, both widths) depends on `org_portal.roles` without setting or capturing it. It fails deterministically on the CI-baseline flags. Back to the Batch D implementer.
+2. **Copy truthfulness, findings (a) to (c).** All three trace to design Copy text, so they escalate to **tech-lead** for a Copy amendment, then to the implementers (api-developer for `no-organization-copy.ts` and `sign-in-copy.ts`; ux-developer for the revoke-all components), each with an exact-text test that fails on the old text.
+3. **Staged patch.** `scripts/sign-in-invitations/test-rls.sql.integration.patch` must be re-staged against the current `scripts/test-rls.sql` (database-admin), or the orchestrator appends the `\ir` by hand at integration.
+
+Everything else is green: the auth gate (real server, MFA-enrolled user, full login), the DB lane, the SQL isolation suite, custom-hosts, the prod lane, the 360px walk, the gate audit, the live-catalog probes, and failing-first for every key mechanism.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 5 — Verification, run 1 | qa | Complete. Static gates and build green. Unit 9,528 / 0 failed. DB lane 12,330 / 0 failed / 1 pre-existing skip. `test-rls-65` 92. Full `test-rls.sql` 1,390 with only the 3 known drift failures; the staged patch's hunk 3 no longer applies to HEAD. Flags reset to the CI baseline. e2e on own :3540: chromium 489/491 (lane 7 ×2 fails on `org_portal.roles`, repeats), custom-hosts 111/111, prod :3541 83/83. Auth gate met with an MFA-enrolled user. Failing-first reproduced (6 TS mutations; 7 SQL mutations caught by the implementer's suite; cooldown by probe; fix `3423f81` regression fails then passes). Gate audit clean. Live-catalog layer probes match the design. Copy truthfulness FAIL ×3 (designation card misattributes the sender; card says accepting "doesn't change what they can do"; designation takedown claims "every open invitation"). | **FAIL** | 2026-10-26 |
+
+## Handoff
+
+- **To tech-lead (Phase 3):** a Copy amendment for findings (a), (b) and (c), naming the corrected strings and their exact-text tests. The neighbour checks in §10 Groups C and I and the Phase 3 panel row are where they were missed.
+- **To full-stack-developer (Batch D):** `e2e/community-sign-in-invite.spec.ts`. Add `org_portal.roles` to the `captureFlags`/`setFlag` list at `:87-88` (or assert both refusal states), then re-run lane 7 at both widths on reset flags.
+- **To database-admin:** re-stage `scripts/sign-in-invitations/test-rls.sql.integration.patch` so `git apply --check` is clean on the current tree (append after the section-67 include).
+- **Next QA run:** the changed files and lane 7, plus the walk of the three corrected surfaces at 360 and 1280. The rest of this run's evidence stands unless the fixes touch `src/auth.ts`, a migration, or `e2e/support/`.
+
+Scratch artefacts (logs, walk screenshots, the SQL harness, the scratch copy) are under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa2b/`.
+
+---
+
+## 2b Phase 3 — amendment 4 (Copy, QA run 1 findings a–c)
+
+**Date:** 2026-10-26 · **Author:** tech-lead · **Class:** Copy loop-back inside the 2b Feature (no schema, route, permission, flag or audit change; Phase 3 text corrected, so the loop-back target is Phase 3 and then Phase 4) · **Inputs:** "Increment 2b — Phase 5: Verification (qa), run 1" (FAIL; Copy Truthfulness (a), (b), (c) and the three observations), §10 Groups C, F and I, amendment 3, and the live tree at `a340f1f` on `pipeline/signin-invites` (`no-organization-copy.ts`, `sign-in-copy.ts`, `sign-in-card.tsx`, `invitation-email.ts`, `invite-summary.tsx`, `revoke-all-invitations.tsx`, `revoke-all-control.tsx`, `org-sent-invitations.tsx`, `issue.ts`, `drizzle/0065`). Nothing outside this work-log was edited.
+
+**Why the design missed all three.** (a) Group C's four checks named the audience and the source of the *role* but not the *sender*; the sender's identity was never a claim the check asked about. (b) Group D's `none` line was a Phase 3 string whose "doesn't change what they can do" was true before the Q1 ruling (elders connect) and the Session hand-off; the Group F neighbour check recorded "recording seats, connecting activates" and did not grep the card for the opposite claim. (c) §10 told Batch C to keep the revoke-all confirm "unchanged"; the neighbour check covered the new control's strings and not the old control's, whose meaning the new required `scope` narrowed. One rule is added to the checks and applied retroactively below: **when a change narrows what an existing control does, the existing control's strings are neighbours** (count line, heading, dialog title and body, toast).
+
+### Rulings at a glance
+
+| # | Finding | Ruling | Code | Implementer |
+|---|---|---|---|---|
+| a | `/no-organization` designation card says the congregation invited the person | **Changes**: "A PresbyPortal administrator invited you to be the {designation} at {Congregation}." Aligned with `invite-summary.tsx:48` | `NO_ORG_INVITATION_COPY.cardDesignation` (`no-organization-copy.ts:78-79`) | full-stack-developer |
+| b | Card `none` line says accepting "doesn't change what they can do here" | **Changes**: one sentence true for every record, no variants | `SIGN_IN_CARD_COPY.none` (`sign-in-copy.ts:119-120`, rendered `sign-in-card.tsx:251`) | full-stack-developer |
+| c | Designation takedown says "every open invitation" | **Changes**: count line, section heading, dialog title, dialog body and both success messages and toasts name their scope | `revoke-all-invitations.tsx:35-48`, `revoke-all-control.tsx:53-54`, new constants in `sign-in-copy.ts` | full-stack-developer |
+| obs 1 | "One more step" after enrolment | **Stands, recorded as known** | none | none |
+| obs 2 | "you choose a password" for an existing-account recipient | **Stands, recorded as known**; a no-lookup rewording is logged as a follow-up for the operator | none | none |
+| obs 3 | Unhedged Session hand-off sentence | **Stands, recorded as known** | none | none |
+
+QA's handoff split (a)/(b) to api-developer and (c) to ux-developer; the orchestrator is running one full-stack-developer pass for all three plus the lane 7 flag fix, so that pass is the named implementer throughout. The files are small and the three changes share one test style.
+
+### (a) The designation card on `/no-organization`
+
+| Where | String (replaces `no-organization-copy.ts:78-79`) |
+|---|---|
+| `NO_ORG_INVITATION_COPY.cardDesignation(congregation, purpose)` | A PresbyPortal administrator invited you to be the {founding administrator / treasurer} at {Congregation}. Accepting gives you that {role / access}. |
+
+Built from the existing `DESIGNATION_NAME` and `INVITATION_ROLE_WORD`, so it differs from the old template only in the lead-in. Examples: "A PresbyPortal administrator invited you to be the founding administrator at Alder Creek Presbyterian Church. Accepting gives you that role." / "... the treasurer at Alder Creek Presbyterian Church. Accepting gives you that access." The `sign_in` card is unchanged (a congregation does send it).
+
+**R.** The sentence denies no residual and no ruling. It states a sender (a platform administrator) and does not say the administrator confirmed the address or that the invitation is the only way in (F232, R42). It does not deny that the invitee may be self-designated (DECISION-183); "invited you" is true of a self-sent designation as well. **S.** The sender: designation purposes are `origin = 'platform'` by CHECK `account_invitations_purpose_origin_tie`, `(purpose = 'sign_in') = (origin = 'org')`, `drizzle/0065:278-280`, so a `founding_administrator` or `treasurer` row cannot have been sent by a congregation; the listing returns the purpose, and the string reads nothing else. The role word and "at {Congregation}" are `organizations.name` and the purpose, as before. The same fact is already told by the email (`invitation-email.ts:154`, "A PresbyPortal administrator has invited you to be ...") and by `/invite` (`invite-summary.tsx:48`, "A PresbyPortal administrator invited you to be the {role} at ..."); this string now matches the second word for word up to the congregation. **A.** The proven-address account holder on `/no-organization`, view N1 (and N2), whose button is Accept the invitation; "Accepting gives you that role" is their act. **N.** Grepped `invited you to be` and `invited you` across `src/`, `e2e/` and `docs/` (not the work-logs): the card is the only string that attributed a designation to the congregation. Left, checked: the H1 "You're invited to {Congregation}" (true: the invitation is to its role); the N0 line (`no-organization-copy.ts:38`) and `INVITATION_DEAD_IN_PLACE_COPY` ("ask the person who invited you / ask whoever invited you"), both neutral about who. Left, noted: the email says "the first administrator" where the card and `/invite` say "founding administrator" (a pre-existing difference in `invitation-email.ts:70-73`, not made worse here and not reopened).
+
+**Exact-text tests (each fails on the old text).**
+1. `src/lib/onboarding/no-organization-copy.test.ts:71-76`: the two `cardDesignation` literals become "A PresbyPortal administrator invited you to be the founding administrator at Quillhaven Fellowship. Accepting gives you that role." and "... the treasurer at Quillhaven Fellowship. Accepting gives you that access." (The `sign_in` literal at `:69` is unchanged.)
+2. `src/app/no-organization/invitation-cards.test.tsx:67-68`: the two rows become "A PresbyPortal administrator invited you to be the founding administrator at Alder. Accepting gives you that role." and "... the treasurer at Alder. Accepting gives you that access.", and one added assertion on each designation card: `textContent` does not match `/^Alder invited you/` (the negative property: the congregation is not the sender).
+3. `e2e/no-organization-connect.spec.ts:367`: `${o.name} invited you to be its founding administrator.` becomes ``A PresbyPortal administrator invited you to be the founding administrator at ${o.name}.``. `invite-summary.test.tsx:61,65` already pin the `/invite` prefix; the three literals together are the parity check (no shared constant is introduced; two surfaces, two literals, one ruling here).
+
+### (b) The Community card's `none` line
+
+| Where | String (replaces `sign-in-copy.ts:119-120`) |
+|---|---|
+| `SIGN_IN_CARD_COPY.none(name, address)`, state `none` and `revoked` | Invite {Name} to sign in. We'll email {address} with a link that works once. Accepting lets them sign in as themselves, and any role or seat they hold here then takes effect. |
+
+One sentence for every record, not two variants. The card cannot key a variant on the record: `authorityBearing` is an input to `connectOutlook` (`sign-in-types.ts:143-152`) and is not carried on `SignInCardState`, and the outlook itself is `turned_off`, `shared_address` or `visitor` for records that may still hold a role, so a variant keyed on the outlook would be wrong exactly where it mattered. "Any role or seat they hold here" is conditional and therefore true of a baseline member (nothing takes effect), a visitor (nothing), an elder or staff member, and a direct role grant.
+
+**R.** Does not deny F232 or the Q1 ruling; it is the Q1 ruling in one clause (elders connect, and their seat then applies). It makes no claim of prevention and does not say a sender confirmed the address. The visitor acknowledgement paragraph and the `do_not_contact` paragraph (Group I) are untouched. **S.** The claim is a rule, not a per-person fact, so no query establishes it for this record, and none is needed: the bind (`presby__bind_person_account` through the accept core) sets `people.user_id`, and the permission resolver reads role grants and `group_memberships` (including the materialized Session roster) for the person's linked user; before the bind those rows resolve to nobody (the pending-page banner's "none has connected a sign-in yet, so no one can approve" is the same fact). "Hold" is the verb the `by_sign_in_second_factor` line beneath it already uses ("{Name} holds a role or a seat here."), so the two lines agree. **A.** A `people.manage` holder on the Community edit page (the surface's default role), including the elder reached from the Session hand-off's **Invite** link. The line gives no instruction; the Send button below it is theirs. **N.** Grepped "doesn't change", "change what", "sign in as themselves", "Accepting lets" and "take effect": the live occurrences are `sign-in-copy.ts:120` (modified), `invitation-email.ts:170` ("What you can see and do depends on your role at {Congregation}. Accepting doesn't change your role.", read by the invitee) and `decision-copy.ts:96` (unrelated: a roll note about dated actions). The email's sentence is true as written, because accepting creates no role and removes none, and it begins "What you can see and do depends on your role"; it is left. The Officers form hint ("recording someone here does not change what they can do in the app") and `SESSION_BANNER_COPY.officersNote` stay true and agree with the new line. `CONNECT_OUTLOOK_COPY.pendingInvitation` and the send dialog body ("whoever opens the link becomes {Name} on PresbyPortal") are consistent. The sentence is shown in the `none` and `revoked` states only; the pending, expired and blocked cards never carried it.
+
+**Exact-text tests (each fails on the old text).**
+1. `src/lib/onboarding/sign-in-copy.test.ts:110-111`: the literal becomes "Invite Wendeline to sign in. We'll email w@example.invalid with a link that works once. Accepting lets them sign in as themselves, and any role or seat they hold here then takes effect."
+2. `src/app/(org)/o/[slug]/admin/community/[id]/edit/sign-in-card.test.tsx:120,128` currently compare against the constant and so pass on either text. Add, to both the `none` and the `revoked` case, the rendered-text assertions `toContain("any role or seat they hold here then takes effect")` and `not.toContain("doesn't change what they can do")`.
+3. `e2e/community-sign-in-invite.spec.ts:165`: the template literal becomes ``Invite ${person.name} to sign in. We'll email ${person.email} with a link that works once. Accepting lets them sign in as themselves, and any role or seat they hold here then takes effect.``
+
+### (c) The designation takedown (platform operator, organization page)
+
+All strings are new constants in `src/lib/onboarding/sign-in-copy.ts` beside `ORG_SENT_PANEL_COPY` (the module that already owns the panel's words), so `revoke-all-invitations.tsx` and `revoke-all-control.tsx` retype nothing. `ORG_SENT_PANEL_COPY.designationsButton` (the button) is unchanged and correct.
+
+`DESIGNATION_TAKEDOWN_COPY`:
+
+| Where | String |
+|---|---|
+| Section heading (`revoke-all-invitations.tsx:35`, was "Open invitations") | Open designation invitations |
+| Count line, singular (`:39`) | This organization has 1 open designation invitation. |
+| Count line, plural | This organization has {n} open designation invitations. |
+| Sentence after the count line (same paragraph; replaces "Revoke them all at once if something looks wrong.") | These are the founding-administrator and treasurer invitations a PresbyPortal administrator sent. Revoke them all at once if something looks wrong. Sign-in invitations the congregation sent are not affected; they are handled under "Sign-in invitations sent by this organization." |
+| Dialog title (`:47`) | Revoke every open designation invitation? |
+| Dialog body (`:48`) | Every open founding-administrator and treasurer invitation for {Organization} stops working immediately. Sign-in invitations the congregation sent are not affected. This cannot be undone; you can send new invitations afterwards. |
+| Dialog buttons | unchanged: Keep them / Yes, revoke all |
+
+`REVOKE_ALL_RESULT_COPY`, typed `Record<RevokeAllScope, { message: string; toast: string }>` (a third scope is then a compile error), read by `RevokeAllControl` by its `scope` prop in place of `revoke-all-control.tsx:53-54`:
+
+| Scope | Inline message (role `status`) | Toast |
+|---|---|---|
+| `designations` | All open designation invitations were revoked. Sign-in invitations sent by the congregation were not changed. | All open designation invitations revoked. |
+| `org_sent` | All open sign-in invitations were revoked. | All open sign-in invitations revoked. |
+
+Failure text (`outcome.error`, `DB_ERROR_COPY`, "Invalid scope.", "Forbidden.") is unchanged. The `org_sent` confirm (`ORG_SENT_PANEL_COPY.revokeAllConfirm`, "This stops every open sign-in link this congregation has sent. ...") already names its scope and is unchanged; its success message needs no sentence about designations because its button, dialog and message all say "sign-in", and the cost of misreporting was in the designation direction (QA's finding).
+
+**R.** Nothing denies an accepted residual. The strings make no claim about holders, grants or access: the lever only ends invitations, and a designation already accepted stays (the holder-revoke lever, DECISION-194, is separate and unchanged). The count line and dialog say nothing of expired rows beyond "open", the same word the page's count uses. **S.** The count: `page.tsx:169-171`, `listInvitationsForOrg` rows (`origin = 'platform'`, `issue.ts:1005-1020`) with `status` pending or expired, which is the same population the action revokes: `revokeAllOpenInvitations` selects `origin = SCOPE_ORIGIN[scope]` (`issue.ts:940-944`, designations is `platform`) with `accepted_at`, `revoked_at`, `superseded_at` and `blocked_at` all null, in one locked transaction (`:951-980`). "Founding-administrator and treasurer" is exhaustive for `origin = 'platform'` by the same CHECK as (a). "Sign-in invitations the congregation sent are not affected" is the `origin` filter, and the required `scope` (a missing or unknown one is refused: `actions.ts:1046-1048`) is what stops the other origin being hit by omission. "All ... were revoked" rests on `{ ok: true }`, which the action returns only when the transaction committed (`revoked` is not returned to the client, which is why the messages claim no number). "Stops working immediately" is `revoked_at` set in that transaction. The "handled under ..." pointer names the heading `ORG_SENT_PANEL_COPY.heading`, which `org-sent-invitations.tsx` renders on every load, including the load-failed state; the pointer is interpolated from that constant so the two cannot drift. **A.** A platform operator holding `FEATURES.ADMIN_ORGANIZATIONS`, the page's only audience and the only role that can post either lever; both the designation and the sign-in levers sit on the same page for the same role, so "handled under" is something this reader can do. The dialog gives no other instruction. **N.** Grepped "Revoke every", "stops working immediately", "open invitation", "All open invitations", "Open invitations", "Revoke all", "Cancel all open": modified are `revoke-all-invitations.tsx:35,39-41,47-48`, `revoke-all-control.tsx:53-54`, and the tests below. Left, checked: `invitation-list.test.tsx:202` and the single-row revoke dialog's "stops working immediately" (true: it revokes one invitation); `actions.ts:1030-1031` (the docstring already names the scope); the comments at `revoke-all-invitations.tsx:10-19` ("revoke every open founding-administrator and treasurer invitation") already say designation and need no edit; `docs/release-notes/v0.37.md:36` ("revoke every open invitation for the organization at once") describes v0.37.0 as shipped and stays (a historical note); `docs/product/functionality-map.md` line for Organizations says "Revoke all" under the designation flow and is true of the control as it is now. Nothing else in the live tree or the e2e specs asserts these strings (grepped `e2e/`: none).
+
+**Exact-text tests (each fails on the old text).**
+1. `src/lib/onboarding/sign-in-copy.test.ts`: literal assertions for every row above, including both `REVOKE_ALL_RESULT_COPY` entries (next to `:294-298`).
+2. `src/app/(admin)/admin/organizations/[id]/revoke-all-invitations.test.tsx`, asserting literals rather than the constants:
+   - `:32,35`: the count regexes become `/1 open designation invitation\./` and `/3 open designation invitations\./` (the old text "1 open invitation." does not match).
+   - heading: `getByRole("heading", { name: "Open designation invitations" })`.
+   - dialog (`:44`): the alertdialog's title is exactly "Revoke every open designation invitation?" and its text contains "Every open founding-administrator and treasurer invitation for Alder Creek Presbyterian Church stops working immediately." and "Sign-in invitations the congregation sent are not affected.", and does not contain "whoever it was sent to".
+   - `:53`: the status text is exactly "All open designation invitations were revoked. Sign-in invitations sent by the congregation were not changed." and `toastSuccess` was called with exactly "All open designation invitations revoked." (the old `/all open invitations were revoked/i` matches neither).
+3. `src/app/(admin)/admin/organizations/[id]/org-sent-invitations.test.tsx:62`: the status text is exactly "All open sign-in invitations were revoked." and `toastSuccess` was called with "All open sign-in invitations revoked." The same test also asserts the message does not contain "designation", so a copy-paste of the designation message into the other scope fails.
+
+### Observations ruled (the operator approved these strings; defaults kept, recorded as known)
+
+1. **"One more step: set up two-factor sign-in to finish connecting" leads to a second step (`no-organization-copy.ts:57,62`).** Stands. The string is true: it says "one more step" and "then come back here and select Check again", and E-35 (enrolment does not verify the session) is the reason the page needs its second step, recorded in the design and walked in Batch D's spec (d). Changing it would reword an operator-approved string for a sequence the string already names. Known, not a defect.
+2. **"You choose a password" in the `sign_in` email, for a recipient who already has an account (`invitation-email.ts`, Group I).** Stands; the operator read it and Group I recorded it. Why it cannot simply be fixed here: a variant keyed on whether the address has an account would need an account lookup in the issue path, and the sender-side surfaces are deliberately neutral about which addresses have accounts (G20a; the same notice whether or not one exists). **Follow-up for the operator to accept or decline (orchestrator adds to `docs/TODO.md`):** a no-lookup rewording, "Accepting takes about a minute: you sign in, or choose a password if you are new, and you are done", which is true for both recipients. Not applied; it changes an approved string and the email test. Known.
+3. **The Session hand-off sentence is unhedged while the card's `by_sign_in` line says "if it can" (`SESSION_BANNER_COPY.handOff`, `sign-in-copy.ts:255-256`).** Stands. The Group F check recorded why: it states a rule that holds when nothing else stands in the way, introduced by "also", shown only while the toggle is on, and the rows beneath it show the real per-person state (No email on file, Not invited yet, Invitation sent, Invitation couldn't be completed) with an **Invite** or **Open** link, so a seat for which the rule does not hold (a shared address, an ended membership) is visibly not connected and is offered the invitation. Known: the sentence over-promises in the shared-address case, and the row below it is what corrects it.
+
+### Blast radius
+
+- **Existing unit tests this amendment alters (modify):** `no-organization-copy.test.ts:71-76`, `invitation-cards.test.tsx:67-68`, `sign-in-copy.test.ts:110-111` (and the new rows near `:294-298`), `sign-in-card.test.tsx:120,128` (add assertions), `revoke-all-invitations.test.tsx:32,35,41,53,59,65` (the button name at `:41,59,65` is unchanged), `org-sent-invitations.test.tsx:62`.
+- **Existing e2e specs asserting these strings (modify):** `e2e/no-organization-connect.spec.ts:367` (a) and `e2e/community-sign-in-invite.spec.ts:165` (b). Grepped `e2e/` for every (c) string: no spec asserts the revoke-all dialog or its messages. (Both of the first two were found by grep this time, not by a full run, which is the check Batch D's finding 4 asked for.)
+- **Flags each changed e2e spec depends on, and where it is set:** `community-sign-in-invite.spec.ts` sets `org_portal.members_create`, `org_portal.officers` and the `auth.require_2fa` flag through `e2e/support/flags.ts`, and **must also set `org_portal.roles`** for lane 7 (`:449-451`, the Roles refusal), which is the full-stack-developer's separate fix in this pass; it goes into `captureFlags`/`setFlag` at `:87-88`, and **not** into `scripts/ci/e2e-baseline-flags.sql`, because the spec can set it. `no-organization-connect.spec.ts` depends on the same flags as before (none added by this amendment); `org_portal.sign_in_connect` is the per-organization toggle the fixture seeds, not a platform flag. No key is added to `e2e-baseline-flags.sql`.
+- **Not touched:** `src/auth.ts`, `src/proxy.ts`, `src/lib/authz.ts`, any migration, any server action's logic, any permission or flag seed. The pass does not move the Phase 4 auth-gate e2e requirement, and QA's note stands: the rest of run 1's evidence holds.
+
+### Carry-forward
+
+| Item | Addressed or deferred |
+|---|---|
+| QA run 1 Copy finding (a) | Addressed above |
+| QA run 1 Copy finding (b) | Addressed above |
+| QA run 1 Copy finding (c) | Addressed above |
+| QA observations 1 to 3 | Ruled: stand, recorded as known (the operator approved the strings); observation 2 carries a follow-up offer for the operator |
+| QA run 1 e2e finding (lane 7 depends on `org_portal.roles`) | Named under Blast radius; the fix is the same full-stack-developer pass, spec-side only |
+| QA run 1 staged-patch finding (`test-rls.sql.integration.patch` hunk 3) | Not Copy; **deferred to database-admin or the orchestrator's by-hand `\ir` append at integration**, as QA recorded |
+| QA run 1 "branch behind `origin/main`" | Not Copy; the merge and the feasibility re-check against the merged tree happen at integration (Rule 16) |
+| F232, R42, Q1, G6 neutrality, DECISION-040 non-variance | Checked on every string above; none breached (no string names a reason, a death, or whether an address has an account) |
+| §10 Groups C and F "No string made stale" claims | **Retracted for the three strings above** and corrected here; Group I's "unchanged" claim for the platform panel's revoke controls is likewise retracted for the designation control |
+| New rule: a change that narrows an existing control makes that control's strings neighbours | Applied retroactively: the platform panel's section heading (`revoke-all-invitations.tsx:35`, "Open invitations") was also stale and is in the table above |
+
+### Implementer and status
+
+**Implementer:** full-stack-developer, one pass, covering (a), (b) and (c) (the three Copy rulings above, with their exact-text tests) together with the lane 7 `org_portal.roles` flag fix named by QA. The Copy edits are in `src/lib/onboarding/no-organization-copy.ts`, `src/lib/onboarding/sign-in-copy.ts`, `src/app/(admin)/admin/organizations/[id]/revoke-all-invitations.tsx` and `revoke-all-control.tsx`. A string needed in the pass that is not in this amendment stops for a ruling. After the pass, QA re-runs the changed files and lane 7, plus a walk of the three corrected surfaces at 360 and 1280, as its handoff already said.
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 3c — Technical design amendment 4 (Copy, QA run 1 findings a-c) | tech-lead | Complete. Three strings ruled with the four checks and exact-text tests; three observations kept as known; implementer named | Design complete; implementer named | 2026-10-26 |
+
+
+---
+
+## Phase 4 — QA run 1 fix pass (full-stack-developer, 2026-10-26)
+
+**Scope:** amendment 4 (a), (b) and (c), the lane 7 flag fix, and the re-staged section-65 patch. Copy, test and staged-asset changes only; no SQL, permission, flag, route, audit or `src/auth.ts` / `src/proxy.ts` / `src/lib/authz.ts` change. `scripts/test-rls.sql` and `e2e/support/*` are untouched; `e2e-global-setup.integration.patch` was applied for the run and reverted (`git checkout -- e2e/support/global-setup.ts`), never committed.
+
+### Commits (branch `pipeline/signin-invites`, none pushed)
+
+| Commit | What |
+|---|---|
+| `4f09f6f` | (a) `NO_ORG_INVITATION_COPY.cardDesignation` names "A PresbyPortal administrator" as the sender: `no-organization-copy.ts`; tests `no-organization-copy.test.ts`, `invitation-cards.test.tsx` (plus the `not.toMatch(/^Alder invited you/)` property), `e2e/no-organization-connect.spec.ts` |
+| `57dd3ae` | (b) `SIGN_IN_CARD_COPY.none` ("... and any role or seat they hold here then takes effect.") and (c) `DESIGNATION_TAKEDOWN_COPY` + `REVOKE_ALL_RESULT_COPY` (typed `Record<RevokeAllScope, ...>`) in `sign-in-copy.ts`, wired into `revoke-all-invitations.tsx` (heading, count line plus explanation, dialog title and body) and `revoke-all-control.tsx` (per-scope message and toast); tests `sign-in-copy.test.ts` (both new constants are also in the "never claims" walk), `sign-in-card.test.tsx` (literal `toContain` / `not.toContain` on `none` and `revoked`), `revoke-all-invitations.test.tsx`, `org-sent-invitations.test.tsx` (literals; toast spy hoisted; `not.toContain("designation")`) |
+| `f6abd16` | e2e: `community-sign-in-invite.spec.ts` reads the corrected card line (b) and sets and captures `org_portal.roles` (a spec-local `ROLES_FLAG`, since `e2e/support/*` is a Rule 16 shared file; not added to the baseline file) |
+| `c03a52e` | `scripts/sign-in-invitations/test-rls.sql.integration.patch` re-staged: hunks 1 and 2 unchanged, hunk 3 is now the section-65 `\ir` appended after the section-67 include (header text reads "59-62, 64 and 67 above") |
+
+### Red then green
+
+- **Unit, red first:** the six edited test files run against the unchanged source gave 11 failed, 79 passed: `no-organization-copy.test.ts` (group C literals), `invitation-cards.test.tsx` x2, `sign-in-copy.test.ts` x3 (card `none`, and the two new takedown / result tests failing on the then-missing constants), `sign-in-card.test.tsx` x2 (`none`, `revoked`), `revoke-all-invitations.test.tsx` x2 (count regexes and dialog title; the status/toast literals sit behind the dialog assertions), `org-sent-invitations.test.tsx` (status text "All open invitations were revoked." not equal to the new scope-named text). After the source change the same files: 89 files passed, 1,621 tests, 0 failed.
+- **Patch, red first:** the HEAD copy of the patch fails `git apply --check` ("patch failed: scripts/test-rls.sql:8653"); the re-staged patch passes it (exit 0) against the current tree.
+- **Lane 7, red first:** QA run 1 reproduced the failure deterministically on the baseline flags (both widths, `:449-451`, "Role administration isn't turned on"); green now (below). I did not re-break it a second time.
+
+### Gate
+
+| Check | Result |
+|---|---|
+| `npm run typecheck`, `npm run lint` | pass |
+| `npm run check` (all eight tripwires) | pass |
+| Unit suite (`vitest run`) | 617 files passed, 93 skipped; 9,530 passed, 2,803 skipped, 0 failed (QA's 9,528 plus the 2 new tests) |
+| e2e, own dev server :3540 (PID 51141, stopped by PID, port confirmed free), flags reset to the CI baseline first (`e2e-reset-flags.sql -v pipeline_branch=1`) | `community-sign-in-invite.spec.ts` (10 lanes x 2 widths, lane 7 included) and `no-organization-connect.spec.ts`: 42/42 passed. `admin-organizations*.spec.ts` + `designation-revoke.spec.ts`: 39/39 passed |
+| Look at the three corrected surfaces at 360 and 1280 (a temporary spec, deleted, not committed; screenshots under `.../scratchpad/shots/`) | (a) the N1 designation card reads "A PresbyPortal administrator invited you to be the founding administrator at E2E Invitation Church. Accepting gives you that role."; (b) the Community card reads the new `none` line; (c) the platform panel section, the dialog ("Revoke every open designation invitation?", body names both scopes) and the post-revoke inline message plus toast all read as ruled. `noHorizontalOverflow` held on all three pages at both widths; the dialog fits the viewport at 360 |
+
+### Notes
+
+- The prod lane (:3541), the DB lane and `test-rls-65.sql` were not re-run: nothing in this pass touches the build graph, a migration or SQL, and QA's amendment 4 handoff scopes the re-run to the changed files, lane 7 and the walk.
+- The inline revoke-all result is rendered by `RevokeAllControl` inside a section that `page.tsx` renders only while `openCount > 0`. In my walk both the message and the toast were present about 400 ms after the click, so the message is announced, but it is not guaranteed to persist once the revalidated page drops the section. Pre-existing structure, unchanged by this pass; offered to QA / the operator as an observation, not changed.
+- The three observations (one more step, "you choose a password", the unhedged hand-off) stand as ruled in amendment 4. Observation 2's follow-up is for the orchestrator's `docs/TODO.md`, not this pass.
+- Still owed at integration, not mine: merging `origin/main`, then applying the two staged patches and re-running `scripts/test-rls.sql` on the merged `development` branch (Rule 16).
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 4 — QA run 1 fix pass | full-stack-developer | Complete. Amendment 4 (a), (b), (c) applied with exact-text tests (11 red, then 89 files green); lane 7 sets `org_portal.roles`; section-65 patch re-staged and `git apply --check` clean. typecheck, lint, `npm run check`, unit 9,530/0 failed; e2e 42/42 and 39/39 on :3540 from baseline flags; 360/1280 look done. Four commits, not pushed | Ready for QA run 2 | 2026-10-26 |
+
+### Handoff
+
+- **To QA (run 2):** re-run the changed unit files, `community-sign-in-invite.spec.ts` (lane 7 at both widths), `no-organization-connect.spec.ts` and the admin organization specs on reset flags; walk the three corrected surfaces at 360 and 1280. Everything else in run 1 stands (this pass touched no auth file, migration or `e2e/support/`).
+
+---
+
+# Increment 2b — Phase 5: Verification (qa), run 2
+
+**Date:** 2026-10-26
+**Verified by:** qa (read-only). No repository file was edited. As in run 1, the staged `scripts/sign-in-invitations/e2e-global-setup.integration.patch` was applied for the e2e and walk runs only. It was reverted with `git checkout -- e2e/support/global-setup.ts`, and `git status` is clean at `88b6eff`.
+**Worktree / branch / database:** `presby-2b`, `pipeline/signin-invites` @ `88b6eff` (fixes `4f09f6f`, `57dd3ae`, `f6abd16`, `c03a52e`), Neon `ep-delicate-tree`.
+- Own dev server on :3540, started by hand after clearing `.next/dev`, with `RATE_LIMIT_DISABLED=true`, `AUTH_URL`/`E2E_BASE_URL` set to `http://localhost:3540`, the `DOMAINS_*` fakes, `CRON_SECRET` and `STRIPE_WEBHOOK_SECRET`.
+- Stopped by PID (70613, 70629, 70631, 70632, 70780). Port confirmed free afterwards.
+- Disk: 559 GiB free.
+
+**Flag state:** global flags were reset to the CI baseline before the e2e run, with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1` on this worktree's `PLATFORM_DATABASE_URL` (exit 0, COMMIT). After the run, `org_portal.roles`, `members_create` and `officers` read `f` again, so the spec restores what it captured.
+
+**Scope run:**
+- In full: typecheck, lint, `npm run check`, the unit suite.
+- Failing-first: the 6 edited test files against the pre-fix sources, plus two isolating mutations.
+- `git apply --check` on the re-staged patch.
+- e2e (`--project=chromium`, both widths where the spec has them): `community-sign-in-invite`, `no-organization-connect`, `admin-organizations`, `admin-organizations-create`, `designation-revoke`, and the 0.42.3 auth guards `totp-full-login`, `totp-callback-bypass`, `session-claim-integrity`, `branded-signin`.
+- A walk of the three corrected screens in a real browser at 1280 and 360.
+
+**Not re-run (still rests on run 1 at `7832730`):** build, the DB lane, `test-rls-65.sql`, full `test-rls.sql`, the full chromium and custom-hosts projects, the prod lane, coverage, and the live-catalog probes. I checked the fix pass's diff (14 files): it touches no migration or SQL, no `src/auth.ts`, `src/proxy.ts` or `src/lib/authz.ts`, no server action, nothing under `e2e/support/`, no layout and no `src/components/` component. The branch is still behind `origin/main`, and nothing here ran against the merged tree.
+
+## Type Check
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | PASS (exit 0) |
+| `npm run lint` | PASS (exit 0) |
+| `npm run check` | All eight tripwires pass (exit 0) |
+
+## Unit Tests
+
+`vitest run`: 617 files passed, 93 skipped. 9,530 tests passed, 2,803 skipped, 0 failed (28 s). That is run 1's 9,528 plus the 2 new tests. The skips are the `skipIf(!hasDb)` DB suites, which run 1 covered in the DB lane.
+
+## End-to-End Tests
+
+| Spec (chromium, :3540) | Passed |
+|---|---|
+| `community-sign-in-invite.spec.ts` (10 lanes × desktop and 360px) | 20/20 |
+| `no-organization-connect.spec.ts` | 22/22 |
+| `admin-organizations.spec.ts` | 25/25 |
+| `admin-organizations-create.spec.ts` | 6/6 |
+| `designation-revoke.spec.ts` | 8/8 |
+| `totp-full-login.spec.ts` | 1/1 |
+| `totp-callback-bypass.spec.ts` | 7/7 |
+| `session-claim-integrity.spec.ts` | 1/1 |
+| `branded-signin.spec.ts` | 5/5 |
+| **Total** | **95/95**, 0 skipped, 0 flaky, 6.4 min, 1 worker |
+
+**Lane 7** (`community-sign-in-invite.spec.ts:393`) now passes at desktop (11.2 s) and at 360px (10.2 s), starting from CI-baseline flags where `org_portal.roles` is `f`.
+- The spec now captures and sets `org_portal.roles` itself (`:82`, `:90-91`). It does not rely on the baseline file.
+- The steps that run 1 never reached all ran: the Roles and Officers refusals at `:452-455`, the Community list, the three refused views, the absent card, and the accepted-audit row.
+
+**Auth gate:** this is an auth-touching pipeline. The full login path ran against my own dev server: `totp-full-login` (an MFA-enrolled seeded user goes password → a wrong code is refused → the real TOTP → landing), the seven `totp-callback-bypass` cases, `session-claim-integrity` and `branded-signin`. All passed.
+
+**Staged patch:**
+- `git apply --check scripts/sign-in-invitations/test-rls.sql.integration.patch` exits 0 on HEAD.
+- The `a340f1f` copy still fails ("patch failed: scripts/test-rls.sql:8653"), so the re-stage is what fixed it.
+- I applied the patch to a scratch copy of `scripts/test-rls.sql`. The file now ends with `\ir public-calendar/test-rls-67.sql` and then `\ir sign-in-invitations/test-rls-65.sql`, under the corrected "59-62, 64 and 67 above" header.
+
+**Real-browser walk** (a scratch spec outside the repo using the repo fixtures; Chromium at 1280×800 and 360×740).
+- **(a)** On `/no-organization` N1, the founding-administrator card reads "A PresbyPortal administrator invited you to be the founding administrator at E2E Invitation Church. Accepting gives you that role." The treasurer card reads "...the treasurer at E2E Invitation Church. Accepting gives you that access." No touch target is under 44px.
+- **(b)** The Community card for a seated elder (`none`), and for a member whose invitation the platform's org-sent lever had just revoked (`revoked`), both show the ruled `none` line. The elder's card has the `by_sign_in_second_factor` line under it, and the two lines agree on "holds".
+- **(c)** The platform organization page shows:
+  - the heading "Open designation invitations"
+  - the count line and explanation exactly as ruled
+  - the dialog "Revoke every open designation invitation?", whose body names both scopes; the dialog's box is inside the 360 viewport (x=24, w=312)
+  - the toast "All open designation invitations revoked."
+
+  **The scope claim held live:** after the designation takedown, the panel just below still read "1 open" sign-in invitation. The org-sent lever then gave "All open sign-in invitations were revoked." and the matching toast, and the panel went to "0 open … 1 cancelled."
+- No horizontal overflow on any page at either width.
+
+## Regression Tests Added
+
+| Commit | Tests |
+|---|---|
+| `4f09f6f` | `no-organization-copy.test.ts:71-76`; `invitation-cards.test.tsx:67-68` (plus the `not.toMatch(/^Alder invited you/)` check); `e2e/no-organization-connect.spec.ts:367` |
+| `57dd3ae` | `sign-in-copy.test.ts:113` and the new `:303-330`; `sign-in-card.test.tsx:121-123, 132-133`; `revoke-all-invitations.test.tsx:32-36, 44-62`; `org-sent-invitations.test.tsx:64-66` |
+| `f6abd16` | `e2e/community-sign-in-invite.spec.ts:168` (the card line) and `:90-91` (the flag) |
+
+**Failing-first, reproduced independently.**
+- **Pre-fix run:** a `git archive` copy of `88b6eff` in the scratchpad, with `no-organization-copy.ts`, `sign-in-copy.ts`, `revoke-all-invitations.tsx` and `revoke-all-control.tsx` restored from `a340f1f`. The six edited test files gave **11 failed, 79 passed**, matching the implementer's count. Every assertion failed on the old literal ("Alder invited you to be its…", "…It doesn't change what they can do here.", "All open invitations were revoked.") or on the then-missing constants.
+- **Mutation 1, old control message only** (new copy module and section, pre-fix `revoke-all-control.tsx`): both status assertions failed on "All open invitations were revoked." That is 2 failed, 7 passed, and shows the designation status literal goes red by itself, not only behind the dialog assertions.
+- **Mutation 2, old toast only** (the post-fix control with just the toast text set back): both `toHaveBeenCalledWith` toast assertions failed. 2 failed, 7 passed.
+- Lane 7 red-first is run 1's deterministic failure on both widths. It is green now on the same baseline.
+- The scratch copy was deleted by its literal path.
+
+## Coverage on Critical Modules
+
+Not re-run. The pass changed only string constants and their tests. Run 1's figures stand: `permissions.ts` 100%, `two-factor.ts` 91.3%, `flags.ts` 100%, and the 2b modules 93.7–100%.
+
+## Feature-Gate Audit
+
+No protected routes touched in this pass. `actions.ts` (including `revokeAllInvitationsAction`'s `auth()` + `FEATURES.ADMIN_ORGANIZATIONS` + required-`scope` checks) is unchanged since `a340f1f`. The only server-side code changed is the copy module. `revoke-all-control.tsx` is a client component, and its change is limited to which string it shows. Run 1's table stands.
+
+## Schema/RLS Audit
+
+Nothing was touched: no migration, grant, policy or trigger. Run 1's live-catalog probes stand. The only SQL-adjacent change is the staged integration patch, which is now `git apply --check` clean, as shown above.
+
+## Copy Truthfulness — **copy truthfulness: PASS**
+
+- [x] Every added or changed string matches amendment 4's tables word for word: `no-organization-copy.ts:82-83`, `sign-in-copy.ts:121`, `:326-350`. No string outside the Copy tables was added. The comment text is not user-facing.
+- [x] I opened the queries behind each claim.
+  - **(a)** CHECK `account_invitations_purpose_origin_tie` makes every designation `origin='platform'`. The card now matches `invite-summary.tsx:48`.
+  - **(c)** The count (`listInvitationsForOrg`: `origin='platform'`, not superseded, status pending or expired) and the revoke (`revokeAllOpenInvitations`: `origin = SCOPE_ORIGIN[scope]` with accepted, revoked, superseded and blocked all null) cover the same rows. Seen live: the sign-in invitation survived the designation takedown.
+  - **(b)** States a rule, consistent with the bind and resolver path and with the pending-page banner.
+- [x] I traced each instruction to the viewer who sees it. (a) The proven-address account holder, whose button is "Set up two-factor sign-in" or "Accept". (b) A `people.manage` holder, whose button is "Send invitation". (c) A `FEATURES.ADMIN_ORGANIZATIONS` operator: the "handled under" pointer is interpolated from `ORG_SENT_PANEL_COPY.heading`, and that panel renders on every load, directly below.
+- [x] Older strings made false: none left. I grepped `src`, `e2e`, `docs` and `scripts` (work-logs excluded) for "invited you to be its", "doesn't change what they can do", "Revoke every open invitation", "All open invitations", "Open invitations" and "whoever it was sent to". The only hits are the new negative assertions and one JSX comment (`no-organization/page.tsx:208`) that is not rendered.
+
+**Observations (not FAIL; for the orchestrator's `docs/TODO.md`):**
+1. **"the congregation" on a non-congregation's page.** Founding-administrator designations apply to every organization type (`foundingAdministratorPlan`). So on a presbytery's or synod's page, `DESIGNATION_TAKEDOWN_COPY.explanation`, `dialogBody` and `REVOKE_ALL_RESULT_COPY.designations.message` call the organization "the congregation". The statement about scope is still true; only the noun is wrong. It uses the same word as the already-approved `ORG_SENT_PANEL_COPY.revokeAllConfirm` ("this congregation"). A tech-lead follow-up could say "the organization" in all four.
+2. The pointer quotes the heading in sentence case, but CSS renders the heading in uppercase. Cosmetic; a reader can still match it.
+
+## RevokeAllControl's vanishing inline result: ruled a follow-up, not a defect
+
+**Measured** (the walk, both widths):
+
+| Lever | Inline `role="status"` result | Toast |
+|---|---|---|
+| Designations | Present at about 490–990 ms. Gone by 1.0–1.5 s, when the revalidated page drops the section because `openInvitationCount` reached 0 (`page.tsx:286`). | Visible until 4–8 s |
+| `org_sent` | Gone by 1.5 s, when `summary.revocable` reached 0 (`org-sent-invitations.tsx`) | Visible until 4–8 s |
+
+**Why it is not a defect of this pass:**
+- No string is false.
+- The scoped toast (sonner, a live region) carries the result long enough to read.
+- The dialog body states the scope before the operator confirms.
+- The page shows what happened afterwards: the designation section is gone, and the sign-in panel directly below still shows its open count, or after its own lever, "1 cancelled".
+- On `origin/main` the designation lever already has the same structure: the same `openInvitationCount > 0` gate and the same inline status. 2b adds a second instance of it.
+
+**What is lost:** the designation message's second sentence, "Sign-in invitations sent by the congregation were not changed.", is effectively never on screen. Also, the unit tests (`revoke-all-invitations.test.tsx:59`, `org-sent-invitations.test.tsx:64`) check the status line in an isolated render. They prove the words are right, not that the line stays visible on the real page.
+
+**Follow-up (ux-developer, tracked):** either render the success result outside the conditionally rendered section (for example a page-level status that survives revalidation), or drop the inline success line and rely on the toast plus the page's new state. Add an e2e assertion on whichever the design keeps.
+
+## Verdict
+
+**PASS.**
+
+- Run 1's three FAIL items are fixed. Lane 7 is green at both widths on CI-baseline flags. Copy findings (a), (b) and (c) render as ruled, with exact-text tests I independently showed fail on the old text. The staged section-65 patch now applies.
+- The auth gate is met again: own dev server, MFA-enrolled seeded user, full login path, all guard specs green.
+- What I did not re-run is listed under Scope and rests on run 1.
+- Still owed at integration (Rule 16): merge `origin/main`, apply the two staged patches, and re-run `scripts/test-rls.sql` on the merged `development` branch.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 5 — Verification, run 2 | qa | Complete. Flags reset to the CI baseline. typecheck, lint and `npm run check` green; unit 9,530 / 0 failed. Failing-first reproduced (11 red on pre-fix sources; status-only and toast-only mutations each 2 red). The re-staged `test-rls.sql.integration.patch` passes `git apply --check` (the old one fails). e2e on own :3540: 95/95, 0 skipped (lane 7 at desktop and 360px; auth guards incl. an MFA-enrolled full login). Walk of (a), (b), (c) at 1280 and 360: strings as ruled, no overflow, nothing under 44px, scope claim held live. Copy truthfulness PASS with 2 observations. RevokeAllControl's inline result ruled a follow-up (gone at about 1–1.5 s, toast carries it; same structure on `main`). DB lane, prod lane and probes not re-run (rest on run 1). | **PASS** | 2026-10-26 |
+
+## Handoff
+
+- **Next agent: analyst (Phase 6)**, shipped vs intent for Increment 2b.
+- **For the orchestrator's `docs/TODO.md`:**
+  1. RevokeAllControl's success result disappears on revalidation, for both levers (ux-developer follow-up, above).
+  2. "the congregation" → "the organization" in `DESIGNATION_TAKEDOWN_COPY`, `REVOKE_ALL_RESULT_COPY.designations` and `ORG_SENT_PANEL_COPY.revokeAllConfirm` (tech-lead Copy follow-up).
+  3. Amendment 4 observation 2's no-lookup "you choose a password" rewording, for the operator to accept or decline.
+- **Integration (Rule 16):** merge `origin/main`, apply both staged patches, and re-run `scripts/test-rls.sql` on merged `development`.
+
+Logs, walk screenshots and the walk spec are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/qa2b-r2/`. The screenshots are under `walk/shots/`, the e2e log is `e2e.log`, and the walk log is `walk/walk.log`.
+
+---
+
+# Phase 6: Shipped vs Intent (analyst), Community Increment 2b
+
+*Returned as text for the orchestrator to record verbatim. I wrote and edited no repository file. My own files are under `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/b5a17cb2-025b-40b4-8c4b-1774b6b74a3b/scratchpad/an2b/`: `walk/walk.spec.ts`, `walk2.spec.ts`, `walk4.spec.ts`, `walk.log`, `walk2.log`, `walk3.log`, `walk4.log`, `walk/shots/`, `counts-before.txt` and `counts-after.txt`.*
+
+**Worktree and branch.** `/Users/cshenso/git/presby-platform/presby-2b`, `pipeline/signin-invites` at `eb54c16`. Neon `ep-delicate-tree`.
+
+**How the walk ran.** I started my own dev server on :3540 by hand, with `.next/dev` cleared and the env you listed. I stopped it by PID, and :3540 is confirmed free. Playwright ran from my own config with `globalSetup` removed, so I did not apply or revert the `e2e-global-setup` patch. `git status` is clean.
+
+**Cleanup.** The table counts before and after are identical except `audit_events` (+31, append-only by design). There are 0 `e2e-invite-*` users, organizations or queue rows. No trigger is left disabled. The three flags I touched (`org_portal.members_create`, `org_portal.officers`, `auth.require_2fa`) are restored.
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+- Every Phase 1 verb works for the right person, in the order intended, at 360px.
+- Nothing regressed, and I found no defect that sends the pipeline back.
+- The notes are one release gate, one integration risk and a small set of follow-ups.
+- **Release gate: F166.** Every new-account invitee enrols two-factor sign-in on the way in, and F166 still loses their recovery codes and landing page. TODO line 167 already says it is HIGH "before the first non-operator invitee", and this feature is that invitee.
+- **Integration risk: main is 79 commits ahead.** QA never ran against a merged tree. See conditions 1 to 3.
+
+## ONE-LINE TAKE
+
+> A founding administrator can invite a person they already recorded, and that person can accept as a new account or in place on the site. A member whose proven address sits on exactly one eligible record is connected at sign-in. An elder is connected after confirming two-factor sign-in, and then approves roll actions. The walk found nothing false, but the new-account path strands the person on the enrolment page and drops their recovery codes (F166).
+
+## What's Working
+
+Ordered as the person on each path sees it, at 360px.
+
+**1. The founding administrator, created by accepting a platform designation as a brand-new account.**
+- `/invite?token=…` shows "A PresbyPortal administrator invited you to be the founding administrator at E2E Invitation Church." It shows the masked address "e***@example.invalid".
+- The page offers first name, last name, password and confirm, and "Create account".
+- `/invite/accepted` reads "Your account is ready".
+- Sign-in sends them to `/account/2fa` (enrol), then through the `/totp` challenge, and they land at `/o/<slug>` as "Good evening, Rosalind."
+- Their Community page has "Pending approvals" and "Add person". That is the original production symptom, and it is fixed.
+
+**2. The founding administrator sends a sign-in invitation.**
+- On a person's edit page, the card is headed "Sign in to PresbyPortal".
+- The card reads: "Invite {Name} to sign in. We'll email {address} with a link that works once. Accepting lets them sign in as themselves, and any role or seat they hold here then takes effect." Below it: "When {Name} signs in with {address}, PresbyPortal connects them to this record if it can. An invitation also connects them."
+- The dialog reads: "We'll email {address}. The link works once and expires on 11/2/2026. Only send it if that address belongs to {Name}: whoever opens the link becomes {Name} on PresbyPortal."
+- After the send, the card reads "Invitation sent to {address} on 10/26/2026. It expires 11/2/2026.", with Sent, a five-minute cooldown line, a disabled Send again, and Cancel invitation. It also says: "While this invitation is open, signing in does not connect {Name} by itself. They accept the invitation instead."
+- The rows in `invitation.created`, `invitations` and `email_queue` are right:
+  - One `sign_in`/`org` invitation row.
+  - One `account_sign_in_invitation` queue row with the subject "E2E Invitation Church has invited you to sign in to PresbyPortal".
+  - One `invitation.created` audit row carrying ids only, with no address.
+  - The queue body is redacted after delivery.
+- The Community list shows "Invitation sent 10/26/2026" on that person's row and "Not connected yet" on a seated elder's row.
+- The elder's card says: "{Name} holds a role or a seat here. When they sign in with {address}, PresbyPortal connects them once they have confirmed two-factor sign-in."
+- The Session hand-off on Pending approvals reads: "1 member of the Session is recorded, but none has connected a sign-in yet, so no one can approve." Below that is the elder's row, "Not invited yet", with an Invite link.
+- A clerk who holds only `people.manage` sees "Ask an administrator to invite your Session members to sign in", with no names.
+
+**3. A brand-new account accepts a sign-in invitation.**
+- I could not recover the real emailed token, because the body is redacted after delivery. I seeded a row with a known token, as the e2e specs do. Everything from the link onward is the real path.
+- `/invite` says "{Congregation} invited you to sign in…". It shows the masked address and **no name pre-fill** (first and last name came back empty).
+- Accepting creates the account, then `/invite/accepted`, then `/account/2fa` (forced enrolment), then `/totp`, then `/o/<slug>` as "Good evening, Cordelia."
+- The administrator's card for her then reads "Connected through an invitation on 10/26/2026. To change who signs in as this person, send us a support ticket."
+- Reach as a baseline member:
+  - `/directory` says "isn't available … yet".
+  - Officers says "You don't have permission to manage officer terms".
+  - Roles says "isn't turned on".
+  - Another person's edit page says "You don't have permission to do that".
+  - Pending approvals says "You don't have permission to do that".
+
+**4. Connect at sign-in.**
+- An existing account with a proven address, on an authority-free record, signs in and lands directly in the congregation. The audit row is `via: sign_in`, `proof: account`, `secondFactor: false`, with an empty authority snapshot and no address. The administrator's card reads "Connected through sign-in on 10/26/2026."
+- An existing account with an open invitation is not auto-connected. `/no-organization` shows "You're invited to {Congregation}" and "Accepting connects this sign-in to your record there as Tamsin Rook." Accept goes straight into the congregation. The audit row is `invitation.accepted`, `via: in_place`, `mode: existing_account`.
+
+**5. The elder, and the hand-off.**
+- Password sign-in leads to the `/totp` challenge, then `/no-organization` ("You're not connected to a congregation yet").
+- Check again connects them and lands them at `/o/<slug>`. The audit row is `via: check_again`, `secondFactor: true`, `authority.sessionSeat: true`.
+- The administrator's banner and hand-off rows disappear.
+- The elder finds the queue by clicking only: Community tile, then the "Pending approvals / 1 waiting" link, then Pending approvals in decide mode. Approve opens a dialog. The result is "Marigold Hartwell's roll action approved.", the roll action is approved, and `decided_by` is the elder's account.
+
+**Overflow and tap targets.**
+- There was no horizontal overflow on any page.
+- Every new surface has controls at 44px or taller, and the send dialog fits inside the viewport. The `/no-organization` Check again and Accept buttons measure 44px or more.
+- The only small targets are pre-existing: the "PresbyPortal" and "Back to portal" header links (20px), the "← Home" link on `/account/2fa` (17px) and the `/account/2fa` header buttons (32 to 36px).
+
+## Intent-vs-Shipped Diff
+
+| Phase 1 said | Shipped | Verdict |
+|---|---|---|
+| Founding administrator can invite a person already recorded, one at a time, to the address on file | Card, dialog, send, send again, cancel, cooldown, chain cap, visitor acknowledgement, `officers.manage` rule. A `people.manage`-only clerk sees Send on an elder's card and is refused in the dialog: "Only someone who can manage officers can invite them." | matches; the clerk learns after the click (polish follow-up 10) |
+| The invitee is not named before sign-in (G5) | Verified live: masked address only, no name pre-fill | matches |
+| Accepting grants nothing | The card now says any role or seat "then takes effect" (amendment 4). The email still says "Accepting doesn't change your role", which is true as written | matches after the QA fix |
+| Marker "Can't sign in yet" | Replaced by "Not connected yet", "Invitation sent {date}" and "Invitation couldn't be completed" | acceptable drift, ruled |
+| Session hand-off per elder (Flow 7) | Seen live. "Invitations sent to {n} of the {m}" counts bounced rows as out; the row below says "Email bounced" | matches |
+| Auto-connect: member signs in and is connected | Authority-free: yes, at sign-in. An elder is not connected at sign-in; they need Check again after confirming two-factor sign-in. An enrolled elder lands on the generic "You're not connected" page after the challenge | acceptable drift (R42, operator Q1); see follow-up 5 |
+| `proof` recorded in the connect audit row (analyst Pass 3 and R42) | `proof` is null on every Check-again row, and every authority-bearing connect is one | acceptable drift, but it blunts the F232 review chain on the rows it matters for; follow-up 6 |
+| Accept in place for sign-in, founding administrator and treasurer | `/no-organization` card, the two-factor notice, dead and blocked copy, audit `via: in_place`. The designation card now names "A PresbyPortal administrator" | matches |
+| Disconnect after accept: not in 2b | Not shipped. The card says "send us a support ticket" | matches (operator ruling) |
+| Platform org-sent panel and scoped revoke | Walked by QA; the designation takedown now names its scope | matches |
+| Members reach only baseline access | Baseline members see Community and Officers tiles with administrator wording, and Community lists every person's name and address; the Add a person wizard renders and its search silently does nothing | acceptable drift, already in the Phase 3 hand-off list; follow-ups 8 and 9 |
+| New invitee enrols two-factor and lands connected | Lands connected, but `/account/2fa` strands them: "You enrolled on…", "10 unused codes remaining", no codes shown, no Continue. They must find "← Home" | **F166, not 2b's defect; release gate** |
+
+## Edge Cases
+
+- **Empty state:** pass. `/no-organization` N0, N1 and "Nothing new yet" are distinct. Pending approvals says "No one can approve yet" with a per-viewer hand-off. The Community list shows no marker when there is none.
+- **Failure microcopy:** pass. The refusals I provoked (clerk on an elder, baseline member on edit and Pending approvals) are human sentences. QA covered the dead-link, blocked, rate-limited and database-error strings in unit and e2e tests. I could not take the database down.
+- **Permission gate:** pass. `people.manage` is required for the card. `officers.manage` is enforced server-side for a seat holder. A baseline member is refused on edit, Pending approvals, Officers and Roles. The only soft spot is the Add a person wizard (follow-up 9).
+- **Audit event:** pass. I read `invitation.created` (ids only), `tenant.person.sign_in_connected` (two rows, no address), `invitation.accepted` (in place and new account) and `tenant.roll_action.approved`. The Google proof row cannot be exercised without Google and rests on QA's mutation M1.
+- **Mobile (360px):** pass on every page above. No overflow, no new control under 44px.
+
+## The F342 caveat
+
+I did not hit the enrolment-secret race in five enrolments (three founding-administrator and new-account runs, plus the elder's already-enrolled path). F342 ships ahead of this release (0.46.2), so nothing here depends on it.
+
+## Rulings
+
+### QA run 2's three follow-ups
+
+1. **RevokeAllControl's vanishing inline result: follow-up, not a defect.**
+   - I agree with QA. The toast and the page's new state carry the result.
+   - The one sentence lost is "Sign-in invitations sent by the congregation were not changed."
+   - Recommended fix, for the tech-lead to rule: put that sentence in the designation toast and drop the inline success line for both scopes. That avoids a page-level status that survives revalidation. If the inline line is kept instead, add an e2e assertion that it is still on screen.
+2. **"the congregation" becomes "the organization": follow-up, widened.**
+   - Founding-administrator designations apply to every organization type. QA named four strings (`DESIGNATION_TAKEDOWN_COPY` explanation and dialog body, `REVOKE_ALL_RESULT_COPY.designations.message`, `ORG_SENT_PANEL_COPY.revokeAllConfirm`).
+   - Add the sign-in email lead ("the website your congregation uses to keep its records") for the same reason.
+   - Leave the `/no-organization` H1 alone. It is pinned by tests and e2e, and Group A deliberately words the rest as "the office that keeps your records".
+3. **"you choose a password": accept the operator's rewording.**
+   - **Recommendation to the operator: accept** "Accepting takes about a minute: you sign in, or choose a password if you are new."
+   - The current sentence is now false for anyone who accepts in place, which is every existing account. The footnote ("If you already have a PresbyPortal account, sign in with this email address") only partly covers it.
+   - It is member-visible and cheap, and it needs the email test updated. It should go out before the first real sign-in invitation is sent.
+   - I did not apply it, because the operator approved the string.
+   - A related line to read in the same pass: the footnote "Nothing happens unless you accept" holds while the link is open (open invitations take precedence over auto-connect). After the link expires or is revoked, a sign-in with that address can connect.
+
+### Batch C and D deviations
+
+**Batch C**
+
+- **1 (`NAME_FALLBACK = "you"`), 2 (platform dialog and panel borrows), 5 (joined marker text):** accepted. QA ruled 1, 2 and 5 acceptable.
+- **3 ("Ask the office" body omitted with no address):** accepted. A credentials sign-in always has an address.
+- **4 ("Sign in with a different account" also on N1):** accepted, and I recommend keeping it. I saw it on N1, and the wrong account is the commonest failure.
+- **6 (`invitationsOut` counts sent and bounced):** accepted. The row below corrects it ("Email bounced").
+- **7 (accessible-name span), 8 (hydration fixture person ids 195 and 196):** accepted.
+
+**Batch D**
+
+- **1 (the flake is a real race):** accepted. It is F342, fixed on another branch and queued ahead of this release.
+- **2 (design text "no admin tiles" does not hold):** confirmed live. A baseline member sees Community and Officers tiles ("Add people, record participants and roll actions…" and "Record officer terms…"). Community opens and lists everyone with addresses, within each person's privacy settings. The Add a person wizard also opens (follow-ups 8 and 9).
+- **3 (a two-factor-required account is walked to `/account/2fa` before `/no-organization`):** accepted, and I saw it.
+- **4 (blast radius missed two e2e specs):** accepted as a process note for the retrospective.
+- **5 (queue hygiene):** accepted.
+
+**Earlier batches**
+
+- A1, A2, B1 and B2 findings were ruled at the time. Two stay open: A2's finding 2, where the listing shows a `sign_in` invitation whose address has since left the record and so accepts as "dead" (follow-up 11); and A2's finding 3, a development-database organization whose name looks real, which the orchestrator should confirm (follow-up 12).
+
+## The integration list
+
+**Main moved.** `origin/main` is 49ea633, version **0.46.1**. It is 79 commits ahead of this branch, with migrations 0067, 0068 and 0072. QA ran against a branch behind main, so nothing has run on the merged tree.
+
+1. **Merge `origin/main` first.**
+   - A dry `git merge-tree` shows one textual conflict, in `src/lib/org-feature-catalog.test.ts` (both sides added a toggle-only key).
+   - Fourteen more files changed on both sides and merged cleanly by text. They are: `docs/schema-design.md`, `scripts/giving/test-rls-46.sql`, `organizations/[id]/actions.ts`, `actions.test.ts` and `page.tsx`, `officer-roster.tsx`, its test, and `officers/page.tsx` and its test, `src/lib/audit.ts` and its test, `src/lib/db/domain/people.ts`, `src/lib/org-features.ts`, and `src/lib/org-provisioning.test.ts`. Read each for a semantic clash.
+   - Main also changed `src/proxy.ts` (16 lines) and the `/totp` challenge form (0.44.1 auto-submit). 2b's specs use `submitTotp`, which clicks Verify. Take main's version of `e2e/support/invitation-ui.ts` and check the specs still pass.
+2. **Re-run the Phase 5 evidence on the merged tree.** At minimum: typecheck, lint, `npm run check`, the unit suite, the serial DB lane, `test-rls-65.sql`, the full `test-rls.sql` with both patches, the chromium project, and the auth-gate specs (`totp-full-login`, `totp-callback-bypass`, `session-claim-integrity`, `branded-signin`) on a real server with an MFA-enrolled user. Run `npm run docs:erd` after merging `schema-design.md`.
+3. **The two staged patches.**
+   - `e2e-global-setup.integration.patch` applies cleanly to main's `global-setup.ts` (checked). CI needs it, because since 0065 the seed must run on the owner connection. Apply it for real.
+   - `test-rls.sql.integration.patch` **fails again** against main: hunk 3, the append, collides with the new `\ir parishes/test-rls-68.sql` and `\ir assets/test-rls-72.sql`. Hunks 1 and 2 (the section 44 conversions) apply. Apply them, then append `\ir sign-in-invitations/test-rls-65.sql` by hand after the section-72 include with its banner. Do not re-stage the append hunk a third time.
+4. **`drizzle/meta/_journal.json`:** add idx 65, `0065_presby_sign_in_and_connect`, with `when` 1787532773186 (idx 64 plus one day, matching the existing spacing). Idx 66 stays reserved for 3a, and 67, 68 and 72 are already there.
+5. **`scripts/seed-dev.sql`:** append `\ir sign-in-invitations/seed-dev-sign-in.sql` with a banner, after the parishes include. It seeds the toggle rows for every organization and needs the earlier fixtures. `test-rls-46.sql` also needs those toggle rows.
+6. **`docs/decisions.md`:** insert DECISION-225, 226, 227 and 228, and the amended 207 and 208 (text in the log at amendment 2 §11.2 and Phase 3). All are free on main. Main's latest are 261, 270 and 277.
+7. **`docs/schema-design-2.md`:** a new lettered subsection after "2ae. Public asset allowlist" (call it **2af**) for F186, F187, F192 to F198 and F230 to F233. Name F199 as closed in v0.42.0 (DECISION-219) so the number is not reused. F232 is an open `paper` residual. None of these numbers collide with main. Fix the two "reserved" notes at lines 1831 and 1851.
+8. **`CLAUDE.md`:** all three operator-approved edits.
+   - Edit 1: Permissions vs Flags, replace the last sentence of the credential paragraph with DECISION-227's text.
+   - Edit 2: Two Hierarchies, the platform-admin sentence, extended with the proven-address route (DECISION-226).
+   - Edit 3: the tenant-administrator paragraph, after the DECISION-194 residual.
+   - Anchors verified against the current text. `AGENTS.md` is a shim and needs nothing.
+   - Main now has `src/lib/dev-docs.ts` `INVARIANTS` and a test that fails on a Key Invariants **heading** change only, not wording. The edits change no heading, so the test will pass. Still re-read those entries (the "Two hierarchies" `paper` entry, and "A submission grant is a credential") and add F232 where it lists residuals.
+9. **`docs/TODO.md`:**
+   - Move to Done: line 136 (auto-connect), line 139 (credential reader), line 303 (Session-state copy pass), line 305 (the Increment 2 constraints), line 312 (bootstrap e2e) and line 317 (what's-new hold). Reword line 299 and line 300 (F177 stays open, now with the standing-visitor decline).
+   - Add the follow-ups below and the design's own list (disconnect after accept; S11 conditional; E-35 enrolment should verify the session; G17 `/home` card for a later designation; Staff-page markers; the older actor helpers; the F232 detection query).
+10. **`docs/STATE.md`:** it says "email authenticates nothing" at line 183; update it and the RESUME block.
+11. **`docs/product/functionality-map.md` (Rule 14):** lines 50 and 63 (the `/no-organization` description still says "open the link in your invitation email"), the Community line (line 70), the Auth lines (32 and 37), and the platform organization page. Update the Index too.
+12. **`docs/architecture.md` (Rule 15): yes, one short addition.** Sign-in can now write the identity binding, which is a changed data flow. Suggested text under the authorization paragraph:
+    > A login is bound to a person record in exactly two ways: by accepting an invitation, by link or in place, or by signing in with an address the account has proven that sits on exactly one eligible record. Both are owner-path functions, and address proof is a database fact bound to the account's current address. A record that carries authority connects only after a confirmed second factor.
+    The "first administrator" paragraph already there stays true.
+
+## The production runbook for 0065
+
+**None exists.** `docs/deployment.md` mentions 0065 only in forward references (lines 680 and 824). The design assigned it to integration as an unwritten hand-off. Write a section "Sign-in invitations and connect at sign-in (0065)" modelled on the 0064 one. It needs the following.
+
+- **Confirm first.**
+  - `to_regprocedure('presby_person_email(uuid,text)')` is non-null (0064 applied).
+  - `to_regprocedure('presby_connect_signed_in_account(uuid,boolean)')` is null.
+  - `to_regclass('public.user_totp')` is non-null.
+  - The shipped code is at least v0.42.3 and v0.42.4 (DECISION-230 and 246), which main already has.
+- **Order:** snapshot production, apply 0065, then merge and deploy. Every merge to `main` auto-deploys. New code before 0065 calls missing functions. Old code against 0065 keeps working (the migration header and design §4 say so).
+- **Pre-reads, counts only, re-run just before apply.**
+  - **P1** case-duplicate `lower(users.email)` groups. The file stops on any.
+  - **P2** stamped users with a `user.email_changed` audit row. The file clears those stamps and prints a count. Expect 0. If non-zero, those people lose proof until they sign in with Google.
+  - **P6** open invitations. The `account_invitations` CHECKs and indexes are dropped and re-added.
+  - **P8** the deploy-day wave: proven, unlinked, active users with exactly one candidate. Expect 0, so the release note needs no wave line. If non-zero, say so in the note.
+  - The count of `organization_feature_toggles` rows and of organizations. Section 8 seeds one `org_portal.sign_in_connect` row per organization.
+  - The Google-account count (it was 0 on 2026-10-25).
+- **Apply:** `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0065_presby_sign_in_and_connect.sql`, as the owner on the direct endpoint. It is idempotent, and a second run changes nothing.
+- **Verify (from QA's catalog probes).**
+  - Both guard triggers present and enabled (`users_guard_email_proof`, `people_guard_user_link`).
+  - Indexes present: `users_email_lower_uq`, `account_invitations_open_sign_in_person_uq`, the re-predicated `account_invitations_open_address_uq`, `audit_events_sign_in_connected_ix`.
+  - `presby_app` has no privilege on `account_invitations`.
+  - `presby_app` holds EXECUTE on exactly the 15 callables, and none on the five internals.
+  - `presby_platform` holds none.
+  - Every definer is owned by the owner and has `search_path = public, pg_temp`.
+  - Toggle rows equal the organization count.
+  - Row counts unchanged apart from the section-2 clean-up and the toggle seed.
+- **Down-path.** There is no rollback file. A code rollback is safe. The widened vocabulary CHECKs cannot be narrowed once a `sign_in` row exists. Production has none before this file.
+- **After deploy.**
+  - The operator walks the real path on a congregation made for testing, with plus-addresses (3 invitations per address per day). Send an invitation, accept as a new account, and enrol.
+  - The operator does the one-time Google check. This is the only path no test exercises. Sign in with Google on an address on exactly one eligible record, then confirm the connection and the proof audit row.
+- **Do not run** `seed-dev-sign-in.sql` or `test-rls-65.sql` on production.
+
+## Rules 12 to 15
+
+- **Rule 12:** not applicable. The source was the operator in production, with no feedback row (same as Increment 2).
+- **Rule 13:** member-visible, so publish one what's-new entry at SHIP IT (this closes TODO 317). Do it only after the F166 gate, since it invites people into that flow. Suggested text, within the "do not write" list:
+  - Title: "Invite a person to sign in, and sign-in can connect you to your record."
+  - Body: "A congregation's office can now invite someone it has recorded to sign in. If you sign in with the email address on your record, PresbyPortal can connect you to it without an invitation, though not for visitors, shared addresses or people at more than one congregation. A member of the Session can approve once they have connected a sign-in, either that way or by accepting an invitation. If you hold a role or a seat, you confirm two-factor sign-in first."
+  - Do not write "no one can be connected without an invitation", "two-factor sign-in prevents misuse of a typed address", "you can undo a connection", or "connecting never gives you more access".
+- **Rule 14:** see integration item 11.
+- **Rule 15:** see integration item 12.
+- **Release note:** use the design's §14 lines and the "do not write" list. Add the F232 residual line as drafted. The P8 line is not needed if P8 is 0 at deploy.
+
+## Version
+
+Confirmed: **0.48.0**, a minor. That follows 0.46.2 (F342), 0.46.3 (ingest) and 0.47.0 (careers) in the queue. If F342 ships first, the e2e helper retry is harmless. Main is already 0.46.1, so renumber if the queue changed.
+
+## Follow-Ups (SHIP WITH NOTES), TODO-ready
+
+1. `- [ ] **F166 is a release gate for Community 2b (HIGH).** Walked live 2026-10-26 on development at 360px: a new-account invitee enrols on /account/2fa and is left on "You enrolled on … 10 unused codes remaining" with no recovery codes shown, no Continue link and the callbackUrl gone; they must find "← Home" (17px tall). Fix before 0.48.0 ships or before any non-operator is told to use sign-in invitations. — docs/work-log/2026-10-22-founding-admin-directory.md Increment 2b Phase 6`
+2. `- [ ] **Merge origin/main into the 2b branch and re-run Phase 5 on the merged tree (Rule 16).** Main is at 0.46.1 (79 commits ahead; 0067, 0068, 0072). One textual conflict (org-feature-catalog.test.ts) and fourteen same-file merges; take main's invitation-ui.ts (0.44.1 auto-submit). Apply the e2e global-setup patch; apply test-rls patch hunks 1 and 2 and append the section-65 \ir by hand. — Increment 2b Phase 6`
+3. `- [ ] **Write the 0065 production runbook in docs/deployment.md.** None exists. Pre-reads P1/P2/P6/P8 and toggle and org counts; snapshot; apply with -1 on the direct endpoint, then deploy; verify the 15 grants, both triggers and the indexes; operator walk and the one-time Google check. — Increment 2b Phase 6`
+4. `- [ ] **RevokeAllControl's inline success line disappears on revalidation (both levers).** Move the "sign-in invitations were not changed" sentence into the designation toast and drop the inline line, or render the result outside the conditional section and add an e2e assertion. — Increment 2b Phase 5 run 2 / Phase 6`
+5. `- [ ] **An enrolled elder lands on the generic "You're not connected" page after the two-factor challenge.** Connect at sign-in cannot run with a verified factor (R42), so they must press Check again, and the page does not say so. Consider a sentence for an account with a two-factor enrolment ("If you hold a role or a seat, select Check again"), or run the check on return from /totp?callbackUrl=/no-organization. Needs a Copy ruling. — Increment 2b Phase 6`
+6. `- [ ] **The sign_in_connected audit row has proof: null on every Check-again connect, which is every authority-bearing connect.** The F232 review chain loses the google-or-account fact on exactly the rows it targets. Record the proof source at Check again (or write "unknown"). Also build the F232 detection query (tenant.person_email.added then tenant.person.sign_in_connected, joined on personId). — Increment 2b Phase 6`
+7. `- [ ] **Say "organization" where the noun is "congregation" on non-congregation pages:** DESIGNATION_TAKEDOWN_COPY, REVOKE_ALL_RESULT_COPY.designations, ORG_SENT_PANEL_COPY.revokeAllConfirm, and the sign-in email lead. Leave the /no-organization H1. — Increment 2b Phase 5 run 2 / Phase 6`
+8. `- [ ] **Operator decision: the sign-in email's "you choose a password" is false for an existing-account recipient.** Recommended: "Accepting takes about a minute: you sign in, or choose a password if you are new." Change the email and its test; do it before the first real invitation. — Increment 2b Phase 5 run 2 / Phase 6`
+9. `- [ ] **A baseline member sees administrator tiles and wizard.** The Community and Officers tiles describe administrator actions to every connected member; Community lists everyone with their addresses (privacy-filtered); /admin/community/new renders the Add a person wizard and its search silently does nothing. Gate the wizard page like the edit page, and make the tile wording permission-aware. — Increment 2b Phase 6 (walked 2026-10-26; Batch D finding 2)`
+10. `- [ ] **A people.manage-only clerk is offered Send on an elder's card and is refused in the dialog.** The refusal is clear ("Only someone who can manage officers can invite them") but the card could say so up front. — Increment 2b Phase 6`
+11. `- [ ] **The sign-in invitation listing shows an invitation whose address has left the person's record; accepting answers dead.** Filter the listing by the currency check, or leave it (one wasted click). — Increment 2b Batch A2 finding 2`
+12. `- [ ] **Confirm the development database holds no organization whose name looks like a real congregation (A2 finding 3).** No Real Data covers the repository, but the row was inherited from development. — Increment 2b Batch A2 finding 3`
+13. `- [ ] **Officer roster at 360px, still open:** the table scrolls sideways, the long surname overruns "Since", the name links are 17 to 37px tall. — Increment 2 manual bootstrap walk, re-observed in 2b Batch D`
+14. `- [ ] **Disconnect after accept** (first follow-up; needs a definer because the F186 trigger forbids clearing the link), plus the design's other follow-ups listed in the log: S11, E-35, the G17 `/home` card for a later designation, Staff-page markers, the older actor helpers. — Increment 2b design §16`
+
+## Red Flags
+
+None. The pipeline does not reopen.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| Inc 2b · 6 — Shipped vs intent | analyst | Complete. Walked as the people the path creates, on my own :3540 at 360px: an accepted-designation founding administrator (new account, forced enrolment, landing, Community with Add person), the send from the card (rows, queue and audit read back), a new account accepting a sign-in invitation (no name pre-fill, enrolment, landing, baseline-only reach), connect at sign-in (authority-free), accept in place, and an elder connecting through Check again and approving a roll action by clicking only. QA run 2's three follow-ups ruled; Batch C and D deviations ruled; integration list checked against main 0.46.1. No defect found; F166 named as a release gate; 14 follow-ups; 12 integration items; the 0065 runbook does not exist and is specified. Version 0.48.0. Test data removed; audit rows remain by design. | **SHIP WITH NOTES** | 2026-10-26 |
+
+## Handoff
+
+**Next agent: orchestrator.**
+
+1. Record this section.
+2. Merge `origin/main` into the branch and run integration items 1 to 12.
+3. Write the 0065 runbook.
+4. Re-run Phase 5 on the merged tree, scoped as in item 2. This is the one place a scoped QA run is needed.
+5. Put to the operator:
+   - Follow-up 8 (email wording).
+   - Whether F166 ships before 0.48.0 or the first invitations wait for it. I recommend it first.
+   - Whether to publish the what's-new entry at release or after F166.
+
+After that, **deployment-engineer** carries the runbook, and the operator does the production walk and the one-time Google check. Nothing is committed or pushed without the operator's say-so.
+
+---
+
+## Integration — merged tree and release 0.48.0 (orchestrator-run integration agent, 2026-10-26)
+
+Recorded verbatim from the integration agent's report.
+
+Community 2b is merged with main, integrated and released as 0.48.0 on `pipeline/signin-invites`, with nothing pushed and production untouched. After the merge, typecheck, lint, all eight tripwires, the unit suite, the DB lane, the SQL isolation suites and 71 e2e specs pass. The full chromium run printed "557 passed" but its log lost the lines for about half its tests, so I re-ran the 2b specs separately (57/57) and can't name which specs the 557 covered. Two of the four checks you asked about need your eye: the Moderator seat and the extra CLAUDE.md sentence (details below).
+
+## Commits (oldest first, tree clean)
+
+| Commit | What |
+|---|---|
+| `5cd92ee` | Merge of `origin/main` (0.47.0) |
+| `7ba0e81` | `fix(invitations)`: email line is now "Accepting takes about a minute: you sign in, or choose a password if you are new." Email and test updated. |
+| `eacd10a` | `chore(integration)`: everything in item 4 of your list |
+| `b868139` | `chore(release)`: 0.48.0, `docs/release-notes/v0.48.md`, with v0.47 linking forward |
+| `bd7bad5` | `docs(briefings)`: entry plus marker moved to `decision=231 commit=b868139` |
+
+## Conflicts
+
+- **Three textual conflicts, not one.** Main moved after the dry run: `src/lib/audit.ts` and `src/lib/audit.test.ts` (careers keys against 2b's two), plus `src/lib/org-feature-catalog.test.ts`. I kept both sides in each; the toggle-only list is `calendar, careers, domains, giving, mail_domain, parishes, public_calendar, sign_in_connect`.
+- **Same-file merges.** I read them for clashes (org-features, officers page and roster, people.ts, org-provisioning, founding-administrator tests). The merged text shows no clash apart from the Moderator seat below.
+- **Not edited.** `e2e/support/invitation-ui.ts` has no main-side change, so nothing to take. 0065 adds no tables, so there are no domain-index or `dev-docs.ts` additions.
+- **Neon.** On `ep-delicate-tree` (host checked each time) I applied 0067, 0068, 0071 and 0072.
+
+## Test results on the merged tree
+
+- **Static checks:** typecheck, lint and `npm run check` all pass.
+- **Unit suite:** 691 files and 10,708 tests passed.
+- **Serial DB lane:** 800 files, 13,868 passed, 0 failed, 1 skipped, which is the same pre-existing skip as before.
+- **`test-rls-65.sql` as `presby_app`:** exit 0, 92 passes.
+- **Full `test-rls.sql`** with stop-on-error off: 1,564 passes. The only three failures are the known drift ones (presbytery member count, the 2fa policy line, the statistics.publish count). The section-44 conversions, sections 65, 67, 68, 71 and 72 all pass.
+- **Auth-gate specs on :3540:** `totp-full-login`, `totp-callback-bypass`, `session-claim-integrity` and `branded-signin` pass, 14 of 14, with the global-setup patch applied for real.
+- **Chromium project:** it ran and printed "557 passed" with exit 0. The log lost the lines for about half of those tests, so I re-ran 2b's own specs on their own:
+  - `community-sign-in-invite`
+  - `no-organization-connect`
+  - `invitation-new-account`
+  - `invitation-existing-account`
+  - `invitation-fixture-sweep`
+  - `sign-in-connect-smoke`
+  - the two community hydration specs
+
+  All 57 pass.
+- **Playwright browser:** the merge brought a newer Playwright, so I ran `npx playwright install chromium` (a 92 MB download).
+- **Not run:** the custom-hosts project, the prod lane, and the QA live-catalog probes.
+- **Housekeeping:** `npm run docs:erd` added main's missing careers diagram to `docs/schema-design.md`. I stopped both :3540 servers by PID and the port is free.
+
+## Where things are
+
+- **0065 runbook:** `docs/deployment.md`, section "Sign-in invitations and connect at sign-in (0065)", after the careers section. It follows the Phase 6 specification, including the hold on real invitations and the point that connect-at-sign-in is on by default.
+- **Release note and TODO:** the operator section of the v0.48 note and the TODO ("Held until F166 ships") both carry the hold on real invitations until F166, and the what's-new entry after F166.
+- **TODO:** I added the 2b follow-ups and a re-check line for when F343 and 2b both merge.
+
+## For your attention
+
+1. **Moderator seat found at integration.** The `deacons_moderator` derived group from 0068 isn't in 0065's closed derived list `('active_membership','session','diaconate')`. A Moderator therefore counts as authority-bearing through `parishes.assign`. Auto-connect asks them for a second factor, but a sender needs `parishes.assign` to invite them and `officers.manage` is not asked for. It fails closed, so nothing is exposed. I filed it as a TODO and did not change 0065, because classifying the seat is a decision that needs your ruling.
+2. **One extra CLAUDE.md sentence.** Beyond your three edits I also landed Phase 3's "A congregation's sign-in invitation is the same mechanism…" sentence, because the approved edit 3 says it is kept as written. Drop it in review if you don't want it.
+3. **`dev-docs.ts` INVARIANTS.** The two entries list no residuals, so there was nowhere to add F232 and I edited nothing there.
+4. **Briefings marker.** I set it to 231, the contiguous floor, rather than 228. Every recorded number above 224 is named.
+5. **F343.** When it merges, the `invitations.db.test.ts:755`, `accept.db.test.ts:149`, `invitation-new-account` and `invitation-existing-account` assertions on the new-account default flip, as the F343 branch already lists. The TODO line also asks for the 2b new-account walks to be re-checked.
+
+The work-log has no integration or merged-tree section yet; the orchestrator can paste the results above in.

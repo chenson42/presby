@@ -39,7 +39,7 @@ export function TwoFactorCard({
         toast.success(
           nextRequired
             ? "2FA is now required. Takes effect on the user's next page load."
-            : "2FA requirement disabled. Takes effect on the user's next page load.",
+            : "This account's own requirement is off. A role or a congregation's policy may still require two-factor.",
         );
       } else {
         toast.error(result.error);
@@ -53,7 +53,7 @@ export function TwoFactorCard({
       const result = await forceResetTwoFactor({ userId });
       if (result.ok) {
         toast.success(
-          "2FA enrollment wiped. The user will be required to re-enroll on their next sign-in.",
+          "2FA enrollment wiped. If something still requires two-factor of this user, they will be asked to set it up again at their next sign-in. If nothing does, they will not be asked.",
         );
       } else {
         toast.error(result.error);
@@ -69,7 +69,7 @@ export function TwoFactorCard({
           variant="outline"
           className="bg-amber-500/15 text-amber-700 dark:text-amber-300"
         >
-          2FA not required
+          Own setting: not required
         </Badge>
       );
     }
@@ -115,8 +115,9 @@ export function TwoFactorCard({
       )}
       {!twoFactorRequired && (
         <p className="mt-2 text-sm text-muted-foreground">
-          Disabling does not remove an enrolled TOTP secret. If you re-enable
-          the requirement, the user&apos;s existing secret remains valid.
+          This account&apos;s own setting is off. A role or a congregation&apos;s
+          policy can still require two-factor. An enrolled authenticator is kept
+          either way, and is used again if the setting is switched back on.
         </p>
       )}
 
@@ -162,8 +163,12 @@ export function TwoFactorCard({
                 </Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm text-muted-foreground">
                   This will permanently delete the user&apos;s TOTP secret,
-                  recovery codes, and any pending enrollment. The user will be
-                  required to re-enroll on their next sign-in.
+                  recovery codes, and any pending enrollment. While enforcement
+                  is on, if their own setting, a role or a
+                  congregation&apos;s policy requires two-factor, they will be
+                  asked to set it up again at their next sign-in. If nothing
+                  requires it, they will not be asked, and can set it up again
+                  themselves at Account &rarr; Two-factor.
                 </Dialog.Description>
                 <div className="mt-6 flex justify-end gap-3">
                   <Dialog.Close asChild>

@@ -14,6 +14,10 @@ export const AUDIT_ACTIONS = {
   FEATURE_FLAG_TOGGLED: "feature_flag.toggled",
   TOTP_ENROLLED: "totp.enrolled",
   TOTP_RECOVERY_CODES_REGENERATED: "totp.recovery_codes.regenerated",
+  // F344 (DECISION-292): minting new recovery codes needs a session that has
+  // passed the second factor. A refusal is the one observable sign that a
+  // first-factor-only session tried to escalate. Metadata: { twoFactorRequired }.
+  TOTP_RECOVERY_CODES_REGENERATE_REFUSED: "totp.recovery_codes.regenerate_refused",
   TOTP_RESET: "totp.reset",
   USER_ROLE_ASSIGNED: "user.role.assigned",
   USER_ROLE_REMOVED: "user.role.removed",
@@ -480,14 +484,18 @@ export const AUDIT_ACTIONS = {
   // audit row commit or roll back together. `check:audit` walks only
   // `src/app/**/actions.ts` and cannot see these writes; Rule 7 is proven by
   // the per-outcome DB tests instead.
-  //   - INVITATION_CREATED / _RESENT / _REVOKED: actor = the platform operator.
+  //   - INVITATION_CREATED / _RESENT / _REVOKED: actor = the platform operator,
+  //     or, for origin `org` (a congregation's sign-in invitation, Increment 2b),
+  //     the congregation's sender.
   //     created: { invitationId, organizationId, purpose, personId, expiresAt,
   //       selfAddressed, acknowledgedDoNotContact }.
   //     resent: { invitationId (new), supersededInvitationId, organizationId,
   //       purpose, resendCount }.
   //     revoked: { invitationId, organizationId, purpose, via:
   //       'single' | 'revoke_all' }.
-  //   - INVITATION_ACCEPTED: actor = the accepting user. { invitationId,
+  //   - INVITATION_ACCEPTED: actor = the accepting user (for an in-place
+  //     acceptance, 2b, the account itself, with `via` and `secondFactor` added).
+  //     { invitationId,
   //     organizationId, purpose, personId, mode: 'new_account' |
   //     'existing_account', invitedByUserId, inviterIsInvitee }.
   //   - INVITATION_ACCEPT_BLOCKED: actor = the account when known, else null.
@@ -580,6 +588,45 @@ export const AUDIT_ACTIONS = {
   PERSON_PHOTO_REMOVED: "tenant.person_photo.removed",
   PERSON_PHOTO_DESIGNATED: "tenant.person_photo.designated",
   PERSON_PHOTO_UNDESIGNATED: "tenant.person_photo.undesignated",
+  // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/signin-invites, 2026-10-25 (Community Increment 2b,
+  // DECISION-225/226). Address proof and auto-connect. Both are written with
+  // insertAuditRow(tx, ...) in the SAME transaction as the change they record,
+  // so a throw from the audit insert rolls the change back. A DECLINE writes
+  // nothing. Metadata is ids, enums and booleans only: never an address, a
+  // name or a token. The actor is the ACCOUNT ITSELF (the signed-in user),
+  // not a platform operator or a congregation's sender.
+  //   - TENANT_PERSON_SIGN_IN_CONNECTED: written by
+  //     src/lib/onboarding/connect.ts (called from src/auth.ts's sign-in branch
+  //     and the Check-again action) when presby_connect_signed_in_account
+  //     returns `connected`. resourceType 'person', resourceId = the person.
+  //     Metadata (a closed list, pinned by test): { organizationId, personId,
+  //     contactMethodId, contactMethodCreatedAt (ISO, so a reviewer can join to
+  //     the tenant.person_email.added row and its actor), via: 'sign_in' |
+  //     'check_again', proof: 'google' | 'account' | null, secondFactor,
+  //     authority: { sessionSeat, diaconateSeat, roleKeys, permissionKeys } }.
+  //     The R21 detection chain for F232 is tenant.person_email.added |
+  //     primary_changed, then this row, joined on personId.
+  //   - USER_EMAIL_PROOF_RECORDED: written by src/lib/auth/email-proof.ts when
+  //     presby_record_google_email_proof actually stamps. resourceType 'user',
+  //     resourceId = the user. Metadata: { source: 'google' }.
+  TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected",
+  USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded",
+  // Careers, Increment 1 (docs/work-log/2026-10-25-careers-inc1.md, Phase 3
+  // "Audit"; DECISION-264/265). One row per status change that changes what the
+  // PUBLIC can read: publish, close, reopen, and the cron's close of a posting
+  // past its closing date. Written with `insertAuditRow(tx, ...)` in the SAME
+  // transaction as the change (src/lib/careers/postings.ts and sweep.ts), so a
+  // failed audit insert fails the change. NOT written for create, edit, reorder
+  // or discarding a draft (nothing was ever public). `check:audit` scans only
+  // actions.ts, which delegate to those lib functions.
+  // resourceType 'job_posting'; resourceId = the posting id. Metadata is ids
+  // and an enum only - never a title, a slug or any text:
+  // { organizationId, postingId, via: 'staff' | 'closing_date' }; the cron's
+  // rows have a null actor.
+  CAREERS_POSTING_PUBLISHED: "careers.posting.published",
+  CAREERS_POSTING_CLOSED: "careers.posting.closed",
+  CAREERS_POSTING_REOPENED: "careers.posting.reopened",
   // ---------------------------------------------------------------------------
 } as const;
 

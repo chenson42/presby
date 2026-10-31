@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { HelpLink } from "@/components/help/help-link";
+import { helpHref } from "@/lib/help/urls";
 import { recordAudit, AUDIT_ACTIONS } from "@/lib/audit";
 
 export default async function AccessPending({
@@ -31,9 +33,14 @@ export default async function AccessPending({
         Your account exists, but doesn&apos;t yet have permission for this area.
         Ask an administrator to grant you the right role.
       </p>
+      <div className="mt-4">
+        <HelpLink href={helpHref("why-cant-i-see-this", "access-pending")} className="text-sm">
+          Why can&apos;t I see this?
+        </HelpLink>
+      </div>
       <Link
         href="/home"
-        className="mt-6 inline-block text-sm text-muted-foreground underline-offset-4 hover:underline"
+        className="mt-4 inline-block text-sm text-muted-foreground underline-offset-4 hover:underline"
       >
         ← Back to home
       </Link>

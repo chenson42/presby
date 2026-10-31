@@ -850,8 +850,8 @@ rollback;
 begin;
   select assert_eq(
     (select count(*) from permissions where key = 'domains.manage' and module = 'domains'
-        and sensitivity_tier = 1 and not requires_two_factor),
-    1, '47n: domains.manage is a tier-1 key in module domains, requires_two_factor false (T7 / TODO S3)');
+        and sensitivity_tier = 1 and requires_two_factor),
+    1, '47n: domains.manage is a tier-1 key in module domains, requires_two_factor true (0080; DECISION-291 supersedes T7 / TODO S3)');
   select assert_eq(
     (select count(*) from app_role_permissions rp join app_roles r on r.id = rp.role_id
       where r.organization_id is null and rp.permission_key = 'domains.manage'),

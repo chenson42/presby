@@ -4,6 +4,227 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-298 — An applied migration may be corrected in place only when the change is guard-only and provably behaviour-neutral where it already ran; otherwise fix forward.**
+
+**Status:** Accepted (orchestrator ruling, 2026-10-28; Phase 6 SHIP WITH NOTES, `2026-10-28-org-baseline-backfill`) · **Date:** 2026-10-28 · **Feature:** `2026-10-28-org-baseline-backfill` (migration 0082; v0.50.1)
+
+- **Rule.** CLAUDE.md's `drizzle/` line allows an in-place correction only before a migration reaches a shipped environment. This adds one exception for a file already applied to production or `development`. All of these must hold:
+  - **(a)** The change touches only guards, meaning conditions on `RAISE`, `IF` and `WHEN`, plus comments. Every statement that writes, alters or grants is byte-identical.
+  - **(b)** On every environment that already ran the file, the corrected file writes nothing. This is proven by a zero-row re-run with `psql -1` there, and the counts are recorded.
+  - **(c)** A forward migration cannot serve. The test is that a fresh `db:migrate` stops at the defective index before any later file.
+  - **(d)** The change has a regression test that is red on the as-applied file and green on the corrected one.
+  - **(e)** The work-log, the migration header and `docs/deployment.md` each say that the file was corrected in place, and why.
+- **Why.** `db:migrate` is the only path to a fresh environment. A defect in an applied file blocks every new environment, and nothing after it can run. A guard that is wrong on an empty catalog can only be fixed at its index.
+- **Not covered.** Any change to a write, a grant, a policy or a function body; any renumbering; any change to the journal's `when`. Those fix forward.
+- **Accepted residual (`paper`).**
+  - A guard can be widened, so it refuses in more cases, as the membership stop-block did here. That is neutral on environments that applied the file only because the file is not run again. The re-run in (b) is the check, and nothing mechanical enforces it.
+  - A hand-applied file's bytes are not hashed anywhere (the ledger holds ten rows), so nothing detects drift between "as applied" and "as in the repo" except this record.
+- **First use.** `0082` (stop-blocks corrected before release; commit `421940c`).
+- **Follow-through.** The `drizzle/` line in CLAUDE.md carries the exception (operator approved, 2026-10-28).
+
+---
+
+**DECISION-297 — Help screenshots come only from a fixture-only database behind a fail-closed guard.**
+
+**Status:** Accepted (tech-lead, Phase 3 as DECISION-new-2; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-28 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)
+
+- Guard rules G1 to G6: a slug allowlist, the profile rows, `.invalid` identities, the same host as the server, an attestation variable (`HELP_SHOTS_DB_OK`), and any error refuses (`src/lib/help/shots-guard.ts`, `e2e/help-shots/`).
+- The manifest is a pure data file (`screenshots-data.ts`) plus a static-import binding (`screenshots.ts`); `capturedIn` can only move by re-running capture (`npm run help:shots`, never part of CI).
+- Every committed image is opened and read by a human for a real name, address, email, brand or tenant (`check:secrets` scans text, not pixels).
+- *Revisit if* images exceed about fifteen, or capture moves into CI.
+
+---
+
+**DECISION-296 — The help tripwire is split, and its content subset is closed.**
+
+**Status:** Accepted (tech-lead, Phase 3 as DECISION-new-1; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-28 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)
+
+- `scripts/check-help.ts` (tsx, no environment) holds the registry, file, history, heading, link, image, phrase, label, TODO-token, map, literal-href and import-boundary rules (H1 to H19).
+- `src/lib/help/coverage.test.ts` (vitest) holds the catalog and tile coverage and the toggle-name rules, because `org-features.ts` and `tiles.ts` import `server-only` and the database, and extracting the catalog would have collided with three unmerged branches.
+- Content is restricted to a subset the hand-written scanner models: inline links, ATX headings, no raw HTML, no bare URLs, and the template tokens `{{contact}}` and `{{privacyContact}}` (the second added for the privacy policy, whose address is a build-time variable, `HELP_PRIVACY_CONTACT_EMAIL`).
+- A published page may carry `limitationUntil: <token>` so a feature's merge (or a defect's fix) names the pages it falsifies. Planned slugs equal their tokens; `slug-history.ts` is append-only.
+- *Revisit if* a page renders a constant by import (then extract the catalog), or the subset blocks an author.
+
+---
+
+**DECISION-295 — Public developer documentation at `/docs` is a closed, curated registry rooted in `src/content/docs/`.**
+
+**Status:** Accepted (architect, Phase 2, 2026-10-26); recorded at Increment 1's integration because the `/docs` proxy bypass is live, though the content ships in Increment 3 · **Date:** 2026-10-26 · **Feature:** `2026-10-26-user-help` (Increment 3)
+
+- It is never a render of any `docs/**` file and never `/developer` made public (consistent with DECISION-258, "internal for good").
+- **Public:** site authoring (kit components from `ALLOWED_BLOCK_TYPES`, block props, front matter, content-repo layout, the publish flow as an author sees it); live-slot names, image limits and the brand partition rendered by import; the "PresbyPortal has no public API" and "publishing is limited to operator-provisioned repositories" statements; links, not copies, to the architecture overview and the repo.
+- **Never rendered:** decisions, work-logs, reviews, TODO, STATE, the functionality map, deployment and runbooks, CLAUDE.md and agent files, schema reviews, the ingest wire contract and OIDC verification internals, production hostnames, Neon or Vercel identifiers, real congregation names and `site-<slug>` repository names.
+- Enforced by a path rule (the registry and loader may not name a path outside `src/content/docs/`) and a content scan (host and identifier shapes), on top of `check:secrets`. Copying private material in by hand remains `paper`.
+- Developer-portal Increment 4 shares the renderer, never the registry or the content root, so the two closed lists are disjoint by construction.
+- Until Increment 3 ships, anonymous `/docs/x` is the framework 404, not a sign-in redirect (pinned by `e2e/help.spec.ts`).
+
+---
+
+**DECISION-294 — A help page's publication is a registry status checked against a `[help:<token>]` on exactly one `docs/TODO.md` line.**
+
+**Status:** Accepted (architect, Phase 2; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)
+
+- The registry has `status: "published" | "pending" | "planned"` and `requires?: "<token>"`.
+- A pending page publishes in the commit that moves its line to Done, and that commit must publish it.
+- A planned placeholder expires the same way.
+- "Done" means a `- [x]` line under `## Done` (F349: checkbox state alone cannot define Done).
+- `check:help` is the ninth tripwire (Workflow Rule 17).
+- The ordinary case needs no token: a feature's own branch adds its page as `published` in the same PR (Rule 17's amendment, F373).
+- Accepted residuals (`paper`): a feature shipped behind a global flag that is off in production; operator flag flips.
+
+---
+
+**DECISION-293 — User help is a static, platform-host-only `(documentation)` route group.**
+
+**Status:** Accepted (architect, Phase 2; amended by the architect's ruling on the help 404 after Batch 3, 2026-10-28; Phase 6 SHIP WITH NOTES, 2026-10-28) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-user-help-inc1` (no migration; v0.50.0)
+
+- The proxy bypasses `/help` and `/docs` by segment-boundary prefix with no new import (F348: an exact `PUBLIC_PATHS` list would redirect a typo to sign-in).
+- Content is markdown in `src/content/` with a typed registry, read only at build (`dynamic = "error"`, `dynamicParams = false`). Every `/help` URL that is not a published page or a planned placeholder (unknown, pending, retired, a planned slug at the wrong path, or a deeper path) is answered by one `force-dynamic` catch-all, `help/[...unmatched]`, which calls `notFound()`. So each one gets `help/not-found.tsx` with an identical body and no per-URL cache entry. There is no root `not-found.tsx` and no `global-not-found`, because the custom-host neutral 404 (DECISION-040) must not change.
+- One shared renderer has no `rehype-raw` and no `prose`, and images come from a statically imported manifest.
+- Platform palette, un-brandable, no `loading.tsx`; a custom host answers the neutral 404 on every help path.
+- *Revisit if* `cacheComponents` is enabled (move the lock to `ensureStatic`; `dynamic`, `dynamicParams` and `force-dynamic` all go away), or if a page under these prefixes ever needs a session, or if Vercel stops continuing past a `fallback: false` miss to the next matching route (the preview check in `e2e/help-404.spec.ts`'s gate).
+
+---
+
+**DECISION-291 — Two-factor is role-based: `users.two_factor_required` defaults to false; the platform-admin grant points set it true (audited, still switchable); `roles.manage`, `role_grants.manage` and `domains.manage` carry `permissions.requires_two_factor`.**
+
+**Status:** Accepted (architect, Phase 2; Phase 3 amendments P3-3, P3-4, P3-9, P3-10; residual 1 widened by the Phase 3 amendment after Phase 5 run 1; Phase 6 SHIP WITH NOTES, 2026-10-26) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-2fa-default` (F343; migration 0080; v0.49.0). Amends DECISION-170/175's key set; supersedes the domains T7/S3 deferral.
+
+- **Rule.** Migration 0080 changes the column default to false and issues no `UPDATE users`; existing accounts keep their value. A new account is required only by:
+  - (a) its own column;
+  - (b) a congregation's `require_two_factor` (arm A);
+  - (c) holding any key flagged `requires_two_factor` (arm B), now six keys: the three giving keys plus `roles.manage`, `role_grants.manage` and `domains.manage`.
+
+  All three stay subject to the `auth.require_2fa` master switch.
+- **Platform admins.** When a person gains `ADMIN_ROLE`, or any role bound to `admin.dashboard`, through `ensureDefaultRole` (`INITIAL_ADMIN_EMAILS`) or `assignRoleAction`, one helper (`requireTwoFactorForPlatformRole`, `src/lib/auth/platform-role-two-factor.ts`) sets the column true in the grant's own transaction. It writes `user.2fa_required.changed` with `cause: platform_role_granted` only when the value changed.
+  - The helper fires only when the grant row was newly inserted, in both callers (P3-3). Pressing Add on a role the person already holds does not undo a deliberate switch-off; a different platform role granted later does switch it on again, audited with its `roleName`.
+  - `ensureDefaultRole` lives in `src/lib/auth/default-role.ts` and takes the parsed `INITIAL_ADMIN_EMAILS` as a parameter (P3-4).
+  - Removing the role does not clear the column, and the per-person switch can still turn it off (operator ruling 2026-10-26). There is no derived platform-role term in `computeEffectiveTwoFactor`.
+  - **Tripwire:** a future writer of `is_platform_admin`, `user_roles` for a platform role, or `role_features` must call `requireTwoFactorForPlatformRole`.
+- **Commission and delegation.** Flagging the administration keys needs no DECISION-175-style refusal trigger. That guard exists for giving privacy; a 2FA flag only adds a challenge. Arm B's commission and delegation arms already require 2FA at every org where `withOrgContext()` lets the key be used. This supersedes the 2026-10-19 T7 rationale and closes TODO S3.
+- **`/admin/2fa`.** The stranded predicate calls `presby_two_factor_required(u.id)`, so the list and the dashboard card agree with sign-in by construction, and the platform-tier exception narrows to a per-account boolean. "Required by" reads Own setting / Congregation policy / A role, in that order.
+- **Deploy skew (production).** 0080 is applied before the code is promoted, in the same sitting. Between the two, the old code runs against the new default, so a platform role granted through the old code would not switch the person on; no platform-role grant and no first sign-in of an `INITIAL_ADMIN_EMAILS` address may happen in that window. Rollback is a forward migration (default true, unflag the three keys); accounts created in between keep `false`, so a rollback also needs a decision about those rows. Runbook: `docs/deployment.md`, "Pre-deploy runbook: 0080".
+- **Cost trigger (P3-9).** Rewrite arm B in `STRANDED_WHERE` as one set-based statement when active unenrolled accounts pass about 1,000, or `EXPLAIN ANALYZE` of `countStranded` exceeds 1 second, whichever comes first (13.2 ms at 31 users on the pipeline branch).
+- **Accepted residuals (`paper`):**
+  1. **Platform rights set outside the helper.** `users.is_platform_admin`, `user_roles` for a platform role, or `role_features` written by anything other than the application's two grant points (`assignRoleAction`, `ensureDefaultRole`) do not set `users.two_factor_required`, and the account is not required. **No database layer prevents this:** `presby_app`, the application's own connection, can `UPDATE users SET is_platform_admin` (no grant, trigger or constraint refuses it; probed by QA, Phase 5 run 1), so the protection is code review and the tripwire sentence above, not the database. (`presby_app` cannot write `permissions` or `role_features`, `0048:90-91`; it can write `user_roles`, which is why `assignRoleAction` is the grant point.) Today no application code writes `is_platform_admin` or `role_features`, and the branch shows the residual is live: both accounts with `is_platform_admin` have their own setting off and are not enrolled. The residual is accepted and `paper` (operator ruling 2026-10-26); the detective control is the audit trail on the helper's writes, which a bare SQL write does not produce.
+  2. **Database blip.** For an account whose only source is a role or a congregation, a database error in `organizationRequiresTwoFactor()` yields "not required" for that computation (DECISION-026). If the blip coincides with a cookie re-sign, the proxy's claim stays false until the next Node-side re-sign or sign-in, not merely for one request. Node-side re-checks (`/admin` layout, giving pages, invitation accept) recompute on every request. Before this decision the column masked this for every default-true account.
+  3. **Mid-session grants.** A key granted to someone else mid-session reaches their proxy claim only at their next re-sign or sign-in. Node-side re-checks cover tier-2 data.
+  4. **Per-request cost.** New accounts no longer short-circuit on the column, so each of their authenticated requests pays the definer call (2.5 to 3.4 ms). `/admin/2fa` costs about 3 ms per active unenrolled account; revisit at the P3-9 trigger.
+  5. **Voluntary enrolment.** Enrolling while not required brings no challenge at sign-in, the same as for any column-false account before; it is now the default for every new member, and nothing in the product says so yet (TODO follow-up).
+- **Production impact.** Existing holders of the three keys become required at their next computation. R8's two read-only counts were 1 active holder, 0 newly required, and 1 platform-role holder, 0 not required (2026-10-26); they are re-run on deploy day and the number stated in the release note.
+
+---
+
+**DECISION-292 — Confirming a first enrolment is a possession proof that may mark the session verified through the same single-use grant. Recovery codes are delivered only in client memory, and minting new ones requires a verified session. Amends DECISION-230's enumerated call sites.**
+
+**Status:** Accepted (architect, Phase 2; Phase 3 additions; Phase 6 SHIP IT with changes, 2026-10-26) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-recovery-codes` (F166, F344; no migration; v0.48.1)
+
+- **Rule (amends DECISION-230's enumerated call sites).** `completeEnrollment` opens `withTwoFactorGrant(session.user.id, "totp", () => unstable_update({}))`, but only when all of these hold:
+  - `verifyToken` has passed against the caller's own pending secret;
+  - the `user_totp` insert actually created the row (`ON CONFLICT DO NOTHING ... RETURNING`; an existing enrolment is refused and never replaced);
+  - the enrolment writes have committed.
+
+  A failed update is caught and costs one `/totp` challenge. `TOTP_ENROLLED` records `sessionVerified`. The grant's importers, call sites and the exports of both `'use server'` files are a closed, set-equal allow-list in `src/lib/auth/two-factor-grant.boundaries.test.ts`.
+- **Delivery.**
+  - The fresh-codes cookie is removed from both paths.
+  - A server action that writes any cookie re-renders the route in Next 16 (`request-cookies.js:125`), and `unstable_update` writes one. So the codes live in a client holder whose identity is the same in every branch of `/account/2fa`, and they survive that re-render.
+  - A reload loses them by design (operator ruling, "shown once").
+  - Both Continue controls take only the server-sanitized `callbackUrl`.
+- **F344.** `regenerateRecoveryCodes` refuses any session without `twoFactorVerified` and writes `totp.recovery_codes.regenerate_refused`. The way back is `/totp?callbackUrl=/account/2fa`.
+- **Phase 3 additions.**
+  1. The enrolment writes run in one `db.transaction`, and so does the regenerate replacement.
+  2. `sessionVerified` requires the session `unstable_update` returns to report the claim, not just a clean return.
+  3. Continue is a plain `<a>` (a full navigation), so the codes leave memory and the proxy reads the fresh cookie.
+  4. A layout-level holder is the one sanctioned deviation from the same-identity holder. **It was not used:** smoke 1 showed no remount in either lane (dev and `next start`), so residual (c) is pinned by e2e, and the layout fallback stays the sanctioned response if Next changes.
+- **Accepted residuals (`paper`):**
+  - **(a)** Someone holding only the first factor of a never-enrolled account reaches a verified session in one step instead of two. No new power: before this they enrolled and then answered a challenge with the secret they chose.
+  - **(b)** DECISION-230's residual carries over: a verified claim outlives an administrator's TOTP reset, and such a session can enrol a new authenticator. Enrolment never required verification, so this is not new.
+  - **(c)** "Codes survive the re-render" depends on React keeping client state across the server-action re-render. Only the running-server e2e pins it, in both lanes.
+  - **(d)** A lost action response leaves the account enrolled with codes nobody saw. Recovery is `/totp`, then Regenerate.
+  - **(e)** Enrolled but not-required accounts answer one voluntary `/totp` before they can regenerate.
+  - **(f)** `verifyToken` has no replay guard. The race between regenerate and sign-in, and key rotation, remain out of scope.
+  - **(g)** The grant allow-list is a regex source scan. Obfuscation (computed member names, split specifiers, Unicode escapes, string-literal and comment tricks) and non-TypeScript source are not caught.
+  - **(h)** The "every `return (` in `page.tsx` opens with the holder" pin misses a parenless `return <X/>`.
+- **Revisit if:**
+  - Next stops re-rendering on cookie writes in actions, or Auth.js's `update()` stops writing the cookie in-process;
+  - a fourth grant call site is proposed;
+  - a per-session server record (DECISION-230's revocation follow-up) lands, which would make the "verified" state revocable at enrolment and reset.
+
+---
+
+**DECISION-228 — Accept in place: the credential model is unchanged, only how it is presented; every binding of authority carries two independent proofs beyond the password.**
+
+**Status:** Resolved (architect, Phase 2 addendum; tech-lead, Phase 3 amendment 2; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory` (Community Increment 2b; migration 0065; v0.48.0); R45, R46; Q2
+
+- **Decision.** The `account_invitations` row is still the credential and still authorizes only the act its row names, inside definers that take organization and purpose from the row. `presby_accept_invitation(token, ...)` becomes a wrapper over `presby__accept_invitation_core(invitation id, ..., presentation)`; `presby_accept_in_place(invitation id, user id, factor)` calls the same core with `'in_place'`. In place, the bearer token is replaced by (a) the account's **proven** address equalling the row's address and (b) the click as intent, plus a **confirmed second factor** where required: always for the founding administrator and treasurer, for `sign_in` when the record is authority-bearing, and (in TypeScript) G9 parity otherwise.
+- **Order of gates.** A foreign invitation id is never an oracle: every pre-factor miss is `dead`. The listing is a definer returning a closed shape for a proven account's own open invitations.
+- **Audit.** The existing rows, with `via: 'in_place'` and `secondFactor` on the in-place path only. DECISION-147's statistics tokens are untouched.
+- **The principle.** Token path: the sender's ceiling and the token. In place: the sender, a proven address and a second factor. Auto-connect: a proven address and a second factor, the sender missing, so its residual is F232.
+- **Rejected.** Resend-and-consume (fights the cooldown and the chain cap). No `/home` card for a connected member's later designation (G17, a follow-up; the Post-Login Landing table does not change). The sender-visible card never depends on another organization's rows (R46).
+
+---
+
+**DECISION-227 — The contact-email wording: a contact email authenticates nothing, and may identify the one person an authenticated, address-proven account belongs to.**
+
+**Status:** Resolved (operator approved the `CLAUDE.md` wording, 2026-10-25) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory` (Community Increment 2b; migration 0065; v0.48.0); R43; F233
+
+- **Decision.** Amends DECISION-216's sentence. Text, verbatim in `CLAUDE.md` (Permissions vs Flags): a contact email authenticates nothing. Proof of an address comes only from the account: `users.email_verified`, bound to the account's current address (DECISION-225), never from `contact_methods.verified_at` or from an address being on file. Inside a SECURITY DEFINER function a contact email may do exactly two things: address a credential, read through `presby_person_email` (DECISION-216); and identify the one person record that an authenticated, address-proven account belongs to (invitation acceptance's address match, and `presby_connect_signed_in_account`).
+- **Why.** The recorded wording was already narrower than the code: the founding-administrator branch of `presby_accept_invitation` identifies a person by address (0064). `contact_methods.verified_at` is an output of linking and an input to nothing; the connect definer must not read it.
+- **Pinned by.** `scan.test.ts` section 3 keeps its assertion; 3b and 3c pin that only `src/auth.ts` imports `connect.ts`, and that `connect.ts` and `src/app/no-organization/**` name no contact object.
+
+---
+
+**DECISION-226 — Auto-connect: one standing core, a connect definer, a second factor for authority, an audit snapshot, a per-congregation toggle.**
+
+**Status:** Resolved (architect, Phase 2 addendum; tech-lead, Phase 3 amendment 2; operator Q1 "also elders, not visitors", S12 declined, S13 accepted; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory` (Community Increment 2b; migration 0065; v0.48.0); R40-R42, R47; F232
+
+- **One standing core.** `presby__person_sign_in_standing(person, org)` is the one place that decides eligibility for issue, resend, the token and in-place `sign_in` accepts, connect and the reader (refusal, `standing` through `presby_membership_standing`, authority snapshot); pinned by one matrix test and by text and live-catalog scans.
+- **The connect definer.** `presby_connect_signed_in_account(user, factor)` runs at sign-in and from Check again: active, proven, unlinked, no open invitation, exactly one global candidate, managed organization, toggle on, no refusal, not a visitor, and for an authority-bearing record a `user_totp` row **and** a verified session. Every other reason is the one `declined` literal. It writes only `people.user_id` and the stamp, through the bind helper. The audit row `tenant.person.sign_in_connected` is written in the connecting transaction with the authority snapshot.
+- **Honest framing (the release note must match).** The second factor makes binding authority a deliberate, multi-step act and hardens the account from day one; it stops a stranger who merely holds the mailbox from getting authority by an incidental sign-in; it does **not** stop collusion (F232). No disconnect in 2b. Platform administrators connect only as any person does.
+- **The toggle.** `org_portal.sign_in_connect` is a tenant setting (no new platform flag), default on, auto-connect only; turning it off stops new connections and disconnects nobody.
+- **Accepted residuals (`paper`).** F232 (a `people.manage` holder can put an address they control on an authority-bearing record; detected by audit, not prevented; the operator declined recording the address author). Caller-asserted identity and factor (E-30): the database cannot check a session. The deploy-day wave is real and was sized before release (0 on 2026-10-25).
+- **Revisit if** a visitor baseline role lands (Increment 3a changes the visitor condition) or disconnect-after-accept is built.
+
+---
+
+**DECISION-225 — Address proof is a database fact bound to the current address.**
+
+**Status:** Resolved (architect, Phase 2 addendum; tech-lead, Phase 3 amendment 2; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory` (Community Increment 2b; migration 0065; v0.48.0); R37-R39; F230, F231
+
+- **Decision.** Proof means `users.email_verified is not null`. `users_guard_email_proof` makes it a fact about the current address: a non-owner role cannot insert or set a stamp (clearing is allowed); on every role, an address change clears the stamp unless re-stamped in the same statement; a case-only change keeps it.
+- **Three owner-path writers.** The new-account insert in `presby_accept_invitation`; `presby_record_google_email_proof` (stamps only an active, unstamped account whose address equals the one passed); and `presby_complete_email_change` (consumes the verification token and stamps in one statement). Google's `email_verified` claim is required at sign-in by F231's gate (DECISION-246), not here.
+- **Clean-up.** A one-time statement in 0065 clears stamps made stale by a recorded email change (provable from the append-only audit table). No backfill. A stamp at password reset (S11) was declined. Adding Auth.js's Email provider later would need an owner-path definer.
+- **Residual.** The database cannot check a Google ID token (F187 class); mitigated by the single call-site scan and by stamping only an address the account already holds.
+
+---
+
+**DECISION-208 — The link between a login and a person is a database property against every non-owner role; `users.email` is case-insensitively unique.**
+
+**Status:** Resolved (tech-lead, Phase 3; amended in Phase 3a by A1, A2, E1 and S10, and by R44 on 2026-10-25; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (Community Increment 2b; migration 0065; v0.48.0); R23, R24, R36; F186, F187; departs from R23's owner binding and R24's revoke
+
+- **The link.** `people.user_id` is the identity binding: `presby_user_organizations` resolves a user to a person to memberships. It is written only on the owner path, by invitation acceptance (token or in place, through the shared accept core) and by `presby_connect_signed_in_account`, both through `presby__bind_person_account` (the accept core's `created_person` insert is the one other write). `people_guard_user_link` (BEFORE INSERT OR UPDATE OF `user_id`) refuses any link transition when `current_user` is **not the owner of `people`** (A1; owner = `pg_class.relowner` for `TG_RELID`; no role is named). Deny by default, because `presby_platform` also holds INSERT and UPDATE on `people` and is expected to become a login one day. It costs nothing: fixtures, the FK `SET NULL` action and the definers all run as the owner. Measured: no application code on `presby_app` writes the column.
+- **Why not a marker, and why not bind the owner.** A transaction-local marker is forgeable by any `presby_app` statement (the 0059 idiom works on `account_invitations` only because `presby_app` holds no privilege there; on `people` it holds UPDATE), and binding the owner path would force about ten fixture sites to arm it for a path on which no platform code writes the column. **Accepted residual, `paper`:** the owner path is not bound. **Mitigation (A2):** a source scan in `boundaries.test.ts` fails when any non-test file under `src/`, other than the fixtures in `src/lib/testing/`, writes `userId` in a `people` insert or update.
+- **Why not revoke `users` privileges (R24).** `presby_app` legitimately writes `users` on seven app paths and through the NextAuth adapter, and a trigger on `users.email` cannot tell the verified email-change update from a forged one. The exploitable gap is a case-variant of an existing address (acceptance matches on `lower(email)`; `users_email_unique` is case-sensitive), closed by `users_email_lower_uq` with a stop-block on existing case-duplicates (production measured 0 groups, 2026-10-22). The same index closes the new-account race named in the 0059 comment and makes the acceptance identity match deterministic. **E1:** the re-created `presby_accept_invitation` maps `users_email_lower_uq` to `account_exists` for every purpose, beside `users_email_unique`; without it the race would surface as `db_error`. **Behaviour change:** a Google sign-in whose address is a case-variant of an existing account now fails at the adapter's insert instead of quietly creating a second account.
+- **F187 is narrowed, twice, not closed (S10).** The case-variant is closed by `users_email_lower_uq`, and proof writes are owner-only (DECISION-225). The definer-mediated email change now exists for the verified-address case (`presby_complete_email_change`), but an application bug on `presby_app` can still rewrite `users.email` to an unused address (the stamp then clears, which is the safe direction). `paper`, filed.
+- Disconnecting a login after acceptance is a future decision; the guard permits `non-null -> null` only on owner and FK paths so that decision has a clean place to land.
+
+---
+
+**DECISION-207 — An org-issued sign-in credential: the `sign_in` purpose, four definer functions on `presby_app`, the sender rule, and an acceptance branch that grants nothing.**
+
+**Status:** Resolved (tech-lead, Phase 3; amended in Phase 3a by A4, A5 and the four Option 3 conditions, and by Phase 3 amendment 2 on 2026-10-25; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-22 · **Feature:** `2026-10-22-founding-admin-directory` (Community Increment 2b; migration 0065; v0.48.0); R19-R22, R25-R35, G1-G9; F192-F199; operator rulings 2026-10-22, including F177 Option 3, "Warn and confirm"
+
+- **Credential.** Same table and mechanism as DECISION-183 (hashed, single-use, expiring, never a `FEATURES.*` key, session claim or resolver input), `purpose = 'sign_in'`, `origin = 'org'`, no names carried, a person required. It is addressed to an existing person's on-file primary email in SQL, read through `presby_person_email(person, 'credential')`, and never to a typed address; the sender's confirmed address is only an equality guard (`address_changed`). Resend is a new row (D-1) whose lineage follows the person, not the address (R33, F197), so a corrected address can be re-sent without resetting the five-resend cap.
+- **Issue is on `presby_app` through definers**, the deliberate opposite of `issue.ts`: issue, resend, revoke and a closed-shape state reader derive the organization from `presby_current_org()` and the actor from a bounded `users.id` claim, raise one uniform literal on identity refusals and return typed outcomes otherwise. `presby_app` holds no privilege on `account_invitations`. The sender never reads other `users` rows (DECISION-189); account collisions surface only at acceptance.
+- **Who can be invited, and the sender rule.** Any person with a membership at the issuing organization, **visitors included** (operator ruling; the visitor test is `presby_membership_standing(...) = 'visitor'`, S13); never a typed address. Refused: ended, merged, deceased, already linked, **any membership at another organization, live or ended** (R31, `needs_support`), no usable address, an address another live member shares (R29), the sender's own address on another person. **You may bind a login only to a record whose authority you could have created yourself:** `people.manage` for everyone; additionally `officers.manage` for anyone holding a Session or Board of Deacons seat; and the person's non-derived authority T must be a subset of the sender's own effective permissions as of today (`exceeds_your_access`). **A4:** T is built directly from `role_grants` (person arm, and managed-group arm joined to `group_memberships`), counting every row with `ends_on is null or ends_on > current_date` and **no `starts_on` bound**; the sender's own set is as of today. **A5:** derived groups are a closed list, `membership_source = 'derived' and derived_from in ('active_membership','session','diaconate')`, so a new derived kind falls into T (fails closed) until classified; pinned by test. **Known consequence, recorded rather than made a rule:** a tenant role bound to the Session group reaches an invitee through a sender who holds `officers.manage` but not that role's keys. **No age gate:** its only stated reason was F177, which is not age-specific; the realistic child case (a shared parent address) is refused by `address_shared`. **Accepted residual, `paper`** (R21): a `people.manage` sender can rewrite an authority-free unlinked person's email and invite; detected by `tenant.person.updated` (with `emailChanged`, in-transaction, F199), `invitation.created`, `invitation.accepted`.
+- **Three ways a `sign_in` record's login is bound.** The token (this decision), **in-place presentation** (DECISION-228) and **auto-connect** (DECISION-226). The standing core replaces predicates that were coded separately in issue, accept and the reader. Because the address is read through `presby_person_email`, `address_ambiguous` and `address_invalid` do not exist (an active Main is unique by index and its shape is a subset of the invitation's).
+- **F177 is handled by an operator-confirmed acknowledgement, and stays open.** A visitor with a login reads the member directory and calendar, privacy-filtered, through the baseline `active_membership` grant; DECISION-065 stands. The operator ruled "Warn and confirm" (Option 3) and the architect endorsed it on four conditions, all built: (1) the definer enforces `needs_acknowledgement` (reason `visitor`), not the UI; (2) the audit row records `acknowledged` in the same transaction; (3) the visitor predicate is pinned equal to the Community Visitors list's by test; (4) F177 stays open. **The acknowledgement is a disclosure, not a control: it reduces no exposure.** Staff anchors with no roll reading the directory is accepted on purpose (it is part of their job). Option 1 (narrow `active_membership`) plus a visitor baseline role is the first item of Increment 3's Phase 2.
+- **Acceptance is one function with explicit purpose routing** (R35, F196): every branch names its purpose and ends in an `internal_error` default. The `sign_in` branch takes the person only from the token's row; re-checks, unlocked and again `FOR SHARE`, that the invited address is still an email contact of that person (R27, F192), answering `dead` and writing nothing otherwise; refuses a membership at another organization (R31); reuses the treasurer gates verbatim plus `person_deceased`; writes `people.user_id` and the matching contact's `verified_at` and nothing else. Preview shows the person's name only when the signed-in account's address matches (G5, F194).
+- **Limits** (G9, R32): per organization 30, per inviter 30, per `(organization, address)` 3, per 24 hours, counting only org-origin rows (the platform's 10, 20 and 3 count only platform rows; F198), bounded `created_at <= now()`, evaluated under the organization lock; cooldown 5 minutes; at most 5 resends per chain; 7-day expiry.
+- **Structure.** `account_invitations_open_address_uq` is narrowed to `purpose <> 'sign_in'` under the same name (F193); `account_invitations_open_sign_in_person_uq` is person-keyed; the purpose-origin tie, names and person CHECKs bind the vocabulary; the email carries its own credential template key (scrubbed after send) and the sender's own name, rendered in one exhaustive function, link origin `platformOrigin()` only. `org-invite.ts` is the only file naming the definers, pinned by source scan. No new flag: the surfaces ride the Community toggle; the database-side kill lever is the platform's `org_sent` revoke-all.
+
+---
+
 **DECISION-290 — A pending two-factor secret is created by one conditional upsert and the enrolment page shows only a ciphertext read back from the database; never find-then-write.**
 
 **Status:** Resolved (tech-lead, Phase 3; shipped as built, QA PASS, Phase 6 SHIP IT) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-totp-enroll-race` (F342; no migration; v0.46.2)
@@ -39,6 +260,23 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-278 — Careers Increment 1 implementation shape: a trigger-bound posting state machine, a compare-and-set `version`, a database-enforced cap of 100 published postings, and one daily sweep.**
+
+**Status:** Resolved (tech-lead, Phase 3; built across three batches, deviations recorded in the work-log; QA runs 1 to 4 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-26 · **Feature:** `2026-10-25-careers-inc1` (parent `2026-10-25-careers`; migration 0071; F311 to F320; v0.47.0)
+
+- **State machine.** `draft → published`, `draft → closed` ("discard"), `published → closed`, `closed → published`, enforced by a trigger that binds the owner connection too. `first_published_at`, `posted_on`, `closed_at`, `version` and `updated_at` are trigger-owned and outside the tenant column grants, so `presby_app` cannot write them. The owner path may supply `posted_on` at first publish (the Track K import). A posting is never deleted: `delete` is not granted and a guard covers the owner (the one path is the guarded test-fixture teardown cascade, as for `organization_domains`); a draft nobody wants is "discarded", which is a close (the operator's all-deletes-soft rule).
+- **Compare-and-set on `version`.** Only content and status changes bump it; an ordering change does not. A stale save is refused with a plain message, not overwritten.
+- **Ordering and the cap.** Only published postings are ordered, newest first, by dense renumbering under a row lock. At most 100 published postings per organization, by trigger and advisory lock; the public list is capped at 100, so without the cap a 101st posting would drop silently (F320).
+- **The one anonymous read.** `presby_public_careers(slug, posting default null)` answers both the list and one posting, always returns one row, projects named keys only, and returns `slug` and `title` alone for a closed posting. A failed read is a distinct `failed` state. "Open" is derived at read time (`published` and the closing date not passed in the organization's zone); the sweep is housekeeping, not the gate.
+- **Audit.** Publish, close and reopen (and the cron's close) write one row each, in the change's transaction, ids only (`organizationId`, `postingId`, `via`). Create, edit, reorder and discard write none.
+- **The sweep.** `presby_careers_sweep(p_limit)` runs as an isolated step of the existing daily maintenance cron, on the owner connection, after the roll reconcile; its return type `(kind, organization_id, posting_id, application_id)` is fixed now so Increment 2 can extend it with `create or replace`. A null limit means 200. A failed sweep logs counts only and never stops the token pruning.
+- **The placement line** on the staff page reports what the published bundle contains and says so when it could not check.
+- **Writers.** `src/lib/careers/postings.ts` is the only module that names `job_postings` for writing; `public.ts` reaches it only through the definer and `sweep.ts` only through the sweep function. `boundaries.test.ts` pins this, and the INSERT is a column-limited raw `sql` statement because Drizzle's `.values()` names every column and `presby_app` has no grant on the trigger-owned ones. `dev-docs.ts` files the table under `T. Careers` and is the one other file that names it (F338).
+- **Accepted residuals (`paper`).** RLS enforces tenancy, not authorization: an application bug could show a draft to another member of the same organization (drafts are tier-1 content). Posting links carry no `rel="nofollow"` (D10, not producible through `<Prose>`). The renderer has no escape syntax, so a literal `*` or a line-leading `- `, `1. ` or `#` in typed text changes meaning; the paste converter neutralises `*`, typed text relies on the preview (F318). Close on a published posting saves unsaved edits first, so they are briefly live (ruled intended, QA N3).
+- **Revisit if** the 100 cap or the three employment types prove too tight, or a fifth writer of `job_postings.status` appears (it must audit).
+
+---
+
 **DECISION-277 — `blob_assets.audience` (fail-closed); the public asset route serves a `public_site` image, or the photo of a person currently listed, through one definer; private consumers pin `'private'` by composite FK.**
 
 **Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; amended at Phase 4 Batch 1 by orchestrator rulings 2026-10-26; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-public-asset-allowlist` (F289; F297/F298; F340; F341; migration 0072; v0.46.1)
@@ -56,6 +294,44 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 - **Accepted residuals.** Tier 1 has no takedown: a `public_site` image stays fetchable by its uuid after it drops out of a bundle (Tier 2 is a follow-up). Copies already in browsers, search engines or archives cannot be purged. Old code running between the migration and promotion can produce `private` images, which a re-ingest (a new commit) heals. `people.photo_key` has no FK until a photo writer ships.
 - **Directory-toggle residual (deferred by the operator, 2026-10-26).** A listed person's photo is fetchable by its exact uuid while `sites.public_staff_directory` / `sites.public_committee_directory` is off, because the roster functions never read those flags. Gating the roster-photo branch on them was escalated at Phase 3 (Edge Case 19); the operator answered "nah. we can test that in the future" and deferred it. It is stated in the release note and in `docs/deployment.md`, and carried as a "Deferred, not open" line in `docs/TODO.md`. `paper`.
 - **Revisit if** a non-image class needs public serving, a photo writer ships (add the `photo_key` FK), takedown is required (Tier 2), or the directory-toggle residual is reopened.
+
+---
+
+**DECISION-266 — Posting descriptions use the site-kit markdown subset, rendered by `<Prose>`.**
+
+**Status:** Resolved (architect, Phase 2; amended by tech-lead, Phase 3 D1; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-careers-inc1` (F311, F317, F318; v0.47.0)
+
+- **Decision.** A posting's description is stored as the markdown subset site-kit already renders. No editor dependency (Tiptap and ProseMirror rejected: a second content model on the public tree). Phase 2 named `renderMarkdown`; `presby-site-kit@4.0.0` does not export it (its `exports` map is `.` and `./styles.css`), so the pages render through the exported `<Prose body=…>` component, which calls the same function. The architect's intent, one renderer shared with a bundle's own `prose` blocks, holds (F311).
+- **Validator narrower than the renderer.** Server-side: `http`, `https` and a bare `mailto` links only, headings `##` and `###` only, no placeholder links, 20,000 characters. The same pure validator runs in the editor and in the action.
+- **The editor.** A textarea with a seven-button toolbar, a counter, a client preview through the same component, and a paste converter built on the browser's own `DOMParser` that flattens pasted HTML to the subset (a `javascript:` link is dropped and its text kept, a lone `*` becomes U+2217). A converted block is closed with a blank-line boundary on both sides when it would glue to text (Phase 6 finding 7, QA N1).
+- **Accepted residuals (`paper`).** No `rel="nofollow"` is producible through `<Prose>` (F317). The renderer has no escape syntax (F318). A pasted paragraph at the end of a line still merges with the next line (QA N4, in `docs/TODO.md`). A dropped link in a paste is silent (needs a Copy line, in `docs/TODO.md`).
+- **Revisit if** site-kit exports a `./markdown` subpath (v4.1.0 option, `docs/TODO.md`), or staff feedback says the toolbar is unusable.
+
+---
+
+**DECISION-265 — Careers permissions: `careers.manage` and `careers.applicants`, both in the founding-administrator bundle.**
+
+**Status:** Resolved (architect, Phase 2; tech-lead, Phase 3; operator ruling Q4; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-careers-inc1` (F292, F314, F315; migration 0071; v0.47.0)
+
+- **Keys.** `careers.manage` (tier 1; posting create, edit, publish, close) and `careers.applicants` (tier 3; operator-confirmed, applications and resumes). Neither implies the other. `requires_two_factor` stays at its default on both, matching the four existing tier-3 keys; it joins the tracked S2 follow-up as a member of that class.
+- **Bootstrap (F292).** Both keys join the founding-administrator bundle in `presby_founding_administrator_permission_keys()`, the TypeScript `foundingAdministratorPlan()`, the designation golden, and a 0057-style backfill onto every existing org-owned `founding_administrator` role. Without the bundle, `assertPermissionSubset()` (F111) makes a key nobody at an organization holds ungrantable there, so the template could never be adopted. A universal `hiring_committee` template carries both keys, inserted by key with no fixed id (template ids 1 to 6 are taken); the isolation suite's template count goes from six to seven (F314). A parity test pins SQL equal to TypeScript, in order, for every organization type.
+- **The residual (`paper`, operator ruling Q4).** `careers.applicants` is the first key above tier 1 in that bundle: the founding administrator can read job applications once they exist. Detected by the resume-download audit row (Increment 2), not prevented. Until Increment 2, `careers.applicants` is checked by no code and reads nothing. CLAUDE.md's No Role Carries a Wildcard section names it as a second known violation.
+- **Platform-admin confirm dialog.** The founding-administrator confirm sentence builds from `PERMISSION_LABELS`; both keys are labelled so it never renders a raw key, and the existing drift test is extended (F315). Its wording names "job applications and resumes", which do not exist yet; accepted as the planned way of naming the residual.
+- **Integration hazard.** Two `create or replace`s of the bundle function with different arrays silently drop the first one's keys. The later migration to merge must re-read the live body (`docs/deployment.md`, "Careers (0071)").
+- **Revisit if** the S2 follow-up (`requires_two_factor` on tier-3 keys) is decided; it is a one-column change.
+
+---
+
+**DECISION-264 — The careers public surface: platform pages under the site tree, one anonymous definer, descendants-only path reservation.**
+
+**Status:** Resolved (architect, Phase 2; amended by tech-lead, Phase 3 D2 to D5; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-careers-inc1` (F312, F316; migration 0071; v0.47.0)
+
+- **Routes.** `/careers` (the list) and `/careers/<posting>` are page routes under `(public)/site/[slug]`, shaped like `/give`: the church's brand colours and fonts, a "Back to {church}" link, and no site top menu or footer (D2, F312: site-kit's stylesheet is keyed on a `.presby-site` ancestor and sized to the reference site, whose prose `h2` is 4.25rem). The `careers` `liveSlot`, placed on a content page by the site's author, renders cards inside the site's chrome.
+- **Reserved paths.** The reserved-path check gains descendants-only reservation: `careers/<anything>` is refused at ingest by name (Copy I1, F316); the bare `/careers` is allowed and the bundle's own page wins. A production check (read-only) of live bundles for pages under `/careers/` returned 0 on 2026-10-25.
+- **One definer.** `presby_public_careers(slug, posting)` answers both reads (D5), always returns one row, projects named keys only, and returns `slug` and `title` alone for a closed posting (D3). A failed read is a `failed` state, distinct from `unavailable`: the slot shows one notice for both, the pages 404 for `unavailable` and show a `noindex` notice for `failed` (D4). A toggle-off or non-serving organization gets the site's one neutral 404 on the pages, never a "careers unavailable" page.
+- **Indexing.** Open pages and the list are `index, follow`; closed, failed and notice states are `noindex` (Phase 6 finding 5, fixed before release). Postings are public by design.
+- **Applying is not built here.** The apply route handler, the signed form token, the honeypot and the rate limit are Increment 2 (DECISION-262 and DECISION-263 own them).
+- **Revisit if** a church wants its site's menu on these pages (needs a site-kit change, Q-A), or the public list needs more than 100 rows.
 
 ---
 
@@ -283,6 +559,7 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 - **Operator ruling, 2026-10-25: existing sessions are not rotated.** There are two active production accounts, both the operator's, so no member is forced to verify again. The fix covers new activity; it cannot show whether an existing session already carries a claim it did not earn, because that leaves no audit mark. Such a session stays verified until its token expires (about 30 days).
 - **Accepted residual (`paper`).** A verified claim outlives an administrator's TOTP reset or a sign-out elsewhere until the token expires. Tracked as the revocation follow-up.
 - **Disclosure hygiene.** Release notes, commit titles and the PR stay neutral until deploy.
+- **Amended by DECISION-292** (2026-10-26): `completeEnrollment` is a third grant call site, after the possession proof and the commit.
 - **Revisit if** Auth.js or Next changes how async context reaches the jwt callback, `next.config.ts` sets `trailingSlash` or `skipTrailingSlashRedirect` (the route check matches `/api/auth/session` exactly; the callback layer does not depend on it).
 
 ---

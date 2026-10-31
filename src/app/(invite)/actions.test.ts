@@ -53,7 +53,7 @@ vi.mock("@/lib/onboarding/accept", () => ({ acceptInvitation: mockAccept }));
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mintInvitationToken } from "@/lib/onboarding/invitation-token";
-import { INVITATION_DEAD_LINK_COPY, INVITEE_BLOCKED_COPY } from "@/lib/onboarding/labels";
+import { INVITATION_DEAD_LINK_COPY, INVITEE_BLOCKED_COPY, inviteeBlockedCopy } from "@/lib/onboarding/labels";
 import {
   acceptNewAccountAction,
   acceptSignedInAction,
@@ -161,14 +161,27 @@ describe("acceptNewAccountAction", () => {
     expect(state).toEqual({ status: "error", code, message });
   });
 
-  it.each(Object.keys(INVITEE_BLOCKED_COPY))("maps blocked reason %s to its plain-language copy", async (reason) => {
-    mockAccept.mockResolvedValue({ kind: "blocked", reason });
+  it.each(Object.keys(INVITEE_BLOCKED_COPY))("maps blocked reason %s to its plain-language copy (a designation keeps its existing sentence)", async (reason) => {
+    mockAccept.mockResolvedValue({ kind: "blocked", reason, purpose: "treasurer", organizationName: "Quillhaven Fellowship" });
     const state = await acceptNewAccountAction(IDLE, form(NEW_FIELDS));
     expect(state).toEqual({
       status: "error",
       code: "blocked",
       message: INVITEE_BLOCKED_COPY[reason as keyof typeof INVITEE_BLOCKED_COPY],
     });
+  });
+
+  it("a blocked sign_in invitation reads the neutral sign-in sentence, naming the congregation's office (G6)", async () => {
+    mockAccept.mockResolvedValue({
+      kind: "blocked", reason: "membership_ended", purpose: "sign_in", organizationName: "Quillhaven Fellowship",
+    });
+    const state = await acceptNewAccountAction(IDLE, form(NEW_FIELDS));
+    expect(state).toEqual({
+      status: "error",
+      code: "blocked",
+      message: inviteeBlockedCopy("sign_in", "membership_ended", "Quillhaven Fellowship"),
+    });
+    expect((state as { message: string }).message).toBe("This invitation can't be completed. Contact Quillhaven Fellowship's office.");
   });
 
   it("maps field validation to the field it belongs to, distinguishing a too-short from a too-long password", async () => {
@@ -270,7 +283,7 @@ describe("acceptSignedInAction", () => {
     [{ kind: "email_mismatch" }, "email_mismatch"],
     [{ kind: "account_inactive" }, "account_inactive"],
     [{ kind: "dead" }, "dead"],
-    [{ kind: "blocked", reason: "person_elsewhere" }, "blocked"],
+    [{ kind: "blocked", reason: "person_elsewhere", purpose: "treasurer", organizationName: null }, "blocked"],
     [{ kind: "db_error" }, "db_error"],
   ])("maps %j", async (result, code) => {
     mockAuth.mockResolvedValue(session());

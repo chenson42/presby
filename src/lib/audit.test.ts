@@ -65,6 +65,7 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   FEATURE_FLAG_TOGGLED: "feature_flag.toggled",
   TOTP_ENROLLED: "totp.enrolled",
   TOTP_RECOVERY_CODES_REGENERATED: "totp.recovery_codes.regenerated",
+  TOTP_RECOVERY_CODES_REGENERATE_REFUSED: "totp.recovery_codes.regenerate_refused",
   TOTP_RESET: "totp.reset",
   USER_ROLE_ASSIGNED: "user.role.assigned",
   USER_ROLE_REMOVED: "user.role.removed",
@@ -277,6 +278,12 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   PERSON_PHOTO_REMOVED: "tenant.person_photo.removed",
   PERSON_PHOTO_DESIGNATED: "tenant.person_photo.designated",
   PERSON_PHOTO_UNDESIGNATED: "tenant.person_photo.undesignated",
+  // Community Increment 2b (DECISION-225/226): address proof and auto-connect.
+  TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected",
+  USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded",
+  CAREERS_POSTING_PUBLISHED: "careers.posting.published",
+  CAREERS_POSTING_CLOSED: "careers.posting.closed",
+  CAREERS_POSTING_REOPENED: "careers.posting.reopened",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

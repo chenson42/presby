@@ -1,0 +1,13 @@
+diff --git a/scripts/seed-dev.sql b/scripts/seed-dev.sql
+index deb4633..aaf9917 100644
+--- a/scripts/seed-dev.sql
++++ b/scripts/seed-dev.sql
+@@ -1966,3 +1966,8 @@ commit;
+ -- (Fernwood and Alder Creek) and six demo events dated from the day it runs;
+ -- idempotent. scripts/public-calendar/test-rls-67.sql needs it.
+ \ir public-calendar/seed-dev-public-calendar.sql
++
++-- Careers fixture (drizzle/0071). Its own file and transaction, run AFTER the
++-- person-emails and public-calendar includes; owner-only rows (two live sites, the careers toggle,
++-- one posting in each state). scripts/careers/test-rls-71.sql needs it.
++\ir careers/seed-dev-careers.sql

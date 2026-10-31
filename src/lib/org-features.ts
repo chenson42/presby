@@ -112,6 +112,32 @@ export const ORG_FEATURE_CATALOG = [
     orgTypes: null,
     operatorEnabled: false as const,
   },
+  // Connect people when they sign in (docs/work-log/2026-10-22-founding-admin-
+  // directory.md, Increment 2b, Phase 3 amendment 2 section 6; R47,
+  // DECISION-226). TOGGLE-ONLY (`flag: null`): the operator's standing rule is a
+  // per-org toggle, not a new global flag, before go-live. Provisioned ON:
+  // migration 0065 writes an explicit enabled row for every existing
+  // organization and `createOrganization()` writes one for every new one, so
+  // DECISION-097's "a missing row is off" stays unconditional (an organization
+  // created by raw SQL, as the fixtures are, has no row and is off).
+  //
+  // REACH: auto-connect only. It never touches invitations, in-place
+  // acceptance or an existing connection, and turning it off disconnects
+  // nobody. It grants nothing. A SECURITY DEFINER function reads the row
+  // (`presby_connect_signed_in_account`), from the row only: the
+  // category-curation axis is NOT consulted for it (a curation preference never
+  // changes a security behaviour). The card reads it in TypeScript.
+  {
+    key: "org_portal.sign_in_connect",
+    name: "Connect people when they sign in",
+    description:
+      "When someone signs in with an email address on their record, PresbyPortal connects their sign-in to that record, so they don't need an invitation. People who hold a role or a seat connect only after confirming two-factor sign-in. Some people are never connected this way, such as visitors and addresses shared by more than one person. Turning this off stops new connections only: invitations still work and people already connected stay connected.",
+    category: "people" as const,
+    flag: null,
+    provisionedOn: true as const,
+    orgTypes: null,
+    operatorEnabled: false as const,
+  },
   // Public events calendar (docs/work-log/2026-10-25-public-events-calendar.md,
   // Phase 3 "Names"; DECISION-238, DECISION-241). TOGGLE-ONLY (`flag: null`), no
   // platform flag (operator: per-org toggles, not new global flags, pre-live).
@@ -134,6 +160,33 @@ export const ORG_FEATURE_CATALOG = [
     description:
       "Shows the events your team has marked for the website on your public website. Only marked events appear. Whoever maintains your website must also place the calendar on a page.",
     category: "worship" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: null,
+    operatorEnabled: false as const,
+  },
+  // Job openings (docs/work-log/2026-10-25-careers-inc1.md, Phase 3
+  // "Permissions & Flags"; DECISION-264/265). TOGGLE-ONLY (`flag: null`), no
+  // platform flag (operator: per-org toggles, not new global flags, pre-live).
+  // Provisioned OFF: a missing row is off, `createOrganization()` writes nothing
+  // for it and 0071 backfills no rows. SELF-SERVICE (`operatorEnabled: false`):
+  // the congregation's `org_features.manage` holder turns it on. `orgTypes: null`
+  // because presbyteries and synods hire too. Category `people` (Community).
+  //
+  // THE ANONYMOUS READ COMPOSES THIS ENTRY IN SQL. `presby_public_careers`
+  // (drizzle/0071) repeats this entry's key, its `category` and its `orgTypes`
+  // (null) and the category axis flag, because an anonymous request has no
+  // `personId` and cannot call `orgFeatureEnabledInTx`. `public.test.ts` pins
+  // every one of those literals to this entry and `public.db.test.ts` compares
+  // the SQL with `orgFeatureEnabledInTx` over the axis x category x toggle
+  // matrix. Changing the key, category or `orgTypes` here without the migration
+  // fails those tests, on purpose.
+  {
+    key: "org_portal.careers",
+    name: "Job openings",
+    description:
+      "Lets your congregation post job openings on its public website. People are asked to contact the church to apply. Whoever maintains your website can also place the openings on a page.",
+    category: "people" as const,
     flag: null,
     provisionedOn: false as const,
     orgTypes: null,

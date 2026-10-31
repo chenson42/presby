@@ -2,6 +2,8 @@ import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { PlatformMark, PlatformWordmark } from "@/components/brand/platform-mark";
+import { HelpLink } from "@/components/help/help-link";
+import { HELP_INDEX_HREF } from "@/lib/help/urls";
 
 /**
  * The four courts of Presbyterian polity, rendered as a minimal inline SVG —
@@ -76,7 +78,13 @@ export default async function Home() {
        * greeting is not a competing call-to-action).
        */}
       <header className="border-b border-border bg-background">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-4">
+        {/*
+         * `flex-wrap`: at 360px the signed-in bar (wordmark, Help, Sign out,
+         * Continue) is the worst case, and it drops the actions to a second line
+         * rather than overflow (user-help Inc 1, R13). The Help link is for anyone,
+         * signed in or not; /help is public and session-free.
+         */}
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 py-4">
           <Link
             href="/"
             aria-label="PresbyPortal"
@@ -84,7 +92,8 @@ export default async function Home() {
           >
             <PlatformWordmark heightPx={28} />
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <HelpLink href={HELP_INDEX_HREF}>Help</HelpLink>
             {signedIn ? (
               <form
                 action={async () => {
@@ -329,7 +338,7 @@ export default async function Home() {
         </section>
 
         <p className="text-sm text-muted-foreground">
-          Pre-release. Nothing here is a live congregation.
+          PresbyPortal is in early release.
         </p>
 
         {signedIn && (

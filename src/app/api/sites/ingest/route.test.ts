@@ -493,6 +493,35 @@ describe.skipIf(!hasDb)(
           expect(mockRevalidatePath).not.toHaveBeenCalled();
         },
       );
+
+      // Careers Increment 1 (DECISION-264, Copy I1): /careers/<posting> is a dynamic
+      // platform route, so a bundle page BENEATH /careers would be stored and never
+      // shown - refused by name. The bare /careers is NOT reserved (the next
+      // describe), so the message must not say it is.
+      it.each(["/careers/x", "/CAREERS/Music-Director", "/careers/a/b", "/%63areers/x"])(
+        "a bundle page at %s is refused with the careers message, naming the page, and nothing is stored",
+        async (reservedPath) => {
+          const token = signToken({ sha: `sha-reserved-careers-${reservedPath.replace(/\W/g, "")}-${stamp}` });
+          const res = await POST(
+            ingestRequest(
+              `Bearer ${token}`,
+              validBundleBody({
+                pages: [
+                  { path: "/", frontMatter: { title: "Home" }, mdxAst: { type: "root", children: [] } },
+                  { path: reservedPath, frontMatter: { title: "X" }, mdxAst: { type: "root", children: [] } },
+                ],
+              }),
+            ),
+          );
+          expect(res.status).toBe(422);
+          const body = await res.json();
+          expect(body.status).toBe("error");
+          expect(body.error).toBe(
+            `Page "${reservedPath}" is reserved: PresbyPortal serves its own pages for job openings under /careers/ (on a custom domain too). A page at /careers itself is fine. Rename or remove it.`,
+          );
+          expect(mockRevalidatePath).not.toHaveBeenCalled();
+        },
+      );
     });
 
     // -----------------------------------------------------------------------
@@ -725,6 +754,31 @@ describe.skipIf(!hasDb)(
         expect(auditCountAfter).toBe(auditCountBefore);
 
         expect(mockRevalidatePath).not.toHaveBeenCalled();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // 8b. Careers: the bare /careers page is allowed (and wins over the list)
+    // -----------------------------------------------------------------------
+
+    describe("200 - a bundle page at exactly /careers is accepted (careers Increment 1)", () => {
+      it.each(["/careers", "/Careers/"])("%s is stored: only the descendants are reserved", async (careersPath) => {
+        const token = signToken({ sha: `sha-careers-bare-${careersPath.replace(/\W/g, "")}-${stamp}` });
+        const res = await POST(
+          ingestRequest(
+            `Bearer ${token}`,
+            validBundleBody({
+              pages: [
+                { path: "/", frontMatter: { title: "Home" }, mdxAst: { type: "root", children: [] } },
+                { path: careersPath, frontMatter: { title: "Employment" }, mdxAst: { type: "root", children: [] } },
+              ],
+            }),
+          ),
+        );
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.status).toBe("ingested");
+        expect(body.pageCount).toBe(2);
       });
     });
 

@@ -60,7 +60,13 @@ export const people = pgTable(
   "people",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    // One human, one login.
+    // One human, one login: the identity binding presby_user_organizations
+    // resolves. Written only on the owner path, by invitation acceptance and
+    // by sign-in connection (DECISION-208 as amended). The trigger
+    // people_guard_user_link (drizzle/0065 section 6; not expressible here)
+    // refuses any link write by a role that is not the table owner, so never
+    // `.set({ userId })` / insert a `userId` on `db`. The owner path is not
+    // bound (paper residual; the boundaries.test.ts scan is the mitigation).
     userId: uuid("user_id").references(() => users.id, {
       onDelete: "set null",
     }),

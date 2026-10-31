@@ -284,6 +284,55 @@ describe("proxy — /site/* (public organization websites, DECISION-085)", () =>
   });
 });
 
+describe("proxy — /help and /docs (public documentation, DECISION-293)", () => {
+  // A SEGMENT-boundary prefix bypass, never a bare startsWith("/help"): the
+  // pages are static and session-free, no token rides these paths, and the
+  // bypass sits before edgeAuth() and before the 2FA gate (R1).
+
+  it("admits an anonymous visitor to /help, /docs and everything under them, with no auth() call", async () => {
+    for (const path of [
+      "/help",
+      "/help/signing-in",
+      "/help/planned",
+      "/help/planned/x",
+      "/help/no-such-page",
+      "/docs",
+      "/docs/x",
+      "/help?next=//evil.example",
+    ]) {
+      const res = await proxy(request(path));
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get("location"), path).toBeNull();
+    }
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("does NOT admit look-alikes: /helpx, /helpdesk, /docsx, /HELP, /help%2Fx redirect to /signin with the path", async () => {
+    for (const path of ["/helpx", "/helpdesk", "/help-me", "/docsx", "/docs-old", "/HELP", "/Docs", "/help%2Fx"]) {
+      auth.mockResolvedValueOnce(null as unknown as Awaited<ReturnType<typeof edgeAuth>>);
+      const res = await proxy(request(path));
+      expect(res.status, path).toBe(307);
+      const location = new URL(res.headers.get("location") as string);
+      expect(location.pathname, path).toBe("/signin");
+      expect(location.searchParams.get("callbackUrl"), path).toBe(new URL(path, "https://x.invalid").pathname);
+    }
+  });
+
+  it("reaches /help for a signed-in user whose required second factor is unverified, while /o/<slug> still goes to /totp", async () => {
+    const unverified = { twoFactorRequired: true, twoFactorVerified: false };
+
+    const help = await proxy(request("/help/signing-in"));
+    expect(help.status).toBe(200);
+    expect(help.headers.get("location")).toBeNull();
+    expect(auth).not.toHaveBeenCalled();
+
+    signedIn(unverified);
+    const org = await proxy(request("/o/alder-creek"));
+    expect(org.status).toBe(307);
+    expect(new URL(org.headers.get("location") as string).pathname).toBe("/totp");
+  });
+});
+
 describe("proxy — /invite (account invitations, DECISION-183/185)", () => {
   // Exact-path entries in PUBLIC_PATHS, like /file-statistics: the token rides
   // the query string or the host-only Path=/ hand-off cookie, so no prefix bypass.
@@ -446,6 +495,12 @@ describe("proxy - a custom host is rewritten to /site/<host><path> (R1)", () => 
       "/account",
       "/site/alder-creek",
       `/site/${CUSTOM}`,
+      // public documentation: platform hosts only (DECISION-293)
+      "/help",
+      "/help/signing-in",
+      "/help/planned",
+      "/docs",
+      "/docs/x",
     ];
     for (const p of platformPaths) {
       const res = await proxy(request(p, CUSTOM));

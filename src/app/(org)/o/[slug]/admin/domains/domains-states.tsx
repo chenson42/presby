@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { FeaturesHelpLink } from "@/components/help/features-help-link";
 
 /**
  * The non-data-bearing answers `/o/<slug>/admin/domains` can give (the
@@ -18,6 +19,7 @@ export function DomainsFeatureOff({ name }: { name: string }) {
         Connecting your own web address isn&apos;t turned on for {name} yet. If you&apos;d like it, ask PresbyPortal
         support to turn it on.
       </p>
+      <FeaturesHelpLink />
     </section>
   );
 }

@@ -7,20 +7,20 @@ import { Button } from "@/components/ui/button";
 import { HydrationGate } from "@/components/shared/hydration-gate";
 import { OneTimeCodeInput } from "@/components/shared/one-time-code-input";
 import { completeEnrollment } from "./actions";
+import { useRecoveryCodesHandoff } from "./enrolment-handoff";
 
 interface TotpEnrollFormProps {
   uri: string;
   secret: string;
   pendingTtlMinutes: number;
-  callbackUrl?: string;
 }
 
 export function TotpEnrollForm({
   uri,
   secret,
   pendingTtlMinutes,
-  callbackUrl,
 }: TotpEnrollFormProps) {
+  const present = useRecoveryCodesHandoff();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [pending, setPending] = useState(false);
@@ -29,8 +29,6 @@ export function TotpEnrollForm({
   const [attempt, setAttempt] = useState(0);
   const inFlight = useRef(false);
   const submitted = useRef<string | null>(null);
-  const [enrolled, setEnrolled] = useState(false);
-  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
   // Generate QR code client-side from the otpauth URI
   useEffect(() => {
@@ -58,8 +56,12 @@ export function TotpEnrollForm({
     try {
       const result = await completeEnrollment({ code: c });
       if (result.ok && result.data) {
-        setEnrolled(true);
-        setRecoveryCodes(result.data.recoveryCodes);
+        // The holder at the root of the page shows the codes and Continue (it
+        // outlives the re-render that follows enrolment; this form does not).
+        present({
+          codes: result.data.recoveryCodes,
+          sessionVerified: result.data.sessionVerified,
+        });
       } else if (!result.ok) {
         toast.error(result.error);
         submitted.current = null;
@@ -69,9 +71,13 @@ export function TotpEnrollForm({
     } catch {
       // A rejected call (network, server error) must not strand the guard or
       // become an unhandled rejection from the fire-and-forget auto path. The
-      // design adds no copy for it; the boxes re-enable and the same code can
-      // be sent again with the button.
+      // boxes re-enable and the same code can be sent again with the button; the
+      // message says to reload, because the action may have finished and only the
+      // reply been lost (DECISION-292 residual d).
       submitted.current = null;
+      toast.error(
+        "Something went wrong and we could not confirm your code. Reload this page to see whether setup finished.",
+      );
     } finally {
       inFlight.current = false;
       setPending(false);
@@ -85,39 +91,6 @@ export function TotpEnrollForm({
       return;
     }
     void confirm(code);
-  }
-
-  if (enrolled) {
-    return (
-      <div className="max-w-xl">
-        <h1 className="text-2xl font-semibold">Two-factor authentication enabled</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Your authenticator app is now linked. Save your recovery codes below —
-          this is the only time they will be shown in plaintext.
-        </p>
-        <div className="mt-6 rounded-md border border-amber-500/40 bg-amber-500/10 p-4">
-          <h2 className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-            Recovery codes — save these now
-          </h2>
-          <p className="mt-1 text-xs">
-            Each code lets you sign in once if you lose your authenticator.
-          </p>
-          <ul className="mt-3 grid grid-cols-2 gap-2 font-mono text-sm">
-            {recoveryCodes.map((c) => (
-              <li key={c} className="rounded bg-background px-2 py-1">
-                {c}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <a
-          href={callbackUrl ?? "/launch"}
-          className="mt-6 inline-block text-sm underline underline-offset-2"
-        >
-          Continue
-        </a>
-      </div>
-    );
   }
 
   return (

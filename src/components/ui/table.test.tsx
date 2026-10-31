@@ -49,4 +49,43 @@ describe("Table — scroll-cue wrapper", () => {
     const wrapper = container.querySelector('[data-slot="table-container"]');
     expect(wrapper?.className).toContain("overflow-x-auto");
   });
+
+  it("merges containerProps onto the scroll container so it can be focusable (P3-2)", () => {
+    const { container } = render(
+      <Table
+        containerProps={{ tabIndex: 0, role: "region", "aria-label": "Scrollable", className: "extra" }}
+      >
+        <TableBody>
+          <TableRow>
+            <TableCell>One</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+    const wrapper = container.querySelector('[data-slot="table-container"]') as HTMLElement;
+    expect(wrapper.getAttribute("tabindex")).toBe("0");
+    expect(wrapper.getAttribute("role")).toBe("region");
+    expect(wrapper.getAttribute("aria-label")).toBe("Scrollable");
+    // merged, not replaced: the scroll behaviour and the fade survive
+    expect(wrapper.className).toContain("overflow-x-auto");
+    expect(wrapper.className).toContain("extra");
+    expect(wrapper.style.backgroundAttachment).toBe("local, scroll");
+    // the props meant for the table still land on the table
+    expect(container.querySelector("table")?.getAttribute("role")).toBeNull();
+  });
+
+  it("leaves an existing caller's container untouched when containerProps is absent", () => {
+    const { container } = render(
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableCell>One</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+    const wrapper = container.querySelector('[data-slot="table-container"]') as HTMLElement;
+    expect(wrapper.hasAttribute("tabindex")).toBe(false);
+    expect(wrapper.hasAttribute("role")).toBe(false);
+  });
 });

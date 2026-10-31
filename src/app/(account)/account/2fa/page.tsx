@@ -1,5 +1,4 @@
 import { eq } from "drizzle-orm";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
@@ -7,21 +6,28 @@ import {
   userTotp,
   userTotpRecoveryCodes,
 } from "@/lib/db/schema";
-import {
-  FRESH_RECOVERY_CODES_COOKIE,
-  isTotpConfigured,
-} from "@/lib/two-factor";
+import { isTotpConfigured } from "@/lib/two-factor";
 import {
   getOrCreatePendingEnrollment,
   PENDING_TTL_MINUTES,
 } from "@/lib/totp-pending";
 import { sanitizeCallbackUrl } from "@/lib/auth/safe-callback";
-import { clearFreshCodesCookieAction } from "./actions";
 import { TotpEnrollForm } from "./totp-enroll-form";
 import { RegenerateCodesForm } from "./regenerate-codes-form";
 import { FormattedDate } from "@/components/shared/formatted-date";
-import { FreshRecoveryCodes } from "@/components/shared/fresh-recovery-codes";
+import { ConfirmItsYou } from "./confirm-its-you";
+import { ContinueButton } from "./continue-button";
+import { EnrolmentHandoff } from "./enrolment-handoff";
 
+/**
+ * Every `return (` below opens with <EnrolmentHandoff callbackUrl={callbackUrl}>:
+ * the same component, in the same place, with no key, in every branch. That is
+ * what lets the one-time recovery codes survive the re-render that follows
+ * enrolment (a cookie write in a server action re-renders the route in Next 16,
+ * and enrolment marks the session verified). A branch added without it, or a
+ * `key` on it, breaks the codes in a way only a browser would show; page.test.tsx
+ * P1 and P4 pin it. `callbackUrl` is the sanitized value; hostile input is /launch.
+ */
 export default async function AccountTwoFactorPage({
   searchParams,
 }: {
@@ -32,20 +38,8 @@ export default async function AccountTwoFactorPage({
 
   const sp = await searchParams;
   const callbackUrl = sanitizeCallbackUrl(sp.callbackUrl);
-
-  const jar = await cookies();
-  const rawFreshCodes = jar.get(FRESH_RECOVERY_CODES_COOKIE)?.value ?? null;
-  let freshCodes: string[] | null = null;
-  if (rawFreshCodes) {
-    try {
-      const parsed = JSON.parse(rawFreshCodes);
-      freshCodes = Array.isArray(parsed)
-        ? parsed.filter((s): s is string => typeof s === "string")
-        : null;
-    } catch {
-      freshCodes = null;
-    }
-  }
+  const hasCallback =
+    typeof sp.callbackUrl === "string" && sp.callbackUrl.length > 0;
 
   const existing = await db.query.userTotp.findFirst({
     where: eq(userTotp.userId, session.user.id),
@@ -60,32 +54,35 @@ export default async function AccountTwoFactorPage({
     const unusedCount = recoveryRows.filter((c) => !c.usedAt).length;
 
     return (
-      <div className="max-w-xl">
-        <h1 className="text-2xl font-semibold">Two-factor authentication</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          You enrolled on{" "}
-          <FormattedDate value={existing.enrolledAt} mode="date" />.
-          {existing.lastUsedAt && (
-            <> Last used: <FormattedDate value={existing.lastUsedAt} mode="datetime" />.</>
-          )}
-        </p>
-
-        {freshCodes && (
-          <FreshRecoveryCodes
-            codes={freshCodes}
-            onDisplayed={clearFreshCodesCookieAction}
-          />
-        )}
-
-        <div className="mt-6 rounded-md border border-border p-4">
-          <h2 className="text-sm font-semibold">Recovery codes</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {unusedCount} unused code{unusedCount === 1 ? "" : "s"} remaining
-            (of {totalCodes} total).
+      <EnrolmentHandoff callbackUrl={callbackUrl}>
+        <div className="max-w-xl">
+          <h1 className="text-2xl font-semibold">Two-factor authentication</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            You enrolled on{" "}
+            <FormattedDate value={existing.enrolledAt} mode="date" />.
+            {existing.lastUsedAt && (
+              <> Last used: <FormattedDate value={existing.lastUsedAt} mode="datetime" />.</>
+            )}
           </p>
-          <RegenerateCodesForm />
+
+          {/* Reload, back or a second tab after enrolling: the way onward, when the
+              request carried a destination. Never the raw query string. */}
+          {hasCallback && <ContinueButton href={callbackUrl} />}
+
+          <div className="mt-6 rounded-md border border-border p-4">
+            <h2 className="text-sm font-semibold">Recovery codes</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {unusedCount} unused code{unusedCount === 1 ? "" : "s"} remaining
+              (of {totalCodes} total).
+            </p>
+            {session.user.twoFactorVerified ? (
+              <RegenerateCodesForm />
+            ) : (
+              <ConfirmItsYou callbackUrl={callbackUrl} hasCallback={hasCallback} />
+            )}
+          </div>
         </div>
-      </div>
+      </EnrolmentHandoff>
     );
   }
 
@@ -94,21 +91,23 @@ export default async function AccountTwoFactorPage({
   // error that tells the member nothing. Say what is wrong instead.
   if (!isTotpConfigured()) {
     return (
-      <div className="max-w-xl">
-        <h1 className="text-2xl font-semibold">Two-factor authentication</h1>
-        <div className="mt-4 rounded-md border border-border bg-muted/40 p-4">
-          <p className="text-sm font-medium">Not available right now</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Two-factor enrolment isn&apos;t configured on this deployment.
-            Please contact an administrator — no action is needed from you.
-          </p>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Administrators: set <code>AUTH_TOTP_ENCRYPTION_KEY</code> (32 bytes,
-            base64) and restart. Rotating it invalidates every existing
-            enrolment.
-          </p>
+      <EnrolmentHandoff callbackUrl={callbackUrl}>
+        <div className="max-w-xl">
+          <h1 className="text-2xl font-semibold">Two-factor authentication</h1>
+          <div className="mt-4 rounded-md border border-border bg-muted/40 p-4">
+            <p className="text-sm font-medium">Not available right now</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Two-factor enrolment isn&apos;t configured on this deployment.
+              Please contact an administrator — no action is needed from you.
+            </p>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Administrators: set <code>AUTH_TOTP_ENCRYPTION_KEY</code> (32 bytes,
+              base64) and restart. Rotating it invalidates every existing
+              enrolment.
+            </p>
+          </div>
         </div>
-      </div>
+      </EnrolmentHandoff>
     );
   }
 
@@ -123,11 +122,12 @@ export default async function AccountTwoFactorPage({
   );
 
   return (
-    <TotpEnrollForm
-      uri={enrollData.uri}
-      secret={enrollData.secret}
-      pendingTtlMinutes={PENDING_TTL_MINUTES}
-      callbackUrl={callbackUrl}
-    />
+    <EnrolmentHandoff callbackUrl={callbackUrl}>
+      <TotpEnrollForm
+        uri={enrollData.uri}
+        secret={enrollData.secret}
+        pendingTtlMinutes={PENDING_TTL_MINUTES}
+      />
+    </EnrolmentHandoff>
   );
 }

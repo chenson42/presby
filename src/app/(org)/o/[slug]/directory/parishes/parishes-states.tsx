@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { FeaturesHelpLink } from "@/components/help/features-help-link";
 
 /**
  * The non-data-bearing answers the parish management pages can give. Distinct
@@ -19,6 +20,7 @@ export function ParishesOff({ name }: { name: string }) {
       <p className="mt-3 text-sm text-muted-foreground">
         Parish management isn&apos;t turned on for {name} yet.
       </p>
+      <FeaturesHelpLink />
     </section>
   );
 }

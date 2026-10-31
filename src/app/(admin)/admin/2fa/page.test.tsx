@@ -58,3 +58,50 @@ describe("two-factor policy page, truncation note", () => {
     expect(screen.queryByText(/Showing the first/)).toBeNull();
   });
 });
+
+// F343 (DECISION-291), Copy S1 to S3: the page says the three sources of a
+// requirement, hedges on enforcement, and labels each row by why it is there.
+const text = (container: HTMLElement) => (container.textContent ?? "").replace(/\s+/g, " ");
+
+describe("two-factor policy page, copy (F343)", () => {
+  it("S1: the intro names the three sources and the platform-administrator sentence, and no longer says 'opt-in per congregation'", async () => {
+    holder();
+    listStranded.mockResolvedValue({ rows: [], total: 0 });
+    const { container } = render(await TwoFactorPolicyPage());
+    const t = text(container);
+    expect(t).not.toMatch(/opt-in per congregation/);
+    expect(t).toContain(
+      "When two-factor enforcement is on for the installation, a person is required to use two-factor sign-in if any one of these is true: their own account setting requires it, they hold a role that requires it (giving, creating and granting roles, or website domains), or a congregation they belong to requires it. The stricter setting wins, because the requirement is resolved at sign-in, before anyone has chosen an organization.",
+    );
+    expect(t).toContain(
+      "A platform administrator's own setting is switched on when the role is granted through the application. It can be switched off on their user page; a role or a congregation's policy cannot be switched off there.",
+    );
+    expect(t).toContain("Enrolling in two-factor for your own account is at Account → Two-factor. Resetting someone else's is on their user page.");
+  });
+
+  it("S2: the blurb is conditional on enforcement, says what happens, and does not claim release or a code they cannot produce", async () => {
+    holder();
+    listStranded.mockResolvedValue({ rows: [account(1)], total: 1 });
+    const { container } = render(await TwoFactorPolicyPage());
+    const t = text(container);
+    expect(t).toContain(
+      "These accounts are required to use two-factor but have not set it up yet. While enforcement is on, they are taken to set it up before they can open the admin area or a congregation's portal. Open an account to see or change its own setting; a role or a congregation's policy still applies when its own setting is off.",
+    );
+    expect(t).not.toMatch(/code they cannot produce/);
+    expect(t).not.toMatch(/exempt them/);
+  });
+
+  it("S3: 'Required by' shows Own setting, Congregation policy and A role, and any other value as is", async () => {
+    holder();
+    const row = (n: number, source: string) => ({ ...account(n), source });
+    listStranded.mockResolvedValue({
+      rows: [row(1, "this user"), row(2, "congregation"), row(3, "role"), row(4, "organization")],
+      total: 4,
+    });
+    render(await TwoFactorPolicyPage());
+    expect(screen.getByText("Own setting")).toBeTruthy();
+    expect(screen.getByText("Congregation policy")).toBeTruthy();
+    expect(screen.getByText("A role")).toBeTruthy();
+    expect(screen.getByText("organization")).toBeTruthy();
+  });
+});

@@ -17,6 +17,8 @@ import { PublicCommitteeDirectory } from "./committee-directory";
 import { PublicGivingSlot } from "./public-giving-slot";
 import { PublicEventsCalendarSlot } from "./public-events-calendar-slot";
 import { PUBLIC_CALENDAR_SLOT } from "@/lib/calendar/public-contract";
+import { CAREERS_SLOT } from "@/lib/careers/contract";
+import { PublicCareersSlot } from "./careers-slot";
 
 /**
  * DECISION-121 — org types that get the minimal sign-in fallback instead of
@@ -408,6 +410,10 @@ export async function renderSitePage(
       [PUBLIC_CALENDAR_SLOT]: (filter) => (
         <PublicEventsCalendarSlot slug={slug} urls={urls} filter={filter} />
       ),
+      // Job openings (careers Increment 1, DECISION-264). Closes over the DATABASE-RETURNED `slug`
+      // and `urls` ONLY - never `key`, a request, headers, cookies or searchParams (DECISION-132).
+      // The marker's `filter` is read for nothing in v1. The name is one exported constant.
+      [CAREERS_SLOT]: () => <PublicCareersSlot slug={slug} urls={urls} />,
     },
   });
 

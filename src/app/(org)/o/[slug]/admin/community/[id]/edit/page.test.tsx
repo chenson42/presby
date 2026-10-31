@@ -84,11 +84,22 @@ vi.mock("@/lib/person-photos/reader", () => ({
   personPhotosEnabled: (...args: unknown[]) => personPhotosEnabled(...args),
 }));
 
+// The sign-in card's reader (Community Increment 2b). Its own behaviour is
+// `org-invite.db.test.ts`'s job; the default is `forbidden` (no card), so every
+// older assertion in this file is about the same page it always was.
+const getSignInCard = vi.fn();
+vi.mock("@/lib/onboarding/org-invite", () => ({
+  getSignInCard: (...args: unknown[]) => getSignInCard(...args),
+}));
+
 vi.mock("../../pending/actions", () => ({
   withdrawRollActionAction: vi.fn(),
 }));
 
 vi.mock("./actions", () => ({
+  sendSignInInvitationAction: vi.fn(),
+  resendSignInInvitationAction: vi.fn(),
+  revokeSignInInvitationAction: vi.fn(),
   updatePersonAction: vi.fn(),
   recordRollActionAction: vi.fn(),
   removeParticipantAction: vi.fn(),
@@ -134,6 +145,7 @@ function status(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   getCommunityStatus.mockReset().mockResolvedValue(status());
+  getSignInCard.mockReset().mockResolvedValue({ kind: "forbidden" });
 });
 
 afterEach(() => {
@@ -827,5 +839,78 @@ describe("EditMemberPage — photos link (docs/work-log/2026-10-26-person-photos
     render(await EditMemberPage({ params: makeParams() }));
     expect(screen.queryByRole("link", { name: /^photos$/i })).toBeNull();
     expect(screen.getByRole("heading", { name: /edit person/i })).toBeTruthy();
+  });
+});
+
+describe("EditMemberPage - the sign-in card (Community Increment 2b)", () => {
+  const CARD = {
+    personId: "p-1",
+    state: "none",
+    linked: false,
+    connectedVia: null,
+    connectedOn: null,
+    address: "nora@example.invalid",
+    invitedAddress: null,
+    addressCurrent: null,
+    sentAt: null,
+    expiresAt: null,
+    resendCount: 0,
+    nextResendAt: null,
+    cooldownMinutes: 0,
+    chainCapReached: false,
+    delivery: "unknown",
+    blockedOutcome: null,
+    isVisitor: false,
+    addressDoNotContact: false,
+    authorityBearing: false,
+    addressShared: false,
+    selfConnectEnabled: true,
+    outlook: "by_sign_in",
+  };
+
+  async function renderPage() {
+    cachedAuth.mockResolvedValue({ user: { id: "u1", email: "clerk@example.invalid" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: { ...PERSON, preferredName: "Nori" } });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    render(await EditMemberPage({ params: makeParams() }));
+  }
+
+  it("reads the card with the viewer's context and renders it below the Connection card, named with the preferred name", async () => {
+    getSignInCard.mockResolvedValue({ kind: "ok", card: CARD });
+    await renderPage();
+    expect(getSignInCard).toHaveBeenCalledTimes(1);
+    expect(getSignInCard).toHaveBeenCalledWith(
+      { organizationId: "org-1", actingPersonId: "person-1", actingUserId: "u1", actingUserEmail: "clerk@example.invalid" },
+      "p-1",
+    );
+    const card = screen.getByTestId("sign-in-card");
+    expect(card.id).toBe("sign-in");
+    expect(card.textContent).toContain("Invite Nori Ashgrove to sign in.");
+    expect(screen.getByRole("button", { name: "Send invitation" })).toBeTruthy();
+  });
+
+  it("a failed read renders the card's own failure line and the rest of the page", async () => {
+    getSignInCard.mockResolvedValue({ kind: "error" });
+    await renderPage();
+    expect(screen.getByTestId("sign-in-card").textContent).toContain("We couldn't load this just now. Reload the page.");
+    expect(screen.getByRole("heading", { name: /edit person/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send invitation" })).toBeNull();
+  });
+
+  it.each(["forbidden", "not_found"])("%s renders no card", async (kind) => {
+    getSignInCard.mockResolvedValue({ kind });
+    await renderPage();
+    expect(screen.queryByTestId("sign-in-card")).toBeNull();
+  });
+
+  it("is not read when the person page itself is not shown", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: false });
+    render(await EditMemberPage({ params: makeParams() }));
+    expect(getSignInCard).not.toHaveBeenCalled();
   });
 });

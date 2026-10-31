@@ -110,6 +110,27 @@ describe("GrantRoleForm — target kind toggle", () => {
   });
 });
 
+describe("GrantRoleForm — a derived group is worded by who it reaches (3a, S15)", () => {
+  const GROUPS = [
+    { groupId: "g-1", name: "Altar Guild", derived: false, derivedFrom: null },
+    { groupId: "g-2", name: "Session", derived: true, derivedFrom: "session" as const },
+    { groupId: "g-3", name: "Active Membership", derived: true, derivedFrom: "active_membership" as const },
+    { groupId: "g-4", name: "All Current Records", derived: true, derivedFrom: "all_memberships" as const },
+  ];
+
+  it("lists each group's option text exactly", () => {
+    render(<GrantRoleForm slug="alder-creek" options={{ ...OPTIONS, groups: GROUPS }} />);
+    fireEvent.click(screen.getByRole("radio", { name: /a group/i }));
+    const select = screen.getByLabelText(/^group$/i) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+      "Altar Guild",
+      "Session (derived)",
+      "Active Membership (derived)",
+      "All Current Records (derived; includes visitors and inactive people)",
+    ]);
+  });
+});
+
 describe("GrantRoleForm — empty target list disables submit", () => {
   it("disables submit and shows inline copy when there are no eligible people", () => {
     render(

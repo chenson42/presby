@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { grantFormGroupLabel } from "@/lib/derived-group-labels";
 import type { GrantFormOptions, RoleGrantee } from "@/lib/role-grants";
 import { grantRoleAction } from "./actions";
 
@@ -183,8 +184,7 @@ export function GrantRoleForm({
               >
                 {options.groups.map((group) => (
                   <option key={group.groupId} value={group.groupId}>
-                    {group.name}
-                    {group.derived ? " (derived)" : ""}
+                    {grantFormGroupLabel(group)}
                   </option>
                 ))}
               </select>

@@ -8,6 +8,7 @@ import {
   roleGrants,
 } from "@/lib/db/domain/authz";
 import { groups } from "@/lib/db/domain/groups";
+import type { DerivedFromKey } from "@/lib/groups";
 import { memberships, people } from "@/lib/db/domain/people";
 import { isSeatOnlyPermissionKey } from "@/lib/parishes-pure";
 
@@ -276,7 +277,17 @@ export async function listGrants(
 export interface GrantFormOptions {
   roles: Array<{ id: string; key: string; name: string }>;
   people: Array<{ personId: string; displayName: string }>;
-  groups: Array<{ groupId: string; name: string; derived: boolean }>;
+  /**
+   * `derivedFrom` is null for a managed group. The grant form words a derived
+   * group by who it reaches (`grantFormGroupLabel`, S15): All Current Records
+   * reaches visitors and inactive people, Active Membership does not.
+   */
+  groups: Array<{
+    groupId: string;
+    name: string;
+    derived: boolean;
+    derivedFrom?: DerivedFromKey | null;
+  }>;
 }
 
 export type GrantFormOptionsResult =
@@ -346,6 +357,7 @@ export async function getGrantFormOptions(
           groupId: row.id,
           name: row.name,
           derived: row.derivedFrom !== null,
+          derivedFrom: row.derivedFrom as DerivedFromKey | null,
         })),
       },
     };

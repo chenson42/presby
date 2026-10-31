@@ -83,6 +83,7 @@ export async function createMembershipStandingFixture(label: string) {
   let counter = 0;
   const orgIds: string[] = [];
   const personIds: string[] = [];
+  const userIds: string[] = [];
 
   async function q(query: SQL): Promise<Row[]> {
     return rowsOf(await platform.execute(query));
@@ -157,6 +158,38 @@ export async function createMembershipStandingFixture(label: string) {
       values (${orgId}, ${personId}, ${roll}, ${engagement})
       returning id`);
     return String(row!.id);
+  }
+
+  /**
+   * One main email address for a person, stored normalized (0064's CHECK),
+   * synthetic (`example.invalid`). Returns the address.
+   */
+  async function addEmail(personId: string): Promise<string> {
+    counter += 1;
+    const address = `${label}-p${counter}-${stamp}@example.invalid`.toLowerCase();
+    await q(sql`
+      insert into contact_methods (person_id, kind, value, is_primary)
+      values (${personId}, 'email', ${address}, true)`);
+    return address;
+  }
+
+  /** An active, proven (owner-stamped), unlinked account at `address`. */
+  async function user(address: string): Promise<string> {
+    const [row] = await q(sql`
+      insert into users (email, name, is_active, email_verified)
+      values (${address}, 'Standing Fixture User', true, clock_timestamp())
+      returning id`);
+    const id = String(row!.id);
+    userIds.push(id);
+    return id;
+  }
+
+  /** The auto-connect toggle row (org_portal.sign_in_connect) set ON. */
+  async function enableConnect(orgId: string): Promise<void> {
+    await q(sql`
+      insert into organization_feature_toggles (organization_id, feature_key, enabled, updated_by)
+      values (${orgId}, 'org_portal.sign_in_connect', true, null)
+      on conflict (organization_id, feature_key) do update set enabled = true`);
   }
 
   /** The derived rows of one membership, by kind. */
@@ -250,6 +283,9 @@ export async function createMembershipStandingFixture(label: string) {
     for (const id of personIds) {
       await platform.execute(sql`delete from people where id = ${id}`);
     }
+    for (const id of userIds) {
+      await platform.execute(sql`delete from users where id = ${id}`);
+    }
   }
 
   return {
@@ -265,6 +301,9 @@ export async function createMembershipStandingFixture(label: string) {
     trackOrg,
     person,
     membership,
+    addEmail,
+    user,
+    enableConnect,
     derivedRows,
     hasPermission,
     today,

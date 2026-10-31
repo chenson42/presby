@@ -21,10 +21,19 @@
  *   - the seed include is byte-identical to the calendar block;
  *   - live-catalog scan 1 (the parts 0066 sections 1 to 8 and 10 own).
  *
+ * WHAT BATCH A2 ADDED (0066 section 9, the three re-created 0065 bodies):
+ *   - the "2b core, connect" column of M1 to M16: the standing core's
+ *     refusal, standing and authority_bearing, and auto-connect's verdict for
+ *     an authority-free person with a proven address, at the createOrganization()
+ *     organization, where `member` (active_membership) and calendar_viewer
+ *     (all_memberships) are both live: neither grant counts in T (EC-12, R49),
+ *     and connect declines every standing that is not member standing (R55);
+ *   - scan 1's section 9 part: the T exclusion list is the four kinds and not
+ *     deacons_moderator (D10b), and `standing = 'visitor'` appears in no
+ *     function body.
+ *
  * WHAT LATER BATCHES ADD TO THIS FILE (named so the gap is visible, not
- * silent): Batch A2 adds the "2b core, connect" column and the `'visitor'`
- * standing-comparison absence to scan 1 (section 9 re-creates those bodies);
- * Batch B adds the TypeScript mirror (membershipStanding / isMemberStanding
+ * silent): Batch B adds the TypeScript mirror (membershipStanding / isMemberStanding
  * equal to SQL across the cross-product), the "in getDirectory" and "Community
  * list" columns, and scans 2 and 3 (source and writer scans).
  *
@@ -190,6 +199,62 @@ describe.skipIf(!hasDb)("drizzle/0066 member standing: the R51 matrix (Postgres-
     const personId = String(row!.person_id);
     if (e.directory !== undefined) expect(await fx.hasPermission(personId, orgM, "directory.view"), "directory.view").toBe(e.directory);
     if (e.events !== undefined) expect(await fx.hasPermission(personId, orgM, "events.view"), "events.view").toBe(e.events);
+  });
+
+  // The "2b core, connect" column (Phase 3 section 6.3; Batch A2). Each row
+  // is built by the same builder as the matrix above, then given a main
+  // address and a proven, unlinked account. connect runs as presby_app inside
+  // a transaction that is always rolled back (it links on success).
+  type Connect = { refusal: string | null; standing: string | null; verdict: "connected" | "declined" };
+  const connectColumn: Record<string, Connect> = {
+    "M1 active / regular": { refusal: null, standing: "listed", verdict: "connected" },
+    "M2 active / visitor (enrolled visitor)": { refusal: null, standing: "listed", verdict: "connected" },
+    "M3 active / inactive": { refusal: null, standing: "listed", verdict: "connected" },
+    "M4 other_participant / regular": { refusal: null, standing: "listed", verdict: "connected" },
+    "M5 other_participant / visitor": { refusal: null, standing: "listed", verdict: "connected" },
+    "M6 null / regular": { refusal: null, standing: "listed", verdict: "connected" },
+    "M7 null / staff (DECISION-207: the anchor resolves directory.view)": { refusal: null, standing: "staff_anchor", verdict: "connected" },
+    "M8 null / visitor": { refusal: null, standing: "visitor", verdict: "declined" },
+    "M9 null / inactive": { refusal: null, standing: "inactive", verdict: "declined" },
+    "M10 null / moved_away": { refusal: null, standing: "inactive", verdict: "declined" },
+    "M11 unlisted roll / visitor (owner-path fixture)": { refusal: null, standing: "visitor", verdict: "declined" },
+    "M12 unlisted roll / regular": { refusal: null, standing: "listed", verdict: "connected" },
+    "M13 regular, then ended": { refusal: "membership_ended", standing: null, verdict: "declined" },
+    "M14 visitor, ended with the archive marker": { refusal: "membership_ended", standing: null, verdict: "declined" },
+    "M15 regular, person deceased": { refusal: "person_deceased", standing: "listed", verdict: "declined" },
+    "M16 regular, person merged": { refusal: "person_merged", standing: "listed", verdict: "declined" },
+  };
+
+  it("premise: every matrix row has a connect-column expectation, and the organization's auto-connect toggle is on", async () => {
+    expect(Object.keys(connectColumn).sort()).toEqual(matrix.map(([name]) => name).sort());
+    await fx.enableConnect(orgM);
+  });
+
+  it.each(matrix)("connect column, %s", async (name, build) => {
+    const e = connectColumn[name]!;
+    await fx.enableConnect(orgM);
+    const membershipId = await build();
+    const [mr] = await fx.q(sql`select person_id from memberships where id = ${membershipId}`);
+    const personId = String(mr!.person_id);
+    const userId = await fx.user(await fx.addEmail(personId));
+
+    const [core] = await fx.q(sql`select * from presby__person_sign_in_standing(${personId}::uuid, ${orgM}::uuid)`);
+    expect(core!.refusal ?? null, "core refusal").toBe(e.refusal);
+    expect(core!.standing ?? null, "core standing").toBe(e.standing);
+    expect(core!.authority_bearing, "member and calendar_viewer are outside T (EC-12)").toBe(false);
+    expect(core!.role_keys, "no role in T").toEqual([]);
+
+    let verdict: unknown;
+    try {
+      await fx.appDb.transaction(async (tx) => {
+        const r = await tx.execute(sql`select outcome from presby_connect_signed_in_account(${userId}::uuid, false)`);
+        verdict = ((r as unknown as { rows: Array<{ outcome: string }> }).rows)[0]!.outcome;
+        throw new Error("rollback");
+      });
+    } catch (err) {
+      if ((err as Error).message !== "rollback") throw err;
+    }
+    expect(verdict, "connect, no second factor").toBe(e.verdict);
   });
 
   describe("transitions on one membership (EC-3, EC-4)", () => {
@@ -395,6 +460,34 @@ describe.skipIf(!hasDb)("drizzle/0066 member standing: the R51 matrix (Postgres-
 
     it("the closed derived-kind list of the set T appears only in presby__person_sign_in_standing", async () => {
       expect(await holders("derived_from in ('active_membership'")).toEqual(["presby__person_sign_in_standing"]);
+    });
+
+    it("section 9 (D10b): the T exclusion list is the four kinds, and deacons_moderator is not in it", async () => {
+      const [row] = await fx.q(sql`select prosrc from pg_proc where oid = 'presby__person_sign_in_standing(uuid,uuid)'::regprocedure`);
+      const body = String(row!.prosrc);
+      expect(body).toContain("derived_from in ('active_membership', 'all_memberships', 'session', 'diaconate')");
+      expect(body).not.toContain("deacons_moderator");
+    });
+
+    const VISITOR_COMPARISON = String.raw`standing\s*(=|<>|!=)\s*'visitor'|standing\s+(not\s+)?in\s*\([^)]*'visitor'`;
+
+    it("section 9: `standing = 'visitor'` (or an IN list naming it) appears in no function body", async () => {
+      const rows = await fx.q(sql`
+        select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.prosrc ~* ${VISITOR_COMPARISON} order by 1`);
+      expect(rows.map((r) => String(r.proname))).toEqual([]);
+    });
+
+    it("the visitor-comparison scan can fail: a deliberately offending public function is seen (rolled back)", async () => {
+      await fx.ownerRolledBack(async (tx) => {
+        await tx.execute(sql.raw(`create function public.ms66_visitor_offender(p_standing text) returns boolean language plpgsql immutable as $$ begin return p_standing = 'visitor'; end $$`));
+        const result = await tx.execute(sql`
+          select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where n.nspname = 'public' and p.prosrc ~* ${VISITOR_COMPARISON} order by 1`);
+        // toContain, not toEqual: the sample proves the pattern can match,
+        // independently of whether the real catalog is clean.
+        expect(((result as unknown as { rows: Array<{ proname: string }> }).rows).map((r) => r.proname)).toContain("ms66_visitor_offender");
+      });
     });
 
     it("the scan can fail: a deliberately offending public function is seen (rolled back)", async () => {

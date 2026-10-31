@@ -13,9 +13,16 @@
  * against a scratch copy, the sync's missing-group raises, the officer sync's
  * `prosrc`, and the DerivedFromKey source pin (scan 4).
  *
+ * Batch A2 added the handler-mapping test (EC-13; amendment D13 (a)): the
+ * four shipped `has no derived group active_membership` handlers still map
+ * the message 0066's sync raises for a missing Active Membership group, none
+ * of them maps the All Current Records message, and the acceptance core,
+ * driven end to end, fails loudly (and writes nothing) when only the second
+ * group is missing.
+ *
  * Not here, by design: T-G test 3 (groupSeedPlan lists all_memberships for
  * every type, and createOrganization binds calendar_viewer) belongs to Batch
- * B, which changes the plan; the handler-mapping test belongs to Batch A2.
+ * B, which changes the plan.
  *
  * Run with (serial):
  *   npx dotenv -e .env.local -- npx vitest run --no-file-parallelism src/lib/db/domain/derived-group-guard.db.test.ts
@@ -370,6 +377,98 @@ describe.skipIf(!hasDb)("drizzle/0066 derived-row and derived-group guards (Post
         expect(r.message).toBe(`organization ${orgY} has no derived group all_memberships; seed derived groups at org creation`);
         expect(r.message).not.toMatch(/has no derived group active_membership/);
       });
+      expect((await fx.q(sql`select tgenabled from pg_trigger where tgname = 'groups_pair_derived'`))[0]!.tgenabled).toBe("O");
+    });
+  });
+
+  describe("the four handlers keep mapping the common state, and nothing maps the new one (EC-13, D13 a; Batch A2)", () => {
+    // The live handlers (amendment A2 row 4): the acceptance core (0065; the
+    // token wrapper presby_accept_invitation only calls it), the two 0061
+    // participant functions and 0062's decision. The sync raises the message.
+    const HANDLERS = [
+      "presby__accept_invitation_core",
+      "presby_decide_roll_action",
+      "presby_record_participant_action",
+      "presby_void_participant_action",
+    ];
+
+    async function raised(setup: (orgId: string, tx: Parameters<Parameters<MembershipStandingFixture["ownerRolledBack"]>[0]>[0]) => Promise<void>, tag: string) {
+      const orgId = await fx.bareOrg(tag);
+      const p = await fx.person(tag);
+      let message = "";
+      await fx.ownerRolledBack(async (tx) => {
+        await setup(orgId, tx);
+        const r = await fx.refused(tx, sql`insert into memberships (organization_id, person_id, engagement_status) values (${orgId}, ${p}, 'regular')`);
+        expect(r.code).toBe("23503");
+        message = r.message!;
+      });
+      return message;
+    }
+
+    it("exactly the four handlers and the sync name the shipped message in the live catalog", async () => {
+      const rows = await fx.q(sql`
+        select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and position('has no derived group active_membership' in p.prosrc) > 0 order by 1`);
+      expect(rows.map((r) => String(r.proname))).toEqual([...HANDLERS, "presby_sync_derived_membership_group"].sort());
+    });
+
+    it("each handler's LIKE pattern matches the message for a missing active_membership, and none matches the all_memberships message", async () => {
+      const missingAm = await raised(async () => {}, "map-am");
+      const missingAll = await raised(async (orgId, tx) => {
+        await tx.execute(sql`alter table groups disable trigger groups_pair_derived`);
+        await tx.execute(sql`
+          insert into groups (organization_id, group_type_id, name, membership_source, derived_from, is_protected)
+          values (${orgId}, ${fx.rosterTypeId}, 'Active Membership', 'derived', 'active_membership', true)`);
+      }, "map-all");
+      expect(missingAm).toMatch(/has no derived group active_membership/);
+      expect(missingAll).toMatch(/has no derived group all_memberships/);
+
+      for (const name of HANDLERS) {
+        const [row] = await fx.q(sql`select prosrc from pg_proc where proname = ${name}`);
+        const patterns = [...String(row!.prosrc).matchAll(/like '([^']*has no derived group active_membership[^']*)'/g)].map((m) => m[1]!);
+        expect(patterns.length, `${name} has a handler`).toBeGreaterThan(0);
+        for (const pattern of patterns) {
+          const [m] = await fx.q(sql`select ${missingAm} like ${pattern} as am, ${missingAll} like ${pattern} as allm`);
+          expect(m, `${name}: '${pattern}'`).toEqual({ am: true, allm: false });
+        }
+      }
+    });
+
+    it("end to end through the acceptance core: active_membership present, all_memberships missing -> the acceptance fails loudly (23503) and writes nothing", async () => {
+      const { createInvitationFixture, FAKE_BCRYPT } = await import("@/lib/testing/invitation-fixture");
+      const { pgCode, pgMessage } = await import("@/lib/testing/membership-standing-fixture");
+      const inv = await createInvitationFixture("dg66h");
+      try {
+        const org = await inv.makeBareOrg("halfpair");
+        // A committed half pair: the pair trigger is off only around this one
+        // insert (serial suite), and back on in finally.
+        await fx.platform.execute(sql`alter table groups disable trigger groups_pair_derived`);
+        try {
+          await fx.q(sql`
+            insert into groups (organization_id, group_type_id, name, membership_source, derived_from, is_protected)
+            values (${org}, ${fx.rosterTypeId}, 'Active Membership', 'derived', 'active_membership', true)`);
+        } finally {
+          await fx.platform.execute(sql`alter table groups enable trigger groups_pair_derived`);
+        }
+        const operator = await inv.makeUser(inv.email("operator"));
+        const address = inv.email("halfpair");
+        const invitation = await inv.insertInvitation({ organizationId: org, purpose: "founding_administrator", email: address, createdByUserId: operator });
+        const before = await inv.snapshot(org, address);
+
+        let caught: unknown;
+        try {
+          await inv.accept(invitation.token, { passwordHash: FAKE_BCRYPT, firstName: "Marisol", lastName: "Quenby" });
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught, "the acceptance must not succeed or map the state").toBeDefined();
+        expect(pgCode(caught)).toBe("23503");
+        expect(pgMessage(caught)).toBe(`organization ${org} has no derived group all_memberships; seed derived groups at org creation`);
+        expect(await inv.snapshot(org, address)).toEqual(before);
+        expect((await inv.invitation(invitation.id)).accepted_at).toBeNull();
+      } finally {
+        await inv.cleanup();
+      }
       expect((await fx.q(sql`select tgenabled from pg_trigger where tgname = 'groups_pair_derived'`))[0]!.tgenabled).toBe("O");
     });
   });

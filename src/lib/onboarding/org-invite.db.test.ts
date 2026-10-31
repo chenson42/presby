@@ -195,14 +195,14 @@ describe.skipIf(!hasDb)("src/lib/onboarding/org-invite.ts (Postgres-backed)", ()
       expect(result).toMatchObject({ kind: "ok", address: p.email });
     });
 
-    it("F177 condition 2: a visitor is refused until acknowledged, then audited as ['visitor']; a client claiming acknowledgement for a non-visitor still records []", async () => {
+    it("a visitor sends without an acknowledgement and is audited as [] (drizzle/0066 section 9 retired F177 condition 1); a client claiming acknowledgement for a non-visitor still records []", async () => {
+      // Increment 3a: the definer no longer asks for a visitor acknowledgement
+      // (check 10), so the unchanged TypeScript sends and records what the
+      // definer found: nothing (EC-21). Batch B removes `visitor` from
+      // SIGN_IN_ACK_REASONS and the dialog.
       const v = await f.person(org, { engagement: "visitor", roll: null });
-      const before = await counts(v.id);
-      expect(await send(v.id, v.email!)).toEqual({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["visitor"] });
-      expect(await counts(v.id)).toEqual(before);
-
-      expect(await send(v.id, v.email!, true)).toMatchObject({ kind: "ok", acknowledged: ["visitor"] });
-      expect((await auditFor("invitation.created", v.id))[0]!.metadata).toMatchObject({ acknowledged: ["visitor"] });
+      expect(await send(v.id, v.email!)).toMatchObject({ kind: "ok", acknowledged: [] });
+      expect((await auditFor("invitation.created", v.id))[0]!.metadata).toMatchObject({ acknowledged: [] });
 
       const m = await f.person(org);
       expect(await send(m.id, m.email!, true)).toMatchObject({ kind: "ok", acknowledged: [] });

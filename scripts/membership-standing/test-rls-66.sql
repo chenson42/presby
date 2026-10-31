@@ -41,6 +41,14 @@
 --       (i) baseline        visitor: events.view, not directory.view
 --       (j) archive/restore the SQL semantics the Batch B writer uses
 --       (k) groups shape    pairing and five-kind CHECKs
+--       (l) section 9       the three re-created 0065 bodies (Batch A2):
+--                           a grant on All Current Records is outside the
+--                           set T; issue asks no visitor acknowledgement;
+--                           connect declines inactive and moved away and
+--                           connects regular. Uses the Hollinbrook rows of
+--                           scripts/sign-in-invitations/seed-dev-sign-in.sql,
+--                           which scripts/seed-dev.sql includes before
+--                           this file's own seed include
 --
 --     What presby_app CANNOT reach (the OWNER path through every guard, the
 --     stop-blocks, the backfill re-execution, the live-catalog scans, the
@@ -60,6 +68,10 @@
 \set M66_VIS     '\'c6600000-0000-4000-8000-000000000001\''
 \set M66_REG     '\'c6600000-0000-4000-8000-000000000002\''
 \set M66_STAFF   '\'c6600000-0000-4000-8000-000000000003\''
+\set M66_H65_ORG    '\'65000000-0000-4000-8000-000000000001\''
+\set M66_H65_SENDER '\'e6500000-0000-4000-8000-0000000000a0\''
+\set M66_H65_CLEM   '\'c6500000-0000-4000-8000-000000000003\''
+\set M66_H65_U3     '\'e6500000-0000-4000-8000-000000000003\''
 
 \echo '======================================================'
 \echo ' Section 66 (member standing and the derived-row guards, drizzle/0066) starting.'
@@ -317,7 +329,23 @@ rollback;
 
 -- ===========================================================================
 -- (e) The pair: a presby_app insert of an active_membership group
+--
+--     Needs an organization with NO derived group, which presby_app cannot
+--     create (no INSERT on organizations, DECISION-135). On a database built
+--     from empty (CI, the from-empty rehearsal) the Southern Fields presbytery
+--     fixture is that organization. On a long-lived branch (development and
+--     its copies) 0082 gave every organization with no `member` role an Active
+--     Membership group, and 0066's backfill then gave it All Current Records,
+--     so the premise cannot hold there: the block is SKIPPED with a visible
+--     line rather than failing on data drift (Batch A2). The pair is proven on
+--     every database by derived-group-guard.db.test.ts, T-G test 1.
 -- ===========================================================================
+begin;
+  select set_config('app.current_org_id', :M66_SOUTH, true);
+  select (count(*) = 0) as m66_south_bare
+    from groups where organization_id = :M66_SOUTH and membership_source = 'derived' \gset
+rollback;
+\if :m66_south_bare
 begin;
   select set_config('app.current_org_id', :M66_SOUTH, true);
   create temp table m66_before on commit drop as
@@ -342,6 +370,9 @@ begin;
              and (select count(*) from role_grants) = grants)::int from m66_before),
     1, '66e (arch-A3 i): and no role, permission or grant row changed');
 rollback;
+\else
+\echo 'skip  66e: Southern Fields already holds derived groups (0082 on a long-lived branch); the pair is proven by derived-group-guard.db.test.ts T-G test 1'
+\endif
 
 -- ===========================================================================
 -- (f) Engagement guard and vocabulary (R53, F243), as presby_app
@@ -627,6 +658,57 @@ begin;
     if v_con <> 'groups_derived_kind_check' then raise exception 'FAIL 66k: wrong constraint %', v_con; end if;
     raise notice 'pass  66k (D9): a sixth derived kind is refused (groups_derived_kind_check)';
   end $$;
+rollback;
+
+-- ===========================================================================
+-- (l) Section 9: the three 0065 bodies re-created (Batch A2; amendment A4.2,
+--     D10b; R49, R55). Clementine Ashby (Hollinbrook, visitor, no roll, a
+--     proven unlinked account U3) is moved between standings as presby_app
+--     inside one rolled-back transaction; connect reads the uncommitted row.
+-- ===========================================================================
+begin;
+  select set_config('app.current_org_id', :M66_H65_ORG, true);
+  select assert_eq(
+    (select count(*) from role_grants rg
+       join app_roles r on r.id = rg.role_id and r.key = 'calendar_viewer'
+       join groups g on g.id = rg.group_id and g.derived_from = 'all_memberships'
+      where rg.organization_id = :M66_H65_ORG and rg.ends_on is null),
+    1, '66l premise: Hollinbrook''s calendar_viewer role is granted to All Current Records');
+  select assert_eq(
+    (select count(*) from group_memberships gm join groups g on g.id = gm.group_id
+      where gm.person_id = :M66_H65_CLEM and g.derived_from = 'all_memberships' and gm.ends_on is null),
+    1, '66l premise: the visitor holds an open All Current Records row, so the grant reaches her');
+  select assert_eq(
+    (select count(*) from pg_proc where proname = 'presby__person_sign_in_standing'
+        and position('derived_from in (''active_membership'', ''all_memberships'', ''session'', ''diaconate'')' in prosrc) > 0
+        and position('deacons_moderator' in prosrc) = 0),
+    1, '66l (D10b): the core''s T exclusion list is the four kinds; deacons_moderator stays in T');
+  select assert_eq(
+    (select count(*) from presby_issue_sign_in_invitation(:M66_H65_CLEM, repeat('6', 64), now() + interval '7 days', null,
+       'clementine.ashby.signin65@example.invalid', false, :M66_H65_SENDER)
+      where outcome = 'ok' and ack_reasons = '{}'),
+    1, '66l (check 10): a visitor is invited with no acknowledgement and no reason');
+rollback;
+
+begin;
+  select set_config('app.current_org_id', :M66_H65_ORG, true);
+  update memberships set engagement_status = 'inactive'
+   where person_id = :M66_H65_CLEM and organization_id = :M66_H65_ORG;
+  select assert_eq(
+    (select count(*) from presby_connect_signed_in_account(:M66_H65_U3, true) where outcome = 'declined'),
+    1, '66l (connect step 10, R55): an inactive person without a roll is declined (2b connected her)');
+  update memberships set engagement_status = 'moved_away'
+   where person_id = :M66_H65_CLEM and organization_id = :M66_H65_ORG;
+  select assert_eq(
+    (select count(*) from presby_connect_signed_in_account(:M66_H65_U3, true) where outcome = 'declined'),
+    1, '66l (connect step 10, R55): a moved-away person without a roll is declined');
+  update memberships set engagement_status = 'regular'
+   where person_id = :M66_H65_CLEM and organization_id = :M66_H65_ORG;
+  select assert_eq(
+    (select count(*) from presby_connect_signed_in_account(:M66_H65_U3, false)
+      where outcome = 'connected' and person_id = :M66_H65_CLEM
+        and not session_seat and not diaconate_seat and role_keys = '{}' and permission_keys = '{}'),
+    1, '66l (R49): a regular attender holding the calendar_viewer grant connects with NO factor (the grant is outside T)');
 rollback;
 
 \echo '======================================================'

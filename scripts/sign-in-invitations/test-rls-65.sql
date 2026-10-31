@@ -294,16 +294,20 @@ begin;
     (select count(*) from presby_issue_sign_in_invitation(:H65_ROSALIND, repeat('e', 64), now() + interval '7 days', null,
        'rosalind.quarrington.signin65@example.invalid', false, :H65_SENDER) where outcome = 'already_pending'),
     1, '65.6: a second send while one is open is already_pending');
+  -- drizzle/0066 section 9 (Increment 3a) retired F177 condition 1: a
+  -- visitor is no longer an acknowledgement reason (a visitor's sign-in
+  -- carries no directory, F177 Option 1). The do_not_contact acknowledgement
+  -- is unchanged and is asserted in sign-in-invitations.db.test.ts.
   select assert_eq(
     (select count(*) from presby_issue_sign_in_invitation(:H65_CLEM, repeat('f', 64), now() + interval '7 days', null,
        'clementine.ashby.signin65@example.invalid', false, :H65_SENDER)
-      where outcome = 'needs_acknowledgement' and ack_reasons = '{visitor}' and invitation_id is null),
-    1, '65.6 (F177 condition 1): a visitor is refused until the sender acknowledges - the DEFINER enforces it');
+      where outcome = 'ok' and ack_reasons = '{}' and invitation_id is not null),
+    1, '65.6 (0066 section 9): a visitor is invited with no acknowledgement, and the definer reports no reason');
   select assert_eq(
     (select count(*) from presby_issue_sign_in_invitation(:H65_CLEM, repeat('f', 64), now() + interval '7 days', null,
        'clementine.ashby.signin65@example.invalid', true, :H65_SENDER)
-      where outcome = 'ok' and ack_reasons = '{visitor}'),
-    1, '65.6 (F177 condition 2): acknowledged, it sends, and the reasons the definer found come back for the audit row');
+      where outcome = 'already_pending'),
+    1, '65.6: ...so a second send, acknowledged or not, is already_pending');
   select assert_eq(
     (select count(*) from presby_preview_invitation(:H65_FLOW_TOKEN, :H65_U1)
       where purpose = 'sign_in' and session_matches and person_display_name = 'Rosalind Quarrington'

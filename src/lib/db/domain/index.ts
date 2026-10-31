@@ -34,3 +34,4 @@ export * from "./giving";
 export * from "./domains";
 export * from "./invitations";
 export * from "./careers";
+export * from "./help-contact";

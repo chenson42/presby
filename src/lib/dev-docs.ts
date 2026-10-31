@@ -200,6 +200,7 @@ export const MODULES: Record<string, string> = {
   ticket_messages: "S. Support",
   ticket_actions: "S. Support",
   congregation_feedback: "S. Support",
+  help_contact_messages: "S. Support",
   job_postings: "T. Careers",
 };
 
@@ -287,6 +288,8 @@ const BESPOKE_POLICIES: Record<string, string> = {
     "GLOBAL, same rule as addresses. Not duplicated per org, so an installed pastor's phone cannot diverge between presbytery and congregation. Several emails per person, labelled personal/work/other, exactly one active main (a partial unique index plus a deferred SECURITY DEFINER check). End-dated, never deleted: removal sets ended_at, an edit ends the row and inserts a replacement, identity and ended rows are frozen by trigger, verified_at is owner-path only (drizzle/0064). presby_person_email(person, purpose) decides which address a person's mail uses.",
   person_relationships:
     "GLOBAL. A parent is a parent regardless of which church is looking.",
+  help_contact_messages:
+    "Platform axis, no organization_id and NO policy: FORCE ROW LEVEL SECURITY with zero policies is a deliberate deny-all (drizzle/0083, DECISION-300), the first such table. presby_app, presby_platform and PUBLIC hold no table privilege; presby_app reaches it only through presby_submit_help_contact(), SECURITY DEFINER, which returns a closed outcome token and no id or content. Reads and triage are owner-path only (src/lib/help-contact/inbox.ts). A guard refuses every DELETE and every rewrite of a sender's words, on the owner connection too; the only change to a personal field is the irreversible clear. Do not add a tenant_isolation policy: there is no tenant.",
   person_identifiers:
     "GLOBAL. Unique only where uniqueness is safe: the partial index covers verified, non-shared identifiers. Shared household emails and unverified entries are matching signals, not keys.",
 };

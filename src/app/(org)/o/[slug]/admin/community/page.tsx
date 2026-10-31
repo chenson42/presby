@@ -11,6 +11,7 @@ import { getDirectory, type DirectoryResult } from "@/lib/directory";
 import {
   getCommunityBadges,
   listFormerParticipants,
+  listInactive,
   listStaff,
   listVisitors,
   type CommunityListResult,
@@ -45,7 +46,7 @@ const STAFF_FLAG = "org_portal.staff";
  *
  * VIEWS (DECISION-201), server-rendered links in `CommunityNav`: Everyone,
  * Members (active, baptized, affiliate), Participants read the privacy-filtered
- * Directory (`getDirectory()`, `directory.view`); Visitors, Staff and Former
+ * Directory (`getDirectory()`, `directory.view`); Visitors, Inactive, Staff and Former
  * read `src/lib/community.ts` (`people.manage`, admin-only, never in the
  * Directory).
  *
@@ -136,7 +137,8 @@ export default async function CommunityPage({
     resolved.org.organizationId,
     "people.manage",
   );
-  const adminView = view === "visitors" || view === "staff" || view === "former";
+  const adminView =
+    view === "visitors" || view === "inactive" || view === "staff" || view === "former";
   if (adminView && !canManage) {
     return <MembersForbidden name={resolved.org.name} heading={HEADING} />;
   }
@@ -153,9 +155,11 @@ export default async function CommunityPage({
       listResult =
         view === "visitors"
           ? await listVisitors(personId, organizationId, opts)
-          : view === "staff"
-            ? await listStaff(personId, organizationId, opts)
-            : await listFormerParticipants(personId, organizationId, opts);
+          : view === "inactive"
+            ? await listInactive(personId, organizationId, opts)
+            : view === "staff"
+              ? await listStaff(personId, organizationId, opts)
+              : await listFormerParticipants(personId, organizationId, opts);
     } else {
       directoryResult = await getDirectory(personId, organizationId, {
         search,

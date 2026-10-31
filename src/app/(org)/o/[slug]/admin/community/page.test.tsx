@@ -355,7 +355,7 @@ describe("MembersPage — the six views", () => {
       ],
       pagination: PAGINATION,
     });
-    getCommunityBadges.mockResolvedValue({ "p-1": "participant" });
+    getCommunityBadges.mockResolvedValue({ "p-1": { roll: "participant", engagement: null } });
     hasPermission.mockImplementation(
       async (_p: string, _o: string, key: string) => key === "people.manage",
     );

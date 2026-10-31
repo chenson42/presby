@@ -23,7 +23,7 @@ export function CommunityRowsList({
   canStaffLink = false,
 }: {
   slug: string;
-  view: Extract<CommunityView, "visitors" | "staff" | "former">;
+  view: Extract<CommunityView, "visitors" | "inactive" | "staff" | "former">;
   rows: CommunityRow[];
   /** Sign-in markers by person id; empty unless the viewer holds `people.manage`. */
   markers?: Record<string, Marker>;
@@ -71,7 +71,7 @@ function Detail({
   slug,
   canStaffLink,
 }: {
-  view: "visitors" | "staff" | "former";
+  view: "visitors" | "inactive" | "staff" | "former";
   row: CommunityRow;
   slug: string;
   canStaffLink: boolean;
@@ -84,6 +84,9 @@ function Detail({
     ) : (
       <>Visitor</>
     );
+  }
+  if (view === "inactive") {
+    return <>{row.engagementStatus === "moved_away" ? "Moved away" : "Inactive"}</>;
   }
   if (view === "staff") {
     if (row.positions.length > 0) return <>{row.positions.join(", ")}</>;

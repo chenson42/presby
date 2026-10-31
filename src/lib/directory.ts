@@ -31,8 +31,9 @@ import {
  *     and the resolver's arm 2. This function does not decide that;
  *     `presby_has_permission()` does, and it runs first.
  *   - who APPEARS as a row: the narrower, already-documented
- *     `docs/schema-design.md` §11 formula — `current_roll` in the
- *     roll-member statuses OR `engagement_status = 'regular'`, minus
+ *     `docs/schema-design.md` §11 formula, now asked of the one classifier
+ *     (`presby_membership_standing(...) = 'listed'`: a roll in the four, or
+ *     engagement regular; Increment 3a, DECISION-233), minus
  *     `directory_hidden`, minus deceased, minus a merged (tombstoned)
  *     person, minus an ended relationship (`ended_on` set — the access
  *     gate's own definition of "current", F136). A first-time visitor with a live membership can browse the
@@ -182,18 +183,17 @@ export interface GetDirectoryOptions {
   includeHidden?: boolean;
   /**
    * Increment 5 (pagination/search/status). Narrows to ONE `current_roll`
-   * value, replacing the default OR-of-four eligibility branch entirely
-   * for this call (does NOT also require `engagement_status = 'regular'` —
-   * that is a separate admission path, not a sub-case of any one roll
-   * value). Omitted = today's unfiltered eligibility, unchanged.
+   * value, replacing the default standing-`listed` eligibility branch entirely
+   * for this call (does NOT also apply the standing test — an explicit roll
+   * filter, not the listed test). Omitted = today's unfiltered eligibility, unchanged.
    */
   status?: DirectoryStatus;
   /**
    * Founding-admin-directory pipeline (DECISION-197/201): narrows to a SET of
    * `current_roll` values, for the admin Community page's Members view
    * (`['active','baptized','affiliate']`). Like `status` it replaces the
-   * default OR-of-four eligibility branch for this call and does not also
-   * admit `engagement_status = 'regular'`. If `status` is ALSO given the two
+   * default standing-`listed` branch for this call and does not also admit a
+   * regular attender with no roll. If `status` is ALSO given the two
    * intersect (`status` keeps its meaning). An EMPTY array matches nothing
    * (never an `in ()` syntax error, never "no filter"); values outside
    * `DIRECTORY_STATUSES` are dropped. The privacy predicate (hidden, merged,
@@ -314,10 +314,7 @@ function directoryEligibilityWhereSql(
         ? sql`m.current_roll = ${status}`
         : rollSet !== undefined
           ? sql`true`
-          : sql`(
-      m.current_roll in ('active', 'baptized', 'affiliate', 'other_participant')
-      or m.engagement_status = 'regular'
-    )`
+          : sql`presby_membership_standing(m.current_roll, m.engagement_status) = 'listed'`
     }
     and ${rollSetSql}
   `;

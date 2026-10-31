@@ -114,7 +114,7 @@ describe("MembersList — directory entries", () => {
     ["visitor", "Visitor"],
     ["waiting", "Waiting for the Session"],
   ] as const)("renders the %s badge as %s", (badge, label) => {
-    render(<MembersList {...BASE} entries={[ENTRY]} badges={{ "p-1": badge }} />);
+    render(<MembersList {...BASE} entries={[ENTRY]} badges={{ "p-1": { roll: badge, engagement: null } }} />);
     expect(screen.getByText(label)).toBeTruthy();
   });
 
@@ -137,6 +137,9 @@ describe("MembersList — admin rows (Visitors, Staff, Former)", () => {
     firstVisitDate: "2026-03-01",
     positions: ["Organist", "Sexton"],
     endedOn: "2026-04-02",
+    engagementStatus: "visitor",
+    endedReason: null,
+    signInConnected: false,
   };
 
   it("Visitors: links to the edit page and shows the first visit", () => {

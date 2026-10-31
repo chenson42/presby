@@ -32,15 +32,21 @@
  *     deacons_moderator (D10b), and `standing = 'visitor'` appears in no
  *     function body.
  *
- * WHAT LATER BATCHES ADD TO THIS FILE (named so the gap is visible, not
- * silent): Batch B adds the TypeScript mirror (membershipStanding / isMemberStanding
- * equal to SQL across the cross-product), the "in getDirectory" and "Community
- * list" columns, and scans 2 and 3 (source and writer scans).
+ * WHAT BATCH B ADDED:
+ *   - the TypeScript mirror: membershipStanding / isMemberStanding equal the
+ *     SQL classifier across the cross-product (R51's one-definition pin, the
+ *     database half; the pure half is membership-standing.test.ts);
+ *   - the "in getDirectory" and "Community list" columns of M1 to M16, read
+ *     through the real library functions as a people.manage viewer.
+ *   Scans 2 and 3 (the source and writer scans) are DB-free and live in
+ *   src/lib/membership-standing.source.test.ts.
  *
- * calendar_viewer before Batch B: createOrganization() does not seed it yet,
- * so the matrix organization gets it by re-executing 0066's own delimited
- * backfill-calendar-viewer block (the documented repair for an organization
- * created by old code, EC-45). After Batch B the block is a no-op for it.
+ * calendar_viewer: since Batch B createOrganization() seeds it (the plan binds
+ * it to All Current Records), so the beforeAll re-execution of 0066's own
+ * delimited backfill-calendar-viewer block (the documented repair for an
+ * organization created by old code, EC-45) is a no-op for the matrix
+ * organization. It stays, as the A2 hand-off asked: it is the proof that the
+ * repair block is idempotent against a provisioned organization.
  *
  * SERIAL: the backfill blocks are global (they act on every organization),
  * and the harness disables triggers around teardown.
@@ -112,8 +118,8 @@ describe.skipIf(!hasDb)("drizzle/0066 member standing: the R51 matrix (Postgres-
     if (result.kind !== "ok") throw new Error(`createOrganization: ${result.kind}`);
     orgM = result.organizationId;
     fx.trackOrg(orgM);
-    // EC-45's repair, and before Batch B the only source of calendar_viewer
-    // for an organization created after 0066 was applied.
+    // EC-45's repair. A no-op since Batch B (createOrganization() seeds
+    // calendar_viewer itself); kept as the idempotence proof.
     await fx.platform.transaction(async (tx) => {
       await tx.execute(sql.raw(block("backfill-calendar-viewer")));
     });
@@ -257,6 +263,72 @@ describe.skipIf(!hasDb)("drizzle/0066 member standing: the R51 matrix (Postgres-
     expect(verdict, "connect, no second factor").toBe(e.verdict);
   });
 
+  // The "in getDirectory" and "Community list" columns (Batch B), through the
+  // real library functions as a viewer who holds people.manage (the Community
+  // lists) and, as a listed member of the organization, directory.view.
+  const listsColumn: Record<string, { directory: boolean; list: "visitors" | "inactive" | "staff" | "former" | null }> = {
+    "M1 active / regular": { directory: true, list: null },
+    "M2 active / visitor (enrolled visitor)": { directory: true, list: null },
+    "M3 active / inactive": { directory: true, list: null },
+    "M4 other_participant / regular": { directory: true, list: null },
+    "M5 other_participant / visitor": { directory: true, list: null },
+    "M6 null / regular": { directory: true, list: null },
+    "M7 null / staff (DECISION-207: the anchor resolves directory.view)": { directory: false, list: "staff" },
+    "M8 null / visitor": { directory: false, list: "visitors" },
+    "M9 null / inactive": { directory: false, list: "inactive" },
+    "M10 null / moved_away": { directory: false, list: "inactive" },
+    "M11 unlisted roll / visitor (owner-path fixture)": { directory: false, list: "visitors" },
+    "M12 unlisted roll / regular": { directory: true, list: null },
+    "M13 regular, then ended": { directory: false, list: null },
+    "M14 visitor, ended with the archive marker": { directory: false, list: "former" },
+    "M15 regular, person deceased": { directory: false, list: null },
+    "M16 regular, person merged": { directory: false, list: null },
+  };
+
+  describe("the getDirectory and Community list columns (EC-1, EC-22)", () => {
+    let viewer: string;
+
+    beforeAll(async () => {
+      viewer = await fx.person("Viewer");
+      await fx.membership(orgM, viewer, null, "regular");
+      const [role] = await fx.q(sql`
+        insert into app_roles (organization_id, key, name, role_kind)
+        values (${orgM}, 'ms66_manager', 'Standing fixture manager', 'custom') returning id`);
+      await fx.q(sql`insert into app_role_permissions (role_id, permission_key) values (${String(role!.id)}, 'people.manage')`);
+      await fx.q(sql`
+        insert into role_grants (organization_id, role_id, person_id, starts_on)
+        values (${orgM}, ${String(role!.id)}, ${viewer}, date '2020-01-01')`);
+    });
+
+    it("premise: every matrix row has a lists-column expectation, and the viewer holds both keys", async () => {
+      expect(Object.keys(listsColumn).sort()).toEqual(matrix.map(([name]) => name).sort());
+      expect(await fx.hasPermission(viewer, orgM, "people.manage")).toBe(true);
+      expect(await fx.hasPermission(viewer, orgM, "directory.view")).toBe(true);
+    });
+
+    it.each(matrix)("%s", async (name, build) => {
+      const e = listsColumn[name]!;
+      const membershipId = await build();
+      const [mr] = await fx.q(sql`select person_id from memberships where id = ${membershipId}`);
+      const personId = String(mr!.person_id);
+
+      const { getDirectory } = await import("@/lib/directory");
+      const { listVisitors, listInactive, listStaff, listFormer } = await import("@/lib/community");
+      const directory = await getDirectory(viewer, orgM, { page: 1, pageSize: 500 });
+      if (directory.kind !== "ok") throw new Error("directory not ok");
+      expect(directory.entries.map((x) => x.personId).includes(personId), "in getDirectory").toBe(e.directory);
+
+      const readers = { visitors: listVisitors, inactive: listInactive, staff: listStaff, former: listFormer };
+      const found: string[] = [];
+      for (const [list, reader] of Object.entries(readers)) {
+        const result = await reader(viewer, orgM, { page: 1, pageSize: 500 });
+        if (result.kind !== "ok") throw new Error(`${list} not ok`);
+        if (result.rows.some((r) => r.personId === personId)) found.push(list);
+      }
+      expect(found, "Community lists").toEqual(e.list === null ? [] : [e.list]);
+    });
+  });
+
   describe("transitions on one membership (EC-3, EC-4)", () => {
     it("visitor -> regular opens (today); -> inactive closes (today), all row open; -> regular reopens", async () => {
       const id = await m(null, "visitor");
@@ -324,6 +396,38 @@ describe.skipIf(!hasDb)("drizzle/0066 member standing: the R51 matrix (Postgres-
              presby_standing_is_member('visitor') as v, presby_standing_is_member('inactive') as i,
              presby_standing_is_member('unclassified') as u, presby_standing_is_member(null) as n`);
     expect(s).toEqual({ l: true, s: true, v: false, i: false, u: false, n: null });
+  });
+
+  it("cross-product (TypeScript mirror): membershipStanding, isMemberStanding and isMemberStandingFor equal the SQL classifier everywhere (R51)", async () => {
+    const { ENGAGEMENT_STATUSES, LISTED_ROLLS, MEMBERSHIP_STANDINGS, isMemberStanding, isMemberStandingFor, membershipStanding } =
+      await import("@/lib/membership-standing");
+    const rolls = [...LISTED_ROLLS, null, "removed", "zzz", ""];
+    const engagements = [...ENGAGEMENT_STATUSES, null, "unknown", ""];
+    const lit = (v: string | null) => (v === null ? "null" : `'${v}'`);
+    const rows = await fx.q(sql`
+      select r, e, presby_membership_standing(r, e) as standing,
+             presby_membership_is_member_standing(r, e) as member
+        from unnest(${sql.raw(`array[${rolls.map(lit).join(",")}]::text[]`)}) r,
+             unnest(${sql.raw(`array[${engagements.map(lit).join(",")}]::text[]`)}) e`);
+    expect(rows).toHaveLength(rolls.length * engagements.length);
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const roll = (row.r as string | null) ?? null;
+      const engagement = (row.e as string | null) ?? null;
+      const standing = membershipStanding(roll, engagement);
+      expect(standing, `${roll}/${engagement}`).toBe(row.standing);
+      expect(isMemberStanding(standing), `${roll}/${engagement} member`).toBe(row.member);
+      expect(isMemberStandingFor(roll, engagement), `${roll}/${engagement} composed`).toBe(row.member);
+      seen.add(standing);
+    }
+    // The grid reaches every standing, including the fail-closed arm.
+    expect([...seen].sort()).toEqual([...MEMBERSHIP_STANDINGS].sort());
+    // The SQL classifier's own closed result is the TypeScript vocabulary.
+    const [distinct] = await fx.q(sql`
+      select array_agg(distinct presby_membership_standing(r, e) order by presby_membership_standing(r, e)) as standings
+        from unnest(${sql.raw(`array[${rolls.map(lit).join(",")}]::text[]`)}) r,
+             unnest(${sql.raw(`array[${engagements.map(lit).join(",")}]::text[]`)}) e`);
+    expect((distinct!.standings as string[]).sort()).toEqual([...MEMBERSHIP_STANDINGS].sort());
   });
 
   describe("the delimited backfill blocks, re-executed (EC-2, EC-23, EC-41)", () => {

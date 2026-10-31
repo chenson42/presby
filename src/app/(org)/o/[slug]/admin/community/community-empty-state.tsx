@@ -7,8 +7,9 @@ const VIEW_NAMES: Record<CommunityView, string> = {
   members: "members",
   participants: "participants",
   visitors: "visitors",
+  inactive: "inactive people",
   staff: "staff",
-  former: "former participants",
+  former: "former people",
 };
 
 /**
@@ -39,7 +40,8 @@ export function CommunityEmptyState({
     );
   }
 
-  const addPerson = canManage && view !== "staff" && view !== "former" && view !== "members";
+  const addPerson =
+    canManage && view !== "staff" && view !== "former" && view !== "members" && view !== "inactive";
 
   return (
     <div className="rounded-lg border border-dashed border-border px-4 py-16 text-center">
@@ -78,6 +80,8 @@ function headline(view: CommunityView): string {
       return "No participants yet";
     case "visitors":
       return "No visitors yet";
+    case "inactive":
+      return "No one is marked inactive or moved away";
     case "staff":
       return "No one holds a staff position yet";
     case "former":
@@ -95,6 +99,8 @@ function detail(view: CommunityView): string {
       return "Add a person and choose Participant.";
     case "visitors":
       return "Add a visitor to keep track of who is coming.";
+    case "inactive":
+      return "People on the roll who are marked inactive stay under Members or Participants.";
     case "staff":
       return "";
     case "former":

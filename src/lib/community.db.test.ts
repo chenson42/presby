@@ -21,6 +21,7 @@ const hasDb = Boolean(
 
 describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () => {
   let listVisitors: typeof import("./community").listVisitors;
+  let listInactive: typeof import("./community").listInactive;
   let listStaff: typeof import("./community").listStaff;
   let listFormerParticipants: typeof import("./community").listFormerParticipants;
   let getCommunityBadges: typeof import("./community").getCommunityBadges;
@@ -70,12 +71,20 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
   let formerB: string;
   let endedOther: string; // ended for another reason
   let elsewhereVisitor: string; // a visitor at orgB
+  let inactiveNoRoll: string; // engagement inactive, no roll, with a connected sign-in
+  let movedAwayNoRoll: string; // engagement moved_away, no roll
+  let inactiveOnRoll: string; // active roll, marked inactive: stays under Members
+  let movedAwayOnRoll: string; // other_participant roll, marked moved away
+  let visitorUnlistedRoll: string; // visitor with an unlisted roll: standing visitor (M11)
+  let archivedVisitor: string; // archived (marker), engagement visitor
+  let archivedInactive: string; // archived (marker), engagement inactive
 
   const people_: string[] = [];
 
   beforeAll(async () => {
     ({
       listVisitors,
+      listInactive,
       listStaff,
       listFormerParticipants,
       getCommunityBadges,
@@ -231,6 +240,23 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
     await member(endedOther, orgA, "regular", { endedOn: "2026-03-01", endedReason: "moved away" });
     await member(elsewhereVisitor, orgB, "visitor");
 
+    // Increment 3a: the standing-driven lists.
+    inactiveNoRoll = await person("Rhea");
+    movedAwayNoRoll = await person("Sage");
+    inactiveOnRoll = await person("Tess");
+    movedAwayOnRoll = await person("Una");
+    visitorUnlistedRoll = await person("Vale");
+    archivedVisitor = await person("Wyn");
+    archivedInactive = await person("Xan");
+    await member(inactiveNoRoll, orgA, "inactive");
+    await member(movedAwayNoRoll, orgA, "moved_away");
+    await member(inactiveOnRoll, orgA, "inactive", { currentRoll: "active", currentRollSince: "2019-01-01" });
+    await member(movedAwayOnRoll, orgA, "moved_away", { currentRoll: "other_participant", currentRollSince: "2023-01-01" });
+    await member(visitorUnlistedRoll, orgA, "visitor", { currentRoll: "zzz" });
+    await member(archivedVisitor, orgA, "visitor", { endedOn: "2026-06-01", endedReason: "community_archived" });
+    await member(archivedInactive, orgA, "inactive", { endedOn: "2026-07-01", endedReason: "community_archived" });
+    await platform.update(people).set({ userId: proposerUserId }).where(eq(people.id, inactiveNoRoll));
+
     await platform.insert(contactMethods).values({ personId: visitorA, kind: "email", value: `alba-${stamp}@example.invalid`, isPrimary: true });
 
     await position(staffRegular, "Organist", "2025-01-01", null);
@@ -294,14 +320,15 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
     it("every reader is forbidden without people.manage, even for a directory.view holder", async () => {
       expect(await listVisitors(directoryOnly, orgA, ALL)).toEqual({ kind: "forbidden" });
       expect(await listStaff(directoryOnly, orgA, ALL)).toEqual({ kind: "forbidden" });
+      expect(await listInactive(directoryOnly, orgA, ALL)).toEqual({ kind: "forbidden" });
       expect(await listFormerParticipants(directoryOnly, orgA, ALL)).toEqual({ kind: "forbidden" });
       expect(await getCommunityStatus(directoryOnly, orgA, visitorA)).toEqual({ kind: "forbidden" });
       expect(await getCommunityBadges(directoryOnly, orgA, [visitorA, memberActive])).toEqual({});
     });
 
-    it("a people.manage holder WITHOUT directory.view still gets all three lists while the Directory is forbidden — the Community page's degrade", async () => {
+    it("a people.manage holder WITHOUT directory.view still gets all four lists while the Directory is forbidden — the Community page's degrade", async () => {
       expect((await getDirectory(managerOnly, orgA)).kind).toBe("forbidden");
-      for (const reader of [listVisitors, listStaff, listFormerParticipants]) {
+      for (const reader of [listVisitors, listInactive, listStaff, listFormerParticipants]) {
         expect((await reader(managerOnly, orgA, ALL)).kind).toBe("ok");
       }
     });
@@ -314,7 +341,8 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
       expect(result.kind).toBe("ok");
       if (result.kind !== "ok") return;
       // visitorPending stays a visitor while its proposal waits.
-      expect(idsOf(result.rows)).toEqual([visitorA, visitorB, visitorPending].sort());
+      // The unlisted-roll visitor IS a visitor now: the list asks the classifier (M11).
+      expect(idsOf(result.rows)).toEqual([visitorA, visitorB, visitorPending, visitorUnlistedRoll].sort());
       const a = result.rows.find((r) => r.personId === visitorA)!;
       expect(a).toMatchObject({
         displayName: `Alba ${surname}`,
@@ -322,8 +350,19 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
         firstVisitDate: "2026-09-13",
         positions: [],
         endedOn: null,
+        engagementStatus: "visitor",
+        endedReason: null,
+        signInConnected: false,
       });
       expect(result.rows.find((r) => r.personId === visitorB)).toMatchObject({ email: null, firstVisitDate: null });
+    });
+
+    it("excludes inactive, moved-away and archived people", async () => {
+      const result = await listVisitors(managerOnly, orgA, ALL);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      for (const id of [inactiveNoRoll, movedAwayNoRoll, inactiveOnRoll, movedAwayOnRoll, archivedVisitor, archivedInactive]) {
+        expect(idsOf(result.rows)).not.toContain(id);
+      }
     });
 
     it("another organization's visitor is never visible (RLS)", async () => {
@@ -333,14 +372,14 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
 
     it("orders by surname, first name, id and paginates with a clamped page", async () => {
       const page1 = await listVisitors(managerOnly, orgA, { page: 1, pageSize: 2 });
-      expect(page1).toMatchObject({ kind: "ok", pagination: { page: 1, pageSize: 2, total: 3, totalPages: 2 } });
+      expect(page1).toMatchObject({ kind: "ok", pagination: { page: 1, pageSize: 2, total: 4, totalPages: 2 } });
       if (page1.kind !== "ok") return;
       expect(page1.rows.map((r) => r.displayName)).toEqual([`Alba ${surname}`, `Bryn ${surname}`]);
 
       const clamped = await listVisitors(managerOnly, orgA, { page: 99, pageSize: 2 });
       expect(clamped).toMatchObject({ kind: "ok", pagination: { page: 2, totalPages: 2 } });
       if (clamped.kind !== "ok") return;
-      expect(clamped.rows.map((r) => r.displayName)).toEqual([`Fern ${surname}`]);
+      expect(clamped.rows.map((r) => r.displayName)).toEqual([`Fern ${surname}`, `Vale ${surname}`]);
 
       const low = await listVisitors(managerOnly, orgA, { page: -4, pageSize: 2 });
       expect(low.kind === "ok" && low.pagination.page).toBe(1);
@@ -352,13 +391,13 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
       const byEmail = await listVisitors(managerOnly, orgA, { ...ALL, search: `alba-${stamp}@` });
       expect(byEmail.kind === "ok" && idsOf(byEmail.rows)).toEqual([visitorA]);
       const byLast = await listVisitors(managerOnly, orgA, { ...ALL, search: surname.toUpperCase() });
-      expect(byLast.kind === "ok" && byLast.rows.length).toBe(3);
+      expect(byLast.kind === "ok" && byLast.rows.length).toBe(4);
       for (const wildcard of ["%", "_", "\\", "%b%", "a_a"]) {
         const result = await listVisitors(managerOnly, orgA, { ...ALL, search: wildcard });
         expect(result.kind === "ok" && result.rows.length, wildcard).toBe(0);
       }
       const blank = await listVisitors(managerOnly, orgA, { ...ALL, search: "   " });
-      expect(blank.kind === "ok" && blank.rows.length).toBe(3);
+      expect(blank.kind === "ok" && blank.rows.length).toBe(4);
     });
   });
 
@@ -410,14 +449,73 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
   });
 
   // ---------------------------------------------------------------------------
+  describe("listInactive (Increment 3a)", () => {
+    it("lists live people whose standing is inactive: engagement inactive or moved away and no listed roll", async () => {
+      const result = await listInactive(managerOnly, orgA, ALL);
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      expect(idsOf(result.rows)).toEqual([inactiveNoRoll, movedAwayNoRoll].sort());
+      expect(result.rows.find((r) => r.personId === inactiveNoRoll)).toMatchObject({
+        engagementStatus: "inactive",
+        signInConnected: true,
+        endedOn: null,
+        endedReason: null,
+      });
+      expect(result.rows.find((r) => r.personId === movedAwayNoRoll)).toMatchObject({
+        engagementStatus: "moved_away",
+        signInConnected: false,
+      });
+    });
+
+    it("a person on the roll who is marked inactive or moved away is NOT here (they stay under Members or Participants, G3)", async () => {
+      const result = await listInactive(managerOnly, orgA, ALL);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(idsOf(result.rows)).not.toContain(inactiveOnRoll);
+      expect(idsOf(result.rows)).not.toContain(movedAwayOnRoll);
+    });
+
+    it("excludes visitors, regular attenders, staff, ended and archived people", async () => {
+      const result = await listInactive(managerOnly, orgA, ALL);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      for (const id of [visitorA, memberActive, participant, staffAnchorNoPosition, archivedInactive, endedOther]) {
+        expect(idsOf(result.rows)).not.toContain(id);
+      }
+    });
+
+    it("searches by name and paginates", async () => {
+      const searched = await listInactive(managerOnly, orgA, { ...ALL, search: "Rhea" });
+      expect(searched.kind === "ok" && idsOf(searched.rows)).toEqual([inactiveNoRoll]);
+      const paged = await listInactive(managerOnly, orgA, { page: 1, pageSize: 1 });
+      expect(paged.kind === "ok" && paged.pagination).toMatchObject({ total: 2, totalPages: 2 });
+      expect(paged.kind === "ok" && paged.rows).toHaveLength(1);
+    });
+
+    it("never reads another organization's people (RLS)", async () => {
+      const result = await listInactive(managerOnly, orgA, ALL);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(idsOf(result.rows)).not.toContain(elsewhereVisitor);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   describe("listFormerParticipants", () => {
-    it("lists exactly the memberships ended by a participant removal, with the end date", async () => {
+    it("lists exactly the memberships ended by a participant removal or an archive (the two fixed markers), with the end date", async () => {
       const result = await listFormerParticipants(managerOnly, orgA, ALL);
       expect(result.kind).toBe("ok");
       if (result.kind !== "ok") return;
-      expect(idsOf(result.rows)).toEqual([formerA, formerB].sort());
+      expect(idsOf(result.rows)).toEqual([formerA, formerB, archivedVisitor, archivedInactive].sort());
       expect(result.rows.find((r) => r.personId === formerA)?.endedOn).toBe("2026-04-01");
       expect(result.rows.find((r) => r.personId === formerB)?.endedOn).toBe("2026-05-01");
+      expect(result.rows.find((r) => r.personId === archivedVisitor)).toMatchObject({
+        endedOn: "2026-06-01",
+        endedReason: "community_archived",
+        engagementStatus: "visitor",
+      });
+      expect(result.rows.find((r) => r.personId === archivedInactive)).toMatchObject({
+        endedReason: "community_archived",
+        engagementStatus: "inactive",
+      });
+      expect(result.rows.find((r) => r.personId === formerA)?.endedReason).toBe("other_participant_removed");
       expect(idsOf(result.rows)).not.toContain(endedOther);
       expect(idsOf(result.rows)).not.toContain(visitorEnded);
     });
@@ -437,19 +535,42 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
         visitorEnrolled,
       ]);
       expect(badges).toEqual({
-        [memberActive]: "active",
-        [participant]: "participant",
-        [visitorPending]: "waiting",
-        [visitorA]: "visitor",
-        [visitorEnrolled]: "participant",
+        [memberActive]: { roll: "active", engagement: null },
+        [participant]: { roll: "participant", engagement: null },
+        [visitorPending]: { roll: "waiting", engagement: null },
+        [visitorA]: { roll: "visitor", engagement: null },
+        [visitorEnrolled]: { roll: "participant", engagement: null },
         // staff anchor, ended people: no badge
+      });
+    });
+
+    it("a rolled person marked inactive or moved away keeps the roll badge and gains the engagement badge (G4)", async () => {
+      const badges = await getCommunityBadges(managerOnly, orgA, [
+        inactiveOnRoll,
+        movedAwayOnRoll,
+        inactiveNoRoll,
+        movedAwayNoRoll,
+        visitorUnlistedRoll,
+        archivedVisitor,
+      ]);
+      expect(badges).toEqual({
+        [inactiveOnRoll]: { roll: "active", engagement: "inactive" },
+        [movedAwayOnRoll]: { roll: "participant", engagement: "moved_away" },
+        // no roll: only the engagement badge
+        [inactiveNoRoll]: { roll: null, engagement: "inactive" },
+        [movedAwayNoRoll]: { roll: null, engagement: "moved_away" },
+        // standing visitor through an unlisted roll still reads Visitor
+        [visitorUnlistedRoll]: { roll: "visitor", engagement: null },
+        // archived: ended, no badge
       });
     });
 
     it("drops non-UUID ids, tolerates duplicates and an empty list, and never reads another organization's people", async () => {
       expect(await getCommunityBadges(managerOnly, orgA, [])).toEqual({});
       expect(await getCommunityBadges(managerOnly, orgA, ["nope", "1; drop table people"])).toEqual({});
-      expect(await getCommunityBadges(managerOnly, orgA, [visitorA, visitorA, "nope"])).toEqual({ [visitorA]: "visitor" });
+      expect(await getCommunityBadges(managerOnly, orgA, [visitorA, visitorA, "nope"])).toEqual({
+        [visitorA]: { roll: "visitor", engagement: null },
+      });
       expect(await getCommunityBadges(managerOnly, orgA, [elsewhereVisitor])).toEqual({});
     });
   });
@@ -495,6 +616,49 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
       expect(member.kind === "ok" && member.status).toMatchObject({ connection: "member", currentRoll: "active" });
     });
 
+    it("reports the engagement, the SQL standing, the connected sign-in and the end reason (3a)", async () => {
+      const connected = await getCommunityStatus(managerOnly, orgA, inactiveNoRoll);
+      expect(connected.kind === "ok" && connected.status).toMatchObject({
+        connection: "inactive",
+        engagementStatus: "inactive",
+        standing: "inactive",
+        signInConnected: true,
+        endedReason: null,
+      });
+      const moved = await getCommunityStatus(managerOnly, orgA, movedAwayNoRoll);
+      expect(moved.kind === "ok" && moved.status).toMatchObject({
+        connection: "moved_away",
+        engagementStatus: "moved_away",
+        standing: "inactive",
+        signInConnected: false,
+      });
+      const rolledInactive = await getCommunityStatus(managerOnly, orgA, inactiveOnRoll);
+      expect(rolledInactive.kind === "ok" && rolledInactive.status).toMatchObject({
+        connection: "member",
+        engagementStatus: "inactive",
+        standing: "listed",
+      });
+      const unlisted = await getCommunityStatus(managerOnly, orgA, visitorUnlistedRoll);
+      expect(unlisted.kind === "ok" && unlisted.status).toMatchObject({ connection: "visitor", standing: "visitor" });
+      const staff = await getCommunityStatus(managerOnly, orgA, staffAnchorNoPosition);
+      expect(staff.kind === "ok" && staff.status).toMatchObject({ standing: "staff_anchor", engagementStatus: "staff" });
+    });
+
+    it("the two archive connections: an archived visitor and any other archived person (the engagement is kept on the row)", async () => {
+      const visitor = await getCommunityStatus(managerOnly, orgA, archivedVisitor);
+      expect(visitor.kind === "ok" && visitor.status).toMatchObject({
+        connection: "former_visitor",
+        endedOn: "2026-06-01",
+        endedReason: "community_archived",
+        engagementStatus: "visitor",
+      });
+      const inactive = await getCommunityStatus(managerOnly, orgA, archivedInactive);
+      expect(inactive.kind === "ok" && inactive.status).toMatchObject({
+        connection: "archived",
+        endedReason: "community_archived",
+      });
+    });
+
     it("not_found for a non-UUID, an unknown id, and a person who belongs only to another organization", async () => {
       expect(await getCommunityStatus(managerOnly, orgA, "nope")).toEqual({ kind: "not_found" });
       expect(await getCommunityStatus(managerOnly, orgA, "00000000-0000-0000-0000-000000000000")).toEqual({ kind: "not_found" });
@@ -504,7 +668,7 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
 
   // ---------------------------------------------------------------------------
   describe("every live-membership shape is findable in Community", () => {
-    it("each person lands in at least one of the six views, and the ended one in Former — regression for staff-anchor people missing from Community", async () => {
+    it("each person lands in at least one of the seven views, and the ended one in Former — regression for staff-anchor people missing from Community", async () => {
       const all = { page: 1, pageSize: 200 };
       const directoryIds = async (extra: Record<string, unknown> = {}) => {
         const result = await getDirectory(viewerBoth, orgA, { ...all, ...extra });
@@ -522,6 +686,7 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
         members: await directoryIds({ rollStatuses: ["active", "baptized", "affiliate"] }),
         participants: await directoryIds({ status: "other_participant" }),
         visitors: await adminIds(listVisitors),
+        inactive: await adminIds(listInactive),
         staff: await adminIds(listStaff),
         former: await adminIds(listFormerParticipants),
       };
@@ -536,11 +701,25 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
         visitor: visitorA,
         "staff with a position": staffRegular,
         "staff anchor without a position": staffAnchorNoPosition,
+        // 3a: an inactive or moved-away person with no roll is in Inactive, not nowhere (G1).
+        "inactive, no roll": inactiveNoRoll,
+        "moved away, no roll": movedAwayNoRoll,
+        "visitor with an unlisted roll": visitorUnlistedRoll,
       };
       for (const [shape, id] of Object.entries(liveShapes)) {
         expect(viewsOf(id), shape).not.toEqual([]);
       }
       expect(viewsOf(formerA), "ended membership").toContain("former");
+      expect(viewsOf(archivedVisitor), "archived visitor").toEqual(["former"]);
+      expect(viewsOf(archivedInactive), "archived inactive person").toEqual(["former"]);
+
+      // Roll-bearing inactive people stay in the Directory (Everyone, Members or Participants) and out of Inactive.
+      expect(viewsOf(inactiveOnRoll)).toEqual(["everyone", "members"]);
+      expect(viewsOf(movedAwayOnRoll)).toEqual(["everyone", "participants"]);
+      // The Directory lists exactly standing `listed`: no visitor, inactive or staff anchor.
+      for (const id of [visitorA, visitorUnlistedRoll, inactiveNoRoll, movedAwayNoRoll, staffAnchorNoPosition]) {
+        expect(views.everyone).not.toContain(id);
+      }
 
       // DECISION-129 is untouched: the anchor is Staff-only, never in the Directory.
       expect(viewsOf(staffAnchorNoPosition)).toEqual(["staff"]);

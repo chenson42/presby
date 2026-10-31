@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/shared/pagination";
 import type { DirectoryEntry, DirectoryPagination } from "@/lib/directory";
-import type { CommunityBadge as Badge } from "@/lib/community";
+import type { CommunityBadges } from "@/lib/community";
 import type { CommunityView } from "@/lib/community-labels";
 import { CommunityBadge } from "./community-badge";
 import { CommunityEmptyState } from "./community-empty-state";
@@ -39,7 +39,7 @@ export function MembersList({
   view: CommunityView;
   entries?: DirectoryEntry[];
   rows?: CommunityRow[];
-  badges: Record<string, Badge>;
+  badges: Record<string, CommunityBadges>;
   /** Sign-in markers by person id; empty unless the viewer holds `people.manage`. */
   markers?: Record<string, Marker>;
   canManage: boolean;
@@ -83,7 +83,7 @@ export function MembersList({
                     slug={slug}
                     entry={entry}
                     canEdit={canManage}
-                    badge={badges[entry.personId]}
+                    badge={badges[entry.personId]?.roll ?? undefined}
                     marker={markers[entry.personId]}
                   />
                 </li>
@@ -92,7 +92,7 @@ export function MembersList({
           ) : (
             <CommunityRowsList
               slug={slug}
-              view={view as "visitors" | "staff" | "former"}
+              view={view as "visitors" | "inactive" | "staff" | "former"}
               rows={rows ?? []}
               markers={markers}
               canStaffLink={canStaffLink}
@@ -122,7 +122,7 @@ function MemberCard({
   slug: string;
   entry: DirectoryEntry;
   canEdit: boolean;
-  badge?: Badge;
+  badge?: CommunityBadges["roll"];
   marker?: Marker;
 }) {
   const displayName = `${entry.preferredName ?? entry.firstName} ${entry.lastName}`;
@@ -142,7 +142,7 @@ function MemberCard({
             {entry.email && (
               <p className="break-all text-sm text-muted-foreground">{entry.email}</p>
             )}
-            {badge && <CommunityBadge badge={badge} />}
+            {badge ? <CommunityBadge badge={badge} /> : null}
           </Link>
           {/* A sibling of the link, never inside it (a link in a link is invalid). */}
           {canEdit && marker && (

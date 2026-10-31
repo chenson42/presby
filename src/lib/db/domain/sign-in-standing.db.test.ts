@@ -364,7 +364,12 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
   // ===========================================================================
   // F177 condition 3: the classifier's visitor = the Community Visitors list
   // ===========================================================================
-  it("the classifier's 'visitor' equals listPredicate('visitors') over roll null and every listed roll, with exactly the one documented difference", async () => {
+  // 3a (Batch B, R51/EC-1): the Community Visitors list now ASKS the classifier
+  // (`presby_membership_standing(...) = 'visitor'`), so the one difference 2b
+  // documented (a visitor-engagement membership with an UNLISTED non-null roll:
+  // 'visitor' to the classifier, not on the old column-based list, M11) is gone.
+  // The two now agree over the whole grid, the unlisted roll included.
+  it("the classifier's 'visitor' equals listPredicate('visitors') over roll null, every listed roll and an unlisted one, with NO difference (3a: the list asks the classifier)", async () => {
     const m = COMMUNITY.match(/case "visitors":[\s\S]*?return sql`([\s\S]*?)`;/);
     expect(m, "community.ts visitors predicate").not.toBeNull();
     const predicate = m![1]!.replace(/\s+/g, " ").trim();
@@ -381,9 +386,10 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
                      (select null::uuid as merged_into_id, null::date as date_of_death) p) as list
         from (select v.*, null::uuid as person_id from (values ${sql.join(values, sql`, `)}) v(current_roll, engagement_status)) x`);
     const differ = rows.filter((r) => r.classifier !== r.list);
-    expect(differ.map((r) => `${String(r.current_roll)}/${String(r.engagement_status)}`)).toEqual(["legacy_roll/visitor"]);
-    const knownRolls = rows.filter((r) => r.current_roll !== "legacy_roll");
-    expect(knownRolls.every((r) => r.classifier === r.list)).toBe(true);
+    expect(differ.map((r) => `${String(r.current_roll)}/${String(r.engagement_status)}`)).toEqual([]);
+    // Non-vacuity: the grid really contains the old difference (an unlisted roll with engagement visitor), and it is a visitor in both.
+    const unlisted = rows.find((r) => r.current_roll === "legacy_roll" && r.engagement_status === "visitor");
+    expect(unlisted).toMatchObject({ classifier: true, list: true });
   });
 
   it("the classifier's listed rolls are exactly DIRECTORY_STATUSES, and its values and order are R50's", async () => {

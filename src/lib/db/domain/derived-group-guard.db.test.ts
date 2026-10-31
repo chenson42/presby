@@ -21,8 +21,11 @@
  * group is missing.
  *
  * Not here, by design: T-G test 3 (groupSeedPlan lists all_memberships for
- * every type, and createOrganization binds calendar_viewer) belongs to Batch
- * B, which changes the plan.
+ * every type, and createOrganization binds calendar_viewer and throws when the
+ * lookup misses) belongs to Batch B, which changed the plan. It landed in
+ * `src/lib/org-provisioning.test.ts` (the pure plan and the real database) and
+ * `src/lib/org-provisioning.plan.test.ts` (the throw-if-missing, with the
+ * database faked so no production code has to be edited to prove it).
  *
  * Run with (serial):
  *   npx dotenv -e .env.local -- npx vitest run --no-file-parallelism src/lib/db/domain/derived-group-guard.db.test.ts

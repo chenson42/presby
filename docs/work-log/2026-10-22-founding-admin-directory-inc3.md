@@ -17,7 +17,8 @@
 | 1 — Functional refinement | analyst | Complete; G1–G19; recommends split 3a/3b | READY WITH NOTES | 2026-10-25 |
 | 2 — Architectural review | architect | Complete; R48–R66; Option 1 via narrowed active_membership + all-live kind + events.view role; one standing classifier; F240 derived-row guard; F240–F244, F266–F268; DECISION-232–236, 247–249; returns F245–F249, F269–F273, DECISION-237/250 | Approved with suggestions | 2026-10-25 |
 | 3 — Technical design | tech-lead | Complete for 3a; migration 0066, D1 to D8 departures (all accepted; D4 operator-approved); batches 0, A1, A2, B, C, D. Updated 2026-10-25 for the architect's arch-A1 to arch-A4 (F245 closed in 0066; S16 declined) | Design complete (updated) | 2026-10-25 |
-| 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Batch 0 done 2026-10-25; rest waits for 2b | — | — |
+| 3 — Technical design, amendment (rebased on main 0.50.1; see "Phase 3 amendment" at the end of this log) | tech-lead | Complete. Five-kind derived list and the officer sync's attributes specified (orchestrator's required edit); 19 assumptions re-checked against the merged tree; departures D9 to D21 ruled (a 2b fixture that contradicted the kind CHECK found and fixed; 0082 shrinks D4 but 3a's baseline role is still needed; portal tiles are permission-blind; parish consumers of `deriveConnection`; group renamed "All Current Records"); F246 and F247 filed; apply order proven for both journal order and merge order; six help pages and one screenshot; one new e2e spec. One non-blocking operator question | Design complete (amended) | 2026-10-31 |
+| 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Batch 0 done 2026-10-25; 2b has merged (main 0.50.1 merged into this branch 2026-10-31). Next: A0 (orchestrator: refresh the pipeline Neon branch, probe), then A1 database-admin | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -2005,3 +2006,334 @@ Files read:
 ## Orchestrator: required Phase 3 edit before 3a Phase 4 (2026-10-25, from parish-management's QA run 1 rulings)
 
 Parish management (0068) adds a fifth derived kind, `deacons_moderator`. 3a's `derived_from` kind CHECK and its stop-block list (arch-A2) name four values and must be widened to five (`active_membership`, `all_memberships`, `session`, `diaconate`, `deacons_moderator`) or 0066/0068 cannot both apply in either order. Also: parish's 0068 now re-creates `presby_sync_derived_group()` as `security definer set search_path = public, pg_temp` so 0066's owner-only guard is not reset; 3a's 0066 body for that function must match (same signature and attributes) or the later of the two wins silently — the 3a Phase 4 writer re-scan (arch-A4) must check it. See /Users/cshenso/git/presby-platform/presby-parish/docs/work-log/2026-10-25-parish-management.md "Phase 3 amendment 1 — QA run 1 rulings".
+
+---
+
+# Phase 3 amendment — rebased on main 0.50.1 (tech-lead, 2026-10-31)
+
+*Written 2026-10-31 by tech-lead in the `presby-inc3` worktree, HEAD `f1644c9` (this branch plus `main` 0.50.1). The 2026-10-25 design above is not edited; this section amends it, and where the two differ this section wins. The feasibility check was re-run against the merged tree (Phase 3's own rule for a design whose Phase 4 starts after other pipelines merged): I read `drizzle/0065`, `0068`, `0080`, `0082` in full where they touch 3a, and `0067`, `0071`, `0072` by grep; the live `src/` consumers named below; the `presby-treasury` (0073, 0074) and `presby-photos` (0078) worktrees as they stand today, read-only; `docs/deployment.md`, `docs/decisions.md`, `docs/schema-design*.md` and `docs/STATE.md` for the numbers. **One database read:** the pipeline's own Neon branch (the `.env.local` here, endpoint `ep-delicate-sun-…`), read-only, counts and booleans only. It turned out to be a pre-0065 copy (§A6), so it cannot answer any 2b-era question; nothing below is "measured on development" and I say so each time. Production and `development` were not touched. No code, migration, seed, test or Rule 16 file was written. No real name, address or id appears below.*
+
+## A0. Verdict
+
+**Design complete (amended).** No loop-back to Phase 1 or 2. The rebase changes the build in thirteen places (D9 to D21, §A3), none of which changes what 3a is. Two items are recorded for the architect's information and are not blocking (D10b, the T list and F247; D17, F246). **One operator question, non-blocking, with a default** (§A15). Four things the orchestrator must do before Batch A1 starts (§A6, §A12). Numbers: all confirmed free (§A1).
+
+## A1. Numbers and the migration slot (jobs 3 and 5)
+
+**Migration 0066 is free.** There is no `drizzle/0066*` file on `main`, none in the `presby-treasury` (0073, 0074) or `presby-photos` (0078) worktrees, and none on any `origin/pipeline/*` branch (checked by `git ls-tree`). `drizzle/meta/_journal.json` on this branch has no idx 66 (it jumps 65 to 67; `docs/deployment.md:827` says the skip is deliberate). 3b's reserved 0069 is also free today, but see §A13 (3b must start from 0071's version of the founding-administrator key function).
+
+**DECISION-232 to 237, 247 to 250.** None is defined in `docs/decisions.md` (highest on this branch is 298). The only mention of any of them is `DECISION-236` inside DECISION-242's text (parish management's own pointer at our F240/F245 closure), which is ours. Treasury and photos worktrees: no use.
+**F240 to F249 and F266 to F273.** None is defined in `docs/schema-design*.md`, `docs/decisions.md` or `docs/TODO.md`; the only mentions are F240/F245 (parish management's pointers at our findings) and the `docs/STATE.md` range lines. Treasury and photos worktrees: no use. **Dev port 3490** appears only on our STATE rows. Nothing is taken; nothing to stop for.
+**New in this amendment, from the pre-assigned set:** **F246** and **F247** (§A12). F248, F249 and DECISION-237 stay returned.
+**Findings subsection:** the next free `docs/schema-design-2.md` subsection per STATE is `2am`; the orchestrator confirms at integration.
+
+## A2. What shipped, against what the design assumed (job 2)
+
+| # | Design assumption (2026-10-25) | As shipped on `main` | Verdict |
+|---|---|---|---|
+| 1 | 2b's R40 core returns `standing`, from a classifier introduced in 0065 with today's semantics (S13); only `visitor` is tested | `presby_membership_standing(text,text)` is `0065:696-709` (immutable SQL, no definer), identical to R50's first-match order; ACL restated at `:2687` and `:2726` (revoke from all three, grant `presby_app`). The core `presby__person_sign_in_standing` (`:792-869`) returns `standing` text. **There is no `is_visitor` boolean anywhere.** `'visitor'` is compared as a standing in exactly two function bodies: `presby_sign_in__check` check 10 (`:1067`) and `presby_connect_signed_in_account` step 10 (`:2641`) | Holds. Those two are the sites §4.10 changes |
+| 2 | The T closed list is one pinned place, the standing core | `0065:858-859`: `not (g.membership_source = 'derived' and coalesce(g.derived_from in ('active_membership', 'session', 'diaconate'), false))`. Pinned as the literal `derived_from in ('active_membership', 'session', 'diaconate')` by `MARKERS.closedList` at `src/lib/db/domain/sign-in-standing.db.test.ts:65` | Holds; A2 must change both the body and that marker (D11) |
+| 3 | The three 0065 bodies §4.10 re-creates, the four 0017/0033-era bodies §4.4 and §4.6 replace, are still the live definitions | `grep "function <name>" drizzle/*.sql`: `presby_sign_in__check`, `presby__person_sign_in_standing`, `presby_connect_signed_in_account`, `presby_membership_standing` only in 0065; `presby_sync_derived_membership_group` only in 0017; `presby_reject_derived_group_write` / `_edit` only in 0009 and 0033. **No file numbered 0066 to 0082 redefines any of them.** `presby_effective_permissions` (0010, 0048) and `presby_two_factor_required` (0080 is the last) are untouched by 3a | Holds. This is the proof that 0066 applied after 0067 to 0082 cannot overwrite a later definition (§A5) |
+| 4 | Four `sqlerrm like '%has no derived group active_membership%'` handlers (the 0059/0061/0062/0064 bodies) | Live handlers are: `presby__accept_invitation_core` (`0065:2041`, the moved acceptance body; `presby_accept_invitation` is now a thin wrapper), `presby_record_participant_action` (`0061:446`), `presby_void_participant_action` (`0061:589`), `presby_decide_roll_action` (`0062:690`). 0059 and 0064 versions are superseded | **D13**: the list in §3.1, EC-13 and Batch A2's mapping test names the core, not `presby_accept_invitation` |
+| 5 | `provisioningComplete()` checks `active_membership` | `issue.ts:304-312` unchanged; the acceptance core has its own check at `0065:1802-1806` (founding administrator). Both check only `active_membership` | Holds. The core's own check stays as it is (the pair is guaranteed by trigger, backfill and post-check); `issue.ts` also checks `all_memberships` as designed |
+| 6 | `SIGN_IN_ACK_REASONS`, `connectOutlook`, the dialog paragraph, `getSignInCard` as 2b built them | `sign-in-types.ts:66` (`["do_not_contact","visitor"]`), `:133-138` (`visitor` outlook), `:183`, `:213` (`isVisitor`); `org-invite.ts:539,564-566,598`; `send-sign-in-dialog.tsx:53,64,80,82,160`; `sign-in-card.tsx:72-73,125`; `sign-in-copy.ts:174-175,193-194`; `org-features.ts:134`. **Two sites the design did not list:** the `isVisitor` plumbing (`SignInCardState.isVisitor`, the dialog prop, the card's pass-through) and a second standing vocabulary, `MEMBERSHIP_STANDINGS` / `MembershipStanding` at `sign-in-types.ts:87-88` | **D13** |
+| 7 | "Auto-connect: step 10 is `standing is not 'visitor'`; the 2b matrix's connect column" | `0065:2641`: `if v_st.refusal is not null or v_st.standing is null or v_st.standing = 'visitor'`. The `standing is null` arm and the refusal arm stay | Holds; §A4.2 words the replacement |
+| 8 | The Community Visitors list is "engagement `visitor`, no roll" (`community.ts`) | `community.ts:112-119`, as read in 2026-10-25; unchanged | Holds. 3a's classifier-based list (`= 'visitor'`) is the one by-name change (M11), as designed |
+| 9 | `directory.ts` default branch is `current_roll in (...) or engagement_status = 'regular'` | `directory.ts:316-320`, unchanged. **New consumers that inherit it:** treasury's `isDirectoryListedPerson` calls `directoryEligibilityWhereSql(false)` (never a copy) | Holds, and the inheritance is wanted. Treasury also adds a second, hand-coded definition in SQL: **F246** (D17) |
+| 10 | `deriveConnection` consumers are the wizard, `people.ts` and the edit page | Also `src/lib/parishes.ts:302-307` (a person's tag in parish household rows) and `parishes-pure.ts:188-195` (`bucketForConnections`: member, participant, visitor, else Others), `household-row.tsx:39` | **D15** |
+| 11 | "No Directory tile on the portal home" for a visitor (§13 W1; Phase 1 Flow 8) | `src/lib/org-portal/tiles.ts:14-64,234-238`: portal tiles are **permission-blind by rule** (DECISION-162); the Directory tile always shows and opens `DirectoryForbidden` ("You don't have permission to view the directory. If you think this is a mistake, ask an administrator at {name}.", `directory-states.tsx:45-52`) | **D14**: the walk text and one release-note sentence change; no tile code changes |
+| 12 | `groupSeedPlan()` lists session, diaconate, active_membership | `org-provisioning.ts:189-228` lists four for a congregation (adds `deacons_moderator`, a `roster`-type group) and one for any other type; the inline literal union on `:194` and `:278` already includes `deacons_moderator` | **D9**: both unions gain `all_memberships`; the plan lists it explicitly for every type |
+| 13 | `DerivedFromKey` has four kinds after 3a | `src/lib/groups.ts:138-142` already holds `session`, `diaconate`, `deacons_moderator`, `active_membership` (parish management widened it) | **D9**: becomes five by adding `all_memberships` |
+| 14 | 35 fixture files create an `active_membership` group (D1's reason) | Recount with the same patterns: **39** (30 under `src/`, six in `e2e/support/` (`careers`, `domains-ui`, `giving`, `invitation`, `parish` fixtures and `seed-orgs.ts`), and `scripts/seed-dev.sql`, `scripts/sign-in-invitations/seed-dev-sign-in.sql`, `scripts/test-rls.sql`). `e2e/support/*` and the seed files are Rule 16 files | D1 stands, now with a stronger reason: editing 39 files is not available to this pipeline |
+| 15 | No fixture inserts a derived group of a kind outside the closed list (§3.3, "groups shape CHECKs") | **False.** `sign-in-standing.db.test.ts:188` inserts a derived group with `derivedFrom: "fixture_new_kind"` (through `sign-in-fixture.ts:208-233`, `groupGrant`) to test 2b's A5 "unclassified kind fails closed". `groups_derived_kind_check` refuses it | **D11**: a Phase 3 defect in the original design, closed here |
+| 16 | D4: 9 of 11 `development` organisations hold the group with no live `member` grant (F133), so the baseline widens | 0082 (`drizzle/0082:57-95`, applied to production 2026-10-28 and to `development`, `docs/deployment.md:1522-1565`) gives every organisation that has **no `member` role at all** the role (`directory.view`, `events.view`), a group-arm grant, and the Active Membership group if missing. On the pipeline branch (pre-0082) the 9 organisations have no `member` role at all (2 `member` roles exist, both granted) | **D12**: the D4 population is very likely 0 or near 0 now; re-measure (§A6). The ruling stands as operator-approved |
+| 17 | Two-factor behaviour in the Phase 6 walks | 0080 (`:58`): `users.two_factor_required` defaults to false, so a new account is **not** sent to `/totp` merely for existing; the requirement now comes from a flagged key (`roles.manage`, `role_grants.manage`, `domains.manage`, the giving keys), the congregation, or the person's own setting. R42's connect-time factor (`0065:2542-2543`, `:2648`) is unchanged | **D21**: walk text only |
+| 18 | Parish management and 0066 compose | `0068:564-604` re-creates `presby_sync_derived_group()` as `security definer set search_path = public, pg_temp` with the `deacons_moderator` arm and `revoke all ... from public, presby_app, presby_platform`; the 0068 header (`:96-104`) already states the 0066 interaction | §A4.3 |
+| 19 | Seed and fixture users and the e2e flags | `scripts/ci/e2e-baseline-flags.sql` still holds only `org_portal.home_v2`, `org_portal.reports`, `sites.public_render`; no 3a spec asserts a flag it cannot set (§A9) | Holds |
+
+## A3. Departures from the 2026-10-25 design (D9 to D21), each with a ruling
+
+D1 to D8 are unchanged. **ack** marks what the architect should read; nothing here needs the operator except as stated in §A15.
+
+| # | Departure | Ruling | Why |
+|---|---|---|---|
+| D9 | **Derived kinds are five, not four** (orchestrator's required edit, from parish QA run 1 §1.4). | `groups_derived_kind_check` lists `active_membership`, `all_memberships`, `session`, `diaconate`, `deacons_moderator`, in every place §A4.1 lists. The kind list stays closed: a sixth kind is a migration. | 0068 §8c inserts `deacons_moderator` groups. With four kinds, 0066 after 0068 (production) stops at its own stop-block and 0066 before 0068 (CI) makes 0068 fail on the CHECK |
+| D10 | **The officer sync is altered, never re-created** (orchestrator's required edit, §1.3). | Exactly as §4.4 already designed, now stated as a hard rule with a pre-check, a post-check and a catalog test (§A4.3). 0066 must not contain `create or replace function presby_sync_derived_group`. | `create or replace` resets attributes and, taken from 0062's body, would silently drop 0068's `deacons_moderator` arm; the later of the two migrations would win |
+| D10b (**ack**) | **The T exclusion list gains `all_memberships` and does NOT gain `deacons_moderator`.** | §4.10 item 1 becomes `derived_from in ('active_membership', 'all_memberships', 'session', 'diaconate')`. The Board of Deacons Moderator seat stays inside T. | `deacons_moderator` carries `parishes.assign`, an authority. Excluding it would make that person non-authority-bearing: auto-connect would skip the second factor (R42). Fail-closed is right. It has a side effect that exists on `main` today, **F247** (§A12): nobody can send a sign-in invitation to the Moderator, because the sender ceiling (`0065:1017-1023`) needs the sender to hold `parishes.assign`, a seat-only key. Not fixable in 3a without changing the core's return shape; filed |
+| D11 | **One 2b fixture contradicts the kind CHECK** (`sign-in-standing.db.test.ts:188`). | In A2, change the fixture's kind to `deacons_moderator` (a real derived kind outside the T exclusion list) and rename the case "a derived kind outside the T exclusion list counts in T (the Moderator seat; F247)". Same expected outcome (authority true, keys `roles.manage`, issue `exceeds_your_access`). Update `MARKERS.closedList` (`:65`) to the new list. | The case's purpose, "a kind nobody has classified fails closed", cannot exist in stored data once the CHECK holds (the same reasoning as D3 for `unclassified`). A real kind exercises the same SQL arm and is honest about what it now represents. The fixture seeds `groups` as the owner, so the CHECK is the only obstacle; the orgs `createInvitationFixture` builds have no `deacons_moderator` group, so the unique key is not hit |
+| D12 | **0082 changes D4's measurement, not its ruling.** | See §A6 item 3. 3a still needs `all_memberships` and `calendar_viewer`. 3a must not create, modify or rebind any `member` role, grant or group row (0082's rows included), and creates no `member` grant anywhere. P5 is re-run before apply and the release-note widening sentence is written from that number. | 0082 gives `member` (events.view, directory.view) to **everyone on `active_membership`**, which includes visitors today. 3a narrows `active_membership` to member standing, so a visitor loses `member` entirely and keeps nothing without `calendar_viewer`. 0082 therefore does not do any of what 3a's baseline role is for; it only shrinks the number of people for whom `calendar_viewer` is new |
+| D13 | **2b symbols as built** (rows 4 and 6 of §A2). | (a) Handler list: the acceptance core, the two 0061 participant functions, `presby_decide_roll_action`. (b) The sign-in TypeScript removals also cover `isVisitor` (`SignInCardState`, `org-invite.ts:598`, the dialog prop and its `showVisitor` branch, the card pass-through). (c) **One standing vocabulary:** `membership-standing.ts` exports `MEMBERSHIP_STANDINGS` and `MembershipStanding` (the 2b names; `Standing` is an alias of the type) and `sign-in-types.ts` re-exports them, so there are not two lists. (d) `connectOutlook`'s `visitor` result becomes `not_listed`, derived from `isMemberStanding`; its precedence is unchanged. (e) New outlook `connected_not_listed`: `state === "signs_in"` and a standing that is not member standing, shown under the connected lines (it replaces nothing; `connected` still returns no outlook line). | R51's rule: no module re-codes the standing vocabulary or the member test |
+| D14 | **Portal tiles are permission-blind** (§A2 row 11). | Phase 1 Flow 8, §13 W1/W2a and the release note stop saying the Directory "is not offered" or that there is "no Directory tile". The truth: the tile is there and opens "You don't have permission to view the directory." The Calendar tile opens the calendar. No tile change, no new gate (DECISION-162's rule stands). | A second permission check in the tile registry is exactly what the registry's own header forbids |
+| D15 | **Parish management consumes `deriveConnection`** (§A2 row 10). | (a) The new connections `inactive`, `moved_away`, `unclassified` render as tags on parish household rows, and a household whose only people are inactive, moved away or listed-or-staff stays in **Others** (`bucketForConnections` already falls through to it; no code change there, one new unit case pins it). (b) Two neighbour strings change (§A7 Group J). (c) Who sees the tags: viewers with `parishes.assign`, `people.manage` or `directory.view_hidden` (`parishes.ts:68-98`). This widens who sees "Inactive" and "Moved away" from `people.manage` holders to the Moderator of the Board of Deacons and `directory.view_hidden` holders. Not a new fact: they already see "Visitor", and today an inactive person is tagged "Listed", which is false (F242). | Accurate labels beat a false one. Disclosure widening is operator-visible: §A15 question 1, default yes |
+| D16 | **The new group is named "All Current Records", not "Everyone on Record".** | Replaces the literal in §4.5, Group H, the drafted DECISION-232, T-G test 1's fixed literals, `groupSeedPlan`, the staged seed patch and the help page. The derived-edit trigger forbids a later rename, so it is decided now. The Groups-list text "Everyone with a current record here" stays. | Community's "Everyone" list is the directory-listed people and excludes visitors; a group called "Everyone on Record" includes them. Two "Everyone"s with different populations on the Roles and Groups pages is a trap for an administrator. Not yet recorded in `decisions.md`, so no recorded text changes |
+| D17 (**ack**) | **Treasury carries a second, hand-coded copy of member standing in SQL** (F246). | 3a does not edit treasury. Recorded as F246 and a follow-up (§A12). | `presby-treasury/drizzle/0073:657-668`, `presby_reimbursement__is_eligible_requester`: `m.current_roll is not null or m.engagement_status in ('regular','staff')`. It agrees with member standing for every value the sanctioned writers can store, and differs only for an unlisted non-null roll text (unreachable once the roll-cache guard is in). It cannot be fixed from 0066: on a fresh `db:migrate` 0066 runs before 0073, and on production 0073 may run before 0066, so neither file can call the other's function safely |
+| D18 | **Apply order and the window** (§A5). | 0066 is hand-applied; before the code deploys no organisation is created (or the backfill block is re-run). | See §A5 |
+| D19 | **Help edits** (Rule 17; §A8). | Six published pages and one screenshot; no `pending` page, no `[help:<token>]` line. | The ordinary Rule 17 case |
+| D20 | **e2e blast radius** (§A9). | One new spec (`e2e/visitor-access.spec.ts`), plus the existing-spec list re-cut against the live tree. | F177's visible behaviour had only a database matrix and a Phase 6 walk |
+| D21 | **Phase 6 walk text** after 0080 and D14. | §A10b. | Walk text only |
+
+## A4. The orchestrator's required edit, exactly (job 1)
+
+### A4.1 The five-kind list, in every place
+
+The list is, verbatim, in this order: `'active_membership','all_memberships','session','diaconate','deacons_moderator'`.
+
+1. **§4.2 item 3 (stop-block).** "`derived_from` is not null and not in (the five)". Count only, never a value.
+2. **§4.5 step 5.** `groups_derived_kind_check check (derived_from is null or derived_from in (the five)) not valid`, then `validate constraint`. `groups_derived_pairing_check` is unchanged.
+3. **§3.2 P10, `unknown_kind`.** The five. On production, 0068 has been applied, so every congregation's `deacons_moderator` group is inside the list and the count must be 0.
+4. **Pin test, §6.3 scan 4.** The set equality now spans four texts: the list parsed from `drizzle/0066_presby_membership_standing.sql`, the CHECK in `src/lib/db/domain/groups.ts`, `DerivedFromKey` in `src/lib/groups.ts`, and the `derivedFrom` literals in both inline unions in `src/lib/org-provisioning.ts` (`:194`, `:278`; the second union is `boundToDerivedFrom` and is a subset, asserted `⊆`). It also asserts that `0068`'s inserted literal (`'deacons_moderator'`) is in the list. The deliberately offending sample is a sixth key.
+5. **Drizzle mirror, §4.12.** `src/lib/db/domain/groups.ts`: the two new CHECKs in the table callback beside `groups_derived_check`; the stale `// session | diaconate` comment at `:60` lists five kinds.
+6. **`DerivedFromKey`** gains `all_memberships` (it already has `deacons_moderator`). Expect textual conflicts at integration in `src/lib/groups.ts`, `src/lib/db/domain/groups.ts` and `src/lib/org-provisioning.ts` (parish management's side added `deacons_moderator`); resolve by keeping both sides' additions.
+7. **Comments.** The 0066 header and the column comment on `groups.derived_from` name five kinds and say that `deacons_moderator` is owned by 0068 and the other four by 0017/0033/0062 and 0066.
+
+### A4.2 The T exclusion list
+
+0066 §9, `presby__person_sign_in_standing`: the one allowed difference from the live body is the literal `derived_from in ('active_membership', 'all_memberships', 'session', 'diaconate')`. `deacons_moderator` is deliberately absent (D10b). The live-catalog scan 1 ("`derived_from in ('active_membership'` appears in exactly `{presby__person_sign_in_standing}`") stays and also asserts that function's text contains the four-name list above and not `deacons_moderator`.
+
+**Connect step 10**, exact change in `presby_connect_signed_in_account`: the condition `v_st.refusal is not null or v_st.standing is null or v_st.standing = 'visitor'` becomes `v_st.refusal is not null or v_st.standing is null or not presby_standing_is_member(v_st.standing)`. The refusal and `standing is null` arms stay, so a null standing never reaches the new function (`presby_standing_is_member(null)` would be null, and `not null` is not true). **Check 10 in `presby_sign_in__check`**: the `visitor` reason is removed; `do_not_contact` stays.
+
+### A4.3 `presby_sync_derived_group()`: signature and attributes
+
+Matches `0068:564-604`: `presby_sync_derived_group()`, `returns trigger`, `language plpgsql`, `security definer`, `set search_path = public, pg_temp`, `revoke all ... from public, presby_app, presby_platform`. 0066 §3 does exactly this, and nothing else to that function:
+
+```sql
+do $$ begin
+  if to_regprocedure('presby_sync_derived_group()') is null then
+    raise exception '0066: presby_sync_derived_group() is missing; apply 0062 first';
+  end if;
+end $$;
+alter function presby_sync_derived_group() security definer set search_path = public, pg_temp;
+revoke all on function presby_sync_derived_group() from public, presby_app, presby_platform;
+do $$ declare v_def boolean; v_cfg text[]; begin
+  select p.prosecdef, p.proconfig into v_def, v_cfg from pg_proc p where p.oid = 'presby_sync_derived_group()'::regprocedure;
+  if not v_def or v_cfg is null or not ('search_path=public, pg_temp' = any (v_cfg)) then
+    raise exception '0066: presby_sync_derived_group() is not security definer with a pinned search_path';
+  end if;
+end $$;
+```
+
+- **Either order is safe.** After 0068 (production): the `alter` changes nothing and the post-check passes. Before 0068 (a fresh `db:migrate`, which runs 0066 first): the `alter` makes 0062's invoker body a definer; 0068 later replaces the body with the same attributes. A production database that somehow still held the invoker form is repaired by the `alter`.
+- **A catalog test (A1, `derived-group-guard.db.test.ts`, run after the full migrate):** attributes equal the contract; `prosrc` contains the `when 'deacons_moderator' then 'deacons_moderator'` arm (a body re-created from 0062 would lose it; this cannot be asserted inside the migration, because on a fresh database 0068 has not run yet); `pg_get_function_identity_arguments` is empty. Behavioural: as `presby_app`, an officer term for `deacons_moderator` still materializes its roster row (`parishes.db.test.ts`, `scripts/parishes/test-rls-68.sql` 68a re-run in the A1 gate).
+- **Writer re-scan (arch-A4), recorded here from the merged tree by grep** (the implementer re-runs the live `pg_proc.prosrc` form on the refreshed branch and records it beside §3.3 item (1)):
+  - `memberships.current_roll` and `current_roll_since`: written only by `presby_sync_current_roll`, `presby_reconcile_current_roll` and the one-time backfill (all 0012, definers). 0061's two `update memberships` statements (`:417`, `:570`) write `ended_on` and `ended_reason` only. 0065's only `insert into memberships` (`:1947`, `:1955`) writes the staff anchor with a null roll inside the acceptance definer. No migration from 0066 to 0082 touches either column.
+  - `engagement_status` UPDATE: none in any migration or in `src/` (the household updates at `people.ts:981-1001` set `household_id` only). One test updates it as the owner (`src/lib/contact-methods/readers.db.test.ts:46`, `regular` to `visitor` with the roll cleared in the same statement: allowed by the guard, which tests the new row).
+  - Derived `group_memberships` rows: `presby_sync_derived_group` (0009/0062/0068) and `presby_sync_derived_membership_group` (0017), both owner-path after 0066; `groups.ts:786,861,955,1067` write managed rows or the four `public_*` columns; `sign-in-fixture.ts:235` is owner-path.
+  - `groups` rows: provisioning (`createOrganization`), 0068 §8c and 0082 (owner), `groups.ts:665` (managed rename), `invitations.db.test.ts:180,198` (owner path inside a definer / the owner connection).
+  - **No new writer is off the owner path. No Phase 3 loop-back.**
+
+## A5. Applying 0066 out of numeric order (job 3)
+
+**Safe, and why.** 0066's hard dependency is 0065 (coded as the first stop-block, unchanged). Everything 0066 replaces is last defined before 0066 (§A2 row 3); everything it alters or backfills reads columns and rows that 0067 to 0082 do not redefine. What 0067 to 0082 add that 0066 sees: the `deacons_moderator` groups (inside the five-kind list), 0082's groups and `member` roles (the backfill treats them like any organisation's), and 0068's definer sync (idempotent `alter`). Nothing numbered 0067 to 0082 reads anything 0066 creates.
+
+**Two orders, one end state (both must be rehearsed):**
+
+| Order | Where | What happens |
+|---|---|---|
+| Journal order, from empty | CI (`.github/workflows/db.yml` `npm run db:migrate`), every new scratch database | 0065, **0066**, 0067, 0068, …, 0082. At 0066 there are no organizations (`db:migrate` runs before `db:seed`): every backfill inserts nothing, every stop-block counts 0. 0068 then inserts `deacons_moderator` groups into a table that already has the five-kind CHECK, and re-creates the sync as a definer. 0082 inserts nothing. Organisations created later come from `createOrganization()` |
+| Merge order, onto a database that already has 0067 to 0082 | `development`, the refreshed pipeline branch, production | 0066 runs last. P10 sees `deacons_moderator` rows and passes. The pair backfill covers 0082's groups. The `alter function` is a no-op. 0082's `member` roles are untouched |
+
+**The residual in the second direction.** If 0082 (or any code that inserts an `active_membership` group) runs **after** 0066 on a database that has organisations, the pair trigger creates the `all_memberships` sibling but nothing creates that organisation's `calendar_viewer` role. This cannot happen in CI (no organisations at migrate time) or in production (0082 is applied; its one organisation has 0 memberships and gets both from 0066's backfill). The delimited `-- BEGIN backfill-calendar-viewer` block is idempotent and is the repair; the runbook says so.
+
+**How to apply (existing databases).** By hand, as the table owner, on the **direct** (non-pooler) endpoint, one file, one transaction, exactly the `docs/deployment.md` form:
+`psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0066_presby_membership_standing.sql`
+Never `drizzle-kit migrate` on an existing database: the ledger records only the first ten migrations (`docs/deployment.md:144-169`), so it would try to re-run 0010. After a snapshot of production, with §A6's counts read first, and with the order **apply 0066, then deploy the code** (the narrowing takes effect when 0066 is applied; tenant permissions resolve per request). **The window:** between apply and deploy, an organisation created by the old code gets the pair (the trigger) but not `calendar_viewer`; so create none in that window, and if one is created re-run the backfill block (check P11, §A6). The journal entry is idx 66, `when` 1787619173186 (idx 65's value plus one day, matching the file's own pattern), staged as `scripts/membership-standing/_journal.json.integration.patch` (the `scripts/careers/` and `scripts/public-calendar/` precedent). Apply twice on the refreshed pipeline branch; the second run changes no row (recorded).
+
+## A6. Before Batch A1: the pipeline branch, the re-measurements, D4
+
+1. **The pipeline's Neon branch is stale.** Read-only, counts and booleans only, 2026-10-31: the branch behind this worktree's `.env.local` has no `presby_membership_standing` (0065), no `presby_seat_key_group` (0068, and zero `deacons_moderator` groups), its `presby_sync_derived_group` is not a definer, and it still has the pre-0082 state (15 organisations, 11 `active_membership` groups, 9 of them with no `member` role at all). Batch A1's rehearsal needs 0065 to 0082. **Orchestrator, before A1:** reset that branch from `development` (after confirming `development` carries 0065 to 0082 with the probe below), or apply the missing files by `psql` in journal order. Probe, one row, to record:
+   ```sql
+   select to_regprocedure('presby_membership_standing(text,text)') is not null as m0065,
+          to_regprocedure('presby_seat_key_group(text)') is not null           as m0068,
+          (select count(*) from groups where derived_from = 'deacons_moderator') as seat_groups,
+          (select column_default = 'false' from information_schema.columns
+            where table_name = 'users' and column_name = 'two_factor_required') as m0080,
+          (select count(*) from organizations o where not exists
+             (select 1 from groups g where g.organization_id = o.id and g.derived_from = 'active_membership')) as orgs_without_am_group,
+          (select prosecdef from pg_proc where proname = 'presby_sync_derived_group') as sync_is_definer;
+   ```
+2. **Re-run §3.2 P1 to P10 (P10 with the five-kind list, §A4.1), P11 and P12 below, read-only, on `development` and on production**, once before A1 (to size the work) and once on deploy day. Only counts are recorded.
+   ```sql
+   -- P11 (after 0066 is applied; both must be 0): the pair and the baseline role are complete
+   select count(*) filter (where has_am is distinct from has_all)        as exactly_one_of_pair,
+          count(*) filter (where has_all and not has_role)               as pair_without_calendar_viewer
+     from (select o.id,
+                  coalesce(bool_or(g.derived_from = 'active_membership'), false) as has_am,
+                  coalesce(bool_or(g.derived_from = 'all_memberships'), false)   as has_all,
+                  exists (select 1 from app_roles r where r.organization_id = o.id and r.key = 'calendar_viewer') as has_role
+             from organizations o left join groups g on g.organization_id = o.id
+            group by o.id) s;
+   -- P12 (before and after): derived and managed groups by kind; before, no all_memberships; after, equal to active_membership
+   select coalesce(derived_from, 'managed') as kind, count(*) from groups group by 1 order by 1;
+   ```
+3. **D4 after 0082, in words.** Expected, not measured by me: on `development` and production, P5 (organisations holding the group with no live `member` grant) is now 0 or very small, because 0082 provisioned every organisation that had no `member` role at all, and the 2026-10-22 restore covered production's grant. **If P5 is 0, the release note drops the widening sentence entirely and says only what P2 and the calendar baseline do. If P5 is non-zero, the operator reads the number before apply (as already ruled) and the note states it.** An organisation that holds a `member` role with no live grant (the one remaining F133 shape) is not fixed by 0082 or by 3a, and 3a creates no `member` grant. P2's `with_sign_in` for visitor, inactive and unclassified is still the number of signed-in people who lose the directory at apply, and note that after 0082 it includes every visitor with a sign-in at an organisation that got `member` from 0082.
+
+## A7. Copy: what the amendment adds or changes
+
+Every string the amendment adds or changes. Groups A to I of §14 stand except where this section says otherwise. **An implementer who needs a string not in §14 or here stops for a ruling.**
+
+### Group J: Parishes (new in this amendment; D15)
+
+| Where | String |
+|---|---|
+| `directory/parishes/unassigned/page.tsx:144-146` (the sentence under the group toggles) | A household appears under the first group that fits: Members, then Participants, then Visitors, then Others. Others are households where everyone is only listed, on staff, or marked inactive or moved away. |
+| Parish household-row tag (`household-row.tsx:39`, from `CONNECTION_LABELS`) | Inactive · Moved away (the labels of §14 Group E; `unclassified`, "On record", is unreachable from stored rows after the CHECK) |
+| `members-states.tsx:100` (`MembersLimited`, shown to a `people.manage` holder without `directory.view`) | You can add and edit people at {name}, but browsing the full list needs directory access (the directory.view permission). Ask your stated clerk or another administrator to add it. Visitors, Inactive, Staff and Former above still work. |
+
+**R.** Nothing denies a residual or a ruling. **S.** "Others" is `bucketForConnections`'s fall-through: every connection that is not member, participant or visitor; with `ended_on` null the reachable ones are listed, staff, inactive, moved away (and `unclassified`, which the CHECK makes unreachable, so the sentence omits it); the `MembersLimited` claim "Visitors, Inactive, Staff and Former still work" is true because those four lists are `people.manage`-gated and do not read the directory (`community.ts` readers; `page.tsx:139`'s `adminView` gains `inactive`). **A.** Parish rows and the sentence: viewers with `parishes.assign`, `people.manage` or `directory.view_hidden` (`parishes.ts:68-98`); `MembersLimited`: a `people.manage` holder who lacks `directory.view`, who can read all four views named. No instruction in either that the reader cannot follow. **N.** Grep of the live tree for the neighbours: `unassigned/page.tsx:144-146` and `members-states.tsx:100` are made stale by 3a and are modify targets; `parishes-pure.ts:66-67` label "Others" is a name, not a claim, and stays; `parish-copy.ts` has no listed/visitor wording.
+
+### Group G (as-built corrections, D13)
+
+Group G's table stands with these edits: the replaced 2b string is `CONNECT_OUTLOOK_COPY.visitor` (`sign-in-copy.ts:174-175`, the key renamed `not_listed`); the retired string is `SIGN_IN_DIALOG_COPY.send.visitorAcknowledgement` (`:193-194`); the new connected-and-not-listed line is the copy of the new outlook `connected_not_listed` (D13 (e)). The "card note" the analyst quoted does not exist in 2b's shipped strings, as Group G already says. Neighbours added to Group G's N: `send-sign-in-dialog.tsx:35` (doc comment: "shown up front for a visitor") and `org-invite.ts:598` are code, not copy, and change with the removal.
+
+### Group H (rename, D16)
+
+"Seeded names": group **All Current Records**; role **Calendar viewer**. "Managed from", `all_memberships`: Everyone with a current record here (unchanged). Role-grant form, `all_memberships`: All Current Records (derived; includes visitors and inactive people).
+
+### Group I (release-note drafts) amended
+
+- **Replace** "Changes are recorded in the audit log." with "Every change is recorded." *Audience check:* the audit log is a platform-side record; an administrator is not told they can read it. *Source:* `insertAuditRow` in the same transaction (§9).
+- **Add:** "The database now refuses to let anything other than the officer record write the rosters of the Session, the Board of Deacons and the Moderator of the Board of Deacons, as announced in 0.45." *Neighbour:* `docs/release-notes/v0.45.md:40` promised that "a later release (the Community work that adds migration 0066)" closes both gaps; the 3a note must say it did, and must not say the gap was "prevented" before.
+- **Replace** the visitor line with: "Visitors who signed in under the earlier arrangement can no longer open the member directory; opening it says they don't have permission. They can still see the calendar." (D14: not "the directory is not offered").
+- **Replace** the 0.48 sentence "We plan to give visitors a narrower view in a later release" (`docs/release-notes/v0.48.md:58`) by saying the narrower view has arrived.
+- **D4 sentence:** written from P5 (§A6 item 3); omitted when P5 is 0.
+- Do-not-write list unchanged, plus: "the directory is hidden from visitors' home page" and "the database prevents a regular attender from being connected".
+
+**Copy checks for the amendment.** *Residuals:* none of the new strings denies a residual or a ruling (the Moderator and Session roster sentence says what the database now refuses; F246/F247 are not mentioned to users). *Source of truth:* Group J above; the release-note sentences name 3a's own mechanisms (§9, §A4). *Audience:* named per group. *Neighbours:* grepped `visitor`, `inactive`, `member directory`, `Everyone`, `calendar`, `Others` across `src/` non-test: new stale hits are `members-states.tsx:100` and `unassigned/page.tsx:144-146`; checked and left: `tiles.ts:227`, `participant-copy.ts:93-94`, `org-features.ts:105-111` and `turning-features-on-and-off.md:35` ("Member calendar ... to every member who has calendar access", still true), `role-grants.ts:78-84` (a comment about bootstrapping onto `active_membership`, still accurate), the Directory's own `DirectoryForbidden` copy (`directory-states.tsx:49-51`; becomes the visitor's message and is true for them).
+
+## A8. Help impact (Rule 17, job 4)
+
+Public help is part of the product. 3a changes who can see what, adds labels and roles, and retires an acknowledgement a page describes. **No `pending` page and no `[help:<token>]` line** (the ordinary case: each page is edited as `published` in the same PR); the implementer (Batch C) edits from the screens, not from this text, and sets each edited page's `verifiedIn` to the release it re-walked it against at ship. `npm run check:help` is part of Batch C's gate. Expect textual conflicts with photos and treasury at integration in `registry.ts` and in `roles-who-can-do-what.md`/`using-the-directory.md`; keep both sides.
+
+| Page (`src/content/help/`) | Edit | Strings it quotes (registry `labels` to add; each must exist in the UI as a static fragment) |
+|---|---|---|
+| `adding-people.md` (entry `adding-people`, `registry.ts:415`) | Seven views (add "Inactive"); the Visitors, Inactive and Former bullets; a new section **Marking how a person is doing** (the Engagement card, what it decides, the roll case, the dialog, the confirmations); a new section **Archiving a visitor, and restoring**; a short **Correcting a visit** paragraph; the lead paragraph gains one sentence | "Inactive", "Engagement", "Save engagement", "Regular attender", "Moved away", "Mark as regular", "Archive", "Restore", "Keep archived", "Visit details", "Save visit details", "This is a staff record, so engagement isn't tracked." |
+| `sign-in-invitations.md` (entry `sign-in-invitations`, `registry.ts:660`, keeps `requires: "signin-invites"`) | Delete the visitor bullet at `:17` (the acknowledgement is retired); "Two people need an extra step" becomes one; the "does not connect everyone" bullet at `:50` and the sentence at `:56` change from "visitor" to "a person who isn't listed in the member directory (a visitor, or someone marked inactive or moved away)"; one new paragraph says what a connected visitor sees | "I understand, send it anyway" stays (the do-not-contact case); add "Engagement" |
+| `using-the-directory.md` (`registry.ts:155`) | The "Some people are not listed at all" bullet; one sentence under the opening paragraph | none new ("You don't have permission to view the directory." already listed) |
+| `events-and-the-calendar.md` (`registry.ts:574`) | "Reading the calendar comes with the Member role" and "the calendar shows ... to its members" | "Calendar viewer" |
+| `roles-who-can-do-what.md` (`registry.ts:521`) | "A new congregation has five roles" becomes six; the table gains a row; "A group holds the last three" becomes four; the "Constitutional" sentence names the new role; the group-fill sentence | "Calendar viewer", "All Current Records" |
+| `what-presbyportal-does.md` (line 7) | "members, participants, visitors, staff or former members" | none |
+| `src/content/help/images/community-list.png` | Re-capture: the view tabs now number seven. `npm run help:shots` against a fixture-only database, own server on its own port; open the image and read it for real data before it merges | n/a |
+
+**Not edited:** `why-cant-i-see-this.md` (its "The page says 'You don't have permission to'" entry already describes a visitor opening the Directory, and the page says the role does not include it, which is true); `turning-features-on-and-off.md` (the "Member calendar" row is still true); `officers-and-the-session.md`, `getting-help.md`, the photos and reimbursements pages (no 3a text).
+
+**Draft text, for Batch C to check against the screens** (the strings are §14 Groups A to D, and Group J here):
+
+- *adding-people, views:* The page is headed "Community". It has two links at the top, "Pending approvals" and "Add person", and a row of views: "Everyone", "Members", "Participants", "Visitors", "Inactive", "Staff" and "Former".
+- *bullets:* "Visitors" lists the people you recorded as visitors. A visitor is never in the directory. "Inactive" lists people you marked inactive or moved away who are not on the roll. People on the roll stay under "Members" or "Participants", with a small "Inactive" or "Moved away" tag. "Former" lists people whose connection has ended, with the date: participants you removed and visitors or inactive people you archived.
+- *Marking how a person is doing:* Open "Edit" beside a person. The "Engagement" card says how the person is doing: "Visitor", "Regular attender", "Inactive" or "Moved away". It is for your own care. It is never reported to the presbytery or the denomination, and it does not change anyone's membership roll. It does decide who appears in the member directory and what a connected sign-in can see. A person who is not on the roll appears in the directory only as a regular attender. A person on the roll stays in the directory whatever you choose, and cannot be marked as a visitor; "Moved away" is a label, and a departure is recorded as a roll action. A staff record has no engagement. When a change would add someone to the directory or take them out, a dialog asks first, and adds a line if the person has a sign-in connected. Choose "Save engagement". Every change is recorded.
+- *Archiving:* A visitor, or a person marked inactive or moved away, can be archived from their row or their record. The dialog "Archive" says they will leave the list and appear under "Former", that their record is kept, and that you can restore it any time; it adds a line if they have a sign-in connected and another if an invitation to them is still open. Someone who still holds an office, a role or a staff position cannot be archived: end that first. A member on the roll leaves through a roll action, and a participant is removed as a participant. You cannot archive your own record. To bring someone back, open "Former" and choose "Restore".
+- *Correcting a visit:* On a visitor's record, "Visit details" lets you correct the date of the first visit and how they heard about you. Choose "Save visit details".
+- *roles:* Reading the calendar comes with the Member role and with the Calendar viewer role. The Calendar viewer role is held by the "All Current Records" group, which holds everyone with a current record at your congregation, including visitors. A person still needs a connected sign-in.
+
+## A9. e2e blast radius, re-cut against the live tree (D20)
+
+Existing specs this change alters, beyond §11's table (which stands; re-grep its line numbers at Batch C, they moved):
+
+| Existing | Asserts today | Change |
+|---|---|---|
+| `e2e/community-sign-in-invite.spec.ts:310-336` (lane 4) | the visitor card line and the acknowledgement paragraph, Send refused until ticked | the card line becomes the `not_listed` text; no acknowledgement; Send succeeds without a tick; the `do_not_contact` lane (the checkbox) is kept |
+| `e2e/no-organization-connect.spec.ts:180-194` (b) | a visitor is not connected; Check again says "Nothing new yet." | unchanged for the visitor; add inactive and moved-away rows (same outcome, same text) |
+| `e2e/hydration/community-sign-in-controls.spec.ts` | the acknowledgement checkbox is disabled until hydration | drops the visitor branch; keeps the `do_not_contact` branch |
+| `e2e/community-nav-scroll.spec.ts` (Batch 0's) | reads segment counts from the DOM | passes with seven; re-run |
+| `e2e/community-participants.spec.ts:274-283` | "six real links in one scrollable row" | seven, still one band |
+| `e2e/parishes.spec.ts:201-205`, `e2e/support/parish-fixture.ts:254` | "Hide Visitors (1)", the unassigned buckets; the fixture uses only `visitor`, `regular` and the roll | unchanged; re-run (the new tags and the Others sentence do not alter its assertions) |
+| `e2e/sign-in-connect-smoke.spec.ts`, `e2e/totp-full-login.spec.ts`, `e2e/member-calendar.spec.ts`, `e2e/member-home.spec.ts`, `e2e/designation-revoke.spec.ts`, `e2e/invitation-*.spec.ts` | login, members, fixtures that create groups | regression lane; re-run |
+
+**New spec:** `e2e/visitor-access.spec.ts` (desktop and 360px). A visitor with a connected sign-in (built on the owner connection with the existing community and sign-in fixture helpers; no person-id range is needed because the helpers pick their own and no edit to `e2e/support/*` is made) opens `/o/<slug>/calendar` and sees the calendar, opens `/o/<slug>/directory` and sees "You don't have permission to view the directory.", and on `/o/<slug>` sees the Directory tile and the Calendar tile (D14). **Flags it depends on:** `org_portal.events` (global; the spec captures, sets and restores it through `e2e/support/flags.ts`, exactly as `member-calendar.spec.ts:32-46` does) and the organisation's `org_portal.calendar` toggle (set by the spec's own SQL and restored). No key is added to `scripts/ci/e2e-baseline-flags.sql`. The new `e2e/community-engagement.spec.ts` flag list of §11 stands.
+
+## A10. Edge cases added by the amendment (each cites its test or says unverified)
+
+| # | Case | Pinned by |
+|---|---|---|
+| EC-36 | The same end state from journal order (from empty, `db:migrate`) and from merge order (0067 to 0082 already applied); second run changes no row | A1 rehearsal on both a from-empty scratch database (the `db.yml` recipe) and the refreshed branch (recorded in Phase 4 notes); CI's `db.yml` migrate for the first |
+| EC-37 | 0066 after 0068: P10 and the stop-block accept `deacons_moderator`; the CHECK validates; a sixth kind is refused | T-G test 5 extended with a `deacons_moderator` insert and a sixth-kind refusal; the rehearsal on the refreshed branch |
+| EC-38 | The officer sync is a definer with a pinned search path and still carries the `deacons_moderator` arm; an officer term for each of session, diaconate and `deacons_moderator` materializes under `presby_app` | T-G (attributes and `prosrc` arm); `parishes.db.test.ts`; `scripts/parishes/test-rls-68.sql` 68a re-run |
+| EC-39 | A derived group of the Moderator kind counts in T (authority-bearing, `exceeds_your_access` for a sender who lacks `parishes.assign`); `all_memberships` does not | `sign-in-standing.db.test.ts` (the renamed D11 case); T-M M1 under the connect column |
+| EC-40 | A visitor with a sign-in at an organisation that 0082 baselined has `events.view` and not `directory.view` | T-M M8 (the matrix creates its organisation through `createOrganization()`, so `member` and `calendar_viewer` come from provisioning) |
+| EC-41 | An `active_membership` group inserted after 0066 (the 0082 shape) gets its sibling by trigger and no `calendar_viewer`; re-running the delimited backfill block adds the role and nothing else | `org-baseline-backfill.db.test.ts` re-run unedited (it counts only `active_membership` groups and the role count of one organisation, both unchanged); T-M block re-execution case |
+| EC-42 | Parish household rows tag an inactive or moved-away person with the new label, and a household of only such people sits in Others | `parishes-pure.test.ts` (one new `bucketForConnections` case); `household-row` RTL (Batch C); *the Others sentence's truth against the DB: unverified beyond the unit case* |
+| EC-43 | The visitor sees the Directory tile, the permission message there, and the calendar | `e2e/visitor-access.spec.ts` (new); T-M M8 for the underlying permissions |
+| EC-44 | A visitor recorded as a ruling elder or other officer (F366's state) keeps `events.view`, has no `directory.view`, holds the Session group's `roll.approve` through the roster row, and cannot be archived (`holds_position`) | T-M row **M17** (owner-path fixture, with a comment that it documents F366 and is not design intent); `community-engagement.db.test.ts` archive refusal |
+| EC-45 | Apply then old code, create-org window: an organisation created by old code between apply and deploy has the pair and no `calendar_viewer`; P11 shows it | `createOrganization()` old-plan case in the A1 old-code lane: *unverified in automation*, covered by P11 and the runbook |
+
+### A10b. Phase 6 walk text (D14, D21; the walk list of §13 otherwise stands)
+
+- **W1** pages listed after 0066: the Directory **tile still shows** on `/o/<slug>` and opens "You don't have permission to view the directory."; the calendar opens; `/home` is unchanged. The account is created by the invitation fixture; **no `/totp` step is expected** (0080) unless the organisation requires two-factor or the person holds a flagged key.
+- **W2a** (moved away, connected): the person reloads and sees the same: the calendar opens, the Directory says no permission.
+- **W2b** unchanged (no `/totp` expected for the proven, unlinked account).
+- The 3b walk's `/totp` then `/account/2fa` then Check again for an authority-bearing deacon is unchanged: that step is R42's connect-time factor, not the sign-in default.
+
+## A11. F366 (open bug, not part of this pipeline, not fixed here)
+
+`startOfficerTerm` (`src/lib/officers.ts`) checks only that the person has an open `memberships` row, so a visitor can be recorded as a ruling elder or deacon. What 3a does with that, so nobody is surprised: the classifier does not look at officer terms; a visitor-elder has standing `visitor`, an open Session roster row (a different derived group), `roll.approve` through `session_member`, no `directory.view` after 0066, and `events.view` through `calendar_viewer`. 3a's archive refuses them (`holds_position`: `memberships_guard_end` and the pre-check both see the open term), and 2b's sender ceiling and `officers.manage` check apply as for any seat. Nothing in 3a makes F366 worse; nothing in 3a depends on its fix. T-M row M17 (EC-44) documents the state; a fix to `startOfficerTerm` needs no change to 3a.
+
+## A12. Findings, decision text changes, and lines for the orchestrator
+
+**Findings (from the pre-assigned F240 to F249 set; both are `paper`-class follow-ups, neither blocks 3a):**
+- **F246.** Treasury's `presby_reimbursement__is_eligible_requester` (`presby-treasury/drizzle/0073:657-668`) is a hand-coded second definition of member standing in SQL, against R51's "no consumer re-codes the predicate". It agrees with `presby_membership_is_member_standing` for every value the sanctioned writers store and differs only for an unlisted non-null roll text. The R51 live-catalog scans do not see it (it uses neither the four-roll list nor `engagement_status = 'regular'`). Fix, after both 3a and treasury are on `main` and applied: a forward migration (or an in-place edit if 0073 is still unreleased and unapplied) replacing the body with `presby_membership_is_member_standing(m.current_roll, m.engagement_status)`; it cannot be done from 0066 or from 0073 alone (§A3 D17). **Deferred; accepted by tech-lead, for the orchestrator to confirm at integration.** A `docs/TODO.md` line.
+- **F247.** On `main` today, the Moderator of the Board of Deacons seat counts in the 2b set T (a derived kind outside the closed list, `0065:858-859`), so an invitation to that person is refused `exceeds_your_access` for every sender (the key is seat-only; no sender holds it), while auto-connect works with a second factor. Fails closed; no access is gained. A fix needs a seat flag on the core (like `session_seat`), a changed return shape and a new refusal, so it is its own design. **Deferred; accepted by tech-lead; the operator may want it scheduled.** A `docs/TODO.md` line. 3a records it and keeps T as it is (D10b).
+
+**Decision text, for the orchestrator to write at integration (newest first, as drafted in §15.2, with these changes):**
+- **DECISION-236:** the kind list is the five; the officer sync is changed with `alter function` and 0068 already re-creates it as a definer (so either order of 0066 and 0068 ends the same); the "The Court Is Not a Group" statement then covers the Moderator seat's roster too. CLAUDE.md's wording needs no change; the orchestrator may append ", and the seat group's roster is written only by the officer sync (0066, DECISION-236)" as parish management's log suggested.
+- **DECISION-232:** the group is "All Current Records" (D16); the reach of the baseline is stated with the re-run P5 and says 0082 provisioned `member` everywhere it was missing, and that `calendar_viewer` is still needed because 0082's role is bound to `active_membership`.
+- **DECISION-233:** one sentence: the TypeScript vocabulary has one owner (`membership-standing.ts`), and `sign-in-types.ts` re-exports it (D13). Treasury's second copy is F246.
+- DECISION-234, DECISION-235: unchanged.
+
+**Lines for `docs/TODO.md` (orchestrator, at integration, Rule 10):** F246 follow-up; F247 follow-up; a dependency line "3a after treasury and photos: expect textual conflicts in `src/lib/directory.ts`, `src/lib/db/domain/people.ts` and the community edit page, and in the help registry; re-run the treasury and photos DB suites against 0066"; and update the existing line 598 ("Parish seat group roster ... until 0066") to Done at 3a's integration.
+
+## A13. Batches and implementation order, re-confirmed (job 6)
+
+The batch plan of §8 stands. Changes:
+
+| Batch | Implementer | Change from §8 |
+|---|---|---|
+| **A0** (new, before A1) | orchestrator, with the database-admin reading the result | Refresh the pipeline Neon branch from `development` (§A6 item 1), record the probe, run P1 to P12 as far as they apply pre-apply. Gate: the probe row shows 0065 and 0068 present, `sync_is_definer` true |
+| **0** | ux-developer | Done 2026-10-25. Re-run its spec when the seventh segment lands |
+| **A1** | **database-admin** (the first batch to run) | 0066 sections 1 to 8 and 10 with D9 and D10 (§A4.1, §A4.3). The gate adds: `parishes.db.test.ts` and `scripts/parishes/test-rls-68.sql` 68a re-run; `org-baseline-backfill.db.test.ts` re-run; both application orders rehearsed (§A5, EC-36); the A4 writer re-scan recorded; the staged assets cut against the **merged** tree (the staged `test-rls.sql` and `seed-dev.sql` patches are cut now, not carried from 2026-10-25; the journal patch per §A5); if treasury and photos have merged by then, their DB suites run against 0066 |
+| **A2** | database-admin | Section 9 with D10b (§A4.2), the check and connect edits, **and D11** (the fixture kind and `MARKERS.closedList`); the 2b parity golden is byte-identical (`git diff --exit-code src/lib/onboarding/designation-parity.golden.json`: 0066 changes no key; the golden's baseline is the merged tree, which already includes careers' keys) |
+| **B** | api-developer | §8 scope plus D13 (the `isVisitor` removals, one standing vocabulary, `not_listed`, `connected_not_listed`), D9's two literal unions and the `DerivedFromKey` widening, D16's literal, the `parishes-pure.test.ts` case, `adminView` including `inactive` |
+| **C** | ux-developer | §8 scope plus the Group J strings, the parish tag, the help pages and registry labels (§A8), `community-list.png` is Batch D's |
+| **D** | full-stack-developer | §8 scope plus `e2e/visitor-access.spec.ts`, the re-cut existing specs (§A9), the `community-list.png` re-capture, a final read of the staged assets and the help diff against the merged tree |
+
+**Implementation order, unchanged in shape:** A0, nav (done), schema (A1, A2), library and actions (B), UI and help (C), audit keys (with B), e2e and screenshot (D), release notes at Phase 6 via `/release-notes`, and at ship the Rule 10, 14 and 17 housekeeping (TODO, functionality map, `verifiedIn`). No `FEATURE_CATALOG`, permission seed or flag (unchanged).
+
+**3b carry-notes from this rebase** (3b's design lives in `-inc3b`; recorded so they are not lost): its 0069 re-creates `presby_founding_administrator_permission_keys`, whose latest definition is **0071** (careers added `careers.manage` and `careers.applicants`), not 0061 or 0068: start from 0071's body or 0069 silently drops those keys on a production that applied 0071 first. R61/R62's `followups.*` keys and 0080: `requires_two_factor` is now live for six keys (`docs/deployment.md`, 0080), so S2/S3 "tracked" is superseded; 3b rules afresh whether `followups.manage` is flagged. 3b's migration number must be re-confirmed at its kickoff (0075 is careers' Increment 2, 0081 reserved).
+
+## A14. Carry-forward additions
+
+The §16 table stands. Rows added by this amendment:
+
+| Requirement | Addressed here, or *deferred* (who accepted) |
+|---|---|
+| Orchestrator's required edit: five kinds in the CHECK and stop-block | §A4.1, D9 |
+| Orchestrator's required edit: 0066's `presby_sync_derived_group()` matches 0068's signature and attributes; the arch-A4 re-scan checks it | §A4.3, D10, EC-38; re-scan recorded in §A4.3 |
+| Parish QA run 1 §1.3 (0068's definer sync, either order) and §1.4 (five kinds) | §A4.1, §A4.3, §A5 |
+| Phase 3 rule: re-run the feasibility check when Phase 4 starts after other pipelines merged | §A2 (19 rows), §A3; row 15 is a defect found and closed (D11) |
+| Rule 17 help impact | §A7 (strings), §A8 (pages), Batch C and D |
+| 0082 / DECISION-298: what 3a must not duplicate or contradict | D12; §A6 item 3 |
+| 0080: the walks and the 2FA wording | D21, §A10b |
+| 2b R40 as built | §A2 rows 1, 2, 7; D13 |
+| Numbers confirmed free | §A1 |
+| F366 interaction noted, not fixed | §A11, EC-44 |
+| New: F246 (treasury's second member-standing copy) | *Deferred; accepted by tech-lead, orchestrator to confirm* |
+| New: F247 (Moderator seat in T) | *Deferred; accepted by tech-lead, operator may schedule* |
+| v0.45 release note's promise that 0066 closes the roster gaps | §A7 Group I |
+
+## A15. Operator question (non-blocking; the default applies if no answer comes)
+
+1. **Parish management's household rows tag each person with how they are connected. After 3a an inactive or moved-away person will be tagged "Inactive" or "Moved away" there (today they are tagged "Listed", which is not true), and the Moderator of the Board of Deacons, anyone who holds the directory-hidden permission, and anyone who manages people will see those tags. They already see "Visitor". Is it acceptable that the Moderator of the Board of Deacons sees "Inactive" and "Moved away"? Default: yes.**
+
+Two items I ruled myself rather than ask: the group's name (D16), and that the Moderator seat stays inside the sign-in authority set (D10b). The D4 widening is already approved; its size is re-measured, not re-asked.
+
+## A16. Implementer, status, handoff
+
+**Implementers:** unchanged, per batch (§A13). **The first batch to run is A1, database-admin**, after the orchestrator's A0. Batch 0 (ux-developer) is done.
+
+## Per-Phase Status row (amendment)
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 3 — Technical design (amendment, rebased on main 0.50.1) | tech-lead | Feasibility re-run against the merged tree (19 assumptions re-checked). Five-kind list and the sync function's attributes specified exactly (D9, D10); T list gains `all_memberships` only, F247 filed (D10b); one 2b fixture contradicting the kind CHECK found and fixed (D11); 0082 changes D4's size not its ruling (D12); 2b symbols as built (D13); portal tiles are permission-blind, walk text corrected (D14); parish consumers of `deriveConnection` (D15); group renamed "All Current Records" (D16); treasury's second member-standing copy filed as F246 (D17); apply order and window (D18); six help pages and one screenshot (D19); one new e2e spec (D20). 0066 confirmed free; DECISION-232 to 237, 247 to 250, F240 to F249, F266 to F273 and port 3490 confirmed unused. One non-blocking operator question. | Design complete (amended) | 2026-10-31 |
+
+**Handoff, next agent: the orchestrator**, who (1) refreshes the pipeline Neon branch from `development` and records the probe (A0); (2) runs §A6 items 2 and 3 on `development` and production; (3) puts §A15 to the operator; (4) at integration writes DECISION-232 to 236 with the §A12 changes, F240 to F247, and the TODO lines. Then **Batch A1 (database-admin)**.
+
+Files read for this amendment (under `/Users/cshenso/git/presby-platform/presby-inc3` unless noted): this work-log; `CLAUDE.md`; `drizzle/0065` (`:670-1090`, `:1790-1810`, `:1935-1962`, `:2465-2764`), `0068` (header, `:270-300`, `:395-440`, `:479-515`, `:540-690`), `0080`, `0082`, and by grep `0059` to `0082`; `drizzle/meta/_journal.json`; `docs/deployment.md` (migrations, 0067, 0082), `docs/decisions.md`, `docs/schema-design-2.md`, `docs/STATE.md`, `docs/release-notes/v0.45.md` and `v0.48.md`; `src/lib/{community,community-labels,directory,groups,parishes,parishes-pure,org-provisioning,org-features,role-grants,people}.ts`, `src/lib/onboarding/{sign-in-types,sign-in-copy,org-invite,issue,no-organization-copy}.ts`, `src/lib/org-portal/tiles.ts`, `src/lib/help/registry.ts`, `src/lib/db/domain/{sign-in-standing.db.test,org-baseline-backfill.db.test,invitations.db.test}.ts`, `src/lib/testing/sign-in-fixture.ts`; the community, groups, roles, directory and parishes route trees named; the seven help pages named; `e2e/` specs named; `scripts/ci/e2e-baseline-flags.sql`; and, read-only, `/Users/cshenso/git/presby-platform/presby-treasury/drizzle/0073`, `0074` and `src/lib/directory.ts`, and `/Users/cshenso/git/presby-platform/presby-photos/drizzle/0078` and `src/lib/directory.ts`. One read-only counts-and-booleans connection to the pipeline branch (§A6 item 1).

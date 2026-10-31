@@ -22,12 +22,17 @@ import {
   inputTags,
   isNoOwnerConnectionZone,
   mayNameReimbursementTables,
-  SHARP_FILE,
+  SHARP_FILES,
 } from "./check-treasury-boundaries.mjs";
 
 /** @param {string} path @param {string} content */
 const f = (path, content) => ({ path, content });
 const rules = (violations) => violations.map((v) => v.rule);
+
+/** The closed list of two sharp importers (T5, DECISION-312), and a clean version of each. */
+const [PHOTO_IMAGE, SANITIZE] = SHARP_FILES;
+const CLEAN = 'import "server-only";\nimport sharp from "sharp";\nexport const x = sharp;';
+const cleanPair = () => SHARP_FILES.map((p) => f(p, CLEAN));
 
 const MEMBER = "src/app/(org)/o/[slug]/reimbursements";
 const ADMIN = "src/app/(org)/o/[slug]/admin/reimbursements";
@@ -257,7 +262,12 @@ describe("T4 - a file that builds or sends a reimbursement notice names no money
 
 // ── T5 - sharp is imported at runtime by one file ───────────────────────────
 
-describe("T5 - sharp is imported at runtime only by src/lib/storage/image-sanitize.ts", () => {
+describe("T5 - sharp is imported at runtime only by the closed list of two (DECISION-312)", () => {
+  it("the list is the two re-encoders, sorted", () => {
+    expect(SHARP_FILES).toEqual(["src/lib/person-photos/image.ts", "src/lib/storage/image-sanitize.ts"]);
+    expect([...SHARP_FILES].sort()).toEqual(SHARP_FILES);
+  });
+
   it.each([
     ['import sharp from "sharp";'],
     ["import sharp from 'sharp';"],
@@ -274,10 +284,11 @@ describe("T5 - sharp is imported at runtime only by src/lib/storage/image-saniti
     expect(rules(v)).toEqual(["T5"]);
   });
 
-  it("allows the one file, a type-only import anywhere, a test, and a comment", () => {
+  it("allows both listed files, a type-only import anywhere, a test, and a comment", () => {
     expect(
       checkTreasuryBoundaries([
-        f(SHARP_FILE, 'import sharp from "sharp";'),
+        f(PHOTO_IMAGE, 'import sharp from "sharp";'),
+        f(SANITIZE, 'import sharp from "sharp";'),
         f("src/lib/reimbursement/receipts.ts", 'import type { Sharp } from "sharp";'),
         f("src/lib/storage/image-sanitize.test.ts", 'import sharp from "sharp";'),
         f("src/lib/reimbursement/x.ts", '// import sharp from "sharp";'),
@@ -285,36 +296,91 @@ describe("T5 - sharp is imported at runtime only by src/lib/storage/image-saniti
     ).toEqual([]);
   });
 
+  it("flags a third importer next to the two listed files", () => {
+    const v = checkTreasuryBoundaries([...cleanPair(), f("src/lib/person-photos/store.ts", 'import sharp from "sharp";')]);
+    expect(rules(v)).toEqual(["T5"]);
+    expect(v[0].file).toBe("src/lib/person-photos/store.ts");
+    expect(v[0].message).toMatch(/DECISION-312/);
+  });
+
   it("does not mistake another package whose name starts with sharp", () => {
     expect(checkTreasuryBoundaries([f("src/lib/x.ts", 'import s from "sharp-thing";')])).toEqual([]);
   });
 
-  describe("exactly one: the allowed file must exist and import it at runtime", () => {
-    it("passes when the one file imports sharp, however it is written", () => {
+  describe("exactly these two: each listed file must exist, import it at runtime, and stay clean", () => {
+    it("passes when both files import sharp, however it is written", () => {
       for (const src of ['import sharp from "sharp";', 'const sharp = require("sharp");', 'const s = await import("sharp");']) {
-        expect(checkSharpHasItsImporter([f(SHARP_FILE, src)])).toEqual([]);
+        const files = SHARP_FILES.map((p) => f(p, `import "server-only";\n${src}`));
+        expect(checkSharpHasItsImporter(files), src).toEqual([]);
       }
     });
 
-    it("fails when the file is missing from the tree", () => {
-      const v = checkSharpHasItsImporter([f("src/lib/storage/blob-store.ts", "export {};")]);
+    it.each(SHARP_FILES.map((p, i) => [p, i]))("fails when %s is missing from the tree", (listed, i) => {
+      const others = cleanPair().filter((file) => file.path !== listed);
+      const v = checkSharpHasItsImporter([...others, f("src/lib/storage/blob-store.ts", "export {};")]);
       expect(rules(v)).toEqual(["T5"]);
-      expect(v[0].file).toBe(SHARP_FILE);
+      expect(v[0].file).toBe(SHARP_FILES[i]);
       expect(v[0].message).toMatch(/does not exist/);
     });
 
-    it("fails when the file exists but no longer imports sharp (or only its types, or only in a comment)", () => {
+    it("fails for both files when neither is in the tree", () => {
+      const v = checkSharpHasItsImporter([f("src/lib/storage/blob-store.ts", "export {};")]);
+      expect(v.map((x) => x.file)).toEqual(SHARP_FILES);
+    });
+
+    it.each(SHARP_FILES)("fails when %s exists but no longer imports sharp (or only its types, or only in a comment)", (listed) => {
       for (const src of ["export const x = 1;", 'import type { Sharp } from "sharp";', '// import sharp from "sharp";']) {
-        const v = checkSharpHasItsImporter([f(SHARP_FILE, src)]);
+        const files = cleanPair().map((file) => (file.path === listed ? f(listed, `import "server-only";\n${src}`) : file));
+        const v = checkSharpHasItsImporter(files);
         expect(rules(v), src).toEqual(["T5"]);
+        expect(v[0].file).toBe(listed);
         expect(v[0].message).toMatch(/no longer imports/);
       }
     });
 
-    it("the whole-tree check is the main check plus this one, so an extra importer AND a missing one both show", () => {
+    it.each(SHARP_FILES)("fails when %s does not begin with import \"server-only\"", (listed) => {
+      for (const content of ['import sharp from "sharp";', '// header\nimport "server-only";\nimport sharp from "sharp";']) {
+        const files = cleanPair().map((file) => (file.path === listed ? f(listed, content) : file));
+        const v = checkSharpHasItsImporter(files);
+        expect(rules(v), content).toEqual(["T5"]);
+        expect(v[0].message).toMatch(/server-only/);
+      }
+    });
+
+    it.each(SHARP_FILES)("fails when %s calls withMetadata()", (listed) => {
+      const dirty = `${CLEAN}\nexport const y = sharp(Buffer.alloc(0)).withMetadata().jpeg();`;
+      const files = cleanPair().map((file) => (file.path === listed ? f(listed, dirty) : file));
+      const v = checkSharpHasItsImporter(files);
+      expect(rules(v)).toEqual(["T5"]);
+      expect(v[0].file).toBe(listed);
+      expect(v[0].line).toBe(4);
+      expect(v[0].message).toMatch(/withMetadata/);
+    });
+
+    it.each([
+      "withMetadata",
+      "keepMetadata",
+      "keepExif",
+      "withExif",
+      "withExifMerge",
+      "keepIccProfile",
+      "withIccProfile",
+      "keepXmp",
+      "withXmp",
+    ])("fails on %s in a listed file", (name) => {
+      const files = [f(PHOTO_IMAGE, `${CLEAN}\nexport const y = sharp(b).${name}({});`), f(SANITIZE, CLEAN)];
+      expect(rules(checkSharpHasItsImporter(files))).toEqual(["T5"]);
+    });
+
+    it("lets a comment mention withMetadata (the docstrings say it is never called)", () => {
+      const documented = `${CLEAN}\n// \`.withMetadata()\` is never called\n/* withXmp too */`;
+      expect(checkSharpHasItsImporter([f(PHOTO_IMAGE, documented), f(SANITIZE, documented)])).toEqual([]);
+    });
+
+    it("the whole-tree check is the main check plus this one, so an extra importer AND missing ones both show", () => {
       const v = checkTreasuryBoundariesTree([f("src/lib/reimbursement/receipts.ts", 'import sharp from "sharp";')]);
-      expect(rules(v)).toEqual(["T5", "T5"]);
-      expect(v.map((x) => x.file)).toEqual(["src/lib/reimbursement/receipts.ts", SHARP_FILE]);
+      expect(rules(v)).toEqual(["T5", "T5", "T5"]);
+      expect(v.map((x) => x.file)).toEqual(["src/lib/reimbursement/receipts.ts", ...SHARP_FILES]);
     });
   });
 });
@@ -322,10 +388,10 @@ describe("T5 - sharp is imported at runtime only by src/lib/storage/image-saniti
 // ── The scan itself ─────────────────────────────────────────────────────────
 
 describe("the real repository", () => {
-  it("is clean, and image-sanitize.ts is the one file importing sharp (T5, exactly one)", async () => {
+  it("is clean, and person-photos/image.ts and image-sanitize.ts are the two files importing sharp (T5, DECISION-312)", async () => {
     const files = await collectFiles();
     expect(checkTreasuryBoundariesTree(files)).toEqual([]);
-    expect(files.some((file) => file.path === SHARP_FILE)).toBe(true);
+    for (const listed of SHARP_FILES) expect(files.some((file) => file.path === listed)).toBe(true);
   });
 
   it("scans real files (the scan is not vacuous) and planting one violation per rule in the real tree makes it fail", async () => {

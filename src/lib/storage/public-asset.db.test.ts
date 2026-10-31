@@ -17,6 +17,15 @@
  * the photo IFF the key is in `presby_public_staff_roster` UNION
  * `presby_public_committee_roster`, so the page and the predicate cannot drift.
  *
+ * drizzle/0078 (person photos, F331): photos are seeded as person_photos plus
+ * a website designation (src/lib/testing/person-photo-fixture.ts) with the
+ * org's `org_portal.person_photos` toggle on; people.photo_key is retired and a
+ * write to it is refused. Two 0072 cases are now UNREPRESENTABLE rather than
+ * served-or-not, and are asserted as such: a photo stored public_site (the FK
+ * pins private) and a photo key stored in upper case (the key is a uuid
+ * column). The merged person is withheld by 0078 (the roster says so, and the
+ * parity test follows the roster).
+ *
  * Run with:
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/storage/public-asset.db.test.ts
  */
@@ -24,6 +33,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sql, type SQL } from "drizzle-orm";
 import type { GivingFixture } from "@/lib/testing/giving-fixture";
+import { seedPersonPhoto, setPersonPhotosToggle } from "@/lib/testing/person-photo-fixture";
 
 vi.mock("server-only", () => ({}));
 
@@ -52,7 +62,7 @@ describe.skipIf(!hasDb)("F289 the public asset door (Postgres-backed)", () => {
   const tag = `D1${Date.now().toString(36)}`;
   const q = async (query: SQL): Promise<Row[]> => fx.rowsOf(await fx.platform.execute(query));
 
-  /** Inserts a blob under an explicit id (a photo key IS the blob id). */
+  /** Inserts a blob, optionally under an explicit id. Person photos go through person-photo-fixture. */
   async function blob(o: {
     org?: string;
     id?: string;
@@ -82,17 +92,21 @@ describe.skipIf(!hasDb)("F289 the public asset door (Postgres-backed)", () => {
   // ---- the people matrix -----------------------------------------------------
   interface Person {
     id: string;
-    photo: string; // the blob id AND the photo_key
+    photo: string; // the master's blob id: what the roster projects as photo_key
     label: string;
   }
   const people: Record<string, Person> = {};
 
-  async function person(name: string, opts: { audience?: "public_site" | "private"; photoKeyCase?: "upper" } = {}): Promise<Person> {
+  async function person(name: string, opts: { imageKey?: string } = {}): Promise<Person> {
     const id = await fx.makePerson(name, tag);
-    const photo = randomUUID();
-    await blob({ id: photo, audience: opts.audience ?? "private" });
-    await q(sql`update people set photo_key = ${opts.photoKeyCase === "upper" ? photo.toUpperCase() : photo} where id = ${id}`);
     await fx.addMember(org, id);
+    const { imageKey: photo } = await seedPersonPhoto(fx.platform, {
+      organizationId: org,
+      personId: id,
+      userId: fx.actingUserId,
+      imageKey: opts.imageKey,
+      purposes: ["website"],
+    });
     const p = { id, photo, label: name };
     people[name] = p;
     return p;
@@ -125,6 +139,7 @@ describe.skipIf(!hasDb)("F289 the public asset door (Postgres-backed)", () => {
     suspendedOrg = await fx.makeOrg("suspended");
     provisioningOrg = await fx.makeOrg("provisioning");
     slug = await liveSite(org);
+    await setPersonPhotosToggle(fx.platform, org, true);
     otherSlug = await liveSite(otherOrg);
     await liveSite(inactiveOrg);
     await q(sql`update organizations set status = 'inactive' where id = ${inactiveOrg}`);
@@ -211,20 +226,15 @@ describe.skipIf(!hasDb)("F289 the public asset door (Postgres-backed)", () => {
     });
     await q(sql`insert into person_privacy (person_id, organization_id, hide_photo) values (${elsewhere.id}, ${otherOrg}, true)`);
 
-    // A listed person whose photo was (wrongly) stored public_site: still governed by listing ALONE.
-    await staff(await person("ListedButPublicSite", { audience: "public_site" }));
-    // An UNLISTED person's photo stored public_site: the exclusion.
-    await staff(await person("UnlistedPublicSite", { audience: "public_site" }), { listed: false });
-    // photo_key text stored UPPERCASE.
-    await staff(await person("UpperKey", { photoKeyCase: "upper" }));
-    await staff(await person("UpperKeyUnlisted", { photoKeyCase: "upper" }), { listed: false });
+    // A listed person whose listing is toggled below (0072's "stored public_site" variant is
+    // unrepresentable since 0078: person_photos_image_fk pins 'private').
+    await staff(await person("ListedToggled"));
 
-    // One blob that is the photo of two people, one listed and one not.
+    // One blob that is the photo of two people, one listed and one not (two person_photos rows,
+    // one shared master blob).
     const sharedListed = await person("SharedListed");
     await staff(sharedListed);
-    const sharedUnlisted = await person("SharedUnlisted");
-    await q(sql`update people set photo_key = ${sharedListed.photo} where id = ${sharedUnlisted.id}`);
-    people.SharedUnlisted = { ...sharedUnlisted, photo: sharedListed.photo };
+    const sharedUnlisted = await person("SharedUnlisted", { imageKey: sharedListed.photo });
     await staff(sharedUnlisted, { listed: false });
 
     // A listed person who is merged_into_id-linked: whatever the roster says is the answer.
@@ -308,12 +318,21 @@ describe.skipIf(!hasDb)("F289 the public asset door (Postgres-backed)", () => {
       expect(await asApp(org, people[name]!.photo)).toBeNull();
     });
 
-    it("a listed person's photo mistakenly stored public_site is roster-class (a day, private) while listed - never site-class", async () => {
-      expect((await asApp(org, people.ListedButPublicSite!.photo))?.cacheClass).toBe("roster");
+    it("a photo can never be stored public_site: the FK pins private (0072's 'mistakenly public_site' case is unrepresentable)", async () => {
+      const p = people.StaffListed!;
+      const publicImage = (await blob({ audience: "public_site" })).id;
+      const thumb = (await blob({ audience: "private" })).id;
+      await expect(
+        q(sql`insert into person_photos (organization_id, person_id, image_asset_key, thumb_asset_key, width, height, created_by)
+              values (${org}, ${p.id}, ${publicImage}, ${thumb}, 10, 10, ${fx.actingUserId})`),
+      ).rejects.toMatchObject({ cause: expect.objectContaining({ code: "23503", constraint: "person_photos_image_fk" }) });
+      // ...and the public_site blob, being nobody's photo, is simply a site image.
+      expect((await asApp(org, publicImage))?.cacheClass).toBe("site");
     });
 
-    it("...and stops being served the moment they are un-listed", async () => {
-      const p = people.ListedButPublicSite!;
+    it("a listed photo is roster-class (a day, private) - never site-class - and stops being served the moment they are un-listed", async () => {
+      const p = people.ListedToggled!;
+      expect((await asApp(org, p.photo))?.cacheClass).toBe("roster");
       await q(sql`update staff_positions set public_listed = false where person_id = ${p.id}`);
       try {
         expect(await asApp(org, p.photo)).toBeNull();
@@ -323,15 +342,22 @@ describe.skipIf(!hasDb)("F289 the public asset door (Postgres-backed)", () => {
       expect((await asApp(org, p.photo))?.cacheClass).toBe("roster");
     });
 
-    it("the exclusion: an UNLISTED person's photo stored public_site is NOT served", async () => {
-      expect(await asApp(org, people.UnlistedPublicSite!.photo)).toBeNull();
+    it("the exclusion: an UNLISTED person's photo is NOT served (it is private, and nobody lists it)", async () => {
+      expect(await asApp(org, people.StaffUnlisted!.photo)).toBeNull();
     });
 
-    it("a photo_key stored UPPERCASE answers the same as lowercase, listed and unlisted", async () => {
-      expect((await asApp(org, people.UpperKey!.photo))?.cacheClass).toBe("roster");
-      expect((await asApp(org, people.UpperKey!.photo.toUpperCase()))?.cacheClass).toBe("roster");
-      expect(await asApp(org, people.UpperKeyUnlisted!.photo)).toBeNull();
-      expect(await asApp(org, people.UpperKeyUnlisted!.photo.toUpperCase())).toBeNull();
+    it("a key asked in UPPERCASE answers the same as lowercase, listed and unlisted (a stored key cannot vary: uuid columns)", async () => {
+      expect((await asApp(org, people.StaffListed!.photo))?.cacheClass).toBe("roster");
+      expect((await asApp(org, people.StaffListed!.photo.toUpperCase()))?.cacheClass).toBe("roster");
+      expect(await asApp(org, people.StaffUnlisted!.photo)).toBeNull();
+      expect(await asApp(org, people.StaffUnlisted!.photo.toUpperCase())).toBeNull();
+      const [col] = await q(sql`select data_type from information_schema.columns
+                                 where table_name = 'person_photos' and column_name = 'image_asset_key'`);
+      expect(col!.data_type).toBe("uuid");
+    });
+
+    it("a merged tombstone is withheld (0078), and the door agrees with the roster", async () => {
+      expect(await asApp(org, people.MergedAway!.photo)).toBeNull();
     });
 
     it("hide_photo set live withholds a listed photo; clearing it brings it back (read live, nothing copied)", async () => {

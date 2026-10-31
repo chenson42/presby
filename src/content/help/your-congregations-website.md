@@ -35,7 +35,7 @@ A line under the heading says where your openings appear on your website. Your o
 
 ## Naming people on the website
 
-"Officers", "Staff" and each group's roster have a "Public listing" switch for each person. Turning it on asks you to confirm, because the person's name, role and photo (if one is on file and they have not hidden it) become visible to anyone who visits your website, including search engines and archival crawlers. The list shows on your website only where whoever maintains it has put the list of people.
+"Officers", "Staff" and each group's roster have a "Public listing" switch for each person. Turning it on asks you to confirm, because the person's name, role and, if there is one, photo become visible to anyone who visits your website, including search engines and archival crawlers. A photo appears only when a website photo has been chosen for the person, or their directory photo has been cleared for the website, and not if the person has hidden their photo. See [Photos of people](/help/photos-of-people). The list shows on your website only where whoever maintains it has put the list of people.
 
 On a phone the "Public listing" column is not shown. Use a wider screen to change it.
 

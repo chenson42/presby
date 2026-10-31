@@ -1,6 +1,8 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { OrgAccessError, withOrgContext, type OrgTx } from "@/lib/authz";
+import { OFF_WARNING_FALLBACK, offWarningCopy } from "@/lib/person-photos/copy";
+import { countChosenPhotos } from "@/lib/person-photos/reader";
 import { openRequestCount } from "@/lib/reimbursement/counts";
 import { REIMBURSEMENT_TOGGLE_KEY } from "@/lib/reimbursement/keys";
 
@@ -13,7 +15,8 @@ import { REIMBURSEMENT_TOGGLE_KEY } from "@/lib/reimbursement/keys";
  * toggles) free of feature-specific queries, so a warning is data the page asks
  * for, not logic the catalog carries. A key without an entry has no warning.
  *
- * Two entries: `org_portal.giving` and `org_portal.reimbursement` (treasury
+ * Three entries: `org_portal.giving`, `org_portal.person_photos` and
+ * `org_portal.reimbursement` (treasury
  * Increment 1, Copy C1). Turning Reimbursements OFF hides the pages and deletes
  * nothing, so an administrator who turns it off with requests still in flight
  * is told how many ("open" = submitted, returned or approved; drafts are not
@@ -32,6 +35,15 @@ import { REIMBURSEMENT_TOGGLE_KEY } from "@/lib/reimbursement/keys";
  * If the count cannot be read, the warning is still shown, generically: a
  * database blip must not silently remove the one thing that tells a treasurer
  * their donors are still being charged.
+ *
+ * `org_portal.person_photos` (docs/work-log/2026-10-26-person-photos-inc1.md,
+ * Copy C1): turning it OFF hides every photo of a person, including on the
+ * public website, so when photos are chosen the church is told how many before
+ * the switch flips. The count comes from `reader.ts` (`countChosenPhotos`,
+ * distinct photos with an active designation, worded "chosen for", never "shown"), so
+ * this module never imports the photo tables. Zero chosen photos: no warning.
+ * The copy lives in `person-photos/copy.ts`; the warning names the cached-copy
+ * residual ("up to a day") and says nothing is deleted.
  */
 
 export interface OffWarning {
@@ -42,6 +54,7 @@ export interface OffWarning {
 type OffWarningLoader = (tx: OrgTx) => Promise<OffWarning | null>;
 
 export const GIVING_FEATURE_KEY = "org_portal.giving";
+export const PERSON_PHOTOS_FEATURE_KEY = "org_portal.person_photos";
 
 const REGISTRY: Record<string, OffWarningLoader> = {
   [GIVING_FEATURE_KEY]: async (tx) => {
@@ -57,6 +70,10 @@ const REGISTRY: Record<string, OffWarningLoader> = {
         `${count} monthly ${count === 1 ? "gift is" : "gifts are"} still active in Stripe and keep${count === 1 ? "s" : ""} ` +
         "charging until cancelled there. Turning this off hides Giving; it does not stop recording.",
     };
+  },
+  [PERSON_PHOTOS_FEATURE_KEY]: async (tx) => {
+    const count = await countChosenPhotos(tx);
+    return count > 0 ? offWarningCopy(count) : null;
   },
   [REIMBURSEMENT_TOGGLE_KEY]: async (tx) => {
     const count = await openRequestCount(tx);
@@ -81,6 +98,7 @@ const GENERIC_WARNING: OffWarning = {
 };
 
 const FALLBACK: Record<string, OffWarning> = {
+  [PERSON_PHOTOS_FEATURE_KEY]: { ...OFF_WARNING_FALLBACK },
   [GIVING_FEATURE_KEY]: {
     title: "Monthly gifts may still be active",
     description:

@@ -1,7 +1,10 @@
 /**
  * D3 - the two anonymous roster functions after drizzle/0072 (F289,
  * DECISION-277, operator ruling "hide_photo wins"; docs/work-log/
- * 2026-10-25-public-asset-allowlist.md, Phase 3 "Test Plan" D3).
+ * 2026-10-25-public-asset-allowlist.md, Phase 3 "Test Plan" D3), as switched
+ * to person_photos by drizzle/0078 (DECISION-286; docs/work-log/
+ * 2026-10-26-person-photos-inc1.md, F331: rewritten to seed person_photos and
+ * designations - people.photo_key is retired and a write to it is refused).
  *
  * On the presby_app connection, exactly as the public site calls them (no org
  * GUC - they are SECURITY DEFINER and read the slug):
@@ -16,11 +19,15 @@
  *     owner plus presby_app only, and an unchanged signature and result row.
  *
  * One positive through the asset door (presby_public_site_asset) on the
- * presby_app connection proves the definer reaches both roster helpers
- * without a permission error and withholds a hidden photo (the 0046 B-M1
- * rule: every helper a definer calls is exercised as presby_app). The full
- * door matrix and the parity property are Batch 2's D1; the 0072 migration's
- * own shape is U7.
+ * presby_app connection proves the definer reaches both roster helpers - and,
+ * since 0078, presby_person_public_photo() inside them - without a permission
+ * error and withholds a hidden photo (the 0046 B-M1 rule: every helper a
+ * definer calls is exercised as presby_app).
+ *
+ * 0078's own live-site matrix (scripts/person-photos/test-rls-78.sql 78e
+ * cannot reach a live site as presby_app): the Q6 fallback, a thumbnail key,
+ * a removed photo, an ended designation and the toggle, through the rosters
+ * AND the door.
  *
  * Run with:
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/db/domain/public-roster-photo.db.test.ts
@@ -29,6 +36,12 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sql, type SQL } from "drizzle-orm";
 import type { CalendarFixture } from "@/lib/testing/calendar-fixture";
+import {
+  removeSeededPersonPhoto,
+  seedPersonPhoto,
+  setPersonPhotosToggle,
+  type SeededPersonPhoto,
+} from "@/lib/testing/person-photo-fixture";
 
 vi.mock("server-only", () => ({}));
 
@@ -37,7 +50,7 @@ const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_
 type Row = Record<string, unknown>;
 const rowsOf = (r: unknown): Row[] => (Array.isArray(r) ? (r as Row[]) : ((r as { rows?: Row[] }).rows ?? []));
 
-describe.skipIf(!hasDb)("drizzle/0072 roster functions: hide_photo wins (Postgres-backed)", () => {
+describe.skipIf(!hasDb)("drizzle/0072 + 0078 roster functions: hide_photo wins (Postgres-backed)", () => {
   let fx: CalendarFixture;
   let appDb: typeof import("@/lib/db").db;
   let org: string;
@@ -54,19 +67,31 @@ describe.skipIf(!hasDb)("drizzle/0072 roster functions: hide_photo wins (Postgre
     committeeHidden: randomUUID(),
     committeeShown: randomUUID(),
   };
+  const seeded: Record<string, SeededPersonPhoto> = {};
 
   const q = async (query: SQL): Promise<Row[]> => rowsOf(await fx.platform.execute(query));
   const asApp = async (query: SQL): Promise<Row[]> => rowsOf(await appDb.execute(query));
 
+  /** A member of `org` whose website photo is `photoKey` (designated, attested). */
   async function listedPerson(first: string, photoKey: string, hidePhoto: boolean | null): Promise<string> {
     const id = await fx.makePerson(first, tag);
-    await q(sql`update people set photo_key = ${photoKey} where id = ${id}`);
     await fx.addMember(org, id);
+    seeded[first] = await seedPersonPhoto(fx.platform, {
+      organizationId: org,
+      personId: id,
+      userId: fx.actingUserId,
+      imageKey: photoKey,
+      purposes: ["website"],
+    });
     if (hidePhoto !== null) {
       await q(sql`insert into person_privacy (person_id, organization_id, hide_photo) values (${id}, ${org}, ${hidePhoto})`);
     }
     return id;
   }
+
+  const staff = async (personId: string, position: string) =>
+    q(sql`insert into staff_positions (organization_id, person_id, position, position_key, starts_on, public_listed)
+          values (${org}, ${personId}, ${position}, ${position.toLowerCase()}, '2020-01-01', true)`);
 
   beforeAll(async () => {
     ({ db: appDb } = await import("@/lib/db"));
@@ -76,10 +101,8 @@ describe.skipIf(!hasDb)("drizzle/0072 roster functions: hide_photo wins (Postgre
     const [o] = await q(sql`select slug from organizations where id = ${org}`);
     slug = String(o!.slug);
     await q(sql`insert into organization_sites (organization_id, repo, status) values (${org}, ${`presby-fixtures/site-${slug}`}, 'live')`);
+    await setPersonPhotosToggle(fx.platform, org, true);
 
-    const staff = async (personId: string, position: string) =>
-      q(sql`insert into staff_positions (organization_id, person_id, position, position_key, starts_on, public_listed)
-            values (${org}, ${personId}, ${position}, ${position.toLowerCase()}, '2020-01-01', true)`);
     await staff(await listedPerson("Hidden", photo.staffHidden, true), "Organist");
     await staff(await listedPerson("Shown", photo.staffShown, false), "Sexton");
     await staff(await listedPerson("Plain", photo.staffNoPrivacyRow, null), "Secretary");
@@ -162,8 +185,8 @@ describe.skipIf(!hasDb)("drizzle/0072 roster functions: hide_photo wins (Postgre
   });
 
   it("the asset door, called as presby_app, reaches both roster helpers and agrees with them (no permission error)", async () => {
-    // Blobs whose ids ARE the photo keys (stored private, as a photo writer
-    // must), one public_site site image, and one private image that is nobody's photo.
+    // The photo blobs exist (stored private, as person_photos_image_fk requires); add one
+    // public_site site image and one private image that is nobody's photo.
     const png = (tag2: string) => Buffer.from(`\x89PNG f289 ${tag2} ${randomUUID()}`, "latin1");
     const insert = async (id: string, audience: string) => {
       const bytes = png(id);
@@ -173,35 +196,34 @@ describe.skipIf(!hasDb)("drizzle/0072 roster functions: hide_photo wins (Postgre
     };
     const siteImage = randomUUID();
     const privateImage = randomUUID();
-    for (const id of [photo.staffShown, photo.staffHidden, photo.officerHidden, photo.committeeShown, photo.committeeHidden]) {
-      await insert(id, "private");
-    }
     await insert(siteImage, "public_site");
     await insert(privateImage, "private");
 
     const door = async (key: string) =>
       asApp(sql`select content_type, cache_class from presby_public_site_asset(${org}::uuid, ${key}::uuid)`);
-    expect(await door(photo.staffShown)).toEqual([{ content_type: "image/png", cache_class: "roster" }]);
-    expect(await door(photo.committeeShown)).toEqual([{ content_type: "image/png", cache_class: "roster" }]);
+    expect(await door(photo.staffShown)).toEqual([{ content_type: "image/jpeg", cache_class: "roster" }]);
+    expect(await door(photo.committeeShown)).toEqual([{ content_type: "image/jpeg", cache_class: "roster" }]);
     expect(await door(photo.staffHidden)).toEqual([]);
     expect(await door(photo.officerHidden)).toEqual([]);
     expect(await door(photo.committeeHidden)).toEqual([]);
     expect(await door(siteImage)).toEqual([{ content_type: "image/png", cache_class: "site" }]);
     expect(await door(privateImage)).toEqual([]);
     // An uppercase key is the same key (the uuid parameter canonicalizes it)...
-    expect(await door(photo.staffShown.toUpperCase())).toEqual([{ content_type: "image/png", cache_class: "roster" }]);
-    // ...and photo_key TEXT stored uppercase is the same photo (exclusion and match are both on lower()).
-    await q(sql`update people set photo_key = upper(photo_key) where photo_key = ${photo.staffShown}`);
-    try {
-      expect(await door(photo.staffShown)).toEqual([{ content_type: "image/png", cache_class: "roster" }]);
-      await q(sql`update person_privacy set hide_photo = true
-                   where person_id = (select id from people where photo_key = ${photo.staffShown.toUpperCase()})`);
-      expect(await door(photo.staffShown), "a hidden photo stored uppercase is still withheld").toEqual([]);
-    } finally {
-      await q(sql`update person_privacy set hide_photo = false
-                   where person_id = (select id from people where photo_key = ${photo.staffShown.toUpperCase()})`);
-      await q(sql`update people set photo_key = lower(photo_key) where photo_key = ${photo.staffShown.toUpperCase()}`);
-    }
+    expect(await door(photo.staffShown.toUpperCase())).toEqual([{ content_type: "image/jpeg", cache_class: "roster" }]);
+    // ...and the STORED key can no longer differ in case: 0072's text photo_key is retired, the
+    // keys are uuid columns, and the roster projects them as canonical lowercase text.
+    const types = await q(sql`select column_name, data_type from information_schema.columns
+                               where table_name = 'person_photos' and column_name in ('image_asset_key', 'thumb_asset_key')
+                               order by column_name`);
+    expect(types).toEqual([
+      { column_name: "image_asset_key", data_type: "uuid" },
+      { column_name: "thumb_asset_key", data_type: "uuid" },
+    ]);
+    const listed = (await asApp(sql`select photo_key from presby_public_staff_roster(${slug})`))
+      .map((r) => r.photo_key)
+      .filter((k): k is string => typeof k === "string");
+    expect(listed.length).toBeGreaterThan(0);
+    expect(listed.every((k) => k === k.toLowerCase())).toBe(true);
   });
 
   it.each([
@@ -222,5 +244,88 @@ describe.skipIf(!hasDb)("drizzle/0072 roster functions: hide_photo wins (Postgre
     const [r] = rows;
     expect(r).toMatchObject({ prosecdef: true, proconfig: ["search_path=public, pg_temp"], args, result });
     expect(r!.executors).toEqual([r!.owner, "presby_app"].sort());
+  });
+
+  describe("drizzle/0078 on a live site: designations, thumbnails, removal, the toggle", () => {
+    const door = async (key: string) =>
+      asApp(sql`select cache_class from presby_public_site_asset(${org}::uuid, ${key}::uuid)`);
+    const rosterKey = async (displayName: string) =>
+      (await asApp(sql`select display_name, photo_key from presby_public_staff_roster(${slug})`)).find(
+        (r) => r.display_name === displayName,
+      )?.photo_key;
+
+    it("a thumbnail key is never served, even for a listed, shown photo", async () => {
+      expect(await door(seeded.Shown!.imageKey)).toEqual([{ cache_class: "roster" }]);
+      expect(await door(seeded.Shown!.thumbKey)).toEqual([]);
+    });
+
+    it("the Q6 fallback: an ATTESTED directory photo stands in on the website; an unattested one never does", async () => {
+      const attested = await fx.makePerson("DirAttested", tag);
+      const unattested = await fx.makePerson("DirPlain", tag);
+      for (const p of [attested, unattested]) await fx.addMember(org, p);
+      const a = await seedPersonPhoto(fx.platform, {
+        organizationId: org, personId: attested, userId: fx.actingUserId, purposes: ["directory"], attestDirectory: true,
+      });
+      const u = await seedPersonPhoto(fx.platform, {
+        organizationId: org, personId: unattested, userId: fx.actingUserId, purposes: ["directory"], attestDirectory: false,
+      });
+      await staff(attested, "Treasurer");
+      await staff(unattested, "Custodian");
+      expect(await rosterKey(`DirAttested ${tag}`)).toBe(a.imageKey);
+      expect(await door(a.imageKey)).toEqual([{ cache_class: "roster" }]);
+      expect(await rosterKey(`DirPlain ${tag}`)).toBeNull();
+      expect(await door(u.imageKey)).toEqual([]);
+    });
+
+    it("a website designation beats the attested directory photo; ending it falls back; removing the photo stops serving", async () => {
+      const p = await fx.makePerson("Layered", tag);
+      await fx.addMember(org, p);
+      const dir = await seedPersonPhoto(fx.platform, {
+        organizationId: org, personId: p, userId: fx.actingUserId, purposes: ["directory"], attestDirectory: true,
+      });
+      const web = await seedPersonPhoto(fx.platform, {
+        organizationId: org, personId: p, userId: fx.actingUserId, purposes: ["website"],
+      });
+      await staff(p, "Choir Member");
+      expect(await rosterKey(`Layered ${tag}`)).toBe(web.imageKey);
+      expect(await door(dir.imageKey), "the directory photo is not listed while a website photo is").toEqual([]);
+
+      await q(sql`update person_photo_designations set ended_at = now(), ended_by = ${fx.actingUserId}
+                   where photo_id = ${web.photoId} and ended_at is null`);
+      expect(await rosterKey(`Layered ${tag}`)).toBe(dir.imageKey);
+      expect(await door(web.imageKey), "an ended website designation stops serving").toEqual([]);
+      expect(await door(dir.imageKey)).toEqual([{ cache_class: "roster" }]);
+
+      await removeSeededPersonPhoto(fx.platform, dir.photoId, fx.actingUserId);
+      expect(await rosterKey(`Layered ${tag}`)).toBeNull();
+      expect(await door(dir.imageKey), "a removed photo is the neutral miss, never the site branch").toEqual([]);
+      expect(await asApp(sql`select display_name from presby_public_staff_roster(${slug}) where display_name = ${`Layered ${tag}`}`))
+        .toHaveLength(1);
+    });
+
+    it("the toggle off withholds every roster photo and the door; back on restores them", async () => {
+      await setPersonPhotosToggle(fx.platform, org, false);
+      try {
+        const rows = await asApp(sql`select photo_key from presby_public_staff_roster(${slug})`);
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows.every((r) => r.photo_key === null)).toBe(true);
+        expect(await door(photo.staffShown)).toEqual([]);
+      } finally {
+        await setPersonPhotosToggle(fx.platform, org, true);
+      }
+      expect(await rosterKey(`Shown ${tag}`)).toBe(photo.staffShown);
+      expect(await door(photo.staffShown)).toEqual([{ cache_class: "roster" }]);
+    });
+
+    it("a person who is a minor is withheld at read time, with no one acting", async () => {
+      const kid = await fx.makePerson("Younger", tag);
+      await fx.addMember(org, kid);
+      const k = await seedPersonPhoto(fx.platform, { organizationId: org, personId: kid, userId: fx.actingUserId });
+      await staff(kid, "Acolyte");
+      expect(await rosterKey(`Younger ${tag}`)).toBe(k.imageKey);
+      await q(sql`update people set date_of_birth = current_date - interval '15 years' where id = ${kid}`);
+      expect(await rosterKey(`Younger ${tag}`)).toBeNull();
+      expect(await door(k.imageKey)).toEqual([]);
+    });
   });
 });

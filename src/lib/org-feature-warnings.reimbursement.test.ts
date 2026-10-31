@@ -19,6 +19,9 @@ vi.mock("@/lib/authz", () => ({
   withOrgContext: async (_p: string, _o: string, fn: (tx: unknown) => unknown) => fn({}),
 }));
 vi.mock("@/lib/reimbursement/counts", () => ({ openRequestCount: mocks.openRequestCount }));
+// The person-photos entry (DECISION-285) shares this registry; its reader is server-only and
+// reaches the schema, so it is stubbed here exactly as the photos test stubs it.
+vi.mock("@/lib/person-photos/reader", () => ({ countChosenPhotos: async () => 0 }));
 
 import { loadOffWarnings } from "./org-feature-warnings";
 

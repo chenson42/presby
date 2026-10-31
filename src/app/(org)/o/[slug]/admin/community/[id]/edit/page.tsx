@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { Lock, Users } from "lucide-react";
+import { Camera, Lock, Users } from "lucide-react";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import {
   assertOrgAccess,
@@ -14,6 +14,8 @@ import { getHouseholds } from "@/lib/directory";
 import { getPersonForEdit } from "@/lib/people";
 import { getCommunityStatus, type CommunityStatus } from "@/lib/community";
 import { getSensitiveInfoGrants } from "@/lib/person-sensitive";
+import { EDIT_LINK_COPY } from "@/lib/person-photos/copy";
+import { personPhotosEnabled } from "@/lib/person-photos/reader";
 import { getSignInCard } from "@/lib/onboarding/org-invite";
 import type { SignInCardState } from "@/lib/onboarding/sign-in-types";
 import {
@@ -152,6 +154,7 @@ export default async function EditMemberPage({
   let pendingRollActions: PendingRollActionForPerson[] = [];
   let showSensitiveInfoLink = false;
   let showGuardiansLink = false;
+  let showPhotosLink = false;
   let communityStatus: CommunityStatus | null = null;
   let canPropose = false;
   let sessionCannotAct = false;
@@ -228,6 +231,23 @@ export default async function EditMemberPage({
       throw err;
     }
     return <MembersLoadError backHref={`/o/${slug}/admin/community`} />;
+  }
+
+  // The link into `./edit/photos` (docs/work-log/2026-10-26-person-photos-inc1.md,
+  // Copy C7): shown only when the org's "Photos of people" toggle is on, and
+  // only on a page the viewer already holds `people.manage` for (`getPersonForEdit`
+  // just said `ok`). An independent awaited call, like the guardians link, and a
+  // failed read hides the link rather than taking the edit page down: the photos
+  // page re-checks the toggle and the permission itself.
+  if (personResult.kind === "ok") {
+    try {
+      showPhotosLink = await personPhotosEnabled({
+        organizationId: resolved.org.organizationId,
+        actorPersonId: resolved.org.personId,
+      });
+    } catch {
+      showPhotosLink = false;
+    }
   }
 
   if (personResult.kind === "forbidden") {
@@ -343,6 +363,18 @@ export default async function EditMemberPage({
           >
             <Lock className="size-4 shrink-0" aria-hidden />
             Pastoral notes, demographics, medical & disability information
+          </Link>
+        </div>
+      )}
+
+      {showPhotosLink && (
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <Link
+            href={`/o/${slug}/admin/community/${id}/edit/photos`}
+            className="flex min-h-11 items-center gap-2 text-sm underline underline-offset-2"
+          >
+            <Camera className="size-4 shrink-0" aria-hidden />
+            {EDIT_LINK_COPY}
           </Link>
         </div>
       )}

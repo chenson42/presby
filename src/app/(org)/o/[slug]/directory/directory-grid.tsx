@@ -8,7 +8,7 @@ import {
   DIRECTORY_STATUSES,
   type DirectoryStatus,
 } from "@/lib/directory-status";
-import { resolvePhotoSrc } from "./person-avatar";
+import { resolvePhotoSrcs } from "@/components/org-portal/person-avatar";
 import { PersonCard } from "./person-card";
 
 /** Plain-language labels for the `DIRECTORY_STATUSES` filter — never the
@@ -31,8 +31,8 @@ const STATUS_LABELS: Record<DirectoryStatus, string> = {
  * component only renders what it is handed.
  *
  * AN ASYNC SERVER COMPONENT, not a plain function, so every card's photo
- * can resolve through `resolvePhotoSrc()` (DECISION-030) in one
- * `Promise.all()` before the grid ever renders — see `person-avatar.tsx`'s
+ * can resolve through `resolvePhotoSrcs()` (DECISION-030, F332) in one
+ * `resolveMany()` read before the grid ever renders — see `components/org-portal/person-avatar.tsx`'s
  * header for why the resolution step is a plain async function rather than
  * one async component per card. Tested the same way `directory/page.tsx`
  * already is: call `await DirectoryGrid(props)` directly, then hand the
@@ -70,8 +70,9 @@ export async function DirectoryGrid({
   orgName: string;
   slug: string;
 }) {
-  const photoSrcs = await Promise.all(
-    entries.map((entry) => resolvePhotoSrc(organizationId, entry.photoKey)),
+  const photoSrcs = await resolvePhotoSrcs(
+    organizationId,
+    entries.map((entry) => entry.photoThumbKey),
   );
 
   const buildHref = (targetPage: number) => {

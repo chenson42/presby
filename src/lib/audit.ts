@@ -569,6 +569,25 @@ export const AUDIT_ACTIONS = {
   //   skippedMembersOnly?, clearedBecauseMembersOnly? }.
   EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
   EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  // APPENDED - pipeline/person-photos, 2026-10-26 (docs/work-log/
+  // 2026-10-26-person-photos-inc1.md, DECISION-285, R10). Written from
+  // src/lib/person-photos/store.ts with insertAuditRow(tx, ...) in the SAME
+  // transaction as the change, so a failed audit insert undoes it. A photo
+  // reaching the open web is a disclosure, so choosing one for the website (and
+  // the moment it stops) is its own record. resourceType 'person'; resourceId =
+  // the person. Metadata is ids, booleans and purposes ONLY: never the bytes, a
+  // hash, a filename, dimensions or a name. `check:audit` scans only actions.ts,
+  // which delegate to store.ts.
+  //   ADDED        { organizationId, personId, photoId, autoDirectory }
+  //   REMOVED      { organizationId, personId, photoId, endedPurposes }
+  //   DESIGNATED   { organizationId, personId, photoId, purpose, attested,
+  //                  replacedPhotoId | null, via: 'designate' | 'add' }
+  //   UNDESIGNATED { organizationId, personId, photoId, purpose,
+  //                  via: 'undesignate' | 'remove' }
+  PERSON_PHOTO_ADDED: "tenant.person_photo.added",
+  PERSON_PHOTO_REMOVED: "tenant.person_photo.removed",
+  PERSON_PHOTO_DESIGNATED: "tenant.person_photo.designated",
+  PERSON_PHOTO_UNDESIGNATED: "tenant.person_photo.undesignated",
   // ---------------------------------------------------------------------------
   // APPENDED - pipeline/treasury, 2026-10-25 (docs/work-log/2026-10-25-treasury-
   // inc1.md, Phase 3 "AUDIT_ACTIONS"). Reimbursements. All `tenant.reimbursement.*`

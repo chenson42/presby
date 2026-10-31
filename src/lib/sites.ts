@@ -1645,7 +1645,8 @@ export interface PublicStaffRosterEntry {
   displayName: string;
   roleLabel: string;
   department: string | null;
-  /** `blob_assets.id`-shaped key (`people.photo_key`), or `null`. The
+  /** `blob_assets.id`-shaped key (the roster function's `photo_key` output, which
+   * is `presby_person_public_photo()`'s master key; `people.photo_key` is retired), or `null`. The
    * caller builds the URL — this function returns no route-path string,
    * matching `imageUrl`'s own closure-based resolution in `page.tsx`. */
   photoKey: string | null;

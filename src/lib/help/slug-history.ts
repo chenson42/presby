@@ -39,4 +39,6 @@ export const SLUG_HISTORY: readonly string[] = [
   // 2026-10-31, treasury (0.51.0): the reimbursement pages.
   "reimbursements",
   "reimbursements-for-treasurers",
+  // 2026-10-31, person photos (0.52.0).
+  "photos-of-people",
 ];

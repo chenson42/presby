@@ -3,7 +3,7 @@
  * Tests for `<DirectoryGrid>` — the `org_portal.directory_v2` card grid.
  *
  * `DirectoryGrid` is an async Server Component (see its own header for why:
- * every card's photo resolves via `resolvePhotoSrc()`, in one `Promise.all`,
+ * every card's photo resolves via `resolvePhotoSrcs()`, in one `resolveMany()` read,
  * before it returns). Tested the same way `directory/page.tsx` already is
  * in this repo: `await DirectoryGrid(props)` directly, then hand the
  * resolved element to `render()` — no RSC runtime needed, because by the
@@ -11,10 +11,10 @@
  * tree.
  *
  * `@/lib/storage/blob-store` is mocked (the same one hop before `@/lib/db`
- * that `page.test.tsx` mocks, for the identical reason: `./person-avatar`'s
- * real `resolvePhotoSrc()` calls `getBlobStore().resolve()`, and the real
+ * that `page.test.tsx` mocks, for the identical reason: the avatar module's
+ * real `resolvePhotoSrcs()` calls `getBlobStore().resolveMany()`, and the real
  * `blob-store.ts` opens a real connection at import time via `@/lib/db`).
- * `./person-avatar` itself is imported for real — these tests exercise the
+ * `components/org-portal/person-avatar` itself is imported for real — these tests exercise the
  * REAL `<PersonAvatar>` rendering path, stubbing only the DB-shaped call
  * underneath it.
  */
@@ -22,16 +22,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { DirectoryEntry } from "@/lib/directory";
 
-const resolve = vi.fn();
+const resolveMany = vi.fn();
 vi.mock("@/lib/storage/blob-store", () => ({
-  getBlobStore: () => ({ resolve, resolveMeta: vi.fn(), store: vi.fn() }),
+  getBlobStore: () => ({ resolveMany, resolve: vi.fn(), resolveMeta: vi.fn(), store: vi.fn() }),
 }));
 
 import { DirectoryGrid } from "./directory-grid";
 
 afterEach(() => {
   cleanup();
-  resolve.mockReset().mockResolvedValue(null);
+  resolveMany.mockReset().mockResolvedValue(new Map());
 });
 
 function entry(overrides: Partial<DirectoryEntry> = {}): DirectoryEntry {
@@ -44,7 +44,7 @@ function entry(overrides: Partial<DirectoryEntry> = {}): DirectoryEntry {
     phone: null,
     address: null,
     dateOfBirth: null,
-    photoKey: null,
+    photoThumbKey: null,
     ...overrides,
   };
 }
@@ -122,7 +122,7 @@ describe("DirectoryGrid — card content", () => {
           email: "m.ashcombe@example.invalid",
           phone: "555-0100",
           address: { line1: "1 Way", city: "Fixtureville", region: "OH", postalCode: "00000" },
-          photoKey: "photo-key-1",
+          photoThumbKey: "00000000-0000-4000-8000-0000000000a1",
         }),
       ],
       organizationId: "org-42",
@@ -134,16 +134,30 @@ describe("DirectoryGrid — card content", () => {
     const phoneLink = screen.getByRole("link", { name: "555-0100" });
     expect(phoneLink.getAttribute("href")).toBe("tel:555-0100");
     expect(screen.getByText("Fixtureville")).toBeTruthy();
-    expect(resolve).toHaveBeenCalledWith({
+    expect(resolveMany).toHaveBeenCalledTimes(1);
+    expect(resolveMany).toHaveBeenCalledWith({
       organizationId: "org-42",
-      key: "photo-key-1",
+      keys: ["00000000-0000-4000-8000-0000000000a1"],
       audience: "private",
     });
   });
 
-  it("never calls the blob store for an entry with no photoKey", async () => {
-    await renderGrid({ entries: [entry({ photoKey: null })] });
-    expect(resolve).not.toHaveBeenCalled();
+  it("never calls the blob store for an entry with no photoThumbKey", async () => {
+    await renderGrid({ entries: [entry({ photoThumbKey: null })] });
+    expect(resolveMany).not.toHaveBeenCalled();
+  });
+
+  it("reads every card's thumbnail in ONE resolveMany call, not one read per card", async () => {
+    const k = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+    await renderGrid({
+      entries: [
+        entry({ personId: "c0000000-0000-0000-0000-000000000001", photoThumbKey: k(1) }),
+        entry({ personId: "c0000000-0000-0000-0000-000000000002", photoThumbKey: null }),
+        entry({ personId: "c0000000-0000-0000-0000-000000000003", photoThumbKey: k(3) }),
+      ],
+    });
+    expect(resolveMany).toHaveBeenCalledTimes(1);
+    expect(resolveMany.mock.calls[0]![0].keys).toEqual([k(1), k(3)]);
   });
 
   it("prefers preferredName over firstName", async () => {

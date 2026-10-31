@@ -32,7 +32,7 @@
  * `@/lib/storage/blob-store` is mocked wholesale, not because this file
  * tests avatar rendering (it doesn't — that's `directory-grid.test.tsx`'s
  * job), but because `page.tsx` statically imports `./directory-grid` →
- * `./person-avatar` → `@/lib/storage/blob-store` → `@/lib/db`, and `@/lib/db`
+ * `@/components/org-portal/person-avatar` → `@/lib/storage/blob-store` → `@/lib/db`, and `@/lib/db`
  * opens a real connection pool at module-import time and throws when
  * DATABASE_URL is unset (this file's own environment, same as every other
  * mocked-suite test in this tree). Mocking the module one hop before
@@ -261,7 +261,7 @@ describe("DirectoryPage — result branches (org_portal.directory_v2 OFF, the re
           phone: null,
           address: null,
           dateOfBirth: null,
-          photoKey: null,
+          photoThumbKey: null,
         },
       ],
     });
@@ -313,7 +313,7 @@ describe("DirectoryPage — org_portal.directory_v2 ON", () => {
           phone: null,
           address: null,
           dateOfBirth: null,
-          photoKey: null,
+          photoThumbKey: null,
         },
       ],
     });

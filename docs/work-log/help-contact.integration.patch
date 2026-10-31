@@ -1,0 +1,73 @@
+help-contact (User help Increment 2; DECISION-300/301/303; migration 0083) - Rule 16 integration patch, database-admin Batch 1
+Work-log: docs/work-log/2026-10-31-help-contact.md (Phase 4, Batch 1)
+
+Everything above the first `diff --git` line is prose; `git apply` skips it.
+The two diffs below are against the branch's own HEAD (main at 0.50.1 plus
+this pipeline; the journal ends at idx 82). They were applied LOCALLY
+(uncommitted) for the Batch 1 gate runs and reverted; the branch commits
+neither file (CLAUDE.md, Rule 16). If main has moved, use `git apply --3way`.
+
+1. drizzle/meta/_journal.json - idx 83, tag 0083_presby_help_contact (idx ==
+   the migration's own number, the house rule). `when` is 1793479500000,
+   greater than idx 82's 1793219058000. Keep the array ordered by idx: an
+   entry numbered below 83 that lands first goes BEFORE this one; if one with
+   a larger idx has landed with a larger `when`, re-stamp this one so `when`
+   stays monotonic with idx.
+
+2. scripts/test-rls.sql - one appended `\ir help-contact/test-rls-83.sql`
+   with its banner, after the last section. The section needs the test
+   helpers (scripts/install-test-helpers.sql) and NO seed fixture, and every
+   block rolls back. After the merge, re-run the whole of scripts/test-rls.sql
+   as presby_app on the merged development branch (Rule 16).
+
+NOT in this patch, on purpose:
+  * src/lib/db/domain/index.ts and src/lib/dev-docs.ts - committed on the
+    branch per the F338 ruling (a pipeline that adds tables commits its own
+    barrel export and dev-docs classification; the merge conflict is a
+    trivial append). docs/schema-design.md's regenerated ERD lines are
+    committed with them.
+  * scripts/seed-dev.sql - no change: the table needs no fixture, and no
+    shipped fixture inserts into it.
+  * e2e/support/* - none in Batch 1.
+  * docs/decisions.md (DECISION-300 to 304, text drafted in Phase 3),
+    docs/TODO.md (the AF-2 / F407 bug-fix line, the onboarding normalizer
+    AF-8 / F413 line, the getTicketOperatorPool() is_active line, the
+    in-app reply and retention-sweep follow-ups), docs/STATE.md - the
+    orchestrator's, at integration.
+
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index fb98fad..629c9c8 100644
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -498,6 +498,13 @@
+       "when": 1793219058000,
+       "tag": "0082_presby_backfill_org_baseline",
+       "breakpoints": true
++    },
++    {
++      "idx": 83,
++      "version": "7",
++      "when": 1793479500000,
++      "tag": "0083_presby_help_contact",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/scripts/test-rls.sql b/scripts/test-rls.sql
+index d8887d2..76b5073 100644
+--- a/scripts/test-rls.sql
++++ b/scripts/test-rls.sql
+@@ -8746,3 +8746,13 @@ rollback;
+ --     people.user_id).
+ -- ===========================================================================
+ \ir sign-in-invitations/test-rls-65.sql
++
++-- ===========================================================================
++-- APPENDED SECTION - pipeline/help-contact (integration).
++-- 83. User help Increment 2: the /help/contact drop box
++--     (drizzle/0083_presby_help_contact.sql; DECISION-300/301/303). Its own
++--     file, as 46, 47, 59-65, 67, 68, 71 and 72 above; \ir resolves relative
++--     to this script. It needs the test helpers and NO seed fixture (the
++--     table has no organization and no person), and every block rolls back.
++-- ===========================================================================
++\ir help-contact/test-rls-83.sql

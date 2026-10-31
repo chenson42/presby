@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Complete (11 operator questions with defaults; FC1–FC10 → F382–F391) | READY WITH NOTES | 2026-10-31 |
 | 2 — Architectural review | architect | Complete (CA1–CA13; amends C1, C3, C5, C6, C10, R9; AF-1–AF-8 = F406–F413; DECISION-300–304 proposed) | Approved with suggestions | 2026-10-31 |
 | 3 — Technical design | tech-lead | Complete (Batches 1 to 5; DECISION-300 to 304 text and the runbook drafted) | Design complete, implementer named | 2026-10-31 |
-| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Pending | — | — |
+| 4 — Implementation | database-admin (Batch 1), then full-stack-developer (Batches 2 to 5) | Batch 1 complete (0083 hand-written, applied to `pipeline-help-contact` twice; 25 DB tests + section 83 green; CA1 catalog proven, failing-first for each mechanism). Batches 2 to 5 pending | — | 2026-10-31 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1523,28 +1523,88 @@ Two implementation decisions this design adds beyond the pre-assigned block, for
 
 # Phase 4 — Implementation
 
-## Files Created
+## Batch 1 — database-admin: migration 0083 and its proofs (2026-10-31)
 
-- `path/to/file` — purpose
+### Files Created
 
-## Files Modified
+- `drizzle/0083_presby_help_contact.sql` — the table, seven CHECKs, three indexes, the delete and update guards, FORCE RLS with no policy, revoke-all, `presby_submit_help_contact` (SECURITY DEFINER, EXECUTE to `presby_app` only), comments.
+- `src/lib/db/domain/help-contact.ts` — the Drizzle mirror (`helpContactMessages`), the topic, status and outcome vocabularies, and the definer's three constants as TypeScript exports.
+- `scripts/help-contact/test-rls-83.sql` — section 83, runs as `presby_app`: (a) structure, (b) every table verb is 42501, (c) the definer works, returns no id, cannot be read back, and the CHECKs bind through it (9 bad inputs). 14 assertions plus 3 DO-block passes; every block rolls back.
+- `src/lib/db/domain/help-contact.db.test.ts` — 25 tests: catalog (5), as `presby_app` (3, including the EXECUTE-revoke kill switch), owner-path guards (6), CHECKs (5), the definer (4), concurrency (2).
+- `docs/work-log/help-contact.integration.patch` — the Rule 16 hunks (journal idx 83, the `\ir` line in `scripts/test-rls.sql`). `git apply --check` is clean against HEAD.
 
-- `path/to/file` — what changed
+### Files Modified
 
-## Schema Changes
+- `src/lib/db/domain/index.ts` — `export * from "./help-contact";` (F338 ruling; see Departures 1).
+- `src/lib/dev-docs.ts` — `help_contact_messages` filed under `S. Support`, plus a `BESPOKE_POLICIES` note that the zero-policy FORCE is deliberate (F338).
+- `docs/schema-design.md` — `npm run docs:erd` added the two `users` edges to the S. Support diagram.
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+### Schema Changes
 
-## Audit Events
+- New table `help_contact_messages` (`id`, `created_at`, `topic`, `name`, `email`, `congregation`, `message`, `status`, `status_changed_at`, `status_changed_by` to `users`, `notified_at`, `cleared_at`, `cleared_by` to `users`). New functions `presby_submit_help_contact(text, text, text, text, text) returns text`, `presby_help_contact_guard_delete()`, `presby_help_contact_guard_update()`. No existing object changed.
+- **Applied via: hand-written migration.** `db:generate` has been broken repo-wide since 0009–0012, and Drizzle Kit emits no RLS, trigger, definer or revoke. Applied to `pipeline-help-contact` (endpoint `ep-odd-mud-…`) as owner with `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0083_presby_help_contact.sql`. **Idempotency:** the whole file was applied twice in a row. Both runs exited 0, and the row count was 0 before and after. It was then re-applied whole 11 more times as the restore step of the failing-first runs below, each exit 0, with the catalog identical afterwards. `development` and production were not touched.
+- **Journal:** the entry `{ idx: 83, tag: "0083_presby_help_contact" }` is in the integration patch, not committed (Rule 16).
 
-- [Action key written when the security-sensitive mutation fires]
+### Live catalog on `pipeline-help-contact` (after 0083)
 
-## Implementer Notes
+```
+relname               | relowner     | relrowsecurity | relforcerowsecurity
+help_contact_messages | neondb_owner | t              | t
+pg_policies for the table: 0 rows
+aclexplode(relacl): neondb_owner only (INSERT SELECT UPDATE DELETE TRUNCATE REFERENCES TRIGGER MAINTAIN); no presby_app, no presby_platform, no PUBLIC
+has_table_privilege(presby_app | presby_platform, every verb): all false
+pg_trigger: help_contact_guard_delete O (BEFORE DELETE ROW), help_contact_guard_update O (BEFORE UPDATE ROW)
+presby_help_contact_guard_delete()  | neondb_owner | prosecdef f | {search_path=public, pg_temp} | {neondb_owner=X/neondb_owner}
+presby_help_contact_guard_update()  | neondb_owner | prosecdef f | {search_path=public, pg_temp} | {neondb_owner=X/neondb_owner}
+presby_submit_help_contact(text,text,text,text,text) | neondb_owner | prosecdef t | {search_path=public, pg_temp} | {neondb_owner=X/neondb_owner,presby_app=X/neondb_owner}
+has_function_privilege(public | presby_app | presby_platform, submit, execute): f | t | f
+CHECKs: help_contact_bounds, _cleared_shape, _email_shape, _no_controls, _status_allowed, _status_stamp_shape, _topic_allowed
+indexes: help_contact_status_created_ix (status, created_at desc), help_contact_created_ix (created_at), help_contact_notified_ix (notified_at desc) where notified_at is not null
+```
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+### CA1 properties, each with its proof
 
-Strings added or changed: [file:line each, or "none"]
+| Property | Test | Failing-first (mechanism removed on the branch, then 0083 re-applied whole) |
+|---|---|---|
+| FORCE RLS on, zero policies | db test "FORCE ROW LEVEL SECURITY is on, with zero policies"; 83a | `no force`: db test fails (deep-equal on `relforcerowsecurity`); `test-rls-83.sql:55` `FAIL 83a: … ENABLED and FORCED (F1) — expected 1, got 0`, exit 3 |
+| `presby_app`: SELECT, INSERT, UPDATE, DELETE (and TRUNCATE) each 42501 | db test "SELECT, INSERT, UPDATE, DELETE and TRUNCATE are each 42501"; 83b | `grant select … to presby_app`: db test fails (`expected a raise matching /permission denied for table/`); `test-rls-83.sql:63` `FAIL 83a: … hold NOTHING … expected 0, got 1`. With that stray grant, `presby_app` read **0 rows**: the zero-policy FORCE is the second wall. |
+| EXECUTE works for `presby_app`, not for PUBLIC (or `presby_platform`) | db tests "EXECUTE on the definer works…" and "the definer is SECURITY DEFINER…"; 83a, 83c | `grant execute … to public`: db test fails (`toMatchObject`, `public_exec`); `test-rls-83.sql:88` fails, exit 3 |
+| Kill switch: after `revoke execute … from presby_app` the call is 42501; the grant restores it | db test "the kill switch…" (commits the revoke and re-grants in `finally`, since `neondb_owner` cannot `SET ROLE presby_app`) | with a stray PUBLIC grant the revoke does not bite: `expected true to be false` |
+| DELETE guard fires for the owner | db test "the delete guard refuses the owner" | `disable trigger help_contact_guard_delete`: `expected a raise matching /messages are permanent/` |
+| UPDATE guard refuses a rewrite, an un-clear, and clearing a `new` message (plus identity changes, an unnamed or partial clear, a re-stamp, cleared back to `new`, an unnamed status change, stamps moved without a status change; stamps forced to `now()`) | db tests in "the guards on the OWNER path" (5) | `disable trigger help_contact_guard_update`: all 5 fail |
+| Coalescing: `stored_notify` once per window | db tests "the first message in a window claims…", "a claim 61 minutes old…" | `v_notify := true or exists (…)`: `expected 'stored_notify' to be 'stored'` |
+| …under concurrency | db test "a second caller waits on the advisory lock…" (deterministic, rolled back) and "two concurrent committed submissions…" (exactly one claim in a quiet window) | lock removed: `the second caller is blocked on the advisory lock: expected +0 to be 1`. The committed race could not be run failing-first: its own first run had already claimed the hour (see Notes 3). |
+| Ceiling returns `ceiling` and writes nothing | db tests "the hourly ceiling…" (89 + 1 stored, the next refused; messages older than an hour do not count), "the daily ceiling…" (300, and older than 24 h do not count) | `c_ceil_hour := 91`: `expected 'stored' to be 'ceiling'` |
+| CHECKs | db tests in "the CHECKs" (5); 83c through the definer | `drop constraint help_contact_no_controls`: db test fails, `test-rls-83.sql:184` `FAIL 83c: the definer stored a control character`; `drop constraint help_contact_email_shape`: db test fails |
+
+### Gates
+
+- `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism src/lib/db/domain/help-contact.db.test.ts`: **25 passed** (two full runs, plus the filtered failing-first runs).
+- `psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/help-contact/test-rls-83.sql`: exit 0, 14 `assert_eq` plus 3 DO-block passes. Also run through a one-line `\ir help-contact/test-rls-83.sql` wrapper in `scripts/`: the path the patch adds resolves. 0 rows written.
+- `npm run check:schema-parity`: 87 domain tables (86 before), 0 failing.
+- `npm run typecheck`: exit 0. `eslint` on the four changed TS files: exit 0. `npm run check`: all nine tripwires pass.
+- `npm run test` (no DB env, the CI shape): 731 files passed, 116 skipped; 11,205 tests passed, 3,227 skipped.
+- Full `scripts/test-rls.sql` on this branch: **not green, and not because of 0083.** It stops at `test-rls.sql:219` (`FAIL presbytery: sees only its own members — expected 2, got 3`). That is the documented live-DB drift recorded at lines 205–218: an untracked third membership at Northern Reach, inherited because this branch was forked from the shared dev database. It cascades into the adjacent assertions (`:222`), about 8,500 lines before the appended `\ir`. The Rule 16 re-run on the merged `development` branch is the orchestrator's.
+
+### Departures from the design, with reasons
+
+1. **The barrel and dev-docs lines are committed on the branch.** Phase 3 said nothing depends on the `index.ts` re-export and listed it as integration-only. `src/lib/dev-docs.test.ts` (F283) does depend on it. With the table declared and not exported, "sees the same tables in the exports as are declared in the schema files" fails (105 against 106), so the unit suite would be red on the branch. The F338 standing ruling covers exactly this case, so the patch leaves both hunks out.
+2. **`help_contact_bounds` is slightly tighter on the message than written, and only tighter.** The design had `char_length(btrim(message)) between 10 and 2000`. As shipped: `char_length(message) <= 2000` (raw length, never shorter than trimmed) and `char_length(btrim(message, E' \t\r\n')) >= 10`. Plain `btrim` strips only spaces, so twelve newlines would have passed. The validator always stores a trimmed message, so nothing it accepts is refused here.
+3. **The update guard also refuses a partial clear** (a clear must null all four personal fields), as an explicit 42501. The design left that case to the cleared-shape CHECK (23514). The rule is the same; the guard's error is clearer. A clear is signalled by naming `cleared_at` **or** `cleared_by`, and the guard overwrites `cleared_at` with `now()` whatever the caller wrote.
+4. **The `presby_app` revoke proof commits.** The design had "after `revoke execute … from presby_app` in the same transaction". `neondb_owner` cannot `SET ROLE presby_app` (measured: `permission denied to set role`), so the revoke and the call cannot share a transaction. The test commits the revoke, calls on the real `db` login, and re-grants in `finally`. `has_function_privilege` is then asserted true and a rolled-back call succeeds.
+5. **The concurrency proof is two tests, and one of them commits two rows per run.** Two connections cannot share a rolled-back view, so a literal "exactly one claim" race has to commit. That test reads the committed state first. In a quiet window it asserts exactly one claim. With a claim younger than 59 minutes it asserts zero. In every case it asserts at most one. Its rows are synthetic (`race-N-<stamp>@example.invalid`, status `new`) and cannot be deleted. The deterministic proof of the mechanism is the rolled-back lock-wait test, which watches the second caller wait on `advisory` in `pg_stat_activity`.
+
+### Notes for the next implementer and for QA
+
+1. **Validator agreement (Batch 2).** The email CHECK is `^[^@]+@[^@]+\.[^@]+$` with no whitespace, so the domain needs at least one character on each side of a dot. `x@a.` and `x@.invalid` are refused (DB test). Phase 3's "a domain containing a dot" would accept both, and they would then surface as `not_sent` (23514). `validate.ts` should mirror the regex. Control characters: tab, LF and CR are allowed, and C1 controls (0x80–0x9f) are not refused by the CHECK. `text-hygiene` strips them.
+2. **The definer's coalescing is exact under READ COMMITTED** (the default; each statement in the VOLATILE function takes a fresh snapshot after the lock is granted). Under REPEATABLE READ a waiter would not see the holder's row. `submit.ts` should call it on a plain `db` statement or a default transaction. This is stated in the 0083 comment.
+3. **Durable rows on `pipeline-help-contact`:** 4 so far (two per full run of the db test), all synthetic and `new`. They count toward the e2e lane's 60-per-hour pre-check and the 90-per-hour ceiling, at 2 per run. Batch 4's admin e2e will see them in the New list.
+4. **Residual (in the 0083 comment, not prevented):** a status change that leaves `status_changed_by` at its previous value records the previous operator. `inbox.ts` must always set it. The audit row in the same transaction names the real actor.
+5. **The CA10 audit test** (`setMessageStatus` and `clearMessageDetails` write one audit row each, with no personal field in `metadata`) needs `inbox.ts` and is Batch 4's, per Phase 3. It is not in this file.
+
+Audit events: none in Batch 1 (the triage audit keys are Batch 2/4).
+
+Strings added or changed: none user-facing. The guard and comment texts are operator and developer facing (`drizzle/0083_presby_help_contact.sql` sections 3 and the comments block).
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

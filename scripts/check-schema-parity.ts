@@ -186,6 +186,21 @@ const ALLOWLIST: Array<{
       "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION (drizzle/0078 section 1, person_photos_thumb_fk); person-photos.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
     since: "2026-10-26",
   },
+  // The treasury receipt (Treasury Increment 1, Batch 1b). Same shape and the
+  // same reason as giving_statements above: reimbursement.ts does not import
+  // assets.ts (DECISION-058). Enforced at drizzle/0073_presby_reimbursements.sql
+  // section 1d (reimbursement_attachments_blob_fk), three columns on the
+  // constant asset_audience = 'private' per F289's catalog rule (DECISION-277),
+  // NO ACTION both ways (F44); reimbursement.ts's attachments block says so.
+  {
+    table: "reimbursement_attachments",
+    kind: "extra_fk",
+    fk: "(asset_audience,blob_key,organization_id) -> blob_assets(audience,id,organization_id)",
+    category: "architectural",
+    reason:
+      "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION both ways (drizzle/0073 section 1d, reimbursement_attachments_blob_fk; F289, DECISION-277); reimbursement.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
+    since: "2026-10-26",
+  },
   // --- The submission-grant STAMP (1 row) ------------------------------------
   // src/lib/db/domain/returns.ts:364 says so in the column's own docstring:
   // "THE STAMP. Composite FK to `statistical_returns` is 0049-only."

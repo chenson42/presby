@@ -457,6 +457,41 @@ export async function findDirectoryPersonIds(
 }
 
 /**
+ * Does `personId` appear in the directory of `organizationId`? One yes/no,
+ * built on the SAME eligibility predicate the directory lists with
+ * (`directoryEligibilityWhereSql(false)`: not hidden, not merged, not deceased,
+ * relationship current, on the roll or a regular attender) - never a hand copy,
+ * so it can only ever say yes to someone `getDirectory()` would list (F136).
+ *
+ * Added for reimbursements (docs/work-log/2026-10-25-treasury-inc1.md, EC17):
+ * the beneficiary picker offers only listed people, and the action that
+ * receives a POSTED id re-checks it here, so a `directory_hidden` member cannot
+ * be named by hand-posting an id. It judges eligibility only; whether the
+ * CALLER may see the directory is `checkDirectoryView`'s question, asked by the
+ * caller.
+ */
+export async function isDirectoryListedPerson(
+  tx: OrgTx,
+  organizationId: string,
+  personId: string,
+): Promise<boolean> {
+  if (!UUID_RE.test(personId)) return false;
+  const result = await tx.execute(sql`
+    select 1 as listed
+      from memberships m
+      join people p on p.id = m.person_id
+      left join person_privacy pp
+             on pp.person_id = m.person_id
+            and pp.organization_id = m.organization_id
+     where m.organization_id = ${organizationId}::uuid
+       and m.person_id = ${personId}::uuid
+       and ${directoryEligibilityWhereSql(false)}
+     limit 1
+  `);
+  return ((result as unknown as { rows?: unknown[] }).rows ?? []).length > 0;
+}
+
+/**
  * THE shared row query. Same SELECT list, same JOINs, same eligibility
  * predicate, same ORDER BY `getDirectory()` has always used — `opts`
  * narrows the result set (search text, status, one household, one person)

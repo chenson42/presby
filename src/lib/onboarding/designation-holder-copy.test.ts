@@ -203,7 +203,7 @@ describe("revokeDialogContent", () => {
   it("the treasurer wording states donor and gift data is unchanged and points at the audit log, with no claim about operator access", () => {
     const c = revokeDialogContent("treasurer", "X", row());
     expect(c.intro).toMatch(/manage giving at X\.$/);
-    expect(c.treasurerLine).toBe("Gift and donor records are not changed. This is recorded in the audit log.");
+    expect(c.treasurerLine).toBe("Gift, donor and reimbursement records are not changed. This is recorded in the audit log.");
     expect(c.treasurerLine).not.toMatch(/no access/i);
     expect(revokeDialogContent("founding_administrator", "X", row()).treasurerLine).toBeNull();
   });

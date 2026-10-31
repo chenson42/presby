@@ -78,7 +78,7 @@ describe.skipIf(!hasDb)("two-factor default (0080, Postgres-backed)", () => {
     expect(u!.two_factor_required).toBe(false);
   });
 
-  it("exactly six permissions are flagged: giving.view/record/manage (module giving, tier 2) and roles.manage, role_grants.manage, domains.manage", async () => {
+  it("exactly nine permissions are flagged: giving.view/record/manage (module giving, tier 2), reimbursement.view/pay/manage (module reimbursement, tier 2; drizzle/0074) and roles.manage, role_grants.manage, domains.manage", async () => {
     const rows = await q(sql`
       select key, module, sensitivity_tier from permissions where requires_two_factor order by key`);
     expect(rows).toEqual([
@@ -86,6 +86,9 @@ describe.skipIf(!hasDb)("two-factor default (0080, Postgres-backed)", () => {
       { key: "giving.manage", module: "giving", sensitivity_tier: 2 },
       { key: "giving.record", module: "giving", sensitivity_tier: 2 },
       { key: "giving.view", module: "giving", sensitivity_tier: 2 },
+      { key: "reimbursement.manage", module: "reimbursement", sensitivity_tier: 2 },
+      { key: "reimbursement.pay", module: "reimbursement", sensitivity_tier: 2 },
+      { key: "reimbursement.view", module: "reimbursement", sensitivity_tier: 2 },
       { key: "role_grants.manage", module: "authz", sensitivity_tier: 1 },
       { key: "roles.manage", module: "authz", sensitivity_tier: 1 },
     ]);

@@ -292,7 +292,7 @@ export const HELP_PAGES = [
     summary:
       "Ask your congregation to pay you back, and follow the request to the end.",
     order: 65,
-    status: "pending",
+    status: "published",
     audience: "everyone",
     needs: {
       who: "A member, regular attender or staff member of a congregation that uses Reimbursements.",
@@ -337,8 +337,7 @@ export const HELP_PAGES = [
       "Open the request",
       "Sign in to see the details. This message doesn't include any.",
     ],
-    verifiedIn: null,
-    requires: "reimbursements",
+    verifiedIn: "0.51.0",
   },
   // ---- Church administrators -------------------------------------------------------------
   {
@@ -759,7 +758,7 @@ export const HELP_PAGES = [
     summary:
       "Approve, send back, and record payment of a reimbursement.",
     order: 10,
-    status: "pending",
+    status: "published",
     audience: "treasurer",
     needs: {
       who: "A chair or leader of a group that receives requests (to approve), or a member of the treasury team (to record payments and set Reimbursements up). Everyone who views, pays or manages requests signs in with two-factor sign-in.",
@@ -823,8 +822,7 @@ export const HELP_PAGES = [
       "Record payments",
       "Manage reimbursements",
     ],
-    verifiedIn: null,
-    requires: "reimbursements",
+    verifiedIn: "0.51.0",
   },
   // ---- Planned: labelled placeholders for backlog tracks, no file, no steps, no dates (operator ruling O1, 2026-10-26) ----
   {

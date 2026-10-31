@@ -3,6 +3,8 @@ import { sql } from "drizzle-orm";
 import { OrgAccessError, withOrgContext, type OrgTx } from "@/lib/authz";
 import { OFF_WARNING_FALLBACK, offWarningCopy } from "@/lib/person-photos/copy";
 import { countChosenPhotos } from "@/lib/person-photos/reader";
+import { openRequestCount } from "@/lib/reimbursement/counts";
+import { REIMBURSEMENT_TOGGLE_KEY } from "@/lib/reimbursement/keys";
 
 /**
  * Page-side "turning this OFF has a consequence" warnings for the Features
@@ -13,8 +15,16 @@ import { countChosenPhotos } from "@/lib/person-photos/reader";
  * toggles) free of feature-specific queries, so a warning is data the page asks
  * for, not logic the catalog carries. A key without an entry has no warning.
  *
- * Two entries: `org_portal.giving` and `org_portal.person_photos`. Turning Giving OFF hides every
- * giving page and tile; it does NOT stop Stripe events being recorded, and it
+ * Three entries: `org_portal.giving`, `org_portal.person_photos` and
+ * `org_portal.reimbursement` (treasury
+ * Increment 1, Copy C1). Turning Reimbursements OFF hides the pages and deletes
+ * nothing, so an administrator who turns it off with requests still in flight
+ * is told how many ("open" = submitted, returned or approved; drafts are not
+ * counted), by `openRequestCount()` - the same kind of SECURITY DEFINER BARE
+ * COUNT, readable by an `org_features.manage` holder with no money key. A count
+ * of zero is no warning at all.
+ *
+ * Giving: turning Giving OFF hides every giving page and tile; it does NOT stop Stripe events being recorded, and it
  * does not cancel a donor's monthly gift - that keeps charging in Stripe until
  * it is cancelled there. So when monthly gifts are active the church is told,
  * in a dialog, before the switch flips. The count is
@@ -65,7 +75,22 @@ const REGISTRY: Record<string, OffWarningLoader> = {
     const count = await countChosenPhotos(tx);
     return count > 0 ? offWarningCopy(count) : null;
   },
+  [REIMBURSEMENT_TOGGLE_KEY]: async (tx) => {
+    const count = await openRequestCount(tx);
+    return count > 0 ? reimbursementWarning(count) : null;
+  },
 };
+
+/** Copy C1, verbatim. `n` is `presby_reimbursement_open_count()`. */
+function reimbursementWarning(n: number): OffWarning {
+  const noun = n === 1 ? `${n} request is open` : `${n} requests are open`;
+  return {
+    title: "Reimbursement requests are still open",
+    description:
+      `${noun} (waiting for approval, for the requester, or for payment). ` +
+      "Turning this off hides the pages and nothing is deleted. Turning it back on restores everything.",
+  };
+}
 
 const GENERIC_WARNING: OffWarning = {
   title: "Check before turning this off",
@@ -78,6 +103,11 @@ const FALLBACK: Record<string, OffWarning> = {
     title: "Monthly gifts may still be active",
     description:
       "We couldn't check for active monthly gifts just now. Any that exist keep charging in Stripe until cancelled there. Turning this off hides Giving; it does not stop recording.",
+  },
+  [REIMBURSEMENT_TOGGLE_KEY]: {
+    title: "Reimbursement requests may still be open",
+    description:
+      "We couldn't check how many requests are open just now. Turning this off hides the pages and nothing is deleted.",
   },
 };
 

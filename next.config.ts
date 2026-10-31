@@ -224,6 +224,12 @@ const nextConfig: NextConfig = {
       "./src/lib/giving/statements/fonts/**/*",
       "./node_modules/pdfkit/js/data/**/*",
     ],
+    // The reimbursement print route (Treasury Inc 1, Batch 7; Copy C11) draws the same Noto Sans
+    // from the same directory (src/lib/reimbursement/print.ts reads it from process.cwd()).
+    "/o/*/reimbursements/*/print": [
+      "./src/lib/giving/statements/fonts/**/*",
+      "./node_modules/pdfkit/js/data/**/*",
+    ],
   },
   images: {
     remotePatterns: [

@@ -2,7 +2,7 @@ Reimbursements is where you ask your congregation to pay you back for something 
 
 ## Before you start
 
-Your congregation has to use Reimbursements. An administrator turns it on under "Features", and it is off until they do. If it is off, the Reimbursements page says so and tells you to ask an administrator who manages your organization's features. See [Turning features on and off](/help/turning-features-on-and-off).
+Your congregation has to use Reimbursements. An administrator turns it on under "Features", and it is off until they do. While it is off the "Reimbursements" tile is not on your congregation's page. If you open a Reimbursements link anyway, the page says so and tells you to ask an administrator who manages your organization's features. See [Turning features on and off](/help/turning-features-on-and-off).
 
 Requests can be started by members, regular attenders and staff of the congregation. If you think you should be able to start one and cannot, tell the church office.
 
@@ -16,14 +16,14 @@ The form is headed "New reimbursement request".
 
 1. Under "What is this for?", choose one of these.
    - "Pay me back", for something you paid for yourself.
-   - "Pay a vendor", when the church should pay a business or person directly. Enter the "Vendor name".
    - "Pay someone else back" appears only for people the congregation has allowed to enter requests for others. Under "Who are we paying back?", search by name. Only people who appear in the directory can be chosen.
+   - "Pay a vendor", when the church should pay a business or person directly. Enter the "Vendor name".
 2. Under "Charge to", choose a group. These are the groups the treasurer has chosen to receive requests. If the page says "No groups can be charged yet. Ask your treasurer to set them up.", there is nothing to choose yet.
 3. If the form shows a "Category", choose one.
-4. Enter the "Amount", the "Date of the expense" and "What was it for?". The date cannot be in the future or more than a year ago.
+4. Enter the "Amount", the "Date of the expense" and "What was it for?". The date cannot be after today or more than a year ago.
 5. If someone approved the spending before you made it, you can name them under "Who approved this before you spent it? (optional)".
 6. Under "Receipts", select "Add a receipt or invoice". Photos and PDFs work. Each file can be up to 4 MB, and you can add up to 5. If you really cannot attach a receipt, tick "I can't attach a receipt". The treasurer decides whether that is okay before paying.
-7. Select "Send request". Or select "Save draft" to finish later. The page says "Draft saved." and the draft is visible only to you. You can keep up to 20 unfinished drafts.
+7. Select "Send request". Or select "Save draft" to finish later. A message says "Draft saved." and the draft is visible only to you. You can keep up to 20 unfinished drafts.
 
 If saving fails, the page says "We couldn't save that. Your entries are still here. Try again."
 
@@ -31,9 +31,9 @@ Photos are saved again without their hidden location data. PDFs are kept exactly
 
 ## What happens after you send it
 
-The page tells you where the request went.
+A message tells you where the request went.
 
-- The page says "Sent to" and the group's name, then "for approval". The chair or leader of that group can approve it.
+- The message says "Sent to" and the group's name, then "for approval". The chair or leader of that group can approve it.
 - If no one in the group can approve it, the request goes to the treasurer.
 - If no one can approve it and no one can record payments yet, the request is saved and waits. The page says to let your church office know.
 
@@ -58,13 +58,13 @@ You also get an email at each step: "Your reimbursement request was approved", "
 
 - A draft has "Edit draft".
 - A request that was sent back has "Edit and send again".
-- To stop a request, select "Withdraw request" and confirm "Withdraw". The page says "Request withdrawn." A request that is already paid cannot be withdrawn: ask the treasurer.
+- To stop a request, select "Withdraw request" and confirm "Withdraw". A message says "Request withdrawn." A request that is already paid cannot be withdrawn: ask the treasurer.
 
 Nothing is deleted. A withdrawn request stays on record.
 
 ## Print the form
 
-Open a request and select "Print the form" to get a printable form of the request, titled "Reimbursement request". It ends with "Printed from PresbyPortal."
+Open a request and select "Print the form". A PDF file of the request downloads, titled "Reimbursement request". Open it to print. It ends with "Printed from PresbyPortal."
 
 ## If you approve requests
 

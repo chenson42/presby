@@ -1,0 +1,152 @@
+# Treasury Increment 1 - integration patch (Rule 16 shared files)
+#
+# docs/work-log/2026-10-25-treasury-inc1.md -> Phase 4 Batch 1a (first cut),
+# Batch 7 (CLAUDE.md hunk), Batch 1b (regenerated 2026-10-26 against the
+# branch after its merge of origin/main at 0.46.1, 49ea633: 0068 and 0072 are
+# on main, so the journal entries 73 and 74 now follow 0072), Batch 2b
+# (2026-10-26: the two non-Rule-16 hunks, the `src/lib/db/domain/index.ts`
+# export and the `src/lib/dev-docs.ts` classification, are DROPPED from this
+# patch because the branch now commits them itself, orchestrator ruling F338:
+# a pipeline that adds tables commits its own one-line barrel export and its
+# dev-docs entry, the merge conflict being a trivial append, so the unit suite is
+# green on the branch without this patch). Produced by database-admin from edits
+# applied LOCALLY (uncommitted) to test, then reverted; the branch commits none
+# of the four files below. Every hunk passes `git apply --check` against the
+# branch HEAD it was cut from; if main moves again before integration, re-cut it
+# the same way.
+#
+# Apply at integration, from the repository root:
+#
+#     git apply docs/work-log/treasury-inc1.integration.patch
+#
+# It touches four files: three Rule 16 shared files and CLAUDE.md:
+#   1. drizzle/meta/_journal.json      idx 73 and 74 entries after idx 72 (tags
+#                                      = filenames; `when` continues the 0072
+#                                      + n days series)
+#   2. scripts/seed-dev.sql            appends `\ir treasury/seed-dev-treasury.sql`
+#                                      (after the parishes include)
+#   3. scripts/test-rls.sql            DECISION-152's template-role count 6 -> 7
+#                                      (0074 adds the reimbursement_clerk
+#                                      template), and appends
+#                                      `\ir treasury/test-rls-73.sql` after the
+#                                      section-72 include
+#   4. CLAUDE.md                       the tripwire count "eight" -> "nine" in the
+#                                      Phase 4 gate and the command list, and the
+#                                      `check:treasury-boundaries` line (Batch 7)
+#
+# Order of the migrations everywhere: 0072 before 0073 (0073 section 1.0
+# raises 'reimbursement 0073: apply 0072 (blob_assets audience) first'
+# otherwise, before creating anything). Production and development already
+# carry 0072 (0.46.1).
+#
+# After applying: re-run scripts/test-rls.sql as presby_app against the merged
+# development branch (Rule 16), after scripts/install-test-helpers.sql,
+# drizzle/0073, drizzle/0074 and scripts/treasury/seed-dev-treasury.sql.
+# Section 72b (scripts/assets/test-rls-72.sql, committed on this branch) now
+# counts the receipt FK as the third private consumer, so it passes only once
+# 0073 is applied.
+#
+# NOT in this patch (not shared files, committed on the branch): the F323
+# modify targets scripts/giving/test-rls-46.sql (46j, 46m),
+# src/lib/onboarding/designation-parity.golden.json and
+# e2e/invitation-existing-account.spec.ts; Batch 1b's
+# scripts/assets/test-rls-72.sql, src/lib/storage/blob-audience.db.test.ts and
+# scripts/check-schema-parity.ts rows.
+#
+# ----------------------------------------------------------------------------
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 47a0f8c..2aefca2 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -260,7 +260,7 @@ Phases run 1 → 2 → 3 → 4 → 5 → 6. Loop-backs are expected, and a loop-
+ | React components, pages, forms | **ux-developer** |
+ | Spans server + client and is small | **full-stack-developer** |
+ 
+-**Gate:** Tests for the change are written *by the implementer* (QA runs them, and does not write them). Typecheck and build pass. `npm run check` reports zero violations (all eight tripwires, the command CI runs; two QA first runs failed on `check:secrets`). No native browser dialogs. No `console.log` left in production paths. All invariants honored. Audit events written for security-sensitive mutations. **For any feature that touches `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required before Phase 5 can begin — module-resolution defects are invisible to unit tests.**
++**Gate:** Tests for the change are written *by the implementer* (QA runs them, and does not write them). Typecheck and build pass. `npm run check` reports zero violations (all nine tripwires, the command CI runs; two QA first runs failed on `check:secrets`). No native browser dialogs. No `console.log` left in production paths. All invariants honored. Audit events written for security-sensitive mutations. **For any feature that touches `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required before Phase 5 can begin — module-resolution defects are invisible to unit tests.**
+ **Loop-back:** Design unbuildable returns to Phase 3. Architectural problem discovered returns to Phase 2.
+ 
+ ### Phase 5 — Test Verification (qa)
+@@ -458,10 +458,14 @@ npm run check:hydration-gate # Tripwire: every useForm root renders <HydrationGa
+                               # exemption `// hydration-gate-ok: <reason>`
+ npm run check:giving-boundaries # Tripwire: the giving "appears nowhere else" properties (Stripe SDK
+                        # imported by one file, no owner connection inside src/lib/giving, ...)
++npm run check:treasury-boundaries # Tripwire: the reimbursement "appears nowhere else" properties (no owner
++                       # connection in a treasury path, only src/lib/reimbursement/ names its tables,
++                       # no `capture` on a file input, no money or free text in a notice, `sharp`
++                       # imported by one file; DECISION-271)
+ npm run check:proxy-imports # Tripwire: src/proxy.ts's import graph never reaches the database, a
+                        # server-only module, or any src/lib/domains file but host.ts, probe.ts
+                        # and cron-passthrough.ts (DECISION-177)
+-npm run check        # All eight tripwires in sequence
++npm run check        # All nine tripwires in sequence
+ npm run test:e2e:prod # Hydration specs (e2e/hydration/) against `next build && next start` on
+                        # port 3800 (PW_PROD_BUILD=1); a dev server can never satisfy this lane
+ npm run ui:add -- <component…>  # The ONLY supported way to generate a shadcn primitive.
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index f9b85ae..7b3f0ff 100644
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -470,6 +470,20 @@
+       "when": 1788137573186,
+       "tag": "0072_presby_blob_audience",
+       "breakpoints": true
++    },
++    {
++      "idx": 73,
++      "version": "7",
++      "when": 1788223973186,
++      "tag": "0073_presby_reimbursements",
++      "breakpoints": true
++    },
++    {
++      "idx": 74,
++      "version": "7",
++      "when": 1788310373186,
++      "tag": "0074_presby_reimbursement_permissions",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/scripts/seed-dev.sql b/scripts/seed-dev.sql
+index 809fe2f..7aa0cdf 100644
+--- a/scripts/seed-dev.sql
++++ b/scripts/seed-dev.sql
+@@ -1973,3 +1973,9 @@ commit;
+ -- congregation, so a database built from empty matches development.
+ -- scripts/parishes/test-rls-68.sql needs it.
+ \ir parishes/seed-dev-parishes.sql
++
++-- Reimbursements fixture (drizzle/0073, 0074). Its own file and transaction,
++-- run AFTER the person-emails include (it needs Alder Creek's people, groups
++-- and the giving fixture's treasurer role); adds no people, users or
++-- memberships; idempotent. scripts/treasury/test-rls-73.sql needs it.
++\ir treasury/seed-dev-treasury.sql
+diff --git a/scripts/test-rls.sql b/scripts/test-rls.sql
+index 97a7716..bd84fc0 100644
+--- a/scripts/test-rls.sql
++++ b/scripts/test-rls.sql
+@@ -7935,7 +7935,7 @@ begin;
+     1, 'DECISION-152: and that permission is statistics.publish — the same authority that files a return retracts it (no statistics.withdraw)');
+   select assert_eq(
+     (select count(*) from app_roles where organization_id is null),
+-    6, 'DECISION-152: there are now SIX template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), and treasurer + giving_recorder (drizzle/0055)');
++    7, 'DECISION-152: there are now SEVEN template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), treasurer + giving_recorder (drizzle/0055), and reimbursement_clerk (drizzle/0074, F322)');
+   select assert_eq(
+     (select count(*) from app_role_permissions rp
+        join app_roles r on r.id = rp.role_id
+@@ -8707,3 +8707,14 @@ rollback;
+ --     fixture (no seed change), so it is never run against production.
+ -- ===========================================================================
+ \ir assets/test-rls-72.sql
++
++-- ===========================================================================
++-- APPENDED SECTION - pipeline/treasury (integration, Increment 1).
++-- 73. Reimbursements (drizzle/0073_presby_reimbursements.sql and
++--     drizzle/0074_presby_reimbursement_permissions.sql). Its own file, as
++--     46, 47, 59-64, 68 and 72 above; \ir resolves relative to this script.
++--     It needs the test helpers, scripts/seed-dev.sql's Alder Creek fixture
++--     and scripts/treasury/seed-dev-treasury.sql, so it is never run against
++--     production. Section 73a/73g assert the receipt FK that 72b also counts.
++-- ===========================================================================
++\ir treasury/test-rls-73.sql

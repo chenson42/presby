@@ -278,6 +278,19 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   PERSON_PHOTO_REMOVED: "tenant.person_photo.removed",
   PERSON_PHOTO_DESIGNATED: "tenant.person_photo.designated",
   PERSON_PHOTO_UNDESIGNATED: "tenant.person_photo.undesignated",
+  // Reimbursements (docs/work-log/2026-10-25-treasury-inc1.md, Phase 3 "AUDIT_ACTIONS").
+  REIMBURSEMENT_APPROVED: "tenant.reimbursement.approved",
+  REIMBURSEMENT_OVERRIDE_APPROVED: "tenant.reimbursement.override_approved",
+  REIMBURSEMENT_RETURNED: "tenant.reimbursement.returned",
+  REIMBURSEMENT_NOT_APPROVED: "tenant.reimbursement.not_approved",
+  REIMBURSEMENT_VOIDED: "tenant.reimbursement.voided",
+  REIMBURSEMENT_PAYMENT_RECORDED: "tenant.reimbursement.payment_recorded",
+  REIMBURSEMENT_PAYMENT_REVERSED: "tenant.reimbursement.payment_reversed",
+  REIMBURSEMENT_RECEIPT_WAIVED: "tenant.reimbursement.receipt_waived",
+  REIMBURSEMENT_RECEIPT_VIEWED: "tenant.reimbursement.receipt_viewed",
+  REIMBURSEMENT_EXPORTED: "tenant.reimbursement.exported",
+  REIMBURSEMENT_CHARGEABLE_CHANGED: "tenant.reimbursement.chargeable_changed",
+  REIMBURSEMENT_CATEGORY_CHANGED: "tenant.reimbursement.category_changed",
   // Community Increment 2b (DECISION-225/226): address proof and auto-connect.
   TENANT_PERSON_SIGN_IN_CONNECTED: "tenant.person.sign_in_connected",
   USER_EMAIL_PROOF_RECORDED: "user.email_proof_recorded",
@@ -341,6 +354,25 @@ describe("AUDIT_ACTIONS — online-giving keys (Batch 1b)", () => {
       } else {
         expect(value, key).toMatch(/^tenant\.giving_[a-z_]+\.[a-z_]+$/);
       }
+    }
+  });
+});
+
+describe("AUDIT_ACTIONS - reimbursement keys (treasury Increment 1)", () => {
+  const keys = Object.keys(AUDIT_ACTIONS).filter((k) => k.startsWith("REIMBURSEMENT_")) as Array<
+    keyof typeof AUDIT_ACTIONS
+  >;
+
+  it("declares exactly the twelve keys the design names, all on the tenant axis", () => {
+    expect(keys).toHaveLength(12);
+    for (const key of keys) {
+      expect(AUDIT_ACTIONS[key], key).toMatch(/^tenant\.reimbursement\.[a-z_]+$/);
+    }
+  });
+
+  it("has no key for the events the events table already records (submit, withdraw, note, receipt attach and detach)", () => {
+    for (const absent of ["SUBMITTED", "WITHDRAWN", "NOTE_ADDED", "RECEIPT_ATTACHED", "RECEIPT_DETACHED"]) {
+      expect(Object.keys(AUDIT_ACTIONS)).not.toContain(`REIMBURSEMENT_${absent}`);
     }
   });
 });

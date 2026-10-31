@@ -4,6 +4,80 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-299 — The treasurer tree answers a refused verb with a sentence that is true for every cause of that outcome; the queue's "Charged to" filter is read from the requests the viewer can already see, bounded at 2,000.**
+
+**Status:** Accepted (tech-lead Phase 3 amendment "Copy gaps from Batch 4", ruling 5 and ruling 8, 2026-10-26; Phase 6 SHIP WITH NOTES; recorded at integration 2026-10-31) · **Date:** 2026-10-26 · **Feature:** `2026-10-25-treasury-inc1` (no migration of its own; v0.51.0). Numbered DECISION-299 because DECISION-267 to 271 were pre-assigned to the five Phase 2 entries and the work-log's two later decision drafts had no number.
+
+- **Refusals.** The member tree keeps one neutral answer (`This request isn't available.`) for a refused decision or withdrawal and for every `not_found`, because a member must not be able to tell a request they cannot see from one that is not there (DECISION-040's shape). The treasurer tree is different: its audience already holds `reimbursement.view` or `pay`, so it is told why. Six short sentences (`treasury.refusals.{notWaivable, receiptPresent, notVoidable, notReversible, notApprovable, notReturnable}`), each worded to be true for every cause its definer outcome can have, never naming a person, an amount or who decided. `not_found` stays neutral in both trees.
+- **The group filter.** The queue's "Charged to" options are the distinct groups present in the rows the viewer can already see, so the filter discloses nothing the list does not. No new definer and no schema change. `presby_reimbursement_treasurer_list` clamps a page to 200 rows, so the derivation pages and stops at 2,000 requests; when it stops, the hint `Only groups with one of the 2,000 most recent requests are listed.` says so (`queue.filter.groupsTruncated`) and a group the list lacks but the URL names stays selectable as "This group".
+- **Revisit if** an organization passes 2,000 requests (add a distinct-groups definer; no operator confirmation needed), or a refusal outcome gains a cause that makes one of the six sentences false.
+
+---
+
+**DECISION-271 — Treasury shares one CSV writer, one boundary tripwire, and person-addressed notices; the emailed link is a bare path.**
+
+**Status:** Accepted (architect Phase 2; tech-lead Phase 3 detail; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (v0.51.0)
+
+- `src/lib/csv.ts` (pure) holds `csvTextCell`, `centsToDecimal`, the formula guard, CRLF join and the row-cap check; `src/lib/giving/csv.ts` imports and re-exports them and keeps its own header, row shape and cap, so its byte-exact test is unchanged. The reimbursement export is a GET route gated on `view` (2FA), capped at 20,000 rows (413, never a truncated file), audited with a row count and filters only. It includes the purpose column (a treasurer cannot reconcile without it) and excludes the pre-approver name and any bank detail.
+- `npm run check:treasury-boundaries`, now one of ten tripwires in `npm run check`: T1 no owner connection under reimbursement, treasury or either route tree; T2 only `src/lib/reimbursement/` and the Drizzle mirror name `reimbursement_*` or `presby_reimbursement_*`; T3 no `capture` on any `type="file"` input in `src/app`; T4 a file that references a `reimbursement.notice.` template key names no money or free-text identifier (the namespace is distinct from the permission keys, which also start `reimbursement.`); T5 `sharp` imported at runtime by one file. Later ledger increments extend it.
+- Four notice templates, all `person:role` (requester notices too: staff often have only a work address, and the notice names no one and nothing). Addresses come only from `getPersonEmail(tx, id, "role")` inside the RLS transaction; no deliverable address means in-app only. Rows are written in the transition's transaction and sent after commit.
+- **Link format (departs from the Phase 2 note; F321):** `<platform origin>/o/<slug>/reimbursements/<id>` (`/admin/reimbursements/<id>` for pay holders), never `/launch?next=`, because the proxy and `/launch` both drop the query for a signed-out visitor.
+- **Revisit if** the proxy preserves the query string on its sign-in redirect (then `/launch?next=` becomes viable), or a notice ever needs a field the tripwire forbids.
+
+---
+
+**DECISION-270 — Receipts are private blobs served only through their request; `sharp` re-encodes images; 4 MB; an upload route handler. Partly superseded by DECISION-277.**
+
+**Status:** Accepted (architect Phase 2; amended by F289 Phase 2; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (v0.51.0)
+
+- As in Phase 2: row id in the URL, never the blob key; gate order `auth()`, 2FA, org, toggle, viewer-check definer, `resolve()`; headers `nosniff`, `private, no-store`, sandbox CSP, `attachment` for PDF; one 404 shape; at most 5 files of 4,000,000 bytes (a request body up to 4,200,000); first cookie-authenticated POST route handler in the tenant tree, so same-origin check, one file part, `Content-Length` precheck and a streamed cap; duplicate detection on the `content_sha256` of the bytes as received.
+- **Superseded by DECISION-277:** the audience backfill is fail-closed (everything starts `private`); the column default stays permanently; the constant column on a private consumer is named `asset_audience`; `resolve()` and `resolveMeta()` take a required audience; the receipt FK is `(blob_key, organization_id, asset_audience) → blob_assets (id, organization_id, audience)`.
+- **Phase 3 additions:** `receipt_preflight` before `store()`; client canvas downscale is usability only; the server re-encode is the guarantee (`sharp`, `rotate()`, long edge 1800, JPEG 80/70/60/50, `limitInputPixels` 64,000,000, no metadata; `src/lib/storage/image-sanitize.ts` is the only importer, T5); PDFs pass through unsanitized; 40 uploads per user per hour.
+- **Accepted residuals:** no malware scanning; PDF metadata and active content; an orphaned private blob when attach fails after store; `bytea` growth (about 1 GB a year at fpcw scale); `sharp` loading on Vercel is unverified until one real receipt upload in a deployed function (EC42; the production proof is the operator's check, with the toggle on for a fixture or test congregation only).
+- **Revisit if** an object store replaces `bytea`, a non-image class needs public serving, or `sharp` cannot load on Vercel (then receipts block and the pipeline returns to Phase 2).
+
+---
+
+**DECISION-269 — Requesting is an eligibility check, not a key; the money keys, template bindings, backfill and delegation.**
+
+**Status:** Accepted (architect Phase 2; amended by tech-lead Phase 3, P3-2 and P3-14; residual 12 accepted by the operator 2026-10-26) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (migration 0074; v0.51.0)
+
+- No `reimbursement.request` key. `presby_reimbursement_may_file` requires an active membership, an unmerged person linked to the acting user, and `current_roll is not null or engagement_status in ('regular','staff')` (an accepted-invitation person is created with a `staff` membership, migration 0064). The cost: an organization cannot narrow who files except by turning the feature off (named v1 limit).
+- Keys: `request_for_others` (no 2FA), `view`, `pay`, `manage` (2FA each; `manage` because the chargeable list decides who approves). Bound to the `treasurer` template, including `request_for_others` **(amendment: otherwise un-grantable, F322)**; a `reimbursement_clerk` template carries that key alone. None goes to `founding_administrator`, `stated_clerk`, `session_member` or `installed_pastor`.
+- Backfill: org-owned `treasurer` roles with `role_kind = 'constitutional' and is_protected` (minted only by `presby_apply_treasurer`); never `grant_reason`; never a wildcard. Production held 1 such copy when counted (2026-10-26).
+- Downward guard: sibling triggers for `module = 'reimbursement'` (F301); generalizing the guard is a follow-up before the ledger.
+- Delegation (F296): `src/lib/treasury/team.ts` treats a role as delegable when every key's module is in `TREASURY_MODULES`; the actor gate is the surface's own manage key (giving: `giving.manage`; reimbursement: `reimbursement.manage`); `assertPermissionSubset()` unchanged; person-arm grants only; the last effective manage holder of the surface's key cannot be ended there. `src/lib/giving/team.ts` is a wrapper whose tests are unchanged.
+- **Ending a treasury grant is checked against its own module's manage key only; the cross-module orphan is accepted as residual 12 (operator, 2026-10-26).** A team-page revoke of the seven-key `treasurer` grant can leave the other module's manage key unheld. The stricter rule was refused for three reasons: its refusal sentence would tell a `giving.manage` holder to hand the role to someone else when the subset rule means that holder cannot; it fails toward keeping a departed treasurer's money keys live, where permitting the revoke fails toward removing access; and it would couple two modules' guards for a case that needs a custom role built on purpose. **Detection:** `tenant.role.revoked`, with the grant id, on both team pages. **Recovery (read, never run; unverified):** a platform operator ends the remaining `giving.manage` holders on `/admin/organizations/<id>` (DECISION-194: reason required, audited, never a grant held through a derived group), which empties the treasurer slot, then re-designates a treasurer, whose acceptance mints a fresh seven-key role through 0074's bindings. A holder through a derived group cannot be ended that way and needs an engineer; the founding administrator cannot repair it (F138). Pinned by `treasury/team.db.test.ts` (revoking the sole grant on one surface leaves the other manage key unheld); a later decision to add the stricter rule changes that test on purpose. No release note or help text may say the treasury team can never be left without a manager. `paper`.
+- **Revisit if** an organization needs to restrict who files, a second tier-2 module needs its own delegation rules, the guard is generalized, or residual 12 is ever hit in production.
+
+---
+
+**DECISION-268 — Approval is a seat checked live in a definer, not a key; separation of duties is in the database.**
+
+**Status:** Accepted (architect Phase 2; tech-lead Phase 3 detail; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (migration 0073; v0.51.0)
+
+- One internal rule: an eligible approver is a live unmerged person with an active membership, holding a `chair` or `leader` row in date on a `managed` group, not the creator or beneficiary (merge-resolved). Re-derived on every approve and return, so a seat that ends mid-queue loses authority at once. Derived groups (Session, Diaconate) have no such rows and take the override path; a `deacons_moderator` mapping is an additive change inside the same function (tracked in `docs/TODO.md`; DECISION-242).
+- Override: `reimbursement.pay`, no eligible approver at that moment, and at least one other `pay` holder (`needs_second_payer` otherwise); stamped `approval_path = 'override'`. A `pay` holder cannot override while an eligible approver exists.
+- Triggers binding the owner too: on `→approved` the approver is not the creator or beneficiary; on a payment insert the payer is not the approver in force, and `self_paid` is derived.
+- **Named limit:** "the requester may pay only as the sole pay holder" needs a holder count, so it is a definer property (`needs_another_payer`), not a trigger property. The sole `pay` holder may record payment on their own request, stamped `self_paid`.
+- Accepted: the seat has no `requires_two_factor`; the independent payer is the money control. `paper`.
+- **Revisit if** a spending threshold or dual approval is wanted, or a Moderator seat is mapped.
+
+---
+
+**DECISION-267 — Reimbursements are one module with a state machine enforced in the database.**
+
+**Status:** Accepted (architect Phase 2; tech-lead Phase 3 detail; residual 14 accepted by the operator 2026-10-26; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (migrations 0073 and 0074; v0.51.0)
+
+- Six tables in 0073 (chargeable groups, categories, requests, attachments, payments, events); `presby_app` holds SELECT on the two config tables and nothing on the other four. All reads and writes go through `presby_reimbursement_*` definers: a bounded actor claim, one viewer rule (creator for drafts; creator or beneficiary, a live eligible approver of the group, or a `view` holder afterwards), `not_found` for missing and forbidden alike, a closed outcome list pinned to a TypeScript constant. Audit rows are written in the same transaction (12 `tenant.reimbursement.*` keys, plus `RECEIPT_VIEWED`).
+- Transition table by trigger on every connection; freeze rules; revision incremented only while `draft`/`returned`, approve bound to the revision seen. Two deferred constraint triggers: a request is `paid` iff a live payment exists; a status change has a same-transaction history event.
+- Payments are insert-only; a reversal is its own row (one per payment) and returns the request to `approved`; no fund or account column until Increment 5. Saving is create-or-find by client key, then update by id with the expected revision. `origin = 'import'` admits null actors for Track K; the importer is not built.
+- Migration 0073 depends on F289's 0072 (receipt FK). Migration 0074: keys, bindings, backfill.
+- **Accepted residual 14 (the 0055 class; accepted by the operator 2026-10-26, "Accept it"):** the delete guard is a row trigger, so the owner connection (`neondb_owner`) can still `TRUNCATE` any of the six tables, `reimbursement_events` included, and can `ALTER TABLE ... DISABLE TRIGGER`. `presby_app` and `presby_platform` cannot: neither holds `TRUNCATE`, and neither owns the tables. No table in this database carries a TRUNCATE trigger (0055 and 0056 record the same residual), so a guard on these six alone would be inconsistent and would not stop `DISABLE TRIGGER`. Detection is by the owner credential's scope (migration and operator use only, never the request path) and by the audit rows each definer writes in the same transaction, which a truncate of the six tables alone would leave behind as the only record. `paper`. Revisit if a database-wide event trigger refusing `TRUNCATE` on tenant tables is ever adopted (then it covers every module at once; tracked in `docs/TODO.md`).
+- **Revisit if** partial payments, mileage or recurring expenses are wanted, or the ledger needs a column on the payment row.
+
+---
+
 **DECISION-298 — An applied migration may be corrected in place only when the change is guard-only and provably behaviour-neutral where it already ran; otherwise fix forward.**
 
 **Status:** Accepted (orchestrator ruling, 2026-10-28; Phase 6 SHIP WITH NOTES, `2026-10-28-org-baseline-backfill`) · **Date:** 2026-10-28 · **Feature:** `2026-10-28-org-baseline-backfill` (migration 0082; v0.50.1)

@@ -27,6 +27,8 @@
     "test:e2e": "playwright test",
     "help:shots": "PW_HELP_SHOTS=1 playwright test --project=help-shots",
     "test:e2e:prod": "PW_PROD_BUILD=1 playwright test --project=prod-build --project=prod-custom-hosts",
+    "test:e2e:contact": "PW_HELP_CONTACT=1 playwright test --project=contact",
+    "test:e2e:contact:prod": "PW_PROD_BUILD=1 PW_HELP_CONTACT=1 playwright test --project=contact-prod",
     "visual:baseline": "PW_VISUAL=1 playwright test --project=visual --update-snapshots",
     "visual:check": "PW_VISUAL=1 playwright test --project=visual",
     "prepare": "node -e \"if(require('fs').existsSync('.git'))require('child_process').execSync('bash scripts/install-hooks.sh',{stdio:'inherit'})\"",

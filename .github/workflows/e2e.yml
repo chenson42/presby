@@ -164,6 +164,16 @@ jobs:
         env:
           CI: "true"
 
+      # The /help/contact form (user-help Increment 2): its own lane, because the Turnstile site key it needs
+      # also disables the sign-in form's submit for every other spec. The config starts a server of its own
+      # with Cloudflare's PUBLIC test keys and the limiter ON (playwright.config.ts, `isHelpContactRun`).
+      - name: Run the contact-form lane (dev server, limiter on)
+        if: matrix.lane == 'dev'
+        run: npm run test:e2e:contact
+        env:
+          CI: "true"
+          PW_OUTPUT_DIR: test-results-contact
+
       # DECISION-159: the pre-hydration regression against a production build
       # (next build && next start, port 3800, never a reused server). Traces go
       # to test-results-prod/.
@@ -175,6 +185,16 @@ jobs:
           CI: "true"
           PW_OUTPUT_DIR: test-results-prod
 
+      # CA13: a Server Action inside a `dynamic = "error"` segment can call headers() and after() at request
+      # time, proven on `next build && next start` (port 3800 here; the config takes PW_PROD_PORT).
+      - name: Run the contact-form production-build proof
+        if: matrix.lane == 'prod'
+        timeout-minutes: 20
+        run: npm run test:e2e:contact:prod
+        env:
+          CI: "true"
+          PW_OUTPUT_DIR: test-results-contact-prod
+
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -183,6 +203,8 @@ jobs:
           path: |
             test-results/
             test-results-prod/
+            test-results-contact/
+            test-results-contact-prod/
           retention-days: 7
           if-no-files-found: ignore
 

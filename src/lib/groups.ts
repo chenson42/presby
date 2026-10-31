@@ -135,11 +135,18 @@ export interface GroupListEntry {
   memberCount: number;
 }
 
+/**
+ * The closed derived-kind list, equal as a set to `groups_derived_kind_check`
+ * (drizzle/0066 section 4e; src/lib/db/domain/groups.ts). Pinned by
+ * src/lib/db/domain/derived-group-guard.db.test.ts: a sixth kind is a
+ * migration first.
+ */
 export type DerivedFromKey =
   | "session"
   | "diaconate"
   | "deacons_moderator"
-  | "active_membership";
+  | "active_membership"
+  | "all_memberships";
 
 export interface DerivedGroupListEntry {
   groupId: string;

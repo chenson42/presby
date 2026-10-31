@@ -191,7 +191,7 @@ function groupSeedPlan(
 ): Array<{
   groupTypeKey: "court" | "roster";
   name: string;
-  derivedFrom: "session" | "diaconate" | "deacons_moderator" | "active_membership";
+  derivedFrom: "session" | "diaconate" | "deacons_moderator" | "active_membership" | "all_memberships";
 }> {
   const activeMembership = {
     groupTypeKey: "roster" as const,

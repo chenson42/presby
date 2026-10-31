@@ -2935,3 +2935,89 @@ Files read (absolute):
 - `…/scratchpad/qa-photos-p5/walk/` (`360-after-upload.png`, `360-directory.png`, `360-roster-platform.png`, `360-remove-dialog.png`)
 - `…/scratchpad/qa-photos-r2/walk/360-features.png`
 - `…/scratchpad/photos-fix/minor-page-360.png`
+
+
+## Integration with main 0.51.0 (orchestrator, 2026-10-31)
+
+- Merged `main` (treasury 0.51.0): six textual conflicts resolved (schema-parity allowlist, catalog test, off-warning registry, audience call sites, audit keys, barrel). The reimbursement off-warning test now stubs `@/lib/person-photos/reader`.
+- Journal idx 78 between 74 and 80; section 78 after 73; 72b counts eight FKs into `blob_assets`. 0078 applied to `development`; `scripts/test-rls.sql` green there but for the two known data-drift lines.
+- Both pipelines added `sharp`; treasury T5 allowed exactly one importer. The architect ruled option (a), DECISION-312, implemented in `4820176`. The ruling, verbatim:
+
+## Ruling: option (a). Keep two named `sharp` importers on a closed list, and tighten T5 so the list carries the reason. No refactor.
+
+**Verdict: Approved with suggestions.** This is a change to tests and docs made at integration time. It is not a Phase 3 loop-back for photos, and no runtime file moves.
+
+### Why not (b)
+
+DECISION-271 gave three reasons for "one importer". Each one is about something other than the number of files:
+
+- **The Vercel native-binary trace.** Both files import the same exact pin, `sharp@0.35.5`. The lockfile has one copy, and it is the same copy Next already pulls in as an optional dependency. The trace happens per function, so a second importer adds no new trace risk. The open item is the same for both features (treasury EC42, photos edge case 26), and one preview deploy that uploads both a receipt and a photo settles both. Photos' Phase 6 merge condition ("sharp preview build") still stands.
+- **Decompression-bomb limits in one place.** The two files are not two copies of one policy. They are two policies, each reviewed on its own:
+  - Receipts: 64 MP, long edge 1800, a 4 MB cap, and no header check before decoding.
+  - Photos: 16 MP and 6000 px, and it reads the header with `metadata()` before decoding any pixel. It also refuses animated images, runs its own type sniff, and builds two outputs.
+  Merging them would mean one module carrying two refusal orders and two sets of limits behind branches. That is harder to review than two short files that each state their own order. And photos' header-first order, which its own docstring calls "the security property", would end up inside the receipt module, which does not use it.
+- **Metadata stripping in one place.** Both files always re-encode, and neither calls a metadata-keeping method. That property can be checked file by file, which is what the T5 amendment below does.
+
+The cost of (b) is concrete. Photos' `image.ts` went through QA runs 1 to 3. Its 16 TypeScript mutation kills and its `image.test.ts` fixtures are tied to `processPhoto`'s refusal order. Moving that code into `src/lib/storage/` at integration time would mean re-running the photos image tests, the DB suite and e2e, all for a property (a), with the amendment, already protects.
+
+`image.ts` also stays in `src/lib/person-photos/`. Portrait crop, `position: "top"`, a thumbnail and refusal of animation are photo concerns, not concerns of the general-purpose storage adapter.
+
+### What changes (integration commit, orchestrator or api-developer)
+
+1. **`scripts/check-treasury-boundaries.mjs`**
+   - Replace `SHARP_FILE` with `SHARP_FILES = ["src/lib/person-photos/image.ts", "src/lib/storage/image-sanitize.ts"]`.
+   - The "no other importer" half checks membership in that list.
+   - `checkSharpHasItsImporter` runs once per listed file: each must exist and import `sharp` at runtime ("exactly these").
+   - Add T5's content half. Each listed file must start with `import "server-only";`. After `stripComments`, it must not name `withMetadata`, `keepMetadata`, `keepExif`, `withExif`, `withExifMerge`, `keepIccProfile`, `withIccProfile`, `keepXmp` or `withXmp`.
+   - Both files pass all of this today. I checked: the only hit is a comment in `image-sanitize.ts:15`.
+   - Update the header comment and the messages to cite the new decision.
+2. **`scripts/check-treasury-boundaries.test.mjs`**
+   - Update the synthetic T5 cases for the list, including one listed file missing and one listed file calling `withMetadata()`.
+   - The real-repository case expects both files.
+3. **`src/lib/storage/image-sanitize.test.ts:183-199`** expects the sorted two-element list.
+4. **`src/lib/person-photos/scan.test.ts:54-58`** expects the same sorted two-element list. All three scans must name the same two files, so a third importer fails all of them.
+5. **Docs:**
+   - Update the docstrings at `image-sanitize.ts:9-11` ("A second consumer calls THIS function") and `person-photos/image.ts:14` ("THE ONLY FILE IN `src/`") to name the list and the decision.
+   - The P6 CLAUDE.md Project Layout line for `src/lib/person-photos/` should say "one of the two `sharp` importers (DECISION-312)".
+
+**Re-verification (scoped):**
+- the three test files above
+- `npm run check`
+- `npm run typecheck`
+
+No runtime code changes, so the photos image, DB and e2e suites do not need a re-run.
+
+### Suggestion (not blocking)
+
+`image-sanitize.ts` calls `sharp.cache(false)` at module scope, and that setting is process-wide. `image.ts` does not call it. The two are unlikely to load in the same function today. If they ever do, photos inherits the setting without saying so. Consider adding the same explicit line to `image.ts` in a later pass. It is not worth reopening QA for.
+
+### Proposed decision (orchestrator numbers it; DECISION-312 assumed)
+
+> **DECISION-312 — `sharp` has a closed list of two importers, each of which always re-encodes and keeps no metadata. Amends DECISION-270 and DECISION-271 (T5).**
+>
+> **Status:** Accepted (architect, integration of person-photos Inc 1 with 0.51.0) · **Date:** 2026-10-31 · **Feature:** `2026-10-26-person-photos-inc1`
+>
+> - T5 now reads: `sharp` is imported at runtime by exactly the files in `SHARP_FILES` (`src/lib/person-photos/image.ts`, `src/lib/storage/image-sanitize.ts`), and by no other non-test file. Each listed file must exist, import `sharp` at runtime, begin with `import "server-only";`, and name no metadata-keeping method (`withMetadata`, `keepMetadata`, `keepExif`, `withExif`, `withExifMerge`, `keepIccProfile`, `withIccProfile`, `keepXmp`, `withXmp`). `check-treasury-boundaries`, `image-sanitize.test.ts` and `person-photos/scan.test.ts` all assert the same list.
+> - **Why two, not one:** the one-door rule exists to keep a reviewed set of places where untrusted images are decoded, each with stated bomb limits and an unconditional re-encode. Receipts (64 MP, long edge 1800, 4 MB) and photos (header check before decoding, 16 MP and 6000 px, animated images refused, master plus thumbnail) are two separately reviewed refusal orders. Merging them would put both behind branches in one module, which is harder to review. The Vercel trace risk does not grow with a second importer: same exact pin, one lockfile copy, one preview-deploy proof covering both (treasury EC42, photos edge case 26).
+> - **Accepted residual:** the content check is a grep for method names. It cannot see a decode with `limitInputPixels: false` on the pixel path (photos uses `false` legitimately, on the header-only `metadata()` call). Each file's own unit tests (the bomb fixtures in both) carry that, and the list keeps the review surface to two files. `paper`.
+> - **Revisit if** a third consumer needs `sharp`. The list does not grow to three: at that point the shared parts (decoder limits, auto-orient, sRGB, flatten, metadata-free encode) are extracted into `src/lib/storage/image/`, and every feature module passes it its own limits and outputs, as a planned pipeline with its own Phase 2.
+
+### Per-Phase Status row
+
+| Phase | Agent | Status | Verdict | Date |
+|---|---|---|---|---|
+| 2 — Architectural review (integration addendum: `sharp` importers) | architect | Complete. Option (a): a closed list of two in T5, plus server-only and no-metadata-method checks on each listed file. DECISION-312 proposed. No runtime change, so scoped re-verification only | Approved with suggestions | 2026-10-31 |
+
+**Handoff:** to the orchestrator. Record DECISION-312 at integration (Rule 16 shared file), then hand the test and comment edits above to **api-developer**, or make them in the integration commit. Then run the scoped re-verification before `/merge-pr`. This needs no Phase 3 loop-back and no QA re-run of photos' runtime suites.
+
+Files:
+- /Users/cshenso/git/presby-platform/presby-photos/scripts/check-treasury-boundaries.mjs
+- /Users/cshenso/git/presby-platform/presby-photos/scripts/check-treasury-boundaries.test.mjs
+- /Users/cshenso/git/presby-platform/presby-photos/src/lib/storage/image-sanitize.ts
+- /Users/cshenso/git/presby-platform/presby-photos/src/lib/storage/image-sanitize.test.ts
+- /Users/cshenso/git/presby-platform/presby-photos/src/lib/person-photos/image.ts
+- /Users/cshenso/git/presby-platform/presby-photos/src/lib/person-photos/scan.test.ts
+- /Users/cshenso/git/presby-platform/presby-photos/docs/decisions.md (DECISION-270/271)
+
+- Help: `photos-of-people` walked at 360px and published at 0.52.0 (`ae5aecc`), with `using-the-directory` and `your-congregations-website` edits. The walk found an animated WebP accepted: the client downscale (`downscale.ts`) flattens it to one frame before upload, so the server refusal applies to direct uploads only; the help page claims no refusal (TODO papercut).
+- Release housekeeping 0.52.0: `1a1bd83`.

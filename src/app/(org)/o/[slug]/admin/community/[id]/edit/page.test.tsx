@@ -807,7 +807,6 @@ describe("EditMemberPage - the sign-in card (Community Increment 2b)", () => {
     chainCapReached: false,
     delivery: "unknown",
     blockedOutcome: null,
-    isVisitor: false,
     addressDoNotContact: false,
     authorityBearing: false,
     addressShared: false,

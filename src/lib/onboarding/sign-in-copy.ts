@@ -171,8 +171,17 @@ export const CONNECT_OUTLOOK_COPY = {
     `When ${name} signs in with ${address}, PresbyPortal connects them to this record if it can. An invitation also connects them.`,
   by_sign_in_second_factor: (name: string, address: string) =>
     `${name} holds a role or a seat here. When they sign in with ${address}, PresbyPortal connects them once they have confirmed two-factor sign-in.`,
-  visitor: (name: string) =>
-    `${name} is a visitor, so signing in won't connect them by itself. Send an invitation if you want them to have access.`,
+  // 3a (R55): auto-connect declines everyone who is not listed in the member
+  // directory (a visitor, or a person marked inactive or moved away). The line
+  // names the fact, not the label, so it is true of each.
+  not_listed: (name: string) =>
+    `${name} isn't listed in the member directory, so signing in won't connect them by itself. Send an invitation if you want them to have access.`,
+  // Shown for a person who IS connected to a sign-in but is not listed: they
+  // keep the calendar (the calendar baseline reaches every current record) and
+  // not the directory. "If your congregation uses it" keeps the calendar half
+  // true where the calendar toggle is off.
+  connected_not_listed: (name: string) =>
+    `${name} is connected to a sign-in but isn't listed in the member directory, so the usual member access to it doesn't reach them. They can still see the calendar if your congregation uses it. To list them, mark them as a regular attender under Engagement.`,
   shared_address: (name: string) =>
     `${name} shares this email address with someone else here, so signing in won't connect either of them by itself. Each person needs their own address.`,
   turned_off: (congregation: string) =>
@@ -190,8 +199,6 @@ export const SIGN_IN_DIALOG_COPY = {
     title: (name: string) => `Send an invitation to ${name}?`,
     body: (name: string, address: string, expires: string) =>
       `We'll email ${address}. The link works once and expires on ${expires}. Only send it if that address belongs to ${name}: whoever opens the link becomes ${name} on PresbyPortal.`,
-    visitorAcknowledgement: (name: string) =>
-      `${name} is recorded as a visitor. Anyone who signs in can see your member directory and your calendar, with each person's privacy settings applied. Only continue if you want ${name} to have that.`,
     doNotContactAcknowledgement: (name: string) =>
       `${name} asked not to be contacted at this address. This is a one-time account email, not marketing. Send it anyway?`,
     checkbox: "I understand, send it anyway",

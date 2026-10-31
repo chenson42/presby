@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { isMemberStanding } from "@/lib/membership-standing";
 import {
   CONNECT_OUTLOOKS,
   MEMBERSHIP_STANDINGS,
@@ -37,13 +38,19 @@ import {
 
 const ROOT = path.resolve(__dirname, "../../..");
 const MIGRATION = readFileSync(path.join(ROOT, "drizzle/0065_presby_sign_in_and_connect.sql"), "utf8");
+// drizzle/0066 section 9 re-creates three 0065 bodies (the standing core, the
+// check, connect); the LAST definition wins, as in the database, so a body is
+// read from 0066 when 0066 redefines it and from 0065 otherwise.
+const MIGRATION_66 = readFileSync(path.join(ROOT, "drizzle/0066_presby_membership_standing.sql"), "utf8");
 
-/** The text of one `create or replace function <name>(` body, up to the next one. */
+/** The text of one `create or replace function <name>(` body, up to the next one (the latest definition). */
 function functionBody(name: string): string {
-  const start = MIGRATION.indexOf(`create or replace function ${name}(`);
-  expect(start, `${name} is defined in 0065`).toBeGreaterThanOrEqual(0);
-  const next = MIGRATION.indexOf("create or replace function", start + 10);
-  return MIGRATION.slice(start, next === -1 ? undefined : next);
+  const needle = `create or replace function ${name}(`;
+  const source = MIGRATION_66.includes(needle) ? MIGRATION_66 : MIGRATION;
+  const start = source.indexOf(needle);
+  expect(start, `${name} is defined in 0065 or 0066`).toBeGreaterThanOrEqual(0);
+  const next = source.indexOf("create or replace function", start + 10);
+  return source.slice(start, next === -1 ? undefined : next);
 }
 
 const literals = (text: string, re: RegExp) => [...text.matchAll(re)].map((m) => m[1]!);
@@ -93,8 +100,11 @@ describe("the refusal vocabulary is the migration's, in both directions", () => 
     expect([...SIGN_IN_REVOKE_OUTCOMES].sort()).toEqual(revoke);
   });
 
-  it("the acknowledgement reasons are the two the check can raise", () => {
+  // Since 3a (drizzle/0066 section 9) the check raises one acknowledgement
+  // reason: a visitor no longer needs one.
+  it("the acknowledgement reasons are the one the check can raise (do_not_contact)", () => {
     const reasons = unique(literals(functionBody("presby_sign_in__check"), /v_reasons \|\| '([a-z_]+)'::text/g));
+    expect(reasons).toEqual(["do_not_contact"]);
     expect([...SIGN_IN_ACK_REASONS].sort()).toEqual(reasons);
   });
 });
@@ -123,6 +133,11 @@ describe("the reader's vocabulary is the migration's", () => {
 });
 
 describe("the standing classifier's vocabulary is the migration's", () => {
+  it("is ONE list: sign-in-types re-exports the one membership-standing.ts owns (D13 (c))", async () => {
+    const owner = await import("@/lib/membership-standing");
+    expect(MEMBERSHIP_STANDINGS).toBe(owner.MEMBERSHIP_STANDINGS);
+  });
+
   it("MEMBERSHIP_STANDINGS equals presby_membership_standing's results", () => {
     const body = functionBody("presby_membership_standing");
     const found = unique(literals(body, /then '([a-z_]+)'/g).concat(literals(body, /else '([a-z_]+)'/g)));
@@ -183,9 +198,10 @@ const BASE: ConnectOutlookInput = {
 const outlook = (over: Partial<ConnectOutlookInput>) => connectOutlook({ ...BASE, ...over });
 
 describe("connectOutlook (R46: own-organization facts; a closed result)", () => {
-  it("every result is one of the seven, and each is reachable", () => {
+  it("every result is one of the eight, and each is reachable", () => {
     const seen = new Set([
       outlook({ state: "signs_in" }),
+      outlook({ state: "signs_in", standing: "visitor" }),
       outlook({}),
       outlook({ authorityBearing: true }),
       outlook({ standing: "visitor" }),
@@ -196,8 +212,19 @@ describe("connectOutlook (R46: own-organization facts; a closed result)", () => 
     expect([...seen].sort()).toEqual([...CONNECT_OUTLOOKS].sort());
   });
 
-  it("a connected person reads connected whatever else is true", () => {
-    expect(outlook({ state: "signs_in", selfConnectEnabled: false, addressShared: true, standing: "visitor" })).toBe("connected");
+  it("a connected person with member standing reads connected whatever else is true", () => {
+    expect(outlook({ state: "signs_in", selfConnectEnabled: false, addressShared: true, standing: "listed" })).toBe("connected");
+    expect(outlook({ state: "signs_in", standing: "staff_anchor" })).toBe("connected");
+  });
+
+  // D13 (e): a connected person who is not listed gets a line saying the usual
+  // member access does not reach them. An UNKNOWN standing is never called
+  // "not listed": claim only what was read.
+  it("a connected person who is not listed reads connected_not_listed, whatever else is true; an unknown standing reads connected", () => {
+    for (const standing of ["visitor", "inactive", "unclassified"] as const) {
+      expect(outlook({ state: "signs_in", selfConnectEnabled: false, addressShared: true, standing })).toBe("connected_not_listed");
+    }
+    expect(outlook({ state: "signs_in", standing: null })).toBe("connected");
   });
 
   it("an open (pending) or blocked invitation, or no address, reads none: the card's own state copy speaks", () => {
@@ -211,18 +238,28 @@ describe("connectOutlook (R46: own-organization facts; a closed result)", () => 
     for (const state of ["none", "expired", "revoked"] as const) expect(outlook({ state })).toBe("by_sign_in");
   });
 
-  it("every non-visitor standing connects by sign-in (only a visitor is declined, 2b)", () => {
-    for (const standing of ["listed", "staff_anchor", "inactive", "unclassified", null] as const) {
+  // R55 (operator-approved, 3a): auto-connect requires member standing, so the
+  // outlook says not_listed for exactly the standings it declines.
+  it("member standing connects by sign-in; every other known standing is not_listed (the complement of isMemberStanding)", () => {
+    for (const standing of ["listed", "staff_anchor", null] as const) {
       expect(outlook({ standing })).toBe("by_sign_in");
     }
-    expect(outlook({ standing: "visitor" })).toBe("visitor");
+    for (const standing of ["visitor", "inactive", "unclassified"] as const) {
+      expect(outlook({ standing })).toBe("not_listed");
+    }
   });
 
-  it("precedence, first match wins: toggle off, then a shared address, then a visitor, then authority", () => {
+  it("not_listed is exactly the standings isMemberStanding rejects (one definition of the member test)", () => {
+    for (const standing of MEMBERSHIP_STANDINGS) {
+      expect(outlook({ standing }) === "not_listed", standing).toBe(!isMemberStanding(standing));
+    }
+  });
+
+  it("precedence, first match wins: toggle off, then a shared address, then not listed, then authority", () => {
     const everything = { selfConnectEnabled: false, addressShared: true, standing: "visitor" as const, authorityBearing: true };
     expect(outlook(everything)).toBe("turned_off");
     expect(outlook({ ...everything, selfConnectEnabled: true })).toBe("shared_address");
-    expect(outlook({ ...everything, selfConnectEnabled: true, addressShared: false })).toBe("visitor");
+    expect(outlook({ ...everything, selfConnectEnabled: true, addressShared: false })).toBe("not_listed");
     expect(outlook({ ...everything, selfConnectEnabled: true, addressShared: false, standing: "listed" })).toBe("by_sign_in_second_factor");
   });
 

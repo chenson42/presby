@@ -198,7 +198,7 @@ describe.skipIf(!hasDb)("src/lib/onboarding/org-invite.ts (Postgres-backed)", ()
     it("a visitor sends without an acknowledgement and is audited as [] (drizzle/0066 section 9 retired F177 condition 1); a client claiming acknowledgement for a non-visitor still records []", async () => {
       // Increment 3a: the definer no longer asks for a visitor acknowledgement
       // (check 10), so the unchanged TypeScript sends and records what the
-      // definer found: nothing (EC-21). Batch B removes `visitor` from
+      // definer found: nothing (EC-21). Batch B removed `visitor` from
       // SIGN_IN_ACK_REASONS and the dialog.
       const v = await f.person(org, { engagement: "visitor", roll: null });
       expect(await send(v.id, v.email!)).toMatchObject({ kind: "ok", acknowledged: [] });
@@ -459,9 +459,15 @@ describe.skipIf(!hasDb)("src/lib/onboarding/org-invite.ts (Postgres-backed)", ()
       expect(card.card.invitedAddress).toBeNull();
     });
 
-    it("a visitor, a shared address and an off toggle are surfaced from the real standing core and toggle row", async () => {
-      const v = await f.person(org, { engagement: "visitor", roll: null });
-      expect(await lib.getSignInCard(ctx, v.id)).toMatchObject({ card: { isVisitor: true, outlook: "visitor" } });
+    it("a person who is not listed, a shared address and an off toggle are surfaced from the real standing core and toggle row", async () => {
+      // Not listed (3a, R55): a visitor, and a person marked inactive or moved away.
+      for (const engagement of ["visitor", "inactive", "moved_away"] as const) {
+        const v = await f.person(org, { engagement, roll: null });
+        expect(await lib.getSignInCard(ctx, v.id), engagement).toMatchObject({ card: { outlook: "not_listed" } });
+      }
+      // A rolled person marked inactive keeps member standing (the roll lists them).
+      const rolledInactive = await f.person(org, { engagement: "inactive", roll: "active" });
+      expect(await lib.getSignInCard(ctx, rolledInactive.id)).toMatchObject({ card: { outlook: "by_sign_in" } });
 
       const a = await f.person(org);
       const b = await f.person(org, { email: false });

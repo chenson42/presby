@@ -167,9 +167,18 @@ describe("the card (heading 'Sign in to PresbyPortal')", () => {
     expect(CONNECT_OUTLOOK_COPY.by_sign_in_second_factor("Wendeline", "w@example.invalid")).toBe(
       "Wendeline holds a role or a seat here. When they sign in with w@example.invalid, PresbyPortal connects them once they have confirmed two-factor sign-in.",
     );
-    expect(CONNECT_OUTLOOK_COPY.visitor("Wendeline")).toBe(
-      "Wendeline is a visitor, so signing in won't connect them by itself. Send an invitation if you want them to have access.",
+    // 3a (R55, Group G): the sentence names the fact (not listed), so it is true
+    // of a visitor and of a person marked inactive or moved away alike.
+    expect(CONNECT_OUTLOOK_COPY.not_listed("Wendeline")).toBe(
+      "Wendeline isn't listed in the member directory, so signing in won't connect them by itself. Send an invitation if you want them to have access.",
     );
+    expect(CONNECT_OUTLOOK_COPY.connected_not_listed("Wendeline")).toBe(
+      "Wendeline is connected to a sign-in but isn't listed in the member directory, so the usual member access to it doesn't reach them. They can still see the calendar if your congregation uses it. To list them, mark them as a regular attender under Engagement.",
+    );
+    // Neither line claims nothing is visible, and neither promises prevention.
+    for (const line of [CONNECT_OUTLOOK_COPY.not_listed("N"), CONNECT_OUTLOOK_COPY.connected_not_listed("N")]) {
+      expect(line).not.toMatch(/can't see anything|nothing|prevent|safe/i);
+    }
     expect(CONNECT_OUTLOOK_COPY.shared_address("Wendeline")).toBe(
       "Wendeline shares this email address with someone else here, so signing in won't connect either of them by itself. Each person needs their own address.",
     );
@@ -189,9 +198,8 @@ describe("dialogs and toasts", () => {
     expect(d.body("Wendeline", "w@example.invalid", "October 27, 2026")).toBe(
       "We'll email w@example.invalid. The link works once and expires on October 27, 2026. Only send it if that address belongs to Wendeline: whoever opens the link becomes Wendeline on PresbyPortal.",
     );
-    expect(d.visitorAcknowledgement("Wendeline")).toBe(
-      "Wendeline is recorded as a visitor. Anyone who signs in can see your member directory and your calendar, with each person's privacy settings applied. Only continue if you want Wendeline to have that.",
-    );
+    // The visitor acknowledgement is retired (3a); only the do-not-contact one remains.
+    expect(Object.keys(d)).not.toContain("visitorAcknowledgement");
     expect(d.doNotContactAcknowledgement("Wendeline")).toBe(
       "Wendeline asked not to be contacted at this address. This is a one-time account email, not marketing. Send it anyway?",
     );

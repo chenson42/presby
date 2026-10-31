@@ -45,6 +45,8 @@ export const EMAIL_AUDIENCE: Readonly<Record<string, Audience>> = {
   ticket_submitter_reply: "account",
   ticket_resolved: "account",
   ticket_feedback_promoted: "account",
+  // the content-free contact-form notice: to the holders of admin.tickets, never the typed address
+  help_contact_notification: "account",
   // typed: founding-administrator and treasurer invitations both send this key
   account_invitation: "typed",
   statistics_submission_grant: "typed",

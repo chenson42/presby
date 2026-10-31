@@ -279,6 +279,8 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   CAREERS_POSTING_PUBLISHED: "careers.posting.published",
   CAREERS_POSTING_CLOSED: "careers.posting.closed",
   CAREERS_POSTING_REOPENED: "careers.posting.reopened",
+  HELP_CONTACT_STATUS_CHANGED: "help_contact.status_changed",
+  HELP_CONTACT_DETAILS_CLEARED: "help_contact.details_cleared",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

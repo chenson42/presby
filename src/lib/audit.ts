@@ -84,6 +84,16 @@ export const AUDIT_ACTIONS = {
   // assignment, classification, area, priority) is audit-exempt by direct
   // precedent (admin/feedback/actions.ts's identical posture) — only
   // filing and feedback-promotion are audited.
+  // Contact messages (2026-10-31, docs/work-log/2026-10-31-help-contact.md,
+  // CA10, DECISION-300) - written from src/lib/help-contact/inbox.ts in the
+  // same transaction as the triage UPDATE, NOT from an actions.ts, so
+  // check:audit cannot see them; src/lib/db/domain/help-contact.db.test.ts is
+  // the guard (AF-7). The metadata is the message id and the from and to
+  // status ONLY, never a name, address, congregation or message: the audit log
+  // is kept forever, and a "clear details" row that copied the details would
+  // defeat the clear (AF-5).
+  HELP_CONTACT_STATUS_CHANGED: "help_contact.status_changed",
+  HELP_CONTACT_DETAILS_CLEARED: "help_contact.details_cleared",
   TICKET_CREATED: "tenant.ticket.created",
   TICKET_FEEDBACK_PROMOTED: "tenant.ticket.feedback_promoted",
   // Public sites (2026-08-20, docs/work-log/2026-08-20-public-sites.md) —

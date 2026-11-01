@@ -49,3 +49,5 @@ scratch/
 
 # Custom-domain e2e: the fake provider state file (playwright.config.ts DOMAINS_FAKE_STATE_FILE)
 .tmp/
+/test-results-contact/
+/test-results-contact-prod/

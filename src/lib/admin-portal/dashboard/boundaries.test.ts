@@ -5,7 +5,7 @@
  * `src/lib/onboarding/boundaries.test.ts`.
  *
  * The platform tier shows platform-axis data only: organizations, accounts,
- * invitations, queue rows, tickets and feedback (as counts), domains, sites,
+ * invitations, queue rows, tickets, feedback and contact messages (as counts), domains, sites,
  * flags and audit rows. It never shows a count or content derived from people,
  * the roll, gifts, events or attendance. This test makes that the DEFAULT: a
  * reader may reach only the tables, the one `presby_*` function and the modules
@@ -91,6 +91,7 @@ const ALLOWED_TABLES_SQL = [
   "email_queue",
   "tickets",
   "feedback",
+  "help_contact_messages",
   "users",
   "organization_domains",
   "organization_sites",

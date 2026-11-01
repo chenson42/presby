@@ -34,7 +34,7 @@ If you sign in with the address the invitation was sent to and you are not yet c
 
 ## If the link does not work
 
-If the link was already used, has expired, or was replaced by a newer one, the page is headed "This link isn't active". It says the same thing whatever the reason: "If you already accepted it, you can sign in. Otherwise ask whoever invited you to send a new one." Select "Go to sign in" if you have accepted already. {{contact}}
+If the link was already used, has expired, or was replaced by a newer one, the page is headed "This link isn't active". It says the same thing whatever the reason: "If you already accepted it, you can sign in. Otherwise ask whoever invited you to send a new one." Select "Go to sign in" if you have accepted already. If whoever invited you cannot help, [send the PresbyPortal team a message](/help/contact).
 
 ## Two-factor sign-in
 

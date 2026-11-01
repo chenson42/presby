@@ -64,4 +64,4 @@ A Founding Administrator cannot, on the first day:
 - give either of those to anyone else. The role form refuses, as above;
 - turn on "Website domain", which is not on the Features page.
 
-For these, the PresbyPortal team sets things up. {{contact}} When the team gives you a role that allows them, you can give the same role to others.
+For these, the PresbyPortal team sets things up. {{contactAdmin}} When the team gives you a role that allows them, you can give the same role to others.

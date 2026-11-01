@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { HELP_INDEX_HREF, PLANNED_INDEX_HREF, entryHref, helpHref, plannedEntryHref, plannedHref } from "./urls";
+import { HELP_CONTACT_HREF, HELP_INDEX_HREF, PLANNED_INDEX_HREF, entryHref, helpHref, plannedEntryHref, plannedHref } from "./urls";
 
 describe("help URLs", () => {
   it("exposes the index href", () => {
     expect(HELP_INDEX_HREF).toBe("/help");
+  });
+  it("exposes the contact form's href (a route, not a registry page)", () => {
+    expect(HELP_CONTACT_HREF).toBe("/help/contact");
   });
   // The registry is empty at first, so PublishedSlug and PlannedSlug are `never`:
   // every slug is a compile error, which is the R12 guarantee (a typo or a pending

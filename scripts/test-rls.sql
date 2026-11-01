@@ -8767,3 +8767,13 @@ rollback;
 --     flag row scripts/seed.ts seeds, so it is never run against production.
 -- ===========================================================================
 \ir person-photos/test-rls-78.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/help-contact (integration).
+-- 83. User help Increment 2: the /help/contact drop box
+--     (drizzle/0083_presby_help_contact.sql; DECISION-300/301/303). Its own
+--     file, as 46, 47, 59-78 above; \ir resolves relative to this script. It
+--     needs the test helpers and NO seed fixture (the table has no
+--     organization and no person), and every block rolls back.
+-- ===========================================================================
+\ir help-contact/test-rls-83.sql

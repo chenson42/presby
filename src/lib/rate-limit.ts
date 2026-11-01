@@ -17,7 +17,10 @@
  * AUDIT
  * -----
  * checkRateLimit writes a RATE_LIMIT_BLOCKED audit row on every blocked call.
- * This write comes from inside this lib file, not from any actions.ts file.
+ * It is `consumeRateLimit` (the check, no audit) plus `recordRateLimitBlock`
+ * (the audit write), split in DECISION-302 so a form that expects floods can
+ * bound its own audit writes. This write comes from inside this lib file, not
+ * from any actions.ts file.
  * The check:audit script scans only src/app/** /actions.ts — it will not see
  * this write. That is CORRECT. Do not add an audit-exempt annotation to the
  * calling actions.ts files.
@@ -162,26 +165,22 @@ async function upstashCheck(
 // Public API
 // ---------------------------------------------------------------------------
 
+export type RateLimitResult =
+  | { allowed: true }
+  | { allowed: false; retryAfterSeconds: number };
+
 /**
- * Check whether the caller is within their rate-limit window.
+ * The check alone: count this call against `key` and say whether it is allowed.
+ * Honours `RATE_LIMIT_DISABLED`. Writes NOTHING - no audit row, no database
+ * touch - so a caller that expects floods (the /help/contact form,
+ * DECISION-302) decides for itself how much of a refusal to record.
  *
- * @param key       - Namespaced identifier, e.g. "signin:1.2.3.4:user@example.com"
- * @param limit     - { max: number; windowSeconds: number }
- * @param context   - Written into the audit row when allowed === false:
- *                    { userId?: string | null; actor: string; reason: string }
- *
- * Returns { allowed: true } or { allowed: false; retryAfterSeconds: number }.
- * Writes RATE_LIMIT_BLOCKED to audit_events on every blocked call.
- *
- * NOTE: The check:audit script scans only src/app/** /actions.ts. This module
- * writes audit rows from inside a lib file — the script will not see them.
- * That is correct; do not add audit-exempt annotations to actions.ts callers.
+ * Throws when the Upstash backend does; a caller that must fail closed catches.
  */
-export async function checkRateLimit(
+export async function consumeRateLimit(
   key: string,
   limit: { max: number; windowSeconds: number },
-  context: { userId?: string | null; actor: string; reason: string },
-): Promise<{ allowed: true } | { allowed: false; retryAfterSeconds: number }> {
+): Promise<RateLimitResult> {
   // Escape hatch for local development and e2e test runs. The in-memory store
   // accumulates state across the dev server's lifetime — running a Playwright
   // suite multiple times will exhaust the per-IP+email signin budget. Set
@@ -196,28 +195,69 @@ export async function checkRateLimit(
     : inMemoryCheck(key, limit.max, limit.windowSeconds);
 
   if (!result.allowed) {
-    // Fire-and-forget — don't let an audit write failure block the response.
-    db.insert(auditEvents)
-      .values({
-        actorUserId: context.userId ?? null,
-        actorEmail: context.actor.includes("@") ? context.actor : null,
-        action: AUDIT_ACTIONS.RATE_LIMIT_BLOCKED,
-        resourceType: "rate_limit",
-        resourceId: key,
-        metadata: {
-          reason: context.reason,
-          actor: context.actor,
-          retryAfterSeconds: result.retryAfterSeconds,
-        },
-      })
-      .catch(() => {
-        // Swallow — audit write failure must not block the caller.
-      });
-
     return { allowed: false, retryAfterSeconds: result.retryAfterSeconds };
   }
-
   return { allowed: true };
+}
+
+/**
+ * Write one RATE_LIMIT_BLOCKED audit row for a refusal. Fire-and-forget: an
+ * audit write failure never blocks the response. Sets no `ip` column, so an IP
+ * appears in the row only if the caller put it in `key` (or `context.actor`).
+ *
+ * Direct `audit_events` insert, not `recordAudit()`: `recordAudit` imports
+ * `@/auth` and calls `auth()` when the actor is undefined.
+ */
+export function recordRateLimitBlock(
+  key: string,
+  context: { userId?: string | null; actor: string; reason: string },
+  retryAfterSeconds: number,
+): void {
+  db.insert(auditEvents)
+    .values({
+      actorUserId: context.userId ?? null,
+      actorEmail: context.actor.includes("@") ? context.actor : null,
+      action: AUDIT_ACTIONS.RATE_LIMIT_BLOCKED,
+      resourceType: "rate_limit",
+      resourceId: key,
+      metadata: {
+        reason: context.reason,
+        actor: context.actor,
+        retryAfterSeconds,
+      },
+    })
+    .catch(() => {
+      // Swallow — audit write failure must not block the caller.
+    });
+}
+
+/**
+ * Check whether the caller is within their rate-limit window.
+ *
+ * @param key       - Namespaced identifier, e.g. "signin:1.2.3.4:user@example.com"
+ * @param limit     - { max: number; windowSeconds: number }
+ * @param context   - Written into the audit row when allowed === false:
+ *                    { userId?: string | null; actor: string; reason: string }
+ *
+ * Returns { allowed: true } or { allowed: false; retryAfterSeconds: number }.
+ * Writes RATE_LIMIT_BLOCKED to audit_events on every blocked call: it is
+ * `consumeRateLimit` followed by `recordRateLimitBlock` on a refusal, and its
+ * signature and behaviour are unchanged by that split (DECISION-302).
+ *
+ * NOTE: The check:audit script scans only src/app/** /actions.ts. This module
+ * writes audit rows from inside a lib file — the script will not see them.
+ * That is correct; do not add audit-exempt annotations to actions.ts callers.
+ */
+export async function checkRateLimit(
+  key: string,
+  limit: { max: number; windowSeconds: number },
+  context: { userId?: string | null; actor: string; reason: string },
+): Promise<RateLimitResult> {
+  const result = await consumeRateLimit(key, limit);
+  if (!result.allowed) {
+    recordRateLimitBlock(key, context, result.retryAfterSeconds);
+  }
+  return result;
 }
 
 // Exported for unit tests only.

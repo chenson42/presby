@@ -31,6 +31,9 @@ export const HELP_COPY = {
   tableLabel: "Table. Scroll sideways to see all of it.",
   externalCue: " (opens in a new tab)",
 
+  footerContactLead: "Can't find what you need?",
+  footerContactLink: "Write to the PresbyPortal team",
+
   notFoundTitle: "We couldn't find that page",
   notFoundBody: "The link may be old or mistyped.",
   notFoundLink: "Go to the help index",
@@ -66,6 +69,10 @@ export function turnOnText(name: string, defaultOn: boolean): string {
   return `In Features, turn on "${name}". ${defaultOn ? "It is on by default." : "It is off by default."}`;
 }
 
-export function switchedOnText(name: string, contact: string): string {
-  return `The PresbyPortal team turns on "${name}" for you. ${contact}`;
+/**
+ * Plain text, not markdown: the Needs block renders it in a <dd>, where a link would show raw
+ * brackets. Names the ticket route (the reader is an administrator) and the inviter.
+ */
+export function switchedOnText(name: string): string {
+  return `The PresbyPortal team turns on "${name}" for you. To ask for it, file a ticket (Administration, then Tickets) or ask the person who invited you.`;
 }

@@ -44,3 +44,5 @@ As with the first set, the new codes are not shown again if you reload or leave 
 - "Confirm it's you with your authenticator app or a recovery code first. Reload this page to see how." You pressed "Regenerate recovery codes" before confirming in this sign-in. Reload and use "Confirm it's you".
 
 If you lose your phone and your recovery codes: PresbyPortal has no button that resets two-factor sign-in for you. Only the PresbyPortal team can reset it. Ask a church administrator to send the team a support ticket for you. See [Getting help](/help/getting-help).
+
+If you are the only administrator and have no one to ask, [write to the PresbyPortal team](/help/contact) and choose "I can't sign in or I lost my codes" under "What is this about?". A message cannot reset anything by itself. The team uses the email address on your account to check with you, and that address may not be the one you type in the form.

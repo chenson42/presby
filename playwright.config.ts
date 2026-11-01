@@ -58,6 +58,26 @@ const isHelpShotsRun = process.env.PW_HELP_SHOTS === "1";
 if (isHelpShotsRun && (isVisualRun || isProdBuildRun)) {
   throw new Error("PW_HELP_SHOTS=1 is mutually exclusive with PW_VISUAL=1 and PW_PROD_BUILD=1.");
 }
+
+/**
+ * True only when `npm run test:e2e:contact` / `test:e2e:contact:prod` set `PW_HELP_CONTACT=1` (user-help
+ * Increment 2, the /help/contact form; docs/work-log/2026-10-31-help-contact.md, Phase 3 "E2E"). Environment
+ * variable, NOT argv, for the reason `isVisualRun` gives.
+ *
+ * WHY ITS OWN LANE. The form needs Cloudflare's published Turnstile TEST keys in the server's environment,
+ * and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` also switches on the check at sign-in, forgot-password and the public
+ * give form: their submit buttons stay disabled until a token exists. Setting it on the shared e2e server would
+ * disable the sign-in form for every spec and for the standard globalSetup's own sign-ins. So the live-form
+ * specs get a server of their own (this config starts it: `reuseExistingServer: false`, so a keyless dev server
+ * can never masquerade), the limiter ON (`RATE_LIMIT_DISABLED=false`, which beats the `true` in `.env.local`),
+ * and a globalSetup that runs the database-isolation guard and signs nobody in. The `contact` project is
+ * included ONLY on this flag, so a bare `playwright test` never runs it. `contact-prod` is the same specs'
+ * production-build twin and the named proof for CA13.
+ */
+const isHelpContactRun = process.env.PW_HELP_CONTACT === "1";
+if (isHelpContactRun && (isVisualRun || isHelpShotsRun)) {
+  throw new Error("PW_HELP_CONTACT=1 is mutually exclusive with PW_VISUAL=1 and PW_HELP_SHOTS=1.");
+}
 const PROD_PORT = Number(process.env.PW_PROD_PORT ?? 3800);
 const PROD_BASE_URL = `http://localhost:${PROD_PORT}`;
 
@@ -110,6 +130,26 @@ const baseURL = isProdBuildRun
  * THIS config starts; a reused dev server needs them in its own environment, and globalSetup says so.
  * The fake state file lives under the gitignored `.tmp/`.
  */
+/**
+ * Cloudflare's PUBLISHED Turnstile dummy keys (always-pass widget, always-pass secret). They are public
+ * documentation values, not secrets, and must never be set in a Vercel scope: `isHelpContactConfigured`
+ * refuses them in a production deployment. They reach only the server the contact lane starts.
+ */
+const CONTACT_TEST_ENV = {
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: "1x00000000000000000000AA", // leak-ok: Cloudflare's published always-pass test site key
+  TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA", // leak-ok: Cloudflare's published always-pass test secret
+  // The limiter ON. `.env.local` (and CI's) says true for the shared suite; a value in the server's own
+  // environment wins over the file.
+  RATE_LIMIT_DISABLED: "false",
+};
+const contactDevPort = (() => {
+  try {
+    return new URL(baseURL).port || "3000";
+  } catch {
+    return "3000";
+  }
+})();
+
 const HOST_RESOLVER_ARGS = ["--host-resolver-rules=MAP *.invalid 127.0.0.1"];
 const DOMAINS_TEST_ENV = {
   DOMAINS_ALLOW_RESERVED_TLDS: "1",
@@ -122,7 +162,11 @@ const DOMAINS_TEST_ENV = {
 };
 
 export default defineConfig({
-  globalSetup: isHelpShotsRun ? "./e2e/help-shots/global-setup.ts" : "./e2e/support/global-setup.ts",
+  globalSetup: isHelpShotsRun
+    ? "./e2e/help-shots/global-setup.ts"
+    : isHelpContactRun
+      ? "./e2e/help-contact/global-setup.ts"
+      : "./e2e/support/global-setup.ts",
   testDir: "./e2e",
   // Unset in CI and by default locally — "test-results" (the literal
   // e2e.yml's trace-upload step and .gitignore already expect). Only a
@@ -161,9 +205,24 @@ export default defineConfig({
           // .env.local; Auth.js rewrites request origins to AUTH_URL.
           AUTH_URL: PROD_BASE_URL,
           ...DOMAINS_TEST_ENV,
+          // The contact lane's keys are in the BUILD's environment too: the site key is baked into the client
+          // bundle and the page decides "configured" at build.
+          ...(isHelpContactRun ? CONTACT_TEST_ENV : {}),
         },
       }
-    : {
+    : isHelpContactRun
+      ? {
+          // Its own dev server on the port of E2E_BASE_URL (`npm run dev` would bind :3000).
+          command: `npx next dev -p ${contactDevPort}`,
+          url: `${baseURL}/help`,
+          // ALWAYS a fresh server: one that was started without the keys would show "unavailable".
+          reuseExistingServer: false,
+          timeout: 120_000,
+          stdout: "pipe",
+          stderr: "pipe",
+          env: { ...CONTACT_TEST_ENV },
+        }
+      : {
         command: "npm run dev",
         url: process.env.E2E_BASE_URL ?? "http://localhost:3000",
         reuseExistingServer: !process.env.CI,
@@ -196,7 +255,15 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   projects: isProdBuildRun
-    ? [
+    ? isHelpContactRun
+      ? [
+          {
+            name: "contact-prod",
+            use: { ...devices["Desktop Chrome"], launchOptions: { args: HOST_RESOLVER_ARGS } },
+            testMatch: /e2e[\\/]help-contact[\\/]prod-build\.spec\.ts$/,
+          },
+        ]
+      : [
         {
           name: "prod-build",
           use: { ...devices["Desktop Chrome"] },
@@ -223,7 +290,7 @@ export default defineConfig({
           // The visual project owns visual-parity.spec.ts's per-route viewport /
           // colorScheme matrix via test.use(); running it here too would collide
           // with that spec's own storageState/viewport overrides for no benefit.
-          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//, /help-shots\//],
+          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//, /help-shots\//, /[\\/]e2e[\\/]help-contact[\\/]/],
         },
         // Custom domains (see HOST_RESOLVER_ARGS above). The first test of the first spec is a
         // CANARY proving the `*.invalid` mapping works, so every later failure is real.
@@ -232,6 +299,15 @@ export default defineConfig({
           use: { ...devices["Desktop Chrome"], launchOptions: { args: HOST_RESOLVER_ARGS } },
           testMatch: /custom-domains\/.*\.spec\.ts$/,
         },
+        ...(isHelpContactRun
+          ? [
+              {
+                name: "contact",
+                use: { ...devices["Desktop Chrome"] },
+                testMatch: /e2e[\\/]help-contact[\\/]form\.spec\.ts$/,
+              },
+            ]
+          : []),
         ...(isHelpShotsRun
           ? [
               {

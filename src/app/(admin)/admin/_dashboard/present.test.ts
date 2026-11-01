@@ -8,6 +8,7 @@ import {
   presentAccounts,
   presentDomains,
   presentEmail,
+  presentContactMessages,
   presentFeedback,
   presentGiving,
   presentOrganizations,
@@ -23,6 +24,7 @@ describe("a failed read is never an all-clear (E5)", () => {
   it.each([
     ["tickets", presentTickets],
     ["feedback", presentFeedback],
+    ["contact messages", presentContactMessages],
     ["email", presentEmail],
     ["giving", presentGiving],
     ["domains", presentDomains],
@@ -70,6 +72,13 @@ describe("feedback", () => {
   it("says how many are new, or all-clear", () => {
     expect(presentFeedback({ kind: "ok", newCount: 3 })).toMatchObject({ tone: "attention", headline: "3 new" });
     expect(presentFeedback({ kind: "ok", newCount: 0 })).toMatchObject({ tone: "clear", headline: "Nothing waiting." });
+  });
+});
+
+describe("contact messages", () => {
+  it("says how many are new, or all-clear, and never carries a message", () => {
+    expect(presentContactMessages({ kind: "ok", newCount: 2 })).toEqual({ kind: "ok", tone: "attention", headline: "2 new" });
+    expect(presentContactMessages({ kind: "ok", newCount: 0 })).toMatchObject({ tone: "clear", headline: "Nothing waiting." });
   });
 });
 

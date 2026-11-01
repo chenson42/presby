@@ -185,6 +185,10 @@ src/content/help/      — the help pages' markdown and their screenshots (image
 src/lib/help/          — the help registry (typed, pure), the build-time loader, the scanner and checks
                          `npm run check:help` runs, and helpHref(), the only place an in-app help link
                          is built (a source scan bans a hand-built "/help…" literal)
+src/lib/help-contact/  — the /help/contact drop box (DECISION-300 to 304, 313): the pure configured-check
+                         and validation, submit.ts (the action's body, through the one definer
+                         presby_submit_help_contact), inbox.ts (the /admin/messages reads and triage
+                         writes on getPlatformDb(), audit in the same transaction) and notify.ts
 src/components/help/   — help-only composition: the Needs block, the planned placeholder (the one file
                          where future-tense wording is allowed), page navigation
 drizzle/00XX_presby_*.sql  — hand-written: RLS, triggers, functions. Drizzle Kit

@@ -163,6 +163,7 @@ describe("the audience registry is closed and complete (ER14)", () => {
       ticket_submitter_reply: "account",
       ticket_resolved: "account",
       ticket_feedback_promoted: "account",
+      help_contact_notification: "account",
       account_invitation: "typed",
       statistics_submission_grant: "typed",
       account_sign_in_invitation: "person:credential",

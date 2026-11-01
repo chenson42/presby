@@ -1,8 +1,10 @@
 import { formatAge } from "@/lib/admin/format-age";
+import { HELP_CONTACT_INBOX_COPY } from "@/lib/help-contact/copy";
 import type { CountCardState } from "@/components/shared/count-card";
 import type { CardResult } from "@/lib/admin-portal/dashboard/read-card";
 import type { TicketsCard } from "@/lib/admin-portal/dashboard/tickets";
 import type { FeedbackCard } from "@/lib/admin-portal/dashboard/feedback";
+import type { ContactMessagesCard } from "@/lib/admin-portal/dashboard/messages";
 import type { EmailCard } from "@/lib/admin-portal/dashboard/email";
 import type { GivingCard } from "@/lib/admin-portal/dashboard/giving";
 import type { DomainsCard } from "@/lib/admin-portal/dashboard/domains";
@@ -64,6 +66,15 @@ export function presentFeedback(r: CardResult<FeedbackCard>): CountCardState {
   if (r.kind === "error") return ERROR;
   if (r.newCount > 0) {
     return { kind: "ok", tone: "attention", headline: `${r.newCount} new` };
+  }
+  return clear();
+}
+
+/** The contact-form inbox: a count of `new` messages (a content-free email makes this the real signal, FC4). */
+export function presentContactMessages(r: CardResult<ContactMessagesCard>): CountCardState {
+  if (r.kind === "error") return ERROR;
+  if (r.newCount > 0) {
+    return { kind: "ok", tone: "attention", headline: HELP_CONTACT_INBOX_COPY.cardNew(r.newCount) };
   }
   return clear();
 }

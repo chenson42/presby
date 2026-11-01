@@ -34,8 +34,14 @@ const ctx = linkContext([
 
 describe("resolveLink", () => {
   it("admits the fixed internal routes", () => {
-    for (const href of ["/help", "/help/planned", "/launch", "/signin"]) {
+    for (const href of ["/help", "/help/planned", "/help/contact", "/launch", "/signin"]) {
       expect(resolveLink(href, ctx)).toEqual({ kind: "internal", href });
+    }
+  });
+  it("admits /help/contact exactly: no anchor, no sub-path, no query (it is a route, not a page)", () => {
+    expect(resolveLink("/help/contact", ctx)).toEqual({ kind: "internal", href: "/help/contact" });
+    for (const href of ["/help/contact#x", "/help/contact/x", "/help/contact?x=1", "/help/contact/"]) {
+      expect(resolveLink(href, ctx), href).toBeNull();
     }
   });
   it("admits a published slug, with a declared anchor", () => {

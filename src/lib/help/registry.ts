@@ -30,8 +30,8 @@ export const HELP_PAGES = [
     status: "published",
     audience: "prospective",
     covers: [],
-    labels: ["You're invited", "This link isn't active"],
-    verifiedIn: "0.50.0",
+    labels: ["You're invited", "This link isn't active", "Starting a congregation", "What is this about?"],
+    verifiedIn: "0.53.0",
   },
   // ---- Everyone who signs in -------------------------------------------------------------
   {
@@ -71,8 +71,10 @@ export const HELP_PAGES = [
       "Use a recovery code instead",
       "Use my authenticator app instead",
       "That code didn't match. Try again, or use a recovery code.",
+      "I can't sign in or I lost my codes",
+      "What is this about?",
     ],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
   },
   {
     slug: "your-account",
@@ -165,11 +167,11 @@ export const HELP_PAGES = [
   {
     slug: "getting-help",
     title: "Getting help",
-    summary: "How to ask a question, report a problem or send feedback.",
+    summary: "How to ask a question, write to the team, report a problem or send feedback.",
     order: 70,
     status: "published",
     audience: "everyone",
-    covers: ["tile:tickets", "route:/o/{slug}/feedback"],
+    covers: ["tile:tickets", "route:/o/{slug}/feedback", "route:/help/contact"],
     labels: [
       "How are we doing?",
       "Share feedback",
@@ -187,8 +189,13 @@ export const HELP_PAGES = [
       "Ticket filed.",
       "Send reply",
       "Restricted",
+      "What is this about?",
+      "Your email address",
+      "Your message",
+      "Send message",
+      "Your message was sent.",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.53.0",
   },
   {
     slug: "privacy-policy",
@@ -200,7 +207,7 @@ export const HELP_PAGES = [
     audience: "everyone",
     covers: [],
     labels: [],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
   },
   // ---- Written against in-flight pipelines: a pending page is not rendered until its [help:<token>] line is Done.
   //      accepting-your-invitation, setting-up-two-factor, who-is-asked-for-a-code and sign-in-invitations published at 0.50.0 -----
@@ -233,7 +240,7 @@ export const HELP_PAGES = [
       "Go to sign in",
       "If you already accepted it, you can sign in. Otherwise ask whoever invited you to send a new one.",
     ],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
     requires: "recovery-codes",
   },
   {
@@ -268,8 +275,10 @@ export const HELP_PAGES = [
       "Two-factor authentication is already set up on this account, possibly in another tab. Reload this page.",
       "Something went wrong and we could not confirm your code. Reload this page to see whether setup finished.",
       "Confirm it's you with your authenticator app or a recovery code first. Reload this page to see how.",
+      "I can't sign in or I lost my codes",
+      "What is this about?",
     ],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
     requires: "recovery-codes",
   },
   {

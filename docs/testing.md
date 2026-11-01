@@ -261,6 +261,24 @@ If the build ever flakes anyway, `rm -rf "$SCRATCH/app/.next"` and retry. A nega
 
 ---
 
+## The contact-form lane (`/help/contact`)
+
+The contact form needs Turnstile in the server's environment, and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` also keeps the sign-in, forgot-password and give forms' submit buttons disabled until a token exists. So its specs cannot share the default server. They run in their own lane:
+
+```bash
+E2E_BASE_URL=http://localhost:3670 npm run test:e2e:contact          # dev server, limiter ON
+PW_PROD_PORT=3671 npm run test:e2e:contact:prod                      # next build && next start (CA13)
+```
+
+- **The config starts the server** (`reuseExistingServer: false`, so a keyless one can never stand in). Its environment holds Cloudflare's **published** Turnstile test keys and `RATE_LIMIT_DISABLED=false`, which beats the `true` in `.env.local`. Nobody signs in; rows are read through the owner connection and matched by a per-test marker.
+- **The test keys are public documentation values, not secrets**, and are never set in a Vercel scope. In `playwright.config.ts` they are `1x00000000000000000000AA` (site key, always passes) and `1x0000000000000000000000000000000AA` (secret, always passes); the other dummies (`2x…`, `3x…`, the invisible and forced-challenge site keys) are listed in `src/lib/help-contact/configured.ts`, which refuses every one of them in a production deployment. `check:secrets` needs the `// leak-ok:` annotation they carry.
+- **The table cannot be cleaned** (messages are never deleted) and the definer refuses at 90 per hour, so the lane stores about 10 messages a run and `e2e/help-contact/global-setup.ts` refuses to start when the last hour already holds 60. Use a pipeline branch or CI's ephemeral one, never a shared one.
+- **The notification window** is a database fact (one claim per 60 minutes). `e2e/help-contact/prod-build.spec.ts` (d) can only show that `after()` ran when its first message claims the window; if an earlier message holds it, the test is skipped with the time it frees up. CI's fresh branch always can.
+- **Default lane:** `e2e/help-contact-unavailable.spec.ts` runs on the keyless default server and expects the unavailable block.
+- **Known failing-by-design:** `form.spec.ts` test 8 and `prod-build.spec.ts` (e) carry `test.fail` for the open CA7 loop-back (a Server Action forwarded from a custom host loses its `Host`). They go red the moment it is fixed, which is the cue to remove the annotation.
+
+---
+
 ## Running Playwright from a worktree
 
 Workflow Rule 16: a pipeline starts its own server on its assigned port and never

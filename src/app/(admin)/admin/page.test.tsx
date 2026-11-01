@@ -24,7 +24,7 @@ const called = vi.hoisted(() => [] as string[]);
 vi.mock("./_dashboard/cards", () => {
   const ids = [
     "organizations", "giving", "domains", "sites", "tickets",
-    "feedback", "email", "two_factor", "accounts", "recent_changes",
+    "feedback", "contact_messages", "email", "two_factor", "accounts", "recent_changes",
   ];
   return {
     DASHBOARD_CARD_VIEWS: Object.fromEntries(
@@ -62,6 +62,7 @@ describe("AdminDashboard - a support operator (E1, E4)", () => {
     expect(screen.getAllByTestId(/^card-/).map((e) => e.dataset.testid)).toEqual([
       "card-tickets",
       "card-feedback",
+      "card-contact_messages",
     ]);
     expect(screen.queryByText(/don.t have access to any admin tools/i)).toBeNull();
   });
@@ -77,7 +78,7 @@ describe("AdminDashboard - a support operator (E1, E4)", () => {
   it("never calls a card component it does not hold the key for (E4)", async () => {
     mockAuth.mockResolvedValue(session(SUPPORT));
     render(await AdminDashboard());
-    expect(called.sort()).toEqual(["feedback", "tickets"]);
+    expect(called.sort()).toEqual(["contact_messages", "feedback", "tickets"]);
   });
 });
 
@@ -97,7 +98,7 @@ describe("AdminDashboard - ADMIN_DASHBOARD-only session (E2)", () => {
 });
 
 describe("AdminDashboard - a full operator (E3)", () => {
-  it("sees every zone in order with four, three, two and one cards", async () => {
+  it("sees every zone in order with four, four, two and one cards", async () => {
     mockAuth.mockResolvedValue(session(Object.values(FEATURES)));
     render(await AdminDashboard());
 
@@ -108,7 +109,7 @@ describe("AdminDashboard - a full operator (E3)", () => {
       "Access and settings",
       "Recent operator changes",
     ]);
-    expect(sections.map((s) => within(s).getAllByTestId(/^card-/).length)).toEqual([4, 3, 2, 1]);
+    expect(sections.map((s) => within(s).getAllByTestId(/^card-/).length)).toEqual([4, 4, 2, 1]);
   });
 
   it("shows the action bar: New organization (a link to /new) and a find form", async () => {

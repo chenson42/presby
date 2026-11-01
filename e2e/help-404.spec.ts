@@ -35,6 +35,8 @@ for (const path of MISSES) {
 
       await expect(page.getByRole("heading", { level: 1 }), label).toHaveText("We couldn't find that page");
       await expect(page.getByRole("link", { name: "Go to the help index" }), label).toHaveAttribute("href", "/help");
+      // The layout's footer is the way out of a dead end: the contact form.
+      await expect(page.locator("footer").getByRole("link", { name: "Write to the PresbyPortal team" }), label).toHaveAttribute("href", "/help/contact");
 
       const headers = res!.headers();
       expect(headers["cache-control"] ?? "", `${label}: cache-control`).toContain("no-store");

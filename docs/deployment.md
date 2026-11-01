@@ -1698,6 +1698,36 @@ founding-administrator invitation.
 
 ---
 
+## Help contact form (0083)
+
+**Not yet applied to production** (v0.53.0; `docs/work-log/2026-10-31-help-contact.md`; DECISION-300 to 304 and 313). The public `/help/contact` form writes to the definer-only `help_contact_messages` table; platform operators holding `admin.tickets` read it at `/admin/messages`. **Do not deploy 0.53.0 until steps 1 to 3 below are done**: the help pages link to the form, and without the variables it shows "unavailable".
+
+**1. Ship order (FC9).** The help sentences link to the form, so the form must work in Production before the code is live.
+1. Confirm what Production already has, read-only (`vercel env ls production`): `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `HELP_PRIVACY_CONTACT_EMAIL`. `RATE_LIMIT_DISABLED` must be absent.
+2. Set any that are missing, in the **Production scope only**, with a real Cloudflare widget whose allowed hostnames include the production host. **Cloudflare's published test keys (`1x…`, `2x…`, `3x…`) are never set in Production**; the code refuses them in a production deployment and the form shows "unavailable", but do not rely on that. These variables also switch the Turnstile check **on at sign-in, forgot-password and the public giving form**, and the Upstash limiter on for every limiter. If they are new, walk each of those three after the deploy.
+3. Apply `0083` to production, additive (a new table, three guard functions and one definer; nothing reads them until the code ships): the standard endpoint-swap of `MIGRATE_DATABASE_URL`, `psql -1` as owner. Then run the catalog proof: `relforcerowsecurity = t`; zero `pg_policies` rows for the table; `aclexplode(relacl)` shows no `presby_app` and no PUBLIC entry; `has_function_privilege('presby_app', 'presby_submit_help_contact(text,text,text,text,text)', 'execute')` true and the same for `public` false.
+4. Merge and deploy. The site key is baked in at build, so the variables must be set before this build.
+5. Walk it in Production: the form at 360px; send one message with an obvious marker; see the dashboard card say "1 new" and the notification email arrive once; read it in `/admin/messages`; reply by hand; mark it handled; clear its details. Preview deployments show "unavailable" because the keys are Production-scope: expected.
+
+**2. Handling a message (FC2).** A message is a claim, never proof.
+1. Never act on a role, access, sign-in, invitation or two-factor request from a message alone ("I am the administrator at X").
+2. For anything about an account, reply to the address on the account itself (looked up under Users & roles; that needs `admin.users`, so a `support_operator` asks an administrator), never to the typed address.
+3. For a lost phone and lost codes, act only after the account's own address replies to you; then use "Force-reset 2FA enrollment" on that user's page (it writes `user.2fa_force_reset`). Whether a reply from the mailbox is enough proof is your standard to set.
+4. For a prospective congregation (`starting_a_congregation`), replying to the typed address is ordinary correspondence; treat who they say they are as unverified until a conversation settles it, and send an invitation only to an address you chose yourself.
+5. Prefer the ticket route for a signed-in administrator: a ticket has a verified identity and a reply thread.
+6. Triage: Mark as handled or Mark as spam. Clear details when you have finished with a message and whenever someone asks (the privacy policy promises both); it is irreversible. Rows are never deleted.
+
+**3. Reading what happened.** Limiter refusals appear in `/admin/audit` as `rate_limit.blocked` with a resource id beginning `help_contact:`, at most one per kind per hour, with no IP. Status changes and clears appear as `help_contact.status_changed` and `help_contact.details_cleared` (ids and statuses only).
+
+**4. Switching it off (CA6, DECISION-303).** Nothing here is instant except lever A.
+- **Durable:** remove the Turnstile or Upstash variables in Production **and redeploy**. Vercel applies variable changes to new deployments only. Note this also turns the Turnstile check off at sign-in, forgot-password and giving, so it is a heavy lever.
+- **Immediate lever A (verified by the DB test):** as owner, `revoke execute on function presby_submit_help_contact(text, text, text, text, text) from presby_app;`. The next submission shows "The contact form isn't available right now" (the action maps SQLSTATE `42501`). Restore with the same statement as `grant execute … to presby_app`. The page still shows the form until a redeploy.
+- **Lever B, unverified and not recommended:** removing the production host from the Turnstile widget's allowed hostnames in Cloudflare would stop the widget at sign-in, forgot-password and giving as well, and the sign-in form keeps submit disabled without a token, so nobody could sign in. Use it only after walking the effect on a non-production host.
+- **A flood:** the limiter (3 per hour per IP, 30 per hour and 100 per day overall) and the database ceiling (90 per hour, 300 per day) cap the damage; mark the junk as spam. The per-IP limit is a courtesy while `cf-connecting-ip` is unverified on Vercel (F407).
+- **A Cloudflare outage** lets submissions through without the check (fail-open, DECISION-026); the same ceilings bound it.
+
+**5. Dev and e2e.** Cloudflare's public test keys (`docs/testing.md`) go in a gitignored `.env.local` or a Playwright server's environment, never in a Vercel scope.
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.

@@ -302,6 +302,8 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   TENANT_PERSON_ARCHIVED: "tenant.person.archived",
   TENANT_PERSON_RESTORED: "tenant.person.restored",
   TENANT_PERSON_VISIT_DETAILS_UPDATED: "tenant.person.visit_details_updated",
+  HELP_CONTACT_STATUS_CHANGED: "help_contact.status_changed",
+  HELP_CONTACT_DETAILS_CLEARED: "help_contact.details_cleared",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

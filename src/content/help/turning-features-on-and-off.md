@@ -48,7 +48,7 @@ Turning a feature on or off changes what you see in two ways.
 
 ## Features the PresbyPortal team turns on for you
 
-"Website domain" lets a congregation connect its own web address to its public website. It is not on the Features page. If it is off, the "Website domain" page says to ask PresbyPortal support to turn it on. {{contact}}
+"Website domain" lets a congregation connect its own web address to its public website. It is not on the Features page. If it is off, the "Website domain" page says to ask PresbyPortal support to turn it on. {{contactAdmin}}
 
 ## What turning a feature off does
 

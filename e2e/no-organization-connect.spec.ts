@@ -14,7 +14,8 @@
  *   (a) an authority-free member who signs in with the address on their record
  *       is connected at sign-in, lands in the congregation with baseline access
  *       only, and the Community card says "Connected through sign-in on {date}";
- *   (b) a visitor is not connected: N0, then Check again says "Nothing new yet.";
+ *   (b) a visitor, an inactive person and a moved-away person are not connected (only a listed
+ *       record connects, 3a): N0, then Check again says "Nothing new yet.";
  *   (c) two people sharing an address: neither connects;
  *   (d) an authority-bearing person (a ruling elder) is not connected by sign-in:
  *       N0, Check again says "One more step", and a fresh account walks
@@ -177,22 +178,35 @@ test.describe("Sign-in connect and /no-organization", () => {
         }
       });
 
-      test("(b) a visitor is not connected: N0, then Check again says Nothing new yet", async ({ page }) => {
-        const o = org!;
-        await setOrgToggle(sql, o, CONNECT_TOGGLE, true);
-        const account = await addAccount(sql, o, "visitor");
-        const visitor = await addMember(sql, o, { first: "Perpetua", last: "Quillon", email: account.email, engagement: "visitor" });
+      const NOT_LISTED = {
+        visitor: "a visitor",
+        inactive: "an inactive person",
+        moved_away: "a moved-away person",
+      } as const;
+      for (const engagement of ["visitor", "inactive", "moved_away"] as const) {
+        test(`(b) ${NOT_LISTED[engagement]} is not connected (3a: only a listed record connects): N0, then Check again says Nothing new yet`, async ({ page }) => {
+          const o = org!;
+          await setOrgToggle(sql, o, CONNECT_TOGGLE, true);
+          const account = await addAccount(sql, o, engagement.replace("_", "-"));
+          const person = await addMember(sql, o, { first: "Perpetua", last: "Quillon", email: account.email, engagement: "visitor" });
+          if (engagement !== "visitor") {
+            // Visitor to inactive or moved away: no roll, so the engagement guard allows it on the owner path.
+            await sql`
+              update memberships set engagement_status = ${engagement}
+               where organization_id = ${o.orgId}::uuid and person_id = ${person.personId}::uuid`;
+          }
 
-        await signInAs(page, account, /\/no-organization/);
-        await expect(n0(page)).toBeVisible();
-        await pressCheckAgain(page);
-        await expect(page.getByText(NOTHING_NEW)).toBeVisible({ timeout: 30_000 });
-        expect(new URL(page.url()).pathname).toBe("/no-organization");
-        await noHorizontalOverflow(page);
+          await signInAs(page, account, /\/no-organization/);
+          await expect(n0(page)).toBeVisible();
+          await pressCheckAgain(page);
+          await expect(page.getByText(NOTHING_NEW)).toBeVisible({ timeout: 30_000 });
+          expect(new URL(page.url()).pathname).toBe("/no-organization");
+          await noHorizontalOverflow(page);
 
-        expect(await personOfUser(sql, account.id)).toBeNull();
-        expect(await auditFor(sql, "tenant.person.sign_in_connected", visitor.personId)).toHaveLength(0);
-      });
+          expect(await personOfUser(sql, account.id)).toBeNull();
+          expect(await auditFor(sql, "tenant.person.sign_in_connected", person.personId)).toHaveLength(0);
+        });
+      }
 
       test("(c) two people who share the address: neither is connected", async ({ page }) => {
         const o = org!;

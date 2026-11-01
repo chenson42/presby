@@ -46,6 +46,25 @@ const VIEWPORTS = [
   { name: "360px", width: 360, height: 740 },
 ] as const;
 
+/**
+ * Increment 3a: a regular attender is part of Active Membership, and alpha's baseline `member` role
+ * (bound to that group) carries `directory.view`. The clerk is a regular attender there, so removing
+ * `directory.view` from the spec-owned role alone no longer removes the permission: the degrade lane
+ * must take it from the baseline role too, for the lane only. Returns whether the baseline held it.
+ */
+async function setBaselineDirectoryView(sql: Sql, granted: boolean): Promise<boolean> {
+  const roles = (await sql`
+    select r.id, exists (select 1 from app_role_permissions p where p.role_id = r.id and p.permission_key = 'directory.view') as has
+      from app_roles r where r.organization_id = ${COMMUNITY_ORG.id}::uuid and r.key = 'member'`) as { id: string; has: boolean }[];
+  if (!roles[0]) return false;
+  if (granted) {
+    await sql`insert into app_role_permissions (role_id, permission_key) values (${roles[0].id}::uuid, 'directory.view') on conflict do nothing`;
+  } else {
+    await sql`delete from app_role_permissions where role_id = ${roles[0].id}::uuid and permission_key = 'directory.view'`;
+  }
+  return roles[0].has;
+}
+
 async function noHorizontalOverflow(page: Page) {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -271,22 +290,23 @@ test.describe("Community", () => {
         await expect(page.getByRole("listitem").filter({ hasText: full })).toHaveCount(0);
       });
 
-      test("the nav is six real links in one scrollable row, and every empty state reads", async ({ page }) => {
+      test("the nav is seven real links in one scrollable row, and every empty state reads", async ({ page }) => {
         await page.goto(BASE);
         const nav = page.getByRole("group", { name: "Community view" });
-        await expect(nav.getByRole("link")).toHaveCount(6);
+        await expect(nav.getByRole("link")).toHaveCount(7); // 3a added Inactive between Visitors and Staff
         await noHorizontalOverflow(page);
         // One row: every link shares the first link's vertical band (no lopsided wrap).
         const tops = await nav.getByRole("link").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
         expect(new Set(tops).size).toBe(1);
 
-        for (const [view, text] of [
-          ["staff", /staff/i],
-          ["former", /former participants/i],
+        // Every list names what it holds in its no-match line (3a: Former is "former people", Inactive is new).
+        for (const [view, noun] of [
+          ["staff", "staff"],
+          ["former", "former people"],
+          ["inactive", "inactive people"],
         ] as const) {
           await page.goto(`${BASE}?view=${view}&search=zzzzznomatch`);
-          await expect(page.getByText(/no .* match "zzzzznomatch"/i)).toBeVisible();
-          expect(text).toBeTruthy();
+          await expect(page.getByText(new RegExp(`no ${noun} match "zzzzznomatch"`, "i"))).toBeVisible();
         }
       });
     });
@@ -298,12 +318,16 @@ test.describe("Community", () => {
       viewport: { width: 360, height: 740 },
     });
 
+    let baselineHadDirectoryView = false;
+
     test.afterEach(async () => {
       await setDirectoryView(sql, true);
+      if (baselineHadDirectoryView) await setBaselineDirectoryView(sql, true);
     });
 
     test("without directory.view the page keeps Add person and Visitors and names the missing permission — regression for founding administrator cannot reach Add person (F172)", async ({ page }) => {
       await setDirectoryView(sql, false);
+      baselineHadDirectoryView = await setBaselineDirectoryView(sql, false);
       await page.goto(BASE);
       await expect(page.getByRole("heading", { level: 1, name: "Community" })).toBeVisible();
       await expect(page.getByRole("link", { name: /add person/i })).toBeVisible();

@@ -43,11 +43,23 @@ vi.mock("sonner", () => ({
 
 import { MemberWizard } from "./member-wizard";
 
+// The Community engagement Server Actions reach the database; the screens under
+// test only call them through the dialogs, which these files do not drive.
+const mockRestorePersonAction = vi.hoisted(() => vi.fn());
+vi.mock("../actions", () => ({
+  changeEngagementAction: vi.fn(),
+  archivePersonAction: vi.fn(),
+  restorePersonAction: (...args: unknown[]) => mockRestorePersonAction(...args),
+  updateVisitDetailsAction: vi.fn(),
+}));
+
+
 afterEach(() => {
   cleanup();
   mockPush.mockClear();
   mockMatchPersonAction.mockReset();
   mockCreatePersonAction.mockReset();
+  mockRestorePersonAction.mockReset();
   toastSuccess.mockClear();
   toastError.mockClear();
   toastWarning.mockClear();
@@ -65,7 +77,7 @@ function fillSearch(firstName = "Nora", lastName = "Ashgrove") {
 
 describe("MemberWizard — initial render", () => {
   it("starts on the search step, with an adaptive step count (no match/confirm yet)", () => {
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
     expect(screen.getByText(/step 1 of 6/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /^search$/i })).toBeTruthy();
     // No Back button on the very first step.
@@ -76,7 +88,7 @@ describe("MemberWizard — initial render", () => {
 describe("MemberWizard — search with no match", () => {
   it("skips straight to the Identity step and prefills the searched name", async () => {
     mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -103,7 +115,7 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
         ],
       },
     });
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -127,7 +139,7 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
         ],
       },
     });
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -151,7 +163,7 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
         ],
       },
     });
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -169,10 +181,43 @@ describe("MemberWizard — duplicate-match confirm/reject (req 7)", () => {
   });
 });
 
+describe("MemberWizard — an archived match (Increment 3a, Copy groups D and E)", () => {
+  it("says when they were archived, offers Restore beside Open their record, and Restore takes the administrator to the restored record", async () => {
+    mockMatchPersonAction.mockResolvedValue({
+      ok: true,
+      data: {
+        candidates: [
+          {
+            personId: "p-1",
+            displayName: "N. Ashgrove",
+            confidence: "high",
+            alreadyHere: { connection: "former_visitor", endedOn: "2026-05-04" },
+          },
+        ],
+      },
+    });
+    mockRestorePersonAction.mockResolvedValue({ ok: true, data: { personId: "p-1", list: "visitors" } });
+    render(
+      <MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />,
+    );
+    fillSearch("Nora", "Ashgrove");
+    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+    await waitFor(() => screen.getByRole("button", { name: "Restore N. Ashgrove" }));
+    expect(screen.getByText(/they were archived on/i)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open their record" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /yes, this is/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore N. Ashgrove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(mockRestorePersonAction).toHaveBeenCalledWith("alder-creek", { personId: "p-1" }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/o/alder-creek/admin/community/p-1/edit"));
+  });
+});
+
 describe("MemberWizard — validation blocks Next", () => {
   it("Identity step: blank first/last name blocks advancing to Contact & Address", async () => {
     mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
 
     // Search with valid values so we reach Identity, then clear them.
     fillSearch("Nora", "Ashgrove");
@@ -195,7 +240,7 @@ describe("MemberWizard — validation blocks Next", () => {
   });
 
   it("Search step: blank first/last name blocks calling matchPersonAction at all", async () => {
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
     await waitFor(() => {
       expect(screen.getByText(/first name is required/i)).toBeTruthy();
@@ -207,7 +252,7 @@ describe("MemberWizard — validation blocks Next", () => {
 describe("MemberWizard — Back is lossless (req 6)", () => {
   it("Back from Contact & Address to Identity preserves the identity fields already typed", async () => {
     mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -247,7 +292,7 @@ describe("MemberWizard — Back is lossless (req 6)", () => {
 
   it("REGRESSION (docs/TODO.md): dateOfBirth survives Next→Back when the native input's change event lands one frame after the visible value, not synchronously with it — reproducing real device timing, not jsdom's synchronous fireEvent", async () => {
     mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
 
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -284,6 +329,7 @@ async function walkToConnection(canProposeRoll = true) {
   mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
   render(
     <MemberWizard
+      organization="Alder Creek Presbyterian Church"
       slug="alder-creek"
       households={[]}
       canProposeRoll={canProposeRoll}
@@ -364,7 +410,7 @@ describe("MemberWizard — Connection step options — regression for wizard-sel
 
 describe("MemberWizard — required-field markers (L3)", () => {
   it("marks First name and Last name as required on the Search step", () => {
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
 
     const firstName = screen.getByLabelText(/^first name/i);
     const lastName = screen.getByLabelText(/^last name/i);
@@ -529,7 +575,7 @@ describe("MemberWizard — already here (F178, DECISION-200)", () => {
         ],
       },
     });
-    render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
     fillSearch("Nora", "Ashgrove");
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
 
@@ -549,7 +595,7 @@ describe("MemberWizard — already here (F178, DECISION-200)", () => {
 
 describe("MemberWizard — HydrationGate wiring (DECISION-159, F116)", () => {
   it("the server render of the root (which has no <form> tag) is a disabled, busy fieldset", () => {
-    const html = renderToString(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+    const html = renderToString(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
     expect(html).toContain('<fieldset disabled=""');
     expect(html).toContain('aria-busy="true"');
   });
@@ -561,7 +607,7 @@ describe("MemberWizard — HydrationGate wiring (DECISION-159, F116)", () => {
 
 async function walkToContact(searchEmail = "") {
   mockMatchPersonAction.mockResolvedValue({ ok: true, data: { candidates: [] } });
-  render(<MemberWizard slug="alder-creek" households={[]} canProposeRoll={true} />);
+  render(<MemberWizard slug="alder-creek" organization="Alder Creek Presbyterian Church" households={[]} canProposeRoll={true} />);
   fillSearch("Nora", "Ashgrove");
   if (searchEmail) {
     fireEvent.change(screen.getByLabelText(/^email/i), { target: { value: searchEmail } });

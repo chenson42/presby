@@ -616,6 +616,13 @@ describe.skipIf(!hasDb)("community.ts (Postgres-backed, real dev database)", () 
       expect(member.kind === "ok" && member.status).toMatchObject({ connection: "member", currentRoll: "active" });
     });
 
+    it("carries the stored first visit date and how-heard text for the Visit details form (3a)", async () => {
+      const visitor = await getCommunityStatus(managerOnly, orgA, visitorA);
+      expect(visitor.kind === "ok" && visitor.status).toMatchObject({ firstVisitDate: "2026-09-13", howHeard: null });
+      const member = await getCommunityStatus(managerOnly, orgA, memberActive);
+      expect(member.kind === "ok" && member.status).toMatchObject({ firstVisitDate: null, howHeard: null });
+    });
+
     it("reports the engagement, the SQL standing, the connected sign-in and the end reason (3a)", async () => {
       const connected = await getCommunityStatus(managerOnly, orgA, inactiveNoRoll);
       expect(connected.kind === "ok" && connected.status).toMatchObject({

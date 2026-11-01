@@ -47,6 +47,8 @@ export function ConnectionCard({
           </span>
         )}
         {(status.connection === "former_participant" ||
+          status.connection === "former_visitor" ||
+          status.connection === "archived" ||
           status.connection === "ended") &&
           status.endedOn && (
             <span className="text-muted-foreground">

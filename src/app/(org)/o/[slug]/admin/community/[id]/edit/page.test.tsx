@@ -5,7 +5,7 @@
  * the person-lookup three-way split (`ok` / `forbidden` / `not_found`).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 const cachedAuth = vi.fn();
 vi.mock("@/lib/auth/cached-auth", () => ({
@@ -117,6 +117,20 @@ vi.mock("next/navigation", () => ({
 
 import EditMemberPage from "./page";
 import { OrgAccessError } from "@/lib/authz";
+import {
+  COMMUNITY_ARCHIVE_ENDED_REASON,
+  PARTICIPANT_REMOVAL_ENDED_REASON,
+} from "@/lib/roll-action-kinds";
+
+// The Community engagement Server Actions reach the database; the screens under
+// test only call them through the dialogs, which these files do not drive.
+vi.mock("../../actions", () => ({
+  changeEngagementAction: vi.fn(),
+  archivePersonAction: vi.fn(),
+  restorePersonAction: vi.fn(),
+  updateVisitDetailsAction: vi.fn(),
+}));
+
 
 /** A listed person with no roll: the quietest connection. */
 function status(overrides: Record<string, unknown> = {}) {
@@ -128,6 +142,12 @@ function status(overrides: Record<string, unknown> = {}) {
       currentRoll: null,
       currentRollSince: null,
       endedOn: null,
+      endedReason: null,
+      engagementStatus: "regular",
+      standing: "listed",
+      firstVisitDate: null,
+      howHeard: null,
+      signInConnected: false,
       hasOpenStaffPosition: false,
       pendingCount: 0,
       latestAction: null,
@@ -586,9 +606,10 @@ describe("EditMemberPage — card-separated visual structure (M2, docs/reviews/2
     const { container } = render(el);
 
     const cards = container.querySelectorAll(".bg-card");
-    // Profile, Connection, Record a roll action, and the sensitive-info link
-    // each get their own panel — four, not one undifferentiated scroll.
-    expect(cards.length).toBe(4);
+    // Profile, Connection, Engagement, Record a roll action, and the
+    // sensitive-info link each get their own panel — five, not one
+    // undifferentiated scroll.
+    expect(cards.length).toBe(5);
 
     const profileHeading = screen.getByRole("heading", { name: /^profile$/i });
     expect(profileHeading.closest(".bg-card")).not.toBeNull();
@@ -858,5 +879,149 @@ describe("EditMemberPage - the sign-in card (Community Increment 2b)", () => {
     mockFlags({ membersCreate: false });
     render(await EditMemberPage({ params: makeParams() }));
     expect(getSignInCard).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("EditMemberPage — Engagement, Visit details, Archive and Restore (Increment 3a)", () => {
+  async function renderEngagement(
+    overrides: Record<string, unknown> = {},
+    card: Record<string, unknown> | null = null,
+  ) {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+    getPendingRollActionsForPerson.mockResolvedValue({ kind: "ok", actions: [] });
+    getCommunityStatus.mockResolvedValue(status(overrides));
+    getSignInCard.mockResolvedValue(
+      card ? { kind: "ok", card: { state: "none", address: null, selfConnectEnabled: false, ...card } } : { kind: "forbidden" },
+    );
+    hasPermission.mockResolvedValue(false);
+    render(await EditMemberPage({ params: makeParams() }));
+  }
+
+  const buttons = () => screen.queryAllByRole("button").map((b) => b.textContent);
+
+  it("a listed regular attender: the card, its helper, the select and a disabled-until-changed Save; no Archive, no Visit details", async () => {
+    await renderEngagement();
+    expect(screen.getByRole("heading", { name: "Engagement" })).toBeTruthy();
+    expect(screen.getByText(/engagement is for your own care\./i)).toBeTruthy();
+    const select = screen.getByRole("combobox", { name: "Engagement for Nora Ashgrove" }) as HTMLSelectElement;
+    expect(select.value).toBe("regular");
+    expect(screen.getByText("Regular attender. Can appear in the member directory.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Save engagement" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(buttons()).not.toContain("Archive Nora Ashgrove");
+    expect(screen.queryByRole("heading", { name: "Visit details" })).toBeNull();
+  });
+
+  it("a visitor: Visit details, and Archive on the record", async () => {
+    await renderEngagement({ engagementStatus: "visitor", standing: "visitor", connection: "visitor" });
+    expect(screen.getByRole("heading", { name: "Visit details" })).toBeTruthy();
+    expect(screen.getByLabelText("First visit (optional)")).toBeTruthy();
+    expect(screen.getByLabelText("How did they hear about us? (optional)")).toBeTruthy();
+    expect(buttons()).toContain("Archive Nora Ashgrove");
+  });
+
+  it("Visit details also shows for a regular attender whose first visit or how-heard is stored, with those values", async () => {
+    await renderEngagement({ firstVisitDate: "2026-03-01", howHeard: "A neighbour" });
+    expect((screen.getByLabelText("First visit (optional)") as HTMLInputElement).value).toBe("2026-03-01");
+    expect((screen.getByLabelText("How did they hear about us? (optional)") as HTMLInputElement).value).toBe("A neighbour");
+  });
+
+  it("a person on the roll still marked Visitor gets the nudge, and no Archive (the roll lists them)", async () => {
+    await renderEngagement({
+      engagementStatus: "visitor",
+      standing: "listed",
+      connection: "participant",
+      currentRoll: "other_participant",
+    });
+    expect(screen.getByText("Nora Ashgrove is still marked as a visitor. Mark as a regular attender?")).toBeTruthy();
+    expect(buttons()).toContain("Mark as regular attender");
+    expect(buttons()).not.toContain("Archive Nora Ashgrove");
+    const option = screen.getByRole("option", { name: "Visitor (current)" }) as HTMLOptionElement;
+    expect(option.disabled).toBe(true);
+  });
+
+  it("a staff record says engagement isn't tracked and offers no control", async () => {
+    await renderEngagement({ engagementStatus: "staff", standing: "staff_anchor", connection: "staff" });
+    expect(screen.getByText("This is a staff record, so engagement isn't tracked.")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /engagement for/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save engagement" })).toBeNull();
+    expect(buttons()).not.toContain("Archive Nora Ashgrove");
+  });
+
+  it("an archived visitor: the connection says so with the date, Restore is offered, and the card says to restore first", async () => {
+    await renderEngagement({
+      engagementStatus: "visitor",
+      standing: "visitor",
+      connection: "former_visitor",
+      endedOn: "2026-05-04",
+      endedReason: COMMUNITY_ARCHIVE_ENDED_REASON,
+    });
+    expect(screen.getByTestId("connection-card").textContent).toMatch(/Archived visitor\s+on\s/);
+    expect(buttons()).toContain("Restore Nora Ashgrove");
+    expect(buttons()).not.toContain("Archive Nora Ashgrove");
+    expect(screen.getByText("Nora Ashgrove was archived. Restore them to change this.")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /engagement for/i })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Visit details" })).toBeNull();
+  });
+
+  it("any other ended connection: the card says it ended; neither Archive nor Restore", async () => {
+    await renderEngagement({
+      connection: "former_participant",
+      endedOn: "2026-04-02",
+      endedReason: PARTICIPANT_REMOVAL_ENDED_REASON,
+    });
+    expect(screen.getByText("Nora Ashgrove's connection here has ended, so engagement can't be changed.")).toBeTruthy();
+    expect(buttons()).not.toContain("Restore Nora Ashgrove");
+    expect(buttons()).not.toContain("Archive Nora Ashgrove");
+  });
+
+  it("the Save dialog carries the auto-connect line only when the card says an address is on file and the toggle is on", async () => {
+    await renderEngagement(
+      { engagementStatus: "visitor", standing: "visitor", connection: "visitor" },
+      { address: "nora@example.invalid", selfConnectEnabled: true },
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: /engagement for/i }), { target: { value: "regular" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save engagement" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("Mark Nora Ashgrove as a regular attender?")).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        "Nora Ashgrove could be connected to this record automatically when they sign in with an address on file.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("with no card (the reader failed) the same dialog states no auto-connect line and no false 'no sign-in' reading", async () => {
+    await renderEngagement({ engagementStatus: "visitor", standing: "visitor", connection: "visitor" }, null);
+    fireEvent.change(screen.getByRole("combobox", { name: /engagement for/i }), { target: { value: "regular" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save engagement" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).queryByText(/could be connected to this record automatically/i)).toBeNull();
+  });
+
+  it("the Archive dialog says an open invitation will stop working only when the card's state is pending", async () => {
+    await renderEngagement(
+      { engagementStatus: "visitor", standing: "visitor", connection: "visitor", signInConnected: true },
+      { state: "pending" },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Archive Nora Ashgrove" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("An invitation to Nora Ashgrove is still open. It will stop working.")).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        "Nora Ashgrove has a sign-in connected and will no longer reach Alder Creek Presbyterian Church through this record.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("the Archive dialog omits the invitation line when there is no card or the state is not pending", async () => {
+    await renderEngagement({ engagementStatus: "visitor", standing: "visitor", connection: "visitor" }, null);
+    fireEvent.click(screen.getByRole("button", { name: "Archive Nora Ashgrove" }));
+    expect(within(screen.getByRole("alertdialog")).queryByText(/invitation to .* is still open/i)).toBeNull();
   });
 });

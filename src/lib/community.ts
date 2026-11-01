@@ -430,6 +430,10 @@ export interface CommunityStatus {
   engagementStatus: Engagement;
   /** The SQL classifier's standing, asked in the same statement as the rest. */
   standing: MembershipStanding;
+  /** 'YYYY-MM-DD'. Stored on the membership (the Visit details form's start). */
+  firstVisitDate: string | null;
+  /** Free text, at most 200 characters; never copied into an audit row. */
+  howHeard: string | null;
   /** `people.user_id is not null` (never `users`, DECISION-189). */
   signInConnected: boolean;
   hasOpenStaffPosition: boolean;
@@ -471,6 +475,8 @@ export async function getCommunityStatus(
              m.ended_on::text as ended_on,
              m.ended_reason as ended_reason,
              presby_membership_standing(m.current_roll, m.engagement_status) as standing,
+             m.first_visit_date::text as first_visit_date,
+             m.how_heard as how_heard,
              (p.user_id is not null) as sign_in_connected,
              exists (
                select 1 from staff_positions sp
@@ -507,6 +513,8 @@ export async function getCommunityStatus(
           ended_on: string | null;
           ended_reason: string | null;
           standing: MembershipStanding;
+          first_visit_date: string | null;
+          how_heard: string | null;
           sign_in_connected: boolean;
           has_open_staff_position: boolean;
           pending_count: number;
@@ -536,6 +544,8 @@ export async function getCommunityStatus(
         endedReason: row.ended_reason,
         engagementStatus: row.engagement_status,
         standing: row.standing,
+        firstVisitDate: row.first_visit_date,
+        howHeard: row.how_heard,
         signInConnected: row.sign_in_connected === true,
         hasOpenStaffPosition: row.has_open_staff_position === true,
         pendingCount: row.pending_count,

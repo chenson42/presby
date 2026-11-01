@@ -91,12 +91,15 @@ const CONNECTION_FIELDS = [
  */
 export function MemberWizard({
   slug,
+  organization,
   households,
   canProposeRoll,
   memberAvailable = true,
   sessionWaits = false,
 }: {
   slug: string;
+  /** The organization's name, for the restore dialog on an archived match. */
+  organization: string;
   households: { householdId: string; name: string }[];
   /** `roll.propose`. Without it only Visitor is offered; the server re-checks. */
   canProposeRoll: boolean;
@@ -357,6 +360,13 @@ export function MemberWizard({
               onReject={handleRejectMatch}
               alreadyHere={matchCandidate.alreadyHere}
               recordHref={`/o/${slug}/admin/community/${matchCandidate.personId}/edit`}
+              restore={{
+                slug,
+                personId: matchCandidate.personId,
+                organization,
+                onRestored: () =>
+                  router.push(`/o/${slug}/admin/community/${matchCandidate.personId}/edit`),
+              }}
             />
             {/* Confirm's own two full-width buttons ARE the forward action —
              * only Back is offered here, in case the search itself needs

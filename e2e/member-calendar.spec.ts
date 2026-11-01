@@ -61,10 +61,11 @@ test.describe("Member calendar", () => {
   test.describe("without a grant", () => {
     test.use({ storageState: storageStatePath("org-single") });
 
-    // Increment 3a: every current record at alpha now holds `events.view` through the baseline roles
-    // (`member`, bound to Active Membership, which a regular attender joins, and `calendar_viewer`, bound
-    // to All Current Records). "A member with no events.view" therefore needs those two roles to lack it
-    // for this lane only; the spec-owned `viewer` role is untouched, and both are restored in afterAll.
+    // Every current record at alpha holds `events.view` through two baseline roles: `member` (also
+    // `directory.view`, bound to Active Membership), created by main's 0082 baseline backfill, and
+    // `calendar_viewer`, bound to All Current Records, created by 0066's backfill. "A member with no
+    // events.view" therefore needs those two roles to lack it for this lane only; the spec-owned `viewer`
+    // role is untouched, and both are restored in afterAll.
     let baselineEventsView: string[] = [];
     test.beforeAll(async () => {
       const roles = (await sql`

@@ -53,7 +53,7 @@ The page opens and says "You don't have permission to" do something.
 You cannot find a feature in "Features", for example "Website domain".
 
 - What it means: the PresbyPortal team turns it on for you.
-- Who can fix it: the PresbyPortal team. {{contact}}
+- Who can fix it: the PresbyPortal team. {{contactAdmin}}
 
 For how an administrator turns features on and off, see [Turning features on and off](/help/turning-features-on-and-off).
 

@@ -8,6 +8,13 @@ import type { AnchorOf, PlannedSlug, PublishedSlug } from "./registry";
  */
 export const HELP_INDEX_HREF = "/help" as const;
 
+/**
+ * The contact form (Increment 2): a route, not a registry page, so it is not typed against the
+ * registry. `links.ts` FIXED_INTERNAL admits exactly this path, and RESERVED in checks.ts keeps a
+ * page from taking the slug.
+ */
+export const HELP_CONTACT_HREF = "/help/contact" as const;
+
 export function helpHref<S extends PublishedSlug>(slug: S, anchor?: AnchorOf<S>): string {
   return anchor ? `${HELP_INDEX_HREF}/${slug}#${anchor}` : `${HELP_INDEX_HREF}/${slug}`;
 }

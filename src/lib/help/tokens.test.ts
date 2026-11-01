@@ -1,10 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { applyHelpTokens, unknownTemplateTokens } from "./tokens";
-import { HELP_CONTACT_LINE, HELP_PRIVACY_CONTACT_FALLBACK, privacyContactText } from "./contact";
+import { HELP_CONTACT_ADMIN_LINE, HELP_CONTACT_LINE, HELP_PRIVACY_CONTACT_FALLBACK, privacyContactText } from "./contact";
 
 describe("HELP_CONTACT_LINE", () => {
-  it("is the operator-ruled interim sentence", () => {
-    expect(HELP_CONTACT_LINE).toBe("Ask the person who invited you.");
+  it("is the inviter first, then the contact form (Increment 2)", () => {
+    expect(HELP_CONTACT_LINE).toBe(
+      "Ask the person who invited you, or [send the PresbyPortal team a message](/help/contact).",
+    );
+  });
+});
+
+describe("{{contactAdmin}}", () => {
+  it("is the ticket route first, then the form for someone who cannot file one", () => {
+    expect(HELP_CONTACT_ADMIN_LINE).toBe(
+      "File a ticket: open Administration, then Tickets (see [Getting help](/help/getting-help) for the steps). If you cannot file one, [send the PresbyPortal team a message](/help/contact).",
+    );
+  });
+  it("is replaced by its own text, not by {{contact}}'s", () => {
+    expect(applyHelpTokens("A {{contact}} B {{contactAdmin}}", "one", null, "two")).toBe("A one B two");
+    expect(applyHelpTokens("{{contactAdmin}}")).toBe(HELP_CONTACT_ADMIN_LINE);
+  });
+  it("is a known token, and a near miss still fails H5", () => {
+    expect(unknownTemplateTokens("x {{contactAdmin}} y")).toEqual([]);
+    expect(unknownTemplateTokens("{{contactadmin}}")).toEqual([{ line: 1, snippet: "{{contactadmin}}" }]);
+  });
+  it("does not re-expand a replacement that contains braces", () => {
+    expect(applyHelpTokens("{{contactAdmin}}", "x", null, "{{contact}}")).toBe("{{contact}}");
   });
 });
 
@@ -17,7 +38,7 @@ describe("applyHelpTokens", () => {
   it("leaves text without a token alone", () => {
     expect(applyHelpTokens("Plain text.")).toBe("Plain text.");
   });
-  it("resolves every token when Increment 2 swaps the constant (the one-constant change)", () => {
+  it("resolves every token when a caller passes its own line", () => {
     const out = applyHelpTokens("x {{contact}} y", "Use the form.");
     expect(out).toBe("x Use the form. y");
     expect(out).not.toContain("{{");
@@ -69,7 +90,7 @@ describe("applyHelpTokens — {{privacyContact}}", () => {
 });
 
 describe("unknownTemplateTokens", () => {
-  it("accepts {{contact}} and {{privacyContact}} only", () => {
+  it("accepts {{contact}}, {{contactAdmin}} and {{privacyContact}} only", () => {
     expect(unknownTemplateTokens("see {{contact}}")).toEqual([]);
     expect(unknownTemplateTokens("see {{privacyContact}} and {{contact}}")).toEqual([]);
   });

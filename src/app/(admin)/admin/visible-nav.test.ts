@@ -1,7 +1,7 @@
 /**
  * `visibleAdminNav` — the one place the session's features and the nav
  * registry meet. Pins E1 and E2: a support operator (door + tickets +
- * feedback) sees Dashboard, Tickets, Feedback and Design system; a door-only
+ * feedback) sees Dashboard, Tickets, Feedback, Contact messages and Design system; a door-only
  * viewer sees Dashboard and Design system; a full admin sees everything; an
  * undefined feature list degrades to door-level only; empty groups vanish.
  */
@@ -14,10 +14,16 @@ const labels = (features: string[] | undefined) =>
   visibleAdminNav(features).flatMap((g) => g.items.map((i) => i.label));
 
 describe("visibleAdminNav", () => {
-  it("shows a support operator Dashboard, Tickets, Feedback and Design system only (E1)", () => {
+  it("shows a support operator Dashboard, Tickets, Feedback, Contact messages and Design system only (E1)", () => {
     expect(
       labels([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS, FEATURES.ADMIN_FEEDBACK]),
-    ).toEqual(["Dashboard", "Tickets", "Feedback", "Design system"]);
+    ).toEqual(["Dashboard", "Tickets", "Feedback", "Contact messages", "Design system"]);
+  });
+
+  it("Contact messages follows admin.tickets, not admin.feedback (regression for the unpinned key, QA run 1 M13)", () => {
+    expect(labels([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_FEEDBACK])).not.toContain("Contact messages");
+    expect(labels([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS])).toContain("Contact messages");
+    expect(labels([FEATURES.ADMIN_DASHBOARD, FEATURES.ADMIN_TICKETS])).not.toContain("Feedback");
   });
 
   it("shows a door-only viewer Dashboard and Design system (E2)", () => {

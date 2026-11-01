@@ -21,6 +21,7 @@ export type DashboardCardId =
   | "sites"
   | "tickets"
   | "feedback"
+  | "contact_messages"
   | "email"
   | "two_factor"
   | "accounts"
@@ -54,6 +55,7 @@ export const DASHBOARD_CARDS: readonly DashboardCardDef[] = [
   { id: "sites", zone: "organizations", title: "Sites", requiredFeature: FEATURES.ADMIN_ORGANIZATIONS },
   { id: "tickets", zone: "support", title: "Tickets", requiredFeature: FEATURES.ADMIN_TICKETS },
   { id: "feedback", zone: "support", title: "Feedback", requiredFeature: FEATURES.ADMIN_FEEDBACK },
+  { id: "contact_messages", zone: "support", title: "Contact messages", requiredFeature: FEATURES.ADMIN_TICKETS },
   { id: "email", zone: "support", title: "Email queue", requiredFeature: FEATURES.ADMIN_EMAIL_QUEUE },
   { id: "two_factor", zone: "access", title: "Two-factor", requiredFeature: FEATURES.ADMIN_TWO_FACTOR },
   { id: "accounts", zone: "access", title: "Locked accounts", requiredFeature: FEATURES.ADMIN_USERS },

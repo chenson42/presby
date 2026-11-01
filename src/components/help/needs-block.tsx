@@ -1,4 +1,3 @@
-import { HELP_CONTACT_LINE } from "@/lib/help/contact";
 import { HELP_COPY, appliesToText, switchedOnText, turnOnText } from "@/lib/help/copy";
 import type { HelpNeeds } from "@/lib/help/types";
 
@@ -12,7 +11,7 @@ export function NeedsBlock({ needs }: { needs: HelpNeeds }) {
   if (needs.turnOn) {
     rows.push(
       needs.operatorEnabled
-        ? { label: HELP_COPY.needsSwitchedOn, value: switchedOnText(needs.turnOn.name, HELP_CONTACT_LINE) }
+        ? { label: HELP_COPY.needsSwitchedOn, value: switchedOnText(needs.turnOn.name) }
         : { label: HELP_COPY.needsTurnOn, value: turnOnText(needs.turnOn.name, needs.turnOn.defaultOn) },
     );
   }

@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import {
   Globe,
+  Inbox,
   KeyRound,
   Landmark,
   LayoutTemplate,
@@ -11,8 +12,10 @@ import {
   HandCoins,
 } from "lucide-react";
 import { CountCard } from "@/components/shared/count-card";
+import { HELP_CONTACT_INBOX_COPY } from "@/lib/help-contact/copy";
 import { readTicketsCard } from "@/lib/admin-portal/dashboard/tickets";
 import { readFeedbackCard } from "@/lib/admin-portal/dashboard/feedback";
+import { readContactMessagesCard } from "@/lib/admin-portal/dashboard/messages";
 import { readEmailCard } from "@/lib/admin-portal/dashboard/email";
 import { readGivingCard } from "@/lib/admin-portal/dashboard/giving";
 import { readDomainsCard } from "@/lib/admin-portal/dashboard/domains";
@@ -25,6 +28,7 @@ import {
   presentDomains,
   presentEmail,
   presentFeedback,
+  presentContactMessages,
   presentGiving,
   presentOrganizations,
   presentSites,
@@ -113,6 +117,17 @@ export async function FeedbackCardView() {
   );
 }
 
+export async function ContactMessagesCardView() {
+  return (
+    <CountCard
+      title={HELP_CONTACT_INBOX_COPY.title}
+      icon={Inbox}
+      href="/admin/messages"
+      state={presentContactMessages(await readContactMessagesCard())}
+    />
+  );
+}
+
 export async function EmailCardView() {
   return (
     <CountCard
@@ -153,6 +168,7 @@ export const DASHBOARD_CARD_VIEWS: Record<DashboardCardId, ComponentType> = {
   sites: SitesCardView,
   tickets: TicketsCardView,
   feedback: FeedbackCardView,
+  contact_messages: ContactMessagesCardView,
   email: EmailCardView,
   two_factor: TwoFactorCardView,
   accounts: AccountsCardView,

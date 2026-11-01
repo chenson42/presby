@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { HelpEntry } from "@/lib/help/types";
 
 const fx = vi.hoisted(() => {
@@ -74,7 +74,9 @@ describe("/help/[slug]", () => {
     expect(container.querySelectorAll("h1")).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1, name: "Signing in" })).toBeTruthy();
     expect(screen.getByText("How to sign in.")).toBeTruthy();
-    expect(screen.getByText("Steps. Ask the person who invited you.")).toBeTruthy();
+    const para = screen.getByText(/^Steps\. Ask the person who invited you, or /);
+    expect(para.textContent).toBe("Steps. Ask the person who invited you, or send the PresbyPortal team a message.");
+    expect(within(para).getByRole("link", { name: "send the PresbyPortal team a message" }).getAttribute("href")).toBe("/help/contact");
     expect(screen.getByText("Last checked against release 0.47.0.")).toBeTruthy();
     expect(screen.getByText("On this page")).toBeTruthy();
     expect(screen.queryByText("What you need")).toBeNull();

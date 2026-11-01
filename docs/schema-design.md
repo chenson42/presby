@@ -440,6 +440,8 @@ erDiagram
   organizations ||--o{ congregation_feedback : "organization_id"
   people ||--o{ congregation_feedback : "person_id"
   tickets |o--o{ congregation_feedback : "promoted_to_ticket_id"
+  users |o--o{ help_contact_messages : "status_changed_by"
+  users |o--o{ help_contact_messages : "cleared_by"
   users |o--o{ ticket_actions : "actor_user_id"
   audit_events |o--o{ ticket_actions : "audit_event_id"
   tickets ||--o{ ticket_actions : "ticket_id"

@@ -85,6 +85,11 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
         requiredFeature: FEATURES.ADMIN_FEEDBACK,
       },
       {
+        label: "Contact messages",
+        href: "/admin/messages",
+        requiredFeature: FEATURES.ADMIN_TICKETS,
+      },
+      {
         label: "Email queue",
         href: "/admin/email-queue",
         requiredFeature: FEATURES.ADMIN_EMAIL_QUEUE,

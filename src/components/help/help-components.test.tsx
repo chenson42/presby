@@ -7,7 +7,6 @@ import { NeedsBlock } from "./needs-block";
 import { OnThisPage } from "./on-this-page";
 import { HelpBreadcrumb, PageNav } from "./page-nav";
 import { PlannedPlaceholder } from "./planned-placeholder";
-import { HELP_CONTACT_LINE } from "@/lib/help/contact";
 import type { HelpContentEntry, HelpPlannedEntry } from "@/lib/help/types";
 
 afterEach(cleanup);
@@ -93,7 +92,11 @@ describe("NeedsBlock", () => {
     );
     expect(screen.queryByText("Turn on")).toBeNull();
     expect(screen.getByText("Switched on for you")).toBeTruthy();
-    expect(screen.getByText(`The PresbyPortal team turns on "Website address" for you. ${HELP_CONTACT_LINE}`)).toBeTruthy();
+    // Plain text: the <dd> is not markdown, so a link would show raw brackets (the latent 14th reader).
+    const text = `The PresbyPortal team turns on "Website address" for you. To ask for it, file a ticket (Administration, then Tickets) or ask the person who invited you.`;
+    const dd = screen.getByText(text);
+    expect(dd.tagName).toBe("DD");
+    expect(dd.textContent).not.toMatch(/[\[\]]|\(\/help/);
   });
 
   it.each([

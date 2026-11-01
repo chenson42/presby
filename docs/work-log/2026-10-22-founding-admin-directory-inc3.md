@@ -3065,3 +3065,149 @@ No `route.ts` was added or changed. Each action rebuilds its input from the requ
 **Next:** the tech-lead first, for the F-1 ruling and the F-3 ruling. Then full-stack-developer (Batch D owner) for the F-1 spec or reader change, the F-2 help sentence and the F-5 comment. Then Phase 5 run 2, which only needs to re-run the reimbursement specs, the help check and the walk of the page that F-2 changes.
 
 **Left behind:** no servers (:3490, :3491 and :3800 are free), no scratch copies, and the scratch database `qa5_fromempty` is dropped. The pipeline branch and `development` are as I found them. Logs and screenshots remain in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa/`.
+
+---
+
+## Phase 3 ruling on Phase 5 run 1 (tech-lead, 2026-11-01)
+
+Read against the live tree at `9b5f28b` (worktree `presby-inc3`), not the QA text alone: `drizzle/0073_presby_reimbursements.sql` (the settings, form-options, `set_chargeable`, `is_eligible_requester`, `is_seat`, `route` and `viewer_relation` definers), `src/lib/reimbursement/{config,reads}.ts`, `scripts/check-treasury-boundaries.mjs`, DECISION-271, the treasury work-log's Q5 ruling, `e2e/reimbursement-treasurer-ui.spec.ts`, `reads.db.test.ts`, the Community page, row and record-page files, and the two spec comments. No production code, test, help page or Rule 16 file was changed by this section; it is rulings only.
+
+**Verdict on the QA findings:** F-1 accepted as designed (the spec is stale, the group is not wrong); F-2 required; F-3 hide it; F-4 is the orchestrator's; F-5 required (comment only) plus a correction to my own D-1a below. One Phase 3 miss is owned (e2e blast radius, see "Carry-forward").
+
+### F-1. All Current Records in Reimbursement settings: accept, update the spec, pin the claim with a DB test
+
+**What "Can receive requests" grants.** Nothing to the group's members. It is a *charge-to* list. `reimbursement_chargeable_groups` only decides which groups appear in the request form's "charged to" choice (`presby_reimbursement_form_options`, `0073:3058`). Each fact below was read in the definer, not inferred:
+
+- **Who may file is a separate rule, and 3a does not touch it.** `presby_reimbursement__is_eligible_requester` (`0073:657`) is `current_roll is not null or engagement_status in ('regular','staff')`, read from `memberships`, never from a group. A visitor (roll null) is `mayFile: false` and is offered no groups at all: `reads.db.test.ts:169` already pins `getFormOptions(visitor)` as `{ mayFile: false, groups: [] ... }`. Making All Current Records chargeable adds nothing to that. An inactive person with no roll is also refused; an inactive person still on the roll could already file before 3a (unchanged, and F246 is the open item about that function).
+- **Group membership routes nothing and shows nothing.** The approver is a seat: `chair` or `leader` on a `membership_source = 'managed'` group (`is_seat`, `0073:3i`). A derived group has no such rows, so a request charged to All Current Records has no seat and `presby_reimbursement__route` returns `treasurer` (or `nobody` with no second pay holder). `viewer_relation` grants the seat arm only through `eligible_approvers`, so being in a chargeable derived group lets nobody view a request. Nothing about the group's size (visitors included) reaches any reader.
+- **The row's own text is already true for it.** A derived group renders "No chair or leader: requests go to the treasurer." (`copy.ts`, group row), and `approverCount` is 0 by construction. The treasury help page (`reimbursements-for-treasurers.md:68`) says "switch on 'Can receive requests' for each group people may charge" and "If a group has none, the page says requests go to the treasurer": both remain true, and it names no group, so no help edit.
+- **Default is off.** A new row starts un-listed (`chargeable` is true only with a live `reimbursement_chargeable_groups` row). The treasurer must choose it. No one's request form changes on upgrade.
+- **Treasury's design chose this deliberately.** `treasury-inc1.md:121` and `config.ts:22`: "any group of the organization may be chargeable, including a derived one (Session, Diaconate)... (operator Q5)". Active Membership, Session, Diaconate and the Board of Deacons Moderator group are all offered today. All Current Records is one more derived roster under the same ruling. The spec's own comment already said "the two committees and the derived Active Membership roster".
+
+**Why not exclude it in the reader.** The reader is `presby_reimbursement_settings`, a `SECURITY DEFINER` function in treasury's shipped migration `0073` (released as 0.51.0; fix forward only, DECISION-298's five conditions are not met). Excluding the group means a new migration against treasury's definer, and the definer returns only `membershipSource` (`managed` or `derived`), not `derived_from`, so a TypeScript-side filter in `getSettings` cannot tell All Current Records from Active Membership without changing the function anyway. A filter written anywhere outside `src/lib/reimbursement/` would breach the T2 boundary of `check:treasury-boundaries`. It would also be inconsistent: `set_chargeable` accepts any group id of the organization (`group_unavailable` is only for a non-existent one), so a hidden group could still be switched on by a forged call. And the benefit is only tidiness. Rejected. **Revisit if** the operator finds the row confusing in production; the place to do it is F246's forward migration (which already has to replace a body in this file), adding `derived_from` to the settings output and excluding rosters that name no meaningful cost centre. That is a treasury-pipeline decision, not 3a's.
+
+**DECISION-271 and the tripwire.** DECISION-271's T1 to T5 are owner connections, table naming, `capture`, notice templates and `sharp`; none concerns which groups the settings page lists. Accepting changes no tripwire. The two files below are inside the T2 allowances (`e2e/` and `src/lib/reimbursement/` are not scanned or allowed).
+
+**Exact changes (full-stack-developer):**
+
+1. `e2e/reimbursement-treasurer-ui.spec.ts:414-415`. Replace the comment and the count with:
+
+   ```ts
+   // Every group has a switch: the two committees and the two derived rosters, Active Membership and its
+   // sibling All Current Records (the 0066 pair trigger gives every Active Membership group one). A derived
+   // roster is listed like any group (treasury Q5), starts off, and has no seat, so its requests go to the treasurer.
+   await expect(page.getByRole("switch", { name: "Can receive requests" })).toHaveCount(4);
+   for (const name of ["Active Membership", "All Current Records"]) {
+     const derived = page.getByTestId("chargeable-row").filter({ hasText: name });
+     await expect(derived).toContainText("No chair or leader: requests go to the treasurer.");
+     await expect(derived.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+   }
+   ```
+
+   The existing `for (const row of [property, worship])` line stays. `e2e/support/*` is not touched (the fixture inserts Active Membership and the pair trigger makes the sibling; `createOrg` needs no change). Flag dependency of this spec is unchanged; no key is added to `scripts/ci/e2e-baseline-flags.sql`.
+2. `src/lib/reimbursement/reads.db.test.ts`: one new `it`, under `getSettings`, that pins the acceptance claim rather than leaving it as prose. In the existing org `A` (the fixture's `makeOrg` seeds the derived groups; if it does not create the `all_memberships` sibling, insert Active Membership through the same path the e2e fixture uses and let the trigger make it, or select the group by `derived_from = 'all_memberships'`):
+   - make `all_memberships` chargeable with `fx.chargeable`, and **un-list it in a `finally`** (the neighbouring tests assert the exact chargeable names `["Finance Committee", "Quiet Committee"]`; the existing "Short Lived" test shows the pattern);
+   - `getSettings(manager)` reports it `{ chargeable: true, approverCount: 0, membershipSource: "derived" }`;
+   - `getFormOptions(requester)` lists it, and `getFormOptions(visitor)` is still `{ mayFile: false, groups: [], categories: [], canRequestForOthers: false }`;
+   - a request filed by `requester` and charged to it (`filed(requester, { groupId })`) appears for `t1` on the treasurer `override` tab (no eligible approver) and not in `chair`'s waiting list.
+   Run it failing-first by asserting the opposite once (the visitor expectation) and reverting.
+
+**Copy checks (F-1: no string is added or changed).** Residuals: nothing denied (the row text is the existing derived-group sentence). Source of truth: "requests go to the treasurer" is established by `approverCount = 0` from `is_seat`'s `managed` filter, the same query the Q5 row already relies on. Audience: `reimbursement.manage` holders, who can switch it. Neighbours: grep of the live tree for "Can receive requests" finds `copy.ts:428`, the help page and the registry label only; none is made stale.
+
+### F-3. Archive on your own record and own Inactive row: hide it; keep the refusal as the backstop
+
+Hide it. Reasons: the acknowledgement's item 6 and my A8 help line ("You cannot archive your own record") both promise it is not offered; offering a control whose only outcome is a refusal is worse than not offering it; and an administrator in this state is real but rare (an administrator who is themselves recorded as a visitor or inactive), so the cost is two small conditions. The `self_target` sentence stays in `engagement-copy.ts:80` and the check stays at `community-engagement.ts:356` as the server and stale-page backstop (a forged call, a page loaded before the person's connection changed). No string is added or changed, so the four Copy checks have nothing new to check; `adding-people.md:61` ("You cannot archive your own record.") stays true, and no help edit follows.
+
+Mark as regular is **not** refused on your own record (the engagement write has no self check, and the design never gave one: it widens nobody's authority, since the person is already a `people.manage` holder). Left as is; only Archive is hidden.
+
+**Exact changes (full-stack-developer), all in `src/app/(org)/o/[slug]/admin/community/`:**
+
+1. `[id]/edit/page.tsx:271`: add `&& id !== resolved.org.personId` to `canArchive` (compare the route's `id` as the page already does for other uses; if the route param is not already lower-cased UUID text, compare lower-cased on both sides, because the server's check is `===` on database ids). `ended === "archived"` (Restore) is unchanged.
+2. Row: thread the viewer through `page.tsx` (`personId` is already in scope at `:147`) to `MembersList` (new optional prop `viewerPersonId`, `members-list.tsx`, passed to `CommunityRowsList` at `:100`), and in `community-rows-list.tsx:77` pass `isSelf={row.personId === viewerPersonId}` to `CommunityRowActions`. In `community-row-actions.tsx:61` make it `const canArchive = (view === "visitors" || view === "inactive") && !isSelf;`. The early return at `:64` already handles "no button at all" (a Visitors row for yourself shows nothing; an Inactive row for yourself still shows Mark as regular). `isSelf` defaults to `false`.
+3. Tests: `[id]/edit/page.test.tsx` (the file that already fails when `canArchive` is widened): own inactive record shows no Archive and another inactive record does; `community-row-actions.test.tsx`: `isSelf` on an Inactive row shows "Mark as regular" and no "Archive", on a Visitors row renders nothing, and a Former archived row still shows Restore; `actions.test.ts` already pins `self_target` and is untouched.
+4. e2e: one new lane in `e2e/community-engagement.spec.ts` (throwaway congregation; the sender is the viewer): set the sender's own membership to `inactive` with spec-local SQL, assert the Inactive list shows the sender's own row with "Mark as regular" and no "Archive", and the sender's own record page offers no Archive; another inactive person's row and record still do. Desktop and 360px. If the sender cannot be left holding `people.manage` while inactive in the fixture, the implementer states that in the work-log and the lane is recorded as *unverified in e2e* (the unit tests then carry it); QA already walked the real state.
+
+### F-5. The `community-participants` comment, and a correction to my own D-1a
+
+**Exact replacement for the doc comment above `setBaselineDirectoryView`** (`e2e/community-participants.spec.ts:49-55`; comment only, no behaviour):
+
+```ts
+/**
+ * Alpha's baseline `member` role (`directory.view` and `events.view`, bound to Active Membership) comes from
+ * main's 0082 baseline backfill. Since 0066 Active Membership holds member standing (people on the current
+ * roll, regular attenders and staff records); the clerk is a regular attender there. Removing `directory.view`
+ * from the spec-owned role alone therefore does not remove the permission: the degrade lane must take it from
+ * the baseline role too, for the lane only, and restore it. Returns whether the baseline held it.
+ */
+```
+
+The stale clause is "which every live membership joins: DECISION-065" (true before 0066, false after; DECISION-065 is not changed, 0066 narrows the group's rows). The `member-calendar.spec.ts:64-68` comment already names both roles and the two migrations correctly and needs **no** change.
+
+**D-1a is corrected, not only restated.** My D-1a (line 2802) said both lanes "break on any database where 0082 has been applied to alpha, with or without 3a". QA ran main's two specs unedited against `development` (0082 applied, 0066 not): the `community-participants` degrade lane fails there (0082's `member` role, as I ruled) and the `member-calendar` "without a grant" lane **passes**. So:
+
+- `community-participants` degrade lane: **0082**. My attribution stands.
+- `member-calendar` "without a grant": **0066** (the new `calendar_viewer` role bound to All Current Records, which `org-single` joins through the backfill). This is the *intended* 3a widening of `events.view` to every current record (D-1), not a defect and not 0082's. Batch D's Departure 2 named the cause correctly ("holds 0066's `calendar_viewer` role on All Current Records"); my D-1a overcorrected it. The spec edit is right and the comment is right.
+- Batch D's commit-message cause ("3a puts regular attenders in Active Membership") remains wrong for both lanes; that part of D-1a stands. Commit messages are not rewritten.
+- The carry-forward sentence at line 2813 ("were not 3a effects but 0082's") is superseded: one is 0082's, one is a 3a effect and joins the e2e blast-radius list as a Phase 3 miss (my A9 table did not list `member-calendar`).
+- The unverified-whether-main-is-red question in D-1a is answered by QA: main's `community-participants` degrade lane is red against a database carrying 0082 on alpha. That is main's existing defect, not this pipeline's; the orchestrator may record a TODO line (the spec needs the same baseline handling on main) and the edit in this branch will carry it at merge.
+
+### F-2. The help sentence, and A8's other unmade edits
+
+**Required now, exact replacement for `src/content/help/roles-who-can-do-what.md:18`:**
+
+> A group holds the last four, so whoever is in that group has the role. The groups fill by themselves. "Active Membership" holds people with member standing: those on the current roll, regular attenders and staff records. "All Current Records" holds everyone with a current record, including visitors and people marked inactive or moved away. "Session" and "Board of Deacons Moderator" fill from officer terms. See [Officers and the Session](/help/officers-and-the-session).
+
+The four Copy checks:
+1. *Residuals.* Denies none: it does not say regular attenders newly joined (D-1c), and it says visitors are in All Current Records, which the release note must also say.
+2. *Source of truth.* Active Membership: `presby_standing_is_member` is `standing in ('listed','staff_anchor')` (`0066:152-156`), so current roll, regular and staff. All Current Records: the `all_memberships` predicate, every membership with `ended_on is null`, which is what the Calendar viewer row of the same table and `events-and-the-calendar.md:15` already say. Session and the moderator seat: officer terms (the existing sentence's second half; The Court Is Not a Group). "Fill by themselves" is true of all four (derived groups reject direct writes by trigger).
+3. *Audience.* Administrators reading public help; the sentence instructs nothing.
+4. *Neighbours.* Grep for "fill from" / "from the roll and": only this line. `events-and-the-calendar.md:15` and the table rows are consistent with it. All quoted strings ("Active Membership", "All Current Records", "Session", "Board of Deacons Moderator") already appear in the page's table; no `labels` change; `verifiedIn` stays at the value Batch C set (it is moved by walking the page; the implementer walks it, QA re-walks it).
+
+The implementer re-reads the whole page against the Roles screen and runs `npm run check:help`.
+
+**A8's other edits, not required now.** I read each as its reader against the shipped build:
+
+- `events-and-the-calendar.md:1` ("shows your congregation's events to its members") and `:3` ("The calendar every member sees"): still true. A visitor with a connected sign-in sees it too, which makes the sentence *incomplete*, not false, and line 15 already says exactly who reads it. Rule 17 triggers on a changed behaviour a page describes wrongly; these pages describe members reading the calendar, who still do. Not required. I withdraw A8's wish for them as written; a later wording pass may change "members" to "people with a current record", noted below.
+- `using-the-directory.md`: line 26 already says visitors, inactive and moved-away people not on the roll are not listed, and QA walked it as true. A8's "one sentence under the opening paragraph" was a nicety. Not required.
+
+### The wizard's "Keep this under 200 characters": out of scope
+
+Not in scope, no change. The string is `member-wizard-schema.ts:80` (and `:87` for the minute reference): an existing zod message pinned by a characterization golden (`member-wizard-schema.golden.test.ts:98,105,120`), written without a full stop in the same style as every other wizard message. 3a changed the *bound* (`MAX_HOW_HEARD`), not the wording. The Copy table's sentence with a full stop is the edit form's (Group F, `participant-copy.ts:75`), a different surface. Editing one wizard message alone would make it disagree with its siblings and the golden; editing all is a wording pass over a surface 3a does not own. QA correctly marked it minor. A TODO line (below) covers a consistent pass; it does not block the pipeline and is not a Phase 5 re-run item.
+
+### Carry-forward
+
+| Item | Disposition |
+|---|---|
+| Phase 1 gaps and Phase 2 rulings | Unchanged from the prior acknowledgements |
+| F-1 (new) | Addressed: accepted; spec edit and a DB test; treasury's reader unchanged; excluding the group deferred, accepted by tech-lead, to F246's treasury forward migration if the operator asks |
+| F-2 | Addressed (sentence); A8's other edits dropped as not required |
+| F-3 | Addressed (hide; backstop kept) |
+| F-4 | Orchestrator (not this section): merge `origin/main` (0.52.0, 0078) before Phase 5 run 2, re-cut `scripts/membership-standing/test-rls.sql.integration.patch`, re-run `test-rls` on the merged tree |
+| F-5 | Addressed (comment text exact; D-1a corrected above) |
+| e2e blast radius (**Phase 3 miss, owned**) | My A9 table (D20) was cut against the pre-merge tree and I never re-cut it after `8b65da4` brought treasury onto the branch; Batch D's "not run: the reimbursement specs" was true when written and I accepted it in the last acknowledgement without asking for the re-grep. The set now includes `reimbursement-treasurer-ui` (F-1) and `member-calendar` (3a effect, D-1a). **Rule for the retrospective:** at every merge of `main` into a pipeline branch, re-run the blast-radius grep over `e2e/` and `src/**/*.db.test.ts` for the changed predicate, group list and role list, not once at Phase 3 |
+
+### Lines for the orchestrator (Rule 16 shared files; not edited here)
+
+- `docs/decisions.md`: one implementation entry, "Derived rosters are chargeable like any group; Archive is hidden on the viewer's own record (3a Phase 5 run 1, F-1 and F-3)", recording the reasons above.
+- `docs/TODO.md`: (a) wording pass on the wizard's validation messages (full stop, one style, update the golden); (b) `events-and-the-calendar.md` "members" wording after the release note lands; (c) main's `community-participants` degrade lane breaks on a database with 0082 on alpha; (d) F-1's "revisit" inside the F246 migration line.
+- Phase 6 / release note: D-1c's two facts still owed (inactive and visitor people lose `directory.view`; every current record gains `events.view`), and it must not say regular attenders newly joined Active Membership. All Current Records now appears as an extra, off-by-default switch in Reimbursement settings; the note may say so in one clause.
+
+### Implementer and scope of Phase 5 run 2
+
+**Implementer: full-stack-developer (the Batch D owner).** Changes are test-and-comment (F-1, F-5), one markdown sentence (F-2) and a small presentation condition with prop plumbing (F-3); no schema, no server action, no migration, no new string, no flag, no Rule 16 file. Gates: `npm run typecheck`, `npm run lint`, `npm run check` (all ten), the unit suite, `npm run check:help`.
+
+**Phase 5 run 2 (qa), exact scope.** Order: the orchestrator merges `origin/main` first (F-4), then this batch, so the verified tree is the integrated tree.
+
+1. **Reimbursement e2e, the whole set, with `NEXT_PUBLIC_APP_URL` set to the server's own origin** (run 1's Origin-check failure was environmental): `reimbursement-treasurer-ui` (including the 11 serial follow-ons that did not run in run 1, which have never run on a database carrying 0066: report each), `reimbursement-treasurer`, `reimbursement-approval`, `reimbursement-csv`, `reimbursement-member`, `reimbursement-role-bundle`, `reimbursement-toggle`, and `hydration/reimbursement-form`, `hydration/reimbursement-treasurer-forms`. Desktop and 360px where the spec has both. Report the new settings assertions failing first against the unmodified count.
+2. **The new DB test** (`reads.db.test.ts`) plus the whole `src/lib/reimbursement` DB-backed directory, serial; confirm the neighbouring exact-name assertions still pass (the new test un-lists its row).
+3. **F-3:** unit tests (`page.test.tsx`, `community-row-actions.test.tsx`); `community-engagement` (all lanes, both viewports) with the new own-record lane, `community-participants`, `community-nav-scroll`, `visitor-access`, and `hydration/community-engagement-controls` in chromium **and** the prod lane (the row component changed); walk it in a browser at 360px: own Inactive row shows only "Mark as regular", own record shows no Archive, another inactive person still does, no overflow, light and dark.
+4. **F-2:** read the whole `roles-who-can-do-what` page as an administrator against the Roles screen; `npm run check:help` clean; Copy truthfulness on the one sentence against the four checks above.
+5. **F-5:** a comment-only diff; typecheck and lint; the two specs still pass.
+6. **Not re-run (stated):** the full chromium suite (nothing shared changed: no component under `src/components/shared`, no schema), the full DB suite, and the other prod-lane hydration specs. If the `origin/main` merge brings changes touching Community, directory, groups, the roles page or reimbursement, QA widens to those by the merge's file list; the `test-rls` re-run on the merged tree is F-4's.
+7. **Carried to Phase 6:** the release note against D-1c; D-6 condition 1 (image) already satisfied by QA.
+
+### Per-Phase Status row
+
+| 3 — Technical design (ruling on run 1) | tech-lead | F-1 accept + spec + DB test; F-2 sentence required, other A8 edits dropped; F-3 hide; F-5 comment + D-1a corrected; wizard string out of scope; Phase 3 miss owned (post-merge e2e re-grep) | RULED | 2026-11-01 |
+
+**Next:** full-stack-developer for the items above, then (after the orchestrator merges `origin/main`) Phase 5 run 2.

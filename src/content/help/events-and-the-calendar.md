@@ -12,7 +12,7 @@ The calendar is on from the start. If it is off, you can turn it on under "Featu
 
 ## Who can add events
 
-Reading the calendar comes with the Member role. Adding and changing events needs a role that allows "Create, edit, and cancel calendar events, including repeating series". A Founding Administrator does not hold that role, and cannot create it or give it, because a role can include only what you hold. See [Roles: who can do what](/help/roles-who-can-do-what).
+Reading the calendar comes with the Member role and with the Calendar viewer role. The Calendar viewer role is held by the "All Current Records" group, which holds everyone with a current record at your congregation, including visitors. A person still needs a connected sign-in. Adding and changing events needs a role that allows "Create, edit, and cancel calendar events, including repeating series". A Founding Administrator does not hold that role, and cannot create it or give it, because a role can include only what you hold. See [Roles: who can do what](/help/roles-who-can-do-what).
 
 On the first day, "Manage events" says "You don't have permission to manage events". The PresbyPortal team sets this up. {{contact}}
 

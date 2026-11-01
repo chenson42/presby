@@ -23,7 +23,7 @@ Select "Households" to see one card for each household, with the number of membe
 ## Who you do not see, and what is hidden
 
 - Details a person has marked private do not show. Email, phone, address, birthday and photo can each be hidden on their own.
-- Some people are not listed at all: people marked hidden from the directory, visitors, and people whose connection to the congregation has ended.
+- Some people are not listed at all: people marked hidden from the directory, visitors, people marked inactive or moved away who are not on the roll, and people whose connection to the congregation has ended.
 - Cards show a person's initials in a circle, not a photo.
 
 ## Changing an entry

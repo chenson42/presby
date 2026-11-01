@@ -4,17 +4,18 @@ A role is a named set of things a person may do in your congregation, such as ad
 
 Choose "Administration", then "Roles". The page has three parts: "Who holds what", "Grant a role" and "Role catalog".
 
-A new congregation has five roles.
+A new congregation has six roles.
 
 | Role | Who holds it at first |
 |---|---|
 | "Founding Administrator" | You |
 | "Stated Clerk" | You |
 | "Member" | The "Active Membership" group |
+| "Calendar viewer" | The "All Current Records" group |
 | "Session member" | The "Session" group |
 | "Moderator of the Board of Deacons" | The "Board of Deacons Moderator" group |
 
-A group holds the last three, so whoever is in that group has the role. The groups fill from the roll and from officer terms. See [Officers and the Session](/help/officers-and-the-session).
+A group holds the last four, so whoever is in that group has the role. The groups fill from the roll and from officer terms. See [Officers and the Session](/help/officers-and-the-session).
 
 ## Giving a role
 
@@ -32,7 +33,7 @@ You cannot take away the last way anyone has to give roles. The page says "Revok
 
 ## Creating and editing a role
 
-The "Role catalog" lists each role with its number of permissions, its holders and its status. "Founding Administrator" and "Stated Clerk" show "Edit". "Member", "Session member" and "Moderator of the Board of Deacons" are "Constitutional" and cannot be edited.
+The "Role catalog" lists each role with its number of permissions, its holders and its status. "Founding Administrator" and "Stated Clerk" show "Edit". "Member", "Calendar viewer", "Session member" and "Moderator of the Board of Deacons" are "Constitutional" and cannot be edited.
 
 - To make your own role, choose "Create role". Give it a key (lowercase letters, numbers and underscores, starting with a letter) and a name, and tick what it allows. The list is grouped by how sensitive the information is: directory, financial, and pastoral, demographic and medical. Each item has a short description. Choose "Create role". The message is "Role created."
 - To start from a stock role, use "Or adopt a template". The templates are "Committee Chair", "Giving Recorder", "Hiring Committee", "Personnel Administrator", "Stated Clerk" and "Treasurer". Choose one, then "Adopt template". The message is "Role adopted from template."

@@ -61,6 +61,29 @@ test.describe("Member calendar", () => {
   test.describe("without a grant", () => {
     test.use({ storageState: storageStatePath("org-single") });
 
+    // Increment 3a: every current record at alpha now holds `events.view` through the baseline roles
+    // (`member`, bound to Active Membership, which a regular attender joins, and `calendar_viewer`, bound
+    // to All Current Records). "A member with no events.view" therefore needs those two roles to lack it
+    // for this lane only; the spec-owned `viewer` role is untouched, and both are restored in afterAll.
+    let baselineEventsView: string[] = [];
+    test.beforeAll(async () => {
+      const roles = (await sql`
+        select r.id from app_roles r
+         where r.organization_id = ${E2E_ORGS.alpha.id}::uuid and r.key in ('member', 'calendar_viewer')
+           and exists (select 1 from app_role_permissions p where p.role_id = r.id and p.permission_key = 'events.view')`) as { id: string }[];
+      baselineEventsView = roles.map((r) => r.id);
+      if (baselineEventsView.length > 0) {
+        await sql`delete from app_role_permissions where role_id = any(${baselineEventsView}::uuid[]) and permission_key = 'events.view'`;
+      }
+    });
+    test.afterAll(async () => {
+      if (baselineEventsView.length > 0) {
+        await sql`
+          insert into app_role_permissions (role_id, permission_key)
+          select unnest(${baselineEventsView}::uuid[]), 'events.view' on conflict do nothing`;
+      }
+    });
+
     test("a member with no events.view sees a plain explanation, not a 403 or a blank page", async ({ page }) => {
       const response = await page.goto(CALENDAR);
       expect(response?.status()).toBe(200);

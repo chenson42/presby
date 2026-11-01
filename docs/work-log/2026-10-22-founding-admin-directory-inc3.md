@@ -19,7 +19,7 @@
 | 3 — Technical design | tech-lead | Complete for 3a; migration 0066, D1 to D8 departures (all accepted; D4 operator-approved); batches 0, A1, A2, B, C, D. Updated 2026-10-25 for the architect's arch-A1 to arch-A4 (F245 closed in 0066; S16 declined) | Design complete (updated) | 2026-10-25 |
 | 3 — Technical design, amendment (rebased on main 0.50.1; see "Phase 3 amendment" at the end of this log) | tech-lead | Complete. Five-kind derived list and the officer sync's attributes specified (orchestrator's required edit); 19 assumptions re-checked against the merged tree; departures D9 to D21 ruled (a 2b fixture that contradicted the kind CHECK found and fixed; 0082 shrinks D4 but 3a's baseline role is still needed; portal tiles are permission-blind; parish consumers of `deriveConnection`; group renamed "All Current Records"); F246 and F247 filed; apply order proven for both journal order and merge order; six help pages and one screenshot; one new e2e spec. One non-blocking operator question | Design complete (amended) | 2026-10-31 |
 | 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Batch 0 done 2026-10-25; A0 done 2026-10-31. **A1 done 2026-10-31** (database-admin): 0066 sections 1 to 8 and 10, hand-written, applied twice to the pipeline branch (digest identical) and rehearsed from empty in journal order; P1 to P12 measured on the dev copy and production (P5 = 0 real organizations on both: the release note drops the widening sentence); T-M 29, T-G 21, T-E 9, test-rls-66 staged, each mechanism proven failing-first. Existing tests that 0066 contradicts fixed minimally in six files (D11 plus a D11-class gap the amendment missed; flagged for the tech-lead). Full DB suite: no 0066 regression beyond the designed ones; 12 environmental failures (treasury's DB without its code; three pre-existing leaked fixtures). A1 alone breaks 2b's auto-connect (test-rls 65.7) until A2's T-list literal lands, proven. **A2 done 2026-10-31** (database-admin): section 9 (the core's T list gains all_memberships, deacons_moderator stays in T; check 10 drops the visitor acknowledgement; connect step 10 requires member standing), hand-written, applied twice (second run changes nothing), from-empty journal order rehearsed; **the whole patched test-rls.sql is exit 0 from empty** (65.7 green); on the dev copy only seven data-drift lines stop it (219/222, fresh-db coverage, treasury's template and 2FA keys, the demo statistics.publish role); every section-9 mechanism proven failing-first in test-rls-66 (l) and Vitest; handler mapping in T-G; T-M connect column; 2b-era tests edited minimally (four files, listed). Full DB suite: 13 failures, all environmental (9 treasury, 4 leaked fixtures). **B done 2026-10-31** (api-developer): `membership-standing.ts` (the one TypeScript standing definition, pinned equal to SQL over the whole grid, two source scans), deriveConnection and the readers (Inactive list, classifier-driven Visitors, archive-aware Former, engagement badge, status fields), `community-engagement.ts` (four audited writes, row-locked) and four Server Actions, four audit keys, `engagement-copy.ts`, `All Current Records` and `calendar_viewer` in the provisioning plan, grant-form labels, and the 2b removals (visitor acknowledgement, `isVisitor`, `not_listed`, `connected_not_listed`). No schema change. Typecheck, lint, `npm run check` (all nine), `npm run build` clean; full DB suite 16019 of 16025 pass, the five failures are four pre-existing leaked-fixture ones and one B-caused 2b test fixed after the run (now 41/41). **C done 2026-10-31** (ux-developer): seventh nav segment, row actions and three dialogs, Engagement card, Visit details, archive/restore on the record and in the wizard, engagement badge, Group C/E/J strings, Managed-from text, six help pages; every engagement entry point sends `expectedFrom` (unit-tested per entry point, failing-first proven); 360px light and dark walk passed. **D done 2026-10-31** (full-stack-developer): three new specs (`community-engagement` 24, `visitor-access` 4, `hydration/community-engagement-controls` 2), three 2b specs updated and two more found by the regression lane (`member-calendar`, `admin-organizations-create`); regression lanes 155 and 143 passed with one failure each (both fixed and re-run green), the new and targeted specs 37/37, prod hydration lane 7/7; four failing-first mutations shown; no application, schema or Rule 16 file touched; a leaked treasury fixture swept on the branch; 3b's `org_portal.followups` toggle is not on this branch, so not tested. Next: Phase 5 qa | In progress | 2026-10-31 |
-| 5 — Verification | qa | Run 1: full e2e 721/735 (1 failure caused by this pipeline: reimbursement-treasurer-ui:415; 1 environmental), DB 16,145/16,150 (4 existing), from-empty test-rls exit 0 with 66e executed; F-1 spec, F-2 help sentence | FAIL | 2026-11-01 |
+| 5 — Verification | qa | Run 1 FAIL (F-1 spec, F-2 help); run 2 after Batch E: unit 12,951, DB set 725/725, dev e2e 213/213, prod hydration 12/12, F-1/F-3 fail-first confirmed; F-4 patch re-cut open (orchestrator) | PASS | 2026-11-01 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -3058,7 +3058,7 @@ No `route.ts` was added or changed. Each action rebuilds its input from the requ
 
 ## Per-Phase Status row
 
-| 5 — Verification | qa | Run 1: full e2e 721/735 (2 project failures: 1 caused by this pipeline, 1 environmental origin mismatch; the third failure was QA's scratch probe), DB suite 16,145/16,150 (4 existing), from-empty `test-rls` exit 0 with 66e executed | FAIL | 2026-11-01 |
+| 5 — Verification | qa | Run 1 FAIL (F-1 spec, F-2 help); run 2 after Batch E: unit 12,951, DB set 725/725, dev e2e 213/213, prod hydration 12/12, F-1/F-3 fail-first confirmed; F-4 patch re-cut open (orchestrator) | PASS | 2026-11-01 |
 
 ## Handoff
 
@@ -3280,3 +3280,205 @@ All servers were Playwright-started on :3490 (PORT set) or :3800 and have exited
 | 4 — Implementation (Batch E, Phase 5 run 1 fixes) | full-stack-developer | F-1 spec + DB test, F-2 sentence, F-3 hide (rows and record, unit + e2e lane 13), F-5 comment; all gates green; one departure (row early return) | DONE | 2026-11-01 |
 
 **Next:** Phase 5 run 2 (qa), after the orchestrator has merged `origin/main` and re-cut the `test-rls` patch (F-4).
+
+---
+
+## Phase 5 — Verification (qa), run 2
+
+**Date:** 2026-11-01
+**Verified by:** qa
+**Tree:** `pipeline/visitor-follow-ups` at `d14adc6` (Batch E, on top of the `a3feea9` merge of `origin/main` 0.52.0). I edited no project file. Mutations and scratch specs ran in scratch copies that are now deleted. `git status` is clean.
+
+**Verdict: PASS.** F-1, F-2, F-3 and F-5 are fixed, and each fix is shown to fail first where it can be. Every required suite in run 2's scope is green, including the treasurer-ui follow-ons that never ran in run 1. One integration item from run 1 is still open (F-4, below). It belongs to the orchestrator and is not a behaviour failure.
+
+### Run scope
+
+| What | Where | Notes |
+|---|---|---|
+| typecheck, lint, `npm run check`, unit suite in CI shape (no database env) | worktree | full |
+| DB-backed tests, serial | pipeline Neon branch | 28 files: the 12 `*.db.test.ts` the pipeline adds or changes against `origin/main`, the whole `src/lib/reimbursement` set (12), and the 5 photos DB tests (widened because `directory.ts` auto-merged) |
+| `test-rls-66.sql` as `presby_app` | pipeline branch | `presby_app` with `rolbypassrls = f`, checked first. Also ran `test-rls-78.sql` (photos) as a widening |
+| e2e dev lane, chromium | own server on :3490 | reimbursement set (7 specs) and both its hydration specs; all `community-*`; `visitor-access`; `member-calendar`; `admin-organizations-create`; photos (`person-photos`, `hydration/person-photos-upload`, `custom-domains/person-photos-roster` in the `custom-hosts` project); directory blast radius (`person-emails`, `parishes`); the four `hydration/community-*` specs |
+| e2e prod lane | own `next build`, served on :3800 | `prod-build` project: 4 community, 2 reimbursement, photos and `no-organization` hydration specs. Then all `community-*` and `visitor-access` (chromium project) against the same production server |
+| Browser walk | :3490 | F-3 at 360px, light and dark. F-2 on the live Roles screen at 360px and 1280px |
+| Fail-first | scratch copies | F-1 (e2e), F-3 (unit and e2e) |
+| **Not re-run** | — | The full chromium suite, the full DB suite and the full `test-rls.sql` (Batch E touches no shared component, schema or fixture; the merged tree's full `test-rls` belongs to F-4). Coverage was not re-measured; run 1's figures stand. |
+
+**Flag state.** Before any e2e run I ran `scripts/ci/e2e-reset-flags.sql` (`-v pipeline_branch=1`, exit 0). It turned off `org_portal.admin_hub` and `org_portal.features`; both had been on. For the Roles walk my scratch spec turned on `org_portal.roles`, `org_portal.groups` and `org_portal.admin_hub` through `captureFlags` and restored them. At the end I set `admin_hub` and `features` back on. `feature_flags` is now byte-identical to its state before the run (diffed). No `e2e-invite-*` or `e2e-org-create-*` organizations or users are left.
+
+**Environment incident (dev servers), reported so the e2e record can be judged.**
+- **First server died.** My first dev server, started from the worktree, ran 42 tests (all passed), then died about 10 minutes in. The next 93 failures were all `ERR_CONNECTION_REFUSED` or `ECONNREFUSED`, with no assertion failures.
+- **Every later worktree server misbehaved.** Each one I started in the worktree after that got stuck in a rebuild-then-reload cycle on page load, and the one started with a fresh cache also hit `Module not found: @vercel/turbopack-next/internal/font/google/font`.
+- **Cause: a sibling worktree under a shared Turbopack root.** `next.config.ts:156` sets Turbopack's root to the parent directory, `presby-platform/`. A new sibling worktree, `presby-e2e-shard` (a full checkout with its own `package.json`, lockfile and `next.config.ts`), appeared there at about 14:08, while that first server was running.
+- **What I did.** I stopped every server by PID and made an APFS clone of the worktree under its own clean parent directory. I confirmed it byte-identical to the worktree for `src`, `e2e`, `drizzle`, `scripts` and `next.config.ts`, and removed the clone's `.git` pointer so it could not touch the worktree's index. Every dev-lane and prod-lane result below comes from servers started in that clone; Playwright ran from the worktree's own specs. The earlier partial runs are discarded.
+- **Recommendation for the orchestrator.** Any new sibling worktree can break dev servers in the other worktrees. This may deserve a TODO or Rule 16 note.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**
+- `npm run lint`: **PASS**
+- `npm run check`: **PASS**, all ten tripwires. `check:help` reports 29 registry entries, 24 published, 24 content files, 7 images.
+
+## Unit Tests
+
+**CI shape:** 951 files (813 passed, 138 skipped). Tests: 12,951 passed, 0 failed, 3,740 skipped. 38.0 s. This matches Batch E's count exactly. The skips are the database-gated files.
+
+**DB-backed, serial, pipeline branch:** 28 files, **725 passed, 0 failed, 0 skipped**. 759 s. This includes:
+- the new `reads.db.test.ts` test;
+- the neighbouring exact-name chargeable assertions, which still pass (the new test un-lists its group in `finally`);
+- `community-engagement`, `membership-standing`, `derived-group-guard`, `engagement-guards`, the onboarding tests and all five photos DB tests.
+
+**RLS as `presby_app`:**
+- `test-rls-66.sql`: exit 0, 67 passes. 66e is skipped by design on this long-lived branch, the same as run 1 (it ran on run 1's from-empty database).
+- `test-rls-78.sql`: exit 0, 82 passes.
+
+## End-to-End Tests
+
+**Dev lane, chromium, isolated server on :3490:** Total 213 | Passed 213 | Failed 0 | Skipped 0 | 23.2 min.
+
+| Spec | Passed |
+|---|---|
+| `reimbursement-treasurer-ui` | 16 |
+| `reimbursement-member` | 24 |
+| `reimbursement-treasurer` | 9 |
+| `reimbursement-role-bundle` | 9 |
+| `reimbursement-approval` | 7 |
+| `reimbursement-csv` | 6 |
+| `reimbursement-toggle` | 5 |
+| `hydration/reimbursement-form`, `-treasurer-forms` | 3 |
+| `community-engagement` (13 lanes, desktop and 360px, including lane 13) | 26 |
+| `community-sign-in-invite` | 22 |
+| `community-approval` | 13 |
+| `community-participants` | 11 |
+| `community-nav-scroll` | 3 |
+| `community-redirect` | 3 |
+| `hydration/community-*` (4 specs) | 6 |
+| `visitor-access` | 4 |
+| `member-calendar` | 15 |
+| `admin-organizations-create` | 6 |
+| `person-photos` | 4 |
+| `hydration/person-photos-upload` | 1 |
+| `person-emails` | 10 |
+| `parishes` | 10 |
+| `custom-domains/person-photos-roster` (`custom-hosts` project, run separately, not in the 213) | 2 |
+
+**Reimbursement follow-ons that had never run on a 0066 database.** Each of these in `reimbursement-treasurer-ui` passes:
+- `:404` Settings, with the new count of 4 and the two derived-row assertions;
+- `:473` the 60-character category name;
+- `:504` the Treasury team;
+- `:541` a treasury-only viewer on the member address;
+- `:550` no treasury key;
+- `:571` a request with a receipt;
+- `:640` no chargeable group;
+- `:658` every page at 1280px.
+
+`reimbursement-member` and its serial lanes, which failed on Origin in run 1, all pass with `NEXT_PUBLIC_APP_URL` matching the server.
+
+Batch E's departure 4 is not quite right: the hydration specs also run in the chromium project (10 passed there), not only in `prod-build`.
+
+**Prod lane, own build on :3800:**
+- **`prod-build` project:** 12/12 passed in 1.4 min. These are `community-approval-controls`, `community-engagement-controls` (2), `community-participant-dialogs`, `community-sign-in-controls` (2), `no-organization-controls` (2), `person-photos-upload`, `reimbursement-form` and `reimbursement-treasurer-forms` (2).
+- **`community-*` and `visitor-access` against the production server (chromium project):** 82 total, 72 passed, 10 failed, 16.6 min.
+  - Passing: `community-approval` 13, `community-engagement` 26, `community-nav-scroll` 3, `community-participants` 11, `community-redirect` 3, `visitor-access` 4, and 12 of the 22 `community-sign-in-invite` lanes.
+  - The 10 failures are `community-sign-in-invite` lanes 1, 2, 4, 4b and 10, at both viewports. **They cannot pass in this lane, by design.** The send dialog answers "We can't send invitations right now. Send us a support ticket." That is `link_origin_unavailable`: `platformOrigin()` returns null for an `http:` origin when `NODE_ENV=production` (`src/lib/domains/host.ts:205`, called at `src/lib/onboarding/issue.ts:530`).
+  - So a local http production server can never send an invitation. That is why CI's prod lane is limited to hydration specs. All 22 lanes pass in the dev lane. This is not a defect and not this pipeline's.
+
+## Regression Tests Added
+
+The tests are Batch E's; I verified them failing first.
+
+- **F-1, e2e.** `e2e/reimbursement-treasurer-ui.spec.ts:404`. It guards that the settings page lists All Current Records, switched off, with "No chair or leader: requests go to the treasurer."
+  - The `a3feea9` (pre-Batch-E) spec, run against the current build and database, fails at `:415` with `Expected: 3, Received: 4`.
+  - The Batch E spec passes on the same server.
+- **F-1, DB.** The new `getSettings` test in `src/lib/reimbursement/reads.db.test.ts` passes against the live definers. It pins accepted behaviour: chargeable, `approverCount: 0`, the visitor is still offered nothing, and the request is routed to the treasurer `override` tab, not the chair.
+  - Its fail-first rests on Batch E's report (visitor expectation inverted, then restored). I did not repeat it.
+  - It pins behaviour that was already correct; it is not a guard against a past bug.
+- **F-3, unit.** With `!isSelf` removed from `community-row-actions.tsx` and `!isOwnRecord` from `[id]/edit/page.tsx`, 5 tests fail:
+  - 2 in `community-row-actions.test.tsx`;
+  - 1 in `members-list.test.tsx`;
+  - 2 in `[id]/edit/page.test.tsx`.
+
+  Reverting Batch E's early-return departure (dropping `canMarkRegular` from the guard) fails 2 tests, so the departure is covered.
+- **F-3, seam no unit test covers.** I removed `viewerPersonId={personId}` from the Community `page.tsx` alone.
+  - **0 unit tests fail.** Every unit test passes the prop directly.
+  - **e2e lane 13 catches it.** Against a mutated server (an isolated clone on :3491, now deleted), lane 13 fails at `e2e/community-engagement.spec.ts:717` (`Archive <sender>` count 1, expected 0) at both desktop and 360px.
+  - Lane 13 passes at both viewports on the correct build. Lane 13 is the only guard on that seam; it is adequate.
+
+## Coverage on Critical Modules
+
+Not re-measured. Batch E changes three presentation conditions and the prop passing that feeds them, and run 1's figures stand:
+
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.1%
+- `src/lib/flags.ts`: 100%
+
+## Feature-Gate Audit
+
+**No protected routes touched by Batch E.** It adds no `route.ts` and no server action, and changes no action body. The F-3 change only hides a control.
+- The server backstop is unchanged: the `self_target` refusal at `community-engagement.ts:356`, pinned by `actions.test.ts`.
+- Run 1's table for the pipeline's actions stands.
+- The photos routes and actions arrived through the main merge, were audited in their own pipeline, and are not changed here.
+
+## Schema/RLS Audit
+
+Batch E has no schema change. Run 1's live-catalog audit of 0066 stands. `test-rls-66.sql` and `test-rls-78.sql` pass as `presby_app` on the merged branch, which now carries 0078.
+
+## Record-page and row Archive (F-3), browser walk
+
+The walk used a throwaway congregation. The viewer holds `people.manage` and is recorded as inactive; a second inactive person was added. 360px, light (`html.dark=false`) and dark (`html.dark=true`):
+
+| Surface | Light | Dark |
+|---|---|---|
+| Own Inactive row | only "Mark as regular" | the same |
+| Other person's Inactive row | "Mark as regular" and "Archive" | the same |
+| Own record | Engagement card shown, 0 Archive buttons | the same |
+| Other person's record | Archive offered, enabled | the same |
+| Horizontal overflow | 0px on every page | 0px on every page |
+
+The viewer's membership has `ended_on = null` after the walk, so nothing was archived. Screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa2/shots/`.
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the Copy table.** Batch E adds no UI string. The one changed sentence, `roles-who-can-do-what.md:18`, is the ruling's exact text.
+- [x] **The query behind each claim was opened.**
+  - `presby_standing_is_member` is `standing in ('listed','staff_anchor')` (`0066:152`).
+  - `presby_sync_derived_membership_group` writes every membership into `all_memberships` and only member standing into `active_membership`.
+  - **Live check:** in a congregation made through `/admin/organizations/new`, I added a visitor, an inactive person, a moved-away person and two regular attenders (one of them the viewer).
+    - All Current Records held all five; Active Membership held only the two regular attenders.
+    - The Roles screen shows Calendar viewer with 5 holders and Member with 2. "Who holds what" lists Member held by "Active Membership (group)" and Calendar viewer by "All Current Records (group)". The catalog marks Member, Calendar viewer, Session member and Moderator of the Board of Deacons "Constitutional".
+- [x] **Each instruction traced to its role.** The sentence instructs nothing. Its audience is administrators reading public help.
+- [x] **Neighbours grepped; none made false.** The grep covered `src/content/help`, `src/app`, `src/components` and `src/lib`. "fill from", "from the roll and" and "every live membership" occur nowhere else. `events-and-the-calendar.md:15` and `officers-and-the-session.md:34` agree with the new sentence.
+- [x] **Help diff covered.** The page was read against the live Roles screen at 360px and 1280px, with a real `/totp` step for the viewer.
+  - `check:help` is clean.
+  - The merged `using-the-directory.md` holds both main's photo line and inc3's line on inactive and moved-away people who are not on the roll, with nothing duplicated or contradicting. That page's `labels` and `verifiedIn: 0.47.0` were not changed by the merge.
+  - Batch E's diff adds no images, so there were none to open.
+- **`verifiedIn` decision (Batch E item 4).** Leaving `roles-who-can-do-what` at `0.47.0` is right. I walked the derived-group rows, the catalog and line 18 live. I did not re-walk:
+  - the Founding Administrator and Stated Clerk rows (they need an accepted founding invitation);
+  - the "Choose Administration, then Roles" path (it depends on global flags);
+  - the grant and revoke flows.
+
+  That is not a full walk, so `verifiedIn` should move only after one.
+- **F-5.** The `community-participants.spec.ts` change is comment-only and exactly the ruled text. The spec passes 11/11 in the dev lane and 11/11 against the production build. `member-calendar` passes 15/15.
+
+## Findings
+
+- **F-4 (still open; orchestrator; does not block this verdict).** `git apply --check scripts/membership-standing/test-rls.sql.integration.patch` still fails at `scripts/test-rls.sql:8746`. The patch was last cut in `5cc738d`, before the main merge. It must be re-cut at integration, and `test-rls.sql` then re-run on the merged tree as `presby_app`. Batch E's handoff assumed this had already been done.
+- **Environment.** Turbopack's parent-directory root (`next.config.ts:156`) means a new sibling worktree under `presby-platform/` can break dev servers in other worktrees. This is worth a TODO line. It was not caused by this pipeline.
+- **Minor record correction.** Batch E's departure 4 is inaccurate: hydration specs also run in the chromium project.
+
+## Verdict
+
+**PASS.** All run-2 gates are green, and the four Phase 3 rulings are implemented as ruled and verified, with fail-first evidence for F-1 and F-3. The diff is not auth-touching.
+
+## Per-Phase Status row
+
+| 5 — Verification (run 2) | qa | typecheck, lint, check (10/10) and unit 12,951/12,951 green. DB set 725/725 serial (28 files). `test-rls-66` (67) and `-78` (82) exit 0 as `presby_app`. Dev e2e 213/213 plus custom-hosts 2/2 (all 16 treasurer-ui, including the 7 settings follow-ons). Prod lane hydration 12/12; `community-*` and `visitor-access` on the prod build 72/82, the 10 failures being the by-design http-origin refusal. F-1 and F-3 fail-first confirmed (lane 13 is the only guard on the page's `viewerPersonId`). F-3 walked at 360px light and dark; F-2 walked on the live Roles screen. Flags reset and then restored to found state. F-4 patch re-cut still open (orchestrator) | PASS | 2026-11-01 |
+
+## Handoff
+
+**Next: analyst (Phase 6).** Before integration, the orchestrator must re-cut `scripts/membership-standing/test-rls.sql.integration.patch` (F-4) and run `test-rls.sql` on the merged tree as `presby_app`. Carried to Phase 6 from the ruling:
+- the release note against D-1c;
+- D-6 condition 1, already met in run 1;
+- the `verifiedIn` note above.
+
+**Left behind:** :3490, :3491 and :3800 are free, and no Playwright process is running. Scratch copies and clones are deleted. The worktree's `.next/dev` is as I found it. Global flags are identical to their pre-run state. Logs and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa2/`.

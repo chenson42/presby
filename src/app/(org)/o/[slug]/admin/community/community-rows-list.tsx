@@ -31,6 +31,7 @@ export function CommunityRowsList({
   canStaffLink = false,
   organization = "",
   selfConnectEnabled = null,
+  viewerPersonId = null,
 }: {
   slug: string;
   view: Extract<CommunityView, "visitors" | "inactive" | "staff" | "former">;
@@ -43,6 +44,8 @@ export function CommunityRowsList({
   organization?: string;
   /** `org_portal.sign_in_connect`; null when the page could not read it. */
   selfConnectEnabled?: boolean | null;
+  /** The viewer's own person id: their own row offers no Archive. */
+  viewerPersonId?: string | null;
 }) {
   return (
     <ul className="space-y-3">
@@ -86,6 +89,7 @@ export function CommunityRowsList({
                   hasAddress={row.email !== null}
                   invitationOpen={markers[row.personId]?.kind === "pending"}
                   selfConnectEnabled={selfConnectEnabled}
+                  isSelf={viewerPersonId !== null && row.personId === viewerPersonId}
                 />
               )}
             </CardContent>

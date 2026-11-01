@@ -205,6 +205,16 @@ describe("MembersList — admin rows (Visitors, Staff, Former)", () => {
     signInConnected: false,
   };
 
+  it("Inactive: the viewer's own row offers Mark as regular but no Archive; another row offers both — regression for Archive offered on your own record", () => {
+    const own = { ...ROW, personId: "p-me", displayName: "Sam Self", engagementStatus: "inactive" as const, endedOn: null };
+    const other = { ...ROW, personId: "p-9", displayName: "Wren Alder", engagementStatus: "inactive" as const, endedOn: null };
+    render(<MembersList {...BASE} view="inactive" rows={[own, other]} viewerPersonId="p-me" />);
+    expect(screen.getByRole("button", { name: "Mark as regular Sam Self" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Archive Sam Self" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Mark as regular Wren Alder" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Archive Wren Alder" })).toBeTruthy();
+  });
+
   it("Visitors: links to the edit page and shows the first visit", () => {
     render(<MembersList {...BASE} view="visitors" rows={[ROW]} />);
     expect(screen.getByText(/first visit/i)).toBeTruthy();

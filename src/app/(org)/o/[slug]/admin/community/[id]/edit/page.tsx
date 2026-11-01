@@ -288,9 +288,14 @@ export default async function EditMemberPage({
       : communityStatus.connection === "former_visitor" || communityStatus.connection === "archived"
         ? ("archived" as const)
         : ("other" as const);
+  // Not offered on your own record: the action refuses it (`self_target`), and a
+  // control whose only outcome is a refusal is not offered. The refusal stays as
+  // the backstop for a forged call or a page loaded before the connection moved.
+  const isOwnRecord = id.toLowerCase() === resolved.org.personId.toLowerCase();
   const canArchive =
     communityStatus !== null &&
     ended === null &&
+    !isOwnRecord &&
     (communityStatus.standing === "visitor" || communityStatus.standing === "inactive");
   const showVisitDetails =
     communityStatus !== null &&

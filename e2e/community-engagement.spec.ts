@@ -37,7 +37,8 @@
  *   10. Visit details: save, persist, the bad-date and too-long sentences under
  *       their fields, an audit row that never carries the text;
  *   11. Archive and Restore on the person's own record;
- *   12. the wizard's archived match: "Restore" there, then the restored record.
+ *   12. the wizard's archived match: "Restore" there, then the restored record;
+ *   13. the viewer's own Inactive row and own record offer no Archive (F-3).
  *
  * FLAGS. `org_portal.members_create` (global) is captured, set and restored; the
  * congregation's own members_create and sign_in_connect toggles are written by
@@ -698,6 +699,35 @@ test.describe("Community engagement, archive and restore (Increment 3a)", () => 
         expect(restored.ended_on).toBeNull();
         expect(restored.engagement_status).toBe("visitor");
         expect(await auditFor(sql, "tenant.person.restored", person.personId)).toHaveLength(1);
+      });
+
+      // -----------------------------------------------------------------
+      test("13. your own Inactive row and your own record offer no Archive; another inactive person's still do (Phase 5 run 1, F-3)", async ({ page }) => {
+        // The sender holds people.manage by a role granted to the person, so being marked inactive
+        // leaves the page reachable: the real, rare state of an administrator recorded as inactive.
+        await sql`
+          update memberships set engagement_status = 'inactive', current_roll = null
+           where organization_id = ${org!.orgId}::uuid and person_id = ${sender.personId}::uuid`;
+        const other = await addPerson(sql, org!, { first: "Philippa", last: "Underhill", engagement: "inactive" });
+        await signIn(page);
+
+        await openList(page, "inactive");
+        await expect(row(page, sender.name)).toBeVisible();
+        await expect(page.getByRole("button", { name: `Mark as regular ${sender.name}`, exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: `Archive ${sender.name}`, exact: true })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: `Mark as regular ${other.name}`, exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: `Archive ${other.name}`, exact: true })).toBeVisible();
+        await noHorizontalOverflow(page);
+
+        await openRecord(page, sender);
+        await expect(page.getByRole("button", { name: `Archive ${sender.name}`, exact: true })).toHaveCount(0);
+        await expect(page.getByTestId("engagement-card")).toBeVisible();
+        await noHorizontalOverflow(page);
+
+        await openRecord(page, other);
+        await expect(page.getByRole("button", { name: `Archive ${other.name}`, exact: true })).toBeVisible();
+        await noHorizontalOverflow(page);
+        expect((await membershipOf(sql, org!, sender.personId)).ended_on, "nothing was archived").toBeNull();
       });
     });
   }

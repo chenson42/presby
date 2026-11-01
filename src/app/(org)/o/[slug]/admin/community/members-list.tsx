@@ -36,6 +36,7 @@ export function MembersList({
   pagination,
   organization = "",
   selfConnectEnabled = null,
+  viewerPersonId = null,
 }: {
   slug: string;
   view: CommunityView;
@@ -52,6 +53,8 @@ export function MembersList({
   organization?: string;
   /** `org_portal.sign_in_connect`; null when the page could not read it. */
   selfConnectEnabled?: boolean | null;
+  /** The viewer's own person id, for the admin lists: their own row offers no Archive. */
+  viewerPersonId?: string | null;
 }) {
   const count = (entries ?? rows ?? []).length;
 
@@ -105,6 +108,7 @@ export function MembersList({
               canStaffLink={canStaffLink}
               organization={organization}
               selfConnectEnabled={selfConnectEnabled}
+              viewerPersonId={viewerPersonId}
             />
           )}
         </>

@@ -320,6 +320,7 @@ export default async function CommunityPage({
           pagination={listResult.pagination}
           organization={resolved.org.name}
           selfConnectEnabled={selfConnectEnabled}
+          viewerPersonId={personId}
         />
       ) : null}
     </section>

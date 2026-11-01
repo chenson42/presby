@@ -940,6 +940,7 @@ describe("EditMemberPage — Engagement, Visit details, Archive and Restore (Inc
   async function renderEngagement(
     overrides: Record<string, unknown> = {},
     card: Record<string, unknown> | null = null,
+    routeId = "p-1",
   ) {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
@@ -953,7 +954,7 @@ describe("EditMemberPage — Engagement, Visit details, Archive and Restore (Inc
       card ? { kind: "ok", card: { state: "none", address: null, selfConnectEnabled: false, ...card } } : { kind: "forbidden" },
     );
     hasPermission.mockResolvedValue(false);
-    render(await EditMemberPage({ params: makeParams() }));
+    render(await EditMemberPage({ params: makeParams("alder-creek", routeId) }));
   }
 
   const buttons = () => screen.queryAllByRole("button").map((b) => b.textContent);
@@ -976,6 +977,23 @@ describe("EditMemberPage — Engagement, Visit details, Archive and Restore (Inc
     expect(screen.getByLabelText("First visit (optional)")).toBeTruthy();
     expect(screen.getByLabelText("How did they hear about us? (optional)")).toBeTruthy();
     expect(buttons()).toContain("Archive Nora Ashgrove");
+  });
+
+  it("an inactive person: Archive on the record; the same record opened by that person (the viewer) offers none", async () => {
+    await renderEngagement({ engagementStatus: "inactive", standing: "inactive", connection: "inactive" });
+    expect(buttons()).toContain("Archive Nora Ashgrove");
+    cleanup();
+    // OK_RESOLVED's viewer is "person-1": their own record, however the id is cased.
+    await renderEngagement({ engagementStatus: "inactive", standing: "inactive", connection: "inactive" }, null, "PERSON-1");
+    expect(buttons()).not.toContain("Archive Nora Ashgrove");
+    // Mark as regular is not refused on your own record, so it stays.
+    expect(screen.getByRole("combobox", { name: /engagement for/i })).toBeTruthy();
+  });
+
+  it("a visitor viewing their own record gets Visit details but no Archive — regression for Archive offered on your own record", async () => {
+    await renderEngagement({ engagementStatus: "visitor", standing: "visitor", connection: "visitor" }, null, "person-1");
+    expect(screen.getByRole("heading", { name: "Visit details" })).toBeTruthy();
+    expect(buttons()).not.toContain("Archive Nora Ashgrove");
   });
 
   it("Visit details also shows for a regular attender whose first visit or how-heard is stored, with those values", async () => {

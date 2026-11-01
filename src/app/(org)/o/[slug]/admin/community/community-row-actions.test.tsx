@@ -215,6 +215,30 @@ describe("Archive (Visitors and Inactive rows)", () => {
   });
 });
 
+describe("your own row (isSelf): Archive is not offered — regression for Archive offered on your own record", () => {
+  it("an Inactive row for yourself keeps Mark as regular and drops Archive", () => {
+    render(<CommunityRowActions {...BASE} view="inactive" isSelf />);
+    expect(screen.getByRole("button", { name: "Mark as regular Wren Alder" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Archive Wren Alder" })).toBeNull();
+  });
+
+  it("another person's Inactive row still offers both", () => {
+    render(<CommunityRowActions {...BASE} view="inactive" isSelf={false} />);
+    expect(screen.getByRole("button", { name: "Mark as regular Wren Alder" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Archive Wren Alder" })).toBeTruthy();
+  });
+
+  it("a Visitors row for yourself renders nothing at all", () => {
+    const { container } = render(<CommunityRowActions {...BASE} view="visitors" engagementStatus="visitor" isSelf />);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("a Former archived row still shows Restore, whoever it is", () => {
+    render(<CommunityRowActions {...BASE} view="former" archived isSelf />);
+    expect(screen.getByRole("button", { name: "Restore Wren Alder" })).toBeTruthy();
+  });
+});
+
 describe("Restore (an archived Former row)", () => {
   const FORMER = { ...BASE, view: "former" as const, archived: true };
 

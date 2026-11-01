@@ -38,6 +38,7 @@ export function CommunityRowActions({
   hasAddress,
   invitationOpen,
   selfConnectEnabled,
+  isSelf = false,
 }: {
   slug: string;
   view: "visitors" | "inactive" | "former";
@@ -54,14 +55,21 @@ export function CommunityRowActions({
   invitationOpen: boolean;
   /** `org_portal.sign_in_connect`, or null when the page could not read it. */
   selfConnectEnabled: boolean | null;
+  /**
+   * The row is the viewer's own record. Archive is not offered (the action
+   * refuses `self_target`; that stays as the backstop); Mark as regular and
+   * Restore are unaffected.
+   */
+  isSelf?: boolean;
 }) {
   const hydrated = useHydrated();
   const [dialog, setDialog] = useState<Dialog>(null);
 
-  const canArchive = view === "visitors" || view === "inactive";
+  const canArchive = (view === "visitors" || view === "inactive") && !isSelf;
   const canMarkRegular = view === "inactive";
   const canRestore = view === "former" && archived;
-  if (!canArchive && !canRestore) return null;
+  // Mark as regular counts: on your own Inactive row it is the only button left.
+  if (!canArchive && !canMarkRegular && !canRestore) return null;
 
   const list = view === "visitors" ? "Visitors" : view === "inactive" ? "Inactive" : listNameForEngagement(engagementStatus);
 

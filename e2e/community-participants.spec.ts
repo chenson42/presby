@@ -47,11 +47,11 @@ const VIEWPORTS = [
 ] as const;
 
 /**
- * Alpha's baseline `member` role (`directory.view` and `events.view`, bound to Active Membership, which
- * every live membership joins: DECISION-065) comes from main's 0082 baseline backfill. The clerk is a
- * live member there, so removing `directory.view` from the spec-owned role alone does not remove the
- * permission: the degrade lane must take it from the baseline role too, for the lane only. Returns
- * whether the baseline held it.
+ * Alpha's baseline `member` role (`directory.view` and `events.view`, bound to Active Membership) comes from
+ * main's 0082 baseline backfill. Since 0066 Active Membership holds member standing (people on the current
+ * roll, regular attenders and staff records); the clerk is a regular attender there. Removing `directory.view`
+ * from the spec-owned role alone therefore does not remove the permission: the degrade lane must take it from
+ * the baseline role too, for the lane only, and restore it. Returns whether the baseline held it.
  */
 async function setBaselineDirectoryView(sql: Sql, granted: boolean): Promise<boolean> {
   const roles = (await sql`

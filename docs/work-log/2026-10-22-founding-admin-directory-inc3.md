@@ -3211,3 +3211,72 @@ Not in scope, no change. The string is `member-wizard-schema.ts:80` (and `:87` f
 | 3 — Technical design (ruling on run 1) | tech-lead | F-1 accept + spec + DB test; F-2 sentence required, other A8 edits dropped; F-3 hide; F-5 comment + D-1a corrected; wizard string out of scope; Phase 3 miss owned (post-merge e2e re-grep) | RULED | 2026-11-01 |
 
 **Next:** full-stack-developer for the items above, then (after the orchestrator merges `origin/main`) Phase 5 run 2.
+
+---
+
+## Phase 4 — Batch E (full-stack-developer, 2026-11-01): Phase 5 run 1 fixes
+
+Implements the "Phase 3 ruling on Phase 5 run 1" as written. No schema, server action, migration, string, flag or Rule 16 file was changed.
+
+### Commits (on `pipeline/visitor-follow-ups`, after the `a3feea9` main merge; not pushed)
+
+| Commit | Item |
+|---|---|
+| `8d45e7f` fix(community): do not offer Archive on your own record or your own Inactive row | F-3 |
+| `9e01d13` test(reimbursement): settings lists All Current Records beside Active Membership | F-1 |
+| `d8576b9` test(e2e): correct the community-participants baseline-role comment for 0066 | F-5 |
+| `3da0e46` docs(help): roles page says what the derived groups hold now | F-2 |
+
+### What changed
+
+- **F-1.** `e2e/reimbursement-treasurer-ui.spec.ts`: count 4, comment and the Active Membership and All Current Records row assertions, exactly as ruled. `src/lib/reimbursement/reads.db.test.ts`: one new `it` under `getSettings` (the fixture's pair trigger makes the `all_memberships` sibling; the test selects it by `derived_from`). It lists the group, and asserts `{ chargeable: true, approverCount: 0, membershipSource: "derived" }`. It also asserts the requester is offered it, the visitor is still `{ mayFile: false, groups: [], ... }`, and a request charged to it is on the treasurer `override` tab and not in the chair's waiting list. The group is un-listed in a `finally`. Failing-first: with the visitor expectation inverted the test failed (`expected [] to have a length of 1`), then was restored.
+- **F-3.** `[id]/edit/page.tsx`: `canArchive` gains `!isOwnRecord` (route id and `resolved.org.personId`, compared lower-cased). `page.tsx` passes `viewerPersonId={personId}` to `MembersList`, then `CommunityRowsList`, which passes `isSelf` to `CommunityRowActions`. `community-row-actions.tsx`: `canArchive = (view === "visitors" || view === "inactive") && !isSelf`. Archive restore (`ended === "archived"`) and Mark as regular are untouched; the server `self_target` refusal and its copy stay as the backstop.
+- **F-5.** `e2e/community-participants.spec.ts`: the doc comment above `setBaselineDirectoryView`, exact wording, comment only.
+- **F-2.** `roles-who-can-do-what.md:18`: the exact replacement sentence. `check:help` is clean.
+
+### Tests added
+
+- `[id]/edit/page.test.tsx`: an inactive person's record offers Archive, while the viewer's own record (also with a differently cased id) offers none but keeps the Engagement select; a visitor viewing their own record has Visit details and no Archive. Failing-first: with `!isOwnRecord` removed, both failed; then restored.
+- `community-row-actions.test.tsx` (4): `isSelf` on an Inactive row keeps Mark as regular and drops Archive; another person's row keeps both; a Visitors row for yourself renders nothing; a Former archived row still shows Restore.
+- `members-list.test.tsx` (1): the `viewerPersonId` plumbing through `MembersList` to the row (own row has no Archive, another row does).
+- `e2e/community-engagement.spec.ts` lane 13, desktop and 360px: the sender is set to `inactive` by spec-local SQL (the sender keeps `people.manage` because its role is granted to the person, so the lane could be written; it is verified in e2e, not only unit). The own Inactive row shows only "Mark as regular"; the own record shows no Archive; another inactive person's row and record still offer it; nothing was archived.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck`, `npm run lint` | clean |
+| `npm run check` (all ten tripwires, incl. `check:help` 29 entries / 24 published) | exit 0 |
+| `npm test` (CI shape, no DB env) | 813 files passed, 138 skipped; 12,951 passed, 3,740 skipped |
+| Community folder unit tests | 47 files, 1,022 tests, passed |
+| `reads.db.test.ts`, serial against the pipeline branch (`dotenv -e .env.local -- vitest run --no-file-parallelism`) | 18/18 |
+| e2e `community-engagement` (chromium, own server :3490, `PORT`, `E2E_BASE_URL` and `NEXT_PUBLIC_APP_URL` set to it) | 26/26 (13 lanes x 2 viewports, including the new lane 13) |
+| e2e whole reimbursement set (`reimbursement-treasurer-ui` incl. the 11 serial follow-ons, `-treasurer`, `-approval`, `-csv`, `-member`, `-role-bundle`, `-toggle`), chromium, :3490 | 79/79 |
+| e2e `community-participants`, `community-nav-scroll`, `visitor-access`, `member-calendar`, chromium, :3490 | 33/33 |
+| Prod lane (own `next build`/`start`, :3800): `hydration/community-engagement-controls`, `hydration/reimbursement-form`, `hydration/reimbursement-treasurer-forms` | 5/5 |
+| 360px browser check | Screenshots of the sender's own Inactive row and own record at 360px: the row shows only "Mark as regular" and the other person's row shows both; the record has no Archive; no horizontal overflow (also asserted in the lane). Light only. |
+
+All servers were Playwright-started on :3490 (PORT set) or :3800 and have exited; no `pkill`, no stash.
+
+### Departures and notes
+
+1. **Early return in `community-row-actions.tsx`.** The ruling said the existing early return "already handles" the own-row case. It did not: with `isSelf` an Inactive row has `canArchive` false, so the guard `!canArchive && !canRestore` returned null and hid Mark as regular too. The unit test caught it. The guard now includes `canMarkRegular`, which is what the ruling's intent (own Inactive row still shows Mark as regular) requires.
+2. **F-2 walk.** I read the whole `roles-who-can-do-what` page against the code and migration (`presby_standing_is_member`, the `all_memberships` predicate, the Roles page's group names) and did not take a live screenshot of the Roles screen. `verifiedIn` is unchanged (it moves only by walking the page); QA's re-walk is the live one.
+3. **Dark mode** was not checked at 360px (the change adds no colour, only removes a button). Light only.
+4. **Hydration specs** live only in the `prod-build` project (not `chromium`), so run 2's "chromium and the prod lane" wording reduces to the prod lane; I ran it on :3800.
+5. The dev-server log shows an `OrgAccessError ... holds no active membership` from one existing lane (an archived person's own-record page). It is pre-existing behaviour, not lane 13; every spec passed.
+
+### For QA (run 2)
+
+1. Run the F-1 spec: `reimbursement-treasurer-ui` settings test with the count at 4 and the two derived-row assertions (report it failing against the old count of 3 if you want the fail-first), plus the whole reimbursement set on a matching `NEXT_PUBLIC_APP_URL`.
+2. `reads.db.test.ts` and the rest of `src/lib/reimbursement` DB tests, serial. The new test un-lists its group, so the neighbouring exact-name assertions should still pass.
+3. F-3: unit tests (`page.test.tsx`, `community-row-actions.test.tsx`, `members-list.test.tsx`); e2e `community-engagement` lane 13 both viewports; `community-participants`, `community-nav-scroll`, `visitor-access`; the prod-lane hydration specs. Walk own Inactive row, own record, another inactive person at 360px, light and dark.
+4. F-2: read the whole `roles-who-can-do-what` page as an administrator against the live Roles screen; `npm run check:help` clean; Copy truthfulness on line 18. Check the `verifiedIn` decision.
+5. F-5: comment-only diff; the two specs still pass.
+6. Not re-run by me: the full chromium suite, the full DB suite, `test-rls` (F-4 is the orchestrator's).
+
+### Per-Phase Status row
+
+| 4 — Implementation (Batch E, Phase 5 run 1 fixes) | full-stack-developer | F-1 spec + DB test, F-2 sentence, F-3 hide (rows and record, unit + e2e lane 13), F-5 comment; all gates green; one departure (row early return) | DONE | 2026-11-01 |
+
+**Next:** Phase 5 run 2 (qa), after the orchestrator has merged `origin/main` and re-cut the `test-rls` patch (F-4).

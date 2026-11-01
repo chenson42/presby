@@ -4,6 +4,73 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-237 — Derived rosters are chargeable like any group; Archive is hidden on the viewer's own record.**
+
+**Status:** Resolved (tech-lead, Phase 3 ruling on Phase 5 run 1, F-1 and F-3; implemented in Batch E; QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-11-01 · **Feature:** `2026-10-22-founding-admin-directory-inc3` (Community Increment 3a; migration 0066; v0.54.0); amends nothing in treasury's DECISION-271
+
+- **All Current Records in Reimbursement settings (F-1).** Migration 0066 gives every Active Membership group a sibling, so the new group appears in the treasurer's "Can receive requests" list. It is accepted, not hidden. The switch decides only which groups appear in the request form's "charged to" choice (`reimbursement_chargeable_groups`, read by `presby_reimbursement_form_options`). It grants the group's members nothing: who may file is a separate rule on `memberships` (`presby_reimbursement__is_eligible_requester`), never a group; the approver is a seat (`chair` or `leader` on a `managed` group), which a derived group never has, so a request charged to it routes to the treasurer; and `viewer_relation` reaches a request only through an eligible approver, so being in the group lets nobody view one. A visitor is still offered no groups. The switch starts off. Treasury chose this on purpose for derived rosters (treasury Q5: Session, Diaconate and Active Membership are already offered).
+- **Why not exclude it in the reader.** The reader is `presby_reimbursement_settings`, a definer in treasury's shipped migration 0073 (0.51.0): fix forward only, and it returns `membershipSource` but not `derived_from`, so a TypeScript filter could not tell the two derived rosters apart; a filter outside `src/lib/reimbursement/` would breach `check:treasury-boundaries` T2; and `set_chargeable` accepts any group id of the organization, so a hidden group could still be switched on by a forged call. **Revisit if** the operator finds the row confusing in production: the place is F246's forward migration, which already replaces a body in 0073, adding `derived_from` to the settings output. That is a treasury decision.
+- **Pinned by** `e2e/reimbursement-treasurer-ui.spec.ts` (four switches; both derived rows off and "No chair or leader: requests go to the treasurer.") and a `getSettings` test in `src/lib/reimbursement/reads.db.test.ts` (chargeable, `approverCount` 0, the visitor offered nothing, the request on the treasurer's override tab and not the chair's).
+- **Archive on your own record and your own Inactive row is hidden (F-3).** The refusal (`self_target`, `community-engagement.ts`) stays as the backstop for a forged call or a page loaded before the person's connection changed; the button is not offered, because a control whose only outcome is a refusal is worse than none. Mark as regular is not refused on your own record (it widens nobody's authority: the person already holds `people.manage`). No string is added or changed.
+- **Accepted, `paper`:** nothing prevents listing a derived roster as chargeable that has no meaningful cost centre; the treasurer chooses.
+
+---
+
+**DECISION-236 — Derived group rows are written only on the owner path.**
+
+**Status:** Resolved (architect's 3a review folded in as F245; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory-inc3` (Community Increment 3a; migration 0066; v0.54.0); R59; F240, F245
+
+- **The gap.** "The Court Is Not a Group" was `trigger`-class on paper and weaker in the catalog: only DELETE and writes whose `source` was not `'derived'` were refused, so a `presby_app` `INSERT` of `source = 'derived'` into the Session group would have resolved `roll.approve`, and after Option 1 an `UPDATE` of `ends_on` on a derived row would have granted or removed `directory.view`.
+- **The guard.** 0066 makes `presby_reject_derived_group_write()` refuse, for any non-owner (the `relowner` test, no role named), an `INSERT` into a derived group and an `UPDATE` of any column on a derived row except `public_listed`, `public_listed_by`, `public_listed_at` and `public_display_order` (a closed allow-list, so a future column is guarded by default). Both sync functions run as the owner (`SECURITY DEFINER`, pinned `search_path`, organization from `NEW`). The officer sync (`presby_sync_derived_group`) is changed with `alter function`, its body untouched, so its 0062 arms stay byte-identical; 0068 already re-creates it as a definer, so either order of 0066 and 0068 ends the same.
+- **The kind list is five** (`active_membership`, `all_memberships`, `session`, `diaconate`, `deacons_moderator`), so the statement in CLAUDE.md now covers the Moderator seat's roster too. CLAUDE.md gains one clause: the seat group's roster is written only by the officer sync (0066, DECISION-236).
+- **F245 folds in (architect's 3a review).** The guard had a level above it, the derived *group* row: a `presby_app` session could flip a derived group to `managed` (the shipped CHECK and edit trigger allowed it) and then insert a `managed` row the row guard no longer covered. 0066 extends `presby_reject_derived_group_edit()` with the same owner test, so a non-owner may change **no column** of a derived group, or flip a group into or out of `derived`, and adds two shape CHECKs (`(membership_source = 'derived') = (derived_from is not null)`; `derived_from` in the five kinds) behind a count-only stop-block, with `DerivedFromKey` pinned to them.
+- **Accepted residual, `paper` (S16 declined, 4.5):** a tenant can create a derived group in an organization that lacks one; its rows remain trigger-derived and no role reaches it without a grant. Detected by review of `groups` rows and role grants, not prevented. The "Court Is Not a Group" statement is a database property only with both guards.
+- **The release note** says the database access the application uses now refuses these writes, and that the earlier state was caught by review and audit, not prevented. It does not say "anything other than the officer record", because owner-level access and the residual above remain.
+
+---
+
+**DECISION-235 — Archive is an end date with a marker; auto-connect requires member standing.**
+
+**Status:** Resolved (operator approved 2026-10-25; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES; amends DECISION-226) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory-inc3` (Community Increment 3a; migration 0066; v0.54.0); R55, R57
+
+- A visitor, an inactive or a moved-away person is archived by setting `ended_on` and `ended_reason = 'community_archived'` through `presby_app` inside `withOrgContext()`, conditioned in code on standing (`visitor`, `inactive`, `unclassified`) and on `memberships_guard_end` plus the staff-position and pending-action pre-checks. Restore clears both columns only where the marker matches, and is refused for a deceased or merged person. Nothing is deleted. The Former list is a closed `in (...)` of the two markers.
+- The conditions are application-enforced because `presby_app` can already write `ended_on` (residual 3).
+- Auto-connect (DECISION-226) now requires **member standing** (`listed` or `staff_anchor`) rather than "not a visitor": inactive, moved-away and unclassified people are declined like visitors. The visitor acknowledgement at send (DECISION-207, Option 3) is retired; the do-not-contact confirmation stays.
+
+---
+
+**DECISION-234 — Engagement is an access-bearing write.**
+
+**Status:** Resolved (shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory-inc3` (Community Increment 3a; migration 0066; v0.54.0); R53, R54; F243, F244
+
+- `memberships.engagement_status` now decides who is listed and, through the derived groups, who holds `directory.view`. It has a vocabulary CHECK (`visitor`, `regular`, `inactive`, `moved_away`, `staff`) and a `BEFORE UPDATE` guard for every role: no change on an ended membership, no transition into or out of `staff`, no `visitor` on a rolled membership. Every change writes `tenant.person.engagement_changed` in the same transaction (ids, enums, booleans).
+- `current_roll` and `current_roll_since`, which also decide listing, are written only by owner-path definers (`presby_sync_current_roll`, `presby_reconcile_current_roll`, the 0012 backfill). 0066 adds an owner-only guard on `INSERT` and `UPDATE` of both columns, closing F244 as a database property rather than a residual.
+- **Accepted residuals, `paper`:** a `people.manage` holder can list an unlisted person and so make them eligible for auto-connect (detected by the audit chain, not prevented; the F232 class); an `INSERT` with engagement `staff` is not distinguishable from the sanctioned anchor path. The release note must not imply prevention.
+
+---
+
+**DECISION-233 — One classifier owns "listed".**
+
+**Status:** Resolved (S13 accepted by 2b; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory-inc3` (Community Increment 3a; migration 0066; v0.54.0); R50-R52; F241, F242
+
+- `presby_membership_standing(current_roll, engagement_status)` (0065) returns `listed`, `staff_anchor`, `visitor`, `inactive` or `unclassified`, first match wins. Member standing is `listed` or `staff_anchor`, defined once in `presby_standing_is_member`. The Directory (`= 'listed'`), the Visitors and Inactive lists, the sync trigger, the 2b standing core and `deriveConnection` all go through it or its TypeScript mirror `src/lib/membership-standing.ts`.
+- **The TypeScript vocabulary has one owner**, `membership-standing.ts`; `sign-in-types.ts` re-exports it. Treasury's second, hand-coded copy in SQL is F246.
+- The pin is one DB matrix test, a SQL-versus-TypeScript cross-product test and three scans. The analyst's G1 premise is corrected: the group predicate is member standing, not `listed`, so staff anchors keep the directory (DECISION-207).
+
+---
+
+**DECISION-232 — Option 1 closes F177: the baseline splits in two.**
+
+**Status:** Resolved (operator-approved D1, D4; shipped as built, QA PASS, Phase 6 SHIP WITH NOTES; amends DECISION-065 and DECISION-207) · **Date:** 2026-10-25 · **Feature:** `2026-10-22-founding-admin-directory-inc3` (Community Increment 3a; migration 0066; v0.54.0); R48, R49; F177
+
+- `active_membership` narrows to people with member standing. A new derived kind `all_memberships` (group **"All Current Records"**) mirrors every live membership and carries a new protected baseline role `calendar_viewer` ("Calendar viewer", `events.view` only). The `member` role, its permissions and every grant row are untouched, including the production grant restored on 2026-10-22 and the rows main's 0082 provisioned.
+- A visitor or inactive person with a sign-in keeps the calendar and loses the directory; a staff anchor keeps both; custom grants bound to `active_membership` narrow to member standing. Takes effect when 0066 is applied (permissions resolve per request).
+- The pair of groups is created by the database (a definer trigger on `groups`) as well as by provisioning, and the membership sync still raises if either is missing (F16).
+- **The reach of the baseline (re-measured after 0082).** 0082 (applied 2026-10-28) gave `member` to every organization that had no `member` role, so the population that newly gains `events.view` (P5: organizations holding the group with no live `member` grant) is 0 for every real organization on production and on the `development` copy, measured 2026-10-31 (the only two hits were throwaway test fixtures). `calendar_viewer` is still needed: 0082's `member` role is bound to `active_membership`, which no longer holds visitors or inactive people. The release note therefore does not claim a widening; it says what the Calendar viewer role does. P5 is re-run on deploy day, and the sentence is added with the number only if it is non-zero.
+- Amends DECISION-065 (the grantee half: `active_membership`'s population is member standing; "current" is carried by the new kind) and DECISION-207 (F177 closed; the visitor acknowledgement retired). Signed-in people who lose the directory at apply (P2, visitor, inactive or unclassified with a sign-in): 0 on production and 0 on the `development` copy.
+
+---
+
 **DECISION-314 — Help pages have two contact tokens: `{{contact}}` for a reader who may hold no administrator role, `{{contactAdmin}}` for a reader who is a signed-in administrator.**
 
 **Status:** Accepted (tech-lead Phase 3, numbered at integration on the Phase 6 analyst's recommendation) · **Date:** 2026-10-31 · **Feature:** `2026-10-31-help-contact`

@@ -97,10 +97,41 @@ describe("DerivedGroupsList", () => {
       expect(link.getAttribute("href")).toBe("/o/alder-creek/admin/officers");
     }
 
-    // active_membership has no management surface — a note, not a link.
+    // active_membership has no management surface — a note, not a link, and the
+    // note says who the group holds (Copy group H).
     expect(
-      screen.getByText(/the membership roll/i, { selector: "span" }),
+      screen.getByText("Members, regular attenders and staff", { selector: "span" }),
     ).toBeTruthy();
+    expect(screen.queryByText(/the membership roll/i, { selector: "span" })).toBeNull();
+  });
+
+  it("All Current Records says it holds everyone with a current record, and is a note, not an Officers link (EC-24)", () => {
+    render(
+      <DerivedGroupsList
+        slug="alder-creek"
+        entries={[
+          {
+            groupId: "all-1",
+            name: "All Current Records",
+            groupTypeName: "Roster",
+            memberCount: 230,
+            derivedFrom: "all_memberships",
+          },
+          {
+            groupId: "moderator-1",
+            name: "Moderator of the Board of Deacons",
+            groupTypeName: "Court",
+            memberCount: 1,
+            derivedFrom: "deacons_moderator",
+          },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByText("Everyone with a current record here", { selector: "span" }),
+    ).toBeTruthy();
+    // The officer-driven kind still links to Officers; the roster kind does not.
+    expect(screen.getAllByRole("link", { name: /officers/i })).toHaveLength(1);
   });
 
   it("renders NO edit/add-member/end-membership affordance for any derived row — read-only guard", () => {

@@ -156,8 +156,28 @@ describe("bucketForConnections - first match wins", () => {
     expect(b("staff", "listed")).toBe("others");
     expect(b()).toBe("others");
   });
+  it("a household of only inactive, moved-away, listed or staff people stays in Others (3a, EC-42)", () => {
+    expect(b("inactive")).toBe("others");
+    expect(b("moved_away")).toBe("others");
+    expect(b("inactive", "moved_away", "listed", "staff")).toBe("others");
+    expect(b("unclassified")).toBe("others");
+  });
+  it("an inactive person does not hide a visitor, a participant or a member in the same household", () => {
+    expect(b("inactive", "visitor")).toBe("visitors");
+    expect(b("moved_away", "participant")).toBe("participants");
+    expect(b("inactive", "member")).toBe("members");
+  });
   it("is exclusive: every combination lands in exactly one of the four groups", () => {
-    const all: Connection[] = ["visitor", "participant", "member", "staff", "listed"];
+    const all: Connection[] = [
+      "visitor",
+      "participant",
+      "member",
+      "staff",
+      "listed",
+      "inactive",
+      "moved_away",
+      "unclassified",
+    ];
     for (let mask = 0; mask < 1 << all.length; mask += 1) {
       const set = all.filter((_, i) => mask & (1 << i));
       expect(UNASSIGNED_GROUPS).toContain(bucketForConnections(set));

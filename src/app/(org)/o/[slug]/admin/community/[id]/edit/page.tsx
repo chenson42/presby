@@ -32,6 +32,9 @@ import {
 import { EditPersonForm } from "./edit-person-form";
 import { RecordRollActionForm } from "./record-roll-action-form";
 import { ConnectionCard } from "./connection-card";
+import { ArchiveRestoreControls } from "./archive-restore-controls";
+import { EngagementCard } from "./engagement-card";
+import { VisitDetailsForm } from "./visit-details-form";
 import { ParticipantControls } from "./participant-controls";
 import { SignInCard } from "./sign-in-card";
 
@@ -274,6 +277,34 @@ export default async function EditMemberPage({
   const signInCard: SignInCardState | null | undefined =
     signInResult.kind === "ok" ? signInResult.card : signInResult.kind === "error" ? null : undefined;
 
+  // What the Engagement card, the dialogs and the archive controls need that is
+  // not on the status: the sign-in card's own facts (address on file, the connect
+  // toggle, an open invitation). A card that did not load (`null`) leaves each
+  // `null`/false, which omits the line that depends on it; it never states
+  // that nothing can happen.
+  const ended =
+    communityStatus?.endedOn == null
+      ? null
+      : communityStatus.connection === "former_visitor" || communityStatus.connection === "archived"
+        ? ("archived" as const)
+        : ("other" as const);
+  // Not offered on your own record: the action refuses it (`self_target`), and a
+  // control whose only outcome is a refusal is not offered. The refusal stays as
+  // the backstop for a forged call or a page loaded before the connection moved.
+  const isOwnRecord = id.toLowerCase() === resolved.org.personId.toLowerCase();
+  const canArchive =
+    communityStatus !== null &&
+    ended === null &&
+    !isOwnRecord &&
+    (communityStatus.standing === "visitor" || communityStatus.standing === "inactive");
+  const showVisitDetails =
+    communityStatus !== null &&
+    ended === null &&
+    communityStatus.engagementStatus !== "staff" &&
+    (communityStatus.engagementStatus === "visitor" ||
+      communityStatus.firstVisitDate !== null ||
+      communityStatus.howHeard !== null);
+
   return (
     <section className="max-w-xl space-y-6">
       <div>
@@ -328,6 +359,46 @@ export default async function EditMemberPage({
                   : null
               }
             />
+          )}
+          {(canArchive || ended === "archived") && (
+            <ArchiveRestoreControls
+              slug={slug}
+              personId={id}
+              personName={personName}
+              organization={resolved.org.name}
+              mode={ended === "archived" ? "restore" : "archive"}
+              engagement={communityStatus.engagementStatus}
+              signInConnected={communityStatus.signInConnected}
+              invitationOpen={signInCard?.state === "pending"}
+            />
+          )}
+        </div>
+      )}
+
+      {communityStatus && (
+        <div className="space-y-6 rounded-xl border bg-card p-6 shadow-sm">
+          <EngagementCard
+            key={communityStatus.engagementStatus}
+            slug={slug}
+            personId={id}
+            personName={personName}
+            engagement={communityStatus.engagementStatus}
+            currentRoll={communityStatus.currentRoll}
+            ended={ended}
+            signInConnected={communityStatus.signInConnected}
+            addressOnFile={signInCard ? signInCard.address !== null : null}
+            selfConnectEnabled={signInCard ? signInCard.selfConnectEnabled : null}
+          />
+          {showVisitDetails && (
+            <div className="border-t pt-6">
+              <VisitDetailsForm
+                key={`${communityStatus.firstVisitDate ?? ""}|${communityStatus.howHeard ?? ""}`}
+                slug={slug}
+                personId={id}
+                firstVisitDate={communityStatus.firstVisitDate}
+                howHeard={communityStatus.howHeard}
+              />
+            </div>
           )}
         </div>
       )}

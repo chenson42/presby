@@ -286,7 +286,11 @@ describe.skipIf(!hasDb)("drizzle/0061 participant roll (Postgres-backed)", () =>
       select (select count(*) from roll_actions where organization_id = ${org} and person_id = ${person})::int as roll_rows,
              m.ended_on::text as ended_on, m.ended_reason, m.current_roll, m.current_roll_since::text as current_roll_since,
              m.engagement_status,
-             (select gm.ends_on::text from group_memberships gm where gm.membership_id = m.id) as group_ends_on
+             -- drizzle/0066 (Increment 3a): a membership now holds one derived row per
+             -- group (all_memberships and, with member standing, active_membership);
+             -- this reads the Active Membership row, the one this helper always meant.
+             (select gm.ends_on::text from group_memberships gm join groups g on g.id = gm.group_id
+               where gm.membership_id = m.id and g.derived_from = 'active_membership') as group_ends_on
         from memberships m where m.organization_id = ${org} and m.person_id = ${person}`);
     return row!;
   }

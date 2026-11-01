@@ -8,6 +8,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { DerivedGroupListEntry, GroupListEntry } from "@/lib/groups";
+import { derivedGroupManagedFromText } from "@/lib/derived-group-labels";
 
 /**
  * `/o/<slug>/admin/groups` — the managed-group list. `Table`, not cards: the
@@ -133,9 +134,9 @@ export function DerivedGroupsList({
                 {entry.memberCount}
               </TableCell>
               <TableCell>
-                {entry.derivedFrom === "active_membership" ? (
+                {entry.derivedFrom && derivedGroupManagedFromText(entry.derivedFrom) ? (
                   <span className="text-sm text-muted-foreground">
-                    The membership roll
+                    {derivedGroupManagedFromText(entry.derivedFrom)}
                   </span>
                 ) : (
                   <Link

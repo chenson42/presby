@@ -72,7 +72,6 @@ function card(over: Partial<SignInCardState> = {}): SignInCardState {
     chainCapReached: false,
     delivery: "unknown",
     blockedOutcome: null,
-    isVisitor: false,
     addressDoNotContact: false,
     authorityBearing: false,
     addressShared: false,
@@ -143,7 +142,7 @@ describe("SignInCard - the states", () => {
 
   it.each([
     ["by_sign_in_second_factor", CONNECT_OUTLOOK_COPY.by_sign_in_second_factor(NAME, ADDRESS)],
-    ["visitor", CONNECT_OUTLOOK_COPY.visitor(NAME)],
+    ["not_listed", CONNECT_OUTLOOK_COPY.not_listed(NAME)],
     ["shared_address", CONNECT_OUTLOOK_COPY.shared_address(NAME)],
     ["turned_off", CONNECT_OUTLOOK_COPY.turned_off(CONGREGATION)],
   ] as const)("the %s connect line", (outlook, line) => {
@@ -165,6 +164,20 @@ describe("SignInCard - the states", () => {
     unmount();
     renderCard(card({ state: "signs_in", linked: true, connectedVia: null, outlook: "connected" }));
     expect(text()).toContain(SIGN_IN_CARD_COPY.connectedUnknown(NAME));
+  });
+
+  it("a connected person who is not listed: the connected lines, then the connected-and-not-listed line (3a, D13 (e))", () => {
+    renderCard(card({ state: "signs_in", linked: true, connectedVia: "sign_in", connectedOn: "2026-10-20", outlook: "connected_not_listed" }));
+    expect(text()).toContain("Connected through sign-in on");
+    expect(text()).toContain(SIGN_IN_CARD_COPY.connectedSupport);
+    expect(text()).toContain(CONNECT_OUTLOOK_COPY.connected_not_listed(NAME));
+    expect(text()).not.toContain(CONNECT_OUTLOOK_COPY.not_listed(NAME));
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("a connected person who is listed gets no connected-and-not-listed line", () => {
+    renderCard(card({ state: "signs_in", linked: true, connectedVia: "sign_in", connectedOn: "2026-10-20", outlook: "connected" }));
+    expect(text()).not.toContain("isn't listed in the member directory");
   });
 
   it("pending: the sent line with its delivery word, the earlier-link hint, the open-invitation line, Send again and Cancel invitation", () => {
@@ -293,20 +306,21 @@ describe("SignInCard - the send dialog", () => {
     expect(toastSuccess).toHaveBeenCalledWith(SIGN_IN_DIALOG_COPY.send.toastQueued);
   });
 
-  it("a visitor sees the acknowledgement up front; Send is disabled until the box is ticked, and the flag is sent", async () => {
+  // 3a (F177 Option 3, R55): a visitor needs no acknowledgement any more, so
+  // the dialog shows no paragraph and no checkbox up front, and Send is live.
+  it("a person who is not listed (a visitor) is sent to without any acknowledgement: no paragraph, no checkbox, Send enabled, acknowledged false", async () => {
     mockSend.mockResolvedValue({ ok: true, data: { address: ADDRESS, expiresAt: EXPIRES.toISOString(), delivery: "sent" } });
-    renderCard(card({ isVisitor: true, outlook: "visitor" }));
+    renderCard(card({ outlook: "not_listed" }));
     const dialog = open();
-    expect(dialog.textContent).toContain(SIGN_IN_DIALOG_COPY.send.visitorAcknowledgement(NAME));
+    expect(dialog.textContent).not.toContain("is recorded as a visitor");
     expect(dialog.textContent).not.toContain("asked not to be contacted");
+    expect(within(dialog).queryByRole("checkbox")).toBeNull();
     const send = within(dialog).getByRole("button", { name: "Send invitation" }) as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: SIGN_IN_DIALOG_COPY.send.checkbox }));
     expect(send.disabled).toBe(false);
     await act(async () => {
       fireEvent.click(send);
     });
-    expect(mockSend).toHaveBeenCalledWith("alder-creek", { personId: "p-1", confirmedAddress: ADDRESS, acknowledged: true });
+    expect(mockSend).toHaveBeenCalledWith("alder-creek", { personId: "p-1", confirmedAddress: ADDRESS, acknowledged: false });
   });
 
   it("needs_acknowledgement is not an error: the dialog re-opens its paragraphs (do_not_contact only because the server asked) and shows no sentence", async () => {
@@ -353,17 +367,23 @@ describe("SignInCard - the send dialog", () => {
   });
 
   it("reopening resets the checkbox and the error", async () => {
+    // The do-not-contact paragraph (and its checkbox) appears only when the server asks.
+    mockSend.mockResolvedValueOnce({ ok: false, error: "", needsAcknowledgement: ["do_not_contact"] });
     mockSend.mockResolvedValue({ ok: false, error: "x" });
-    renderCard(card({ isVisitor: true, outlook: "visitor" }));
+    renderCard(card());
     let dialog = open();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Send invitation" }));
+    });
     fireEvent.click(within(dialog).getByRole("checkbox"));
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Send invitation" }));
     });
+    expect(within(dialog).getByRole("alert").textContent).toBe("x");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     dialog = open();
-    expect((within(dialog).getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+    expect(within(dialog).queryByRole("checkbox")).toBeNull();
     expect(within(dialog).queryByRole("alert")).toBeNull();
   });
 });

@@ -7,8 +7,9 @@ const VIEW_NAMES: Record<CommunityView, string> = {
   members: "members",
   participants: "participants",
   visitors: "visitors",
+  inactive: "inactive people",
   staff: "staff",
-  former: "former participants",
+  former: "former people",
 };
 
 /**
@@ -39,13 +40,14 @@ export function CommunityEmptyState({
     );
   }
 
-  const addPerson = canManage && view !== "staff" && view !== "former" && view !== "members";
+  const addPerson =
+    canManage && view !== "staff" && view !== "former" && view !== "members" && view !== "inactive";
 
   return (
     <div className="rounded-lg border border-dashed border-border px-4 py-16 text-center">
       <p className="text-sm font-medium">{headline(view)}</p>
-      {detail(view) && (
-        <p className="mt-1 text-sm text-muted-foreground">{detail(view)}</p>
+      {detail(view, canManage) && (
+        <p className="mt-1 text-sm text-muted-foreground">{detail(view, canManage)}</p>
       )}
       {view === "staff" && canStaffLink && (
         <p className="mt-2 text-sm text-muted-foreground">
@@ -71,33 +73,41 @@ export function CommunityEmptyState({
 function headline(view: CommunityView): string {
   switch (view) {
     case "all":
-      return "No one yet";
+      return "No one is listed yet";
     case "members":
       return "No members yet";
     case "participants":
       return "No participants yet";
     case "visitors":
       return "No visitors yet";
+    case "inactive":
+      return "No one is marked inactive or moved away";
     case "staff":
       return "No one holds a staff position yet";
     case "former":
-      return "No former participants";
+      return "No one has been removed or archived";
   }
 }
 
-function detail(view: CommunityView): string {
+function detail(view: CommunityView, canManage: boolean): string {
   switch (view) {
     case "all":
-      return "Add your first person to get started. Staff contacts appear under Staff once a position is recorded.";
+      // The other views are administrator-only, so only an administrator is
+      // pointed at them (Copy group C, audience).
+      return canManage
+        ? "Add your first person to get started. People appear here once they are members, participants or regular attenders; visitors, inactive people and staff contacts are under their own views."
+        : "People appear here once they are members, participants or regular attenders.";
     case "members":
       return "People appear here once the Session approves their roll action.";
     case "participants":
       return "Add a person and choose Participant.";
     case "visitors":
       return "Add a visitor to keep track of who is coming.";
+    case "inactive":
+      return "People on the roll who are marked inactive stay under Members or Participants.";
     case "staff":
       return "";
     case "former":
-      return "";
+      return "People you remove as participants or archive appear here.";
   }
 }

@@ -130,6 +130,15 @@ export function isOnRecordKind(kind: unknown): kind is OnRecordRollActionKind {
 export const PARTICIPANT_REMOVAL_ENDED_REASON = "other_participant_removed";
 
 /**
+ * The fixed `memberships.ended_reason` a Community archive writes (Increment 3a,
+ * DECISION-235; `src/lib/community-engagement.ts` is the only writer). A closed
+ * marker, never a prefix match: the Former list, the connection label and the
+ * restore precondition each compare against exactly this value, so an
+ * arbitrary `ended_reason` text can never be mistaken for an archive.
+ */
+export const COMMUNITY_ARCHIVE_ENDED_REASON = "community_archived";
+
+/**
  * The closed outcome vocabularies of the two definer functions, minus `ok`.
  * Pinned equal to the `outcome := '...'` literals in `drizzle/0061` by a
  * source-scan test, so a code the database can return that TypeScript has no

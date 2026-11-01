@@ -69,13 +69,15 @@ function OutlookLine({ outlook, name, address, congregation }: { outlook: Connec
       return address ? <Line muted>{CONNECT_OUTLOOK_COPY.by_sign_in(name, address)}</Line> : null;
     case "by_sign_in_second_factor":
       return address ? <Line muted>{CONNECT_OUTLOOK_COPY.by_sign_in_second_factor(name, address)}</Line> : null;
-    case "visitor":
-      return <Line muted>{CONNECT_OUTLOOK_COPY.visitor(name)}</Line>;
+    case "not_listed":
+      return <Line muted>{CONNECT_OUTLOOK_COPY.not_listed(name)}</Line>;
     case "shared_address":
       return <Line muted>{CONNECT_OUTLOOK_COPY.shared_address(name)}</Line>;
     case "turned_off":
       return <Line muted>{CONNECT_OUTLOOK_COPY.turned_off(congregation)}</Line>;
+    // The connected lines are ConnectedLines's, not this one's.
     case "connected":
+    case "connected_not_listed":
     case "none":
       return null;
   }
@@ -96,6 +98,9 @@ function ConnectedLines({ card, name }: { card: SignInCardState; name: string })
         )}
       </Line>
       <Line muted>{copy.connectedSupport}</Line>
+      {card.outlook === "connected_not_listed" ? (
+        <Line muted>{CONNECT_OUTLOOK_COPY.connected_not_listed(name)}</Line>
+      ) : null}
     </>
   );
 }
@@ -122,7 +127,6 @@ function CardBody({
       personId={personId}
       personName={name}
       address={address}
-      isVisitor={card.isVisitor}
       triggerLabel={label}
       disabled={disabled}
       triggerVariant={mode === "send" ? "default" : "outline"}

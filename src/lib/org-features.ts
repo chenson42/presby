@@ -131,7 +131,7 @@ export const ORG_FEATURE_CATALOG = [
     key: "org_portal.sign_in_connect",
     name: "Connect people when they sign in",
     description:
-      "When someone signs in with an email address on their record, PresbyPortal connects their sign-in to that record, so they don't need an invitation. People who hold a role or a seat connect only after confirming two-factor sign-in. Some people are never connected this way, such as visitors and addresses shared by more than one person. Turning this off stops new connections only: invitations still work and people already connected stay connected.",
+      "When someone signs in with an email address on their record, PresbyPortal connects their sign-in to that record, so they don't need an invitation. People who hold a role or a seat connect only after confirming two-factor sign-in. Some people are never connected this way, such as visitors, people marked inactive or moved away, and addresses shared by more than one person. Turning this off stops new connections only: invitations still work and people already connected stay connected.",
     category: "people" as const,
     flag: null,
     provisionedOn: true as const,

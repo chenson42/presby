@@ -4,7 +4,7 @@ PresbyPortal is a website that Presbyterian congregations use to keep their reco
 
 These are things an administrator or a member can do now. Each one needs the right role, and some start turned off until an administrator turns them on.
 
-- **Keep a list of its people.** An administrator adds people and sees them as members, participants, visitors, staff or former members. A new member waits for the Session to approve before joining the roll.
+- **Keep a list of its people.** An administrator adds people and sees them as members, participants, visitors, inactive people, staff or former members. A new member waits for the Session to approve before joining the roll.
 - **Share a directory.** People who are connected to the congregation can search a directory, read a household's page and see each person's contact details, except the details a person has marked private.
 - **Record officers.** An administrator records officer terms. The Session and the deacons' rosters are built from those terms.
 - **Decide who can do what.** Roles decide what each person can do. An administrator gives roles and takes them away.

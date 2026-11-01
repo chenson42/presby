@@ -56,8 +56,20 @@ export const groups = pgTable(
     // managed = staff edit the roster.
     // derived = the roster is materialized from officerTerms by trigger and
     //           direct writes are rejected. This enforces invariant 5.
+    //
+    // drizzle/0066 (F245): a derived group's identity is owner-path only.
+    // `groups_reject_derived_edit` (0033; owner test added in 0066 section 3b,
+    // a trigger Drizzle cannot express) refuses a non-owner change to ANY
+    // column of a group that is derived before or after the update.
     membershipSource: text("membership_source").notNull().default("managed"),
-    derivedFrom: text("derived_from"), // session | diaconate
+    // Five kinds, closed (groups_derived_kind_check below; a sixth is a
+    // migration): session | diaconate (officer_terms, 0009/0062) |
+    // deacons_moderator (officer_terms, 0068) | active_membership (member
+    // standing, 0017) | all_memberships (every live membership, 0066). Pinned
+    // to DerivedFromKey (src/lib/groups.ts) by derived-group-guard.db.test.ts.
+    // Inserting an active_membership group creates its all_memberships sibling
+    // by trigger (groups_pair_derived, 0066 section 4b).
+    derivedFrom: text("derived_from"),
     isProtected: boolean("is_protected").notNull().default(false),
     meetsWhen: text("meets_when"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -73,6 +85,15 @@ export const groups = pgTable(
     check(
       "groups_derived_check",
       sql`${t.membershipSource} = 'managed' or ${t.derivedFrom} is not null`,
+    ),
+    // drizzle/0066 section 4e (arch-A2, D9).
+    check(
+      "groups_derived_pairing_check",
+      sql`(${t.membershipSource} = 'derived') = (${t.derivedFrom} is not null)`,
+    ),
+    check(
+      "groups_derived_kind_check",
+      sql`${t.derivedFrom} is null or ${t.derivedFrom} in ('active_membership', 'all_memberships', 'session', 'diaconate', 'deacons_moderator')`,
     ),
   ],
 );
@@ -150,7 +171,12 @@ export const groupMemberships = pgTable(
     ),
     index("group_memberships_org_person_idx").on(t.organizationId, t.personId),
     unique("group_memberships_officer_term_key").on(t.officerTermId),
-    unique("group_memberships_membership_key").on(t.membershipId),
+    // drizzle/0066 section 4a: one derived row per (membership, group) - a
+    // membership holds a row in all_memberships and at most one in
+    // active_membership. Replaced unique (membership_id). Derived rows are
+    // written only on the owner path (group_memberships_reject_derived, owner
+    // test added in 0066 section 3a, F240; a trigger Drizzle cannot express).
+    unique("group_memberships_membership_group_key").on(t.membershipId, t.groupId),
     foreignKey({
       columns: [t.groupId, t.organizationId],
       foreignColumns: [groups.id, groups.organizationId],

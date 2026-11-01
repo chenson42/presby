@@ -11,6 +11,7 @@ import {
   type MatchPersonInput,
 } from "@/lib/people";
 import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
+import { MAX_HOW_HEARD } from "@/lib/membership-standing";
 import { emailRefusalMessage } from "@/lib/contact-methods/copy";
 import { parseNewPersonEmails } from "@/lib/contact-methods/email-rows-schema";
 import type { PersonSaveNotes } from "@/lib/contact-methods/types";
@@ -126,7 +127,7 @@ function sanitizeRollAction(
       return { ok: false, error: VALIDATION_COPY.badFirstVisit };
     }
     const heard = typeof raw.howHeard === "string" ? raw.howHeard.trim() : "";
-    if (heard.length > MAX_FREE_TEXT) {
+    if (heard.length > MAX_HOW_HEARD) {
       return { ok: false, error: VALIDATION_COPY.howHeardTooLong };
     }
     return {

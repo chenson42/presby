@@ -669,6 +669,34 @@ export const AUDIT_ACTIONS = {
   CAREERS_POSTING_PUBLISHED: "careers.posting.published",
   CAREERS_POSTING_CLOSED: "careers.posting.closed",
   CAREERS_POSTING_REOPENED: "careers.posting.reopened",
+  // APPENDED - pipeline/visitor-follow-ups, 2026-10-31 (Community Increment 3a,
+  // DECISION-234/235/236). The four writes of src/lib/community-engagement.ts,
+  // the only module that updates memberships.engagement_status, the archive
+  // marker or the visit details. Each is written with insertAuditRow(tx, ...)
+  // in the SAME transaction as the change, so a throw from the audit insert
+  // rolls the change back; an `unchanged` result writes nothing. resourceType
+  // 'person', resourceId = the person. Metadata is ids, enums and booleans only,
+  // from a CLOSED key list pinned by test (never a name, an address, or the
+  // free-text how_heard):
+  //   - TENANT_PERSON_ENGAGEMENT_CHANGED: { organizationId, personId, from, to,
+  //     standingFrom, standingTo, signInConnected }. Engagement decides who is
+  //     listed in the member directory and (R55) who auto-connects, so it is
+  //     access-bearing (G2). The detection chain for the accepted residual is
+  //     tenant.person_email.added | primary_changed, then this row, then
+  //     tenant.person.sign_in_connected, joined on personId.
+  //   - TENANT_PERSON_ARCHIVED: { organizationId, personId, engagement,
+  //     signInConnected }.
+  //   - TENANT_PERSON_RESTORED: { organizationId, personId, engagement,
+  //     signInConnected }.
+  //   - TENANT_PERSON_VISIT_DETAILS_UPDATED: { organizationId, personId,
+  //     firstVisitDateChanged, howHeardChanged } (booleans: how_heard is free
+  //     text and is never copied here).
+  // signInConnected is people.user_id is not null, never read from users
+  // (DECISION-189).
+  TENANT_PERSON_ENGAGEMENT_CHANGED: "tenant.person.engagement_changed",
+  TENANT_PERSON_ARCHIVED: "tenant.person.archived",
+  TENANT_PERSON_RESTORED: "tenant.person.restored",
+  TENANT_PERSON_VISIT_DETAILS_UPDATED: "tenant.person.visit_details_updated",
   // ---------------------------------------------------------------------------
 } as const;
 

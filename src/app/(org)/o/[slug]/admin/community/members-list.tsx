@@ -3,9 +3,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/shared/pagination";
 import type { DirectoryEntry, DirectoryPagination } from "@/lib/directory";
-import type { CommunityBadge as Badge } from "@/lib/community";
+import type { CommunityBadges } from "@/lib/community";
 import type { CommunityView } from "@/lib/community-labels";
-import { CommunityBadge } from "./community-badge";
+import { CommunityBadge, EngagementStatusBadge } from "./community-badge";
 import { CommunityEmptyState } from "./community-empty-state";
 import { CommunitySearch } from "./community-search";
 import { CommunityRowsList } from "./community-rows-list";
@@ -34,18 +34,27 @@ export function MembersList({
   canStaffLink,
   search,
   pagination,
+  organization = "",
+  selfConnectEnabled = null,
+  viewerPersonId = null,
 }: {
   slug: string;
   view: CommunityView;
   entries?: DirectoryEntry[];
   rows?: CommunityRow[];
-  badges: Record<string, Badge>;
+  badges: Record<string, CommunityBadges>;
   /** Sign-in markers by person id; empty unless the viewer holds `people.manage`. */
   markers?: Record<string, Marker>;
   canManage: boolean;
   canStaffLink: boolean;
   search: string;
   pagination?: DirectoryPagination;
+  /** The organization's name, for the archive and restore dialogs. */
+  organization?: string;
+  /** `org_portal.sign_in_connect`; null when the page could not read it. */
+  selfConnectEnabled?: boolean | null;
+  /** The viewer's own person id, for the admin lists: their own row offers no Archive. */
+  viewerPersonId?: string | null;
 }) {
   const count = (entries ?? rows ?? []).length;
 
@@ -83,7 +92,8 @@ export function MembersList({
                     slug={slug}
                     entry={entry}
                     canEdit={canManage}
-                    badge={badges[entry.personId]}
+                    badge={badges[entry.personId]?.roll ?? undefined}
+                    engagementBadge={badges[entry.personId]?.engagement ?? undefined}
                     marker={markers[entry.personId]}
                   />
                 </li>
@@ -92,10 +102,13 @@ export function MembersList({
           ) : (
             <CommunityRowsList
               slug={slug}
-              view={view as "visitors" | "staff" | "former"}
+              view={view as "visitors" | "inactive" | "staff" | "former"}
               rows={rows ?? []}
               markers={markers}
               canStaffLink={canStaffLink}
+              organization={organization}
+              selfConnectEnabled={selfConnectEnabled}
+              viewerPersonId={viewerPersonId}
             />
           )}
         </>
@@ -117,12 +130,14 @@ function MemberCard({
   entry,
   canEdit,
   badge,
+  engagementBadge,
   marker,
 }: {
   slug: string;
   entry: DirectoryEntry;
   canEdit: boolean;
-  badge?: Badge;
+  badge?: CommunityBadges["roll"];
+  engagementBadge?: CommunityBadges["engagement"];
   marker?: Marker;
 }) {
   const displayName = `${entry.preferredName ?? entry.firstName} ${entry.lastName}`;
@@ -142,7 +157,12 @@ function MemberCard({
             {entry.email && (
               <p className="break-all text-sm text-muted-foreground">{entry.email}</p>
             )}
-            {badge && <CommunityBadge badge={badge} />}
+            {badge || engagementBadge ? (
+              <div className="flex flex-wrap gap-1">
+                {badge ? <CommunityBadge badge={badge} /> : null}
+                {engagementBadge ? <EngagementStatusBadge engagement={engagementBadge} /> : null}
+              </div>
+            ) : null}
           </Link>
           {/* A sibling of the link, never inside it (a link in a link is invalid). */}
           {canEdit && marker && (

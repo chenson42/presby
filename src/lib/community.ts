@@ -2,27 +2,39 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { withOrgContext, type OrgTx } from "@/lib/authz";
 import {
+  COMMUNITY_ARCHIVE_ENDED_REASON,
   PARTICIPANT_REMOVAL_ENDED_REASON,
   isOnRecordKind,
   type RollActionKind,
 } from "@/lib/roll-action-kinds";
 import { deriveConnection, type Connection } from "@/lib/community-labels";
+import {
+  membershipStanding,
+  type Engagement,
+  type MembershipStanding,
+} from "@/lib/membership-standing";
 import { isUuid } from "@/lib/is-uuid";
 import { ACTIVE_MAIN_EMAIL_LATERAL, anyActiveEmailLikeSql } from "@/lib/contact-methods/sql";
 
 /**
  * The admin Community readers that the member-facing Directory must never
- * serve: VISITORS, STAFF and FORMER PARTICIPANTS, plus the per-row badges and
- * the one-person status the edit page renders (docs/work-log/2026-10-22-
- * founding-admin-directory.md, Phase 3 "Library"; DECISION-200).
+ * serve: VISITORS, INACTIVE, STAFF and FORMER (removed participants and
+ * archived people), plus the per-row badges and the one-person status the edit
+ * page renders (docs/work-log/2026-10-22-founding-admin-directory.md, Phase 3
+ * "Library"; DECISION-200; Increment 3a for Inactive and the archive).
  *
  * WHY A SEPARATE FILE. The member Directory's eligibility predicate admits only
- * a live, roll-bearing or `'regular'` membership, so a visitor (engagement
- * `visitor`, no roll) and a staff anchor (`staff`, DECISION-129) are absent
- * from it by construction. Keeping the readers that DO list them in a file
- * `directory.ts` never imports is what keeps it that way; `community.source.
- * test.ts` pins both that `directory.ts` never imports this module and that the
- * predicate text never contains those two engagement values.
+ * a person whose standing is `listed` (a roll in the four, or engagement
+ * `regular`), so a visitor, an inactive person and a staff anchor (DECISION-129)
+ * are absent from it by construction. Keeping the readers that DO list them in
+ * a file `directory.ts` never imports is what keeps it that way;
+ * `participant-boundaries.test.ts` pins that `directory.ts` never imports this
+ * module and that the predicate text never names those engagement values.
+ *
+ * STANDING IS NEVER RE-CODED HERE. The Visitors and Inactive lists ask the SQL
+ * classifier `presby_membership_standing(roll, engagement)` (drizzle/0065), the
+ * same function the Directory, the derived rows and the sign-in core use, so
+ * the lists cannot disagree with who is listed (R51, DECISION-233).
  *
  * EVERY EXPORT IS GATED ON `people.manage` (checked in the same transaction as
  * the read, exactly as `people.ts` does), NOT `directory.view`: these are admin
@@ -67,8 +79,14 @@ export interface CommunityRow {
   /** Titles of the person's OPEN staff positions, oldest first. Empty on a
    * Staff-view row means a staff anchor with no position yet. */
   positions: string[];
-  /** 'YYYY-MM-DD'; set only on the Former participants list. */
+  /** 'YYYY-MM-DD'; set only on the Former list. */
   endedOn: string | null;
+  /** The stored engagement (the value an archive keeps on the ended row). */
+  engagementStatus: Engagement;
+  /** `memberships.ended_reason`; set only on the Former list (the removal or archive marker). */
+  endedReason: string | null;
+  /** `people.user_id is not null` (never `users`, DECISION-189). */
+  signInConnected: boolean;
 }
 
 export type CommunityListResult =
@@ -94,6 +112,9 @@ interface CommunityRowSql {
   first_visit_date: string | null;
   positions: string[] | null;
   ended_on: string | null;
+  engagement_status: Engagement;
+  ended_reason: string | null;
+  sign_in_connected: boolean;
 }
 
 /** An open staff position: no end date, or an end date still ahead. The same
@@ -105,15 +126,24 @@ function likePattern(raw: string): string {
   return `%${raw.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
-type ListKind = "visitors" | "staff" | "former";
+type ListKind = "visitors" | "inactive" | "staff" | "former";
 
 function listPredicate(kind: ListKind) {
   switch (kind) {
     case "visitors":
-      // A visitor is a live membership with engagement 'visitor' and NO roll.
-      // An enrolled visitor has a roll, so they leave this list on their own.
-      return sql`m.engagement_status = 'visitor'
-        and m.current_roll is null
+      // Standing `visitor`: engagement `visitor` and no listed roll. An enrolled
+      // visitor holds a roll, so they leave this list on their own. Asking the
+      // classifier (not the columns) is what makes this list and the Directory
+      // agree by construction, including for an unlisted non-null roll (M11).
+      return sql`presby_membership_standing(m.current_roll, m.engagement_status) = 'visitor'
+        and m.ended_on is null
+        and p.merged_into_id is null
+        and p.date_of_death is null`;
+    case "inactive":
+      // Standing `inactive`: engagement `inactive` or `moved_away` and no listed
+      // roll. A rolled person marked inactive stays under Members or
+      // Participants with an engagement badge (G3, G4).
+      return sql`presby_membership_standing(m.current_roll, m.engagement_status) = 'inactive'
         and m.ended_on is null
         and p.merged_into_id is null
         and p.date_of_death is null`;
@@ -137,9 +167,10 @@ function listPredicate(kind: ListKind) {
           )
         )`;
     case "former":
-      // The removal's own fixed marker (a constant, not user input).
+      // A closed pair of fixed markers (constants, not user input): a
+      // participant removal and a Community archive. Never a prefix match.
       return sql`m.ended_on is not null
-        and m.ended_reason = ${PARTICIPANT_REMOVAL_ENDED_REASON}
+        and m.ended_reason in (${PARTICIPANT_REMOVAL_ENDED_REASON}, ${COMMUNITY_ARCHIVE_ENDED_REASON})
         and p.merged_into_id is null`;
   }
 }
@@ -194,6 +225,9 @@ async function listCommunity(
              cm_email.value as email,
              m.first_visit_date::text as first_visit_date,
              m.ended_on::text as ended_on,
+             m.engagement_status as engagement_status,
+             m.ended_reason as ended_reason,
+             (p.user_id is not null) as sign_in_connected,
              coalesce((
                select array_agg(sp.position order by sp.starts_on, sp.id)
                  from staff_positions sp
@@ -216,19 +250,33 @@ async function listCommunity(
         firstVisitDate: row.first_visit_date,
         positions: row.positions ?? [],
         endedOn: row.ended_on,
+        engagementStatus: row.engagement_status,
+        endedReason: row.ended_reason,
+        signInConnected: row.sign_in_connected === true,
       })),
       pagination: { page, pageSize, total, totalPages },
     };
   });
 }
 
-/** Visitors: engagement `visitor`, no roll, live. `people.manage`-gated. */
+/** Visitors: standing `visitor` (engagement `visitor`, no listed roll), live. `people.manage`-gated. */
 export function listVisitors(
   viewerPersonId: string,
   organizationId: string,
   opts: CommunityListOptions,
 ): Promise<CommunityListResult> {
   return listCommunity("visitors", viewerPersonId, organizationId, opts);
+}
+
+/** Inactive: standing `inactive` (engagement `inactive` or `moved_away`, no listed
+ * roll), live. A rolled person marked inactive is not here (they stay under
+ * Members or Participants with an engagement badge). `people.manage`-gated. */
+export function listInactive(
+  viewerPersonId: string,
+  organizationId: string,
+  opts: CommunityListOptions,
+): Promise<CommunityListResult> {
+  return listCommunity("inactive", viewerPersonId, organizationId, opts);
 }
 
 /** Staff: people with an open `staff_positions` row, whatever their
@@ -242,16 +290,19 @@ export function listStaff(
   return listCommunity("staff", viewerPersonId, organizationId, opts);
 }
 
-/** Former participants: memberships ended by a participant removal (the fixed
- * `ended_reason` marker), the only way back to an Undo after the person leaves
- * every live list. `people.manage`-gated. */
-export function listFormerParticipants(
+/** Former: memberships ended by a participant removal or a Community archive
+ * (the two fixed `ended_reason` markers), the only way back to an Undo or a
+ * Restore after the person leaves every live list. `people.manage`-gated. */
+export function listFormer(
   viewerPersonId: string,
   organizationId: string,
   opts: CommunityListOptions,
 ): Promise<CommunityListResult> {
   return listCommunity("former", viewerPersonId, organizationId, opts);
 }
+
+/** The pre-3a name; the list now holds archived people too. */
+export const listFormerParticipants = listFormer;
 
 // ---------------------------------------------------------------------------
 // Badges
@@ -265,19 +316,31 @@ export type CommunityBadge =
   | "visitor"
   | "waiting";
 
+/** The engagement badge a list row may carry beside its roll badge (G4). */
+export type EngagementBadge = "inactive" | "moved_away";
+
+export interface CommunityBadges {
+  /** The roll or connection badge, or null. */
+  roll: CommunityBadge | null;
+  /** Set when the engagement is inactive or moved away, whether or not the person is on the roll. */
+  engagement: EngagementBadge | null;
+}
+
 /**
- * One query for the rendered ids. The roll wins (`active`, `baptized`,
- * `affiliate`, `participant`); with no roll, `waiting` means a pending roll
- * action exists ("Waiting for the Session"), then `visitor`. A person with no
- * badge (listed, staff anchor, ended) is omitted. `{}` without `people.manage`
- * (never an error: a badge is chrome, not a gate), and non-UUID ids are
- * dropped rather than reaching the cast.
+ * One query for the rendered ids. `roll` is as before: the roll wins (`active`,
+ * `baptized`, `affiliate`, `participant`); with no roll, `waiting` means a
+ * pending roll action exists ("Waiting for the Session"), then `visitor`.
+ * `engagement` is new (G4): a rolled person marked Inactive keeps their roll
+ * badge and gains the engagement badge. A person with neither (listed, staff
+ * anchor, ended) is omitted. `{}` without `people.manage` (never an error: a
+ * badge is chrome, not a gate), and non-UUID ids are dropped rather than
+ * reaching the cast.
  */
 export async function getCommunityBadges(
   viewerPersonId: string,
   organizationId: string,
   personIds: string[],
-): Promise<Record<string, CommunityBadge>> {
+): Promise<Record<string, CommunityBadges>> {
   const ids = [...new Set(personIds.filter((id) => isUuid(id)))];
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await canManagePeople(tx, viewerPersonId, organizationId))) {
@@ -317,16 +380,19 @@ export async function getCommunityBadges(
         }
       ).rows ?? [];
 
-    const badges: Record<string, CommunityBadge> = {};
+    const badges: Record<string, CommunityBadges> = {};
     for (const row of rows) {
-      const badge = badgeFor(row.current_roll, row.engagement_status, row.has_pending);
-      if (badge) badges[row.person_id] = badge;
+      const entry: CommunityBadges = {
+        roll: rollBadgeFor(row.current_roll, row.engagement_status, row.has_pending),
+        engagement: engagementBadgeFor(row.engagement_status),
+      };
+      if (entry.roll || entry.engagement) badges[row.person_id] = entry;
     }
     return badges;
   });
 }
 
-function badgeFor(
+function rollBadgeFor(
   currentRoll: string | null,
   engagementStatus: string,
   hasPending: boolean,
@@ -336,8 +402,14 @@ function badgeFor(
   }
   if (currentRoll === "other_participant") return "participant";
   if (currentRoll === null && hasPending) return "waiting";
-  if (engagementStatus === "visitor") return "visitor";
+  if (membershipStanding(currentRoll, engagementStatus) === "visitor") return "visitor";
   return null;
+}
+
+function engagementBadgeFor(engagementStatus: string): EngagementBadge | null {
+  return engagementStatus === "inactive" || engagementStatus === "moved_away"
+    ? engagementStatus
+    : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +424,18 @@ export interface CommunityStatus {
   currentRollSince: string | null;
   /** 'YYYY-MM-DD'. */
   endedOn: string | null;
+  /** `memberships.ended_reason` (the removal or archive marker, or any other text). */
+  endedReason: string | null;
+  /** The stored engagement. Kept on an ended row, which is how Restore knows which list to return to. */
+  engagementStatus: Engagement;
+  /** The SQL classifier's standing, asked in the same statement as the rest. */
+  standing: MembershipStanding;
+  /** 'YYYY-MM-DD'. Stored on the membership (the Visit details form's start). */
+  firstVisitDate: string | null;
+  /** Free text, at most 200 characters; never copied into an audit row. */
+  howHeard: string | null;
+  /** `people.user_id is not null` (never `users`, DECISION-189). */
+  signInConnected: boolean;
   hasOpenStaffPosition: boolean;
   /** Pending roll actions for this person at this organization. */
   pendingCount: number;
@@ -390,6 +474,10 @@ export async function getCommunityStatus(
              m.current_roll_since::text as current_roll_since,
              m.ended_on::text as ended_on,
              m.ended_reason as ended_reason,
+             presby_membership_standing(m.current_roll, m.engagement_status) as standing,
+             m.first_visit_date::text as first_visit_date,
+             m.how_heard as how_heard,
+             (p.user_id is not null) as sign_in_connected,
              exists (
                select 1 from staff_positions sp
                 where sp.person_id = m.person_id
@@ -404,6 +492,7 @@ export async function getCommunityStatus(
              la.kind as latest_kind,
              la.effective_date::text as latest_effective_date
         from memberships m
+        join people p on p.id = m.person_id
         left join lateral (
           select ra.id, ra.kind, ra.effective_date
             from presby_effective_roll_actions ra
@@ -418,11 +507,15 @@ export async function getCommunityStatus(
     const row = (
       result as unknown as {
         rows?: Array<{
-          engagement_status: string;
+          engagement_status: Engagement;
           current_roll: string | null;
           current_roll_since: string | null;
           ended_on: string | null;
           ended_reason: string | null;
+          standing: MembershipStanding;
+          first_visit_date: string | null;
+          how_heard: string | null;
+          sign_in_connected: boolean;
           has_open_staff_position: boolean;
           pending_count: number;
           latest_id: string | null;
@@ -448,6 +541,12 @@ export async function getCommunityStatus(
         currentRoll: row.current_roll,
         currentRollSince: row.current_roll_since,
         endedOn: row.ended_on,
+        endedReason: row.ended_reason,
+        engagementStatus: row.engagement_status,
+        standing: row.standing,
+        firstVisitDate: row.first_visit_date,
+        howHeard: row.how_heard,
+        signInConnected: row.sign_in_connected === true,
         hasOpenStaffPosition: row.has_open_staff_position === true,
         pendingCount: row.pending_count,
         latestAction:

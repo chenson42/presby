@@ -181,25 +181,46 @@ function isRejectedParent(err: unknown): boolean {
  * The `groups` rows to seed for a freshly-created org, conditional on
  * `organizationType` — confirmed against `scripts/seed-dev.sql`'s own
  * fixture shape (lines ~57-88): a congregation gets Session, Board of
- * Deacons, AND Active Membership; every other organization type (presbytery,
- * synod, general_assembly, new_worshiping_community) gets Active Membership
- * only, mirroring the fixture's own presbytery row (no Session, no Board of
- * Deacons — a presbytery has neither in this schema).
+ * Deacons, the Moderator seat, AND Active Membership; every other organization
+ * type (presbytery, synod, general_assembly, new_worshiping_community) gets
+ * Active Membership only, mirroring the fixture's own presbytery row (no
+ * Session, no Board of Deacons — a presbytery has neither in this schema).
+ *
+ * EVERY type also gets All Current Records (`all_memberships`, Increment 3a,
+ * drizzle/0066, DECISION-232): Active Membership holds the people with MEMBER
+ * STANDING (listed or staff anchor), All Current Records holds everyone with a
+ * live membership, visitors and inactive people included, and carries the
+ * baseline `calendar_viewer` role below. The database creates this sibling by
+ * trigger whenever an Active Membership group is inserted (`groups_pair_derived`),
+ * so the explicit entry is redundant for the row itself, and it is listed here
+ * ON PURPOSE: a `RETURNING` clause does not return rows a trigger inserted, so
+ * the baseline-role lookup in `createOrganization()` finds the group only if
+ * this plan inserted it (the trigger's own insert then does nothing, `on
+ * conflict do nothing`). Drop it from the plan and the throw-if-missing below
+ * fails loudly instead of shipping an organization with no calendar role
+ * (arch-A3, pinned by `org-provisioning.test.ts`).
  */
-function groupSeedPlan(
+export function groupSeedPlan(
   organizationType: OrganizationType,
 ): Array<{
   groupTypeKey: "court" | "roster";
   name: string;
-  derivedFrom: "session" | "diaconate" | "deacons_moderator" | "active_membership";
+  derivedFrom: "session" | "diaconate" | "deacons_moderator" | "active_membership" | "all_memberships";
 }> {
   const activeMembership = {
     groupTypeKey: "roster" as const,
     name: "Active Membership",
     derivedFrom: "active_membership" as const,
   };
+  // The name is decided once: the derived-edit trigger forbids a later rename
+  // (drizzle/0066 section 4, D16). It is the same literal the pair trigger writes.
+  const allMemberships = {
+    groupTypeKey: "roster" as const,
+    name: "All Current Records",
+    derivedFrom: "all_memberships" as const,
+  };
   if (organizationType !== "congregation") {
-    return [activeMembership];
+    return [activeMembership, allMemberships];
   }
   return [
     {
@@ -222,6 +243,7 @@ function groupSeedPlan(
       derivedFrom: "deacons_moderator",
     },
     activeMembership,
+    allMemberships,
   ];
 }
 
@@ -238,7 +260,10 @@ export { eventTypeSeedPlan };
  * `groupSeedPlan()`, same inline-conditional shape.
  *
  * Every organization type gets `member` (`directory.view` + `events.view`,
- * bound to `active_membership`). A CONGREGATION also gets `session_member`
+ * bound to `active_membership`, so held by people with MEMBER STANDING only) and
+ * `calendar_viewer` (`events.view` only, bound to `all_memberships`, so held by
+ * everyone with a live membership, a visitor included; Increment 3a,
+ * DECISION-232). A CONGREGATION also gets `session_member`
  * (DECISION-202, Increment 2): `roll.approve` ONLY, bound to the derived
  * `session` group, so the people the congregation's own officer records seat on
  * its Session can decide the roll actions the clerk proposes. This is the
@@ -275,7 +300,11 @@ export function baselineRoleSeedPlan(
   key: string;
   name: string;
   permissionKeys: readonly string[];
-  boundToDerivedFrom: "active_membership" | "session" | "deacons_moderator";
+  boundToDerivedFrom:
+    | "active_membership"
+    | "all_memberships"
+    | "session"
+    | "deacons_moderator";
 }> {
   const member = {
     key: "member",
@@ -283,11 +312,21 @@ export function baselineRoleSeedPlan(
     permissionKeys: ["directory.view", "events.view"],
     boundToDerivedFrom: "active_membership" as const,
   };
+  // The role KEY is the discriminator drizzle/0066's backfill uses (an
+  // org-owned role already keyed `calendar_viewer` is never modified), so the
+  // key and the name are the backfill's own literals.
+  const calendarViewer = {
+    key: "calendar_viewer",
+    name: "Calendar viewer",
+    permissionKeys: ["events.view"],
+    boundToDerivedFrom: "all_memberships" as const,
+  };
   if (organizationType !== "congregation") {
-    return [member];
+    return [member, calendarViewer];
   }
   return [
     member,
+    calendarViewer,
     {
       key: "session_member",
       name: "Session member",
@@ -462,12 +501,13 @@ export async function createOrganization(
           (g) => g.derivedFrom === r.boundToDerivedFrom,
         );
         if (!boundGroup) {
-          // groupSeedPlan() always includes the active_membership entry for
-          // every organizationType, and the session entry for a congregation
-          // (see its own doc comment) — this is unreachable in practice, but
-          // throwing here (rather than silently skipping the role seed) fails
-          // the whole transaction loudly instead of shipping an org with no
-          // working directory access or no Session role.
+          // groupSeedPlan() always includes the active_membership and
+          // all_memberships entries for every organizationType, and the session
+          // entry for a congregation (see its own doc comment) — this is
+          // unreachable in practice, but throwing here (rather than silently
+          // skipping the role seed) fails the whole transaction loudly instead
+          // of shipping an org with no working directory access, no calendar
+          // role or no Session role.
           throw new Error(
             `org-provisioning: no "${r.boundToDerivedFrom}" group was seeded; cannot bind the "${r.key}" baseline role`,
           );

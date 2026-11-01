@@ -6,7 +6,7 @@ import { CommunityNav, communityHref } from "./community-nav";
 afterEach(cleanup);
 
 describe("CommunityNav", () => {
-  it("shows all six views as real links for a manager", () => {
+  it("shows all seven views as real links for a manager", () => {
     render(<CommunityNav slug="alder-creek" view="all" search="" canManage={true} />);
     const group = screen.getByRole("group", { name: "Community view" });
     const labels = Array.from(group.querySelectorAll("a")).map((a) => a.textContent);
@@ -15,14 +15,16 @@ describe("CommunityNav", () => {
       "Members",
       "Participants",
       "Visitors",
+      "Inactive",
       "Staff",
       "Former",
     ]);
   });
 
-  it("hides Visitors, Staff and Former without people.manage", () => {
+  it("hides Visitors, Inactive, Staff and Former without people.manage", () => {
     render(<CommunityNav slug="alder-creek" view="all" search="" canManage={false} />);
     expect(screen.queryByRole("link", { name: "Visitors" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Inactive" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Staff" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Former" })).toBeNull();
     expect(screen.getByRole("link", { name: "Participants" })).toBeTruthy();
@@ -41,6 +43,12 @@ describe("CommunityNav", () => {
     expect(
       screen.getByRole("link", { name: "Everyone" }).getAttribute("href"),
     ).toBe("/o/alder-creek/admin/community?search=Nora");
+  });
+
+  it("Inactive links to ?view=inactive and keeps the search", () => {
+    expect(communityHref("alder-creek", "inactive", "Nora")).toBe(
+      "/o/alder-creek/admin/community?view=inactive&search=Nora",
+    );
   });
 
   it("communityHref omits the query for Everyone with no search", () => {

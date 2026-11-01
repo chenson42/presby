@@ -10,7 +10,8 @@ import {
 import { getDirectory, type DirectoryResult } from "@/lib/directory";
 import {
   getCommunityBadges,
-  listFormerParticipants,
+  listFormer,
+  listInactive,
   listStaff,
   listVisitors,
   type CommunityListResult,
@@ -18,6 +19,7 @@ import {
 import { parseCommunityView } from "@/lib/community-labels";
 import { countPendingRollActions } from "@/lib/roll";
 import { getSignInMarkers } from "@/lib/onboarding/org-invite";
+import { getSelfConnectEnabled } from "./self-connect";
 import type { SignInMarker } from "@/lib/onboarding/sign-in-types";
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
@@ -38,14 +40,14 @@ const CHILDREN_MINISTRY_FLAG = "org_portal.children_ministry";
 const STAFF_FLAG = "org_portal.staff";
 
 /**
- * `/o/<slug>/admin/community` — the Community page: the list, its six views and
+ * `/o/<slug>/admin/community` — the Community page: the list, its seven views and
  * the "Add person" entry point. Gated on BOTH `org_portal.members_create` (the
  * global flag) AND the matching `organization_feature_toggles` row
  * (DECISION-097's third axis).
  *
  * VIEWS (DECISION-201), server-rendered links in `CommunityNav`: Everyone,
  * Members (active, baptized, affiliate), Participants read the privacy-filtered
- * Directory (`getDirectory()`, `directory.view`); Visitors, Staff and Former
+ * Directory (`getDirectory()`, `directory.view`); Visitors, Inactive, Staff and Former
  * read `src/lib/community.ts` (`people.manage`, admin-only, never in the
  * Directory).
  *
@@ -136,7 +138,8 @@ export default async function CommunityPage({
     resolved.org.organizationId,
     "people.manage",
   );
-  const adminView = view === "visitors" || view === "staff" || view === "former";
+  const adminView =
+    view === "visitors" || view === "inactive" || view === "staff" || view === "former";
   if (adminView && !canManage) {
     return <MembersForbidden name={resolved.org.name} heading={HEADING} />;
   }
@@ -153,9 +156,11 @@ export default async function CommunityPage({
       listResult =
         view === "visitors"
           ? await listVisitors(personId, organizationId, opts)
-          : view === "staff"
-            ? await listStaff(personId, organizationId, opts)
-            : await listFormerParticipants(personId, organizationId, opts);
+          : view === "inactive"
+            ? await listInactive(personId, organizationId, opts)
+            : view === "staff"
+              ? await listStaff(personId, organizationId, opts)
+              : await listFormer(personId, organizationId, opts);
     } else {
       directoryResult = await getDirectory(personId, organizationId, {
         search,
@@ -212,6 +217,14 @@ export default async function CommunityPage({
         ],
       )
     : {};
+
+  // The Inactive row's "Mark as regular" dialog says when a person could be
+  // connected automatically, which depends on this toggle. Read once, only for
+  // the one list whose rows carry that button; `null` omits the line.
+  const selfConnectEnabled =
+    view === "inactive" && canManage
+      ? await getSelfConnectEnabled(personId, organizationId)
+      : null;
 
   const childrenMinistryFlagOn = await isFlagEnabled(CHILDREN_MINISTRY_FLAG);
   const canViewChildrenRoster = childrenMinistryFlagOn
@@ -305,6 +318,9 @@ export default async function CommunityPage({
           canStaffLink={canStaffLink}
           search={search}
           pagination={listResult.pagination}
+          organization={resolved.org.name}
+          selfConnectEnabled={selfConnectEnabled}
+          viewerPersonId={personId}
         />
       ) : null}
     </section>

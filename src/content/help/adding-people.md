@@ -1,4 +1,4 @@
-Community is where you add people and record how each one is connected to your congregation: as a visitor, a participant or a member. A new member waits for the Session to approve.
+Community is where you add people and record how each one is connected to your congregation: as a visitor, a participant or a member. A new member waits for the Session to approve. You can also mark how a person is doing, such as inactive, and archive a visitor you no longer need on a list.
 
 ## Turn on Community
 
@@ -9,13 +9,14 @@ Until you do, the "Community" tile opens a page that says "Member management isn
 
 ## The Community page
 
-The page is headed "Community". It has two links at the top, "Pending approvals" and "Add person", and a row of views: "Everyone", "Members", "Participants", "Visitors", "Staff" and "Former". There is a "Search people" box.
+The page is headed "Community". It has two links at the top, "Pending approvals" and "Add person", and a row of views: "Everyone", "Members", "Participants", "Visitors", "Inactive", "Staff" and "Former". There is a "Search people" box.
 
 ![The Community page on a phone: the view tabs, a search box, and a card for each person with an Edit button.](shot:community-list)
 
 - "Visitors" lists the people you recorded as visitors. A visitor is never in the directory.
+- "Inactive" lists people you marked inactive or moved away who are not on the roll. People on the roll stay under "Members" or "Participants", with a small "Inactive" or "Moved away" tag.
 - "Staff" lists people with a staff position, and a person with no position yet is marked "No position yet".
-- "Former" lists people whose connection has ended, with the date.
+- "Former" lists people whose connection has ended, with the date: participants you removed, and visitors or inactive people you archived.
 
 ## Adding a person
 
@@ -44,6 +45,26 @@ Open "Edit" beside a person in a list. The "Connection" section shows where they
 
 - A participant has "Remove as participant" and "Undo last entry". Removing asks for an effective date and ends their connection from that date. They leave the directory and lose access if they have an account. Undo asks for a reason, keeps the original entry in the record marked undone, and puts the person back as they were.
 - "Record a roll action" offers "Profession of faith", "Reaffirmation of faith", "Restoration", "Certificate received (transfer in)", "Other gain", "Enrolled as a baptized member", "Enrolled as an affiliate member" and "Enrolled as a participant". Enrolling someone as a participant takes effect now. Every other action is proposed and waits for the Session to approve it.
+
+## Marking how a person is doing
+
+Open "Edit" beside a person. The "Engagement" card says how the person is doing: "Visitor", "Regular attender", "Inactive" or "Moved away". It is for your own care. It is never reported to the presbytery or the denomination, and it does not change anyone's membership roll. It does decide who appears in the member directory and what a connected sign-in can see.
+
+A person who is not on the roll appears in the directory only as a regular attender. A person on the roll stays in the directory whatever you choose, and cannot be marked as a visitor; "Moved away" is a label, and a departure is recorded as a roll action. If a person on the roll is still marked as a visitor, the card offers "Mark as regular attender". A staff record has no engagement: the card says "This is a staff record, so engagement isn't tracked."
+
+When a change would add someone to the directory or take them out, a dialog asks first. It adds a line if the person has a sign-in connected, and, when it applies, a line saying they could be connected to the record automatically when they sign in with an address on file. Choose "Save engagement". Every change is recorded. On the "Inactive" list, "Mark as regular" does the same from the row.
+
+## Archiving a visitor, and restoring
+
+A visitor, or a person marked inactive or moved away, can be archived with "Archive", from their row or their record. The dialog says they will leave the list and appear under "Former", that their record is kept, and that you can restore it any time. It adds a line if they have a sign-in connected, and another if an invitation to them is still open.
+
+Someone who still holds an office, a role or a staff position cannot be archived: end that first. A member on the roll leaves through a roll action, and a participant is removed as a participant. You cannot archive your own record.
+
+To bring someone back, open "Former" and choose "Restore", or choose "Restore" on their record. A dialog asks first, with "Restore" and "Keep archived". When you add a person who was archived, the match step says so and offers the same button.
+
+## Correcting a visit
+
+On a visitor's record, "Visit details" lets you correct the date of the first visit and how they heard about you. Choose "Save visit details".
 
 ## Pending approvals
 

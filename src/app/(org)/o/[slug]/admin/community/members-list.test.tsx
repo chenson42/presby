@@ -1,10 +1,29 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MembersList } from "./members-list";
 import type { DirectoryEntry } from "@/lib/directory";
 import type { CommunityRow } from "@/lib/community";
 import type { CommunityView } from "@/lib/community-labels";
+import {
+  COMMUNITY_ARCHIVE_ENDED_REASON,
+  PARTICIPANT_REMOVAL_ENDED_REASON,
+} from "@/lib/roll-action-kinds";
+
+// The row buttons' dialogs call useRouter; nothing here opens one.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+}));
+
+// The Community engagement Server Actions reach the database; the screens under
+// test only call them through the dialogs, which these files do not drive.
+vi.mock("./actions", () => ({
+  changeEngagementAction: vi.fn(),
+  archivePersonAction: vi.fn(),
+  restorePersonAction: vi.fn(),
+  updateVisitDetailsAction: vi.fn(),
+}));
+
 
 afterEach(cleanup);
 
@@ -31,18 +50,40 @@ const BASE = {
 
 describe("MembersList — empty states (one per view)", () => {
   const cases: Array<[CommunityView, RegExp, RegExp | null]> = [
-    ["all", /^no one yet$/i, /add your first person to get started/i],
+    ["all", /^no one is listed yet$/i, /add your first person to get started/i],
+    ["inactive", /^no one is marked inactive or moved away$/i, /people on the roll who are marked inactive stay under members or participants/i],
     ["members", /^no members yet$/i, /once the session approves their roll action/i],
     ["participants", /^no participants yet$/i, /choose participant/i],
     ["visitors", /^no visitors yet$/i, /add a visitor to keep track/i],
     ["staff", /^no one holds a staff position yet$/i, null],
-    ["former", /^no former participants$/i, null],
+    ["former", /^no one has been removed or archived$/i, /people you remove as participants or archive appear here/i],
   ];
 
   it.each(cases)("%s: headline and next step", (view, headline, detail) => {
     render(<MembersList {...BASE} view={view} entries={view === "all" || view === "members" || view === "participants" ? [] : undefined} rows={view === "all" || view === "members" || view === "participants" ? undefined : []} />);
     expect(screen.getByText(headline)).toBeTruthy();
     if (detail) expect(screen.getByText(detail)).toBeTruthy();
+  });
+
+  it("Everyone's detail points an administrator at the other views and no one else (Copy group C, audience)", () => {
+    const { rerender } = render(<MembersList {...BASE} entries={[]} />);
+    expect(
+      screen.getByText(
+        "Add your first person to get started. People appear here once they are members, participants or regular attenders; visitors, inactive people and staff contacts are under their own views.",
+      ),
+    ).toBeTruthy();
+    rerender(<MembersList {...BASE} canManage={false} entries={[]} />);
+    expect(
+      screen.getByText("People appear here once they are members, participants or regular attenders."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/under their own views/i)).toBeNull();
+  });
+
+  it("a search with no match names the view: inactive people and former people (Group C)", () => {
+    const { rerender } = render(<MembersList {...BASE} view="inactive" rows={[]} search="Zed" />);
+    expect(screen.getByText('No inactive people match "Zed". Try a different name or email.')).toBeTruthy();
+    rerender(<MembersList {...BASE} view="former" rows={[]} search="Zed" />);
+    expect(screen.getByText('No former people match "Zed". Try a different name or email.')).toBeTruthy();
   });
 
   it("offers Add person on Everyone, Participants and Visitors for a manager", () => {
@@ -62,7 +103,7 @@ describe("MembersList — empty states (one per view)", () => {
 
   it("omits the CTA when the viewer cannot manage", () => {
     render(<MembersList {...BASE} canManage={false} entries={[]} />);
-    expect(screen.getByText(/^no one yet$/i)).toBeTruthy();
+    expect(screen.getByText(/^no one is listed yet$/i)).toBeTruthy();
     expect(screen.queryByRole("link", { name: /add person/i })).toBeNull();
   });
 
@@ -114,8 +155,30 @@ describe("MembersList — directory entries", () => {
     ["visitor", "Visitor"],
     ["waiting", "Waiting for the Session"],
   ] as const)("renders the %s badge as %s", (badge, label) => {
-    render(<MembersList {...BASE} entries={[ENTRY]} badges={{ "p-1": badge }} />);
+    render(<MembersList {...BASE} entries={[ENTRY]} badges={{ "p-1": { roll: badge, engagement: null } }} />);
     expect(screen.getByText(label)).toBeTruthy();
+  });
+
+  it("a rolled person marked inactive or moved away carries the engagement badge beside the roll badge (Group C, EC-30)", () => {
+    const { rerender } = render(
+      <MembersList {...BASE} entries={[ENTRY]} badges={{ "p-1": { roll: "active", engagement: "inactive" } }} />,
+    );
+    expect(screen.getByText("Active member")).toBeTruthy();
+    expect(screen.getByText("Inactive")).toBeTruthy();
+    rerender(
+      <MembersList {...BASE} entries={[ENTRY]} badges={{ "p-1": { roll: "participant", engagement: "moved_away" } }} />,
+    );
+    expect(screen.getByText("Participant")).toBeTruthy();
+    expect(screen.getByText("Moved away")).toBeTruthy();
+  });
+
+  it("an engagement badge shows alone when there is no roll badge, and nothing shows when both are null", () => {
+    const { rerender } = render(
+      <MembersList {...BASE} entries={[ENTRY]} badges={{ "p-1": { roll: null, engagement: "moved_away" } }} />,
+    );
+    expect(screen.getByText("Moved away")).toBeTruthy();
+    rerender(<MembersList {...BASE} entries={[ENTRY]} badges={{ "p-1": { roll: null, engagement: null } }} />);
+    expect(screen.queryByText("Moved away")).toBeNull();
   });
 
   it("renders no badge for a person without one", () => {
@@ -137,7 +200,20 @@ describe("MembersList — admin rows (Visitors, Staff, Former)", () => {
     firstVisitDate: "2026-03-01",
     positions: ["Organist", "Sexton"],
     endedOn: "2026-04-02",
+    engagementStatus: "visitor",
+    endedReason: null,
+    signInConnected: false,
   };
+
+  it("Inactive: the viewer's own row offers Mark as regular but no Archive; another row offers both — regression for Archive offered on your own record", () => {
+    const own = { ...ROW, personId: "p-me", displayName: "Sam Self", engagementStatus: "inactive" as const, endedOn: null };
+    const other = { ...ROW, personId: "p-9", displayName: "Wren Alder", engagementStatus: "inactive" as const, endedOn: null };
+    render(<MembersList {...BASE} view="inactive" rows={[own, other]} viewerPersonId="p-me" />);
+    expect(screen.getByRole("button", { name: "Mark as regular Sam Self" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Archive Sam Self" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Mark as regular Wren Alder" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Archive Wren Alder" })).toBeTruthy();
+  });
 
   it("Visitors: links to the edit page and shows the first visit", () => {
     render(<MembersList {...BASE} view="visitors" rows={[ROW]} />);
@@ -179,6 +255,67 @@ describe("MembersList — admin rows (Visitors, Staff, Former)", () => {
   it("Former: shows the removal date", () => {
     render(<MembersList {...BASE} view="former" rows={[ROW]} />);
     expect(screen.getByText(/removed/i)).toBeTruthy();
+  });
+
+  it.each([
+    ["removed participant", "participant_removed", "visitor", /^Removed\s/],
+    ["archived visitor", "community_archive", "visitor", /^Archived visitor, /],
+    ["archived inactive person", "community_archive", "inactive", /^Archived, /],
+  ] as const)("Former detail: %s (Group D)", (_label, reason, engagement, expected) => {
+    render(
+      <MembersList
+        {...BASE}
+        view="former"
+        rows={[{ ...ROW, endedReason: reason === "participant_removed" ? PARTICIPANT_REMOVAL_ENDED_REASON : COMMUNITY_ARCHIVE_ENDED_REASON, engagementStatus: engagement }]}
+      />,
+    );
+    const detail = document.querySelector("li p.text-muted-foreground:last-of-type") as HTMLElement;
+    expect(detail.textContent ?? "").toMatch(expected);
+  });
+
+  it("Inactive: the row detail reads Inactive or Moved away", () => {
+    const { rerender } = render(
+      <MembersList {...BASE} view="inactive" rows={[{ ...ROW, engagementStatus: "inactive", endedOn: null }]} />,
+    );
+    expect(screen.getByText("Inactive", { selector: "p" })).toBeTruthy();
+    rerender(
+      <MembersList {...BASE} view="inactive" rows={[{ ...ROW, engagementStatus: "moved_away", endedOn: null }]} />,
+    );
+    expect(screen.getByText("Moved away", { selector: "p" })).toBeTruthy();
+  });
+
+  describe("the row buttons (Group C)", () => {
+    const names = () =>
+      screen
+        .queryAllByRole("button")
+        .map((b) => b.textContent)
+        .filter((t) => t !== "Search");
+
+    it("Visitors: Archive only", () => {
+      render(<MembersList {...BASE} view="visitors" rows={[{ ...ROW, endedOn: null }]} />);
+      expect(names()).toEqual(["Archive Wren Alder"]);
+    });
+
+    it("Inactive: Mark as regular and Archive, each named for the person", () => {
+      render(<MembersList {...BASE} view="inactive" rows={[{ ...ROW, engagementStatus: "inactive", endedOn: null }]} />);
+      expect(names()).toEqual(["Mark as regular Wren Alder", "Archive Wren Alder"]);
+    });
+
+    it("Former: Restore on an archived row, nothing on a removed participant", () => {
+      const { rerender } = render(
+        <MembersList {...BASE} view="former" rows={[{ ...ROW, endedReason: COMMUNITY_ARCHIVE_ENDED_REASON }]} />,
+      );
+      expect(names()).toEqual(["Restore Wren Alder"]);
+      rerender(
+        <MembersList {...BASE} view="former" rows={[{ ...ROW, endedReason: PARTICIPANT_REMOVAL_ENDED_REASON }]} />,
+      );
+      expect(names()).toEqual([]);
+    });
+
+    it("Staff: no row buttons", () => {
+      render(<MembersList {...BASE} view="staff" rows={[ROW]} />);
+      expect(names()).toEqual([]);
+    });
   });
 });
 

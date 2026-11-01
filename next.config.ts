@@ -150,11 +150,20 @@ const nextConfig: NextConfig = {
   // default root inference refuses to resolve a symlinked module living
   // outside the inferred workspace root, even though Node's own
   // require.resolve() finds it without any trouble. In CI/production,
-  // presby-site-kit installs normally (no symlink) and this setting has
-  // no effect either way.
-  turbopack: {
-    root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
-  },
+  // presby-site-kit installs normally (no symlink), so CI (and Vercel, which
+  // also sets CI) keeps Turbopack's default root, the repo itself. The parent
+  // root is NOT inert there: every module resolves through the runner's
+  // parent directory, and the 2026-11-01 sharded e2e lane's shard 1 failed
+  // twice with "Can't resolve '@vercel/turbopack-next/internal/font/google/
+  // font'" (the error docs/testing.md already ties to the parent root in
+  // sibling worktrees). Local dev keeps the parent root for the symlink.
+  ...(process.env.CI
+    ? {}
+    : {
+        turbopack: {
+          root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+        },
+      }),
   // /orgs is retired (docs/work-log/2026-08-27-platform-home-and-portal.md,
   // DECISION-124): its content is absorbed into /home behind
   // `platform.merged_home`. A permanent (308) config-level redirect, never

@@ -437,12 +437,15 @@ absent — see `docs/deployment.md` for what adding them turns on.
 `--shard=i/4` jobs, each on its own ephemeral branch (so no two shards share a
 database), plus one `rls` job that runs `scripts/test-rls.sql` as `presby_app`
 on a fresh branch of its own. `e2e.yml` runs a `dev` lane (Playwright against
-`next dev`) and a `prod` lane (the hydration specs against `next build &&
-next start`) as parallel jobs, again one branch each. The composite action's
+`next dev`) as four `--shard=i/4` jobs (2026-11-01) and a `prod` lane (the
+hydration specs against `next build && next start`), all parallel, again one
+branch each. A shard splits by spec file and still runs one worker, so a spec
+file must not depend on state another file leaves behind; a shard re-runs alone
+from the Actions page. The composite action's
 `compute_cu` input fixes the branch's compute size after creation (the Neon
 create-branch action has no such input); a branch is born at the project
 default, 0.25-8 CU autoscaling. Measured wall times: db shards 5-15 min, rls
-4 min, e2e dev lane 23 min, prod lane 5 min. Two files hold state a from-empty
+4 min, e2e dev lane 23 min (2026-10-23; 75+ min unsharded by 2026-10-31, so sharded), prod lane 5-11 min. Two files hold state a from-empty
 database lacks and the suites assume: `scripts/ci/e2e-baseline-flags.sql`
 (global flags the e2e specs expect ON, applied by e2e.yml only) and
 `scripts/ci/db-baseline.sql` (one active platform admin, applied by the db
@@ -471,7 +474,7 @@ one place in this repo's test suites where the sign-in limiter is exercised
 live, for real, under the standard config. `e2e` keeps `RATE_LIMIT_DISABLED=
 true`, because its shared fixture user signs in far more than 5/min.
 
-`e2e.yml` runs the production lane as a second step of the same job (`if: ${{ !cancelled() }}`, traces in `test-results-prod/`); like the rest of that job it is paper until `NEON_API_KEY` is added, so the local lane run is the gate until then.
+`e2e.yml` runs the production lane as its own job (traces in `test-results-prod/`), beside the four dev-lane shards.
 
 The retrospective's `deletable_until` fixture-exemption fuse (a 2-hour window
 before a scratch-org fixture becomes permanently undeletable, Rule-16 finding

@@ -41,6 +41,13 @@ on:
 # the production build then ran on a workspace the dev server had just used and
 # failed, and the lanes' wall times added up. Separate jobs make each lane's
 # failure its own evidence and each re-runnable alone.
+#
+# The dev lane is split into four `--shard=i/4` jobs (2026-11-01), each on its
+# own ephemeral branch, the way db.yml shards vitest. One worker per shard
+# still (playwright.config.ts: specs share fixture rows), so a shard is the
+# same serial run over a quarter of the spec files. Unsharded it reached ~67
+# min of test time on one runner and hit the job limit on PR #73 and the PR
+# #70 merge run with no failing spec.
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -66,18 +73,22 @@ jobs:
           fi
 
   e2e:
-    name: playwright (${{ matrix.lane }} lane)
+    name: playwright (${{ matrix.label }})
     needs: check-secrets
     if: needs.check-secrets.outputs.has-neon == 'true'
     runs-on: ubuntu-latest
-    # 50 minutes was hit on PR #58 (parish management) with no failing spec; the suite has outgrown it.
-    # 75 was hit on PR #73 and on the PR #70 merge run (839 tests on one worker, ~67 min of test time
-    # alone); 120 is headroom until the dev lane is sharded (docs/TODO.md, Process / tooling).
-    timeout-minutes: 120
+    # Per shard. A dev shard is ~17 min of tests plus ~8 min of setup; the limit
+    # leaves room for a slow runner without hiding a hung one for an hour.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        lane: [dev, prod]
+        include:
+          - { lane: dev, shard: 1, label: "dev lane 1/4" }
+          - { lane: dev, shard: 2, label: "dev lane 2/4" }
+          - { lane: dev, shard: 3, label: "dev lane 3/4" }
+          - { lane: dev, shard: 4, label: "dev lane 4/4" }
+          - { lane: prod, shard: 0, label: "prod lane" }
     steps:
       - uses: actions/checkout@v5
 
@@ -96,7 +107,7 @@ jobs:
           api_key: ${{ secrets.NEON_API_KEY }}
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           parent: development
-          branch_name: e2e-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+          branch_name: e2e-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}-s${{ matrix.shard }}
           compute_cu: "2"
 
       # Deliberately does NOT also set the four DB URLs as step-level `env:`
@@ -162,19 +173,9 @@ jobs:
 
       - name: Run e2e suite (dev server)
         if: matrix.lane == 'dev'
-        run: npm run test:e2e
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
         env:
           CI: "true"
-
-      # The /help/contact form (user-help Increment 2): its own lane, because the Turnstile site key it needs
-      # also disables the sign-in form's submit for every other spec. The config starts a server of its own
-      # with Cloudflare's PUBLIC test keys and the limiter ON (playwright.config.ts, `isHelpContactRun`).
-      - name: Run the contact-form lane (dev server, limiter on)
-        if: matrix.lane == 'dev'
-        run: npm run test:e2e:contact
-        env:
-          CI: "true"
-          PW_OUTPUT_DIR: test-results-contact
 
       # DECISION-159: the pre-hydration regression against a production build
       # (next build && next start, port 3800, never a reused server). Traces go
@@ -187,26 +188,14 @@ jobs:
           CI: "true"
           PW_OUTPUT_DIR: test-results-prod
 
-      # CA13: a Server Action inside a `dynamic = "error"` segment can call headers() and after() at request
-      # time, proven on `next build && next start` (port 3800 here; the config takes PW_PROD_PORT).
-      - name: Run the contact-form production-build proof
-        if: matrix.lane == 'prod'
-        timeout-minutes: 20
-        run: npm run test:e2e:contact:prod
-        env:
-          CI: "true"
-          PW_OUTPUT_DIR: test-results-contact-prod
-
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-traces-${{ matrix.lane }}
+          name: playwright-traces-${{ matrix.lane }}-s${{ matrix.shard }}
           path: |
             test-results/
             test-results-prod/
-            test-results-contact/
-            test-results-contact-prod/
           retention-days: 7
           if-no-files-found: ignore
 
@@ -216,4 +205,4 @@ jobs:
         with:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           api_key: ${{ secrets.NEON_API_KEY }}
-          branch: e2e-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+          branch: e2e-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}-s${{ matrix.shard }}

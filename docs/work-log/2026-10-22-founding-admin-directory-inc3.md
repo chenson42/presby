@@ -19,7 +19,7 @@
 | 3 — Technical design | tech-lead | Complete for 3a; migration 0066, D1 to D8 departures (all accepted; D4 operator-approved); batches 0, A1, A2, B, C, D. Updated 2026-10-25 for the architect's arch-A1 to arch-A4 (F245 closed in 0066; S16 declined) | Design complete (updated) | 2026-10-25 |
 | 3 — Technical design, amendment (rebased on main 0.50.1; see "Phase 3 amendment" at the end of this log) | tech-lead | Complete. Five-kind derived list and the officer sync's attributes specified (orchestrator's required edit); 19 assumptions re-checked against the merged tree; departures D9 to D21 ruled (a 2b fixture that contradicted the kind CHECK found and fixed; 0082 shrinks D4 but 3a's baseline role is still needed; portal tiles are permission-blind; parish consumers of `deriveConnection`; group renamed "All Current Records"); F246 and F247 filed; apply order proven for both journal order and merge order; six help pages and one screenshot; one new e2e spec. One non-blocking operator question | Design complete (amended) | 2026-10-31 |
 | 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Batch 0 done 2026-10-25; A0 done 2026-10-31. **A1 done 2026-10-31** (database-admin): 0066 sections 1 to 8 and 10, hand-written, applied twice to the pipeline branch (digest identical) and rehearsed from empty in journal order; P1 to P12 measured on the dev copy and production (P5 = 0 real organizations on both: the release note drops the widening sentence); T-M 29, T-G 21, T-E 9, test-rls-66 staged, each mechanism proven failing-first. Existing tests that 0066 contradicts fixed minimally in six files (D11 plus a D11-class gap the amendment missed; flagged for the tech-lead). Full DB suite: no 0066 regression beyond the designed ones; 12 environmental failures (treasury's DB without its code; three pre-existing leaked fixtures). A1 alone breaks 2b's auto-connect (test-rls 65.7) until A2's T-list literal lands, proven. **A2 done 2026-10-31** (database-admin): section 9 (the core's T list gains all_memberships, deacons_moderator stays in T; check 10 drops the visitor acknowledgement; connect step 10 requires member standing), hand-written, applied twice (second run changes nothing), from-empty journal order rehearsed; **the whole patched test-rls.sql is exit 0 from empty** (65.7 green); on the dev copy only seven data-drift lines stop it (219/222, fresh-db coverage, treasury's template and 2FA keys, the demo statistics.publish role); every section-9 mechanism proven failing-first in test-rls-66 (l) and Vitest; handler mapping in T-G; T-M connect column; 2b-era tests edited minimally (four files, listed). Full DB suite: 13 failures, all environmental (9 treasury, 4 leaked fixtures). **B done 2026-10-31** (api-developer): `membership-standing.ts` (the one TypeScript standing definition, pinned equal to SQL over the whole grid, two source scans), deriveConnection and the readers (Inactive list, classifier-driven Visitors, archive-aware Former, engagement badge, status fields), `community-engagement.ts` (four audited writes, row-locked) and four Server Actions, four audit keys, `engagement-copy.ts`, `All Current Records` and `calendar_viewer` in the provisioning plan, grant-form labels, and the 2b removals (visitor acknowledgement, `isVisitor`, `not_listed`, `connected_not_listed`). No schema change. Typecheck, lint, `npm run check` (all nine), `npm run build` clean; full DB suite 16019 of 16025 pass, the five failures are four pre-existing leaked-fixture ones and one B-caused 2b test fixed after the run (now 41/41). **C done 2026-10-31** (ux-developer): seventh nav segment, row actions and three dialogs, Engagement card, Visit details, archive/restore on the record and in the wizard, engagement badge, Group C/E/J strings, Managed-from text, six help pages; every engagement entry point sends `expectedFrom` (unit-tested per entry point, failing-first proven); 360px light and dark walk passed. **D done 2026-10-31** (full-stack-developer): three new specs (`community-engagement` 24, `visitor-access` 4, `hydration/community-engagement-controls` 2), three 2b specs updated and two more found by the regression lane (`member-calendar`, `admin-organizations-create`); regression lanes 155 and 143 passed with one failure each (both fixed and re-run green), the new and targeted specs 37/37, prod hydration lane 7/7; four failing-first mutations shown; no application, schema or Rule 16 file touched; a leaked treasury fixture swept on the branch; 3b's `org_portal.followups` toggle is not on this branch, so not tested. Next: Phase 5 qa | In progress | 2026-10-31 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1: full e2e 721/735 (1 failure caused by this pipeline: reimbursement-treasurer-ui:415; 1 environmental), DB 16,145/16,150 (4 existing), from-empty test-rls exit 0 with 66e executed; F-1 spec, F-2 help sentence | FAIL | 2026-11-01 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -2824,3 +2824,244 @@ Every Phase 1 gap and Phase 2 ruling keeps its prior disposition. New or changed
 8. **Screenshot and help:** diff the Everyone view at 360px against `community-list.png` (D-6 condition 1); read the six edited help pages as their reader (the two listed in D-1c plus `adding-people`, `sign-in-invitations`, `using-the-directory`, `what-presbyportal-does`) against the shipped screens; `npm run check:help` clean; confirm no page or string names `org_portal.followups` (D-2).
 9. **Carried from the A1/A2/B acknowledgement:** `66e` ran (not skipped) on the from-empty run; treasury-caused lines cleared after the main merge; leaked-fixture failures recorded as environmental.
 10. **Release note:** read it against D-1c (narrowing for visitors and inactive people; widening of `events.view`; no claim that regular attenders were newly added to Active Membership).
+
+---
+
+## Phase 5 — Verification (qa), run 1
+
+**Date:** 2026-11-01
+**Verified by:** qa
+**Tree:** `pipeline/visitor-follow-ups` at `a4a19b7`. The worktree is unchanged. I edited no project file. Every mutation and scratch spec ran in a scratch copy that has since been deleted.
+
+**Verdict: FAIL.** Most of the work checks out, but two items fail and one integration file needs re-cutting:
+
+1. **A treasury e2e spec now fails because of 0066.** `e2e/reimbursement-treasurer-ui.spec.ts:415` fails every time on a fresh database (two runs, same result). The new "All Current Records" group appears in Reimbursement settings as a group that "Can receive requests", so the page shows 4 switches where the spec expects 3. Batch D left the reimbursement specs out of its run, on the belief that treasury's code was not on this branch. It is: the main merge `8b65da4` brought it in. This is an e2e blast-radius miss, and it also needs a design ruling (see Findings, F-1).
+2. **Copy truthfulness: one help sentence is now false.** `src/content/help/roles-who-can-do-what.md:18` still says "The groups fill from the roll and from officer terms." The diff edited the line above it but left this sentence, and the design's A8 asked for it to change. All Current Records fills from every current record, visitors included, not from the roll.
+3. **Integration patch no longer applies.** `scripts/membership-standing/test-rls.sql.integration.patch` fails `git apply --check` at hunk 2 (`:8746`), because treasury's 73 include now comes after 65. The orchestrator needs to re-cut it at integration. This is not a behaviour failure.
+
+### Run scope
+
+| What | Where | Notes |
+|---|---|---|
+| typecheck, lint, `npm run check` | worktree | full |
+| Unit suite, CI shape (`npm test`, no database env) | worktree | full |
+| Full DB-backed suite, serial | pipeline branch `br-silent-glitter-ax34lmz0` | full, because the diff has migration 0066 |
+| `test-rls-66.sql` and `test-rls.sql` as `presby_app` | pipeline branch | |
+| From-empty run (CI's `db.yml` recipe) | a scratch database inside the pipeline branch, now dropped | migrate with the patched journal, schema parity, seed, patched `seed-dev.sql`, helpers, patched `test-rls.sql` as `presby_app` |
+| **Full** `--project=chromium` e2e | that from-empty database, own server on :3490, stopped | full suite required: the diff touches a shared component (`src/components/shared/button-group*.tsx`) |
+| Prod lane, five touched hydration specs | own build on :3800 in the scratch copy, stopped | |
+
+**Flag state:** I did not run `e2e-reset-flags.sql`, because no e2e ran against the long-lived pipeline branch. The from-empty database was given exactly CI's state: seed values plus `scripts/ci/e2e-baseline-flags.sql`.
+
+**Two process incidents of mine, reported so the run can be judged:**
+- **Stale sign-in states.** My first full e2e run reused stored sign-in states copied from the worktree, which belonged to a different database. Admin specs failed, so I stopped that run by PID, cleared the states and re-ran from the start. The first run's results are discarded.
+- **Mutations during the e2e run.** Two DB mutations (the `people.manage` bypass and the `directory.ts` predicate) were applied in the scratch copy while that copy's dev server was serving the full e2e run. Turbopack hot-reloaded them, so for a few minutes the server ran mutated code.
+  - I noticed because the 360px screenshots showed inactive people in Everyone. Three isolated re-runs on correct code do not reproduce it.
+  - I confirmed the scratch `src` matched the worktree again, then re-ran all 13 specs that ran in that window on correct code: **136 passed**.
+
+## Type Check
+
+`npm run typecheck`: **PASS** (exit 0). `npm run lint`: **PASS**. `npm run check`: **PASS**, all ten tripwires; `check:help` reports 29 registry entries, 23 published, 24 content files, 7 images.
+
+## Unit Tests
+
+**CI shape** (`npm test`, no database env): 929 files, 795 passed, 134 skipped. Tests: 12,496 passed, 0 failed, 3,654 skipped. 37 s. The skips are the database-gated files, which run in the DB lane below.
+
+**DB-backed, serial, pipeline branch:** 929 files, 2 failed. Tests: 16,150 total, 16,145 passed, 4 failed, 1 skipped. 2,766 s. All four failures predate this pipeline:
+- **`src/lib/db/fixture-deletable.test.ts` (3 tests).** The canary names 24 leaked people and the two leaked organizations `directory-test-a` and `directory-test-b`. All were stamped at 21:24 UTC on 2026-10-31 and their windows are closed. This is the same leak Batches A2 and B reported.
+- **`src/lib/db/domain/parishes.db.test.ts` "the whole file re-applies with no row change" (1 test).** The +2 groups, roles and grants come from replaying 0068 onto those same two organizations. They are the only congregations with no `deacons_moderator` group, verified in the catalog.
+- **The 1 skip** is `roll-decide-lockdown.db.test.ts`'s conditional `ctx.skip()`. It predates this pipeline and is not in the diff.
+- **Treasury-caused lines are gone.** The 8 failures A2 saw (designation-parity, giving/team, two-factor-default) all pass now.
+
+**RLS:**
+- **`test-rls-66.sql`** as `presby_app` (`presby_app|f` checked first): exit 0, 67 passes. 66e is skipped on the long-lived branch by design.
+- **From-empty run:**
+  - The patched `test-rls.sql` (66 appended) exits 0 with 1,708 passes and no FAIL.
+  - **66e ran there, not skipped**: the premise check plus three assertions, 71 passes in the 66 block.
+  - Schema parity: 92 tables, 0 failing.
+- **`test-rls.sql` on the pipeline branch** stops at `:219` ("expected 2, got 3"). Main's own `test-rls.sql` stops at the same `:219` on `development`, so this is existing data drift. The from-empty run passes it.
+
+## End-to-End Tests
+
+**Full chromium suite on the from-empty database:** 735 tests, 46.2 min.
+
+| Result | Count | What |
+|---|---|---|
+| Passed | 721 | includes 5 of my scratch QA lanes |
+| Failed | 3 | listed below |
+| Did not run | 11 | serial follow-ons of the two reimbursement failures |
+
+The three failures:
+- **`e2e/reimbursement-treasurer-ui.spec.ts:404` (assertion at `:415`): FAIL, caused by this pipeline.** The settings page lists "Active Membership", **"All Current Records"**, "Property Committee" and "Worship Committee", each with a "Can receive requests" switch: 4 switches against the spec's 3. It failed again in each of two separate re-runs. On main's CI (PR #72, without 0066) the same spec passes.
+- **`e2e/reimbursement-member.spec.ts:871`: environmental.** The receipt upload answered "You don't have permission to do that." because of the route's Origin check: `platformOrigin()` falls back to `localhost:3000` and my server ran on :3490. Re-run with `NEXT_PUBLIC_APP_URL=http://localhost:3490`, it **passes**, along with the member spec's serial lanes.
+- **My scratch wizard probe:** it timed out on a wrong selector. I rewrote it and re-ran it separately; it passes (see How-heard below).
+
+**Touched specs, all green in the full run:**
+
+| Spec | Passed |
+|---|---|
+| `community-engagement` | 24 |
+| `visitor-access` | 4 |
+| `hydration/community-engagement-controls` | 2 |
+| `community-participants` | 11 |
+| `member-calendar` | 15 |
+| `admin-organizations-create` | 6 |
+| `community-sign-in-invite` | 22 |
+| `no-organization-connect` | 26 |
+| `community-nav-scroll` | 3 |
+| other `hydration/community-*` specs | 4 |
+
+Each spec covers desktop and 360px where it has both lanes.
+
+**Prod lane** (`next build`, then start on :3800): `hydration/community-engagement-controls`, `community-sign-in-controls`, `community-participant-dialogs`, `community-approval-controls` and `no-organization-controls` all pass, **8 passed**.
+
+`scripts/ci/e2e-baseline-flags.sql` is not in the diff: no new flag key.
+
+**D-1a attribution (item 2).** I ran main's two specs **unedited**, from a scratch copy of `origin/main` on :3491, against `development`. That database has 0082 but not 0066: there is no `calendar_viewer` role, and alpha's `member` role (created 2026-10-28) is bound to Active Membership with `directory.view` and `events.view`.
+
+| Lane | Result on `development` | What it means |
+|---|---|---|
+| `community-participants` degrade lane (F172) | **fails** at `:310` | 0082's attribution is correct for this lane: the clerk holds an Active Membership row there |
+| `member-calendar` "without a grant" | **passes** | `org1@presby.invalid` has no derived row on `development`; on the pipeline branch it has an `all_memberships` row (0066's backfill), so `calendar_viewer` gives it `events.view` |
+
+So the tech-lead's ruling that "the two lanes break on any database where 0082 has been applied to alpha, with or without 3a" is **half wrong**. The member-calendar break comes from 0066, and it is the intended widening. The spec edit is correct, and its comment, which names both roles, is accurate.
+
+There is one stale clause in the `community-participants` comment: "Active Membership, which every live membership joins: DECISION-065". After 0066 that group holds member standing only. It is a comment, not a behaviour problem.
+
+Main's `afterEach` restored `development`; I verified that the clerk role has `directory.view` again.
+
+## Regression Tests Added
+
+This is a feature, so there is no single regression. Failing-first evidence for the key protections:
+- **`expectedFrom` dropped from `submit-engagement.ts`** → **10** unit failures, matching Batch C's count. They are in `community-row-actions.test.tsx` (Inactive row) and `[id]/edit/engagement-card.test.tsx` (direct save, dialog save, nudge). Lane 9 covers `changed_meanwhile` from both entry points and passed.
+- **`people.manage` check bypassed in `community-engagement.ts`** → 8 failures: 4 in T-W (`community-engagement.db.test.ts`) and 4 in `community-engagement.test.ts`.
+- **`directory.ts:317` widened to `in ('listed','inactive')`** → 3 failures: T-M M9 and M10, plus source scan 2.
+- **`canArchive` widened to `listed` in `[id]/edit/page.tsx`** → 2 failures in `page.test.tsx`.
+- **Record-page `disabled={!hydrated}` removed (`archive-restore-controls.tsx`)** → **0 failures. Nothing catches this.** This is the C-2 residual the tech-lead accepted. I checked it directly in a browser with the page's scripts held: Archive and Restore are disabled before hydration, and a forced click opens nothing.
+
+## Coverage on Critical Modules
+
+| Module | Statements | Branches |
+|---|---|---|
+| `src/lib/permissions.ts` | 100% | — |
+| `src/lib/two-factor.ts` | 91.1% | 100% |
+| `src/lib/flags.ts` | 100% | — |
+| `membership-standing.ts` | 100% | — |
+| `derived-group-labels.ts` | 100% | — |
+| `engagement-copy.ts` | 100% | — |
+| `community-engagement.ts` (unit only) | 100% | 97.5% |
+| `community/actions.ts` | 100% | 94.6% |
+
+## Permission matrix (item 1)
+
+I built a throwaway congregation through `createOrganization()` on the pipeline branch, gave its people the states below, and called `presby_has_permission` as `presby_app`. The congregation was seeded with `member`→active_membership, `calendar_viewer`→all_memberships, `session_member`→session and `deacons_moderator`. Teardown removed everything (I checked: 0 rows left).
+
+| Record | Standing | `directory.view` | `events.view` |
+|---|---|---|---|
+| visitor | visitor | no | **yes** |
+| inactive | inactive | no | **yes** |
+| moved away | inactive | no | **yes** |
+| regular | listed | yes | yes |
+| staff anchor | staff_anchor | yes | yes |
+| on the roll, inactive | listed | yes | yes |
+| archived visitor | — (ended) | no | no |
+| archived inactive | — (ended) | no | no |
+| ended regular | — (ended) | no | no |
+
+This matches D-1 exactly. The resolver is keyed on the person, not the account: an unconnected regular attender also resolves `directory.view`. "Needs a connected sign-in" therefore holds because only a connected account acts as that person; the resolver does not check it.
+
+## Feature-Gate Audit
+
+| Route or action | `auth()` present? | Permission check present? | Correct key? |
+|---|---|---|---|
+| `changeEngagementAction` (`community/actions.ts:120`) | yes, plus `resolveOrgContext` in the body | yes, `presby_has_permission(..., 'people.manage')` inside the write's transaction (`community-engagement.ts:253`) | tenant `people.manage` (FEATURES.* not applicable) |
+| `archivePersonAction` (`:169`) | yes | yes (`:349`) | `people.manage` |
+| `restorePersonAction` (`:202`) | yes | yes (`:453`) | `people.manage` |
+| `updateVisitDetailsAction` (`:242`) | yes | yes (`:540`) | `people.manage` |
+| `new/actions.ts` (the wizard) | unchanged | unchanged | only the constant changed (`MAX_HOW_HEARD`) |
+| Community page, Inactive view | page gate | `adminView` requires `people.manage` (`page.tsx:141`); `listCommunity` re-checks it in the transaction (`community.ts:185`) | `people.manage` |
+| `self-connect.ts` | read only, inside `withOrgContext` | — | — |
+
+No `route.ts` was added or changed. Each action rebuilds its input from the request, so a forged `organizationId`, `from` or `actor` is never read.
+
+## Schema/RLS Audit (0066, live catalog, pipeline branch)
+
+- **RLS is forced** on `memberships`, `groups`, `group_memberships`, `app_roles`, `app_role_permissions`, `role_grants` and `people`: `relforcerowsecurity = t` on each.
+- **Function access** (read with `aclexplode`):
+  - The new helpers `presby_standing_is_member`, `presby_membership_is_member_standing` and `presby_membership_standing` grant EXECUTE to the owner and `presby_app` only; PUBLIC has none.
+  - The definers (`presby_pair_derived_groups`, `presby_sync_derived_group`, `presby_sync_derived_membership_group`, the standing core, `sign_in__check`, `roll_cache_drift`) are owner-only, each with `search_path=public, pg_temp`.
+  - `presby_connect_signed_in_account` grants EXECUTE to `presby_app`, as designed.
+- **Probes as `presby_app`** (rolled back; `presby_app` holds INSERT and UPDATE grants on these tables, so the grant is never what refuses):
+
+| Probe | Refused by |
+|---|---|
+| Insert a derived row | trigger `presby_reject_derived_group_write` (F240) |
+| End a derived row | the same trigger |
+| Bad engagement value | CHECK `memberships_engagement_status_allowed` |
+| Write `current_roll` | trigger `presby_memberships_guard_roll_cache` (F244) |
+| Rename a derived group | trigger `presby_reject_derived_group_edit` |
+| Flip a derived group to managed | the same trigger (F245) |
+| Duplicate derived kind | unique `groups_org_derived_key` |
+| Change into `staff` | trigger `presby_memberships_guard_engagement` |
+| Read another organization's rows | RLS (returns 0 rows) |
+
+- **Owner path:** changing into `staff` is refused by the engagement guard, so that guard binds the owner too.
+- **Catalog shape:** `group_memberships_membership_group_key` (unique on membership and group) and the five-kind CHECK are present.
+
+## Record-page Archive/Restore (item 6), how-heard (item 7), screenshot and help (item 8)
+
+**Archive and Restore on the record page** (walked in a browser):
+
+| Person | What the record page offers |
+|---|---|
+| visitor, inactive, moved away, connected visitor | Archive |
+| regular (listed), staff anchor, on the roll and inactive | nothing |
+| archived | Restore only |
+| your own record, when you are listed | nothing |
+
+**Your own record, when your own standing is inactive:** Archive **is offered**, both on the record and as the Inactive row button. Choosing it shows "You can't archive your own record. Ask another administrator." and writes nothing. The design's `self_target` sentence covers this, and help says "You cannot archive your own record." But it does not meet the acknowledgement's "never for … your own record" (see F-3).
+
+**How-heard, 201 characters:**
+- **Edit form:** lane 10 shows "Keep this under 200 characters." under the field and saves nothing.
+- **Wizard at 360px:** shows "Keep this under 200 characters" under the field, **with no full stop**, stays on the Connection step and saves nothing. This is a wording difference in an existing string (and the limit itself accepts exactly 200). Minor.
+
+**360px, light and dark:** Everyone, Inactive, Visitors and Former lists, four record pages, and the Mark-as-regular and Archive dialogs all show 0 px horizontal overflow. Screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa/shots/` (the light/dark full-suite set, including the contaminated Everyone pair noted above) and `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa/copy/shots2/` (the clean re-walk and the wizard).
+
+**`community-list.png`:** I opened it. It is Alder Creek fixture data only, with no real person or brand. The live Everyone view at 360px has the same header, tab strip, search box, cards, Edit button and "Active member" badge, so D-6 condition 1 holds. The diff adds no new images.
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the Copy table.** `engagement-copy.ts` matches Groups A, B, D and F plus the ruled additions. Group G's `connected_not_listed` line renders verbatim on the card: I saw it in the browser for a connected visitor. Group H's "All Current Records" and "Calendar viewer" match the seed; `calendar_viewer` is `constitutional` and protected at 19 of 19 organizations, so "Constitutional" is true.
+- [x] **The query behind each claim was opened.**
+  - Auto-connect line: it needs `signInConnected === false`, an address on file, the toggle on, and a change that lists the person. If any of those is unknown, the line is left out (`self-connect.test.ts:34`, `community-row-actions.test.tsx:152`).
+  - Wizard restore dialog: it shows no connected line, because the wizard never reads `user_id` (lane 12).
+  - The card's "can still see the calendar": `calendar_viewer`, hedged with "if your congregation uses it".
+- [x] **Each instruction is doable by the role that sees it.** Every instruction is shown to `people.manage` holders, and each control is on the same page.
+- [ ] **Neighbours: one now-false string.**
+  - **`copy truthfulness: FAIL` — `src/content/help/roles-who-can-do-what.md:18`**, read by a founding administrator or anyone reading public help. "The groups fill from the roll and from officer terms." is false for "All Current Records", which holds everyone with a current record, visitors included. Design A8 listed "the group-fill sentence" as an edit.
+  - Not done, but still true, so not FAILs: A8's edits to `events-and-the-calendar.md:1` and `:3` ("shows … to its members", "The calendar every member sees"), and the extra sentence for `using-the-directory.md`.
+  - No page or string names `org_portal.followups` (item 8 holds).
+- [x] **Help diff covered.** I read all six pages against the screens. The labels I walked are on screen: Inactive, Engagement, Save engagement, Mark as regular, Archive, Restore, Keep archived, Visit details, Save visit details, and the staff-record sentence. Every other claim was checked against the code and the walk.
+- **Release note (item 10):** it is not written yet; it is a Phase 6 task. Group I's drafts do not yet carry D-1c's two required facts: inactive people lose `directory.view`, and every current record gains `events.view`.
+
+## Findings
+
+- **F-1 (FAIL, blocks).** Fix `e2e/reimbursement-treasurer-ui.spec.ts:415`. First the tech-lead must decide whether the derived "All Current Records" group, which includes visitors and inactive people, should be offered in Reimbursement settings at all. The choices are: hide it in treasury's group reader, or accept it and update the spec's count and comment. Then re-run the whole reimbursement spec set on a matching origin.
+- **F-2 (FAIL, blocks).** Correct `roles-who-can-do-what.md:18` as A8 asked, re-walk the page, and keep `check:help` clean.
+- **F-3 (needs a ruling, does not block).** Hide Archive on your own record and on your own Inactive row, or keep the designed refusal. Adding a viewer-id check to `canArchive` and to the row would match the acknowledgement's item 6.
+- **F-4 (integration, orchestrator).** Re-cut `test-rls.sql.integration.patch`. The branch is also 49 commits behind `origin/main` (photos 0.52.0, migration 0078); merge before integration and re-run `test-rls` on the merged tree.
+- **F-5 (comment).** Update `community-participants.spec.ts`'s "every live membership joins" clause, and correct the D-1a record as above.
+
+## Verdict
+
+**FAIL.** F-1 is a red spec this pipeline caused and also needs a design ruling. F-2 is a help sentence the diff made false. The diff is not auth-touching.
+
+## Per-Phase Status row
+
+| 5 — Verification | qa | Run 1: full e2e 721/735 (2 project failures: 1 caused by this pipeline, 1 environmental origin mismatch; the third failure was QA's scratch probe), DB suite 16,145/16,150 (4 existing), from-empty `test-rls` exit 0 with 66e executed | FAIL | 2026-11-01 |
+
+## Handoff
+
+**Next:** the tech-lead first, for the F-1 ruling and the F-3 ruling. Then full-stack-developer (Batch D owner) for the F-1 spec or reader change, the F-2 help sentence and the F-5 comment. Then Phase 5 run 2, which only needs to re-run the reimbursement specs, the help check and the walk of the page that F-2 changes.
+
+**Left behind:** no servers (:3490, :3491 and :3800 are free), no scratch copies, and the scratch database `qa5_fromempty` is dropped. The pipeline branch and `development` are as I found them. Logs and screenshots remain in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa/`.

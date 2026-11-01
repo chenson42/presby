@@ -438,7 +438,7 @@ async function hydratePublishedSite(
         ? (row.brand_type_pairing as TypePairingKey)
         : "classic";
       // Dynamically imported, deliberately not a static top-level import:
-      // src/lib/brand/fonts.ts calls next/font/google at MODULE SCOPE, which
+      // src/lib/brand/fonts.ts calls next/font/local at MODULE SCOPE, which
       // only resolves correctly under Next's own compiler (webpack/SWC) —
       // under plain Node (vitest, this module's own integration test) a
       // static import crashes at MODULE LOAD time with "Lora is not a
@@ -447,7 +447,7 @@ async function hydratePublishedSite(
       // force every OTHER consumer of this file (provisionSiteAction,
       // setSiteStatusAction, markSiteContactMessageReadAction — none of
       // which touch brand at all) to either mock `@/lib/sites` wholesale or
-      // pull in next/font/google transitively. Deferred to exactly the one
+      // pull in next/font/local transitively. Deferred to exactly the one
       // call site that needs it; in the real Next.js server process this
       // resolves through the same compiled module graph either way.
       const { resolveTypePairing } = await import("@/lib/brand/fonts");
@@ -805,7 +805,7 @@ export async function getPublishedSiteBrand(
         ? (row.brand_type_pairing as TypePairingKey)
         : "classic";
       // Dynamically imported — see getPublishedSite()'s own comment on
-      // resolveTypePairing() for why: next/font/google resolves at MODULE
+      // resolveTypePairing() for why: next/font/local resolves at MODULE
       // SCOPE under Next's compiler only, and a static import here would
       // crash this whole module under plain Node (this file's own Vitest
       // suite, and every other caller that never touches brand).

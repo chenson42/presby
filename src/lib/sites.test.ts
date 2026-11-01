@@ -52,7 +52,7 @@ vi.mock("@/lib/audit", () => ({
   recordAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
-// `next/font/google`'s real export is populated only by Next's SWC compiler
+// `next/font/local`'s real export is populated only by Next's SWC compiler
 // plugin at build time — `fonts.test.ts`'s own header comment documents this
 // at length. `getPublishedSite`'s existing fixture works around it by simply
 // never giving any org a `brand_seed_hex` row, so the branch that dynamically
@@ -62,21 +62,15 @@ vi.mock("@/lib/audit", () => ({
 // null-collapse), so this file mocks the loader one level closer to the
 // boundary, exactly `fonts.test.ts`'s own approach — each fake loader
 // returns the same `{ className, variable }` shape the real one does.
-vi.mock("next/font/google", () => {
-  const fakeLoader = (name: string) => (opts: { variable: string }) => ({
-    className: `mock-${name}-${opts.variable}`,
+vi.mock("next/font/local", () => {
+  // Same shape the real loader returns ({ className, variable }). One default
+  // export serves all eight faces; the class name carries the font file path
+  // and the CSS variable, so a face wired to the wrong file shows in a test.
+  const localFont = (opts: { src: string; variable: string }) => ({
+    className: `mock-${opts.src}-${opts.variable}`,
     variable: opts.variable,
   });
-  return {
-    Lora: fakeLoader("lora"),
-    Source_Sans_3: fakeLoader("source-sans-3"),
-    Libre_Franklin: fakeLoader("libre-franklin"),
-    Public_Sans: fakeLoader("public-sans"),
-    Bitter: fakeLoader("bitter"),
-    Karla: fakeLoader("karla"),
-    Montserrat: fakeLoader("montserrat"),
-    Open_Sans: fakeLoader("open-sans"),
-  };
+  return { default: localFont };
 });
 
 const hasDb = Boolean(

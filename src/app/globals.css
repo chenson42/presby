@@ -274,7 +274,7 @@
  * are declared `brandable`/`additive`/`nonColour` in
  * src/lib/brand/contract.ts's TOKEN_POLICY but carry no seed-derived value —
  * a per-org brand selects one of four CURATED pairings (TYPE_PAIRINGS), never
- * an arbitrary font. `next/font/google` calls are static, module-scope
+ * an arbitrary font. `next/font/local` calls are static, module-scope
  * (src/lib/brand/fonts.ts), so the real font-stack values cannot live here as
  * literals; each pairing's `.variable` class (applied by the caller alongside
  * the matching `.pairing-<key>` class below) is what DEFINES

@@ -79,7 +79,7 @@ vi.mock("@/lib/db", () => ({ getPlatformDb: mockGetPlatformDb }));
 // own mockGetPlatformDb harness (above) has no `.insert`/`.update` chain
 // configured — those real functions would crash against it if exercised for
 // real here. This also avoids pulling in @/lib/sites' own transitive
-// `next/font/google` import path in a plain Node vitest environment.
+// `next/font/local` import path in a plain Node vitest environment.
 const mockProvisionSite = vi.hoisted(() => vi.fn());
 const mockSetSiteStatus = vi.hoisted(() => vi.fn());
 const mockSetOrganizationProfile = vi.hoisted(() => vi.fn());

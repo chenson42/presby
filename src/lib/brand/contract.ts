@@ -652,7 +652,7 @@ export type TypeRole = (typeof TYPE_SCALE)[number]["role"];
  * its audience, which skews older (S16) — legibility and x-height win over
  * character every time a choice was close. Google Fonts only; no display,
  * script, or decorative face made the list. Font RESOLUTION is deliberately
- * not here — `next/font/google` imports must be statically analyzable and
+ * not here — `next/font/local` imports must be statically analyzable and
  * are Next-coupled, which this file's zero-runtime-imports rule forbids —
  * that lives in `src/lib/brand/fonts.ts` (slice e1), which imports only
  * `TypePairingKey` from this file. This array is data: the enum and the
@@ -670,9 +670,9 @@ export type TypePairing = {
   readonly key: string;
   /** Human-facing, shown in the editor (slice d). */
   readonly label: string;
-  /** Google Fonts family name, resolved to a `next/font/google` import in `fonts.ts`. */
+  /** Google Fonts family name, resolved to a `next/font/local` import in `fonts.ts`. */
   readonly heading: string;
-  /** Google Fonts family name, resolved to a `next/font/google` import in `fonts.ts`. */
+  /** Google Fonts family name, resolved to a `next/font/local` import in `fonts.ts`. */
   readonly body: string;
   /** One sentence, quotable in a review. */
   readonly why: string;

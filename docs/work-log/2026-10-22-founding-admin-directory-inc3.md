@@ -20,7 +20,7 @@
 | 3 — Technical design, amendment (rebased on main 0.50.1; see "Phase 3 amendment" at the end of this log) | tech-lead | Complete. Five-kind derived list and the officer sync's attributes specified (orchestrator's required edit); 19 assumptions re-checked against the merged tree; departures D9 to D21 ruled (a 2b fixture that contradicted the kind CHECK found and fixed; 0082 shrinks D4 but 3a's baseline role is still needed; portal tiles are permission-blind; parish consumers of `deriveConnection`; group renamed "All Current Records"); F246 and F247 filed; apply order proven for both journal order and merge order; six help pages and one screenshot; one new e2e spec. One non-blocking operator question | Design complete (amended) | 2026-10-31 |
 | 4 — Implementation | Batch 0 ux-developer; A1/A2 database-admin; B api-developer; C ux-developer; D full-stack-developer | Batch 0 done 2026-10-25; A0 done 2026-10-31. **A1 done 2026-10-31** (database-admin): 0066 sections 1 to 8 and 10, hand-written, applied twice to the pipeline branch (digest identical) and rehearsed from empty in journal order; P1 to P12 measured on the dev copy and production (P5 = 0 real organizations on both: the release note drops the widening sentence); T-M 29, T-G 21, T-E 9, test-rls-66 staged, each mechanism proven failing-first. Existing tests that 0066 contradicts fixed minimally in six files (D11 plus a D11-class gap the amendment missed; flagged for the tech-lead). Full DB suite: no 0066 regression beyond the designed ones; 12 environmental failures (treasury's DB without its code; three pre-existing leaked fixtures). A1 alone breaks 2b's auto-connect (test-rls 65.7) until A2's T-list literal lands, proven. **A2 done 2026-10-31** (database-admin): section 9 (the core's T list gains all_memberships, deacons_moderator stays in T; check 10 drops the visitor acknowledgement; connect step 10 requires member standing), hand-written, applied twice (second run changes nothing), from-empty journal order rehearsed; **the whole patched test-rls.sql is exit 0 from empty** (65.7 green); on the dev copy only seven data-drift lines stop it (219/222, fresh-db coverage, treasury's template and 2FA keys, the demo statistics.publish role); every section-9 mechanism proven failing-first in test-rls-66 (l) and Vitest; handler mapping in T-G; T-M connect column; 2b-era tests edited minimally (four files, listed). Full DB suite: 13 failures, all environmental (9 treasury, 4 leaked fixtures). **B done 2026-10-31** (api-developer): `membership-standing.ts` (the one TypeScript standing definition, pinned equal to SQL over the whole grid, two source scans), deriveConnection and the readers (Inactive list, classifier-driven Visitors, archive-aware Former, engagement badge, status fields), `community-engagement.ts` (four audited writes, row-locked) and four Server Actions, four audit keys, `engagement-copy.ts`, `All Current Records` and `calendar_viewer` in the provisioning plan, grant-form labels, and the 2b removals (visitor acknowledgement, `isVisitor`, `not_listed`, `connected_not_listed`). No schema change. Typecheck, lint, `npm run check` (all nine), `npm run build` clean; full DB suite 16019 of 16025 pass, the five failures are four pre-existing leaked-fixture ones and one B-caused 2b test fixed after the run (now 41/41). **C done 2026-10-31** (ux-developer): seventh nav segment, row actions and three dialogs, Engagement card, Visit details, archive/restore on the record and in the wizard, engagement badge, Group C/E/J strings, Managed-from text, six help pages; every engagement entry point sends `expectedFrom` (unit-tested per entry point, failing-first proven); 360px light and dark walk passed. **D done 2026-10-31** (full-stack-developer): three new specs (`community-engagement` 24, `visitor-access` 4, `hydration/community-engagement-controls` 2), three 2b specs updated and two more found by the regression lane (`member-calendar`, `admin-organizations-create`); regression lanes 155 and 143 passed with one failure each (both fixed and re-run green), the new and targeted specs 37/37, prod hydration lane 7/7; four failing-first mutations shown; no application, schema or Rule 16 file touched; a leaked treasury fixture swept on the branch; 3b's `org_portal.followups` toggle is not on this branch, so not tested. Next: Phase 5 qa | In progress | 2026-10-31 |
 | 5 — Verification | qa | Run 1 FAIL (F-1 spec, F-2 help); run 2 after Batch E: unit 12,951, DB set 725/725, dev e2e 213/213, prod hydration 12/12, F-1/F-3 fail-first confirmed; F-4 patch re-cut open (orchestrator) | PASS | 2026-11-01 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Matches Phase 1 sentences 2–3 (follow-ups are 3b by accepted split); six help pages read, none contradicts the build; release-note facts given; nine follow-ups, first the analyst live walk after 0066 on development | SHIP WITH NOTES | 2026-11-01 |
 
 ---
 
@@ -3482,3 +3482,215 @@ The viewer's membership has `ended_on = null` after the walk, so nothing was arc
 - the `verifiedIn` note above.
 
 **Left behind:** :3490, :3491 and :3800 are free, and no Playwright process is running. Scratch copies and clones are deleted. The worktree's `.next/dev` is as I found it. Global flags are identical to their pre-run state. Logs and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa2/`.
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst), Community Increment 3a
+
+## VERDICT
+
+**SHIP WITH NOTES.**
+
+I am withholding SHIP IT for one reason. SHIP IT requires the analyst's own persona walk on `development` at 360px, and I did not run one. QA's browser walks and the e2e specs cover most of it, so the notes below name what remains. Nothing I found is a NEEDS REWORK item. No help page contradicts the build.
+
+## ONE-LINE TAKE
+
+> An administrator can now mark anyone Visitor, Regular attender, Inactive or Moved away, archive and restore visitors and inactive people, and correct a first visit. A visitor or inactive person with a sign-in keeps the calendar and loses the member directory. The first-visit follow-up workflow, the headline of the original request, is not in this increment; it is 3b.
+
+## What's Working
+
+- **One definition of "listed" (G1).** The 2b visitor test, the Directory and the group predicate now agree. QA's permission matrix on a throwaway congregation made through `createOrganization()` matches D-1 exactly:
+  - A visitor, an inactive person and a moved-away person each hold `events.view` and not `directory.view`.
+  - A regular attender and a staff record hold both.
+  - An archived or ended record holds neither.
+- **F177 is closed.** Production and the dev copy had 0 signed-in visitors, inactive or unclassified people at measurement (P2, 2026-10-31). Nobody lost anything at apply.
+- **Engagement writes are guarded and audited (G2).**
+  - Three database guards back the writer: no change on an ended membership, no change into or out of `staff`, and no Visitor on a rolled membership.
+  - The `people.manage` check runs inside the write's own transaction.
+  - Every UI entry point sends `expectedFrom`; removing it fails 10 unit tests.
+  - `tenant.person.engagement_changed`, `archived`, `restored` and `visit_details_updated` all exist in `AUDIT_ACTIONS`.
+- **The residual is disclosed at the moment of the act.** The dialog says a newly listed person "could be connected to this record automatically". It says "could", it is omitted whenever any fact is unknown, and it does not claim prevention.
+- **People no longer vanish (G4).** The Inactive view is the seventh segment, rolled people carry an Inactive or Moved away badge, and the Everyone empty state no longer says "No one yet" when only visitors exist.
+- **The 360px nav fix (G13) landed first.** The e2e spec confirms the active segment is fully in view and every segment is reachable.
+- **The original request's failure paths are human.**
+  - Role-held refusal: "This person still holds an office, a role or a staff position here. End that first, then try again."
+  - Self-archive: "You can't archive your own record."
+  - Stale form: "This changed while you were looking."
+  - Database failure: "We couldn't save that change. Nothing was changed."
+- **Archive and restore delete nothing.** The record is kept, an end date and marker are set, and restore is offered from the Former list, the record and the wizard match step.
+
+## Intent-vs-Shipped Diff
+
+- **Phase 1 ONE-LINE TAKE sentence 1** (start a follow-up, assign it, record what happened). Shipped: not in 3a. G7–G12, G15–G17 and R58 to R64 were split to 3b by operator ruling (migration 0069, DECISION-247–250, F266–F273 reserved). Verdict: **acceptable drift**. It is accepted and recorded, but this pipeline does not deliver the feature its slug names (see Follow-up 8).
+- **Sentences 2 and 3** (engagement without vanishing; archive and restore; a visitor with a sign-in sees the calendar and not the directory). Verdict: **matches**.
+- **Flow 8: "the directory is not offered".** Shipped: the Directory tile still shows on `/o/<slug>` and opens "You don't have permission to view the directory." (D14; portal tiles are permission-blind under DECISION-162). A signed-in visitor is offered a tile that dead-ends in a polite sentence. Verdict: **acceptable drift**, tracked (Follow-up 5).
+- **G6, "archive cancels open follow-ups".** Shipped: nothing in 3a, and the dialogs say nothing about follow-ups (D8). No follow-up rows can exist until 3b, so this is **matches by construction**.
+- **R55, auto-connect requires member standing.** Shipped as the operator approved it. Verdict: **matches**.
+- **G14, visitor card note.** The phrase the analyst quoted never existed in 2b's shipped copy. The shipped `not_listed` line and the connected-and-not-listed line are true. Verdict: **matches in intent**.
+- **G18, first-visit edits.** Shipped, with the 1900 floor on edit only (D7). Verdict: **matches**.
+- **Phase 1 Pass 4 "Help impact".** My Phase 1 omitted the line. The tech-lead's A8 supplied it and Rule 17 is satisfied. This is a Phase 1 gap of mine, with no product consequence.
+- **Archive hidden on your own record and row** (F-3). The original 3a design only refused it. This is a user-side improvement and the server refusal stays as the backstop. Verdict: **better than designed**.
+
+## Edge Cases
+
+- **Empty state:** pass. Inactive, Everyone (administrator and non-administrator variants) and Former all have specific headlines and details. QA's 360px walk covered Inactive, Visitors, Former and Everyone.
+- **Failure microcopy:** pass. Every refusal outcome has a sentence, with no stack traces. The restore and visit-details `forbidden` and `not_found` strings are ruled additions (B-2).
+- **Permission gate:** pass. All four actions check `people.manage` inside the transaction. The Inactive view is gated twice, in the page and in `listCommunity`. A forged organization, `from` or actor is never read.
+- **Audit event:** pass for the four mutations. A `changed_meanwhile` refusal writes no audit row (lane 9).
+- **Mobile (360px):** pass on QA's evidence. QA walked light and dark with 0 px overflow, rows at least 44px tall, and Batch E's lane 13 plus a light-only own-row walk. I did not re-walk it myself.
+- **Help pages read as their reader:** pass, with one wording note. I read the six pages (diff against `origin/main`, not a rendered dev server) against QA's recorded walks and the shipped strings.
+  - **`adding-people`:**
+    - Seven views, the Inactive, Former and Visitors bullets, the Engagement section, Archive and Restore, and Visit details all match.
+    - The labels quoted match the build, including "Mark as regular attender", "Keep archived", "Save visit details" and the staff-record sentence.
+    - "from their row or their record" is true after Batch C departure 2.
+    - "You cannot archive your own record" is now true by omission too: the button is not offered.
+  - **`sign-in-invitations`:**
+    - The visitor acknowledgement is correctly gone and "I understand, send it anyway" is kept for do-not-contact only.
+    - "One person needs an extra step" is true.
+    - Wording note (Follow-up 4): "a person who isn't listed in the member directory" is slightly too broad. A staff record is not listed, yet has member standing, auto-connects and holds `directory.view`. The sentence at `:49` and the new paragraph at `:17` are both affected.
+  - **`roles-who-can-do-what`:** six roles, the table row, "last four", and line 18 (the F-2 sentence) are true. Line 18 does not say regular attenders newly joined anything. QA walked the live Roles screen, so this is the one page with a live read.
+  - **`events-and-the-calendar`:** the Member and Calendar viewer sentence is true. "Including visitors" and "a person still needs a connected sign-in" match the permission matrix. The remaining "members" wording is incomplete but not false.
+  - **`using-the-directory`:** the inactive and moved-away clause is correct, because an inactive person on the roll stays listed and the page says "not on the roll". It sits correctly beside main's photo line.
+  - **`what-presbyportal-does`:** "inactive people" is added and true.
+  - No `limitationUntil` or `[help:]` token is involved. No page names `org_portal.followups`. `check:help` is clean (29 entries, 24 published).
+  - **`verifiedIn` stays where it is.** It moves only by my own walk, and I did not do one.
+  - **Screenshot:** `community-list.png` was opened by QA and holds fixture data only. D-6 condition 1 holds.
+
+### Walk, as the people these paths create
+
+This is not my own walk. It is the evidence available, with the gaps stated.
+
+| Persona (spec or run) | Pages and what they show | Evidence |
+|---|---|---|
+| Connected visitor, built with a link fixture, not a real accepted invitation (`visitor-access`, desktop and 360px) | `/o/<slug>`: Directory and Calendar tiles, no overflow. `/o/<slug>/calendar`: 200, "Calendar", no "isn't available to your account". `/o/<slug>/directory`: 200, "You don't have permission to view the directory." A regular member of the same congregation sees the directory and never the visitor. | Spec |
+| Visitor, inactive or moved-away person with an unconnected account (`no-organization-connect` lane b) | `/signin`, `/launch`, `/no-organization`, then Check again: "Nothing new yet." | Spec |
+| Administrator: mark, archive and restore (`community-engagement`, 13 lanes at both widths, QA's browser walk) | Connected and auto-connect lines in the dialogs, role-held refusal, archive and restore round trip, wizard match step with Restore, Former badge "Archived visitor". | Spec and walk |
+| Nav (`community-nav-scroll`, 360px) | Seven segments, active one in view from every landing. | Spec |
+
+**What no one has walked:**
+- An archived connected person's own `/launch` and `/o/<slug>`. D-5 accepted this as untested; it is the "ended, named and dated" response.
+- A Moved-away connected person reloading after the change (W2a). The permission matrix covers the permissions, not the page.
+- `/home` for a visitor (W1).
+- A visitor created by really accepting an invitation, rather than a link fixture.
+- The "before 0066" half of W1. This is moot in practice, since P2 shows no such person exists in production or on the dev copy.
+
+## Release-note facts (Group I, read against D-1c and the later amendments)
+
+The orchestrator writes the note at integration. It should contain the following and avoid the exclusions.
+
+**Correction to D-1c's wording (needs your ruling).** D-1c says "every current record gains `events.view`". Per D12 and A1's own conclusion, that is true only where P5 > 0. 0082's `member` role already carries `events.view` for everyone on Active Membership, which before this release included visitors. A1 measured P5 = 0 for every real organization on both databases and said the widening sentence is dropped. The note should therefore say the following, which is true whatever P5 turns out to be on deploy day:
+
+> Everyone with a current record at your congregation, including visitors and people marked inactive or moved away, can now see the calendar through a new Calendar viewer role, once they have a connected sign-in and your congregation uses the calendar. For people who already held the Member role, nothing changes.
+
+Add the widening sentence, with the number, only if the deploy-day P5 re-run is non-zero.
+
+**Must contain:**
+1. **Who loses the directory, precisely.** A visitor, or a person marked inactive or moved away who is not on the roll, no longer holds the member directory permission. Opening the directory says "You don't have permission to view the directory." People on the roll stay listed whatever their engagement. Regular attenders and staff records are unchanged. Keep the D14 wording: the Directory tile is still there; do not say it is "not offered".
+2. **The deploy-day P2 number, and when it takes effect.** It is the count of signed-in people who lose the directory (0 on production as of 2026-10-31). In the operator paragraph:
+   - The change takes effect when migration 0066 is applied, not when the code deploys.
+   - Apply 0066 first, then deploy.
+   - Create no organization in between, or re-run the backfill block (P11 must read 0 / 0).
+3. **The new group and role, and the roster guard.**
+   - Every congregation gains the group "All Current Records" and the role "Calendar viewer", which cannot be edited (the Roles page now lists six roles).
+   - "Active Membership" now holds people with member standing.
+   - A role an administrator bound to Active Membership now reaches only those people.
+   - The database now refuses the application's own database access writing the Session, Board of Deacons and Moderator rosters directly. This closes the gap announced in 0.45; say that the earlier state was caught by review and the audit log, not prevented.
+   - Use "the application's database access". The Group I draft's "anything other than the officer record" overstates it: owner-level access and the tenant-created derived group in an organization that lacks one (S16, `paper`) remain.
+4. **The engagement editor.**
+   - Four values, stated in plain words.
+   - It decides who appears in the directory and what a connected sign-in can see.
+   - It is for the congregation's own care and never reported to the presbytery.
+   - It does not change the membership roll.
+   - **Disclose the residual:** marking someone a regular attender lists them, and where "Connect people when they sign in" is on, lets them be connected by signing in with an address on file. Say "we record every change; we do not block it."
+   - Use "Every change is recorded", not "the audit log".
+5. **Auto-connect and invitations.** Signing in no longer connects visitors or people marked inactive or moved away; an invitation still does. Replace 2b's v0.48 sentences "We ask you to confirm before sending to a visitor" and "We plan to give visitors a narrower view in a later release": the narrower view has arrived, and the do-not-contact confirmation stays.
+6. **Archive and restore.**
+   - It applies to visitors and to people marked inactive or moved away.
+   - The record is kept; nothing is deleted.
+   - A connected sign-in will not reach the congregation until the person is restored, and an open invitation stops working.
+   - Members on the roll, participants and staff are not archived this way, and you cannot archive yourself.
+7. **Smaller visible changes, one clause each.**
+   - The Inactive view and the correction of a first visit and how they heard.
+   - On a phone, the Community views scroll to the active one.
+   - "All Current Records" appears in Reimbursement settings as an off-by-default switch whose requests go to the treasurer.
+   - Parish household rows now tag inactive and moved-away people as such (they were tagged "Listed"). Moderators of the Board of Deacons, directory-hidden holders and people managers see those tags, per the operator's A15 default.
+   - The Groups list "Managed from" text changed.
+
+**Must not contain:**
+- Anything about follow-ups. The branch name says "follow-ups" and none shipped.
+- "Regular attenders newly joined Active Membership" or any claim that a regular attender gained access.
+- "Active Membership holds everyone with a current record."
+- "Every current record gains events.view", unless the deploy-day P5 is non-zero.
+- "Visitors can't see anything", "engagement changes nothing" or "archiving deletes".
+- Any implication that listing a person, or the engagement-to-connection chain, is prevented.
+- "The directory is hidden from visitors' home page" or "not offered".
+- "The audit log" as something an administrator can read.
+- The internal terms "member standing", "classifier", "F177", "R55" or "derived group" outside the operator paragraph.
+
+**Rule 13:** per the standing operator instruction there is no what's-new entry and none is listed as a to-do. **Rule 12:** the work-log header records no originating feedback row UUID, so there is nothing to mark `done`.
+
+## The visitor and F366 concern
+
+**3a does not fix it, and it stays a tracked follow-up** (`docs/TODO.md` line 145, operator-approved 2026-10-28, a separate bug-fix pipeline). `startOfficerTerm` still checks only that an open membership exists. A visitor can still be recorded as a ruling elder and counted as a Session seat. T-M row M17 documents the state, and A11 is right that nothing in 3a makes it worse in the recording sense.
+
+**3a does add one new way into the state.** `changeEngagement` has no officer-term check. Its only refusals are ended, staff, stale form, unchanged, and Visitor-on-a-roll. An administrator can mark a seated person who is not on the roll as "Visitor". Production holds one listed person and one staff record, so the exposure today is none. The F366 pipeline should absorb this so the fix is not one-sided (Follow-up 2).
+
+Archive already refuses a seat-holder, and the classifier does not read officer terms.
+
+## Follow-Ups
+
+Each is a `docs/TODO.md` line. The tech-lead's F246 and F247, the wizard-string pass and the `events-and-the-calendar` "members" wording pass are already queued in the Phase 3 ruling and need no new line.
+
+1. **Analyst live walk, then move `verifiedIn`.** After 0066 is applied on `development`, I walk W1–W4 on a Neon child branch at 360px. The walk covers:
+   - the unwalked items listed above;
+   - a visitor created by really accepting a sign-in invitation;
+   - an archived connected person's `/launch` and `/o/<slug>`;
+   - a Moved-away connected person after reload.
+
+   I then bump `verifiedIn` for `adding-people`, `sign-in-invitations`, `roles-who-can-do-what`, `events-and-the-calendar`, `using-the-directory` and `what-presbyportal-does`, and upgrade this verdict to SHIP IT. `officers-and-the-session.md:34` should be read in the same walk (the "Automatic rosters" section now lists four rows).
+2. **F366: extend the fix to cover 3a's Engagement card.** Require a roll for Session-seating offices and deacon, as planned. Also have `changeEngagement` refuse "Visitor" for a person with an open seat-bearing officer term, and count seated non-rolled people on production before applying the fix. 3a makes the state reachable by one more route; production holds none today.
+3. **Deploy-day runbook for 0066.** Re-run P1–P12 on production before apply, and P11 after. Read P5 and P2 (the numbers the release note needs). Apply 0066 before the code, create no organization in between, and record the numbers in `docs/deployment.md`.
+4. **Help and card wording: "isn't listed in the member directory" is too broad for a staff record.** A staff record is not listed but has member standing, auto-connects and holds `directory.view`. Fix the `not_listed` card string only if the staff case can reach it (the outlook is derived from member standing, so it cannot today). Fix `sign-in-invitations.md:17` and `:49` to say "isn't a member or a regular attender".
+5. **The visitor's Directory tile dead-ends (D14).** Tiles are permission-blind under DECISION-162, so a connected visitor is offered a tile that answers "You don't have permission". Revisit when the tile registry gains permission awareness; Phase 1 intended it not offered.
+6. **Hydration gate on the record-page Archive and Restore buttons is untested.** Removing `disabled={!hydrated}` in `archive-restore-controls.tsx` fails 0 tests (QA run 1; the component carries the gate, which is why the tech-lead accepted it). Add the two buttons to `hydration/community-engagement-controls`.
+7. **Wizard "Keep this under 200 characters" has no full stop**, unlike the edit form's string. Do it as the consistent wording pass the tech-lead already filed.
+8. **Community Increment 3b (follow-ups) is still to build.** Edit TODO lines 354, 355 and 382 to show 3a shipped:
+   - 3b carries R58 (the cancel trigger), R60–R64, G7–G12, G15–G17 and S14.
+   - It starts a new work-log, `-inc3b`, with migration 0069 reconfirmed against what has merged.
+   - It must start from 0071's version of the founding-administrator key function and rule afresh on `requires_two_factor` (A13).
+   - The Phase 6 walks for the deacon volunteer and the full follow-up chain belong to that increment.
+9. **Integration conditions (orchestrator, Rule 10 and Rule 16).** These are not ship blockers.
+   - Re-cut `scripts/membership-standing/test-rls.sql.integration.patch` and run `test-rls.sql` on the merged tree as `presby_app` (F-4).
+   - Write DECISION-232 to 236 with the §A12 changes, plus the F-1 and F-3 implementation entry.
+   - Add F240 to F247 to `docs/schema-design-2.md`.
+   - Update TODO lines 470, 614 and 615 to Done. Line 470's CLAUDE.md sentence is to be appended, and CLAUDE.md's "Court Is Not a Group" statement now needs no change.
+   - Update the functionality map. `docs/architecture.md` needs no change (Rule 15: no new subsystem or data flow).
+   - Note the sibling-worktree Turbopack-root hazard that QA hit (`presby-e2e-shard` under `presby-platform/`); it was not caused by this pipeline.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 6 — Shipped vs intent (Increment 3a) | analyst | 3a matches Phase 1's sentences 2 and 3; follow-ups (sentence 1) are 3b by accepted split. Six help pages read against QA's walks, none contradicts the build. Release-note facts given, with D-1c's "gains events.view" corrected to what D12 and P5 = 0 support. F366 not changed by 3a; one new route into the state recorded. Withheld SHIP IT only because the analyst's own live persona walk was not run; nine follow-ups, the first of which is that walk. | SHIP WITH NOTES | 2026-11-01 |
+
+## Handoff
+
+**Next agent: the orchestrator**, for integration:
+- the F-4 patch re-cut and the merged-tree `test-rls`;
+- the decisions and findings;
+- TODO and functionality-map housekeeping;
+- the release note from the facts above (needs your ruling on the D-1c wording).
+
+Then it runs the deploy-day measurements before 0066 touches production. When 0066 is applied on `development`, call me back for the live walk, which turns this into SHIP IT. 3b opens in `-inc3b`.
+
+Files read, all under `/Users/cshenso/git/presby-platform/presby-inc3`:
+- `docs/work-log/2026-10-22-founding-admin-directory-inc3.md`
+- `docs/work-log/_template.md`
+- `docs/TODO.md`
+- `docs/release-notes/v0.45.md`
+- `docs/release-notes/v0.48.md`
+- `src/lib/community-engagement.ts`
+- `src/lib/derived-group-labels.ts`
+- `e2e/visitor-access.spec.ts`
+- `src/lib/help/registry.ts` (diff)
+- the six edited pages under `src/content/help/`

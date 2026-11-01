@@ -31,7 +31,7 @@ export const HELP_PAGES = [
     audience: "prospective",
     covers: [],
     labels: ["You're invited", "This link isn't active", "Starting a congregation", "What is this about?"],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
   },
   // ---- Everyone who signs in -------------------------------------------------------------
   {
@@ -74,7 +74,7 @@ export const HELP_PAGES = [
       "I can't sign in or I lost my codes",
       "What is this about?",
     ],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
   },
   {
     slug: "your-account",
@@ -195,7 +195,7 @@ export const HELP_PAGES = [
       "Send message",
       "Your message was sent.",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.53.0",
   },
   {
     slug: "privacy-policy",
@@ -207,7 +207,7 @@ export const HELP_PAGES = [
     audience: "everyone",
     covers: [],
     labels: [],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
   },
   // ---- Written against in-flight pipelines: a pending page is not rendered until its [help:<token>] line is Done.
   //      accepting-your-invitation, setting-up-two-factor, who-is-asked-for-a-code and sign-in-invitations published at 0.50.0 -----
@@ -240,7 +240,7 @@ export const HELP_PAGES = [
       "Go to sign in",
       "If you already accepted it, you can sign in. Otherwise ask whoever invited you to send a new one.",
     ],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
     requires: "recovery-codes",
   },
   {
@@ -278,7 +278,7 @@ export const HELP_PAGES = [
       "I can't sign in or I lost my codes",
       "What is this about?",
     ],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.53.0",
     requires: "recovery-codes",
   },
   {

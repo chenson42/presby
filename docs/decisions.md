@@ -4,6 +4,66 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-314 — Help pages have two contact tokens: `{{contact}}` for a reader who may hold no administrator role, `{{contactAdmin}}` for a reader who is a signed-in administrator.**
+
+**Status:** Accepted (tech-lead Phase 3, numbered at integration on the Phase 6 analyst's recommendation) · **Date:** 2026-10-31 · **Feature:** `2026-10-31-help-contact`
+
+- `{{contact}}` expands to "ask the person who invited you, or send the PresbyPortal team a message" (`HELP_CONTACT_LINE`). `{{contactAdmin}}` expands to "file a ticket: open Administration, then Tickets … if you cannot file one, send the PresbyPortal team a message" (`HELP_CONTACT_ADMIN_LINE`). Both live in `src/lib/help/contact.ts`; `check:help` refuses any other template token beyond these and `{{privacyContact}}`.
+- **How a page writer chooses:** if every reader of the sentence is an administrator who signed in (first-day, roles, toggles, the website and calendar admin pages), use `{{contactAdmin}}`. If any reader may be a member, a treasurer, an office worker, or someone who cannot sign in, use `{{contact}}`.
+- **Why:** a founding administrator's inviter is the PresbyPortal team, so "ask the person who invited you" is circular for them, and a ticket carries a verified identity and a reply thread the form does not. "If you cannot file one" keeps the form as the way out for an administrator without the ticket role.
+- `paper`: nothing checks that a page's audience matches its token; the documentation review re-reads them.
+
+---
+
+**DECISION-313 — A Server Action is not a route; anonymous platform actions refuse forwarded requests.**
+
+**Status:** Accepted (architect, Phase 3 loop-back from help-contact Batch 3; amends CA7 and DECISION-303) · **Date:** 2026-10-31 · **Feature:** `2026-10-31-help-contact`
+
+- Next forwards a Server Action posted to a page whose worker does not own it to the owning worker over an internal fetch that replaces `Host` and sets `x-action-forwarded: 1` (Next 16.4.2, `action-handler.js`). Because the proxy rewrites every custom-host path into `/site/<host>/…`, every platform action is reachable on a church's domain through that forward, with the platform's own `Host`. This falsifies "a custom host has no platform routes" for actions while leaving pages and route handlers intact. Ruling: (1) the lock lives in the action, not the proxy. A proxy refusal of non-platform `Next-Action` POSTs would break the `/site` contact form and giving, which legitimately run in place on custom hosts, and the proxy cannot know action ownership without importing the manifest. (2) `src/lib/domains/action-host.ts` exports `isDirectPlatformActionRequest()`: a platform `Host` and no `x-action-forwarded`. The header is trusted only to deny. A client can add it, which only denies itself, but cannot remove it from Next's own hop. `x-forwarded-host` is never read: self-hosted, `base-server` preserves a value the client sends. A test pins the header literal in Next's source so an upgrade cannot silently reopen the forward. (3) `/site` actions are exempt. `resolveSiteOrganization`'s `Host === key` already fails closed on a forwarded hop. (4) The help contact action adopts the helper now (CA7 amended). Every other action outside `(public)/site/` adopts it in a separate bug-fix pipeline (F416, severity Low: no cross-tenant read, no victim reachable, no cookie set, because the hop's `Set-Cookie` is stripped and the session cookie is host-only). That pipeline adds a source scan, is auth-touching because of `(auth)/signin` and `(auth)/totp`, and measures forwarding on Vercel. Accepted residuals: a custom-host action replay answers with the action's own refusal rather than the neutral 404, and a client may exercise its own session through the forward. Both are `paper`.
+- The platform-wide adoption is F416 (its own bug-fix pipeline, tracked in `docs/TODO.md`).
+
+---
+
+**DECISION-304 — The public documentation boundary's one database-reaching file is `src/app/(documentation)/help/contact/actions.ts`, named exactly.**
+
+**Status:** Accepted (architect Phase 2 CA1–CA13; text drafted by tech-lead Phase 3) · **Date:** 2026-10-31 · **Feature:** `2026-10-31-help-contact`
+
+It is a `"use server"` stop in H19's import walk: reached, counted, not followed, required to begin with `"use server"`, and importable only from its own segment. `page.tsx` and `contact-form.tsx` stay H19 entries and are walked with everything they import. `checkImportBoundary` gains an optional `stopAt` (default empty; `check:proxy-imports` is unchanged); `help-boundary.mjs` drops the `help/contact/` subtree `EXEMPT` and gains `SERVER_ACTION_STOPS`, one file. `shell-boundaries.test.ts` excludes that one path, pins its imports to `next/headers`, `next/server`, `@/lib/help-contact/*` and `@/types/actions`, and pins that it exports one function. The `loading.tsx` and `error.tsx` bans keep no carve-out. Replaces the subtree exemption recorded in DECISION-293's R8. Why: the exemption exempted the page and the island too, which are exactly what must stay checked. `paper`: the walk sees specifiers, not `eval`.
+
+---
+
+**DECISION-303 — The form's availability is a pure configured-check, and the action refuses off the platform host.**
+
+**Status:** Accepted (architect Phase 2 CA1–CA13; text drafted by tech-lead Phase 3) · **Date:** 2026-10-31 · **Feature:** `2026-10-31-help-contact`
+
+`isHelpContactConfigured(env)` requires the Turnstile pair in every environment and, in a production deployment, both Upstash variables, the limiter enabled, and no Cloudflare dummy key. The page evaluates it at build; the action at runtime, returning `unavailable`. The action also returns `unavailable` unless `isPlatformHost(requestHost(headers()))`. On Vercel, removing variables takes effect only at the next deployment; the immediate lever is revoking EXECUTE on `presby_submit_help_contact`, which the action maps from SQLSTATE `42501`. Amends C10's "immediate" claim. Live-form e2e runs in its own lane with Cloudflare's public test keys in that server's environment only, because setting the site key disables the sign-in form's submit for every other spec. Why: `verifyTurnstile` is a no-op when unconfigured (the starter default), which must not become this form's posture. Accepted: a Cloudflare outage fails open (DECISION-026), bounded by the ceilings. `paper`: a dummy key is refused only in a production deployment. The platform-host check is superseded by DECISION-313's `isDirectPlatformActionRequest()` (platform `Host` and no `x-action-forwarded`).
+
+---
+
+**DECISION-302 — `src/lib/rate-limit.ts` exposes `consumeRateLimit` (no audit) and `recordRateLimitBlock`; `checkRateLimit` is their unchanged composition.**
+
+**Status:** Accepted (architect Phase 2 CA1–CA13; text drafted by tech-lead Phase 3) · **Date:** 2026-10-31 · **Feature:** `2026-10-31-help-contact`
+
+The contact form audits a limiter refusal at most once per kind per hour, with keys that carry no IP; it skips the per-IP check when no usable IP is known (a value that is not IP-shaped counts as none), places the global ceiling after Turnstile, and is backed by a database ceiling inside the definer (90 per hour, 300 per day). Because `cf-connecting-ip` is not proven unspoofable on Vercel (F407), the per-IP limit is a courtesy and the bound is Turnstile plus the global and database ceilings. An Upstash error fails closed as "not sent". Why: `checkRateLimit` writes an audit row on every blocked call, which turns a flood into an unbounded, forever-kept audit-table flood.
+
+---
+
+**DECISION-301 — Notification coalescing is claimed inside the definer.**
+
+**Status:** Accepted (architect Phase 2 CA1–CA13; text drafted by tech-lead Phase 3) · **Date:** 2026-10-31 · **Feature:** `2026-10-31-help-contact`
+
+`presby_submit_help_contact` takes `pg_advisory_xact_lock(hashtextextended('help_contact_messages', 0))`, counts for the ceiling, then sets `notified_at = now()` on the new row only if no row has one within `c_window` (a SQL constant, 60 minutes), returning `'stored_notify'`. Recipients are the holders of `FEATURES.ADMIN_TICKETS` through `getTicketOperatorPool()`. The content-free queue rows are inserted before the response; only the provider attempt runs in `after()`; the 5-minute email-queue cron is the durable backstop; no fifth cron. Template `help_contact_notification` is classified `account`. Accepted: a failed enqueue loses that window's notification (the dashboard card is the backstop). Why: exact across serverless instances, needs no read privilege, no second table and no cron; "first message after a quiet hour" would let a steady trickle suppress every later notification, and running the provider call inline only for the claiming submission would leak the claim through latency (AF-4).
+
+---
+
+**DECISION-300 — The help contact form writes to a definer-only platform-axis table, `help_contact_messages` (migration 0083).**
+
+**Status:** Accepted (architect Phase 2 CA1–CA13; text drafted by tech-lead Phase 3) · **Date:** 2026-10-31 · **Feature:** `2026-10-31-help-contact`
+
+`presby_app` holds no table privilege and reaches it only through `presby_submit_help_contact(text,text,text,text,text)`, `SECURITY DEFINER`, revoked from PUBLIC, executable by `presby_app` only, returning a closed token (`stored`, `stored_notify`, `ceiling`): no id, no content. FORCE RLS with no policy is a deliberate deny-all. DELETE is revoked and a `BEFORE DELETE` guard covers the owner path. A `BEFORE UPDATE` guard allows only status changes (stamps forced) and one irreversible clear (name, email, congregation and message to null; refused while the status is `new`; a cleared row never returns to `new`). Reads and triage happen only in `src/lib/help-contact/inbox.ts` through `getPlatformDb()`, each mutation with its audit row in one transaction carrying ids and statuses only, never a personal field. No IP, user agent, organization, person or sender id is stored. Amends C1 of the user-help parent: not `schema.ts` and no INSERT-only grant, because the live catalog has no INSERT-only precedent and `RETURNING` needs SELECT. `database` for the grants, the guards and the CHECKs; `paper` for the owner path's ability to insert a non-born-new row.
+
+---
+
 **DECISION-312 — `sharp` has a closed list of two importers, each of which always re-encodes and keeps no metadata. Amends DECISION-270 and DECISION-271 (T5).**
 
 **Status:** Accepted (architect, integration of person-photos Inc 1 with 0.51.0) · **Date:** 2026-10-31 · **Feature:** `2026-10-26-person-photos-inc1`

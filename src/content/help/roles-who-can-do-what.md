@@ -15,7 +15,7 @@ A new congregation has six roles.
 | "Session member" | The "Session" group |
 | "Moderator of the Board of Deacons" | The "Board of Deacons Moderator" group |
 
-A group holds the last four, so whoever is in that group has the role. The groups fill from the roll and from officer terms. See [Officers and the Session](/help/officers-and-the-session).
+A group holds the last four, so whoever is in that group has the role. The groups fill by themselves. "Active Membership" holds people with member standing: those on the current roll, regular attenders and staff records. "All Current Records" holds everyone with a current record, including visitors and people marked inactive or moved away. "Session" and "Board of Deacons Moderator" fill from officer terms. See [Officers and the Session](/help/officers-and-the-session).
 
 ## Giving a role
 

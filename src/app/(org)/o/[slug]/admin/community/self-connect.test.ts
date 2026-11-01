@@ -14,7 +14,7 @@ vi.mock("@/lib/onboarding/org-invite", () => ({
   SIGN_IN_CONNECT_TOGGLE: "org_portal.sign_in_connect",
 }));
 
-import { getSelfConnectEnabled } from "./community-self-connect";
+import { getSelfConnectEnabled } from "./self-connect";
 
 describe("getSelfConnectEnabled", () => {
   it("reads the toggle row the way the Sign-in card does (category axis off) inside the viewer's own context", async () => {

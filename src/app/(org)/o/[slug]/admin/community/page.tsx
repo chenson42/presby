@@ -19,7 +19,7 @@ import {
 import { parseCommunityView } from "@/lib/community-labels";
 import { countPendingRollActions } from "@/lib/roll";
 import { getSignInMarkers } from "@/lib/onboarding/org-invite";
-import { getSelfConnectEnabled } from "@/lib/community-self-connect";
+import { getSelfConnectEnabled } from "./self-connect";
 import type { SignInMarker } from "@/lib/onboarding/sign-in-types";
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";

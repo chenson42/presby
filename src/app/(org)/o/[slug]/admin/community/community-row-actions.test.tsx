@@ -31,7 +31,6 @@ const toastError = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }));
 
 import { CommunityRowActions } from "./community-row-actions";
-import { COMMUNITY_ARCHIVE_ENDED_REASON } from "@/lib/roll-action-kinds";
 
 afterEach(() => {
   cleanup();
@@ -44,7 +43,7 @@ const BASE = {
   personName: "Wren Alder",
   organization: "Alder Creek Presbyterian Church",
   engagementStatus: "inactive" as const,
-  endedReason: null,
+  archived: false,
   signInConnected: false,
   hasAddress: true,
   invitationOpen: false,
@@ -217,7 +216,7 @@ describe("Archive (Visitors and Inactive rows)", () => {
 });
 
 describe("Restore (an archived Former row)", () => {
-  const FORMER = { ...BASE, view: "former" as const, endedReason: COMMUNITY_ARCHIVE_ENDED_REASON };
+  const FORMER = { ...BASE, view: "former" as const, archived: true };
 
   it("an archived visitor returns to Visitors; the connected line only when the sign-in is connected", () => {
     render(<CommunityRowActions {...FORMER} engagementStatus="visitor" signInConnected />);
@@ -257,7 +256,7 @@ describe("Restore (an archived Former row)", () => {
 describe("what renders", () => {
   it("nothing for a removed participant on Former, or for a Staff row", () => {
     const { container } = render(
-      <CommunityRowActions {...BASE} view="former" endedReason="other_participant_removed" />,
+      <CommunityRowActions {...BASE} view="former" archived={false} />,
     );
     expect(container.firstChild).toBeNull();
   });

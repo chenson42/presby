@@ -67,7 +67,7 @@ vi.mock("@/lib/roll", () => ({
 }));
 
 const getSelfConnectEnabled = vi.fn();
-vi.mock("@/lib/community-self-connect", () => ({
+vi.mock("./self-connect", () => ({
   getSelfConnectEnabled: (...args: unknown[]) => getSelfConnectEnabled(...args),
 }));
 

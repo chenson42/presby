@@ -29,7 +29,6 @@ import {
 } from "../../members-states";
 import { EditPersonForm } from "./edit-person-form";
 import { RecordRollActionForm } from "./record-roll-action-form";
-import { COMMUNITY_ARCHIVE_ENDED_REASON } from "@/lib/roll-action-kinds";
 import { ConnectionCard } from "./connection-card";
 import { ArchiveRestoreControls } from "./archive-restore-controls";
 import { EngagementCard } from "./engagement-card";
@@ -266,7 +265,7 @@ export default async function EditMemberPage({
   const ended =
     communityStatus?.endedOn == null
       ? null
-      : communityStatus.endedReason === COMMUNITY_ARCHIVE_ENDED_REASON
+      : communityStatus.connection === "former_visitor" || communityStatus.connection === "archived"
         ? ("archived" as const)
         : ("other" as const);
   const canArchive =

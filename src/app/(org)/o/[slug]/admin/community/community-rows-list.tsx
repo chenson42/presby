@@ -5,9 +5,7 @@ import { FormattedDate } from "@/components/shared/formatted-date";
 import type { CommunityRow } from "@/lib/community";
 import type { CommunityView } from "@/lib/community-labels";
 import type { SignInMarker as Marker } from "@/lib/onboarding/sign-in-types";
-import {
-  COMMUNITY_ARCHIVE_ENDED_REASON,
-} from "@/lib/roll-action-kinds";
+import { CONNECTION_LABELS, deriveConnection } from "@/lib/community-labels";
 import { CommunityRowActions } from "./community-row-actions";
 import { SignInMarker } from "./sign-in-marker";
 
@@ -83,7 +81,7 @@ export function CommunityRowsList({
                   personName={row.displayName}
                   organization={organization}
                   engagementStatus={row.engagementStatus}
-                  endedReason={row.endedReason}
+                  archived={isArchived(row)}
                   signInConnected={row.signInConnected}
                   hasAddress={row.email !== null}
                   invitationOpen={markers[row.personId]?.kind === "pending"}
@@ -145,11 +143,15 @@ function Detail({
   // Former: the removal marker is a participant removal; the archive marker is
   // an archived visitor when the engagement kept on the row is Visitor and plain
   // archived otherwise (the same split `deriveConnection` makes).
+  const connection = deriveConnection({
+    endedOn: row.endedOn,
+    endedReason: row.endedReason,
+    currentRoll: null,
+    engagementStatus: row.engagementStatus,
+  });
   const label =
-    row.endedReason === COMMUNITY_ARCHIVE_ENDED_REASON
-      ? row.engagementStatus === "visitor"
-        ? "Archived visitor"
-        : "Archived"
+    connection === "former_visitor" || connection === "archived"
+      ? CONNECTION_LABELS[connection]
       : "Removed";
   return row.endedOn ? (
     <>
@@ -160,4 +162,15 @@ function Detail({
   ) : (
     <>{label}</>
   );
+}
+
+/** A Former row that ended by an archive (restorable), by the same derivation the connection labels use. */
+function isArchived(row: CommunityRow): boolean {
+  const connection = deriveConnection({
+    endedOn: row.endedOn,
+    endedReason: row.endedReason,
+    currentRoll: null,
+    engagementStatus: row.engagementStatus,
+  });
+  return connection === "former_visitor" || connection === "archived";
 }

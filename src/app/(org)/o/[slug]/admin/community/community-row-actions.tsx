@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useHydrated } from "@/components/shared/use-hydrated";
-import { COMMUNITY_ARCHIVE_ENDED_REASON } from "@/lib/roll-action-kinds";
 import type { Engagement } from "@/lib/membership-standing";
 import { ArchiveDialog } from "./archive-dialog";
 import { EngagementDialog } from "./engagement-dialog";
@@ -34,7 +33,7 @@ export function CommunityRowActions({
   personName,
   organization,
   engagementStatus,
-  endedReason,
+  archived,
   signInConnected,
   hasAddress,
   invitationOpen,
@@ -46,7 +45,8 @@ export function CommunityRowActions({
   personName: string;
   organization: string;
   engagementStatus: Engagement;
-  endedReason: string | null;
+  /** The Former row ended by an archive (so it can be restored), not a participant removal. */
+  archived: boolean;
   signInConnected: boolean;
   /** The row carries an active address (`CommunityRow.email`). */
   hasAddress: boolean;
@@ -60,7 +60,7 @@ export function CommunityRowActions({
 
   const canArchive = view === "visitors" || view === "inactive";
   const canMarkRegular = view === "inactive";
-  const canRestore = view === "former" && endedReason === COMMUNITY_ARCHIVE_ENDED_REASON;
+  const canRestore = view === "former" && archived;
   if (!canArchive && !canRestore) return null;
 
   const list = view === "visitors" ? "Visitors" : view === "inactive" ? "Inactive" : listNameForEngagement(engagementStatus);

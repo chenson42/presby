@@ -5,7 +5,7 @@ import { Pagination } from "@/components/shared/pagination";
 import type { DirectoryEntry, DirectoryPagination } from "@/lib/directory";
 import type { CommunityBadges } from "@/lib/community";
 import type { CommunityView } from "@/lib/community-labels";
-import { CommunityBadge } from "./community-badge";
+import { CommunityBadge, EngagementStatusBadge } from "./community-badge";
 import { CommunityEmptyState } from "./community-empty-state";
 import { CommunitySearch } from "./community-search";
 import { CommunityRowsList } from "./community-rows-list";
@@ -34,6 +34,8 @@ export function MembersList({
   canStaffLink,
   search,
   pagination,
+  organization = "",
+  selfConnectEnabled = null,
 }: {
   slug: string;
   view: CommunityView;
@@ -46,6 +48,10 @@ export function MembersList({
   canStaffLink: boolean;
   search: string;
   pagination?: DirectoryPagination;
+  /** The organization's name, for the archive and restore dialogs. */
+  organization?: string;
+  /** `org_portal.sign_in_connect`; null when the page could not read it. */
+  selfConnectEnabled?: boolean | null;
 }) {
   const count = (entries ?? rows ?? []).length;
 
@@ -84,6 +90,7 @@ export function MembersList({
                     entry={entry}
                     canEdit={canManage}
                     badge={badges[entry.personId]?.roll ?? undefined}
+                    engagementBadge={badges[entry.personId]?.engagement ?? undefined}
                     marker={markers[entry.personId]}
                   />
                 </li>
@@ -96,6 +103,8 @@ export function MembersList({
               rows={rows ?? []}
               markers={markers}
               canStaffLink={canStaffLink}
+              organization={organization}
+              selfConnectEnabled={selfConnectEnabled}
             />
           )}
         </>
@@ -117,12 +126,14 @@ function MemberCard({
   entry,
   canEdit,
   badge,
+  engagementBadge,
   marker,
 }: {
   slug: string;
   entry: DirectoryEntry;
   canEdit: boolean;
   badge?: CommunityBadges["roll"];
+  engagementBadge?: CommunityBadges["engagement"];
   marker?: Marker;
 }) {
   const displayName = `${entry.preferredName ?? entry.firstName} ${entry.lastName}`;
@@ -142,7 +153,12 @@ function MemberCard({
             {entry.email && (
               <p className="break-all text-sm text-muted-foreground">{entry.email}</p>
             )}
-            {badge ? <CommunityBadge badge={badge} /> : null}
+            {badge || engagementBadge ? (
+              <div className="flex flex-wrap gap-1">
+                {badge ? <CommunityBadge badge={badge} /> : null}
+                {engagementBadge ? <EngagementStatusBadge engagement={engagementBadge} /> : null}
+              </div>
+            ) : null}
           </Link>
           {/* A sibling of the link, never inside it (a link in a link is invalid). */}
           {canEdit && marker && (

@@ -10,7 +10,7 @@ import {
 import { getDirectory, type DirectoryResult } from "@/lib/directory";
 import {
   getCommunityBadges,
-  listFormerParticipants,
+  listFormer,
   listInactive,
   listStaff,
   listVisitors,
@@ -19,6 +19,7 @@ import {
 import { parseCommunityView } from "@/lib/community-labels";
 import { countPendingRollActions } from "@/lib/roll";
 import { getSignInMarkers } from "@/lib/onboarding/org-invite";
+import { getSelfConnectEnabled } from "@/lib/community-self-connect";
 import type { SignInMarker } from "@/lib/onboarding/sign-in-types";
 import { isFlagEnabled } from "@/lib/flags";
 import { isOrgFeatureEnabled } from "@/lib/org-features";
@@ -39,7 +40,7 @@ const CHILDREN_MINISTRY_FLAG = "org_portal.children_ministry";
 const STAFF_FLAG = "org_portal.staff";
 
 /**
- * `/o/<slug>/admin/community` — the Community page: the list, its six views and
+ * `/o/<slug>/admin/community` — the Community page: the list, its seven views and
  * the "Add person" entry point. Gated on BOTH `org_portal.members_create` (the
  * global flag) AND the matching `organization_feature_toggles` row
  * (DECISION-097's third axis).
@@ -159,7 +160,7 @@ export default async function CommunityPage({
             ? await listInactive(personId, organizationId, opts)
             : view === "staff"
               ? await listStaff(personId, organizationId, opts)
-              : await listFormerParticipants(personId, organizationId, opts);
+              : await listFormer(personId, organizationId, opts);
     } else {
       directoryResult = await getDirectory(personId, organizationId, {
         search,
@@ -216,6 +217,14 @@ export default async function CommunityPage({
         ],
       )
     : {};
+
+  // The Inactive row's "Mark as regular" dialog says when a person could be
+  // connected automatically, which depends on this toggle. Read once, only for
+  // the one list whose rows carry that button; `null` omits the line.
+  const selfConnectEnabled =
+    view === "inactive" && canManage
+      ? await getSelfConnectEnabled(personId, organizationId)
+      : null;
 
   const childrenMinistryFlagOn = await isFlagEnabled(CHILDREN_MINISTRY_FLAG);
   const canViewChildrenRoster = childrenMinistryFlagOn
@@ -309,6 +318,8 @@ export default async function CommunityPage({
           canStaffLink={canStaffLink}
           search={search}
           pagination={listResult.pagination}
+          organization={resolved.org.name}
+          selfConnectEnabled={selfConnectEnabled}
         />
       ) : null}
     </section>

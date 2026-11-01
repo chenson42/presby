@@ -49,19 +49,26 @@ vi.mock("@/lib/directory", () => ({
 }));
 
 const listVisitors = vi.fn();
+const listInactive = vi.fn();
 const listStaff = vi.fn();
-const listFormerParticipants = vi.fn();
+const listFormer = vi.fn();
 const getCommunityBadges = vi.fn();
 vi.mock("@/lib/community", () => ({
   listVisitors: (...args: unknown[]) => listVisitors(...args),
+  listInactive: (...args: unknown[]) => listInactive(...args),
   listStaff: (...args: unknown[]) => listStaff(...args),
-  listFormerParticipants: (...args: unknown[]) => listFormerParticipants(...args),
+  listFormer: (...args: unknown[]) => listFormer(...args),
   getCommunityBadges: (...args: unknown[]) => getCommunityBadges(...args),
 }));
 
 const countPendingRollActions = vi.fn();
 vi.mock("@/lib/roll", () => ({
   countPendingRollActions: (...args: unknown[]) => countPendingRollActions(...args),
+}));
+
+const getSelfConnectEnabled = vi.fn();
+vi.mock("@/lib/community-self-connect", () => ({
+  getSelfConnectEnabled: (...args: unknown[]) => getSelfConnectEnabled(...args),
 }));
 
 const getSignInMarkers = vi.fn();
@@ -78,12 +85,24 @@ const notFoundMock = vi.fn(() => {
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => redirectMock(url),
   notFound: () => notFoundMock(),
+  // The row buttons' dialogs call it; nothing here opens one.
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
 }));
 
 import MembersPage from "./page";
 
 const PAGINATION = { page: 1, pageSize: 25, total: 0, totalPages: 1 };
 import { OrgAccessError } from "@/lib/authz";
+
+// The Community engagement Server Actions reach the database; the screens under
+// test only call them through the dialogs, which these files do not drive.
+vi.mock("./actions", () => ({
+  changeEngagementAction: vi.fn(),
+  archivePersonAction: vi.fn(),
+  restorePersonAction: vi.fn(),
+  updateVisitDetailsAction: vi.fn(),
+}));
+
 
 afterEach(() => {
   cleanup();
@@ -94,8 +113,10 @@ afterEach(() => {
   isOrgFeatureEnabled.mockReset();
   getDirectory.mockReset();
   listVisitors.mockReset();
+  listInactive.mockReset();
   listStaff.mockReset();
-  listFormerParticipants.mockReset();
+  listFormer.mockReset();
+  getSelfConnectEnabled.mockReset().mockResolvedValue(true);
   getCommunityBadges.mockReset().mockResolvedValue({});
   hasPermission.mockReset();
   getSignInMarkers.mockReset().mockResolvedValue({});
@@ -267,9 +288,16 @@ describe("MembersPage — the degrade (DECISION-197, F172): people.manage withou
     expect(screen.getByRole("heading", { name: "Wren Alder" })).toBeTruthy();
     expect(screen.queryByText(/the directory\.view permission/i)).toBeNull();
   });
+
+  it("names the four views that still work, Inactive included (Copy group J)", async () => {
+    await renderLimited();
+    expect(
+      screen.getByText(/Visitors, Inactive, Staff and Former\s+above still work\./),
+    ).toBeTruthy();
+  });
 });
 
-describe("MembersPage — the six views", () => {
+describe("MembersPage — the seven views", () => {
   async function run(view?: string, perms: Record<string, boolean> = { "people.manage": true }) {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED);
@@ -278,8 +306,9 @@ describe("MembersPage — the six views", () => {
     getDirectory.mockResolvedValue({ kind: "ok", entries: [], pagination: PAGINATION });
     const empty = { kind: "ok", rows: [], pagination: PAGINATION };
     listVisitors.mockResolvedValue(empty);
+    listInactive.mockResolvedValue(empty);
     listStaff.mockResolvedValue(empty);
-    listFormerParticipants.mockResolvedValue(empty);
+    listFormer.mockResolvedValue(empty);
     hasPermission.mockImplementation(
       async (_p: string, _o: string, key: string) => perms[key] === true,
     );
@@ -307,8 +336,9 @@ describe("MembersPage — the six views", () => {
 
   it.each([
     ["visitors", () => listVisitors, /no visitors yet/i],
+    ["inactive", () => listInactive, /no one is marked inactive or moved away/i],
     ["staff", () => listStaff, /no one holds a staff position yet/i],
-    ["former", () => listFormerParticipants, /no former participants/i],
+    ["former", () => listFormer, /no one has been removed or archived/i],
   ] as const)("%s reads its admin list, never the Directory", async (view, fn, empty) => {
     await run(view);
     expect(fn()).toHaveBeenCalledWith(
@@ -320,17 +350,39 @@ describe("MembersPage — the six views", () => {
     expect(screen.getByText(empty)).toBeTruthy();
   });
 
-  it.each(["visitors", "staff", "former"])(
+  it.each(["visitors", "inactive", "staff", "former"])(
     "%s without people.manage is the unchanged forbidden state and reads nothing",
     async (view) => {
       await run(view, { "directory.view": true });
       expect(listVisitors).not.toHaveBeenCalled();
+      expect(listInactive).not.toHaveBeenCalled();
       expect(listStaff).not.toHaveBeenCalled();
-      expect(listFormerParticipants).not.toHaveBeenCalled();
+      expect(listFormer).not.toHaveBeenCalled();
       expect(getDirectory).not.toHaveBeenCalled();
       expect(screen.getByText(/don.t have permission to do that at/i)).toBeTruthy();
     },
   );
+
+  it("Inactive reads the sign-in connect toggle once; no other list does", async () => {
+    await run("inactive");
+    expect(getSelfConnectEnabled).toHaveBeenCalledTimes(1);
+    expect(getSelfConnectEnabled).toHaveBeenCalledWith("person-1", "org-1");
+    cleanup();
+    getSelfConnectEnabled.mockClear();
+    for (const view of ["visitors", "staff", "former", "members"]) {
+      await run(view);
+      cleanup();
+    }
+    expect(getSelfConnectEnabled).not.toHaveBeenCalled();
+  });
+
+  it("the nav offers Inactive to an administrator and not to anyone else", async () => {
+    await run("inactive");
+    expect(screen.getByRole("link", { name: "Inactive" })).toBeTruthy();
+    cleanup();
+    await run(undefined, { "directory.view": true });
+    expect(screen.queryByRole("link", { name: "Inactive" })).toBeNull();
+  });
 
   it("an unknown view falls back to Everyone", async () => {
     await run("nonsense");

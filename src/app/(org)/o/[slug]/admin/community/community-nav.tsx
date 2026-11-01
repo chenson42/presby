@@ -1,16 +1,17 @@
-import { Briefcase, Eye, Heart, UserCheck, UserMinus, Users } from "lucide-react";
+import { Briefcase, Clock, Eye, Heart, UserCheck, UserMinus, Users } from "lucide-react";
 import { ButtonGroup, type ButtonGroupItem } from "@/components/shared/button-group";
 import type { CommunityView } from "@/lib/community-labels";
 
 /**
  * Everyone / Members / Participants, then (for `people.manage` holders) Visitors,
- * Staff and Former. A `ButtonGroup` of real links (a GET navigation, not a
+ * Inactive, Staff and Former. A `ButtonGroup` of real links (a GET navigation, not a
  * client tab switcher), the `directory-nav.tsx` pattern, so the page stays a
  * Server Component and the browser back button works. The current `search` is
  * carried across views. The `ButtonGroup` scrolls horizontally rather than
- * wrapping, which is what keeps six segments one row at 360px.
+ * wrapping, which is what keeps seven segments one row at 360px (the current one
+ * is scrolled into view and the side that overflows fades: `ButtonGroupScroll`).
  *
- * Visitors, Staff and Former are shown only when `canManage`; the readers
+ * Visitors, Inactive, Staff and Former are shown only when `canManage`; the readers
  * behind them re-check `people.manage` regardless, so this is visibility, not
  * enforcement.
  */
@@ -24,6 +25,7 @@ const ITEMS: ReadonlyArray<{
   { view: "members", label: "Members", icon: UserCheck, adminOnly: false },
   { view: "participants", label: "Participants", icon: Heart, adminOnly: false },
   { view: "visitors", label: "Visitors", icon: Eye, adminOnly: true },
+  { view: "inactive", label: "Inactive", icon: Clock, adminOnly: true },
   { view: "staff", label: "Staff", icon: Briefcase, adminOnly: true },
   { view: "former", label: "Former", icon: UserMinus, adminOnly: true },
 ];

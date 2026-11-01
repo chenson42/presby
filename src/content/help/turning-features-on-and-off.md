@@ -36,13 +36,14 @@ This table lists the features a new congregation sees. Your Features page may li
 | Public events calendar | Shows the events your team has marked for the website on your public website. Whoever maintains your website must also place the calendar on a page. | Off | Any organization |
 | Job openings | Lets your congregation post job openings on its public website. Whoever maintains your website can also place the openings on a page. | Off | Any organization |
 | Giving | Online giving for the congregation. The card on the Features page describes it, and this help does not cover giving. | Off | Congregations and new worshiping communities |
+| Reimbursements | Lets members ask for reimbursement or a vendor payment, lets the chairs and leaders of a group approve it, and lets the treasurer record the payment. It doesn't send money. See [Asking to be reimbursed](/help/reimbursements). | Off | Congregations and new worshiping communities |
 | Parish management | Deacon districts for the congregation. | Off | Congregations |
 
 ## What you see when a feature is on or off
 
 Turning a feature on or off changes what you see in two ways.
 
-- Some features show their tile only while they are on. The "Calendar" and "Job openings" tiles are examples. Open "Administration" or your congregation's page and the tile appears or disappears.
+- Some features show their tile only while they are on. The "Calendar", "Job openings" and "Reimbursements" tiles are examples. Open "Administration" or your congregation's page and the tile appears or disappears.
 - Others keep their tile and open a page that says the feature is off. For example, "Community" says "Member management isn't turned on" for your congregation until you turn on "Community: add people and record roll actions".
 
 ## Features the PresbyPortal team turns on for you

@@ -163,7 +163,6 @@ export const HELP_PAGES = [
     covers: ["tile:directory"],
     labels: ["Directory", "Households", "Search the directory", "You don't have permission to view the directory."],
     verifiedIn: "0.47.0",
-    limitationUntil: "person-photos",
   },
   {
     slug: "getting-help",
@@ -301,7 +300,7 @@ export const HELP_PAGES = [
     summary:
       "Ask your congregation to pay you back, and follow the request to the end.",
     order: 65,
-    status: "pending",
+    status: "published",
     audience: "everyone",
     needs: {
       who: "A member, regular attender or staff member of a congregation that uses Reimbursements.",
@@ -346,8 +345,7 @@ export const HELP_PAGES = [
       "Open the request",
       "Sign in to see the details. This message doesn't include any.",
     ],
-    verifiedIn: null,
-    requires: "reimbursements",
+    verifiedIn: "0.51.0",
   },
   // ---- Church administrators -------------------------------------------------------------
   {
@@ -718,7 +716,7 @@ export const HELP_PAGES = [
     summary:
       "Add photos to a person's record and choose where each one shows.",
     order: 75,
-    status: "pending",
+    status: "published",
     audience: "administrator",
     needs: {
       who: "A Founding Administrator. Turning the feature on needs a role that can manage features, and adding photos needs a role that can edit people.",
@@ -728,7 +726,9 @@ export const HELP_PAGES = [
     covers: ["org_portal.person_photos"],
     labels: [
       "Photos of people",
-      "Photos of people will be hidden",
+      "Turn it off",
+      "Keep it on",
+      "That picture is already in",
       "Edit person",
       "Photos",
       "Back to edit person",
@@ -758,8 +758,7 @@ export const HELP_PAGES = [
       "Cancel",
       "If it's an iPhone photo, pick it from your photo library or convert it to JPEG first.",
     ],
-    verifiedIn: null,
-    requires: "person-photos",
+    verifiedIn: "0.52.0",
   },
   // ---- Treasurers ---------------------------------------------------------------------------
   {
@@ -768,7 +767,7 @@ export const HELP_PAGES = [
     summary:
       "Approve, send back, and record payment of a reimbursement.",
     order: 10,
-    status: "pending",
+    status: "published",
     audience: "treasurer",
     needs: {
       who: "A chair or leader of a group that receives requests (to approve), or a member of the treasury team (to record payments and set Reimbursements up). Everyone who views, pays or manages requests signs in with two-factor sign-in.",
@@ -832,8 +831,7 @@ export const HELP_PAGES = [
       "Record payments",
       "Manage reimbursements",
     ],
-    verifiedIn: null,
-    requires: "reimbursements",
+    verifiedIn: "0.51.0",
   },
   // ---- Planned: labelled placeholders for backlog tracks, no file, no steps, no dates (operator ruling O1, 2026-10-26) ----
   {

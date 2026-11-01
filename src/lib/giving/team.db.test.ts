@@ -326,9 +326,16 @@ describe.skipIf(!hasDb)("team.ts (Postgres-backed)", () => {
       expect(again).toMatchObject({ kind: "ok", created: false, reactivated: false, addedKeys: [], skippedKeys: [] });
     });
 
-    it("creates the treasurer role from its template too (constitutional, protected), when the actor holds all three keys", async () => {
+    it("creates the treasurer role from its template too (constitutional, protected), when the actor holds every template key", async () => {
+      // Fixture amended per the orchestrator's Batch 1a ruling 1 (2026-10-26,
+      // docs/work-log/2026-10-25-treasury-inc1.md): 0074 added four reimbursement
+      // keys to the treasurer template, so taking it now needs all seven (the
+      // subset rule is unchanged).
       const eOrg = await fx.makeOrg("ensure2", { givingToggle: true });
-      const fullRole = await fx.makeRole(eOrg, "boss_role", ["giving.view", "giving.record", "giving.manage"]);
+      const fullRole = await fx.makeRole(eOrg, "boss_role", [
+        "giving.view", "giving.record", "giving.manage",
+        "reimbursement.request_for_others", "reimbursement.view", "reimbursement.pay", "reimbursement.manage",
+      ]);
       const boss = await fx.makePerson("Ens", "Two");
       await fx.addMember(eOrg, boss);
       await fx.grant(eOrg, fullRole, boss);
@@ -340,6 +347,11 @@ describe.skipIf(!hasDb)("team.ts (Postgres-backed)", () => {
     });
 
     it("reactivates a deactivated role and reconciles ADDITIVELY, only with keys the actor holds", async () => {
+      // Expectation amended per Batch 1a ruling 1 (see above): the template's four
+      // reimbursement keys are ones this actor does not hold, so they are skipped.
+      const REIMBURSEMENT_KEYS = [
+        "reimbursement.manage", "reimbursement.pay", "reimbursement.request_for_others", "reimbursement.view",
+      ];
       const eOrg = await fx.makeOrg("ensure3", { givingToggle: true });
       const bossRole = await fx.makeRole(eOrg, "boss_role", ["giving.manage", "giving.record"]); // no giving.view
       const boss = await fx.makePerson("Ens", "Three");
@@ -350,7 +362,7 @@ describe.skipIf(!hasDb)("team.ts (Postgres-backed)", () => {
       await q(sql`update app_roles set deactivated_at = now() where id = ${own}`);
 
       const result = await team.ensureGivingRole(boss, eOrg, { templateKey: "treasurer" });
-      expect(result).toMatchObject({ kind: "ok", roleId: own, created: false, reactivated: true, addedKeys: ["giving.manage"], skippedKeys: ["giving.view"] });
+      expect(result).toMatchObject({ kind: "ok", roleId: own, created: false, reactivated: true, addedKeys: ["giving.manage"], skippedKeys: ["giving.view", ...REIMBURSEMENT_KEYS] });
       const [role] = await q(sql`select deactivated_at from app_roles where id = ${own}`);
       expect(role!.deactivated_at).toBeNull();
       const keys = await q(sql`select permission_key from app_role_permissions where role_id = ${own} order by 1`);

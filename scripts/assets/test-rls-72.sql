@@ -112,8 +112,8 @@ rollback;
 -- ===========================================================================
 -- (b) The catalog rule (R6): every FK into blob_assets is on the
 --     public-reference allowlist, or carries an asset_audience column pinned
---     to 'private' by a validated CHECK. A future private consumer (treasury
---     0073) that forgets the constant fails here.
+--     to 'private' by a validated CHECK. A private consumer that forgets the
+--     constant fails here (treasury's receipts, drizzle/0073, are the third).
 -- ===========================================================================
 begin;
   select assert_eq(
@@ -132,11 +132,16 @@ begin;
   select assert_eq(
     (select count(*) from pg_constraint c
       where c.contype = 'f' and c.confrelid = 'blob_assets'::regclass
-        and c.conname in ('ticket_messages_attachment_fk', 'giving_statements_blob_fk')
+        and c.conname in ('ticket_messages_attachment_fk', 'giving_statements_blob_fk',
+                          'reimbursement_attachments_blob_fk')
         and c.confdeltype = 'a' and c.confupdtype = 'a' and c.convalidated
         and (select array_agg(a.attname::text order by k.ord) from unnest(c.confkey) with ordinality k(attnum, ord)
                join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.attnum) = array['id', 'organization_id', 'audience']),
-    2, '72b: (not vacuous) both private consumers reference (id, organization_id, audience), NO ACTION/NO ACTION, validated');
+    3, '72b: (not vacuous) the three private consumers (tickets, statements, treasury receipts from drizzle/0073) reference (id, organization_id, audience), NO ACTION/NO ACTION, validated');
+  select assert_eq(
+    (select count(*) from pg_constraint c
+      where c.contype = 'f' and c.confrelid = 'blob_assets'::regclass),
+    8, '72b: exactly eight FKs point into blob_assets (three public references; five private consumers: tickets, statements, treasury receipts from drizzle/0073, and the person-photo master and thumbnail from drizzle/0078): a new one is a deliberate edit here');
   select assert_eq(
     (select count(*) from pg_constraint c
       where c.contype = 'f' and c.confrelid = 'blob_assets'::regclass

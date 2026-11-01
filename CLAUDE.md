@@ -92,6 +92,9 @@ src/lib/brand/         — the brand token contract (contract.ts, zero runtime
 src/lib/storage/       — the generic tenant-scoped blob adapter (DECISION-030/
                          055/058): store()/resolve() only, no caller queries
                          blob_assets directly. Logo is the first consumer
+src/lib/person-photos/ — org-scoped person photos (DECISION-285..289): image.ts is one
+                         of the two `sharp` importers (DECISION-312); store.ts the only
+                         writer of person_photos/person_photo_designations
 src/components/brand/  — brand-tokens.tsx (the :root-scoped <style> emitter —
                          DECISION-052, it IS the marker check-brand-scope.mjs
                          greps for) and org-mark.tsx (logo/wordmark, G7)
@@ -282,7 +285,7 @@ Phases run 1 → 2 → 3 → 4 → 5 → 6. Loop-backs are expected, and a loop-
 | React components, pages, forms | **ux-developer** |
 | Spans server + client and is small | **full-stack-developer** |
 
-**Gate:** Tests for the change are written *by the implementer* (QA runs them, and does not write them). Typecheck and build pass. `npm run check` reports zero violations (all nine tripwires, the command CI runs; two QA first runs failed on `check:secrets`). No native browser dialogs. No `console.log` left in production paths. All invariants honored. Audit events written for security-sensitive mutations. **For any feature that touches `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required before Phase 5 can begin — module-resolution defects are invisible to unit tests.**
+**Gate:** Tests for the change are written *by the implementer* (QA runs them, and does not write them). Typecheck and build pass. `npm run check` reports zero violations (all ten tripwires, the command CI runs; two QA first runs failed on `check:secrets`). No native browser dialogs. No `console.log` left in production paths. All invariants honored. Audit events written for security-sensitive mutations. **For any feature that touches `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/`, or `src/lib/auth/`, a running-server e2e smoke covering the full login path (including an MFA-enrolled user) is required before Phase 5 can begin — module-resolution defects are invisible to unit tests.**
 **Loop-back:** Design unbuildable returns to Phase 3. Architectural problem discovered returns to Phase 2.
 
 ### Phase 5 — Test Verification (qa)
@@ -482,6 +485,10 @@ npm run check:hydration-gate # Tripwire: every useForm root renders <HydrationGa
                               # exemption `// hydration-gate-ok: <reason>`
 npm run check:giving-boundaries # Tripwire: the giving "appears nowhere else" properties (Stripe SDK
                        # imported by one file, no owner connection inside src/lib/giving, ...)
+npm run check:treasury-boundaries # Tripwire: the reimbursement "appears nowhere else" properties (no owner
+                       # connection in a treasury path, only src/lib/reimbursement/ names its tables,
+                       # no `capture` on a file input, no money or free text in a notice, `sharp`
+                       # imported by one file; DECISION-271)
 npm run check:proxy-imports # Tripwire: src/proxy.ts's import graph never reaches the database, a
                        # server-only module, or any src/lib/domains file but host.ts, probe.ts
                        # and cron-passthrough.ts (DECISION-177)
@@ -489,7 +496,7 @@ npm run check:help   # Tripwire: the help registry, content, links, images, labe
                      # [help:<token>] lines in docs/TODO.md agree (Workflow Rule 17, DECISION-294/296); no database
 npm run help:shots   # Regenerates the help screenshots from a FIXTURE-ONLY database and refuses any other;
                      # needs its own server on its own port (E2E_BASE_URL); never part of CI
-npm run check        # All nine tripwires in sequence
+npm run check        # All ten tripwires in sequence
 npm run test:e2e:prod # Hydration specs (e2e/hydration/) against `next build && next start` on
                        # port 3800 (PW_PROD_BUILD=1); a dev server can never satisfy this lane
 npm run ui:add -- <component…>  # The ONLY supported way to generate a shadcn primitive.

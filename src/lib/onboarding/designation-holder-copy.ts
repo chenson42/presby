@@ -266,7 +266,7 @@ export function revokeDialogContent(
     lastHolderLine,
     treasurerLine:
       slot === "treasurer"
-        ? "Gift and donor records are not changed. This is recorded in the audit log."
+        ? "Gift, donor and reimbursement records are not changed. This is recorded in the audit log."
         : null,
     recordLine: `This is recorded in the audit log with your reason. You can't undo it here; the organization can grant access again from its own ${page} page, or you can invite a replacement.`,
   };

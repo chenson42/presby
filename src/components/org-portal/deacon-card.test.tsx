@@ -10,11 +10,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-// `DeaconCard` imports `<PersonAvatar>` from the directory subtree, which
-// imports `resolvePhotoSrc()` from the SAME file — that file imports
+// `DeaconCard` imports `<PersonAvatar>` from `person-avatar.tsx`, which
+// also exports `resolvePhotoSrcs()` — that file imports
 // `@/lib/storage/blob-store`, which opens a real `@/lib/db` pool at
 // module-import time (the same reason `directory-grid.test.tsx` mocks this
-// one hop before `@/lib/db`). `DeaconCard` never calls `resolve()` itself
+// one hop before `@/lib/db`). `DeaconCard` never calls the store itself
 // (it always passes `photoSrc={null}`), so an unconfigured mock is enough.
 vi.mock("@/lib/storage/blob-store", () => ({
   getBlobStore: () => ({

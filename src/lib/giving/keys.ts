@@ -1,6 +1,6 @@
 import "server-only";
-import { sql } from "drizzle-orm";
 import type { OrgTx } from "@/lib/authz";
+import { holdsPermissions } from "@/lib/treasury/keys";
 import { GIVING_KEYS } from "./access-pure";
 
 /**
@@ -13,19 +13,9 @@ import { GIVING_KEYS } from "./access-pure";
  * first so it never trusts the page or action that called it.
  */
 
-export async function holdsPermissions(
-  tx: OrgTx,
-  viewer: { personId: string; organizationId: string },
-  keys: readonly string[],
-): Promise<boolean[]> {
-  const selects = keys.map(
-    (key, i) =>
-      sql`presby_has_permission(${viewer.personId}::uuid, ${viewer.organizationId}::uuid, ${key}) as k${sql.raw(String(i))}`,
-  );
-  const result = await tx.execute(sql`select ${sql.join(selects, sql`, `)}`);
-  const row = (result as unknown as { rows?: Array<Record<string, boolean>> }).rows?.[0] ?? {};
-  return keys.map((_, i) => row[`k${i}`] === true);
-}
+// The implementation moved to src/lib/treasury/keys.ts (shared with the
+// reimbursement gate); re-exported under its old name and path.
+export { holdsPermissions };
 
 /** One round trip: exactly which giving keys the viewer holds right now. No key implies another. */
 export async function givingKeysInTx(

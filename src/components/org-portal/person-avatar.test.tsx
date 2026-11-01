@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 /**
- * Tests for `person-avatar.tsx`'s two exports.
+ * Tests for `person-avatar.tsx`'s two exports (moved here from
+ * `directory/` when it gained a third caller; docs/work-log/
+ * 2026-10-26-person-photos-inc1.md).
  *
- * `resolvePhotoSrc()` is real business logic (DECISION-030's "never query
- * `blob_assets` directly" plumbed through `resolve()`) and is tested with
- * `@/lib/storage/blob-store` mocked — deterministic, no DB, no image
+ * `resolvePhotoSrcs()` is real business logic (DECISION-030's "never query
+ * `blob_assets` directly" plumbed through `resolveMany()`, F332) and is tested
+ * with `@/lib/storage/blob-store` mocked — deterministic, no DB, no image
  * decoding involved.
  *
  * `<PersonAvatar>` is tested only for what is DETERMINISTIC in this
@@ -24,49 +26,75 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-const resolve = vi.fn();
+const resolveMany = vi.fn();
 vi.mock("@/lib/storage/blob-store", () => ({
-  getBlobStore: () => ({ resolve, resolveMeta: vi.fn(), store: vi.fn() }),
+  getBlobStore: () => ({ resolveMany, resolve: vi.fn(), resolveMeta: vi.fn(), store: vi.fn() }),
 }));
 
 import {
   PersonAvatar,
-  resolvePhotoSrc,
+  resolvePhotoSrcs,
   __avatarPaletteClassNameForTest as avatarPaletteClassName,
 } from "./person-avatar";
 
 afterEach(() => {
   cleanup();
-  resolve.mockReset();
+  resolveMany.mockReset();
+  vi.restoreAllMocks();
 });
 
-describe("resolvePhotoSrc", () => {
-  it("returns null without calling the blob store when photoKey is null", async () => {
-    const src = await resolvePhotoSrc("org-1", null);
-    expect(src).toBeNull();
-    expect(resolve).not.toHaveBeenCalled();
+const K1 = "00000000-0000-4000-8000-000000000001";
+const K2 = "00000000-0000-4000-8000-000000000002";
+const dataUri = (type: string, text: string) => `data:${type};base64,${Buffer.from(text).toString("base64")}`;
+
+describe("resolvePhotoSrcs", () => {
+  it("returns all nulls without calling the blob store when every key is null or the list is empty", async () => {
+    expect(await resolvePhotoSrcs("org-1", [null, null])).toEqual([null, null]);
+    expect(await resolvePhotoSrcs("org-1", [])).toEqual([]);
+    expect(resolveMany).not.toHaveBeenCalled();
   });
 
-  it("returns null when resolve() misses (a stale key), never throws", async () => {
-    resolve.mockResolvedValue(null);
-    const src = await resolvePhotoSrc("org-1", "stale-key");
-    expect(src).toBeNull();
-  });
-
-  it("returns a data: URI built from the resolved bytes and content type", async () => {
-    resolve.mockResolvedValue({
-      bytes: Buffer.from("fake-image-bytes"),
-      contentType: "image/webp",
-    });
-    const src = await resolvePhotoSrc("org-1", "key-1");
-    expect(src).toBe(
-      `data:image/webp;base64,${Buffer.from("fake-image-bytes").toString("base64")}`,
+  it("reads every distinct key in ONE resolveMany call, private audience, and aligns the output with the input", async () => {
+    resolveMany.mockResolvedValue(
+      new Map([
+        [K1, { bytes: Buffer.from("one"), contentType: "image/webp" }],
+        [K2, { bytes: Buffer.from("two"), contentType: "image/webp" }],
+      ]),
     );
-    expect(resolve).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      key: "key-1",
-      audience: "private",
+    const out = await resolvePhotoSrcs("org-1", [K2, null, K1, K2]);
+    expect(resolveMany).toHaveBeenCalledTimes(1);
+    expect(resolveMany).toHaveBeenCalledWith({ organizationId: "org-1", keys: [K2, K1], audience: "private" });
+    expect(out).toEqual([dataUri("image/webp", "two"), null, dataUri("image/webp", "one"), dataUri("image/webp", "two")]);
+  });
+
+  it("a key the read did not return (a stale key) is null, never a throw", async () => {
+    resolveMany.mockResolvedValue(new Map());
+    expect(await resolvePhotoSrcs("org-1", [K1])).toEqual([null]);
+  });
+
+  it("matches an upper-case key to the lower-case id the store returns", async () => {
+    resolveMany.mockResolvedValue(new Map([[K1, { bytes: Buffer.from("one"), contentType: "image/webp" }]]));
+    expect(await resolvePhotoSrcs("org-1", [K1.toUpperCase()])).toEqual([dataUri("image/webp", "one")]);
+  });
+
+  it("a read FAILURE logs one fixed line and returns all nulls: a photo outage must not take the directory down", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    resolveMany.mockRejectedValue(new Error("connection reset by peer, host ep-secret.example.invalid"));
+    expect(await resolvePhotoSrcs("org-1", [K1, K2])).toEqual([null, null]);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith("[person-photos] thumbnail read failed; showing initials");
+  });
+
+  it("more than 100 distinct keys are read in chunks of 100, never dropped and never over the adapter's cap", async () => {
+    resolveMany.mockImplementation(async ({ keys }: { keys: string[] }) => {
+      expect(keys.length).toBeLessThanOrEqual(100);
+      return new Map(keys.map((k) => [k, { bytes: Buffer.from(k), contentType: "image/webp" }]));
     });
+    const keys = Array.from({ length: 230 }, (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`);
+    const out = await resolvePhotoSrcs("org-1", keys);
+    expect(resolveMany).toHaveBeenCalledTimes(3);
+    expect(out.every((v) => v !== null)).toBe(true);
+    expect(out[229]).toBe(dataUri("image/webp", keys[229]!));
   });
 });
 

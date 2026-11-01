@@ -7,14 +7,14 @@ If you are the chair or leader of a group that can receive requests, a request c
 1. You get an email, "A reimbursement request needs your approval". It has a button, "Open the request". It does not say what the request is for. Sign in to see the details.
 2. You can also find it on the Reimbursements page, under "Waiting for your approval" and a count.
 3. Open the request. Read the amount, what it was for and the receipts.
-4. Select "Approve". The dialog states the amount, who is paid and the group it is charged to. Select "Approve" again to confirm. The page says "Approved." and the request goes to the treasurer for payment.
-5. To say no, select "Send back". Choose "Needs changes" if the requester can fix it and send it again, or "Not approved" if the request should end there. Write a reason in the "Reason" box. The requester sees it, and it is required.
+4. Select "Approve". The dialog states the amount, who is paid and the group it is charged to. Select "Approve" again to confirm. A message says "Approved." and the request goes to the treasurer for payment.
+5. To say no, select "Send back". Choose "Needs changes" if the requester can fix it and send it again, or "Not approved" if the request should end there. Write a reason in the box labelled "Reason (the requester will see this)". It is required.
 
 Nobody approves their own request. The person who approves a request cannot also record its payment. If the request changed after you opened it, the page says "This request changed after you opened it. Review it again." If someone already decided, it says so with the date.
 
 ## The treasurer view
 
-If you handle reimbursements, the Reimbursements page has a "Treasurer view" button. It opens a page headed "Reimbursement requests", also found from the administration area. A person who is not on the treasury team sees a message that the page is for the people who handle reimbursements.
+If you handle reimbursements, the Reimbursements page has a "Treasurer view" button. It opens a page headed "Reimbursement requests". You can also reach it from "Administration", under "Giving & Finance", on the "Reimbursement requests" tile. A person who is not on the treasury team sees a message that the page is for the people who handle reimbursements.
 
 The page has tabs.
 
@@ -26,7 +26,7 @@ The page has tabs.
 | "Paid" | Requests with a payment recorded. |
 | "All" | Every request that has been sent in. |
 
-You can filter by group and by the dates requests were sent ("Submitted from" and "Submitted to"). "Export CSV" downloads the requests as a spreadsheet file. The file covers every request that has been sent in, not only the tab you are on, and it can hold up to 20,000 requests: narrow the date range if the page says the export is too large. Every export is recorded.
+You can filter by group ("Charged to") and by the dates requests were sent ("Submitted from" and "Submitted to"), then select "Filter". "Export CSV" downloads the requests as a spreadsheet file. The file covers every request that has been sent in, not only the tab you are on or the group you chose under "Charged to". The dates you enter do narrow it. It can hold up to 20,000 requests: if the download says "Narrow the date range: that export is more than 20,000 requests.", enter dates and try again. Every export is recorded.
 
 Everyone who views, pays or manages requests signs in with two-factor sign-in. See [Using your code to sign in](/help/using-your-code).
 
@@ -38,7 +38,7 @@ PresbyPortal records the payment. It does not send money or ask for bank details
 2. Select "Record payment".
 3. Under "How was it paid?", choose "Check", "ACH", "Cash" or "Other". For a check, enter the "Check number". You can add a "Reference (optional)" and a "Note (optional)".
 4. Enter the "Date paid". It cannot be before the day of the expense or after today.
-5. Select "Record payment". The page says "Payment recorded."
+5. Select "Record payment". A message says "Payment recorded."
 
 The requester sees "Paid on" and the date. They do not see how it was paid.
 
@@ -46,7 +46,7 @@ The page may refuse, and says why:
 
 - "A different person must record this payment." The person who approved the request cannot record its payment.
 - "Another person who can record payments should do this, because you entered this request or are being paid by it." Someone other than the requester records it. If you are the only person who can record payments at your church, you can record a payment on your own request, and the request is marked "Marked as paid by the person who entered or is paid by the request."
-- "Add a receipt or waive it before paying." A request needs a receipt before payment. To pay without one, select "Waive receipt". The page says "The request can be paid without one. This is recorded." Add a note if you like.
+- "Add a receipt or waive it before paying." A request needs a receipt before payment. To pay without one, select "Waive receipt". A dialog, "Waive the receipt?", says "The request can be paid without one. This is recorded." Add a note if you like, then select "Waive receipt" again.
 
 ## Correct a mistake
 

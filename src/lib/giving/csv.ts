@@ -1,7 +1,7 @@
 /**
  * The gifts CSV writer - docs/work-log/2026-10-15-online-giving.md, Phase 3
- * "CSV export" (G25). PURE: no imports, no `server-only`, unit-tested to the
- * byte. The route handler (`admin/giving/gifts/export/route.ts`) gates,
+ * "CSV export" (G25). PURE: its one import is the pure shared `@/lib/csv`, no
+ * `server-only`, unit-tested to the byte. The route handler (`admin/giving/gifts/export/route.ts`) gates,
  * queries, audits and streams; this file only formats.
  *
  * What the contract fixes, and where it is enforced here:
@@ -18,6 +18,12 @@
  * Amounts are decimal dollars ("12.34"), never "$12.34": a spreadsheet parses
  * a bare decimal as a number, and a currency string as text.
  */
+
+import { centsToDecimal, csvTextCell, joinCsvLines } from "@/lib/csv";
+
+// The cell primitives live in src/lib/csv.ts (shared with the reimbursement
+// export); re-exported so every existing import and csv.test.ts is untouched.
+export { centsToDecimal, csvTextCell };
 
 export const CSV_HEADER = [
   "gift_id",
@@ -64,29 +70,6 @@ export interface CsvGiftRow {
   checkNumber: string | null;
 }
 
-const FORMULA_LEAD = /^[=+\-@\t\r]/;
-const NEEDS_QUOTES = /[",\r\n]/;
-
-/** A TEXT cell: formula-prefixed, then RFC 4180-quoted. null/undefined -> empty. */
-export function csvTextCell(value: string | null | undefined): string {
-  if (value === null || value === undefined || value === "") return "";
-  let text = String(value);
-  if (FORMULA_LEAD.test(text)) text = `'${text}`;
-  if (NEEDS_QUOTES.test(text)) text = `"${text.replace(/"/g, '""')}"`;
-  return text;
-}
-
-/** Integer cents -> "12.34" (no currency symbol, no grouping). null -> "". */
-export function centsToDecimal(cents: number | null | undefined): string {
-  if (cents === null || cents === undefined) return "";
-  if (!Number.isSafeInteger(cents)) {
-    throw new RangeError("centsToDecimal: cents must be a safe integer");
-  }
-  const abs = Math.abs(cents);
-  const text = `${Math.trunc(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
-  return cents < 0 ? `-${text}` : text;
-}
-
 /** One data row, in CSV_HEADER order. */
 export function csvRow(row: CsvGiftRow): string {
   return [
@@ -109,6 +92,5 @@ export function csvRow(row: CsvGiftRow): string {
 
 /** The whole file: header, then one CRLF-terminated line per row. */
 export function buildGiftsCsv(rows: readonly CsvGiftRow[]): string {
-  const lines = [CSV_HEADER.join(","), ...rows.map(csvRow)];
-  return `${lines.join("\r\n")}\r\n`;
+  return joinCsvLines(CSV_HEADER, rows.map(csvRow));
 }

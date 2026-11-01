@@ -284,7 +284,7 @@ test.describe("treasurer", () => {
     const dialog = await openDialogFor(page, section, "Ottoline Fairweather");
     await expect(dialog).toContainText(/manage giving at/);
     await expect(dialog).toContainText(
-      "Gift and donor records are not changed. This is recorded in the audit log.",
+      "Gift, donor and reimbursement records are not changed. This is recorded in the audit log.",
     );
     await dialog.getByLabel(/reason \(kept in the audit log\)/i).fill(REASON);
     await dialog.getByRole("button", { name: "Yes, end access" }).click();

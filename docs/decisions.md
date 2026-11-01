@@ -4,6 +4,157 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-312 — `sharp` has a closed list of two importers, each of which always re-encodes and keeps no metadata. Amends DECISION-270 and DECISION-271 (T5).**
+
+**Status:** Accepted (architect, integration of person-photos Inc 1 with 0.51.0) · **Date:** 2026-10-31 · **Feature:** `2026-10-26-person-photos-inc1`
+
+- T5 now reads: `sharp` is imported at runtime by exactly the files in `SHARP_FILES` (`src/lib/person-photos/image.ts`, `src/lib/storage/image-sanitize.ts`), and by no other non-test file. Each listed file must exist, import `sharp` at runtime, begin with `import "server-only";`, and name no metadata-keeping method (`withMetadata`, `keepMetadata`, `keepExif`, `withExif`, `withExifMerge`, `keepIccProfile`, `withIccProfile`, `keepXmp`, `withXmp`). `check-treasury-boundaries`, `image-sanitize.test.ts` and `person-photos/scan.test.ts` all assert the same list.
+- **Why two, not one:** the one-door rule exists to keep a reviewed set of places where untrusted images are decoded, each with stated bomb limits and an unconditional re-encode. Receipts (64 MP, long edge 1800, 4 MB) and photos (header check before decoding, 16 MP and 6000 px, animated refused, master plus thumbnail) are two separately reviewed refusal orders. Merging them would put both behind branches in one module, which is harder to review. The Vercel trace risk does not grow with a second importer: same exact pin, one lockfile copy, one preview-deploy proof covering both (treasury EC42, photos edge case 26).
+- **Accepted residual (`paper`):** the content check is a grep for method names. It cannot see a decode with `limitInputPixels: false` on the pixel path (photos uses `false` legitimately, on the header-only `metadata()` call). Each file's unit tests carry that.
+- **Revisit if** a third consumer needs `sharp`: the list does not grow to three. The shared parts are then extracted into `src/lib/storage/image/` as a planned pipeline with its own Phase 2.
+
+---
+
+**DECISION-299 — The treasurer tree answers a refused verb with a sentence that is true for every cause of that outcome; the queue's "Charged to" filter is read from the requests the viewer can already see, bounded at 2,000.**
+
+**Status:** Accepted (tech-lead Phase 3 amendment "Copy gaps from Batch 4", ruling 5 and ruling 8, 2026-10-26; Phase 6 SHIP WITH NOTES; recorded at integration 2026-10-31) · **Date:** 2026-10-26 · **Feature:** `2026-10-25-treasury-inc1` (no migration of its own; v0.51.0). Numbered DECISION-299 because DECISION-267 to 271 were pre-assigned to the five Phase 2 entries and the work-log's two later decision drafts had no number.
+
+- **Refusals.** The member tree keeps one neutral answer (`This request isn't available.`) for a refused decision or withdrawal and for every `not_found`, because a member must not be able to tell a request they cannot see from one that is not there (DECISION-040's shape). The treasurer tree is different: its audience already holds `reimbursement.view` or `pay`, so it is told why. Six short sentences (`treasury.refusals.{notWaivable, receiptPresent, notVoidable, notReversible, notApprovable, notReturnable}`), each worded to be true for every cause its definer outcome can have, never naming a person, an amount or who decided. `not_found` stays neutral in both trees.
+- **The group filter.** The queue's "Charged to" options are the distinct groups present in the rows the viewer can already see, so the filter discloses nothing the list does not. No new definer and no schema change. `presby_reimbursement_treasurer_list` clamps a page to 200 rows, so the derivation pages and stops at 2,000 requests; when it stops, the hint `Only groups with one of the 2,000 most recent requests are listed.` says so (`queue.filter.groupsTruncated`) and a group the list lacks but the URL names stays selectable as "This group".
+- **Revisit if** an organization passes 2,000 requests (add a distinct-groups definer; no operator confirmation needed), or a refusal outcome gains a cause that makes one of the six sentences false.
+
+---
+
+**DECISION-271 — Treasury shares one CSV writer, one boundary tripwire, and person-addressed notices; the emailed link is a bare path.**
+
+**Status:** Accepted (architect Phase 2; tech-lead Phase 3 detail; T5 amended by DECISION-312; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (v0.51.0)
+
+- `src/lib/csv.ts` (pure) holds `csvTextCell`, `centsToDecimal`, the formula guard, CRLF join and the row-cap check; `src/lib/giving/csv.ts` imports and re-exports them and keeps its own header, row shape and cap, so its byte-exact test is unchanged. The reimbursement export is a GET route gated on `view` (2FA), capped at 20,000 rows (413, never a truncated file), audited with a row count and filters only. It includes the purpose column (a treasurer cannot reconcile without it) and excludes the pre-approver name and any bank detail.
+- `npm run check:treasury-boundaries`, now one of ten tripwires in `npm run check`: T1 no owner connection under reimbursement, treasury or either route tree; T2 only `src/lib/reimbursement/` and the Drizzle mirror name `reimbursement_*` or `presby_reimbursement_*`; T3 no `capture` on any `type="file"` input in `src/app`; T4 a file that references a `reimbursement.notice.` template key names no money or free-text identifier (the namespace is distinct from the permission keys, which also start `reimbursement.`); T5 `sharp` imported at runtime by one file (amended by DECISION-312: a closed list of two). Later ledger increments extend it.
+- Four notice templates, all `person:role` (requester notices too: staff often have only a work address, and the notice names no one and nothing). Addresses come only from `getPersonEmail(tx, id, "role")` inside the RLS transaction; no deliverable address means in-app only. Rows are written in the transition's transaction and sent after commit.
+- **Link format (departs from the Phase 2 note; F321):** `<platform origin>/o/<slug>/reimbursements/<id>` (`/admin/reimbursements/<id>` for pay holders), never `/launch?next=`, because the proxy and `/launch` both drop the query for a signed-out visitor.
+- **Revisit if** the proxy preserves the query string on its sign-in redirect (then `/launch?next=` becomes viable), or a notice ever needs a field the tripwire forbids.
+
+---
+
+**DECISION-270 — Receipts are private blobs served only through their request; `sharp` re-encodes images; 4 MB; an upload route handler. Partly superseded by DECISION-277.**
+
+**Status:** Accepted (architect Phase 2; amended by F289 Phase 2; T5 amended by DECISION-312; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (v0.51.0)
+
+- As in Phase 2: row id in the URL, never the blob key; gate order `auth()`, 2FA, org, toggle, viewer-check definer, `resolve()`; headers `nosniff`, `private, no-store`, sandbox CSP, `attachment` for PDF; one 404 shape; at most 5 files of 4,000,000 bytes (a request body up to 4,200,000); first cookie-authenticated POST route handler in the tenant tree, so same-origin check, one file part, `Content-Length` precheck and a streamed cap; duplicate detection on the `content_sha256` of the bytes as received.
+- **Superseded by DECISION-277:** the audience backfill is fail-closed (everything starts `private`); the column default stays permanently; the constant column on a private consumer is named `asset_audience`; `resolve()` and `resolveMeta()` take a required audience; the receipt FK is `(blob_key, organization_id, asset_audience) → blob_assets (id, organization_id, audience)`.
+- **Phase 3 additions:** `receipt_preflight` before `store()`; client canvas downscale is usability only; the server re-encode is the guarantee (`sharp`, `rotate()`, long edge 1800, JPEG 80/70/60/50, `limitInputPixels` 64,000,000, no metadata; `src/lib/storage/image-sanitize.ts` is the only importer, T5); PDFs pass through unsanitized; 40 uploads per user per hour.
+- **Accepted residuals:** no malware scanning; PDF metadata and active content; an orphaned private blob when attach fails after store; `bytea` growth (about 1 GB a year at fpcw scale); `sharp` loading on Vercel is unverified until one real receipt upload in a deployed function (EC42; the production proof is the operator's check, with the toggle on for a fixture or test congregation only).
+- **Revisit if** an object store replaces `bytea`, a non-image class needs public serving, or `sharp` cannot load on Vercel (then receipts block and the pipeline returns to Phase 2).
+
+---
+
+**DECISION-269 — Requesting is an eligibility check, not a key; the money keys, template bindings, backfill and delegation.**
+
+**Status:** Accepted (architect Phase 2; amended by tech-lead Phase 3, P3-2 and P3-14; residual 12 accepted by the operator 2026-10-26) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (migration 0074; v0.51.0)
+
+- No `reimbursement.request` key. `presby_reimbursement_may_file` requires an active membership, an unmerged person linked to the acting user, and `current_roll is not null or engagement_status in ('regular','staff')` (an accepted-invitation person is created with a `staff` membership, migration 0064). The cost: an organization cannot narrow who files except by turning the feature off (named v1 limit).
+- Keys: `request_for_others` (no 2FA), `view`, `pay`, `manage` (2FA each; `manage` because the chargeable list decides who approves). Bound to the `treasurer` template, including `request_for_others` **(amendment: otherwise un-grantable, F322)**; a `reimbursement_clerk` template carries that key alone. None goes to `founding_administrator`, `stated_clerk`, `session_member` or `installed_pastor`.
+- Backfill: org-owned `treasurer` roles with `role_kind = 'constitutional' and is_protected` (minted only by `presby_apply_treasurer`); never `grant_reason`; never a wildcard. Production held 1 such copy when counted (2026-10-26).
+- Downward guard: sibling triggers for `module = 'reimbursement'` (F301); generalizing the guard is a follow-up before the ledger.
+- Delegation (F296): `src/lib/treasury/team.ts` treats a role as delegable when every key's module is in `TREASURY_MODULES`; the actor gate is the surface's own manage key (giving: `giving.manage`; reimbursement: `reimbursement.manage`); `assertPermissionSubset()` unchanged; person-arm grants only; the last effective manage holder of the surface's key cannot be ended there. `src/lib/giving/team.ts` is a wrapper whose tests are unchanged.
+- **Ending a treasury grant is checked against its own module's manage key only; the cross-module orphan is accepted as residual 12 (operator, 2026-10-26).** A team-page revoke of the seven-key `treasurer` grant can leave the other module's manage key unheld. The stricter rule was refused for three reasons: its refusal sentence would tell a `giving.manage` holder to hand the role to someone else when the subset rule means that holder cannot; it fails toward keeping a departed treasurer's money keys live, where permitting the revoke fails toward removing access; and it would couple two modules' guards for a case that needs a custom role built on purpose. **Detection:** `tenant.role.revoked`, with the grant id, on both team pages. **Recovery (read, never run; unverified):** a platform operator ends the remaining `giving.manage` holders on `/admin/organizations/<id>` (DECISION-194: reason required, audited, never a grant held through a derived group), which empties the treasurer slot, then re-designates a treasurer, whose acceptance mints a fresh seven-key role through 0074's bindings. A holder through a derived group cannot be ended that way and needs an engineer; the founding administrator cannot repair it (F138). Pinned by `treasury/team.db.test.ts` (revoking the sole grant on one surface leaves the other manage key unheld); a later decision to add the stricter rule changes that test on purpose. No release note or help text may say the treasury team can never be left without a manager. `paper`.
+- **Revisit if** an organization needs to restrict who files, a second tier-2 module needs its own delegation rules, the guard is generalized, or residual 12 is ever hit in production.
+
+---
+
+**DECISION-268 — Approval is a seat checked live in a definer, not a key; separation of duties is in the database.**
+
+**Status:** Accepted (architect Phase 2; tech-lead Phase 3 detail; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (migration 0073; v0.51.0)
+
+- One internal rule: an eligible approver is a live unmerged person with an active membership, holding a `chair` or `leader` row in date on a `managed` group, not the creator or beneficiary (merge-resolved). Re-derived on every approve and return, so a seat that ends mid-queue loses authority at once. Derived groups (Session, Diaconate) have no such rows and take the override path; a `deacons_moderator` mapping is an additive change inside the same function (tracked in `docs/TODO.md`; DECISION-242).
+- Override: `reimbursement.pay`, no eligible approver at that moment, and at least one other `pay` holder (`needs_second_payer` otherwise); stamped `approval_path = 'override'`. A `pay` holder cannot override while an eligible approver exists.
+- Triggers binding the owner too: on `→approved` the approver is not the creator or beneficiary; on a payment insert the payer is not the approver in force, and `self_paid` is derived.
+- **Named limit:** "the requester may pay only as the sole pay holder" needs a holder count, so it is a definer property (`needs_another_payer`), not a trigger property. The sole `pay` holder may record payment on their own request, stamped `self_paid`.
+- Accepted: the seat has no `requires_two_factor`; the independent payer is the money control. `paper`.
+- **Revisit if** a spending threshold or dual approval is wanted, or a Moderator seat is mapped.
+
+---
+
+**DECISION-267 — Reimbursements are one module with a state machine enforced in the database.**
+
+**Status:** Accepted (architect Phase 2; tech-lead Phase 3 detail; residual 14 accepted by the operator 2026-10-26; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-25 · **Feature:** `2026-10-25-treasury-inc1` (migrations 0073 and 0074; v0.51.0)
+
+- Six tables in 0073 (chargeable groups, categories, requests, attachments, payments, events); `presby_app` holds SELECT on the two config tables and nothing on the other four. All reads and writes go through `presby_reimbursement_*` definers: a bounded actor claim, one viewer rule (creator for drafts; creator or beneficiary, a live eligible approver of the group, or a `view` holder afterwards), `not_found` for missing and forbidden alike, a closed outcome list pinned to a TypeScript constant. Audit rows are written in the same transaction (12 `tenant.reimbursement.*` keys, plus `RECEIPT_VIEWED`).
+- Transition table by trigger on every connection; freeze rules; revision incremented only while `draft`/`returned`, approve bound to the revision seen. Two deferred constraint triggers: a request is `paid` iff a live payment exists; a status change has a same-transaction history event.
+- Payments are insert-only; a reversal is its own row (one per payment) and returns the request to `approved`; no fund or account column until Increment 5. Saving is create-or-find by client key, then update by id with the expected revision. `origin = 'import'` admits null actors for Track K; the importer is not built.
+- Migration 0073 depends on F289's 0072 (receipt FK). Migration 0074: keys, bindings, backfill.
+- **Accepted residual 14 (the 0055 class; accepted by the operator 2026-10-26, "Accept it"):** the delete guard is a row trigger, so the owner connection (`neondb_owner`) can still `TRUNCATE` any of the six tables, `reimbursement_events` included, and can `ALTER TABLE ... DISABLE TRIGGER`. `presby_app` and `presby_platform` cannot: neither holds `TRUNCATE`, and neither owns the tables. No table in this database carries a TRUNCATE trigger (0055 and 0056 record the same residual), so a guard on these six alone would be inconsistent and would not stop `DISABLE TRIGGER`. Detection is by the owner credential's scope (migration and operator use only, never the request path) and by the audit rows each definer writes in the same transaction, which a truncate of the six tables alone would leave behind as the only record. `paper`. Revisit if a database-wide event trigger refusing `TRUNCATE` on tenant tables is ever adopted (then it covers every module at once; tracked in `docs/TODO.md`).
+- **Revisit if** partial payments, mileage or recurring expenses are wanted, or the ledger needs a column on the payment row.
+
+---
+
+**DECISION-289 — Person-photo rules live in five SQL functions, one definition per question, and every surface calls them; dialog sentences are chosen from before and after outcomes.**
+
+**Status:** Accepted (tech-lead Phase 3; amended by the Phase 5 run 1 to 3 amendments; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-person-photos-inc1` (migration 0078; v0.52.0)
+
+- **Context.** Whether a photo shows is decided in four places (the directory, the public roster, the door, the admin page's status lines) by five facts (toggle, minor, merge, `hide_photo`, designation and attestation). Each reading its own SQL would drift, and the public one reads rows the app role cannot see.
+- **Decision.** `presby_person_photos_enabled` (the toggle, pinned to the catalog entry and compared with `orgFeatureEnabledInTx`), `presby_photo_subject_is_minor` (children.ts's DOB arithmetic), `presby_person_directory_photo` (invoker, RLS-scoped, `hide_photo` scoped to the viewing org as the directory has always done), `presby_person_public_photo` (definer, owner-only; `hide_photo` joined on person alone, the stricter cross-org rule 0072 chose) and its wrapper `presby_person_public_photo_status` (definer; organization from `presby_current_org()`). The roster functions, the directory query and the photos page call these and compute nothing themselves. A parity test compares the wrapper with the roster output for every person in the matrix.
+- **Alternatives rejected.** An invoker core (cannot see another organization's `hide_photo`; the page would disagree with the public site). Computing the answer in TypeScript for the page (a second definition). Granting the core to `presby_app` with an organization parameter (an oracle for any person's website photo key).
+- **Consequences.** Per-row function calls in the directory; one index probe per row when no photo is designated. `resolveMany` replaces per-card transactions. The directory entry field is `photoThumbKey`. A client downscale to at most 900 KB is mandatory, and the island never creates a `blob:` URL (the CSP).
+- **Consequence copy (the Phase 5 run 1 to 3 amendments; Phase 5 failed copy truthfulness three times for one cause).** The consequence sentences in the person-photo dialogs are chosen by comparing the outcome of the click, computed by a pure mirror of `presby_person_public_photo` and `presby_person_directory_photo` (`src/lib/person-photos/outcome.ts`), before and after, never by a per-state rule written by hand. Every sentence key carries a declared truth condition (the claims registry), checked over the full product of the dimensions the SQL reads (listed, published, minor, merged, hide none, this-org or other-org, website and directory designations including the same photo), and the mirror is pinned to the SQL and to the store by a Postgres property test. A sentence cannot be added without a claim. Selection verbs (use, chosen, marked) say which photo the designations pick; an effect (show, appear, leave) is stated only as a negative, hedged with "can ... unless something withholds it", or as "can no longer show". Listing and publication are not part of the SQL core's answer, so a sentence that depends on them says so or does not claim it. An instruction on the page names a control the page has, and appears only when applying it is verified to do what it says.
+  - **Unknown is clear.** `factsOfSnapshot` treats what the page cannot read as the benign value: published is true, merged is read from the website answer, and a `hide_photo` set at another congregation is unknown while nothing is designated (the roster functions start from a designation). The page may then show a hopeful status line and a hedged consequence line, and it learns the truth after the click. This is accepted, and every such line is hedged.
+  - **The cache sentence is not on every withdrawal.** `websiteCaches` and `removeCaches` follow stop and remove (claim S4). They are absent when a website photo is replaced (`websiteReplaces`, `directoryWebsiteWillStop`) and when the website selection does not change. No string denies the residual; the website dialog body says archives cannot be recalled. Adding the sentence on replacement is a tracked follow-up.
+  - **Stopping the website designation does not withdraw a clearance on the same photo** (Option A, 2026-10-26). The dialog says so and names the control that does ("Stop using in directory", then choose it again without ticking the box). A separate "withdraw clearance" control is not built (operator). Withdrawing the clearance as a side effect was considered and declined: it would change consent semantics and silently end something a person confirmed.
+  - **Accepted residual:** the directory sentences' "unless {first} has hidden their photo" is wider than the directory function's org-scoped hide; it over-hedges and never promises.
+- **Revisit if** unpaged directory reads exceed about 2,000 rows, or the 500 KB document budget for 25 thumbnails is exceeded (then stream through an authenticated route with a DECISION-040 neutral 404). The consequence-claims registry is tightened before the next edit to `consequences.ts` or `copy.ts` (`docs/TODO.md`, QA run 4 N1).
+
+---
+
+**DECISION-288 — Photo upload is a Server Action at the 1 MB default.**
+
+**Status:** Accepted (architect Phase 2; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-person-photos-inc1` (v0.52.0)
+
+- A mandatory client downscale keeps the body at or under about 900 KB. The server never trusts it.
+- No global `bodySizeLimit` raise.
+- Authorization, toggle, membership, adult and cap checks all run before any decode.
+- Audit is written in-transaction by `store.ts`, and DB tests stand in for the `check:audit` blind spot.
+
+---
+
+**DECISION-287 — `sharp` becomes a direct dependency at Next's resolved version (0.35.5), imported by `src/lib/person-photos/image.ts`, one of the two importers DECISION-312 lists.**
+
+**Status:** Accepted (architect Phase 2; amended by DECISION-312; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-person-photos-inc1` (v0.52.0)
+
+- Derivatives are made at upload, never on read: a master of at most 1200 px with no forced crop, and a 160 px top-biased WebP thumbnail.
+- Sniff plus format agreement, pre-decode pixel and dimension caps, no animation, all metadata stripped.
+- Directory surfaces inline the thumbnail as a `data:` URI. No new route.
+- Phase 2 wrote "imported only by `image.ts`". Treasury's `image-sanitize.ts` landed first (DECISION-270), so the rule is now the closed list of two in DECISION-312.
+
+---
+
+**DECISION-286 — One SQL definition of a person's public photo.**
+
+**Status:** Accepted (architect Phase 2; amended by tech-lead Phase 3, F333; Q6 confirmed at Phase 6; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-person-photos-inc1` (migration 0078; v0.52.0)
+
+- `presby_person_public_photo(org, person)` returns the website designation, otherwise an **attested** directory designation. It returns null for `hide_photo`, for a minor (`presby_photo_subject_is_minor`, read-time and fail-closed), or when the toggle is off.
+- **Definer core plus wrapper (F333; Phase 2 had said invoker).** An invoker cannot see another organization's `person_privacy` row, so the page would disagree with the public roster for a person who hid their photo elsewhere. The core is `SECURITY DEFINER` with an owner-only grant; the wrapper `presby_person_public_photo_status` derives the organization from `presby_current_org()`.
+- Both roster functions project it with unchanged signatures, and no longer join `person_privacy` themselves. `search_path`, revoke and grant are restated.
+- The door treats any `person_photos` key (image or thumbnail, removed or not) as a photo, served only while a roster lists it.
+- The admin UI reads the same function. The directory never falls back to the website photo.
+- **Q6, the fallback consent, confirmed.** A directory photo stands in on the website only when whoever chose it also ticked "OK for the public website" (the attestation). The operator's own word for this was "cleared". Phase 1 G3 said "never fall back"; the operator overruled it and the attestation guard is the condition.
+- `org_portal.person_photos` (toggle-only, people category, provisioned off) gates the management UI, the directory and the public path. Its SQL composition is pinned against `orgFeatureEnabledInTx`.
+
+---
+
+**DECISION-285 — Person photos are an org-scoped set keyed to the membership, with end-dated designations; `people.photo_key` is retired.**
+
+**Status:** Accepted (architect Phase 2; amended by tech-lead Phase 3, F334; Phase 6 SHIP WITH NOTES) · **Date:** 2026-10-26 · **Feature:** `2026-10-26-person-photos-inc1` (migration 0078; v0.52.0)
+
+- Covers the two tables of R1: composite FKs to `memberships`, and `asset_audience = 'private'` pinned into `blob_assets_id_org_audience_key`.
+- At most one active designation per purpose per person per org (partial unique). A website designation requires an attestation (CHECK).
+- No DELETE. Removal and ending are one-way, enforced by trigger on every connection.
+- `people.photo_key` and `photo_updated_at` are held null by CHECK in 0078 and dropped in 0079 after the release. The Drizzle declaration of the two retired columns stays until 0079, because `check:schema-parity` compares columns in both directions (F334). This supersedes F289 R4's "convert to uuid and add an FK" follow-up.
+- Households get their own table later.
+- **Revisit if** a photo needs to be shared across orgs, or bytes need erasing.
+
+---
+
 **DECISION-298 — An applied migration may be corrected in place only when the change is guard-only and provably behaviour-neutral where it already ran; otherwise fix forward.**
 
 **Status:** Accepted (orchestrator ruling, 2026-10-28; Phase 6 SHIP WITH NOTES, `2026-10-28-org-baseline-backfill`) · **Date:** 2026-10-28 · **Feature:** `2026-10-28-org-baseline-backfill` (migration 0082; v0.50.1)

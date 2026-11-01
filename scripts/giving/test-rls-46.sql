@@ -940,11 +940,17 @@ rollback;
 --     are in Vitest), the fixture-wide agreement, and the resolver pin.
 -- ===========================================================================
 begin;
-  -- Six since drizzle/0080 (F343, DECISION-291): the three giving keys (0055)
-  -- and the three administration keys. A pipeline that flags another key
-  -- (treasury's 0074 reimbursement keys) updates this count when it merges.
-  select assert_eq((select count(*) from permissions where requires_two_factor), 6,
-                   '46j: requires_two_factor is true for exactly six keys (0055 giving, 0080 administration; DECISION-291)');
+  -- Nine: the three giving keys (0055), the three administration keys
+  -- (drizzle/0080, F343, DECISION-291), and the three reimbursement keys
+  -- (drizzle/0074, DECISION-269, F323: reimbursement.view, .pay and .manage;
+  -- request_for_others does not require it). A pipeline that flags another
+  -- key updates this count when it merges.
+  select assert_eq((select count(*) from permissions where requires_two_factor), 9,
+                   '46j: requires_two_factor is true for exactly nine keys (0055 giving, 0074 reimbursement, 0080 administration)');
+  select assert_eq((select count(*) from permissions where requires_two_factor
+                     and key in ('reimbursement.view','reimbursement.pay','reimbursement.manage')
+                     and module = 'reimbursement' and sensitivity_tier = 2),
+                   3, '46j: ...three are reimbursement.view, .pay and .manage, tier 2 (drizzle/0074)');
   select assert_eq((select count(*) from permissions where requires_two_factor
                      and key in ('giving.view','giving.record','giving.manage') and module = 'giving' and sensitivity_tier = 2),
                    3, '46j: ...the three giving keys, module giving, tier 2');
@@ -1301,9 +1307,11 @@ begin;
     1, '46m: the giving_recorder TEMPLATE exists (custom, unprotected, unscoped)');
   select assert_eq(
     (select count(*) from (select permission_key from app_role_permissions where role_id = :TREASURER_TEMPLATE
-                           except select unnest(array['giving.view','giving.record','giving.manage'])) d)
-    + (select abs(count(*) - 3) from app_role_permissions where role_id = :TREASURER_TEMPLATE),
-    0, '46m: the treasurer template carries exactly giving.view, giving.record, giving.manage');
+                           except select unnest(array['giving.view','giving.record','giving.manage',
+                                                      'reimbursement.request_for_others','reimbursement.view',
+                                                      'reimbursement.pay','reimbursement.manage'])) d)
+    + (select abs(count(*) - 7) from app_role_permissions where role_id = :TREASURER_TEMPLATE),
+    0, '46m: the treasurer template carries exactly the three giving keys and, since drizzle/0074 (DECISION-269, F323), the four reimbursement keys');
   select assert_eq(
     (select count(*) from app_role_permissions where role_id = :RECORDER_TEMPLATE and permission_key = 'giving.record')
     * 10 + (select count(*) from app_role_permissions where role_id = :RECORDER_TEMPLATE),

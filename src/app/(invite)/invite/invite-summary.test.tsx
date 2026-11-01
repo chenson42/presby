@@ -65,4 +65,17 @@ describe("InviteSummary", () => {
     expect(tr).toContain("A PresbyPortal administrator invited you to be the treasurer at");
     expect(tr).toContain("This role requires two-factor sign-in.");
   });
+
+  it("treasurer: names the giving and reimbursement abilities, byte for byte (treasury Inc 1, Phase 3 amendment ruling 2)", () => {
+    const { container } = render(<InviteSummary preview={preview({ purpose: "treasurer" })} />);
+    const org = preview().organizationName;
+    expect(container.textContent ?? "").toContain(
+      `As treasurer you will be able to view gifts and donors, record gifts, and manage giving settings for ${org}. If ${org} uses Reimbursements, you can also view reimbursement requests, record payments on them, and choose which groups can receive them. This role requires two-factor sign-in.`,
+    );
+  });
+
+  it("founding administrator: no Reimbursements", () => {
+    const { container } = render(<InviteSummary preview={preview({ purpose: "founding_administrator" })} />);
+    expect(container.textContent ?? "").not.toMatch(/reimbursement/i);
+  });
 });

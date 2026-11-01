@@ -13,7 +13,7 @@ are version-controlled.
 made that constrains later work · `finding` = a fact worth knowing that is not
 either of those.
 
-<!-- covers: decision=298 commit=745fd6e -->
+<!-- covers: decision=299 commit=ae5aecc -->
 
 *The marker above is what makes staleness measurable. `scripts/briefings-check.mjs`
 compares it against `docs/decisions.md` and `git log`, and says at session start
@@ -24,6 +24,12 @@ marker when you write new entries — that is the one piece of discipline this f
 is checked.*
 
 ---
+
+## 2026-10-31
+
+- [ ] **`decision` · Photos of people are built and stay off until you turn them on (0.52.0; DECISION-285 to DECISION-289 and DECISION-312).** Staff who manage people add up to ten photos to an adult and choose one for the directory and one for the public website; one SQL definition decides whether a photo shows. **Before any toggle:** apply 0078 to production after 0073 and 0074 (`docs/deployment.md` runbook; never re-apply 0072 afterwards), prove one real upload on a Vercel build, and do your real-iPhone check at 360px. **Accepted:** no birth date counts as an adult, nobody can yet set "hide my photo", the website tick is a staff statement, photo bytes sit in Postgres under a size watch. **DECISION-312:** `sharp` now has two allowed importers, receipts and photos; a third means a planned extraction. **Still open:** your call on the first customer's leadership pages (Q5), and 0079 in a later release.
+
+- [ ] **`decision` · Reimbursements are built and stay off until you turn them on (0.51.0; DECISION-267 to DECISION-271 and DECISION-299).** A member asks to be paid back, a chair or leader approves, the treasurer records payment; nobody approves their own request and the approver never pays, enforced by the database. **Before any toggle:** apply 0073 then 0074 to production, prove `sharp` loads in a Vercel function with one real receipt upload for a test congregation (EC42), and do the `development` walk. **You accepted on 2026-10-26:** the database owner can still empty the six tables, a team-page revoke can leave the other module's manage key unheld, no reminders, no similar-request warning. **Still open:** nobody is told when a church has no treasurer (N2), and Deacons Moderators cannot yet approve (N3). The two help pages wait for their walk.
 
 ## 2026-10-28
 

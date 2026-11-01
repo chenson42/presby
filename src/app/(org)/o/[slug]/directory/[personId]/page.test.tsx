@@ -107,7 +107,7 @@ function baseEntry(overrides: Record<string, unknown> = {}) {
     phone: "555-0100",
     address: null,
     dateOfBirth: null,
-    photoKey: null,
+    photoThumbKey: null,
     middleName: null,
     suffix: null,
     householdId: null,

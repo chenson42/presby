@@ -1985,6 +1985,12 @@ commit;
 -- one posting in each state). scripts/careers/test-rls-71.sql needs it.
 \ir careers/seed-dev-careers.sql
 
+-- Reimbursements fixture (drizzle/0073, 0074). Its own file and transaction,
+-- run AFTER the person-emails include (it needs Alder Creek's people, groups
+-- and the giving fixture's treasurer role); adds no people or memberships, and
+-- one linked fixture user (73e); idempotent. scripts/treasury/test-rls-73.sql needs it.
+\ir treasury/seed-dev-treasury.sql
+
 -- Sign-in invitations and auto-connect fixture (drizzle/0065). Its own file and
 -- transaction, run LAST: it writes the org_portal.sign_in_connect toggle row for
 -- EVERY organization (an absent row is off, DECISION-097) and needs the earlier

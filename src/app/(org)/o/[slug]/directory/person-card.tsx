@@ -3,7 +3,7 @@ import { ChevronRight, Lock, Mail, MapPin, Phone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { DirectoryEntry } from "@/lib/directory";
-import { PersonAvatar } from "./person-avatar";
+import { PersonAvatar } from "@/components/org-portal/person-avatar";
 
 /**
  * One member's card. Extracted from `directory-grid.tsx` in Increment 3 so

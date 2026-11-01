@@ -483,7 +483,11 @@
         "permissions": [
           "giving.manage",
           "giving.record",
-          "giving.view"
+          "giving.view",
+          "reimbursement.manage",
+          "reimbursement.pay",
+          "reimbursement.request_for_others",
+          "reimbursement.view"
         ]
       }
     ],
@@ -531,7 +535,11 @@
           "directory.view",
           "giving.manage",
           "giving.record",
-          "giving.view"
+          "giving.view",
+          "reimbursement.manage",
+          "reimbursement.pay",
+          "reimbursement.request_for_others",
+          "reimbursement.view"
         ]
       }
     ],
@@ -578,7 +586,11 @@
         "permissions": [
           "giving.manage",
           "giving.record",
-          "giving.view"
+          "giving.view",
+          "reimbursement.manage",
+          "reimbursement.pay",
+          "reimbursement.request_for_others",
+          "reimbursement.view"
         ]
       }
     ],

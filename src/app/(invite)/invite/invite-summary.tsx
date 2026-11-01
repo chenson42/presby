@@ -11,7 +11,7 @@ import type { InvitationPreview } from "@/lib/onboarding/accept";
 function roleSummary(purpose: InvitationPreview["purpose"], organizationName: string): string {
   switch (purpose) {
     case "treasurer":
-      return `As treasurer you will be able to view gifts and donors, record gifts, and manage giving settings for ${organizationName}. This role requires two-factor sign-in.`;
+      return `As treasurer you will be able to view gifts and donors, record gifts, and manage giving settings for ${organizationName}. If ${organizationName} uses Reimbursements, you can also view reimbursement requests, record payments on them, and choose which groups can receive them. This role requires two-factor sign-in.`;
     case "founding_administrator":
       return `As founding administrator you will be able to manage people, roles and settings for ${organizationName}, and give access to everyone else there.`;
     case "sign_in":

@@ -24,6 +24,9 @@
  *                      `account_sign_in_invitation`, `person:credential`: the
  *                      issue definer resolves the address in SQL and returns
  *                      it, so the queue row's `to` is never a client string.
+ *                      The four reimbursement notices (approver, treasurer and
+ *                      requester; Treasury Increment 1, P3-11) use
+ *                      `person:role`.
  */
 export type Audience =
   | "account"
@@ -55,6 +58,13 @@ export const EMAIL_AUDIENCE: Readonly<Record<string, Audience>> = {
   account_sign_in_invitation: "person:credential",
   // donor
   "giving.statement.notice": "donor",
+  // person:role - an approver, a treasurer or a requester is often staff with only
+  // a work address, and all three notices reach a recipient at the same address
+  // (src/lib/reimbursement/notices.ts, P3-11). No amount, name or free text in any.
+  "reimbursement.notice.needs_approval": "person:role",
+  "reimbursement.notice.needs_treasurer": "person:role",
+  "reimbursement.notice.ready_to_pay": "person:role",
+  "reimbursement.notice.requester_update": "person:role",
 };
 
 export function audienceFor(templateKey: string): Audience | null {

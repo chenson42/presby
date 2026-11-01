@@ -141,6 +141,8 @@ export const MODULES: Record<string, string> = {
   person_talents: "C. Person extensions",
   background_checks: "C. Person extensions",
   person_medical: "C. Person extensions",
+  person_photos: "C. Person extensions",
+  person_photo_designations: "C. Person extensions",
   roll_actions: "D. Rolls",
   transfer_certificates: "D. Rolls",
   ordinations: "E. Officers",
@@ -201,6 +203,13 @@ export const MODULES: Record<string, string> = {
   ticket_actions: "S. Support",
   congregation_feedback: "S. Support",
   help_contact_messages: "S. Support",
+  // Treasury Increment 1 (drizzle/0073, src/lib/db/domain/reimbursement.ts).
+  reimbursement_chargeable_groups: "U. Reimbursements",
+  reimbursement_categories: "U. Reimbursements",
+  reimbursement_requests: "U. Reimbursements",
+  reimbursement_attachments: "U. Reimbursements",
+  reimbursement_payments: "U. Reimbursements",
+  reimbursement_events: "U. Reimbursements",
   job_postings: "T. Careers",
 };
 

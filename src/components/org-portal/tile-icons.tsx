@@ -11,6 +11,8 @@ import {
   Megaphone,
   Music,
   Palette,
+  Receipt,
+  ReceiptText,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
@@ -48,6 +50,10 @@ export const TILE_ICONS: Record<string, LucideIcon> = {
   // online-giving: the member tile and the treasurer's admin tile get distinct
   // glyphs, same reasoning as calendar/events below.
   "giving-admin": Landmark,
+  // treasury Increment 1: the member tile and the treasurer's tile get distinct
+  // glyphs too (both sit under Giving & Finance).
+  reimbursements: Receipt,
+  "reimbursements-admin": ReceiptText,
   worship: Music,
   committees: Gavel,
   oversight: ShieldCheck,

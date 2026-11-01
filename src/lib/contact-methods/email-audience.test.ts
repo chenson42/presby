@@ -34,14 +34,26 @@ function walk(dir: string): string[] {
 }
 const isTest = (file: string) => /\.(test|spec)\.(ts|tsx)$/.test(file);
 
-/** Non-literal template keys, by the exact source text of the expression. */
-const NAMED: Readonly<Record<string, string>> = {
+/**
+ * Non-literal template keys, by the exact source text of the expression. A value
+ * may be a LIST when one call site sends several keys (the reimbursement notices
+ * choose their key from the notice they build); each is then classified and each
+ * counts as used.
+ */
+const NAMED: Readonly<Record<string, string | readonly string[]>> = {
   // src/lib/onboarding/invitation-email.ts: `export const ACCOUNT_INVITATION_TEMPLATE_KEY = "account_invitation"`
   ACCOUNT_INVITATION_TEMPLATE_KEY: "account_invitation",
   // src/lib/onboarding/invitation-email.ts: `export const ACCOUNT_SIGN_IN_TEMPLATE_KEY = "account_sign_in_invitation"`
   ACCOUNT_SIGN_IN_TEMPLATE_KEY: "account_sign_in_invitation",
   // src/lib/giving/statements/notice.ts: `buildStatementNotice()` returns STATEMENT_NOTICE_TEMPLATE
   "notice.templateKey": "giving.statement.notice",
+  // src/lib/reimbursement/notify.ts: `buildNotice()` returns one of NOTICE_TEMPLATE_KEYS
+  "built.templateKey": [
+    "reimbursement.notice.needs_approval",
+    "reimbursement.notice.needs_treasurer",
+    "reimbursement.notice.ready_to_pay",
+    "reimbursement.notice.requester_update",
+  ],
 };
 
 const SENDERS: Record<string, number> = { enqueueEmail: 0, insertQueueRowInTx: 1 };
@@ -67,7 +79,7 @@ function scan(): Found[] {
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text in SENDERS) {
         const callee = node.expression.text;
         const arg = node.arguments[SENDERS[callee]!];
-        let key: string | null = null;
+        let keys: readonly string[] = [];
         let expression = "(no object-literal argument)";
         if (arg && ts.isObjectLiteralExpression(arg)) {
           const prop = arg.properties.find(
@@ -79,13 +91,17 @@ function scan(): Found[] {
           if (prop) {
             const init = ts.isPropertyAssignment(prop) ? prop.initializer : prop.name;
             expression = init.getText(source);
-            if (ts.isStringLiteral(init) || ts.isNoSubstitutionTemplateLiteral(init)) key = init.text;
-            else key = NAMED[expression] ?? null;
+            if (ts.isStringLiteral(init) || ts.isNoSubstitutionTemplateLiteral(init)) keys = [init.text];
+            else {
+              const named = NAMED[expression];
+              keys = named === undefined ? [] : typeof named === "string" ? [named] : named;
+            }
           } else {
             expression = "(no templateKey property)";
           }
         }
-        found.push({ file: rel(file), callee, key, expression });
+        if (keys.length === 0) found.push({ file: rel(file), callee, key: null, expression });
+        for (const key of keys) found.push({ file: rel(file), callee, key, expression });
       }
       ts.forEachChild(node, visit);
     };
@@ -152,12 +168,23 @@ describe("the audience registry is closed and complete (ER14)", () => {
       statistics_submission_grant: "typed",
       account_sign_in_invitation: "person:credential",
       "giving.statement.notice": "donor",
+      // Treasury Increment 1, P3-11: approver, treasurer and requester notices
+      "reimbursement.notice.needs_approval": "person:role",
+      "reimbursement.notice.needs_treasurer": "person:role",
+      "reimbursement.notice.ready_to_pay": "person:role",
+      "reimbursement.notice.requester_update": "person:role",
     });
   });
 
-  it("exactly one sender addresses a person's contact email, and it is the congregation's sign-in invitation (person:credential; giving is not wired, D7)", () => {
+  it("the senders that address a person's contact email are the congregation's sign-in invitation (person:credential) and the four reimbursement notices (person:role); giving is not wired, D7", () => {
     const personKeys = Object.entries(EMAIL_AUDIENCE).filter(([, a]) => a.startsWith("person:"));
-    expect(personKeys).toEqual([["account_sign_in_invitation", "person:credential"]]);
+    expect(personKeys.sort(([a], [b]) => a.localeCompare(b))).toEqual([
+      ["account_sign_in_invitation", "person:credential"],
+      ["reimbursement.notice.needs_approval", "person:role"],
+      ["reimbursement.notice.needs_treasurer", "person:role"],
+      ["reimbursement.notice.ready_to_pay", "person:role"],
+      ["reimbursement.notice.requester_update", "person:role"],
+    ]);
   });
 
   it("the sign-in invitation is sent by org-invite.ts alone, through the definer-chosen address (the registry entry and the sender land together)", () => {

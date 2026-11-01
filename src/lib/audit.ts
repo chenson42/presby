@@ -579,7 +579,58 @@ export const AUDIT_ACTIONS = {
   //   skippedMembersOnly?, clearedBecauseMembersOnly? }.
   EVENT_LISTED_ON_WEBSITE: "event.listed_on_website",
   EVENT_UNLISTED_FROM_WEBSITE: "event.unlisted_from_website",
+  // APPENDED - pipeline/person-photos, 2026-10-26 (docs/work-log/
+  // 2026-10-26-person-photos-inc1.md, DECISION-285, R10). Written from
+  // src/lib/person-photos/store.ts with insertAuditRow(tx, ...) in the SAME
+  // transaction as the change, so a failed audit insert undoes it. A photo
+  // reaching the open web is a disclosure, so choosing one for the website (and
+  // the moment it stops) is its own record. resourceType 'person'; resourceId =
+  // the person. Metadata is ids, booleans and purposes ONLY: never the bytes, a
+  // hash, a filename, dimensions or a name. `check:audit` scans only actions.ts,
+  // which delegate to store.ts.
+  //   ADDED        { organizationId, personId, photoId, autoDirectory }
+  //   REMOVED      { organizationId, personId, photoId, endedPurposes }
+  //   DESIGNATED   { organizationId, personId, photoId, purpose, attested,
+  //                  replacedPhotoId | null, via: 'designate' | 'add' }
+  //   UNDESIGNATED { organizationId, personId, photoId, purpose,
+  //                  via: 'undesignate' | 'remove' }
+  PERSON_PHOTO_ADDED: "tenant.person_photo.added",
+  PERSON_PHOTO_REMOVED: "tenant.person_photo.removed",
+  PERSON_PHOTO_DESIGNATED: "tenant.person_photo.designated",
+  PERSON_PHOTO_UNDESIGNATED: "tenant.person_photo.undesignated",
   // ---------------------------------------------------------------------------
+  // APPENDED - pipeline/treasury, 2026-10-25 (docs/work-log/2026-10-25-treasury-
+  // inc1.md, Phase 3 "AUDIT_ACTIONS"). Reimbursements. All `tenant.reimbursement.*`
+  // (the actor is a member of the organization, the tenant axis). Written by
+  // src/lib/reimbursement/*.ts with insertAuditRow() in the SAME transaction as
+  // the transition (P3-20), so `check:audit` (which scans only actions.ts files)
+  // cannot see them; src/lib/reimbursement/audit-coverage.test.ts is the proof.
+  // Metadata is ids, counts and tags ONLY - never an amount, a purpose, a
+  // reason, a note or a name. NOT audited, because reimbursement_events is
+  // their record: save, submit, resubmit, withdraw, note, receipt attach and
+  // detach. Toggle changes use ORG_FEATURE_TOGGLED; team grants reuse
+  // TENANT_ROLE_GRANTED/_REVOKED with path "reimbursement_team".
+  //   Metadata: { organizationId, requestId, ... } plus, per key:
+  //   APPROVED { path: 'seat' }; OVERRIDE_APPROVED {};
+  //   RETURNED { kind: 'needs_info', byRole: 'seat' | 'treasury' };
+  //   NOT_APPROVED { byRole }; VOIDED {}; PAYMENT_RECORDED { paymentId,
+  //   method, selfPaid }; PAYMENT_REVERSED { paymentId }; RECEIPT_WAIVED {};
+  //   RECEIPT_VIEWED { attachmentId } (viewer is not the creator);
+  //   EXPORTED { rowCount, from, to, status } (no requestId);
+  //   CHARGEABLE_CHANGED { groupId, chargeable } (no requestId);
+  //   CATEGORY_CHANGED { categoryId, change: 'created' | 'renamed' | 'retired' }.
+  REIMBURSEMENT_APPROVED: "tenant.reimbursement.approved",
+  REIMBURSEMENT_OVERRIDE_APPROVED: "tenant.reimbursement.override_approved",
+  REIMBURSEMENT_RETURNED: "tenant.reimbursement.returned",
+  REIMBURSEMENT_NOT_APPROVED: "tenant.reimbursement.not_approved",
+  REIMBURSEMENT_VOIDED: "tenant.reimbursement.voided",
+  REIMBURSEMENT_PAYMENT_RECORDED: "tenant.reimbursement.payment_recorded",
+  REIMBURSEMENT_PAYMENT_REVERSED: "tenant.reimbursement.payment_reversed",
+  REIMBURSEMENT_RECEIPT_WAIVED: "tenant.reimbursement.receipt_waived",
+  REIMBURSEMENT_RECEIPT_VIEWED: "tenant.reimbursement.receipt_viewed",
+  REIMBURSEMENT_EXPORTED: "tenant.reimbursement.exported",
+  REIMBURSEMENT_CHARGEABLE_CHANGED: "tenant.reimbursement.chargeable_changed",
+  REIMBURSEMENT_CATEGORY_CHANGED: "tenant.reimbursement.category_changed",
   // APPENDED - pipeline/signin-invites, 2026-10-25 (Community Increment 2b,
   // DECISION-225/226). Address proof and auto-connect. Both are written with
   // insertAuditRow(tx, ...) in the SAME transaction as the change they record,

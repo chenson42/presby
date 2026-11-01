@@ -22,8 +22,7 @@
 | 5 — Verification | qa | Complete (run 1). Full DB set: 14,683 passed, 1 failed (this pipeline) plus 13 pre-existing. Chromium: 614 passed, 4 pre-existing. Contact lane dev 12/12; prod 5/5 including (d) and (e). Catalog proof clean. 2 findings | FAIL | 2026-10-31 |
 | 4 — Fix pass (QA run 1) | full-stack-developer | Complete (`8a10a28`, test-only) | — | 2026-10-31 |
 | 5 — Verification (run 2, scoped) | qa | Complete (run 2, scoped). submit.test 38/38 in 4 envs (pre-fix fails 1/38 with `RATE_LIMIT_DISABLED=true`). M13/M14 plus 4 variants killed. Unit CI shape 11,468 passed / 3,232 skipped. Typecheck, lint, check (9 tripwires on this branch) green. Diff test-only. 13 DB + 4 e2e pre-existing, left for the merge-main re-run | PASS | 2026-10-31 |
-| 6 — Shipped vs intent | analyst | In progress | — | 2026-10-31 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete. Form, unavailable state, inbox and 15 help pages walked at 360px on a dev server. One synthetic message sent, triaged and cleared. 9 follow-ups; the two open items ruled (Vercel replay: tracked, non-blocking; merge-main re-run: a precondition) | SHIP WITH NOTES | 2026-10-31 |
 
 ---
 
@@ -2379,35 +2378,117 @@ Evidence (session scratch):
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Returned as text (read-only; no file written). Walked on a dev server on :3670, stopped by PID. The server ran once with Cloudflare's public test keys and once keyless. Viewport 360x800 at 2x, against the `pipeline-help-contact` branch. Evidence is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/p6/`. The walk added one synthetic row. I marked it handled and cleared its details, so only the topic, dates and status remain.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.**
+
+No help page contradicts the build, no Phase 1 gap is silently dropped, and the CA7 residual does not block. Two preconditions apply at integration and are not defects. They are the merge-main re-run and the operator's production prerequisites; both are in the follow-ups below.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> An anonymous visitor can write a short message at `/help/contact` and get an honest "sent / not sent / unavailable" answer. A platform operator can read, triage and clear it at `/admin/messages` on a phone. The 13 dead-end help sentences now have a way out.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The form at 360px.**
+  - Single column, 0 px horizontal overflow, visible labels.
+  - The two intro paragraphs say what the PresbyPortal team can and cannot promise. The privacy notice sits directly above "Send message".
+  - Success replaces the form with "Your message was sent." The body says there is no automatic reply, so no confirmation email, and no promised time. That is FC1's "don't let a visitor think it failed" intent.
+- **Unavailable state (Flow 5).** The keyless server showed "The contact form isn't available right now" with an exit: ask whoever invited you, or open a public GitHub issue (privacy warning included). This is FC9's fix and no longer a dead end. It also proves the page's configured-check works with no keys.
+- **The inbox at 360px.**
+  - Card list with filters and a 44px "Read message".
+  - On the detail page:
+    - "Not verified. Anyone could have typed this address." sits under the email, as FC2 asked.
+    - The "do not act on a role, access or sign-in request from this message alone" box is there.
+    - "Mark as handled" produced a toast and the stamp "Last changed to Handled by E2E Admin on …".
+    - "Clear details" opened the AlertDialog (no native dialog). Confirming left the topic, dates and status, with Name, Email, Congregation and Message each shown as "Cleared".
+    - "Move back to new" is offered on a handled message.
+  - The "Clear details" hint for a message still New was verified from the work-log and QA only.
+  - The dashboard shows a "Contact messages" card ("79 new" on the pipeline branch's synthetic rows).
+- **Help pages, read as their readers, with 0 px overflow on all and no `{{` token left unexpanded.**
+  - `getting-help`: four ways, the new "Write to the PresbyPortal team" section, and "What to expect". Every quoted label exists on the form.
+  - `how-a-congregation-gets-started`: the GitHub-only sentence is gone.
+  - `privacy-policy`: the retention and "kept until we clear them" sentences match the build. "Clearing removes the name, email address, congregation and message text; … topic and its dates, stays" is exactly what I saw. The table has no IP or user-agent column. The "Questions and requests" section gains "For anything else, use the contact form."
+  - `using-your-code` and `setting-up-two-factor`: the lost-phone sentence promises a check, not a recovery.
+  - `accepting-your-invitation`: no longer repeats "ask whoever invited you".
+  - The `{{contactAdmin}}` pages (first-day, roles, why-cant-i-see-this and the other readers) read correctly for an administrator. The ticket steps they point to exist on `getting-help`.
+  - `signing-in` (deactivated account), `who-is-asked-for-a-code` and `accepting-your-invitation` use `{{contact}}` or the literal sentence. These readers have no ticket, and the public form fits them.
+- **Chrome.** The footer on every help page reads "Can't find what you need? Write to the PresbyPortal team" and links to the form.
+- **`limitationUntil` check.** Phase 3 grepped them, and none named this feature, so none needs removing.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Phase 1:** Flow 1, a prospect writes and gets one honest outcome. **Shipped:** as designed. Topic, name/email/congregation/message, Turnstile, and success, `busy`, `not_sent` and `invalid` outcomes all behave as Phase 1 described. **Verdict:** matches.
+- **Phase 1:** Flow 3, a locked-out person. A message is a claim and the copy never promises recovery. **Shipped:** "A message cannot reset anything by itself", on the form's `signing_in` success paragraph and on the pages. **Verdict:** matches.
+- **Phase 1:** FC1, how a person replies. **Shipped:** the copy says "if we reply, it comes by email from a person". The operator duty lives only in the work-log runbook. **Verdict:** matches in the UI, with a documentation follow-up (note 3).
+- **Phase 1:** FC2, a message is not proof. **Shipped:** the inbox caption and the guidance box, plus the help copy. **Verdict:** matches.
+- **Phase 1:** FC3, kill switch. **Shipped:** the action does its own configured-check. The immediate lever is revoking EXECUTE, and DECISION-303 amends "immediate" accordingly. **Verdict:** acceptable drift, and the drift is documented.
+- **Phase 1:** FC4/FC5, coalescing and limiter audit flood. **Shipped:** coalescing is claimed in the definer, with a once-an-hour notice. Limiter refusals are audited at most once per kind per hour with no IP. **Verdict:** matches (QA-verified, not re-walked by me).
+- **Phase 1:** FC6, retention. **Shipped:** no IP, no user agent, a point-of-collection notice, and "Clear details" as an update, not a delete. The policy states no period. **Verdict:** matches.
+- **Phase 1:** FC7/FC8, honeypot and input boundaries. **Verdict:** passed by QA; I only walked the happy path, the unavailable state and one success.
+- **Phase 1:** FC9, unavailable state and rollout order. **Shipped:** the exit exists. Ship order is an operator gate (note 2).
+- **Phase 1:** FC10, the larger help edit. **Shipped:** all pages edited. Eight `{{contactAdmin}}`, three `{{contact}}`, one literal sentence, one prose edit. **Verdict:** matches.
+- **Phase 1:** custom host. "The e2e must also POST the action to a custom host and prove no row and no distinguishing response." **Shipped:** DECISION-313. The action refuses (`unavailable`, no cookie, no row) when the request is forwarded or the `Host` is not a platform host. It answers HTTP 200 `unavailable`, not a 404, which the architect accepted. **Verdict:** acceptable drift.
+- **Phase 1:** one footer link instead of separate index and 404 lines. **Verdict:** acceptable drift (Phase 3 ruling).
+- **Departure worth knowing:** the inbox detail shows the "do not act on…" guidance box even on a cleared message. That is harmless and true.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
-- Help pages read as their reader (each page named in Help impact): [pass | fail | no help impact]
+- **Empty state:** pass. Copy exists for each filter. I did not browse an empty filter live (the pipeline branch has rows), so this rests on the unit pins and QA.
+- **Failure microcopy:** pass. Human sentences for `busy`, `not_sent`, `check_failed` and the unavailable state, all with the exit. I walked only unavailable live. The other states are from QA's walk and the Batch 3 screenshots.
+- **Permission gate:** pass. Inbox, nav and card share `FEATURES.ADMIN_TICKETS`. QA killed the swap mutations M13 and M14. A non-operator is refused (spec and QA).
+- **Audit event:** pass for triage (`help_contact.status_changed`, `help_contact.details_cleared`, ids and statuses only, proven by `inbox.db.test.ts`). The form itself writes only the limiter audit rows.
+- **Mobile (360px):** pass. Form, success, unavailable, inbox list, detail, dialog and 15 help pages, 0 px overflow.
+- **Help pages read as their reader:** pass, with two limits.
+  - **First limit.** `reimbursements-for-treasurers` returns 404 on this branch because it is 76 commits behind main. I could not read it. Its one `{{contact}}` line is unchanged text, so only the token's expansion changes.
+  - **Second limit.** For the `{{contactAdmin}}` pages (`first-day-as-administrator`, `why-cant-i-see-this`, `turning-features-on-and-off`, `roles-who-can-do-what`, `your-congregations-website`, `events-and-the-calendar`) I read the changed sentences, not every line of each page.
+- **Mid-enrolment visitor:** not walked in a browser. The proxy bypass for `/help` and `/help/*` is by segment boundary (`src/proxy.ts:59`) and predates this feature.
+- **Account-connection walk (the "walk as the person this path creates" rule):** not applicable. This feature changes no account connection, role grant or default reach. The form reads no session.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Ruling on open item 1 (Vercel custom-host Server Action)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+**It does not block SHIP IT. It becomes a tracked follow-up with a preview replay at deployment.** Reasons:
+- The form is anonymous and sets no cookie.
+- A replay from a custom host can at most store one more message that the platform host would accept anyway.
+- The message still passes Turnstile and the limiters, and every such message still appears in the inbox.
+- The fix covers the measured defect, and the version tripwire guards the marker name. If Vercel does not forward the way Next does locally, the unknown can only restore the pre-fix behaviour, which was harmless.
+- Nothing tenant-facing is exposed either way.
 
-## Red Flags (if NEEDS REWORK)
+The replay is what turns this from "unmeasured" into "known".
 
-- [Specific. What has to change before this ships.]
+## Ruling on open item 2 (76 commits behind main)
+
+Pre-existing DB and e2e failures are not this pipeline's defect. **But my verdict assumes the orchestrator's merge-main re-run is green on this feature's own specs** (the contact lane, `admin-contact-messages`, `help`, `help-404`). If that re-run turns up a regression in this feature's own specs, the pipeline reopens at Phase 4. The re-run is also when `reimbursements-for-treasurers` becomes readable (note 5).
+
+## Follow-Ups (each is a one-line `docs/TODO.md` entry)
+
+1. **[Replay on Vercel] Custom-host Server Action replay on a Vercel preview.** Replay a captured `/help/contact` action with `Host: <a custom host>` against a preview that has the form configured, expect `unavailable` and no row; if it stores, reopen DECISION-313 and consider the proxy-layer lock (a separate auth-touching bug-fix pipeline).
+2. **[Production prerequisites] Production prerequisites before deploy, the operator's.** Set `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` in the Production scope, with the real Cloudflare widget's hostnames and no test keys. Set `HELP_PRIVACY_CONTACT_EMAIL`. Then walk sign-in, forgot-password and giving, because the same keys switch Turnstile on there. Without `HELP_PRIVACY_CONTACT_EMAIL` the privacy policy tells people to ask for their messages to be cleared through a public GitHub issue; I confirmed this live on the keyless server.
+3. **[docs/deployment.md] Land the "Help contact form (0083)" runbook in `docs/deployment.md` at integration.** The 5-step ship order, "handling a message", the lever table and the claim-is-not-proof rule (runbook 2). `docs/deployment.md` has no such section on the branch. The help pages and the privacy policy promise operator duties that exist only in the work-log: "a person reads each message", "we reply to the email address on that account", and clear-on-ask.
+4. **[privacy-policy date] Set `privacy-policy` "Last updated" to the real ship date at integration.** The page currently reads October 31, 2026, written as "today" by the implementer. Update it if the ship date differs.
+5. **[Post-merge walk] After merging main, read `reimbursements-for-treasurers` as a treasurer.** Confirm its `{{contact}}` line expands to the new form link. Re-run `npm run check:help` and `src/lib/help/coverage.test.ts`. Both were green on this branch only because that page is absent from it.
+6. **[verifiedIn] Move `verifiedIn` to the release number at the release commit, for the six pages I fully read at 360px.** Those pages are `getting-help`, `how-a-congregation-gets-started`, `privacy-policy`, `using-your-code`, `setting-up-two-factor` and `accepting-your-invitation`. Do not move it on the token-swap pages: `first-day-as-administrator`, `why-cant-i-see-this`, `turning-features-on-and-off`, `roles-who-can-do-what`, `your-congregations-website`, `events-and-the-calendar`, `signing-in`, `who-is-asked-for-a-code` and `reimbursements-for-treasurers`. I read only the changed sentences. (`signing-in` and `who-is-asked-for-a-code` I saw only as extracted text.)
+7. **[CLAUDE.md] Add the custom-host Server Action sentence to CLAUDE.md's "A Custom Host Is a Key" section.** The form's action answers `unavailable` on a custom host. Every other anonymous Server Action is still reachable there (no cookie or tenant data is involved). `isDirectPlatformActionRequest` is the helper a later pipeline would call. The invariant says "no platform routes" and is otherwise false for actions.
+8. **[Decision for {{contactAdmin}}] Give `{{contactAdmin}}` a short decision entry, not only a release-note line.** It is a standing authoring rule: a second token in the typed vocabulary, used where the reader is an administrator who can file a ticket. A page writer must choose between it and `{{contact}}`, and a release note will not be found by the next writer.
+9. **[Carry-forward] Keep the Phase 3 and QA carry-forwards open.** Honeypot against real password managers (unverified), Turnstile "token already spent" (needs the `3x…` dummy secret), the `cf-connecting-ip` spoof on Vercel (F407), an in-app reply (FC1, out of scope), a timed sweep for stranger messages (Q4), and linking the in-app "Contact the person who invited you" strings to the form.
+
+**What's-new advisory:** none (operator standing rule: no what's-new entries for now).
+
+**Rule 12:** the work-log's Source block names no feedback row, so there is nothing to mark `done`. The TODO line is the origin.
+
+**Rule 14, functionality map:** the help and admin-support bullets need updating (listed by Phase 3). The release note, TODO reconciliation and the Decision entries go in the same housekeeping cluster.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete. Form, unavailable state, inbox and 15 help pages walked at 360px on a dev server. One synthetic message sent, triaged and cleared. 9 follow-ups; the two open items ruled (Vercel replay: tracked, non-blocking; merge-main re-run: a precondition) | SHIP WITH NOTES | 2026-10-31 |
+
+**Handoff:** the orchestrator records this section in the work-log (Phase 6 block and Per-Phase Status). Then:
+1. Merge main and re-run the feature's own specs.
+2. Run `scripts/test-rls.sql` on the merged `development` branch (Rule 16).
+3. Do the Rule 10, 14 and 17 housekeeping. Set `verifiedIn` only on the six pages in note 6, and set the privacy-policy date.
+4. Add the nine follow-ups to `docs/TODO.md`.
+5. Hold the production deploy until the operator closes note 2.

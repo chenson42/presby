@@ -78,7 +78,7 @@ describe("the Stripe allowlist (R8)", () => {
 
   it("pins the SDK exactly (no range) and the API version to the SDK's own", async () => {
     const pkg = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
-    expect(pkg.dependencies.stripe).toBe("23.0.0");
+    expect(pkg.dependencies.stripe).toBe("23.0.1");
     const { STRIPE_API_VERSION } = await import("./client");
     expect(STRIPE_API_VERSION).toBe("2026-09-30.endive");
     // If a dependency bump moves the SDK's pinned version, this fails and a human decides.

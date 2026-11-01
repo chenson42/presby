@@ -21,8 +21,10 @@ import { organizations } from "./org";
  * abstraction boundary, same category as `src/lib/authz.ts`, not a schema
  * module in the shape every other `db/domain/` file is).
  *
- * The logo is the first real consumer (DECISION-055) — not `people.photo_key`,
- * which stays untouched. No photo migration happens here.
+ * The logo was the first real consumer (DECISION-055). Person photos are a
+ * private consumer since drizzle/0078 (person_photos, pinned 'private' by a
+ * three-column composite FK like the others below); `people.photo_key` is
+ * retired, never a blob reference.
  *
  * AUDIENCE (drizzle/0072_presby_blob_audience.sql, F289, DECISION-277). Every
  * row is `public_site` (a brand mark or a site-bundle image: what the public
@@ -34,13 +36,14 @@ import { organizations } from "./org";
  *   - immutability on every connection, the owner included: the
  *     blob_assets_audience_immutable trigger (0072 section 9);
  *   - private consumers pin 'private' by a three-column composite FK into
- *     blob_assets_id_org_audience_key (0072 section 8; the consumer side
- *     declares its asset_audience column, the FK itself is DDL-only, see
- *     below);
- *   - presby_public_site_asset() (0072 section 12) is the public asset
- *     route's only door: a SECURITY DEFINER that serves a public_site image,
- *     or a listed person's photo by the roster functions' own definition,
- *     and nothing else.
+ *     blob_assets_id_org_audience_key (0072 section 8, and 0078 section 1
+ *     for person_photos' image and thumbnail; the consumer side declares its
+ *     asset_audience column, the FK itself is DDL-only, see below);
+ *   - presby_public_site_asset() (0072 section 12, its photo test moved to
+ *     person_photos by 0078 section 6) is the public asset route's only
+ *     door: a SECURITY DEFINER that serves a public_site image, or a listed
+ *     person's photo by the roster functions' own definition, and nothing
+ *     else.
  */
 
 // drizzle-orm/pg-core has no bytea primitive.

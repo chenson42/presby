@@ -95,7 +95,14 @@ export const people = pgTable(
     grade: text("grade"),
     primaryLanguage: text("primary_language"),
 
-    // Object-storage key, not bytes. See F13.
+    // RETIRED (drizzle/0078, DECISION-285). Photos are org-scoped now:
+    // person_photos / person_photo_designations (./person-photos), because a
+    // photo, and the consent behind it, belong to the relationship, not the
+    // human (G1). Held null on every connection by the CHECK
+    // people_photo_key_retired (0078 section 4); read by no stored function
+    // and by no TypeScript. The declaration stays until 0079 drops the
+    // columns (and people_photo_key_lower_idx), because check:schema-parity
+    // compares columns in both directions (F334). Do not read or write it.
     photoKey: text("photo_key"),
     photoUpdatedAt: timestamp("photo_updated_at", { withTimezone: true }),
 

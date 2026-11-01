@@ -161,7 +161,6 @@ export const HELP_PAGES = [
     covers: ["tile:directory"],
     labels: ["Directory", "Households", "Search the directory", "You don't have permission to view the directory."],
     verifiedIn: "0.47.0",
-    limitationUntil: "person-photos",
   },
   {
     slug: "getting-help",
@@ -726,7 +725,7 @@ export const HELP_PAGES = [
     summary:
       "Add photos to a person's record and choose where each one shows.",
     order: 75,
-    status: "pending",
+    status: "published",
     audience: "administrator",
     needs: {
       who: "A Founding Administrator. Turning the feature on needs a role that can manage features, and adding photos needs a role that can edit people.",
@@ -736,7 +735,9 @@ export const HELP_PAGES = [
     covers: ["org_portal.person_photos"],
     labels: [
       "Photos of people",
-      "Photos of people will be hidden",
+      "Turn it off",
+      "Keep it on",
+      "That picture is already in",
       "Edit person",
       "Photos",
       "Back to edit person",
@@ -766,8 +767,7 @@ export const HELP_PAGES = [
       "Cancel",
       "If it's an iPhone photo, pick it from your photo library or convert it to JPEG first.",
     ],
-    verifiedIn: null,
-    requires: "person-photos",
+    verifiedIn: "0.52.0",
   },
   // ---- Treasurers ---------------------------------------------------------------------------
   {

@@ -8,7 +8,7 @@
  * later batch from reaching for the owner connection in a money path, naming a
  * reimbursement table in a page, putting an amount in an email, adding a
  * `capture` attribute to a receipt picker, or importing the image library from a
- * second file. This is the tripwire that makes each one a failing command
+ * third file (DECISION-312). This is the tripwire that makes each one a failing command
  * instead of a review comment. Modelled on `check-giving-boundaries.mjs` (and
  * sharing its comment stripper); later ledger increments extend THIS script, they
  * do not fork it.
@@ -48,15 +48,22 @@
  *        exception is the shared audience registry
  *        (`src/lib/contact-methods/email-audience.ts`), which holds every module's
  *        template keys and is not notice code.
- *   T5 - `sharp` is imported at RUNTIME by one file only,
- *        `src/lib/storage/image-sanitize.ts` (DECISION-270: the receipt
- *        re-encoder is the guarantee that no EXIF location or embedded payload
- *        survives, so it must have one door). A type-only import is erased and is
- *        not a runtime import. EXACTLY one: no other file imports it, and that
- *        file does (a tree where the re-encoder has stopped using the library, or
- *        has been renamed away, fails too - `checkTreasuryBoundariesTree`, which
- *        the command runs; `checkTreasuryBoundaries` alone is the "no other
- *        importer" half, for the synthetic-file tests).
+ *   T5 - `sharp` is imported at RUNTIME by a CLOSED LIST of two files,
+ *        `src/lib/person-photos/image.ts` and `src/lib/storage/image-sanitize.ts`
+ *        (DECISION-312, amending DECISION-270/271 T5, which named one). The
+ *        re-encoders are the guarantee that no EXIF location or embedded payload
+ *        survives, so the library has a short, named list of doors. A type-only
+ *        import is erased and is not a runtime import. EXACTLY these two: no other
+ *        file imports it, and each listed file exists and does (a tree where a
+ *        re-encoder has stopped using the library, or has been renamed away, fails
+ *        too - `checkTreasuryBoundariesTree`, which the command runs;
+ *        `checkTreasuryBoundaries` alone is the "no other importer" half, for the
+ *        synthetic-file tests). Each listed file also begins with
+ *        `import "server-only";` and, comments aside, never names a sharp option
+ *        that keeps metadata (`withMetadata`, `keepMetadata`, `keepExif`,
+ *        `withExif`, `withExifMerge`, `keepIccProfile`, `withIccProfile`,
+ *        `keepXmp`, `withXmp`): the output carries none. A third importer is a
+ *        design amendment (a new DECISION), not an edit to this list.
  *
  * Not a proof; just a tripwire. It sees file PRESENCE of a token, not data flow
  * - the DB tests (`scripts/treasury/test-rls-73.sql`) and code review cover what
@@ -78,8 +85,8 @@ const SRC = path.join(ROOT, "src");
 
 // ── The zones and allowlists ─────────────────────────────────────────────────
 
-/** The one file that may, and must, import `sharp` at runtime (T5). */
-export const SHARP_FILE = "src/lib/storage/image-sanitize.ts";
+/** The closed list of files that may, and must, import `sharp` at runtime (T5, DECISION-312). */
+export const SHARP_FILES = ["src/lib/person-photos/image.ts", "src/lib/storage/image-sanitize.ts"];
 
 /** The audience registry: holds every module's template keys; not notice code (T4). */
 export const EMAIL_AUDIENCE_FILE = "src/lib/contact-methods/email-audience.ts";
@@ -124,6 +131,10 @@ const NOTICES_IMPORT_RE = /from\s*["'](?:\.\/notices|@\/lib\/reimbursement\/noti
 /** Money, formatters and the free-text fields a request carries. Word-bounded; case-sensitive. */
 const NOTICE_FORBIDDEN_RE =
   /\b(?:amount\w*|\w*[Cc]ents\w*|format(?:Money|Amount|Currency|Dollars)\w*|NumberFormat|currency\w*|dollars?\w*|purpose\w*|vendor\w*|payee\w*|expense_?[Dd]ate|reason\w*)\b/;
+
+/** Sharp options that carry input metadata (EXIF, ICC, XMP) into the output. Word-bounded; comments stripped first. */
+const SHARP_KEEP_METADATA_RE =
+  /\b(?:withMetadata|keepMetadata|keepExif|withExif|withExifMerge|keepIccProfile|withIccProfile|keepXmp|withXmp)\b/;
 
 const SHARP_FROM_RE = /\b(import|export)\s+(type\s+)?([^;'"]*?)\bfrom\s*["']sharp(?:\/[^"']*)?["']/g;
 const SHARP_SIDE_EFFECT_RE = /\bimport\s+["']sharp(?:\/[^"']*)?["']/g;
@@ -288,8 +299,8 @@ export function checkTreasuryBoundaries(files) {
       }
     }
 
-    // T5 - sharp is imported at runtime by one file.
-    if (rel !== SHARP_FILE) {
+    // T5 - sharp is imported at runtime by the closed list of two files.
+    if (!SHARP_FILES.includes(rel)) {
       for (const imp of sharpRuntimeImports(code)) {
         const line = lineOf(code, imp.index);
         violations.push({
@@ -297,7 +308,7 @@ export function checkTreasuryBoundaries(files) {
           file: rel,
           line,
           text: snippet(line),
-          message: `"sharp" is imported at runtime only by ${SHARP_FILE} (DECISION-270: the one re-encoder). Call its exports instead.`,
+          message: `"sharp" is imported at runtime only by ${SHARP_FILES.join(" and ")} (DECISION-312, amending DECISION-270/271 T5: the closed list of two re-encoders). Call their exports instead.`,
         });
       }
     }
@@ -307,30 +318,65 @@ export function checkTreasuryBoundaries(files) {
 }
 
 /**
- * T5's other half: the allowed file must actually be there and import `sharp`
- * at runtime ("exactly one", not "at most one"). Needs the WHOLE tree, so it is
- * separate from `checkTreasuryBoundaries`, whose callers pass a handful of
- * synthetic files.
+ * T5's other half: every listed file must actually be there, import `sharp` at
+ * runtime ("exactly these", not "at most these"), begin with
+ * `import "server-only";`, and name no metadata-keeping sharp option. Needs the
+ * WHOLE tree, so it is separate from `checkTreasuryBoundaries`, whose callers
+ * pass a handful of synthetic files. One run reports every listed file.
  *
  * @param {Array<{ path: string, content: string }>} files
  */
 export function checkSharpHasItsImporter(files) {
-  const own = files.find((file) => file.path === SHARP_FILE);
-  if (own && sharpRuntimeImports(stripComments(own.content)).length > 0) return [];
-  return [
-    {
-      rule: "T5",
-      file: SHARP_FILE,
-      line: 1,
-      text: "",
-      message: own
-        ? `${SHARP_FILE} no longer imports "sharp" at runtime. T5 is EXACTLY one importer: the one re-encoder (DECISION-270) must exist and use the library, or receipts have no sanitizer.`
-        : `${SHARP_FILE} does not exist. T5 is EXACTLY one importer: the one re-encoder (DECISION-270) must exist, or receipts have no sanitizer.`,
-    },
-  ];
+  const violations = [];
+  for (const listed of SHARP_FILES) {
+    const own = files.find((file) => file.path === listed);
+    if (!own) {
+      violations.push({
+        rule: "T5",
+        file: listed,
+        line: 1,
+        text: "",
+        message: `${listed} does not exist. T5 is EXACTLY the closed list ${SHARP_FILES.join(" and ")} (DECISION-312): each re-encoder must exist, or its images have no sanitizer.`,
+      });
+      continue;
+    }
+    const code = stripComments(own.content);
+    if (sharpRuntimeImports(code).length === 0) {
+      violations.push({
+        rule: "T5",
+        file: listed,
+        line: 1,
+        text: "",
+        message: `${listed} no longer imports "sharp" at runtime. T5 is EXACTLY the closed list ${SHARP_FILES.join(" and ")} (DECISION-312): each re-encoder must use the library, or its images have no sanitizer.`,
+      });
+    }
+    if (!own.content.startsWith('import "server-only";')) {
+      violations.push({
+        rule: "T5",
+        file: listed,
+        line: 1,
+        text: own.content.split("\n")[0].trim().slice(0, 120),
+        message: `${listed} must begin with \`import "server-only";\` so the re-encoder can never reach a client bundle (DECISION-312).`,
+      });
+    }
+    const codeLines = code.split("\n");
+    for (let i = 0; i < codeLines.length; i++) {
+      const hit = SHARP_KEEP_METADATA_RE.exec(codeLines[i]);
+      if (hit) {
+        violations.push({
+          rule: "T5",
+          file: listed,
+          line: i + 1,
+          text: (own.content.split("\n")[i] ?? "").trim().slice(0, 120),
+          message: `${listed} names \`${hit[0]}\`. A re-encoder's output carries no input metadata (no EXIF location, ICC or XMP); a sharp option that keeps it defeats the sanitizer (DECISION-312, DECISION-270).`,
+        });
+      }
+    }
+  }
+  return violations;
 }
 
-/** The whole-tree check the command runs: every rule, plus T5's "and that one does". */
+/** The whole-tree check the command runs: every rule, plus T5's "and those two do, cleanly". */
 export function checkTreasuryBoundariesTree(files) {
   return [...checkTreasuryBoundaries(files), ...checkSharpHasItsImporter(files)];
 }
@@ -373,8 +419,9 @@ if (isMain) {
       console.error("");
     }
     console.error("  Why this matters: reimbursements rest on a few things appearing in exactly one place");
-    console.error("  (the table shapes, the image re-encoder) and in none (the owner connection in a money");
-    console.error("  path, an amount in an email, `capture` on a receipt picker). DECISION-271.");
+    console.error("  (the table shapes), the library behind the image re-encoders appearing in exactly two");
+    console.error("  (DECISION-312), and a few appearing in none (the owner connection in a money path, an");
+    console.error("  amount in an email, `capture` on a receipt picker). DECISION-271.");
     console.error("");
     process.exit(1);
   }

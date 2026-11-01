@@ -21,6 +21,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
+import {
+  removeSeededPersonPhoto,
+  seedPersonPhoto,
+  setPersonPhotosToggle,
+  type SeededPersonPhoto,
+} from "@/lib/testing/person-photo-fixture";
 
 vi.mock("server-only", () => ({}));
 
@@ -800,7 +806,7 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     expect(entry?.email).toBeNull();
     expect(entry?.phone).not.toBeNull();
     expect(entry?.address).not.toBeNull();
-    expect(entry?.photoKey).toBeDefined();
+    expect(entry?.photoThumbKey).toBeDefined();
   });
 
   it("hide_phone nulls only phone", async () => {
@@ -830,12 +836,126 @@ describe.skipIf(!hasDb)("getDirectory (Postgres-backed, real dev database)", () 
     expect(entry?.address).not.toBeNull();
   });
 
-  it("hide_photo nulls only the photo key", async () => {
-    const result = await getDirectory(control, orgA);
-    if (result.kind !== "ok") throw new Error("expected ok");
-    const entry = result.entries.find((e) => e.personId === fieldPhoto);
-    expect(entry?.photoKey).toBeNull();
-    expect(entry?.email).not.toBeNull();
+  // 0078: the photo column is a THUMBNAIL KEY from presby_person_directory_photo(), which owns
+  // the toggle, the minor test and hide_photo. Every test below seeds a real directory photo first
+  // (the pre-0078 version of the hide_photo test was vacuous: nobody had a photo, so null proved nothing).
+  describe("directory photos (0078, presby_person_directory_photo)", () => {
+    let platformDb: ReturnType<typeof import("@/lib/db").getPlatformDb>;
+    let userId: string;
+    let controlPhoto: SeededPersonPhoto;
+    let hiddenPhoto: SeededPersonPhoto;
+    let websiteOnly: SeededPersonPhoto;
+    let removedPhoto: SeededPersonPhoto;
+    let endedPhoto: SeededPersonPhoto;
+    let minorPhoto: SeededPersonPhoto;
+    let minorOriginalDob: string | null;
+
+    const rowsOf = <T,>(r: unknown): T[] => (Array.isArray(r) ? r : ((r as { rows?: unknown[] }).rows ?? [])) as T[];
+    const entryOf = async (personId: string) => {
+      const result = await getDirectory(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      return result.entries.find((e) => e.personId === personId);
+    };
+
+    beforeAll(async () => {
+      platformDb = getPlatformDb();
+      const [u] = rowsOf<{ id: string }>(
+        await platformDb.execute(sql`
+          insert into users (email, name) values (${`dirphoto-${Date.now()}@example.invalid`}, 'Directory Photo Fixture')
+          returning id`),
+      );
+      userId = u!.id;
+      await setPersonPhotosToggle(platformDb, orgA, true);
+      const seed = (personId: string, purposes: Array<"directory" | "website">) =>
+        seedPersonPhoto(platformDb, { organizationId: orgA, personId, userId, purposes });
+      controlPhoto = await seed(control, ["directory"]);
+      hiddenPhoto = await seed(fieldPhoto, ["directory"]); // fieldPhoto has hide_photo set
+      websiteOnly = await seed(hhPerson1, ["website"]);
+      removedPhoto = await seed(hhPerson2, ["directory"]);
+      await removeSeededPersonPhoto(platformDb, removedPhoto.photoId, userId);
+      endedPhoto = await seed(fieldEmail, ["directory"]);
+      await platformDb.execute(sql`
+        update person_photo_designations set ended_at = now(), ended_by = ${userId}
+         where photo_id = ${endedPhoto.photoId} and ended_at is null`);
+      minorPhoto = await seed(fieldPhone, ["directory"]);
+      const [dob] = rowsOf<{ d: string | null }>(
+        await platformDb.execute(sql`select date_of_birth::text as d from people where id = ${fieldPhone}`),
+      );
+      minorOriginalDob = dob?.d ?? null;
+    }, 60_000);
+
+    afterAll(async () => {
+      if (!platformDb) return;
+      await platformDb.execute(sql`update people set date_of_birth = ${minorOriginalDob}::date where id = ${fieldPhone}`);
+      // Photo rows reference the user (NO ACTION), and the org's cascade runs later: clear them here, by id.
+      await platformDb.execute(sql`delete from person_photo_designations where organization_id = ${orgA}`);
+      await platformDb.execute(sql`delete from person_photos where organization_id = ${orgA}`);
+      await platformDb.execute(sql`delete from blob_assets where organization_id = ${orgA}`);
+      await platformDb.execute(sql`delete from organization_feature_toggles where organization_id = ${orgA} and feature_key = 'org_portal.person_photos'`);
+      await platformDb.execute(sql`delete from users where id = ${userId}`);
+      const left = rowsOf<{ n: number }>(
+        await platformDb.execute(sql`
+          select (select count(*) from person_photos where organization_id = ${orgA})::int
+               + (select count(*) from blob_assets where organization_id = ${orgA})::int as n`),
+      );
+      expect(left[0]!.n, "the directory photo fixtures are gone").toBe(0);
+    }, 60_000);
+
+    it("a directory designation returns its THUMBNAIL key (never the master's)", async () => {
+      const entry = await entryOf(control);
+      expect(entry?.photoThumbKey).toBe(controlPhoto.thumbKey);
+      expect(entry?.photoThumbKey).not.toBe(controlPhoto.imageKey);
+    });
+
+    it("hide_photo withholds the key (scoped to this org) and nulls ONLY the photo", async () => {
+      const entry = await entryOf(fieldPhoto);
+      expect(hiddenPhoto.thumbKey).toBeTruthy();
+      expect(entry?.photoThumbKey).toBeNull();
+      expect(entry?.email).not.toBeNull();
+      expect(entry?.phone).not.toBeNull();
+      expect(entry?.address).not.toBeNull();
+    });
+
+    it("a person with only a WEBSITE photo shows none in the directory (the fallback is one-way)", async () => {
+      expect(websiteOnly.thumbKey).toBeTruthy();
+      expect((await entryOf(hhPerson1))?.photoThumbKey).toBeNull();
+    });
+
+    it("a removed photo and an ended designation each return null", async () => {
+      expect((await entryOf(hhPerson2))?.photoThumbKey).toBeNull();
+      expect((await entryOf(fieldEmail))?.photoThumbKey).toBeNull();
+    });
+
+    it("a person who appears to be under 18 returns null with nobody acting, and the photo returns when the date of birth says adult again", async () => {
+      expect((await entryOf(fieldPhone))?.photoThumbKey).toBe(minorPhoto.thumbKey);
+      await platformDb.execute(sql`update people set date_of_birth = (current_date - interval '9 years')::date where id = ${fieldPhone}`);
+      expect((await entryOf(fieldPhone))?.photoThumbKey).toBeNull();
+      await platformDb.execute(sql`update people set date_of_birth = ${minorOriginalDob}::date where id = ${fieldPhone}`);
+      expect((await entryOf(fieldPhone))?.photoThumbKey).toBe(minorPhoto.thumbKey);
+    });
+
+    it("the org's photos toggle off returns null for everyone, and on restores it", async () => {
+      await setPersonPhotosToggle(platformDb, orgA, false);
+      try {
+        expect((await entryOf(control))?.photoThumbKey).toBeNull();
+      } finally {
+        await setPersonPhotosToggle(platformDb, orgA, true);
+      }
+      expect((await entryOf(control))?.photoThumbKey).toBe(controlPhoto.thumbKey);
+    });
+
+    it("across the whole directory, only the two eligible directory designations yield a key (nothing leaks from the website-only, removed, ended or hidden photos)", async () => {
+      const result = await getDirectory(control, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const keys = result.entries.map((e) => e.photoThumbKey).filter(Boolean);
+      expect(keys.sort()).toEqual([controlPhoto.thumbKey, minorPhoto.thumbKey].sort());
+    });
+
+    it("the detail reads (household and person) carry the same thumbnail key through the one shared query", async () => {
+      const detail = await getPersonDetail(control, orgA, control);
+      if (detail.kind !== "ok") throw new Error("expected ok");
+      expect(detail.entry.photoThumbKey).toBe(controlPhoto.thumbKey);
+    });
   });
 
   it("a missing person_privacy row defaults to the column's own declared defaults (DECISION-064) — visible except birthday", async () => {

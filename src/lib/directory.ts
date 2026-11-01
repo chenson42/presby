@@ -1,5 +1,5 @@
 import "server-only";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { withOrgContext } from "@/lib/authz";
 import type { db } from "@/lib/db";
 import {
@@ -18,10 +18,14 @@ import {
  * PRIVACY FILTERING IS SQL-LEVEL, NEVER APPLICATION-LEVEL:
  *   - `person_privacy.directory_hidden` excludes the row entirely, in
  *     `WHERE` — never selected, so there is nothing to accidentally render.
- *   - the five field-level flags (`hide_email`, `hide_phone`,
- *     `hide_address`, `hide_birthday`, `hide_photo`) null their own column
- *     via `CASE WHEN` in the `SELECT` list, so a hidden value is never
- *     materialized as a JS value a later refactor could leak.
+ *   - the four contact/birthday field-level flags (`hide_email`, `hide_phone`,
+ *     `hide_address`, `hide_birthday`) null their own column via `CASE WHEN`
+ *     in the `SELECT` list, so a hidden value is never materialized as a JS
+ *     value a later refactor could leak. `hide_photo` is applied the same way
+ *     but INSIDE `presby_person_directory_photo()` (drizzle/0078): the
+ *     thumbnail key it returns is already null when the photo is hidden, the
+ *     person appears to be under 18, or the congregation's photos toggle is
+ *     off, so this file computes none of that (DECISION-289).
  *
  * TWO SEPARATE ELIGIBILITY QUESTIONS (DECISION-065), deliberately not
  * conflated:
@@ -110,8 +114,15 @@ export interface DirectoryEntry {
   address: DirectoryAddress | null;
   /** 'YYYY-MM-DD'. Nulled per `person_privacy.hide_birthday` (default TRUE). */
   dateOfBirth: string | null;
-  /** Nulled per `person_privacy.hide_photo` (default false). */
-  photoKey: string | null;
+  /**
+   * The key of the 160 px THUMBNAIL of this person's DIRECTORY photo, or null.
+   * Never the master (the master is only served to the open web by the public
+   * door, and only while a roster lists it). Null when no directory photo is
+   * chosen, `person_privacy.hide_photo` is set (scoped to this org), the person
+   * appears to be under 18, or the org's `org_portal.person_photos` toggle is
+   * off: all decided by `presby_person_directory_photo()` (0078), not here.
+   */
+  photoThumbKey: string | null;
   /**
    * Increment 3 additions, OPTIONAL — `getDirectory()`'s own `mapRow()`
    * never sets these (its returned entries are byte-for-byte the same shape
@@ -242,7 +253,7 @@ interface DirectoryRow {
   address_region: string | null;
   address_postal_code: string | null;
   date_of_birth: string | null;
-  photo_key: string | null;
+  photo_thumb_key: string | null;
   is_hidden: boolean;
 }
 
@@ -368,6 +379,8 @@ function directorySearchSql(term: string) {
 function directoryFromWhereSql(
   organizationId: string,
   opts: QueryDirectoryRowsOptions,
+  /** Extra lateral joins for the ROW query only (the count query does not need them). */
+  extraJoins: SQL = sql``,
 ) {
   const trimmedSearch = opts.search?.trim();
   return sql`
@@ -385,6 +398,7 @@ function directoryFromWhereSql(
          order by is_primary desc, id
          limit 1
       ) addr on true
+      ${extraJoins}
      where m.organization_id = ${organizationId}::uuid
        and ${directoryEligibilityWhereSql(Boolean(opts.includeHidden), opts.status, opts.rollStatuses)}
        ${trimmedSearch ? sql`and ${directorySearchSql(trimmedSearch)}` : sql``}
@@ -518,10 +532,17 @@ async function queryDirectoryRows(
            else addr.postal_code end                         as address_postal_code,
       case when coalesce(pp.hide_birthday, true) then null
            else p.date_of_birth::text end                    as date_of_birth,
-      case when coalesce(pp.hide_photo, false) then null
-           else p.photo_key end                              as photo_key,
+      dph.thumb_key::text                                    as photo_thumb_key,
       coalesce(pp.directory_hidden, false)                    as is_hidden
-      ${directoryFromWhereSql(organizationId, opts)}
+      ${directoryFromWhereSql(
+        organizationId,
+        opts,
+        // The directory photo's THUMBNAIL key. The function owns the toggle, the
+        // minor test and hide_photo (scoped to this org, as this file always
+        // scoped it); zero rows or a withheld photo give a null key. One index
+        // probe per row when nobody has designated a photo (0078 section 5).
+        sql`left join lateral presby_person_directory_photo(m.organization_id, m.person_id) dph on true`,
+      )}
      order by p.last_name, p.first_name, m.person_id
      ${
        paginate
@@ -608,7 +629,7 @@ function mapRow(row: DirectoryRow): DirectoryEntry {
         }
       : null,
     dateOfBirth: row.date_of_birth,
-    photoKey: row.photo_key,
+    photoThumbKey: row.photo_thumb_key,
     isHidden: row.is_hidden,
   };
 }

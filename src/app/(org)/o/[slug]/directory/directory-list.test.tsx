@@ -27,7 +27,7 @@ function entry(overrides: Partial<DirectoryEntry> = {}): DirectoryEntry {
     phone: null,
     address: null,
     dateOfBirth: null,
-    photoKey: null,
+    photoThumbKey: null,
     ...overrides,
   };
 }

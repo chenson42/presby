@@ -18,7 +18,7 @@ import {
   DirectoryForbidden,
   DirectoryLoadError,
 } from "../directory-states";
-import { PersonAvatar, resolvePhotoSrc } from "../person-avatar";
+import { PersonAvatar, resolvePhotoSrcs } from "@/components/org-portal/person-avatar";
 import { PersonCard } from "../person-card";
 import { formatBirthdayMonthDay } from "../format-birthday";
 
@@ -155,10 +155,9 @@ export default async function PersonDetailPage({
   const showFormalName =
     (entry.middleName || entry.suffix) && formalName !== displayName;
 
-  const photoSrc = await resolvePhotoSrc(
-    resolved.org.organizationId,
-    entry.photoKey,
-  );
+  const [photoSrc = null] = await resolvePhotoSrcs(resolved.org.organizationId, [
+    entry.photoThumbKey,
+  ]);
 
   let household = null;
   if (entry.householdId) {
@@ -188,10 +187,9 @@ export default async function PersonDetailPage({
 
   const otherMembers =
     household?.members.filter((m) => m.personId !== entry.personId) ?? [];
-  const otherMemberPhotoSrcs = await Promise.all(
-    otherMembers.map((member) =>
-      resolvePhotoSrc(resolved.org.organizationId, member.photoKey),
-    ),
+  const otherMemberPhotoSrcs = await resolvePhotoSrcs(
+    resolved.org.organizationId,
+    otherMembers.map((member) => member.photoThumbKey),
   );
 
   return (

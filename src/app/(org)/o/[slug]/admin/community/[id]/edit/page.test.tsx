@@ -77,6 +77,13 @@ vi.mock("@/lib/community", () => ({
   getCommunityStatus: (...args: unknown[]) => getCommunityStatus(...args),
 }));
 
+// `@/lib/person-photos/reader` is `server-only`: mocked so the real module never
+// loads under jsdom. The toggle's own correctness is `public-photo.db.test.ts`'s job.
+const personPhotosEnabled = vi.fn();
+vi.mock("@/lib/person-photos/reader", () => ({
+  personPhotosEnabled: (...args: unknown[]) => personPhotosEnabled(...args),
+}));
+
 // The sign-in card's reader (Community Increment 2b). Its own behaviour is
 // `org-invite.db.test.ts`'s job; the default is `forbidden` (no card), so every
 // older assertion in this file is about the same page it always was.
@@ -175,6 +182,7 @@ afterEach(() => {
     .mockReset()
     .mockResolvedValue({ kind: "ok", state: { kind: "ready" } });
   getSensitiveInfoGrants.mockReset();
+  personPhotosEnabled.mockReset().mockResolvedValue(false);
   hasPermission.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
@@ -807,6 +815,51 @@ describe("EditMemberPage — the Connection card and participant controls (DECIS
   it("does not read the Session state when nothing is pending", async () => {
     await renderWith({ connection: "listed", pending: [] });
     expect(getSessionApprovalState).not.toHaveBeenCalled();
+  });
+});
+
+describe("EditMemberPage — photos link (docs/work-log/2026-10-26-person-photos-inc1.md, Copy C7)", () => {
+  function arrange() {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    mockFlags({ membersCreate: true });
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    getHouseholds.mockResolvedValue({ kind: "ok", households: [] });
+  }
+
+  it("toggle off → no Photos link (absent, never disabled)", async () => {
+    arrange();
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    personPhotosEnabled.mockResolvedValue(false);
+    render(await EditMemberPage({ params: makeParams() }));
+    expect(screen.queryByRole("link", { name: /^photos$/i })).toBeNull();
+  });
+
+  it("toggle on → the link points at ./edit/photos", async () => {
+    arrange();
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    personPhotosEnabled.mockResolvedValue(true);
+    render(await EditMemberPage({ params: makeParams() }));
+    expect(screen.getByRole("link", { name: /^photos$/i }).getAttribute("href")).toBe(
+      "/o/alder-creek/admin/community/p-1/edit/photos",
+    );
+    expect(personPhotosEnabled).toHaveBeenCalledWith({ organizationId: "org-1", actorPersonId: "person-1" });
+  });
+
+  it("a person the viewer may not edit → the toggle is never read", async () => {
+    arrange();
+    getPersonForEdit.mockResolvedValue({ kind: "forbidden" });
+    render(await EditMemberPage({ params: makeParams() }));
+    expect(personPhotosEnabled).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable toggle hides the link and leaves the edit page standing", async () => {
+    arrange();
+    getPersonForEdit.mockResolvedValue({ kind: "ok", person: PERSON });
+    personPhotosEnabled.mockRejectedValue(new Error("db down"));
+    render(await EditMemberPage({ params: makeParams() }));
+    expect(screen.queryByRole("link", { name: /^photos$/i })).toBeNull();
+    expect(screen.getByRole("heading", { name: /edit person/i })).toBeTruthy();
   });
 });
 

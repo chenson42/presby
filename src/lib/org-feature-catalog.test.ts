@@ -62,7 +62,7 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.public_calendar, org_portal.reimbursement, org_portal.sign_in_connect and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
+  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.person_photos, org_portal.public_calendar, org_portal.reimbursement, org_portal.sign_in_connect and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
@@ -71,6 +71,7 @@ describe("ORG_FEATURE_CATALOG", () => {
       "org_portal.giving",
       "org_portal.mail_domain",
       "org_portal.parishes",
+      "org_portal.person_photos",
       "org_portal.public_calendar",
       "org_portal.reimbursement",
       "org_portal.sign_in_connect",
@@ -149,6 +150,17 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(parishes!.operatorEnabled).toBe(false);
     expect(parishes!.category).toBe("people");
     expect(parishes!.name).toBe("Parish management");
+  });
+
+  it("org_portal.person_photos is people-category, provisioned OFF, toggle-only, self-service and unscoped (DECISION-285)", () => {
+    const entry = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.person_photos");
+    expect(entry).toBeDefined();
+    expect(entry!.category).toBe("people");
+    expect(entry!.flag).toBeNull();
+    expect(entry!.provisionedOn).toBe(false);
+    expect(entry!.operatorEnabled).toBe(false);
+    expect(entry!.orgTypes).toBeNull();
+    expect(entry!.name).toBe("Photos of people");
   });
 
   it("operatorEnabled is a boolean on every entry and true for EXACTLY org_portal.domains and org_portal.mail_domain (Q1: platform admin only, for now)", () => {

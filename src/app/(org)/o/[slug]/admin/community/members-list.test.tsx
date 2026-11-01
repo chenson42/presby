@@ -36,7 +36,7 @@ const ENTRY: DirectoryEntry = {
   phone: null,
   address: null,
   dateOfBirth: null,
-  photoKey: null,
+  photoThumbKey: null,
 };
 
 const BASE = {

@@ -17,7 +17,7 @@ import {
   DirectoryForbidden,
   DirectoryLoadError,
 } from "../../directory-states";
-import { resolvePhotoSrc } from "../../person-avatar";
+import { resolvePhotoSrcs } from "@/components/org-portal/person-avatar";
 import { PersonCard } from "../../person-card";
 
 /**
@@ -134,10 +134,9 @@ export default async function HouseholdDetailPage({
         .join(", ")
     : "";
 
-  const photoSrcs = await Promise.all(
-    household.members.map((member) =>
-      resolvePhotoSrc(resolved.org.organizationId, member.photoKey),
-    ),
+  const photoSrcs = await resolvePhotoSrcs(
+    resolved.org.organizationId,
+    household.members.map((member) => member.photoThumbKey),
   );
 
   return (

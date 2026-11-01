@@ -6,9 +6,11 @@ import sharp from "sharp";
  * segment, bound the size, re-encode as JPEG (docs/work-log/2026-10-25-treasury-
  * inc1.md, Phase 3 "Receipts and the F289 audience API"; DECISION-270).
  *
- * THE ONLY IMPORTER OF `sharp` (treasury boundary T5, `npm run
- * check:treasury-boundaries`, exactly one). A second consumer calls THIS
- * function; it does not import the library.
+ * ONE OF TWO IMPORTERS OF `sharp`: a closed list, this file and
+ * `src/lib/person-photos/image.ts` (treasury boundary T5, `npm run
+ * check:treasury-boundaries`, DECISION-312, amending DECISION-270/271). A third
+ * consumer calls one of these two; it does not import the library, and adding a
+ * third importer is a new DECISION.
  *
  * WHAT IT GUARANTEES, in the order a reader of a receipt cares:
  *   - Location and device data in EXIF/XMP/IPTC never reach the stored bytes: the

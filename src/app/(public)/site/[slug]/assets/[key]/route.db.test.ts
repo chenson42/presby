@@ -16,6 +16,13 @@
  *   - slug mode and host mode give the same answers;
  *   - flag off is the same 404.
  *
+ * drizzle/0078 (person photos, F331): the roster photo is seeded as
+ * person_photos plus a website designation with the org's
+ * `org_portal.person_photos` toggle on (src/lib/testing/person-photo-fixture.ts);
+ * people.photo_key is retired. The unlisted person's photo is now stored
+ * private like every person photo: 0072's "unlisted photo stored public_site"
+ * is unrepresentable (person_photos_image_fk pins private).
+ *
  * Run (serial, per docs/testing.md):
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism "src/app/(public)/site/[slug]/assets/[key]/route.db.test.ts"
  */
@@ -23,6 +30,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { sql, type SQL } from "drizzle-orm";
 import type { CalendarFixture } from "@/lib/testing/calendar-fixture";
+import { seedPersonPhoto, setPersonPhotosToggle } from "@/lib/testing/person-photo-fixture";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
@@ -118,20 +126,17 @@ describe.skipIf(!hasDb)("F289 public asset route (Postgres-backed)", () => {
     await q(sql`update organization_sites set content_bundle_key = ${k.bundle} where organization_id = ${org}`);
     k.foreign = await blob({ org: foreignOrg, bytes: png("foreign"), contentType: "image/png", audience: "public_site" });
 
-    // A roster photo: stored private, listed.
-    k.photo = randomUUID();
-    await blob({ org, id: k.photo, bytes: png("photo"), contentType: "image/png", audience: "private" });
+    // A roster photo: stored private, designated for the website, listed.
+    await setPersonPhotosToggle(fx.platform, org, true);
     const person = await fx.makePerson("Listed", stamp);
-    await q(sql`update people set photo_key = ${k.photo} where id = ${person}`);
     await fx.addMember(org, person);
+    k.photo = (await seedPersonPhoto(fx.platform, { organizationId: org, personId: person, userId: fx.actingUserId })).imageKey;
     await q(sql`insert into staff_positions (organization_id, person_id, position, position_key, starts_on, public_listed)
                 values (${org}, ${person}, 'Organist', 'organist', '2020-01-01', true)`);
-    // An unlisted person's photo, stored public_site (the exclusion).
-    k.unlistedPhoto = randomUUID();
-    await blob({ org, id: k.unlistedPhoto, bytes: png("unlisted"), contentType: "image/png", audience: "public_site" });
+    // An unlisted person's photo (private, like every person photo since 0078; designated, not listed).
     const unlisted = await fx.makePerson("Unlisted", stamp);
-    await q(sql`update people set photo_key = ${k.unlistedPhoto} where id = ${unlisted}`);
     await fx.addMember(org, unlisted);
+    k.unlistedPhoto = (await seedPersonPhoto(fx.platform, { organizationId: org, personId: unlisted, userId: fx.actingUserId })).imageKey;
     await q(sql`insert into staff_positions (organization_id, person_id, position, position_key, starts_on, public_listed)
                 values (${org}, ${unlisted}, 'Sexton', 'sexton', '2020-01-01', false)`);
   }, 90_000);
@@ -191,7 +196,7 @@ describe.skipIf(!hasDb)("F289 public asset route (Postgres-backed)", () => {
       ["private image", k.privateImage!],
       ["private PDF", k.privatePdf!],
       ["bundle JSON", k.bundle!],
-      ["unlisted photo stored public_site", k.unlistedPhoto!],
+      ["unlisted photo", k.unlistedPhoto!],
       ["foreign-org key", k.foreign!],
       ["random uuid", randomUUID()],
       ["nil uuid", "00000000-0000-0000-0000-000000000000"],

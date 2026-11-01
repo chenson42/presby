@@ -71,7 +71,9 @@ jobs:
     if: needs.check-secrets.outputs.has-neon == 'true'
     runs-on: ubuntu-latest
     # 50 minutes was hit on PR #58 (parish management) with no failing spec; the suite has outgrown it.
-    timeout-minutes: 75
+    # 75 was hit on PR #73 and on the PR #70 merge run (839 tests on one worker, ~67 min of test time
+    # alone); 120 is headroom until the dev lane is sharded (docs/TODO.md, Process / tooling).
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:

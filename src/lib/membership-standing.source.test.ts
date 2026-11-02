@@ -80,6 +80,12 @@ describe("scan 2: the roll list and the engagement test live in one place (R51)"
     expect(code("src/lib/community.ts")).toContain("presby_membership_standing(m.current_roll, m.engagement_status) = 'inactive'");
   });
 
+  it("the member calendar's members-only rule asks the classifier by name and tests 'visitor' (DECISION-316)", () => {
+    expect(code("src/lib/calendar.ts")).toMatch(
+      /presby_membership_standing\(m\.current_roll, m\.engagement_status\)\s*<>\s*'visitor'/,
+    );
+  });
+
   it("the TypeScript mirror lists exactly the rolls and engagements the SQL does", () => {
     const classifier = M65.slice(M65.indexOf("create or replace function presby_membership_standing("));
     const body = classifier.slice(0, classifier.indexOf("$$;"));

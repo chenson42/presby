@@ -4,6 +4,11 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-316 — A members-only event is hidden from visitors; the member-side read path asks the 0066 standing classifier (F418).**
+
+**Status:** Resolved (tech-lead Phase 3; operator rulings Q1 and Q2, 2026-11-02; QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-11-02 · **Feature:** `2026-11-02-members-only-events` (v0.54.5); amends operator ruling 4 in `src/lib/calendar.ts` ("`is_public` is not a member filter")
+
+An event with "Open to everyone, not only members" unticked (`is_public = false`) is not shown to a viewer whose standing at that congregation is `visitor` (`presby_membership_standing`, 0066) unless they hold `events.manage`. Members, staff anchors, people marked Inactive or Moved away, unclassified records and people on the current roll whose engagement still says "Visitor" (the roll wins, as in the Directory) see it. **Q1 (operator): visitors only**, not everyone without member standing, which was the tech-lead's recommendation. The calendar month, its counts (including the type-filtered unfiltered count), the event page, the "Coming up" card and Copy month all share one predicate, `memberVisible(seesMembersOnly)` in `src/lib/calendar.ts`, whose argument is required so a query cannot omit it; the gate computes `seesMembersOnly` in the statement it already runs. A direct link to a hidden event returns the same `notFound()` as a missing id. **Q2 (operator): the filter is in TypeScript, not RLS or a definer**, because it is authorization inside one tenant, not tenancy; `calendar-visibility.source.test.ts` fails if another non-test file reads `events`. Accepted, `paper`: a future reader that bypasses `calendar.ts` without tripping the scan; the open-tab case after a public-to-members-only flip; equal 404 timing is not measured. No migration.
 **DECISION-315 — Archive revokes an open sign-in invitation; the reader never reports a stored `membership_ended` block over a live membership.**
 
 **Status:** Resolved (tech-lead, Phase 3; QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-11-02 · **Feature:** `2026-11-02-archive-revokes-invite` (F417; v0.54.3); amends DECISION-235

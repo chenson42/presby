@@ -27,6 +27,13 @@ type OrgType =
   | "general_assembly"
   | "new_worshiping_community";
 
+/** A membership's standing inputs (the 0066 classifier reads exactly these two). */
+export interface MemberStanding {
+  engagement?: "regular" | "visitor" | "staff" | "inactive" | "moved_away";
+  /** `null` = no roll. Default is the helper's (listed: "active"; elsewhere: null). */
+  roll?: string | null;
+}
+
 export interface FixtureOrgOptions {
   organizationType?: OrgType;
   /** An IANA zone for an `organization_settings` row, or `null` for NO settings row (the F132 case). Default: no row. */
@@ -142,12 +149,40 @@ export async function createCalendarFixture(label: string) {
     return p!.id;
   }
 
-  async function addMember(organizationId: string, personId: string) {
+  /** A live membership; default standing is a listed member (regular, active roll). */
+  async function addMember(
+    organizationId: string,
+    personId: string,
+    standing: MemberStanding = {},
+  ) {
     await platform.insert(memberships).values({
       organizationId,
       personId,
-      engagementStatus: "regular",
-      currentRoll: "active",
+      engagementStatus: standing.engagement ?? "regular",
+      currentRoll: standing.roll === undefined ? "active" : standing.roll,
+    });
+  }
+
+  /**
+   * A SECOND live membership for a person who already belongs elsewhere, through
+   * the memberships guard's claim GUC (the sign-in fixture's `elsewhere`).
+   * No roll by default: one live active roll per person.
+   */
+  async function addMemberElsewhere(
+    organizationId: string,
+    personId: string,
+    standing: MemberStanding = {},
+  ) {
+    await platform.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('app.person_claim_authorized', ${personId}, true)`,
+      );
+      await tx.insert(memberships).values({
+        organizationId,
+        personId,
+        engagementStatus: standing.engagement ?? "regular",
+        currentRoll: standing.roll === undefined ? null : standing.roll,
+      });
     });
   }
 
@@ -191,8 +226,9 @@ export async function createCalendarFixture(label: string) {
     organizationId: string,
     personId: string,
     permissionKeys: readonly string[],
+    standing: MemberStanding = {},
   ) {
-    await addMember(organizationId, personId);
+    await addMember(organizationId, personId, standing);
     if (permissionKeys.length === 0) return;
     const roleKey = `fx_${permissionKeys.join("_").replace(/\./g, "_")}`;
     const [existing] = await platform
@@ -235,6 +271,7 @@ export async function createCalendarFixture(label: string) {
     makeOrg,
     makePerson,
     addMember,
+    addMemberElsewhere,
     makeRole,
     grant,
     enroll,

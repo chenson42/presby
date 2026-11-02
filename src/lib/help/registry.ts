@@ -642,7 +642,7 @@ export const HELP_PAGES = [
       "Put this and later events on the website",
       "Take this and later events off the website",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.54.5",
     limitationUntil: "founder-events-branding",
   },
   {

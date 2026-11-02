@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { TEST_TIME_ZONES, useProcessTimeZone } from "@/lib/testing/time-zone";
-import type { CalendarFixture } from "@/lib/testing/calendar-fixture";
+import type { CalendarFixture, MemberStanding } from "@/lib/testing/calendar-fixture";
 
 vi.mock("server-only", () => ({}));
 // calendar.ts -> org-features.ts -> @/lib/audit -> @/auth (next-auth) is not
@@ -62,6 +62,16 @@ describe.skipIf(!hasDb)("calendar.ts (Postgres-backed, real dev database)", () =
   let pManageOff: string; // events.manage only, orgOff
   let pNone: string; // member of A, holds nothing
   let pOut: string; // events.view in B only
+
+  // Members-only visibility (DECISION-316): one org per fixture shape, one person per standing.
+  let orgV: string; // the viewer matrix; public, members-only, cancelled, a mixed series, a flip event
+  let orgMO: string; // its ONLY event is members-only
+  let orgL: string; // 3 public + 2 members-only upcoming, interleaved (the home-card limit)
+  let orgF: string; // a type filter over a month with members-only events (F1, QA run 1)
+  let typeFWorship: string;
+  let typeFStudy: string;
+  const mo: Record<string, string> = {};
+  const evV: Record<string, string> = {};
 
   // orgA types
   const typeA: Record<"worship" | "study" | "youth" | "music" | "general", string> =
@@ -233,6 +243,66 @@ describe.skipIf(!hasDb)("calendar.ts (Postgres-backed, real dev database)", () =
     evA.nyLate = await addEvent(orgN, { title: "NY Late", startsAt: "2026-10-31T20:00" });
     await addType(orgN, { name: "General", color: "neutral", icon: "CalendarDays", sortOrder: 99, isFallback: true });
     evA.zOnly = await addEvent(orgZ, { title: "Typeless Event", startsAt: "2026-10-10T10:00" });
+
+    // ---- members-only visibility (DECISION-316, F418) ---------------------------
+    orgV = await fx.makeOrg("v", { ...on, timeZone: "America/New_York" });
+    orgMO = await fx.makeOrg("mo", { ...on, timeZone: "America/New_York" });
+    orgL = await fx.makeOrg("l", { ...on, timeZone: "America/New_York" });
+    orgF = await fx.makeOrg("f", { ...on, timeZone: "America/New_York" });
+    const standings: Record<"regular" | "staff" | "visitor" | "inactive" | "movedAway", MemberStanding> = {
+      regular: { engagement: "regular", roll: "active" },
+      staff: { engagement: "staff", roll: null },
+      visitor: { engagement: "visitor", roll: null },
+      inactive: { engagement: "inactive", roll: null },
+      movedAway: { engagement: "moved_away", roll: null },
+    };
+    const surname = ["Ainsley", "Bexley", "Corliss", "Delmar", "Edgerton", "Fenwick", "Gresham", "Hollis", "Ivers", "Jessup", "Kimball", "Larkin"];
+    let sn = 0;
+    const viewer = async (org: string, key: string, standing: MemberStanding, perms: readonly string[] = ["events.view"]) => {
+      mo[key] = await fx.makePerson("Vesper", surname[sn++]!);
+      await fx.enroll(org, mo[key]!, perms, standing);
+    };
+    await viewer(orgV, "regular", standings.regular);
+    await viewer(orgV, "staff", standings.staff);
+    await viewer(orgV, "visitor", standings.visitor);
+    await viewer(orgV, "inactive", standings.inactive);
+    await viewer(orgV, "movedAway", standings.movedAway);
+    await viewer(orgV, "visitorManager", standings.visitor, ["events.manage"]);
+    await viewer(orgV, "visitorOtherRole", standings.visitor, ["events.view", "directory.view"]);
+    await viewer(orgMO, "moMember", standings.regular);
+    await viewer(orgL, "lVisitor", standings.visitor);
+    await viewer(orgL, "lMember", standings.regular);
+    await viewer(orgF, "fVisitor", standings.visitor);
+    await viewer(orgF, "fMember", standings.regular);
+    // A member at orgV and a visitor at orgMO: standing is per congregation (T5).
+    mo.multi = mo.regular!;
+    await fx.addMemberElsewhere(orgMO, mo.multi, standings.visitor);
+    await fx.grant(orgMO, await fx.makeRole(orgMO, "fx_multi_view", ["events.view"]), mo.multi);
+
+    evV.pub = await addEvent(orgV, { title: "V Public Service", startsAt: "2026-10-14T10:00" });
+    evV.mem = await addEvent(orgV, { title: "V Members Only Meeting", startsAt: "2026-10-15T10:00", isPublic: false });
+    evV.cancelledMem = await addEvent(orgV, { title: "V Cancelled Members", startsAt: "2026-10-16T10:00", isPublic: false, cancelled: true });
+    evV.flip = await addEvent(orgV, { title: "V Flip Event", startsAt: "2026-10-22T10:00" });
+    evV.seriesParent = await addEvent(orgV, { title: "V Series", startsAt: "2026-10-20T19:00", pattern: "weekly", count: 3 });
+    evV.seriesHidden = await addEvent(orgV, { title: "V Series", startsAt: "2026-10-27T19:00", parentId: evV.seriesParent, isPublic: false });
+    evV.seriesLast = await addEvent(orgV, { title: "V Series", startsAt: "2026-11-03T19:00", parentId: evV.seriesParent });
+
+    mo.onlyEvent = await addEvent(orgMO, { title: "MO Only Members Event", startsAt: "2026-10-18T10:00", isPublic: false });
+
+    // orgF: October holds one public and two members-only events (one of them untyped);
+    // November holds ONLY a members-only event. "Study" has no events at all.
+    typeFWorship = await addType(orgF, { name: "Worship", color: "teal", icon: "Church", sortOrder: 1 });
+    typeFStudy = await addType(orgF, { name: "Study", color: "sky", icon: "BookOpen", sortOrder: 2 });
+    await addEvent(orgF, { title: "F Public Worship", startsAt: "2026-10-14T10:00", typeId: typeFWorship });
+    await addEvent(orgF, { title: "F Members Worship", startsAt: "2026-10-15T10:00", typeId: typeFWorship, isPublic: false });
+    await addEvent(orgF, { title: "F Members Untyped", startsAt: "2026-10-16T10:00", isPublic: false });
+    await addEvent(orgF, { title: "F Nov Members Worship", startsAt: "2026-11-12T10:00", typeId: typeFWorship, isPublic: false });
+
+    await addEvent(orgL, { title: "L Members One", startsAt: "2026-11-01T10:00", isPublic: false });
+    await addEvent(orgL, { title: "L Public One", startsAt: "2026-11-02T10:00" });
+    await addEvent(orgL, { title: "L Members Two", startsAt: "2026-11-03T10:00", isPublic: false });
+    await addEvent(orgL, { title: "L Public Two", startsAt: "2026-11-04T10:00" });
+    await addEvent(orgL, { title: "L Public Three", startsAt: "2026-11-05T10:00" });
   });
 
   afterAll(async () => {
@@ -790,6 +860,212 @@ describe.skipIf(!hasDb)("calendar.ts (Postgres-backed, real dev database)", () =
         expect(mine.entries.map((e) => e.id)).not.toContain(evForeign);
         const rows = await listUpcomingMemberEvents(pView, orgA, { limit: 12, now: new Date("2026-01-01T12:00:00Z") });
         expect(rows.kind === "ok" && rows.data.map((r) => r.id)).not.toContain(evForeign);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Members-only events are hidden from a VISITOR (DECISION-316, F418; operator
+    // ruling 2026-11-02, Q1 = visitors only). Standing is the 0066 classifier
+    // over the viewer's live membership at THIS congregation; events.manage
+    // always sees what it manages. Every viewer holds events.view.
+    describe("members-only events and standing", () => {
+      const NOW_V = new Date("2026-10-21T16:00:00Z"); // Oct 21 noon in New York
+      const OCT_V = { year: 2026, month: 10 };
+      const MEMBERS_ONLY = ["V Members Only Meeting"];
+      const SEES: Array<keyof typeof mo> = ["regular", "staff", "inactive", "movedAway", "visitorManager"];
+      const HIDDEN: Array<keyof typeof mo> = ["visitor", "visitorOtherRole"];
+
+      async function monthV(person: string, org = orgV) {
+        const r = await getMonthCalendar(person, org, { month: OCT_V, requestedTypeIds: [], now: NOW_V });
+        if (r.kind !== "ok") throw new Error(`expected ok, got ${r.kind}`);
+        return r.data;
+      }
+      async function upcomingV(person: string, org = orgV, limit = 12, now = NOW_V) {
+        const r = await listUpcomingMemberEvents(person, org, { limit, now });
+        if (r.kind !== "ok") throw new Error(`expected ok, got ${r.kind}`);
+        return r.data;
+      }
+
+      it.each(SEES)("%s sees the members-only event in the month, its counts, its page and the feed (T2)", async (who) => {
+        const data = await monthV(mo[who]!);
+        expect(titles(data.entries)).toEqual(expect.arrayContaining(["V Public Service", ...MEMBERS_ONLY]));
+        expect(data.inMonthCount).toBe(data.entries.filter((e) => e.dayKey.startsWith("2026-10")).length);
+        const page = await getMemberEvent(mo[who]!, orgV, evV.mem!);
+        expect(page.kind === "ok" && page.data.event?.title).toBe("V Members Only Meeting");
+        // The feed is one row per series, so the mixed series shows its next occurrence.
+        expect(titles(await upcomingV(mo[who]!))).toContain("V Flip Event");
+      });
+
+      it.each(HIDDEN)("%s sees NO members-only event in the month, its counts, its page or the feed (T2)", async (who) => {
+        const data = await monthV(mo[who]!);
+        expect(titles(data.entries)).not.toContain("V Members Only Meeting");
+        expect(titles(data.entries)).toContain("V Public Service");
+        const visible = data.entries.filter((e) => e.dayKey.startsWith("2026-10")).length;
+        expect(data.inMonthCount).toBe(visible);
+        expect(data.unfilteredInMonthCount).toBe(visible);
+        expect(data.entries.every((e) => e.isPublic)).toBe(true);
+        expect(await getMemberEvent(mo[who]!, orgV, evV.mem!)).toEqual({
+          kind: "ok",
+          data: { event: null, canManage: false },
+        });
+        expect((await upcomingV(mo[who]!)).map((r) => r.id)).not.toContain(evV.mem);
+      });
+
+      it("the visitor's month holds exactly one fewer in-month event than a member's (counts agree with entries)", async () => {
+        const visitor = await monthV(mo.visitor!);
+        const member = await monthV(mo.regular!);
+        expect(member.unfilteredInMonthCount - visitor.unfilteredInMonthCount).toBe(2); // the meeting and the hidden series occurrence
+      });
+
+      it("orgHasEvents: an org whose only event is members-only is empty to a visitor and not to a member (T2)", async () => {
+        const visitor = await monthV(mo.multi!, orgMO); // visitor at orgMO
+        expect(visitor.unfilteredInMonthCount).toBe(0);
+        expect(visitor.orgHasEvents).toBe(false);
+        const member = await monthV(mo.moMember!, orgMO);
+        expect(member.unfilteredInMonthCount).toBe(1);
+        const nextMonth = await getMonthCalendar(mo.moMember!, orgMO, { month: { year: 2026, month: 12 }, requestedTypeIds: [], now: NOW_V });
+        expect(nextMonth.kind === "ok" && nextMonth.data.orgHasEvents).toBe(true);
+        const visitorNext = await getMonthCalendar(mo.multi!, orgMO, { month: { year: 2026, month: 12 }, requestedTypeIds: [], now: NOW_V });
+        expect(visitorNext.kind === "ok" && visitorNext.data.orgHasEvents).toBe(false);
+      });
+
+      it("a visitor's direct link to a members-only event answers exactly as a missing, cancelled or garbage id does (T3)", async () => {
+        const nullEvent = { kind: "ok", data: { event: null, canManage: false } };
+        const hidden = await getMemberEvent(mo.visitor!, orgV, evV.mem!);
+        expect(hidden).toEqual(nullEvent);
+        expect(hidden).toEqual(await getMemberEvent(mo.visitor!, orgV, "00000000-0000-4000-8000-000000000000"));
+        expect(hidden).toEqual(await getMemberEvent(mo.visitor!, orgV, evV.cancelledMem!));
+        expect(hidden).toEqual(await getMemberEvent(mo.visitor!, orgV, "not-a-uuid"));
+      });
+
+      it("a visitor holding events.manage sees every event and canManage; a non-manage role granting events.view does not (T4)", async () => {
+        const month = await monthV(mo.visitorManager!);
+        expect(titles(month.entries)).toContain("V Members Only Meeting");
+        expect(month.canManage).toBe(true);
+        const page = await getMemberEvent(mo.visitorManager!, orgV, evV.mem!);
+        expect(page.kind === "ok" && page.data.event?.title).toBe("V Members Only Meeting");
+        expect(page.kind === "ok" && page.data.canManage).toBe(true);
+        const other = await monthV(mo.visitorOtherRole!);
+        expect(other.canManage).toBe(false);
+        expect(titles(other.entries)).not.toContain("V Members Only Meeting");
+      });
+
+      it("Inactive and Moved away keep seeing members-only events (Q1: visitors only), cancelled stays hidden from everyone", async () => {
+        for (const who of ["inactive", "movedAway", "staff", "regular"] as const) {
+          const t = titles((await monthV(mo[who]!)).entries);
+          expect(t).toContain("V Members Only Meeting");
+          expect(t).not.toContain("V Cancelled Members");
+        }
+        expect(titles((await monthV(mo.visitorManager!)).entries)).not.toContain("V Cancelled Members");
+      });
+
+      it("standing is per congregation: a member at one org is a visitor at another (T5)", async () => {
+        const atMember = await monthV(mo.multi!, orgV);
+        expect(titles(atMember.entries)).toContain("V Members Only Meeting");
+        const atVisitor = await monthV(mo.multi!, orgMO);
+        expect(atVisitor.entries).toEqual([]);
+        expect(await getMemberEvent(mo.multi!, orgMO, mo.onlyEvent!)).toEqual({ kind: "ok", data: { event: null, canManage: false } });
+      });
+
+      it("the home card limit applies after the filter, and the card is a subset of the visitor's calendar (T6)", async () => {
+        const NOW_L = new Date("2026-11-01T14:00:00Z");
+        const visitor = await upcomingV(mo.lVisitor!, orgL, 3, NOW_L);
+        expect(titles(visitor)).toEqual(["L Public One", "L Public Two", "L Public Three"]);
+        const member = await upcomingV(mo.lMember!, orgL, 3, NOW_L);
+        expect(titles(member)).toEqual(["L Members One", "L Public One", "L Members Two"]);
+        const cal = await getMonthCalendar(mo.lVisitor!, orgL, { month: { year: 2026, month: 11 }, requestedTypeIds: [], now: NOW_L });
+        expect(cal.kind).toBe("ok");
+        if (cal.kind === "ok") expect(cal.data.entries.map((e) => e.id)).toEqual(expect.arrayContaining(visitor.map((r) => r.id)));
+      });
+
+      it("a series with mixed visibility: a visitor sees the visible occurrences, and the feed's next occurrence skips the hidden one (T7)", async () => {
+        const visitorOct = titles((await monthV(mo.visitor!)).entries).filter((t) => t === "V Series");
+        expect(visitorOct).toHaveLength(1); // 10-20 only; 10-27 is members-only
+        const memberOct = titles((await monthV(mo.regular!)).entries).filter((t) => t === "V Series");
+        expect(memberOct).toHaveLength(2);
+        const visitorFeed = (await upcomingV(mo.visitor!)).filter((r) => r.title === "V Series");
+        expect(visitorFeed).toHaveLength(1);
+        expect(visitorFeed[0].id).toBe(evV.seriesLast); // 11-03, never the hidden 10-27
+        expect(visitorFeed[0].seriesKey).toBe(evV.seriesParent);
+        const memberFeed = (await upcomingV(mo.regular!)).filter((r) => r.title === "V Series");
+        expect(memberFeed[0].id).toBe(evV.seriesHidden);
+      });
+
+      // F1 (QA run 1): `unfilteredInMonthCount` is only QUERIED when a type filter is
+      // active (calendar.ts, the second in-month count). Every test above passes
+      // requestedTypeIds [], where it is derived from the already-filtered entries.
+      describe("with a type filter active (the unfiltered count is its own query)", () => {
+        const NOW_F = new Date("2026-10-21T16:00:00Z");
+        async function filtered(person: string, month: { year: number; month: number }, typeIds: string[]) {
+          const r = await getMonthCalendar(person, orgF, { month, requestedTypeIds: typeIds, now: NOW_F });
+          if (r.kind !== "ok") throw new Error(`expected ok, got ${r.kind}`);
+          expect(r.data.activeTypeIds).toEqual(typeIds); // the filter really is active
+          return r.data;
+        }
+        // The page's own empty-state decision (calendar/page.tsx), restated so the
+        // visitor-visible copy is pinned from the reader's output.
+        const emptyState = (d: { unfilteredInMonthCount: number; orgHasEvents: boolean; inMonthCount: number }) =>
+          d.unfilteredInMonthCount === 0 && !d.orgHasEvents
+            ? "org-empty"
+            : d.unfilteredInMonthCount === 0
+              ? "Nothing is scheduled"
+              : d.inMonthCount === 0
+                ? "No events match these event types"
+                : "events";
+
+        it("the visitor's unfiltered count counts only public rows; the member's counts both (and the untyped one)", async () => {
+          const visitor = await filtered(mo.fVisitor!, OCT_V, [typeFWorship]);
+          expect(titles(visitor.entries)).toEqual(["F Public Worship"]);
+          expect(visitor.inMonthCount).toBe(1);
+          expect(visitor.unfilteredInMonthCount).toBe(1); // not 3: the two members-only rows never count
+          const member = await filtered(mo.fMember!, OCT_V, [typeFWorship]);
+          expect(titles(member.entries)).toEqual(["F Public Worship", "F Members Worship"]);
+          expect(member.inMonthCount).toBe(2);
+          expect(member.unfilteredInMonthCount).toBe(3); // includes the untyped members-only row the filter drops
+        });
+
+        it("a visitor filtering a month whose only events are members-only sees 'Nothing is scheduled', not 'No events match'", async () => {
+          const NOV = { year: 2026, month: 11 };
+          const visitor = await filtered(mo.fVisitor!, NOV, [typeFWorship]);
+          expect(visitor.entries).toEqual([]);
+          expect(visitor.inMonthCount).toBe(0);
+          expect(visitor.unfilteredInMonthCount).toBe(0);
+          expect(visitor.orgHasEvents).toBe(true); // October's public event
+          expect(emptyState(visitor)).toBe("Nothing is scheduled");
+          // The same month, unfiltered, reads the same to the visitor: the filter reveals nothing.
+          const unfiltered = await getMonthCalendar(mo.fVisitor!, orgF, { month: NOV, requestedTypeIds: [], now: NOW_F });
+          expect(unfiltered.kind === "ok" && emptyState(unfiltered.data)).toBe("Nothing is scheduled");
+          // A member in that month has an event the filter keeps.
+          const member = await filtered(mo.fMember!, NOV, [typeFWorship]);
+          expect(member.unfilteredInMonthCount).toBe(1);
+          expect(emptyState(member)).toBe("events");
+        });
+
+        it("a visitor whose filter matches nothing public still gets 'No events match', from the public count (1), not the hidden ones", async () => {
+          const visitor = await filtered(mo.fVisitor!, OCT_V, [typeFStudy]);
+          expect(visitor.inMonthCount).toBe(0);
+          expect(visitor.unfilteredInMonthCount).toBe(1);
+          expect(emptyState(visitor)).toBe("No events match these event types");
+        });
+      });
+
+      it("a public event that becomes members-only leaves the visitor's reads and stays in the member's (T8)", async () => {
+        const flip = (isPublic: boolean) =>
+          fx.platform.update(events).set({ isPublic }).where(eq(events.id, evV.flip!));
+        try {
+          expect(titles((await monthV(mo.visitor!)).entries)).toContain("V Flip Event");
+          const before = await getMemberEvent(mo.visitor!, orgV, evV.flip!);
+          expect(before.kind === "ok" && before.data.event?.title).toBe("V Flip Event");
+          await flip(false);
+          expect(titles((await monthV(mo.visitor!)).entries)).not.toContain("V Flip Event");
+          expect(await getMemberEvent(mo.visitor!, orgV, evV.flip!)).toEqual({ kind: "ok", data: { event: null, canManage: false } });
+          expect(titles(await upcomingV(mo.visitor!))).not.toContain("V Flip Event");
+          expect(titles((await monthV(mo.regular!)).entries)).toContain("V Flip Event");
+          const page = await getMemberEvent(mo.regular!, orgV, evV.flip!);
+          expect(page.kind === "ok" && page.data.event?.title).toBe("V Flip Event");
+        } finally {
+          await flip(true);
+        }
       });
     });
   });

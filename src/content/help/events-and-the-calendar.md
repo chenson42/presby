@@ -1,12 +1,12 @@
-The calendar shows your congregation's events to its members. Some events can also appear on your public website. This page covers reading the calendar, adding events, repeating events, event types, and what the public calendar needs.
+The calendar shows your congregation's events to everyone who has a current record and a connected sign-in, and keeps some events from visitors. Some events can also appear on your public website. This page covers reading the calendar, adding events, repeating events, event types, and what the public calendar needs.
 
 ## The calendar every member sees
 
-Choose the "Calendar" tile under "Worship & Events". The page is headed "Calendar". On a phone it shows a list of days. The links "Month" and "List" switch the view, and the arrows move between months. "Show filters" lets you filter by event type. "Copy month" copies the month's events so you can paste them into a bulletin, and leaves out events that are not open to everyone. Choose an event to read its details. A cancelled event is not shown.
+Choose the "Calendar" tile under "Worship & Events". The page is headed "Calendar". On a phone it shows a list of days. On a wider screen the links "Month" and "List" switch the view. On any screen the arrows move between months. "Show filters" lets you filter by event type. "Copy month" copies the month's events so you can paste them into a bulletin, and leaves out events that are not open to everyone. Choose an event to read its details. A cancelled event is not shown.
 
 ![The Calendar page on a phone in list view: the month, then each day with its events.](shot:calendar-month)
 
-Your congregation's page also has a "Coming up" card with the next events.
+Your congregation's page also has a "Coming up" card with the next events. Events that are kept for members do not show to visitors.
 
 The calendar is on from the start. If it is off, you can turn it on under "Features": it is called "Member calendar".
 
@@ -28,7 +28,7 @@ The events list shows each event with its time and status. Choose an event to ed
 
 ### Open to everyone, or members only
 
-"Open to everyone, not only members" is ticked at first. If you untick it, the event shows only on the member calendar, for members who have calendar access. It also stays out of "Copy month" and cannot be shown on the website.
+"Open to everyone, not only members" is ticked at first. If you untick it, a visitor does not see the event: not on the calendar, not in "Coming up", and a link to it shows the same "We couldn't find that event" page as an event that does not exist. Members, staff, people marked "Inactive" or "Moved away", and people who can manage events still see it. A person on the current roll counts as a member, even if their engagement still says "Visitor". For everyone else, changing a person's engagement on their record changes what they see. The event also stays out of "Copy month" and cannot be shown on the website.
 
 ## A repeating event
 

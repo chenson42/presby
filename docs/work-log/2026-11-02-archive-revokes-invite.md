@@ -16,9 +16,9 @@
 | Phase | Owner | Status | Verdict | Date |
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Done: D1 in the 3a live-walk addendum is the bug confirmation | Bug confirmed | 2026-11-01 |
-| 2 — Architectural review | architect | Pending tech-lead's call: skipped if the fix touches no invariant | — | — |
-| 3 — Technical design | tech-lead | In progress | — | — |
-| 4 — Implementation | TBD by tech-lead | Pending | — | — |
+| 2 — Architectural review | architect | Skipped, noted in the Phase 2 section: no migration, no definer change, no dependency, 2b B2 boundary kept | — | 2026-11-02 |
+| 3 — Technical design | tech-lead | Done: ruling is both (a) archive revokes in-transaction, `invitation.revoked` via `archive`, and (b) the reader treats a stored `membership_ended` block as stale over a live membership; no migration | Design complete | 2026-11-02 |
+| 4 — Implementation | full-stack-developer | Pending | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -38,3 +38,201 @@
 The bug is 3a's: Restore is new in 3a. Before it, an ended connection never came back, so a terminal block was correct.
 
 **Analyst's suggested fix:** Archive revokes the open invitation, as its dialog promises, so the person sees the dead-link page and Restore leaves the card on "Invite". Alternatively, derive the `membership_ended` card from current membership state rather than the stored block.
+
+---
+
+# Phase 2 — Architectural review: SKIPPED (tech-lead, 2026-11-02)
+
+Skipping Phase 2: no migration, no `SECURITY DEFINER` change (the fix calls the existing `presby_revoke_sign_in_invitation`), no new dependency, no new route, action, permission key, flag or audit key, and no change to any boundary the 2b architect set. The 2b B2 rule ("`org-invite.ts` is the only file that names the five sign-in definers and is imported only from `src/app/(org)/`", `src/lib/onboarding/boundaries.test.ts:495-545`) is kept as it stands: the archive writer does not import `org-invite.ts`; the server action, which is under `(org)`, hands it a function (see the API Contract). If Phase 4 finds it cannot keep that, stop and return to Phase 2.
+
+# Phase 3 — Technical Design (tech-lead, 2026-11-02)
+
+## Root cause (with file:line)
+
+D1 is two facts that were each correct when written and are wrong together, because 3a made an ended connection reversible.
+
+1. **Archive ends the membership and leaves the person's open sign-in invitation alone.** `archivePerson` (`src/lib/community-engagement.ts:341-421`) updates `memberships.ended_on` (`:388-397`) and writes the `tenant.person.archived` row (`:405-415`). It never reads or touches `account_invitations`. The dialog line "An invitation to {name} is still open. It will stop working." (`src/app/(org)/o/[slug]/admin/community/engagement-copy.ts:299`) was a promise nothing kept: the link stayed open and live, and "stops working" was true only in the sense that pressing Accept would fail.
+2. **Acceptance then closes the row for good, with a reason about a state that can change.** An archived person's preview still returns the row (`presby_preview_invitation` filters on the row's own five timestamps and the address, `drizzle/0065_presby_sign_in_and_connect.sql:2281-2330`, not on membership), so the page offers "Accept the invitation". Pressing it runs the acceptance core, whose sign-in branch calls `presby__person_sign_in_standing` (`drizzle/0066_presby_membership_standing.sql:653-728`); `membership_ended` is its refusal for `not v_has_m or v_m.ended_on is not null` (`:684`), and the core stamps `blocked_at` and `blocked_reason = 'membership_ended'` on the row. `presby_account_invitations_guard_update` makes a blocked row terminal (`drizzle/0065_...sql:2397-2430`: "invitation % is finished; only redaction may follow").
+3. **The reader keeps showing the stored block.** `presby_sign_in_invitation_states` (`drizzle/0065_...sql:1364`) returns the newest non-superseded terminal row, so state `blocked`, outcome `membership_ended`. `readStates` (`src/lib/onboarding/org-invite.ts:268-310`) passes it through; `blockedCardLine` (`src/lib/onboarding/sign-in-copy.ts:152-154`) prints "...connection ... has ended"; the card renders no button for `blocked` (`.../[id]/edit/sign-in-card.tsx:146-147`); `connectOutlook` returns `none` (`sign-in-types.ts:208`); the list marker is "Invitation couldn't be completed" (`sign-in-types.ts:302-303`). Restore (`community-engagement.ts:446-519`) clears `ended_on`, touches no invitation, and nothing in the reader asks whether the connection still has ended. A send over a blocked row would work (`presby_issue_sign_in_invitation` refuses only an open row, `already_pending`), but no button offers it, and a changed email address does not matter because the stored row, not the address, decides the card.
+
+A second path into the same state exists today and predates 3a: voiding an "other participant removed" roll action reopens the membership (`drizzle/0061_presby_participant_roll.sql:556-572`, `update memberships set ended_on = null`). A person whose removal was undone after they pressed Accept on an open invitation lands in the same dead end. Read from the code; the DB test below pins it.
+
+## Summary
+
+Rule **both**, for different reasons.
+
+- **(a) Archive revokes the person's open sign-in invitation in the same transaction, with an audit row.** This makes the dialog's promise true, gives the archived person the neutral dead-link page instead of an "Accept the invitation" button that cannot work (second symptom, both halves), and keeps a link emailed before the archive from coming back to life on Restore. It is the fix that stops new bad rows.
+- **(b) The reader treats a stored `membership_ended` block as stale when the membership is live now.** It is the backstop for every row already blocked, and for the participant-removal-then-void path, which (a) does not reach. A stored block records "ended when you pressed Accept"; once the connection is live again it says nothing about today, so the reader reports state `none`.
+
+(a) alone leaves already-blocked rows and the void path stuck. (b) alone leaves the archived person being offered a button that cannot work, and an emailed link that revives on Restore. Both are small and neither touches the schema.
+
+**Restore does nothing about invitations.** An archive-revoked invitation stays revoked, so Restore never re-arms a link that was emailed days ago; the administrator sends a new one on purpose (the card offers "Send invitation" again). No change to `restorePerson`.
+
+**No migration. No `SECURITY DEFINER` change. Phase 2 skipped (above).**
+
+## Decisions on the points you asked me to weigh
+
+**Existing data.** Counted read-only against production (`br-wild-band-ax96gv09`, a `default_transaction_read_only=on` session, 2026-11-02): migrations 0065 and 0066 are both applied there; `account_invitations` rows with `purpose = 'sign_in'`: **0**; of those, blocked `membership_ended`: **0**; memberships with `ended_reason = 'community_archived'`: **0**. So no production row is in the stuck state and none can be created by this bug before the fix ships. Throwaway dev and pipeline branches may hold some (the analyst's walk branch does); (b) clears them on read and they need no migration or cleanup. For a future operator check:
+`select count(*) from account_invitations i where i.purpose='sign_in' and i.blocked_reason='membership_ended' and exists (select 1 from memberships m where m.person_id=i.person_id and m.organization_id=i.organization_id and m.ended_on is null);`
+
+**What an already-blocked row shows after Restore.** State `none`: the card reads "Invite {name} to sign in. We'll email {address} ..." with "Send invitation", the list marker is the ordinary `not_connected` one, and no "couldn't be completed" line. The stored row is untouched (terminal, immutable); only the reader's answer changes. Only `blocked` + `membership_ended` + a live membership is reinterpreted. `person_merged`, `person_deceased`, `needs_support` and every other row state are unchanged, and a blocked `membership_ended` row on a person who is still ended stays blocked (the card still tells the administrator the truth).
+
+**Audit action.** Reuse `invitation.revoked` (`AUDIT_ACTIONS.INVITATION_REVOKED`), `resourceType: "account_invitation"`, `resourceId` the invitation id, actor the archiving administrator, metadata `{ invitationId, organizationId, purpose: "sign_in", origin: "org", personId, via: "archive" }`. `via` already takes `"single"` and `"revoke_all"` (`src/lib/onboarding/issue.ts:893`, `org-invite.ts:522`); `"archive"` is a third value and nothing switches on it (grepped: only tests read `via`). No new key: a detection query for "who cancelled invitations" keeps working. The `tenant.person.archived` row gains one boolean, `invitationRevoked`, beside the existing `signInConnected` (the e2e and DB tests use `toMatchObject`, so this breaks nothing; `src/lib/audit.ts:687` comment updated).
+
+**What the archived person sees on opening a revoked link.** The one dead-link page, "This link isn't active" with `INVITATION_DEAD_LINK_COPY` (`src/lib/onboarding/labels.ts:135`), because the preview returns zero rows for a revoked row (`presby_preview_invitation` filter, `drizzle/0065_...sql:2310-2314`). It names no congregation and no reason (DECISION-147: the bucket distinguishes nothing), so it does not tell a former visitor they were archived. Accepted residual, `paper`: its sentence "ask whoever invited you to send a new one" is generic and an archived person's inviter cannot send one until the record is restored. The bucket is deliberately uninformative; I do not change it.
+
+**Restore.** Nothing. Reasoned above.
+
+**Dialog copy.** "It will stop working." is now true, and becomes true in the way the administrator cares about; one clause is added so Restore does not surprise (see Copy).
+
+## Permissions & Flags
+
+- Permission key(s): none new. Archive keeps `people.manage` (`community-engagement.ts:55`); the revoke definer checks `people.manage` again for the acting user (`presby__actor_person(..., 'people.manage')`, `drizzle/0065_...sql:1303-1306`), which the archiving administrator holds by construction. Cancelling is never an escalation.
+- Default role bindings: none.
+- Feature flag(s): not needed. The archive action is already behind the Community flag (`org_portal.members_create`); (b) changes what an existing reader reports.
+
+## API Contract
+
+No route. No new server action. Signatures that change:
+
+1. `src/lib/onboarding/org-invite.ts` (the only file naming the definer; no new importer):
+   `export async function revokeOpenSignInInvitationInTx(tx: OrgTx, ctx: SignInContext, personId: string, via: "archive"): Promise<boolean>`
+   Runs `presby_revoke_sign_in_invitation(personId, ctx.actingUserId)` in the caller's transaction. `not_open` returns `false` and writes nothing. `ok` cancels a still-queued email with `cancelQueuedEmail` (same helper `revokeSignInInvitation` uses), writes the `invitation.revoked` row with `insertAuditRow(tx, ...)` and returns `true`. Any other outcome, and any throw, propagates so the whole archive rolls back. `revokeSignInInvitation` is refactored to call the same inner function with `via: "single"`; its behaviour and results do not change.
+2. `src/lib/community-engagement.ts`: `archivePerson(viewerPersonId, organizationId, input, actor, sideEffects)` gains a **required** fifth parameter
+   `type ArchiveSideEffects = { revokeOpenSignInInvitation: (tx: OrgTx, personId: string) => Promise<boolean> }`.
+   Required so that a caller that forgets it is a type error, not a silent regression. It is called inside the same `withOrgContext` transaction, after the membership `update` succeeds and before the audit insert, so a throw (including the audit insert's) rolls back archive and revoke together. Result type adds `invitationRevoked: boolean` to the `ok` arm; the audit row records it. `archivePerson` does not import `org-invite.ts`, so 2b B2 holds and `membership-standing.source.test.ts`'s writer pins are untouched.
+3. `src/app/(org)/o/[slug]/admin/community/actions.ts` `archivePersonAction` (signature unchanged for callers): builds `{ revokeOpenSignInInvitation: (tx, personId) => revokeOpenSignInInvitationInTx(tx, { organizationId: g.organizationId, actingPersonId: g.viewerPersonId, actingUserId: g.actor.userId, actingUserEmail: g.actor.email ?? null }, personId, "archive") }` and passes it. A throw already maps to `ARCHIVE_COPY.db_error` (`actions.ts:182-186`).
+4. `readStates` (`src/lib/onboarding/org-invite.ts:268`): after mapping rows, for the `!linked`, `state === "blocked"`, `outcome === "membership_ended"` rows only, one extra query in the same transaction, `select m.person_id::text from memberships m where m.organization_id = <ctx org> and m.person_id = any(<ids>) and m.ended_on is null` (RLS-scoped; own-organization fact; `ended_on is null` is exactly the core's own `membership_ended` test at `0066:684`, not a restatement of standing). A hit is rewritten to the `none` shape: `state: "none"`, `outcome: null`, `sentAt/expiresAt/nextResendAt/invitedAddress/addressCurrent: null`, `resendCount: 0`, `delivery: deliveryState(null)`. This is the single choke point, so the card (`getSignInCard`), the list markers (`getSignInMarkers`), the Session hand-off rows (`listSessionSignInRows`) and the after-send state at `:430` all agree. Zero extra queries when no row is `blocked`/`membership_ended`.
+
+Lock order, for the record: archive locks the membership row (`for update of m`) and then the definer takes the organization row `for update`; acceptance takes organization, invitation, user, person and contact, and only reads the membership (`0065:1883-1895`, `0066:684`), so there is no cycle. This is reasoned from the definers; a two-connection test pins the observable result (see Tests) and the claim is **unverified under real concurrency until that test runs**.
+
+## Data Model
+
+No schema changes required. No migration (0085 stays free). No `SECURITY DEFINER` function is created, replaced or dropped. Feasibility check against the live tree: `presby_revoke_sign_in_invitation(uuid, uuid)` exists with that signature (`0065:1295`), is callable by `presby_app` from inside `withOrgContext` (it is how `revokeSignInInvitation` already calls it), and `account_invitations` is not touched from TypeScript (a boundaries test bars it from `org-invite.ts`); no CHECK, trigger or FK is added, so nothing in `scripts/seed-dev.sql` is validated anew.
+
+## Component / Page Plan
+
+- Pages to create: none. Components to create: none.
+- Files to modify:
+  - `src/lib/onboarding/org-invite.ts`: `revokeOpenSignInInvitationInTx`, the shared inner revoke, the `readStates` rewrite.
+  - `src/lib/community-engagement.ts`: fifth parameter, the call, `invitationRevoked` in the result and the audit metadata; header comment states the archive-revokes rule.
+  - `src/app/(org)/o/[slug]/admin/community/actions.ts`: builds and passes `sideEffects`.
+  - `src/app/(org)/o/[slug]/admin/community/engagement-copy.ts:299`: the one dialog line.
+  - `src/lib/audit.ts:~687`: comment lists `invitationRevoked` (archived) and `via: "archive"` (revoked).
+  - `src/lib/onboarding/issue.ts:893`: widen the `via` union only if `revokeRow` is reused (it is not: this path is `presby_app`, not the platform connection), so likely unchanged; leave it unless a type needs it.
+  - Existing tests that call `archivePerson` (list under Tests) take the new parameter.
+  - Help: `src/content/help/adding-people.md` (`:59`, `:63`) and `src/content/help/sign-in-invitations.md` (`:24`, `:28`, `:32`).
+- Files not touched on purpose: `restorePerson`, `sign-in-copy.ts`, `sign-in-card.tsx`, `labels.ts`, every `drizzle/` file, every Rule 16 shared file.
+
+## Implementation Order
+
+1. Write the regression test and the DB tests first and run them red against the unmodified tree (record the red output in Phase 4).
+2. `revokeOpenSignInInvitationInTx` and the `revokeSignInInvitation` refactor (`org-invite.ts`); unit tests.
+3. `archivePerson` fifth parameter, call, audit metadata; update every caller; unit and DB tests.
+4. `archivePersonAction` wiring; action test.
+5. `readStates` rewrite; unit and DB tests.
+6. Dialog string and its four tests; help pages; `audit.ts` comment.
+7. Audit events: none new keys (above). Release notes and the TODO/functionality-map housekeeping: orchestrator at ship (Rule 10/14 shared files); a bug fix, so no what's-new.
+
+## Copy
+
+One new or changed user-facing string, and two help edits. Nothing else in the product changes: the dead-link page, the card lines, the markers and the refusal sentences are used as they are.
+
+| # | Where | Text |
+|---|---|---|
+| C1 | Archive dialog, extra line when an invitation is open (`engagement-copy.ts:299`) | "An invitation to {name} is still open. It will stop working, and restoring them will not turn it back on." (was: "...It will stop working.") |
+| H1 | `adding-people.md:59` | after "...another if an invitation to them is still open." add: "Archiving cancels that invitation." |
+| H2 | `adding-people.md:63` | after the Restore sentences add: "Restoring does not bring back an invitation that was open when they were archived. Open their record and choose "Send invitation" to send a new one." |
+| H3 | `sign-in-invitations.md:24` | after the "Cancel invitation" bullet add a sentence in that bullet: "Archiving a person cancels an open invitation too, and restoring them does not turn it back on." |
+
+The four checks, one line per group:
+
+1. **Residuals.** C1/H1-H3 deny no accepted residual. The two this fix touches are admitted, not denied: the dead-link page's generic "ask whoever invited you" (above, `paper`) and the 2b accepted residual F232 (not touched). Nothing says an archived person is told why a link is dead.
+2. **Source of truth.** C1's "is still open" is the existing `invitationOpen` fact (card state `pending`, `page.test.tsx:1078`), and "It will stop working" is now established by the revoke in the same transaction (DB test below); "restoring them will not turn it back on" is the terminal revoked row (`presby_account_invitations_guard_update`, `0065:2397-2430`), pinned by the regression test. It claims nothing about an expired-but-open row, which archive also revokes silently. H2's "Send invitation" is the card's own button (`SIGN_IN_CARD_COPY.buttons.send`, `sign-in-copy.ts:112`), which the card shows for state `none`/`revoked` when an address is on file; if there is no address the card says to add one, and H2 does not promise otherwise.
+3. **Audience.** C1 is seen by whoever can open Archive: a `people.manage` holder (the action's gate, `community-engagement.ts:55`); "restoring them" and "send a new one" are both `people.manage` acts. H1-H3 are read by the same administrator audience as the pages (`audience: "administrator"`, `registry.ts:684-692`).
+4. **Neighbours.** Grepped the live tree for invitation/archive/restore/"stop working" strings. Made stale by this change: `engagement-copy.ts:299` (C1), pinned exactly in `engagement-copy.test.ts:292,305`, `community-row-actions.test.tsx:175`, `.../[id]/edit/page.test.tsx:1085`; help `adding-people.md:59,63` and `sign-in-invitations.md:24` (above). Checked and still true: `sign-in-invitations.md:28` ("the person's connection to your congregation has ended" as a refusal reason is the send-time refusal, unchanged), `:32` and `:65` (the "Invitation couldn't be completed" marker still exists for the cases that stay blocked: merged, deceased, support), `CONNECT_OUTLOOK_COPY.pendingInvitation` (`sign-in-copy.ts:~190`, shown only while open), `SIGN_IN_DIALOG_COPY.cancel.body` (`:220`, the single-cancel dialog, unchanged), and `no-organization-copy.ts` (an archived person's own page; it does not mention invitations by their state).
+
+## Help impact (Workflow Rule 17)
+
+Both pages named by the analyst are touched, and nothing is retired or added.
+- `adding-people` (H1, H2): archive cancels an open invitation; restore does not revive it. Its `labels` (registry `:434`) gain no new quoted string beyond "Send invitation", which `sign-in-invitations` already lists; add it to `adding-people`'s `labels` only if the implementer quotes it in a way `check:help` requires.
+- `sign-in-invitations` (H3), and its `:28`, `:32`, `:65` read-through above (no edit). `verifiedIn` on neither page moves here: the analyst re-walks both after this ships (the live-walk addendum already says neither can move until D1 and the wording items are done).
+- Phase 4 edits the pages from the screens (the dialog line, the record after archive and after restore), not from this table.
+
+## Tests (named; regression test first, red before the fix)
+
+**Regression test, must fail first**, in `src/lib/community-engagement.db.test.ts` (new `describe("F417: archive revokes an open sign-in invitation")`), using `createSignInFixture` (`src/lib/testing/sign-in-fixture.ts`): `D1: archive, the person presses Accept, restore, the card offers the invitation again`.
+  1. a congregation with the connect toggle on, a sender holding `people.manage`, a visitor person with an address and a verified, active account on that address;
+  2. issue a sign-in invitation (`fx.issue`);
+  3. `archivePerson(..., sideEffects)` with the real `revokeOpenSignInInvitationInTx`;
+  4. the person presses Accept: `fx.acceptInPlace` (the existing in-place acceptance path the no-organization page uses) **must return the dead outcome and the row must be `revoked`, not `blocked`**; the preview for the token returns zero rows;
+  5. `restorePerson`;
+  6. `getSignInCard` returns `state: "none"`, `blockedOutcome: null`; `getSignInMarkers` returns the ordinary `not_connected` marker; `sendSignInInvitation` returns `ok` and a new open row exists.
+  Against the unmodified tree, step 4 returns `blocked` / `membership_ended` and step 6 returns `blocked`: red. (Run it before the fix, record the output, then fix.)
+
+**Unit tests (mocked), `src/lib/community-engagement.test.ts`:** archive calls `revokeOpenSignInInvitation` once with the transaction and the person id, after the membership `update` and before the audit insert; it never calls it on `forbidden`, `not_found`, `self_target`, `already_ended`, `not_eligible`, `pending_action` or `holds_position`; `invitationRevoked` true/false reaches the result and the audit metadata; a throw from the side effect rejects and writes no audit row (extends the existing audit-throw test at `:424`). `src/lib/onboarding/org-invite.test.ts`: `revokeOpenSignInInvitationInTx` `ok` (cancels the queued email, one `invitation.revoked` row with `via: "archive"`, returns true), `not_open` (writes nothing, returns false), any other outcome throws; `readStates`: `blocked`/`membership_ended` with a live membership reports `none` through the card, the markers and the Session rows; with an ended membership it stays `blocked`; `person_merged` and `needs_support` stay `blocked`; no extra query when nothing is `blocked`/`membership_ended`; `revokeSignInInvitation`'s existing results are unchanged. `src/app/(org)/o/[slug]/admin/community/actions.test.ts`: `archivePersonAction` passes a `sideEffects` whose function receives the acting user from the session, never from input. `engagement-copy.test.ts:292,305`, `community-row-actions.test.tsx:175`, `.../[id]/edit/page.test.tsx:1085`: the new C1 string. `src/lib/onboarding/boundaries.test.ts`: unchanged and must stay green (it is the proof 2b B2 holds).
+
+**DB tests (`describe.skipIf(!hasDb)`), `src/lib/community-engagement.db.test.ts` and `src/lib/onboarding/org-invite.db.test.ts`:**
+  - archive of a person with an open invitation: row `revoked`, `revoked_by_user_id` the actor, an `invitation.revoked` audit row `via: "archive"`, a `tenant.person.archived` row with `invitationRevoked: true`; with no open row, `invitationRevoked: false` and no `invitation.revoked` row;
+  - an expired-but-open row is revoked; a different person's open row, an accepted row and another organization's row are untouched;
+  - a still-queued invitation email is cancelled and its stored body scrubbed;
+  - **rollback**: a forced throw from the audit insert (the existing EC-16 harness, `:494`) leaves the invitation open and the membership live;
+  - **race** (extends EC-8, `:544`): an acceptance and an archive on two connections end in exactly one of two consistent states (accepted and then archived with no revoke; or revoked and the acceptance `dead`), never blocked, never half-written;
+  - **backstop (b), independent of (a)**: issue, end the membership by owner SQL with the archive marker (bypassing `archivePerson`), accept (the row becomes `blocked` / `membership_ended`), `restorePerson`, then the card is `none` and a send succeeds; and the participant path: a participant with an open invitation, removal, accept (blocked), void the removal, card `none`. If the participant fixture cannot reach it cheaply, the first scenario stands and the second is reported as unverified, not dropped silently.
+
+**e2e (`e2e/community-engagement.spec.ts`, a new test 14, the file's own `COMMUNITY_FLAG = org_portal.members_create` set through `e2e/support/flags.ts` as the spec already does; no other flag, and `scripts/ci/e2e-baseline-flags.sql` is not touched):** seed an open sign-in invitation with a known token for an Inactive/visitor person (`seedSignInInvitation`), open Archive from the record and read the dialog line (C1), confirm; as that person (`signInAs` with a fixture account on the address) open `/invite?token=...` and see "This link isn't active"; as the administrator restore the person and see the record's Sign in card offer "Send invitation" with no "couldn't be completed" text; assert the two audit rows with `auditFor`. At 360 px for the dialog (no horizontal overflow, `noHorizontalOverflow`). The existing spec's test 5 (`:377`) asserts the archived/restored rows with `toMatchObject` and sees no invitation, so it should not need changes; the implementer confirms. No hydration spec changes (`e2e/hydration/community-engagement-controls.spec.ts` asserts button presence, not dialog text).
+
+## e2e blast radius (existing specs this change can alter)
+
+`e2e/community-engagement.spec.ts` tests 5 and 11 (Archive/Restore from lists and from the record; the dialog text with an open invitation is not asserted anywhere in `e2e/`, grepped), `e2e/hydration/community-engagement-controls.spec.ts` (Archive button only). `e2e/sign-in-connect-smoke.spec.ts` and `e2e/no-organization-connect.spec.ts` exercise acceptance and connect for people who are not archived: unchanged. The unit/DB blast radius is every existing call of `archivePerson` (new required parameter): `community-engagement.test.ts:118,145,329-424`, `community-engagement.db.test.ts` (the archive/restore, EC-16, EC-8 and G2 describes), `actions.test.ts:29` (mocked), plus `membership-standing.db.test.ts` if it archives.
+
+## Edge Cases & Risks
+
+- **A concurrent accept** (above): reasoned lock order, pinned by the race test; **unverified** until it runs.
+- **An expired open row** is revoked, not left: harmless, pinned by the DB test above. The dialog makes no claim about it.
+- **A person who is connected** (`people.user_id` set) has no open row to revoke (issue refuses `already_signs_in`); `invitationRevoked` is false. Pinned by the "no open row" DB case.
+- **Revoke raises 42501** (the actor lost `people.manage` mid-request): the archive rolls back and the action returns its existing `db_error` copy; pinned by the unit throw test, not by a real revoked permission (**unverified** end to end).
+- **The archived record's own Sign in card.** After (a), an archived person's card state is `revoked`, which renders "Invite {name} to sign in ..." with "Send invitation" and an outlook line. That is exactly what an archived person who was never invited already shows today (the card ignores an ended membership), and a send is refused with the existing truthful sentence ("This person's connection to {congregation} has ended, so they can't be invited"). I read this from the code and have not seen it in a browser; it is **not** fixed here (see Out of Scope). The analyst's second symptom, "While this invitation is open..." on the archived record, **is** fixed because the row is no longer open.
+- **The participant-removal path**: (b) clears the dead end; (a) does not apply, so a removed participant with an open invitation can still press Accept after removal and be blocked. Not changed here (see Out of Scope).
+- **Phone width**: the only visible change is one more sentence in the existing dialog line; it wraps like the line it extends (a long name: the existing `engagement-copy` tests and the 360 px e2e assertion above; the wrap itself is **unverified** until Phase 4 looks at it).
+
+## Out of Scope (explicit non-goals, for the operator to confirm)
+
+1. Changing the dead-link page's wording or making it say why (DECISION-147).
+2. Revoking at participant removal, or at any other path that ends a membership. Every other ended membership is terminal except the void of a participant removal, which (b) now handles on the card.
+3. Hiding or rewording the Sign in card on an archived record (the "Send invitation" offer on an archived person, above). Proposed as a TODO line for the analyst's Phase 6 to judge, with the unverified-in-browser caveat.
+4. Making Restore re-open a revoked invitation.
+5. A cleanup of existing `blocked` rows. (b) is a read, nothing is rewritten; production has none.
+6. The analyst's N1-N4 and the other TODO items in the live-walk addendum.
+
+## Carry-forward
+
+| Phase 1 gap / Phase 2 ruling | Addressed here (where), or *deferred* (who accepted) |
+|---|---|
+| D1: archive, Accept, restore leaves a permanent dead end (card "ended", no button, list marker, email change does not clear it) | Root cause and both fixes: Summary; API Contract 1, 2, 4; regression test and (b) backstop test in Tests. |
+| D1 second symptom, the person is offered "Accept the invitation" while archived | (a): the revoke makes the preview return zero rows, so the dead-link page shows (Decisions, "What the archived person sees"); e2e step 3. |
+| D1 second symptom, the archived record still says "While this invitation is open..." | (a): the row is no longer open. Pinned by the regression test's `getSignInCard` read after archive in step 4 (assert `state: "revoked"` there too). |
+| Analyst's contrast case (never opened the link, archive then restore leaves it working) | **Changed on purpose**: the link now stops at archive and Restore leaves it stopped, as the dialog says (C1). Stated in the release note as a behaviour change, not a regression. |
+| Analyst: "Restore must never leave a terminal 'connection has ended' card or list marker" | (b), all three readers via `readStates`; Tests (card, markers, Session rows). |
+| Analyst's help note: D1 touches the `sign-in-invitations` "invitations" section | Help impact H3, `adding-people` H1, H2. `verifiedIn` is not moved by this pipeline; the analyst re-walks. |
+| Phase 2 rulings | None: Phase 2 never ran on this fix. The standing 2b B2 and F232 rulings are preserved (Summary, Copy check 1). |
+| Analyst N1-N4, follow-ups 2-6 | *Deferred*: separate TODO lines already filed from the addendum; not this pipeline. |
+
+## DECISION-315 (draft for the orchestrator to add to `docs/decisions.md` at integration; shared file, not edited here)
+
+**DECISION-315 — Archive revokes an open sign-in invitation; the reader never reports a stored `membership_ended` block over a live membership.**
+Archiving a person (Community, 3a) revokes their open sign-in invitation in the archive's own transaction, through the existing `presby_revoke_sign_in_invitation`, audited as `invitation.revoked` with `via: "archive"`; the `tenant.person.archived` row carries `invitationRevoked`. Restore does nothing to invitations: a revoked link stays revoked and the administrator sends a new one. Separately, `readStates` reports state `none` for a `blocked`/`membership_ended` row whose membership has `ended_on is null`, so Restore (3a) and the voiding of a participant removal (0061) never leave a card on "has ended". `archivePerson` receives the revoke as a required function argument from its `(org)` caller so `org-invite.ts` keeps being imported only from the tenant portal (2b B2). Why: 3a made an ended connection reversible, which made a terminal block about a point-in-time state wrong. No migration, no definer change. Accepted, `paper`: the dead-link page's generic "ask whoever invited you" reaches an archived person whose inviter cannot send until Restore; the archived record's Sign in card still offers "Send invitation" and the send is refused with the existing sentence (not changed here).
+
+## Implementer
+
+**full-stack-developer.** The change spans one library module, one tenant-side action, one reader, one dialog string and help copy; it is small and tightly coupled (the new parameter, the action that supplies it, the reader and their tests move together), so splitting between api-developer and ux-developer adds overhead. No schema, so database-admin is not needed.
+
+## Phase 5 scope (for QA)
+
+1. Run the regression test **against the unmodified tree first** (from a scratch copy or a WIP commit; no `git stash` in worktrees) and record that it fails at step 4 and at step 6; then against the fix and record that it passes.
+2. Unit, DB and e2e suites named above; `npm run check` (all ten tripwires; `check:audit` and `check:help` included); `src/lib/onboarding/boundaries.test.ts` green unchanged; typecheck and build.
+3. Feature-gate audit: `archivePersonAction` still gated by session, `people.manage` and the Community flag; no new action or route; no `getPlatformDb()` introduced under `(org)`.
+4. Copy-truthfulness on the diff: C1 against the revoke, H1-H3 against the screens at 360 px (the Archive dialog with an open invitation, the record after archive, the record after restore, the dead-link page for the archived person's link).
+5. Verify the "unverified" items above actually ran: the race test, the participant-removal path, and the dialog wrap at 360 px; anything that could not run is reported as such, not as a pass.
+6. Not auth-touching (`src/auth.ts`, `src/proxy.ts`, `(auth)`, `src/lib/auth/` are not edited), so the MFA-login e2e gate does not apply; the new e2e still signs in as a seeded account.
+7. Phase 6 (analyst): re-walk the D1 sequence on the record and the list, and the six pages the addendum left open, `adding-people` and `sign-in-invitations` included.

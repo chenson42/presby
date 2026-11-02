@@ -29,7 +29,9 @@ const inter = localFont({
   weight: "100 900",
   style: "normal",
   display: "swap",
-  // The one face every page uses, so the one face worth a preload. The eight
+  // The platform face (every page outside a branded church site draws it),
+  // so the one face worth a preload. A branded /site page preloads it without
+  // drawing it (QA run 3, finding B; a TODO line). The eight
   // pairing faces in src/lib/brand/fonts.ts are `preload: false`: next/font
   // preloads per file for every route that imports the module, and a page
   // only draws one pairing (fonts.test.ts pins both halves of this).

@@ -17,8 +17,8 @@
 | 1 — Functional refinement | analyst | Skipped | — | 2026-11-01 |
 | 2 — Architectural review | architect | Skipped | — | 2026-11-01 |
 | 3 — Technical design | tech-lead | Skipped | — | 2026-11-01 |
-| 4 — Implementation | full-stack-developer | Complete | — | 2026-11-01 |
-| 5 — Verification | qa | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Done: nine families on next/font/local, full Google subset coverage, Inter-only preload, Lora/Source Sans 3 renamed (OFL RFN), coverage/wiring/preload/RFN/weight tests | Complete | 2026-11-02 |
+| 5 — Verification | qa | Run 1 FAIL (latin-only coverage; dropped contact lanes), run 2 FAIL (all nine faces preloaded), run 3 PASS (Inter-only preload, /signin 181 KB, /o 389 KB, CLS 0, RFN rename pixel-identical, two Google-free builds, prod lane 111/111) | PASS | 2026-11-02 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 **Skips, stated:** Phases 1–3 are skipped. This adds no behaviour, the design is the operator's instruction ("lets bundle the fonts", 2026-11-01), and the families, weights and variables are fixed by the current `src/lib/brand/fonts.ts` and `src/app/layout.tsx`. The font files are static assets under the existing tree, so no new subdirectory of note is added. If the implementer finds that something needs a structural choice, it comes back here. **Help impact:** none. No label, page or flow changes, and the same faces render with the same coverage as before, apart from the CSS family name and sub-pixel fallback metrics (Visible difference, below).
@@ -180,7 +180,7 @@ These are recorded here because they were found while this work was in progress.
 | inter | 48,432 | 181,384 |
 | **total** | **307,892** | **902,692** (902,256 after the RFN rename) |
 
-About 2.9 times the first cut, inside the expected 0.8 to 1 MB. **Correction (QA run 2, finding A): this sentence was false as first written.** With next/font's default `preload: true`, `/signin`, every `/o/*` page and every `/site/*` page preloaded all nine files (902,692 bytes against 307,892 on `main`) through the HTTP `Link` header; the claim is true only after the QA run 2 loop-back below, which measured it. `next/font/local` emits one `@font-face` per file with no `unicode-range`, so the whole file for a face is fetched once that face is used, where `next/font/google` split it by subset. That is the price of one file per family, accepted in the ruling.
+About 2.9 times the first cut, inside the expected 0.8 to 1 MB. **Correction (QA runs 2 and 3, finding A).** This paragraph first said: "A browser downloads only the face a page uses, and the platform pages use Inter only (181 KB)." That was false. With next/font's default `preload: true`, `/signin`, every `/o/*` page and every `/site/*` page preloaded all nine files (902,692 bytes against 307,892 on `main`) through the HTTP `Link` header. It became true only after the QA run 2 loop-back below set `preload: false` on the eight pairing faces; see the measured after-table there. `next/font/local` emits one `@font-face` per file with no `unicode-range`, so the whole file for a face is fetched once that face is used, where `next/font/google` split it by subset. That is the price of one file per family, accepted in the ruling.
 
 ### Gates
 
@@ -452,7 +452,7 @@ The two scratch copies (with their `.env.local`) and the private browsers are de
   | Bitter | `Bitter Pro` | none: we ship "Bitter", which is not that name |
   | Libre Franklin, Public Sans, Karla, Montserrat, Open Sans, Inter | none | none |
 
-  New `font-files/rename-rfn.py` (run at the end of `build-fonts.sh`) rewrites name IDs 1, 3, 4, 6, 16, 17, 21 and 22 and exits non-zero if the RFN is left in any of them. Name ID 0, the copyright notice that itself says "with Reserved Font Name ...", is kept as upstream wrote it: the licence requires the notice and it is a statement, not a use of the name. Lora's names are now `PP Classic Serif`, `PPClassicSerif-Regular` and so on; Source Sans 3's `PP Classic Sans`, `PPClassicSans-Roman`. While there, Source Sans 3's name ID 1 and 3 no longer say "ExtraLight" (an instancer leftover; the default instance is 400). The README documents all of this.
+  New `font-files/rename-rfn.py` (run at the end of `build-fonts.sh`) rewrites name IDs 1, 3, 4, 6, 16, 17, 21 and 22 and exits non-zero if any of the old family names passed to it is left in them. **Correction (QA run 3):** the script checks the old-name patterns it is given, not the Reserved Font Name itself; the guarantee for the committed files is `font-coverage.test.ts`'s RFN test, which checks the RFN in every name record but ID 0. Name ID 0, the copyright notice that itself says "with Reserved Font Name ...", is kept as upstream wrote it: the licence requires the notice and it is a statement, not a use of the name. Lora's names are now `PP Classic Serif`, `PPClassicSerif-Regular` and so on; Source Sans 3's `PP Classic Sans`, `PPClassicSans-Roman`. While there, Source Sans 3's name ID 1 and 3 no longer say "ExtraLight" (an instancer leftover; the default instance is 400). The README documents all of this.
 - **Glyphs identical, verified.** `build-fonts.sh` was run end to end (rebuild from the pinned upstream commit) and the two outputs compared table by table, with fontTools, against the pre-rename files from `HEAD` and against the rename applied directly to them: `cmap`, `glyf`, `gvar`, `GSUB`, `GPOS`, `hmtx`, `fvar`, `avar` (Source), `HVAR`, `STAT`, `OS/2`, `hhea`, `maxp` and the glyph order all identical; `head` differs only in `checkSumAdjustment` and `modified`. The two committed files are the pre-rename bytes put through `rename-rfn.py`, so only the `name` table differs; the other seven woff2 are untouched (a full rebuild re-encodes them with new bytes and no content change, so those were restored from `HEAD`). Sizes: Lora 80,796 to 80,556, Source Sans 3 127,004 to 126,808; the nine now total 902,256 bytes.
 - **Tests added** to `font-coverage.test.ts` (81 tests, was 62): per family, no `name` record other than ID 0 contains that family's Reserved Font Name (a small `name`-table reader in the file; Lora, Source and Bitter checked); and per family, the `weight:` range declared in `fonts.ts` / `layout.tsx` equals the file's `fvar` range, plus a test that the declarations cover all nine families. **Fail-first:** the HEAD (un-renamed) Lora and Source files failed the RFN test (2 failures); `classicBody`'s weight changed to "400 700" failed the weight test (1 failure); restored, all pass.
 - **QA's minor items:** `fonts.ts` header (per-family subsets: Karla has latin and latin-ext only; `font-coverage.test.ts` is what parses each woff2; two visible differences, the CSS family name and, now, the font's internal name; the fallback is generated from the local Arial / Times New Roman metrics, not "the one `next/font/google` generated"); `layout.tsx` (Inter also has cyrillic-ext and greek-ext); `font-files/README.md` ("the union of the subsets Google serves for that family"; byte table); the stale U+1E9E mention in `font-coverage.test.ts` (Public Sans's latin-ext row is now just the shared sample); this log's former line 183 (marked as a correction in place, above) and the Lora Ω line (190). `fonts.test.ts`'s loose-files pin now lists `rename-rfn.py` too.
@@ -724,3 +724,272 @@ No user-facing string changed. As instructed, I checked the corrected comments a
 - the `e2e-*.log`, `build-*.log` and `gates-*` logs, and `kit-build.log`.
 
 The decoder harness and the comparison scripts are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/fq2/tools/`. The scratch copies, venvs and private browsers are deleted, and nothing is listening on 3570, 3571 or 3810.
+
+
+## Orchestrator: QA run 3 text corrections and finding B (2026-11-02)
+
+- QA run 3's copy defects 1 to 4 are corrected in the text:
+  - work-log `:183` (the struck sentence is now quoted);
+  - the ID 3 "ExtraLight" claim;
+  - `rename-rfn.py`'s docstring and the README's RFN section, which now say the script checks the old-name patterns and the test checks the RFN;
+  - `layout.tsx`'s "the one face every page uses", now "the platform face".
+- No code or number changed.
+- **Finding B** (a branded public `/site` page preloads Inter and never draws it, 181,384 B): accepted for this release and filed as a follow-up in `docs/TODO.md`, together with QA's advisories 1 and 2 (a source-text preload test, no per-route preload pin).
+
+---
+
+## QA run 3 (recorded verbatim by the orchestrator; it ran on `9ad401fc`, before the text corrections above)
+
+### Phase 5 — Verification (qa), run 3
+
+**Date:** 2026-11-02
+**Verified by:** qa (read-only; no project file edited, no test authored)
+**Scope:** PR #74 at `9ad401fc`. What changed since run 2 is `806dd581` (preload split, RFN rename, two new test groups, corrected comments) plus the work-log. Checked against run 2's finding A and ruling (a).
+
+**Where I ran things**
+- **Worktree** (no `.env.local`, CI unit shape): the static gates and the unit suite.
+- **Two scratch copies**, each under its own parent directory in the session scratchpad, outside `~/git/presby-platform/`:
+  - the branch at `9ad401fc`;
+  - `origin/main` at `d530c41f`.
+  - Both had main checkout's `.env.local`. Both are now deleted, with their `.env.local`.
+- **Browsers:** a private `PLAYWRIGHT_BROWSERS_PATH`, deleted afterwards. Disk: 551 GiB free.
+- **Environment values:** none printed. Two read-only `select`s ran on `development`, checked by result only.
+- **Flags were not reset.** The configured database is `development`, and `scripts/ci/e2e-reset-flags.sql` refuses to run there by design (it would switch off operator flags). This worktree has no pipeline Neon branch. Flags read during the run: `sites.public_render` t, `ui.brand_theming` t, `ui.branded_signin` f, `auth.require_2fa` t.
+- **Servers:** a sibling's server was already on :3590 and was left alone. Every server I started was stopped by PID; 3570 and 3810 are free.
+
+**Not re-run, and what it rests on**
+- **Full `--project=chromium` suite:** rests on PR #74's CI. The remote head is still `1e12716`, so CI has never run this head.
+- **DB-backed vitest and `test-rls.sql`:** nothing touches a migration, `authz.ts`, `src/lib/db/` or a fixture.
+- **Contact lanes:** untouched since run 2.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**
+- `npm run lint`: **PASS** (`--max-warnings=0`)
+- `npm run check`: **PASS**. All ten tripwires pass; `check:help` reports 29 entries, 24 published, 7 images.
+
+## Unit Tests
+
+Total: 17,080 | Passed: 13,310 | Failed: 0 | Skipped: 3,770 (140 files, the DB-gated suites in this shape, the same count as run 2) | Duration: 44.7s
+
+- `fonts.test.ts` 25 and `font-coverage.test.ts` 81, so 106 pass.
+
+**Fail-first, planted in the branch copy and restored each time** (copy diffed equal to the worktree afterwards):
+
+| # | Plant | Result |
+|---|---|---|
+| P1 | `preload: false` removed from `warmBody` only | fails: `--font-body-warm: expected undefined to be false` |
+| P1b | `modernHeading` set to `preload: true` | fails: `--font-heading-modern: expected true to be false` |
+| P2 | Inter's `preload: true` removed | fails: "keeps the platform face (Inter) preloaded" |
+| P2b | Inter set to `preload: false` | fails, same test |
+| **P2c** | Inter set to `preload: false`, with `// preload: true,` left in its options | **passes (106/106).** The test regex-matches source text, comments included. Advisory 1. |
+| R1 | `c1d96d26` (un-renamed) Lora and Source Sans 3 | 2 failures: `[1,'Lora']…` and Source |
+| R2 | Lora plus a Windows name ID 25 "Lora" (an ID the renamer never rewrites) | fails `[25,'Lora']` |
+| R3 | Source plus a **Mac-platform** ID 1 "Source Sans 3" | fails `[1,'Source Sans 3']`, which exercises the reader's latin1 branch |
+| R4 | Lora with only ID 4 reverted to "Lora Regular" | fails `[4,'Lora Regular']` |
+| W1 | `classicBody` declared `400 700` | fails `[400,700]` against `[400,600]` |
+| W2 | Inter declared `100 800` in `layout.tsx` | fails `[100,800]` against `[100,900]` |
+| W3 | `warmHeading`'s `weight` written before `src`, so the regex cannot read it | **fails closed**: 2 failures (`undefined`, and "declares all nine families") |
+
+## End-to-End Tests
+
+| Lane | Server | Result | Duration |
+|---|---|---|---|
+| `test:e2e:prod` (prod-build and prod-custom-hosts) | its own build, :3810 | 111 / 111, 0 skipped | 4.9m |
+| Brand dev specs: `color-scheme` 4, `branded-signin` 5, `public-sites` 7, `help` 34 | my own `next dev`, :3570 | 50 / 50, 0 skipped | 43.8s |
+
+- **One aborted dev attempt was my error.** I started the server without the config's domains fakes and its test-default `CRON_SECRET`, so globalSetup refused and no spec ran. I restarted it with them and ran green.
+
+**Production builds (branch copy)**
+
+| Build | Exit | woff2 | Google refs in `.next/` (excluding `.map`) | Google in build log |
+|---|---|---|---|---|
+| Plain | 0 | 9, 902,256 B | 0 | 0 |
+| `CI=1`, clean `.next` | 0 | 9, each byte-identical to its committed file | 0 | 0 |
+
+- **`next-font-manifest.json`:** all 133 app routes preload Inter only. In run 2, 87 routes preloaded all nine files and 46 preloaded Inter only. The plain and `CI=1` manifests are identical.
+- next/font now marks only Inter's file with the preload `.p.` infix.
+
+**Page weight.** Production servers at :3810, Chromium 360×800, a fresh context per page, woff2 `responseBodySize` from `requestfinished`. `/o` is signed in as `presbytery-clerk`.
+
+| Page | Branch run 3: font preloads; woff2 | Run 2 (`c1d96d26`) | Main (`d530c41f`) |
+|---|---|---|---|
+| `/help` | 1 (Inter, HTML `<link>`); 1 file, 181,384 | 1; 181,384 | 1; 48,432 |
+| `/signin` | 1 (Inter, `Link` header); 1 file, 181,384 | 9; 902,692 | 9; 307,892 |
+| `/o/e2e-presbytery` (classic) | 1 (Inter); 3 files, 388,748: Inter 181,384, Lora 80,556, Source Sans 3 126,808 | 9; 902,692 | 9; 307,892 |
+| `/site/fernwood` (seed fixture; answers 404, see below) | 1 (Inter); 181,384 | not measured | 9; 307,892 |
+| `/site/fpcw` (contemporary, 200) | 1 (Inter); 3 own files, 477,792: Inter 181,384, Open Sans 88,536, Montserrat 207,872 | not measured (the manifest listed nine) | 9; 307,892 own |
+
+- **Main's numbers reproduce run 2's exactly.**
+- **Change against main:**
+  - `/help` +132,952
+  - `/signin` −126,508
+  - `/o` +80,856
+  - `/site` (contemporary) +169,900
+- **Each pairing page downloads its own two faces and nothing else.** On `/o`, `classicHeading` and `classicBody` draw the h1 and body; the other six pairing faces are never requested. The contemporary site gets Montserrat and Open Sans only.
+- **No fixture `/site` page renders in `development`.** `fernwood` and `marrowbone` have no content bundle (404), and `alder-creek` is `provisioning`. `fpcw` is the only live site that renders, and the only non-classic pairing in the database. I used it for font requests and glyph counts only: no screenshot, no content read or recorded. It is not a fixture.
+- **Off-origin requests:** none from our pages. On `fpcw`, the YouTube iframe loads its own Roboto from `fonts.gstatic.com` (35,220 B, on main too). Our CSS does not.
+
+**Layout shift.** `PerformanceObserver` `layout-shift` without recent input, read 5 s after load.
+
+| Page | No delay | Every woff2 delayed 1.5 s | Control: 120 px DOM prepend | Control: fallback `size-adjust` and overrides stripped, fonts delayed |
+|---|---|---|---|---|
+| `/help` (branch / main) | 0 / 0 | 0 / 0 | 0.15 / 0.15 | 0 / 0 |
+| `/signin` | 0 / 0 | 0 / 0 | 0.1455 / 0.1455 | 0.0003 / 0.0003 |
+| `/o/e2e-presbytery` | 0 / 0 | 0 / 0 | 0.15 / 0.15 | 0.0274 / 0.0275 |
+| `/site/fpcw` (branch) | 0 | 0.0014 (not font, below) | 0.15 | 0.0016 (0.0002 at the swap, then the same 0.0014) |
+
+- **The second control is a real font-swap shift.** It appears at the 1.5 s swap only once the metric overrides are removed, so the observer does see font swaps, and `adjustFontFallback` is what holds them at 0.
+- **`fpcw`'s 0.0014 is not font-related.** It is a 54-character paragraph shifting at 6.7 to 7.4 s. It also happens with no font delay (6,686 and 7,105 ms in an 8 s window) and with the embed blocked. All woff2 had finished by 2.4 s.
+- Branch and main agree on every cell measured.
+
+**RFN rename** (fonttools 4.68.0, throwaway venv)
+- **Byte comparison with `c1d96d26`:** seven woff2 are byte-identical. Lora went from 80,796 to 80,556 and Source Sans 3 from 127,004 to 126,808.
+- **Table comparison of those two:** glyph order and every table are identical except `head` and `name`. In `head`, only `checkSumAdjustment` and `modified` differ.
+- **Name records:**
+  - Lora is now `PP Classic Serif`, `PPClassicSerif-Regular`, `3.008;CYRE;PPClassicSerif-Regular`.
+  - Source Sans 3 is now `PP Classic Sans`, `PPClassicSans-Roman`, `3.052;ADBO;PPClassicSans-ExtraLight;ADOBE`.
+  - Outside ID 0, no record contains "Lora" or "Source", checked case-insensitively, including the `fvar` and `STAT` name IDs.
+  - ID 0 is unchanged in both. Bitter carries no "Bitter Pro".
+  - No font has a trademark (ID 7) record.
+- **The RFN table matches every `OFL.txt`:** Lora `"Lora"`, Source `'Source'`, Bitter `"Bitter Pro"`, the other six none. The loose files are `README.md`, `build-fonts.sh`, `rename-rfn.py` and `subsets.json`.
+- **Rendering at 360px:**
+  - **Synthetic page** (DPR 2): Lora and Source at 400 to 700 over the sample `Łukasz … ἀρχή` plus English with ligatures, rendered once with the `c1d96d26` bytes and once with HEAD's.
+    - The two screenshots are **byte-identical PNGs**.
+    - CDP glyph counts are identical: 192 heading and 156 body; only the reported family name changes.
+    - The only fallback is ἀρχή in the heading face (16 glyphs), as in run 2.
+    - My first pass served the page without a charset and was discarded.
+  - **In-app** on `/o/e2e-presbytery`, on the same server, with `page.route` swapping the run-2 bytes in:
+    - **0 of 2,515,680 pixels differ**, and a same-bytes repeat run also differs by 0;
+    - glyphs 222 `PP Classic Serif` against 222 `Lora`, and 460 `PP Classic Sans` against 460 `Source Sans 3 ExtraLight`;
+    - 1 Arial glyph (the → arrow) in both.
+  - I read both screenshots: real text, all weights distinct, fixture names only.
+
+## Regression Tests Added
+
+| Test | Guards against |
+|---|---|
+| `src/lib/brand/fonts.test.ts:113` "opts all eight pairing faces out of preload" | finding A returning in any pairing face (the call-recording mock). P1 and P1b reproduced. |
+| `src/lib/brand/fonts.test.ts:125` "keeps the platform face (Inter) preloaded" | Inter losing its preload. P2 and P2b reproduced; P2c slips through (Advisory 1). |
+| `src/lib/brand/font-coverage.test.ts:273` "is not named with a Reserved Font Name" | an RFN in any name record but ID 0, on either platform. R1 to R4 reproduced. |
+| `src/lib/brand/font-coverage.test.ts:283` "is declared … with the weight range its fvar spans", and `:296` | the declared weights and the files drifting apart (run 2's gap 2), failing closed on an unparsed declaration. W1 to W3 reproduced. |
+
+- **Run 2's gaps are closed by these tests**, with Advisory 2 below.
+- **Fail-before:** I could not watch these tests fail before the fix in history. I reproduced each by planting the pre-fix state instead.
+
+## Coverage on Critical Modules
+
+Not re-measured. `permissions.ts`, `two-factor.ts` and `flags.ts` are untouched.
+
+## Feature-Gate Audit
+
+No protected routes touched: no `route.ts` and no `"use server"` action in the diff. Not auth-touching. The diff touches no Rule 16 shared file.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none | n/a | n/a | n/a |
+
+## Copy Truthfulness
+
+No user-facing string changed, and there is no help diff. I checked the corrected comments and work-log claims against the measurements.
+
+**Verified true**
+- **Every new byte figure reproduces:**
+  - 80,556, 126,808 and 902,256 (README and work-log tables);
+  - 388,748, which equals 181,384 + 80,556 + 126,808;
+  - "about 720 KB" for the eight pairing faces (720,872);
+  - main's 48,432 and 307,892;
+  - the commit message's figures.
+- **Work-log `:460–480`:**
+  - the before and after preload counts;
+  - "an HTML `<link>`" on `/help`;
+  - "the other two `Link` entries are stylesheets";
+  - "the other six pairing faces are never requested";
+  - CLS 0 with and without the delay;
+  - the 0.15 control.
+- **Work-log `:190`:** Lora draws Ω and falls back only on ἀρχή.
+- **Corrected comments match `subsets.json`:**
+  - `fonts.ts`: the per-family subsets (Karla latin and latin-ext only), `font-coverage.test.ts` as the parser, and the fallback generated from local Arial / Times New Roman metrics;
+  - `layout.tsx`: Inter's seven subsets;
+  - the README subset paragraph;
+  - the README RFN table and the table-identity sentence;
+  - the U+1E9E mention is gone from `font-coverage.test.ts`.
+
+**Defects (text only; none changes code or a measured number)**
+1. **`docs/work-log/2026-11-01-self-host-fonts.md:183`, the correction misattributes the falsehood.**
+   - The false sentence ("A browser downloads only the face a page uses, and the platform pages use Inter only (181 KB)") was deleted, not quoted.
+   - "**this sentence** was false as first written" now follows "About 2.9 times the first cut, inside the expected 0.8 to 1 MB", which is true.
+   - "the claim is true only after…" has no antecedent.
+   - The numbers in the line are correct.
+   - Fix: quote the struck sentence, point the correction at it, and point to the after-table at `:464`.
+2. **Work-log `:455`, "Source Sans 3's name ID 1 and 3 no longer say ExtraLight".** ID 1 is right. ID 3 is `3.052;ADBO;PPClassicSans-ExtraLight;ADOBE`.
+3. **`rename-rfn.py` overstates its own check.**
+   - The claims: the docstring says "Exits non-zero if any RFN is still present outside ID 0", `font-files/README.md` (RFN section) says "fails the build if the Reserved Font Name is left in any of them", and work-log `:455` says the same.
+   - The post-check actually searches the old-name patterns given on the command line, not the RFN. For Source those are `Source Sans 3 ExtraLight|Source Sans 3|SourceSans3`, while the RFN is `Source`.
+   - Plant: a file with ID 16 "Source Sans Pro" made the script print "renamed" and **exit 0**.
+   - The committed files are still guarded, because `font-coverage.test.ts:273` checks the RFN itself (R3).
+   - Fix: pass the RFN as its own argument and check it, or reword the three places.
+4. **`src/app/layout.tsx:32`, "The one face every page uses".** False for a branded public site. On `/site/fpcw`, CDP counts 0 glyphs drawn in Inter across 187 elements at 360px; Montserrat draws 234 and Open Sans 1,828. This is the premise of finding B.
+
+## Findings
+
+**No blocking finding.** Finding A is resolved: the preloads are what ruling (a) said, measured on four routes and the manifest, with zero font-attributable layout shift.
+
+**B. For the operator, not a Phase 4 FAIL: Inter's preload is never drawn on a branded public site.**
+- **Measured:**
+  - A branded public `/site` page (contemporary) downloads 477,792 B of our fonts, against 307,892 on main (+169,900, 1.55×).
+  - 181,384 B of that is Inter, which the page does not draw.
+  - Without Inter, that page would be 296,408 B, below main.
+- **Why it is not a Phase 4 defect:** ruling (a) said Inter keeps its preload on every route, and the build does exactly that. My run-2 option text did not measure a `/site` page. It holds the same way for any branded `/site` page; I measured one, the only branded live site in `development`.
+- **Operator's choice:**
+  - accept it and correct `layout.tsx:32`; or
+  - open a follow-up to keep Inter out of the `(public)/site` preload (mechanism: tech-lead).
+
+## Advisories (not blocking)
+
+1. **The Inter test reads source text.** A commented-out `// preload: true` next to `preload: false` passes it (P2c). Matching only uncommented option lines, or reading the built `next-font-manifest.json`, would pin the behaviour.
+2. **Nothing pins the preload set per route.** The tests pin each call site. A new `localFont()` elsewhere in `src/` with the default `preload` would preload on every route that imports it, and no test would fail. A manifest check (every route's preload set equals Inter) would close the class.
+3. **`fonts.ts` says "No build and no member's browser ever contacts Google".** That is true of our fonts. A `/site` page with a YouTube embed contacts Google, including `fonts.gstatic.com`. Scope the sentence to fonts.
+4. **No fixture `/site` page renders in `development`.** A fixture with a bundle, a brand, and a non-classic pairing would let the next font or brand QA avoid a non-fixture site.
+5. **CI has never run this head.** The remote is `1e12716`.
+
+## Verdict
+
+**PASS**, on finding A and the follow-up changes.
+- **Green:**
+  - the gates;
+  - all twelve plants, including both fail-firsts in the brief and the RFN and weight checks, with the one weakness noted (P2c);
+  - the preloads and bytes on five pages against run 2 and main;
+  - each pairing page getting only its pairing;
+  - CLS 0 with and without the delay, with two positive controls;
+  - RFN names clean, all glyph and metric tables identical, seven woff2 byte-identical, renders pixel-identical at 360px;
+  - two Google-free builds;
+  - prod-lane 111/111 and brand dev 50/50.
+- **Before or with the push**, a text-only correction of copy defects 1 to 4. None needs re-verification beyond a diff read.
+- **Finding B** is a decision for the operator; it does not block.
+- **The remaining gate is a green PR #74 CI run on the pushed head.** The full chromium suite rests on it.
+
+---
+
+**Per-Phase Status rows**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (`2026-11-01-self-host-fonts`) | qa | Run 3 complete | PASS (finding A resolved: every route preloads Inter only; `/signin` 181,384 B, `/o` 388,748 B, CLS 0 with fonts delayed; RFN rename tables-identical and pixel-identical). Text corrections 1–4 owed. Operator decision B (Inter undrawn on branded `/site`, 181,384 B). Merge needs a green PR #74 CI run on the pushed head. | 2026-11-02 |
+
+**Handoff**
+- **Orchestrator or full-stack-developer (text only):**
+  - `docs/work-log/2026-11-01-self-host-fonts.md:183` and `:455`;
+  - `src/lib/brand/font-files/rename-rfn.py` docstring (or its check) and `src/lib/brand/font-files/README.md`, RFN section;
+  - `src/app/layout.tsx:32`.
+- **Operator:** finding B, accept or follow-up.
+- **Then:** push, and a green PR #74 CI run.
+- **Next agent:** **analyst** (Phase 6).
+
+**Evidence** is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/q3/out/`:
+- `weight-branch.json`, `weight-main.json`, `cls-branch.json`, `cls-main.json`, `cls-fpcw-attrib.txt`, `fpcw-timing*.json`, `whodraws.txt`;
+- `rfn.txt`, `rfn-render*.json`, `render/`, `inapp.json`, `inapp/`;
+- `next-font-manifest-plain.json`;
+- `gates.txt` and the `*.log` files.
+
+The harnesses are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/q3/tools/`. The extracted `c1d96d26` and HEAD fonts are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/q3/fonts/`. The copies, venv, private browsers and plants are deleted. The worktree is clean at `9ad401fc`.

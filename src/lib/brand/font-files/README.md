@@ -53,8 +53,7 @@ Font Name. Every `OFL.txt` here was checked for a "Reserved Font Name" clause:
 | the other six | none | nothing |
 
 `rename-rfn.py` rewrites the `name` table's family-naming records (IDs 1, 3, 4,
-6, 16, 17, 21, 22) and fails the build if the Reserved Font Name is left in any
-of them. Name ID 0, the copyright notice ("... with Reserved Font Name ..."),
+6, 16, 17, 21, 22) and fails the build if any of the old family names it is given is left in any of them; `font-coverage.test.ts` checks the Reserved Font Name itself in every record but ID 0. Name ID 0, the copyright notice ("... with Reserved Font Name ..."),
 is **kept exactly as upstream wrote it**: the licence requires the notice, and
 it is a statement, not a use of the name. Nothing visible changes: the CSS
 family name comes from `next/font`'s variable, never from the font's own name,

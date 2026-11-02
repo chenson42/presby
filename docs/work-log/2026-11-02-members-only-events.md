@@ -19,7 +19,7 @@
 | 2 — Architectural review | architect | Skipped with notation: no migration, schema, definer, route, action, dependency or structural change (see Phase 3, Classification). Reopens if the operator asks for the database to enforce it (Q2). | Skipped | 2026-11-02 |
 | 3 — Technical design | tech-lead | Design complete; Accelerated Feature; implementer named; one operator question (Q1) with a recommended default | Complete | 2026-11-02 |
 | 4 — Implementation | full-stack-developer | Built to the design with the operator's Q1 and Q2 rulings; gates green; handoff to QA | Complete | 2026-11-02 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 FAIL (no test reached calendar.ts:420); run 2 PASS: the 9 new cases catch all three site-420 mutants; e2e 53 dev + 111 prod lane from run 1 | PASS | 2026-11-02 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ## Phase 1 (brief, orchestrator, from the analyst's N1 and the operator's ruling)
@@ -513,3 +513,118 @@ The surname list in the fixture grew by two names for the two new viewers.
 - Line restored (`git checkout src/lib/calendar.ts`; no diff in `calendar.ts`): `calendar.test.ts` 199 of 199 pass, serially, three zones. `calendar-visibility.source.test.ts` 5 of 5, `typecheck`, `lint` and `npm run check` clean (exit 0).
 
 **N1 for Phase 6 (QA note, no code change):** a person on the roll still marked "Visitor" is classified `listed` and sees members-only events, while the Edit card says "Visitor" and the help copy says a visitor does not see them. It is consistent with the ruling (standing, roll wins, as in the Directory). The analyst or operator may add a clause such as "a person on the roll counts as a member even if still marked as a visitor".
+
+
+---
+
+## Phase 5 — Verification (qa), run 2
+
+**PASS.** The F1 gap is closed. The new tests reach `calendar.ts:420`, and they fail under the literal mutant and under both non-literal mutants (all three typecheck). Every gate is green, and `calendar.ts` has no diff.
+
+**Date:** 2026-11-02
+**Verified by:** qa
+**Commit:** `50e845d6` on `pipeline/members-only-events`. Since run 1 (`a29709e1`), only `src/lib/calendar.test.ts` and the work-log have changed.
+- **Database:** `DATABASE_URL` connects as `presby_app`, live `neon.branch_id = br-wispy-heart-axabgzsj`, endpoint `ep-fragrant-dream-ax3gyblf`. `PLATFORM_DATABASE_URL` is `neondb_owner` on the same endpoint. I checked by role name, length and host prefix only; no value was printed.
+- **Disk:** `/System/Volumes/Data` at 40%.
+
+**Scope run (the re-check named in run 1, as instructed):**
+- **DB-backed:** `src/lib/calendar.test.ts` and `src/lib/calendar-visibility.source.test.ts`, serially, as `presby_app`, against the pipeline branch.
+- **Gates:** `npm run typecheck`, `npm run lint`, `npm run check`.
+- **Mutation:** the site-420 mutant, once literal and twice non-literal. Each mutant was also typechecked.
+- **Soundness read** of the new test's restatement of the page's empty-state logic.
+- **Not re-run (they rest on run 1 at `a29709e1`):**
+  - the CI-shape unit suite. The only code change since run 1 is a DB-backed test file, which skips without `.env.local`.
+  - `event-types.test.ts`, `public-calendar.db.test.ts`, `membership-standing.source.test.ts`.
+  - all e2e (dev lane 53/53, prod lane 111/111), the 360px/1280px light/dark walk, the copy-truthfulness audit and the feature-gate audit.
+- **Flags:** no e2e ran in run 2, so I did not reset flags. Run 1's reset still covers its e2e results.
+
+All mutants ran in a scratch copy under my session scratchpad, outside `~/git/presby-platform/`. It had a symlinked `node_modules` and a `.env.local` with mode 600. I deleted the copy afterwards, its `.env.local` included. The worktree is clean (`git status --short` is empty) and HEAD is still `50e845d6`.
+
+## Type Check
+
+- `npm run typecheck`: **PASS** (exit 0).
+- `npm run lint`: **PASS** (exit 0, `--max-warnings=0`).
+- `npm run check`: **PASS** (exit 0). All ten tripwires report passed; `check:help` reports 29 entries, 24 published, 24 content files, 7 images.
+
+## Unit Tests
+
+**DB-backed, serial, as `presby_app`** (`npx dotenv -e .env.local -- npx vitest run --no-file-parallelism src/lib/calendar.test.ts src/lib/calendar-visibility.source.test.ts`):
+- 2 files passed, 204 tests passed, 0 failed, **0 skipped**, in 149.6s.
+- That is `calendar.test.ts` 199 (190 before plus the 9 new: 3 cases in each of 3 time zones) and the T1 scan 5.
+
+**Site-420 mutation.** I changed only line 420 each time; `diff` against the original showed exactly one changed line. Each mutant ran against the same two files.
+
+| Mutant at `calendar.ts:420` | Passes `tsc`? | Result | What failed |
+|---|---|---|---|
+| `memberVisible(true)` | (not needed; T1 bans it) | 10 failed, 194 passed | the 9 new cases (3 × UTC, America/New_York, Pacific/Honolulu) plus T1's literal-argument check |
+| `memberVisible(gate.kind === "open")` (the non-literal I named in run 1) | yes, exit 0 | 9 failed, 195 passed | exactly the 9 new cases; T1 passes, as expected for a non-literal |
+| `memberVisible(!gate.canManage)` (the implementer's variant) | yes, exit 0 | 9 failed, 195 passed | exactly the 9 new cases |
+
+- **Failure messages:** "expected 3 to be 1" (the visitor's October Worship filter, and the Study filter) and "expected 1 to be +0" (the visitor's November filter). Both come from the raw `unfilteredInMonthCount` assertions, not from the page-decision restatement.
+- **Restore check:** after the runs, the scratch `calendar.ts` matched the original byte for byte (sha1 `ea2d0312…`, the same as the worktree's). `git diff HEAD -- src/lib/calendar.ts` in the worktree is empty.
+- **Hiding too much is also caught, by reading:** the member's assertions (count 3 in October, 1 in November, "events") fail if line 420 ever hid members-only rows from a member, for example `memberVisible(false)`. I did not run that mutant.
+
+## End-to-End Tests
+
+Not re-run. The loop-back commit touches no e2e spec, page, component or reader, so run 1's results stand: dev lane 53/53 and prod lane 111/111, both with 0 skipped.
+
+## Regression Tests Added
+
+The implementer wrote these, in `src/lib/calendar.test.ts` under the nested describe "with a type filter active (the unfiltered count is its own query)":
+- **October, Worship filter:** the visitor's `unfilteredInMonthCount` is 1 (public rows only). The member's is 3, which includes an untyped members-only row the filter drops. That proves the query counts across types.
+- **November, where the only event is members-only:** the visitor's count is 0 with `orgHasEvents` true, so the page shows "Nothing is scheduled". The same month unfiltered reads the same to the visitor. The member's count is 1.
+- **October, Study filter (matches nothing):** the visitor gets "No events match" from the public count of 1.
+
+**Soundness:**
+- **The filter path really runs.** `filtered()` asserts `r.data.activeTypeIds` equals the requested ids before returning. If the type ids were ever silently dropped, the call would fall back to the derived count, and the test would fail rather than pass by accident. This is what makes the case reach line 420.
+- **Fail-first:** I confirmed it independently with three mutants (table above). The code at line 420 was already correct, so this is a guard verified by mutation, not a bug-fix regression. No `— regression for …` suffix applies.
+- **The restatement of `calendar/page.tsx`'s empty-state logic** (`emptyState` in the new describe, against `page.tsx:135-137` and the render order at 159 and 260-275):
+  - **It matches today.** The page returns early on `orgIsEmpty` (`u === 0 && !orgHasEvents`). After that, `monthIsEmpty` (`u === 0 && orgHasEvents`) and `filtersHideAll` (`u > 0 && inMonthCount === 0`) cannot both be true. The test's nested ternary maps every reachable input to the same branch (u is `unfilteredInMonthCount`, and `inMonthCount ≤ u` always holds).
+  - **It can drift silently.** It is a copy, not an import. If `page.tsx` changes its conditions, this `emptyState` keeps checking the old logic and still passes. `page.test.tsx:382-407` pins the page's own mapping only for its two fixed inputs.
+  - **The drift does not weaken the F1 guard.** The property that matters is that the visitor's `unfilteredInMonthCount` excludes members-only rows, and the test asserts that directly on the reader's output (`toBe(1)`, `toBe(0)`, `toBe(1)`) before it calls `emptyState`. All three mutants were caught by those count assertions. The restatement only labels the result.
+  - **Non-blocking note (N2):** the restatement would become sound by construction if the three-way decision were moved into a pure function next to the calendar components (`calendar-states.tsx`, or a small pure module) that `page.tsx` and both tests import. That would be a refactor for a later polish pass, not a condition of this PASS.
+
+## Coverage on Critical Modules
+
+Not measured. The diff touches none of `permissions.ts`, `two-factor.ts` or `flags.ts`. The run 1 per-site mutation table and this run's site-420 mutants stand in for coverage on `calendar.ts`: **all five `memberVisible()` call sites are now caught by behavioural tests.**
+
+## Feature-Gate Audit
+
+**No protected routes touched**, and nothing has changed since run 1. The loop-back adds no `route.ts`, no `"use server"` action and no page file.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none added or changed | n/a | n/a | n/a (tenant axis) |
+
+**Schema/RLS:** this is not a schema-touching change. Run 1's live-catalog probe of `presby_membership_standing` as `presby_app` stands.
+
+## Copy Truthfulness
+
+Not re-run: the loop-back adds or changes no user-facing string, and run 1's PASS stands. The strings the new test quotes ("Nothing is scheduled", "No events match these event types") are labels inside the test that match `page.tsx:262` and `:268`. They are not shipped copy.
+
+## Verdict
+
+**PASS.**
+- **F1 closed:** `calendar.ts:420` now has behavioural tests. They catch the literal mutant and both typecheckable non-literal mutants (9 failures each, in all three time zones), and they pass on the shipped code (199/199, plus 5/5 for T1).
+- **Gates:** typecheck, lint and `npm run check` are clean.
+- **No project file changed** during this run.
+
+**Notes for Phase 6:**
+- **N1 (from run 1, unchanged):** a person on the roll who is still marked "Visitor" is classified `listed` and sees members-only events. Meanwhile their Edit card says "Visitor" and C5 says "a visitor does not see the event". This is consistent with the Q1 ruling. A clarifying clause is for the analyst or the operator to decide.
+- **N2 (new, non-blocking):** the page-decision restatement in `src/lib/calendar.test.ts` (the `emptyState` const in the type-filter describe) is a copy of `page.tsx:135-137` and can drift without any test failing. The guard does not depend on it. Extracting a shared pure function would remove the copy; that belongs in `docs/TODO.md` if the analyst agrees.
+
+**Per-Phase Status row:**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (run 2, scoped) | qa | F1 re-check: `calendar.test.ts` and the T1 scan serially as `presby_app` (204/204, 0 skipped); typecheck, lint, `npm run check` clean. The site-420 mutants (`true`, `gate.kind === "open"`, `!gate.canManage`) are each caught by the 9 new cases; `calendar.ts` has no diff. The page-decision restatement can drift but the guard does not rest on it (N2). Everything else rests on run 1 | PASS | 2026-11-02 |
+
+**Handoff:** to **analyst** (Phase 6), with N1 and N2 carried forward. The integration housekeeping already listed in Phase 4 is still owed by the orchestrator: `docs/product/functionality-map.md:23`, `scripts/seed-dev.sql:1879`, the Q1/Q2 fold-in for DECISION-316, and the C6 release note saying "visitors".
+
+Files referenced:
+- /Users/cshenso/git/presby-platform/presby-members-only/src/lib/calendar.ts
+- /Users/cshenso/git/presby-platform/presby-members-only/src/lib/calendar.test.ts
+- /Users/cshenso/git/presby-platform/presby-members-only/src/lib/calendar-visibility.source.test.ts
+- /Users/cshenso/git/presby-platform/presby-members-only/src/app/(org)/o/[slug]/calendar/page.tsx
+- /Users/cshenso/git/presby-platform/presby-members-only/src/app/(org)/o/[slug]/calendar/page.test.tsx
+- /Users/cshenso/git/presby-platform/presby-members-only/docs/work-log/2026-11-02-members-only-events.md

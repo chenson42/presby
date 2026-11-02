@@ -489,3 +489,238 @@ Zero with preload off, as well as on. `adjustFontFallback` holds the metrics thr
 ### For QA run 3
 
 Re-run the gates; read the two new tests and re-run both fail-firsts; re-measure preloads and bytes on a production build (the `Link` header on `/signin` and a signed-in `/o/<slug>` should name only the Inter file); confirm `font-files/` loose files are `README.md`, `build-fonts.sh`, `rename-rfn.py`, `subsets.json`; read the README's RFN section against each `OFL.txt`.
+
+---
+
+## QA run 2 (recorded verbatim by the orchestrator; it ran on `c1d96d26`, before the loop-back above). Orchestrator ruling on finding A: option (a), `preload: false` on the eight pairing faces, with Inter preloaded.
+
+### Phase 5 — Verification (qa), run 2
+
+**Date:** 2026-11-02
+**Verified by:** qa (read-only; no project file edited, no test authored)
+**Scope:** PR #74 locally at `c1d96d26`: the fixes for run 1's findings 1 and 2, the `origin/main` merge `4e56f8f6`, and what those fixes touch.
+
+**Where I ran things**
+- **Worktree** (no `.env.local`, CI unit shape): the static gates and the unit suite only.
+- **Two scratch copies under the session scratchpad:** the branch at `c1d96d26` and `origin/main` at `d530c41f`. Everything else ran there, with main checkout's `.env.local`.
+  - Each copy had its own parent directory, because Turbopack's root is `..` (the TODO's sibling-checkout hazard).
+  - Both copies are now deleted.
+- **Environment values:** none printed. Two read-only `select`s ran on `development`, checked by length or by result only.
+- **Flags were not reset** on `development`, as instructed. The dev-lane specs ran on its current flag state.
+- **Disk:** 559 GiB free. **Browsers:** a private `PLAYWRIGHT_BROWSERS_PATH`, deleted afterwards.
+
+**Not re-run, and what it rests on**
+- **Full `--project=chromium` suite.** `src/app/layout.tsx` is in the diff, so my rules call for it, but the change there is the font loader only. It rests on PR #74's CI run on the pushed head, and **that run has not happened**. The remote head is still `1e12716`, and the seven commits from `9454668` to `c1d96d26` are unpushed. CI on `1e12716` failed `dev lane 2/4`, which run 1 traced to the very bug this PR fixes.
+- **DB-backed vitest and `test-rls.sql`.** Nothing since run 1 touches a migration, `authz.ts`, `src/lib/db/` or a fixture.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**
+- `npm run lint`: **PASS** (`--max-warnings=0`)
+- `npm run check`: **PASS**. All ten tripwires pass; `check:help` reports 29 entries, 24 published, 7 images.
+
+## Unit Tests
+
+Total: 17,059 | Passed: 13,289 | Failed: 0 | Skipped: 3,770 (140 files, the DB-gated suites with no env in this shape) | Duration: 41.8s
+
+- `font-coverage.test.ts` and `fonts.test.ts`: 85 pass (62 + 23).
+
+**Fail-first, reproduced in the branch copy and restored each time:**
+
+| Plant | Result |
+|---|---|
+| Inter and Montserrat swapped for the latin-only cuts from `23a4ca2` | 11 failures, each naming the missing code points (U+0141, U+1EC5, U+0416, U+03A9 …). Montserrat's axis test also fails (`wght 100–900` against `400–800`). |
+| `fonts.ts`: Lora and Bitter heading paths swapped (both paths still exist) | "wires each face to its own file" fails |
+| `fonts.ts`: Libre Franklin and Public Sans swapped within one pairing | same test fails |
+| Guard: `require()` in a `.cjs`, `import()` in a `.mjs`, `export … from` in a `.js`, `vi.mock()` in a `.tsx` | all four caught. Run 1's advisory 2 is closed. |
+
+**Is the coverage test circular? No.**
+- `FAMILIES` and `SAMPLE` are hand-written literals; nothing reads `subsets.json` or the files to build expectations.
+- Each family's subset list matches the keys in `subsets.json`, 51 in total.
+- `subsets.json`, expanded to code-point sets, equals the `unicode-range` set of every one of the 51 `@font-face` blocks main's own build emitted.
+
+**Is the decoder sound? Yes.** I extracted lines 22–142 verbatim with `sed` and compared them against fonttools 4.68.0 in a throwaway venv, for all nine files:
+- Code-point sets are identical, as are the `fvar` axes (tag, min, default, max) and the table directory.
+- Header offsets, the 63-tag table, the transform-version rule and the cmap format 4 and 12 layouts all match the WOFF2 and OpenType specs.
+- Caveat: all nine files use cmap format 4 only, so the format-12 branch is never exercised by real data.
+
+## End-to-End Tests
+
+| Lane | Server | Result | Duration |
+|---|---|---|---|
+| `test:e2e:prod` (prod-build and prod-custom-hosts projects) | own build, port 3810 | 111 / 111, 0 skipped (run 1 had 109; the main merge adds 2) | 5.0m |
+| Brand dev specs: `color-scheme` 4, `branded-signin` 5, `public-sites` 7, `help` 34 | own `next dev`, 3570 | 50 / 50, 0 skipped | 46.7s |
+| `test:e2e:contact` | own keyed `next dev`, 3570 | 12 / 12, 0 skipped | 22.5s |
+| `test:e2e:contact:prod` (CA13), attempt A | own build, 3810 | 4 passed, **1 skipped**: (d) `prod-build.spec.ts:118` | 31.3s |
+| `test:e2e:contact:prod`, attempt B, after the window freed (16:57 UTC) | own build, 3810 | **5 / 5**, (d) included | 14.9s |
+
+- **Why (d) skipped in attempt A:** my own contact dev run, a minute earlier on the shared `development` database, had claimed the hourly notification window. That is the spec's stated skip condition. In CI the dev contact lane (shard 4) and the CA13 proof (prod row) run on separate ephemeral branches, so this cannot happen there.
+- **One aborted prod attempt** before these runs is my own fault: stale `.next/dev/types` from my throwaway route. Not a branch defect.
+
+**Production builds (branch copy)**
+
+| Build | Exit | woff2 emitted | Google refs in `.next/` | Google in build log |
+|---|---|---|---|---|
+| Plain | 0 | 9 (902,692 bytes) | 0 | 0 |
+| `CI=1`, clean `.next` | 0 | 9, byte-identical to the committed files | 0 | 0 |
+
+`font/google` appears only in four `.js.map` source maps, which carry the new explanatory comments.
+
+**Coverage compared with main (main built in the second copy: 51 Google woff2)**
+- For every family, the branch file maps every code point main could draw (the cmap ∩ the declared `unicode-range`). Missing in the branch: 0 for all nine.
+- The branch maps 2 to 58 more per family.
+
+**Glyph check at 360px**
+- Setup: CDP `CSS.getPlatformFontsForNode` on a throwaway `/help/zz-qa-glyphs` route in both scratch copies only. Each word of `Łukasz Nguyễn Đặng Zoë Šimić Őry Ștefan Ünal Жанна Ωmega № ἀρχή` sat in its own span, rendered in Inter and in all eight pairing faces.
+- **Per family and per word, the branch draws exactly what main draws.**
+- **Families or scripts where the branch falls back and main did not: none.**
+
+| Face | Falls back on both builds |
+|---|---|
+| Inter, Source Sans 3 | none |
+| Lora | ἀρχή |
+| Libre Franklin, Bitter, Montserrat | Ωmega, ἀρχή |
+| Public Sans | Жанна, Ωmega, №, ἀρχή |
+| Karla | Nguyễn, Đặng, Жанна, Ωmega, №, ἀρχή |
+| Open Sans | ἀρχή |
+
+- **Requests:** no off-origin request from the branch.
+- **Weights:** text widths at 400, 600, 700 and 800 match main within 0.6 px over roughly 370 px for every face, and clamping is the same. The internal "Thin" / "ExtraLight" names are cosmetic.
+- I read `glyph-branch.png`: no tofu, all nine faces draw.
+
+**Build kit**
+- I ran `build-fonts.sh` exactly as the README says (`WORK=$(mktemp -d)`) on a scratch copy of `font-files/`.
+- All nine files rebuilt, within about 300 bytes of the committed ones. Their cmaps, `fvar`, glyph counts, table sets and font revisions are identical to the committed files.
+- The script contains no absolute paths, user names or secrets. Its only URLs are the public google/fonts raw URL pinned to SHA `6c1dbe27…`, and the README cites the public CSS2 URL.
+
+**`e2e.yml` against `origin/main`**
+- The diff is the matrix `include` rows, the `-s<shard>` branch and artifact names, the 45-minute limit, `--shard=i/4`, the header comment, and `if: … && matrix.shard == 4` on the contact dev lane. Nothing else.
+- The CA13 step and all four trace paths are identical to main; the file has 9 `contact` references, as main does.
+- Run 1's finding 2 is resolved. The work-log's Integration line (`2026-11-01-e2e-shard.md:48`) is corrected.
+
+**Page weight, measured on production servers for both builds at 360px**
+
+| Page | Branch | Main |
+|---|---|---|
+| `/help` | 1 woff2, 181,384 bytes (Inter) | 1 woff2, 48,432 bytes |
+| `/signin` | **9 woff2, 902,692 bytes** | 9 woff2, 307,892 bytes |
+| `/o/e2e-presbytery` (signed in, classic pairing) | **9 woff2, 902,692 bytes** | 9 woff2, 307,892 bytes |
+
+- The preloads come from `next/font`'s HTTP `Link` header. `next-font-manifest.json` lists all nine files for 87 route entries on both builds, including every `/o/*` and every `/site/[slug]` page; 46 entries preload Inter only.
+- The browser downloaded all nine, although each page used only Inter, or Inter plus its own pairing. This is finding A.
+
+## Regression Tests Added
+
+| Test | Guards against |
+|---|---|
+| `src/lib/brand/font-coverage.test.ts:220` "draws the %s subset" (51 cases) | loss of a Google subset in any family. Fail-first reproduced. |
+| `src/lib/brand/font-coverage.test.ts:227` "only axis is wght, spanning the declared weights" | wrong or extra axes, wrong range. Fail-first reproduced (Montserrat). |
+| `src/lib/brand/font-coverage.test.ts:236` | the reader passing vacuously on a non-woff2 file |
+| `src/lib/brand/fonts.test.ts:80` "wires each face to its own file (all eight)" | cross-wired faces. Fail-first reproduced twice. |
+| `src/lib/brand/fonts.test.ts:172` "nothing in src/ imports next/font/google — regression for the Turbopack font-query build failure" | reintroduced `next/font/google`. Fail-first reproduced in 4 shapes. |
+| `src/lib/brand/fonts.test.ts:141`, `:155` | the file set and the directory layout |
+
+**Gaps:**
+- Nothing pins which fonts a route preloads, so finding A has no test.
+- The `weight:` ranges in `fonts.ts` are not cross-checked against each file's `fvar`. The coverage test hand-writes them separately, so the two can drift apart.
+
+## Coverage on Critical Modules
+
+Not re-measured. `permissions.ts`, `two-factor.ts` and `flags.ts` are untouched.
+
+## Feature-Gate Audit
+
+No protected routes touched: no `route.ts` and no `"use server"` action in the diff. Not auth-touching.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none | n/a | n/a | n/a |
+
+## Copy Truthfulness
+
+No user-facing string changed. As instructed, I checked the corrected comments and work-log claims against measured behaviour.
+
+- [x] Bytes: 902,692 total, and every per-file figure in the work-log table and `README.md` matches the build output. "About 2.9 times" (2.93) and "0.8 to 1 MB" are accurate.
+- [x] "Same coverage as main": true, and more precisely a superset. Work-log lines `:8` and `:24`, the `:128` correction, the `:157–158` subset lists and the `:162–164` validation claims all reproduce.
+- [x] Mock comments in `fonts.test.ts:19`, `sites.test.ts` and `read-org-brand.test.ts`, and `sites.ts:444–447`: accurate now.
+- [ ] **`copy truthfulness: FAIL`: `docs/work-log/2026-11-01-self-host-fonts.md:183`**, the per-face download note.
+  - The claim: "A browser downloads only the face a page uses, and the platform pages use Inter only (181 KB) … the whole file for a face is fetched once that face is used." It then calls this "the price … accepted in the ruling".
+  - Measured: true for `/help`. False for `/signin` (a platform page, seen by anyone signing in), for every `/o/*` page and for every public `/site/*` page. These preload and download all nine files, 902,692 bytes, against 307,892 on main. That is +594,800 bytes, 2.9×, on a first visit, mostly on phones. Files are cached afterwards.
+  - The operator's acceptance was priced on the false premise.
+- [ ] Minor items, to fix in the same pass (none blocks alone):
+  - `src/lib/brand/fonts.ts:42`: "`fonts.test.ts` parses each woff2 and pins the coverage". It is `font-coverage.test.ts`.
+  - `fonts.ts:43`: "The one visible difference … is the CSS family name". The corrected work-log (`:8`, `:24`, `:128`) names two differences.
+  - `fonts.ts:47`: "keeps the metric-matched fallback `next/font/google` generated". Carried over from run 1: it is a fallback generated from local metrics (Inter `size-adjust` 107.89% against 107.12%).
+  - `fonts.ts:29–32` and `font-files/README.md:19–21`: the list reads as if every family has the Cyrillic and Greek subsets. Only "the union of the subsets Google serves for it" is true; Karla has latin and latin-ext only.
+  - `src/app/layout.tsx:20–21`: "every Google subset: latin, latin-ext, vietnamese, cyrillic, greek". Inter's file also has cyrillic-ext and greek-ext.
+  - `font-coverage.test.ts:184`: the comment names U+1E9E, which is not in the sample. It is left over from an earlier draft.
+  - Work-log `:190` lists Greek as a Lora fallback. Lora draws Ω (math subset) and falls back only in ἀρχή, the same as main.
+- [x] Older strings grepped: `docs/testing.md`'s "CI's fresh branch always can" holds again with the lanes restored.
+- [x] Help diff: none. "No help impact" stands.
+
+## Findings
+
+**A. FAIL (fonts): the download-cost claim is false, and the real cost was never ruled on.**
+- **What:** see the page-weight table and the Copy item. Main already preloaded all nine faces on these routes (`fonts.ts` reaches the route graph through the brand and branded-signin paths). That is pre-existing. The branch's full-coverage files make it 2.9× heavier, and the record says the opposite.
+- **Not the implementer's call alone.** It goes back to the operator or tech-lead, who choose one:
+  - **(a) `preload: false` on the eight pairing `localFont()` calls.** Inter keeps its preload. A page then downloads only its own pairing, on demand: about 389 KB on a classic `/o/*` page, 181 KB on `/signin`. This needs:
+    - a re-measured swap layout shift without preload (run 1 measured zero only with preload on);
+    - a test that pins the preload set.
+  - **(b) Accept the measured cost.** Rewrite `:183` with the measured numbers and record the operator's explicit acceptance of 902,692 bytes on `/signin`, `/o/*` and `/site/*`. No code change.
+- Either way, `:183` and the minor items above are corrected in the same pass. (b) is the quick path while production deploys stay blocked.
+
+**Run 1 findings:**
+- Finding 1 (coverage): resolved.
+- Finding 2 (contact lanes): resolved.
+
+## Advisories (not blocking)
+
+1. **CI has never run this head.** Push, and get a green PR #74 run before merge. The full chromium suite rests on it.
+2. **OFL Reserved Font Names.** Lora (RFN "Lora") and Source Sans 3 (RFN "Source") are now our own instanced and subsetted Modified Versions, and still carry those names in the `name` table. Run 1's mitigation ("Google's own subset") no longer applies. OFL 1.1 §3 restricts RFNs in Modified Versions. This is an operator licence question; I am not ruling on it. Bitter's RFN is "Bitter Pro", which is not used.
+3. **The format-12 cmap path is unexercised.** All files are format 4 today.
+4. **Run 1 advisories:**
+   - 2, 3 and 6: closed.
+   - 1: now recorded in the work-log.
+   - 7: private browsers used again.
+   - 4 (shard headroom): CI on `1e12716` took 18m, 17m and 10m on shards 1, 3 and 4.
+5. **My own process errors, recorded:**
+   - My first scratch directory name collided with a pre-existing `scratchpad/qa2`, and my rsync merged into its `branch/` and `main/`. I abandoned it, redid the copies in `fq2`, and removed the `.env.local` files I had put in `qa2`.
+   - A mistaken `cp` overwrote run 1's `qa-out/e2e-prod.log` with this run's file. Run 1's evidence for 109 / 109 now lives only in its verbatim work-log text.
+   - Nothing in the repository or worktree was touched; `git status` is clean at `c1d96d26`.
+
+## Verdict
+
+**FAIL**, on one finding (A).
+- Every check the brief named is green:
+  - the gates;
+  - both fail-firsts;
+  - the decoder against fonttools;
+  - the non-circular coverage test;
+  - coverage ≥ main for all nine families, with no glyph regression at 360px;
+  - two Google-free builds;
+  - every e2e lane: 111, 50, 12 and 5 / 5;
+  - the `e2e.yml` diff;
+  - a build kit that reproduces itself.
+- The fail is the per-face download note: it is false, the operator accepted the cost on it, and `/signin`, every congregation page and every public church site now preload 902,692 bytes.
+- **Sharding, judged alone, passes.**
+
+---
+
+**Per-Phase Status rows**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (`2026-11-01-self-host-fonts`) | qa | Run 2 complete | FAIL (finding A: `:183` download claim false; all nine faces preloaded on `/signin`, `/o/*` and `/site/*`, 902,692 bytes against 307,892 on main; operator or tech-lead ruling needed). Run 1 finding 1 resolved. | 2026-11-02 |
+| 5 — Verification (`2026-11-01-e2e-shard`, re-opened) | qa | Run 2 complete | PASS (finding 2 resolved: the contact dev lane is on shard 4, CA13 is restored, the trace paths match main; both contact lanes green locally). Merge still needs a green PR CI run on the pushed head. | 2026-11-02 |
+
+**Handoff**
+- **Fonts:** to the **operator or tech-lead** for the (a) / (b) ruling on finding A, then to **full-stack-developer**. Fix `docs/work-log/2026-11-01-self-host-fonts.md:183` and, in the same pass, `src/lib/brand/fonts.ts:29–32, 42, 43, 47`, `src/app/layout.tsx:20–21`, `src/lib/brand/font-files/README.md:19–21` and `src/lib/brand/font-coverage.test.ts:184`. Under (a), add a test pinning the preload set.
+- **Sharding:** no further QA work. Push, and a green PR #74 run closes it.
+- **Next:** QA run 3, scoped to finding A and the CI result on the pushed head. Phase 6 cannot start from this verdict.
+
+**Evidence** is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-out/run2/`:
+- `main-vs-branch-coverage.txt`, `glyph-compare.txt`, `glyph-branch.png` and `glyph-main.png`;
+- `fetch-branch.json` and `fetch-main.json` (finding A), `w-*.json`;
+- the `e2e-*.log`, `build-*.log` and `gates-*` logs, and `kit-build.log`.
+
+The decoder harness and the comparison scripts are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/fq2/tools/`. The scratch copies, venvs and private browsers are deleted, and nothing is listening on 3570, 3571 or 3810.

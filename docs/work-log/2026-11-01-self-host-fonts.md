@@ -193,3 +193,242 @@ About 2.9 times the first cut, inside the expected 0.8 to 1 MB. A browser downlo
 ### For QA run 2
 
 Re-run typecheck, lint, `npm run check` and `npm test`; read `font-coverage.test.ts` and, if you want, re-run the swap fail-first; rebuild in a scratch copy and grep for Google; confirm the loose files in `font-files/` are `README.md`, `build-fonts.sh` and `subsets.json`; read the correction to the "Visible difference" section above.
+
+---
+
+## QA run 1 (recorded verbatim by the orchestrator; it ran on `23a4ca2`, before the loop-back above)
+
+### Phase 5 — Verification (qa), run 1
+
+**Date:** 2026-11-01
+**Verified by:** qa (read-only; no project file edited, no test authored)
+**Scope:** PR #74 as it stands locally at `23a4ca2`: the bundled fonts (`2026-11-01-self-host-fonts`) and the e2e sharding (`2026-11-01-e2e-shard`), which share the branch.
+
+**Where I ran things**
+- The static gates and the unit suite ran in the worktree, which has no `.env.local` (CI unit-job shape).
+- Builds, servers, DB-backed tests, e2e and the visual work ran in two scratch copies under the session scratchpad, both deleted afterwards:
+  - the branch at `23a4ca2`;
+  - origin/main at `d530c41`, for comparison.
+- Main's `.env.local` (the `development` database) was copied into the scratch copies only. No environment value was printed.
+
+**Flags were not reset.** As instructed, I did not run `scripts/ci/e2e-reset-flags.sql` against `development`. The dev-lane specs ran on whatever flag state `development` holds.
+
+**Not re-run:**
+- The full DB-backed vitest set: the diff touches no migration, `authz.ts`, `src/lib/db/` or shared fixture.
+- The full `--project=chromium` suite: `src/app/layout.tsx` changed, but only its font loader, so this rests on CI. That CI run has not happened yet (see finding 6).
+- `test-rls.sql`.
+
+**Pre-checks**
+- `next.config.ts` matches origin/main: `git diff origin/main -- next.config.ts` is empty, so the revert `4f9013e` is complete.
+- Disk: 562 GiB free.
+
+## Type Check
+
+`npm run typecheck`: **PASS** (exit 0).
+`npm run lint`: **PASS** (exit 0, `--max-warnings=0`).
+`npm run check`: **PASS**. All ten tripwires pass; `check:help` reports 29 registry entries, 24 published, 7 images.
+
+## Unit Tests
+
+**`npm test`, CI shape:**
+Total: 16,418 | Passed: 12,802 | Failed: 0 | Skipped: 3,616 (137 files) | Duration: 42.6s
+The skips are the DB-gated suites, which have no env in this shape.
+
+**DB-backed files the diff changed**, run in scratch with `.env.local` and `--no-file-parallelism`:
+- Files: `src/lib/brand/fonts.test.ts`, `src/lib/sites.test.ts`, `src/lib/brand/read-org-brand.test.ts`
+- Result: 3 files, 107 passed, 0 skipped.
+
+`fonts.test.ts` has 22 tests, all passing, including the 12 new "self-hosted fonts" cases.
+
+## End-to-End Tests
+
+**Dev lane (desktop)**
+- Setup: own `next dev` on 3570; `E2E_BASE_URL`, `NEXT_PUBLIC_APP_URL` and `PORT` set to 3570; flags not reset.
+- Specs: `color-scheme` (4), `branded-signin` (5), `public-sites` (7), `careers` (21, which includes a font-size assertion) and `help` (34, which includes a 360px overflow test).
+- Total: 71 | Passed: 71 | Failed: 0 | Skipped: 0 | Duration: 2.1m
+
+**Prod lane**
+- Command: `npm run test:e2e:prod` with `PW_PROD_PORT=3810` (it builds and starts its own server).
+- Total: 109 | Passed: 109 | Failed: 0 | Skipped: 0 | Flaky: 0 | Duration: 3.6m
+
+**Production builds (branch scratch copy)**
+
+| Build | Exit | woff2 in `.next/static/media` | `fonts.googleapis` / `fonts.gstatic` in `.next/` |
+|---|---|---|---|
+| Plain (`CI` unset) | 0 | 9 (307,892 bytes) | none |
+| `CI=1`, from a clean `.next` | 0 | 9 | none |
+
+`grep -rn "next/font/google" src` matches only comments in `fonts.ts` and `layout.tsx`, plus the guard test's own name and header.
+
+**Guard fail-first**
+Each plant was a new file in the scratch copy, and I ran the guard test once per plant:
+
+| Plant | Guard result |
+|---|---|
+| `import { Inter } from "next/font/google"` | FAIL (catches) |
+| Single-quoted import (`.tsx`) | FAIL (catches) |
+| Multi-line import | FAIL (catches) |
+| `export { Inter } from "next/font/google"` | FAIL (catches) |
+| The same import in a `.js` file | passes (gap, advisory 2) |
+| `require("next/font/google")` | passes (next/font does not transform it) |
+| `@next/font/google` | passes (not installed) |
+
+**Visual check: 360px, light and dark, branch on 3570 against main on 3571**
+Pages: `/help`, `/signin`, `/o/e2e-presbytery` (the fixture branded org, classic pairing) and `/admin/design-system` (all four pairings).
+
+- **Requests to Google:** none from the branch, from a per-request log. Main's matches were only its own same-origin chunk names (`[next]_internal_font_google…css`); main makes no off-origin request either.
+- **Glyph source** (CDP `CSS.getPlatformFontsForNode`): every face is the same on both builds by PostScript name.
+  - Inter-Regular.
+  - Lora-Regular_SemiBold and SourceSans3-Roman_Regular.
+  - LibreFranklin-Thin_SemiBold and PublicSansRoman-Regular.
+  - Bitter-SemiBold and Karla-Regular.
+  - Montserrat-SemiBold and OpenSans-Regular.
+  - Inter's latin woff2 is byte-identical to the one main served: both media files carry the content hash `2bn3s6zvc0dyp`.
+- **Pixel diff, branch against main**, from my own probe's screenshots:
+
+  | Page | Result |
+  |---|---|
+  | `/help` (light, dark) | 0 differing pixels |
+  | `/signin` (light, dark) | 0 differing pixels |
+  | `/admin/design-system` | about 530 pixels, all in the header and button rows; 0 in the pairings area |
+  | `/o/e2e-presbytery` | height differs: main's newer "My groups" card (PR #75), not fonts |
+
+- **`visual-parity.spec.ts` cross-check:** baseline captured on main (80 shots), then `visual:check` on the branch. 28 passed and 52 failed.
+  - Every failure traces to one of three causes:
+    - The `←`/`→` arrows are painted by the generated `inter Fallback` face. Its `size-adjust` is 107.89% here against 107.12% on main, a sub-pixel change of 1 to 51 pixels per shot (`/account`, `/admin/*`, `/no-organization`).
+    - The `/admin` dashboard's live content: 190 to 261 pixels.
+    - PR #75's "My groups" card on `/o/e2e-alpha` and `/o/e2e-presbytery`.
+  - None is a change of glyph face.
+- **Layout shift:** with every woff2 delayed 1.5s, `/help`, `/signin` and `/o/e2e-presbytery` record **zero layout shifts on both builds**. `adjustFontFallback` holds the swap.
+- **Coverage regression found** (finding 1):
+  - Sample text: `Łukasz Nguyễn Đặng Zoë Šimić Őry Ștefan Ünal`.
+  - On main: entirely in the web font (Inter, 43 glyphs).
+  - On the branch: 6 glyphs fall back to Arial, and the same happens in the classic body face.
+  - Per script on the branch: latin-ext 5 of 11 glyphs in Arial, Vietnamese 2 of 6, Cyrillic and Greek entirely Arial. All of these were Inter on main.
+
+**Licences**
+- All 9 directories have an `OFL.txt` with the "SIL OPEN FONT LICENSE Version 1.1" line and the family's copyright line.
+- Every woff2 starts `wOF2`.
+- Total woff2: 307,892 bytes, and each per-family size matches the work-log.
+- 18 files are tracked.
+- Note only: Source Sans 3 carries the Reserved Font Name "Source"; the committed file is Google's own subset, distributed under that name.
+
+**Sharding**
+`--list --shard=i/4` over the branch's config:
+- 839 tests in 102 files (705 `chromium` and 134 `custom-hosts`).
+- Shards: 214 / 223 / 202 / 200 tests in 23 / 36 / 20 / 23 files.
+- No file appears in two shards, and the union equals the unsharded list.
+
+`e2e.yml` checks:
+- Matrix: four `dev` include rows (`shard` 1 to 4) plus `prod` (`shard: 0`).
+- Neon branch names: `e2e-<lane>-<run>-<attempt>-s<shard>`, unique, and the same name is used to create and to delete.
+- Artifact names: `playwright-traces-<lane>-s<shard>`, unique.
+- Limit: `timeout-minutes: 45`.
+
+All as described, apart from the dropped contact lanes (finding 2).
+
+## Regression Tests Added
+
+- `nothing in src/ imports next/font/google — regression for the Turbopack font-query build failure`, at `src/lib/brand/fonts.test.ts:142`.
+  - Guards against a reintroduced `next/font/google` import or mock in `src/**/*.ts{,x}`.
+  - The implementer reported a fail-first; I reproduced it against four import shapes, listed above.
+  - It encodes the class "a TS file imports the module" and not "the build fetches nothing", so a `.js` file escapes it (advisory 2).
+- `src/lib/brand/fonts.test.ts:115–140` checks:
+  - nine unique named files;
+  - each file exists, has `wOF2` magic bytes and an `OFL.txt` beside it;
+  - each font directory is used and holds only those two files.
+- **No test pins Unicode coverage.** Nothing would have caught finding 1.
+
+## Coverage on Critical Modules
+
+Not re-measured. `src/lib/permissions.ts`, `src/lib/two-factor.ts` and `src/lib/flags.ts` are untouched by this diff.
+
+## Feature-Gate Audit
+
+No protected routes were touched: the diff adds or changes no `route.ts` and no `"use server"` action. Not auth-touching under the stricter gate: `src/app/layout.tsx` is the root layout, not `(auth)`, and the stricter gate's paths are not in the diff.
+
+| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
+|---|---|---|---|
+| none | n/a | n/a | n/a |
+
+## Copy Truthfulness
+
+No user-facing string changed. The diff's `.tsx` change is the font loader only. I checked the code comments and work-log claims as instructed:
+
+- [x] Every added or changed string is in the design's Copy table: none added (Phase 3 was skipped and no UI string moved).
+- [x] The claims were checked against the build's real behaviour:
+  - **FAIL: `src/lib/brand/fonts.ts:36`**, "The latin subset is the same one `subsets: ["latin"]` selected before".
+    - `subsets` chose which file was *preloaded*.
+    - Main's generated CSS also declared latin-ext, vietnamese, cyrillic and greek faces (plus cyrillic-ext and greek-ext for some families) through `unicode-range`: 51 woff2 on main against 9 here.
+  - **Misleading: `fonts.ts:30`**, "what `next/font/google` was already downloading". It downloaded that file and 42 others.
+  - **FAIL: work-log claims.** `2026-11-01-self-host-fonts.md:8` ("no visible change intended") and `:24` ("fonts should render identically") are false for any character outside the latin range. `:129` ("Visible difference") lists only the family-name change.
+  - **Stale: `src/lib/sites.ts:444-445`**, "Lora is not a function". The loader is now `localFont`.
+  - **Overstated:** `fonts.test.ts:19`, `sites.test.ts:68` and `read-org-brand.test.ts:35` say "a face wired to the wrong file shows in a test". Only the contemporary pairing asserts its files (`fonts.test.ts:91-92`), so swapping two faces' files passes every test.
+  - **Accurate:**
+    - `fonts.ts:41-43`: no swap shift on either build. "the" metric-matched fallback should read "a"; the metrics differ slightly from Google's.
+    - `node_modules/next/font/local/index.js` really is 0 bytes.
+    - The `layout.tsx` header comment.
+- [x] No instruction strings: not applicable.
+- [x] Older strings grepped: `docs/testing.md:276` ("CI's fresh branch always can") is now false; see finding 2.
+- [x] Help diff: none. The fonts work log states "no help impact" and I agree.
+
+## Findings
+
+**1. FAIL (fonts): characters outside the latin range no longer render in the brand or platform face.**
+- **What changed:** latin-ext (Ł ő ș č ā), Vietnamese (ễ ặ), Cyrillic, Greek and symbols like `№` now paint in Arial or Times New Roman (through the fallback face) mid-word, inside Inter and all eight pairing faces. On main, all of them were the web font.
+- **Where it shows:** tenant-entered text — person and congregation names, site content, postings, any Greek in worship content. The app's own static strings are unaffected: they use only arrows outside the latin range, and arrows fell back on main too.
+- **Remedy: the implementer cannot pick it alone.** This is a bytes-versus-coverage choice with no Phase 3 behind it, so it goes to tech-lead or the operator:
+  - **(a) Restore coverage.** `localFont` has no per-file `unicode-range`. The options are full (unsubset) variable woff2 per family, or a per-subset package such as Fontsource, which is a new dependency and needs the architect. Add a test that pins the chosen coverage, for example the woff2's cmap.
+  - **(b) Accept latin-only as a recorded residual.** Correct `fonts.ts:30/36` and the work-log lines `:8`, `:24` and `:129`, and state the residual.
+- Production deploys are blocked on this branch, so (b) is the quick path if the operator accepts it.
+
+**2. FAIL (sharding, same PR): merge `836feb99` dropped PR #73's contact-form CI lanes.**
+- **Evidence:** `.github/workflows/e2e.yml` at HEAD has 0 references to `contact`; origin/main has 9. The merge deleted:
+  - "Run the contact-form lane" (`npm run test:e2e:contact`, dev);
+  - "Run the contact-form production-build proof" (`npm run test:e2e:contact:prod`, CA13);
+  - the `test-results-contact*` trace paths.
+- **Effect:** the `chromium` project ignores `e2e/help-contact/`, so after this PR the `/help/contact` specs and the CA13 proof run nowhere in CI.
+- **Unrecorded:** `2026-11-01-e2e-shard.md:48` records only the timeout resolution, and that work-log's Phase 5 PASS is from `ccaa2b3`, before the merge.
+- **Remedy (orchestrator, the shard's Phase 4 owner):**
+  - Restore both steps, the dev contact lane gated to one shard (the lightest, 4/4) or its own matrix row, and the CA13 proof in the prod row.
+  - Restore the artifact paths.
+  - Correct the shard work-log's Integration line.
+
+## Advisories (not blocking)
+
+1. **Fallback metrics differ slightly from Google's.** Examples: classicBody `size-adjust` 89.41% against 93.76%, Inter 107.89% against 107.12%. This causes the sub-pixel `visual-parity` diffs on `←`/`→`. There is no swap shift.
+2. **The guard scans only `.ts`/`.tsx`.** `src/` has no JS file today; widening the extension list closes the gap.
+3. **The mock comment overstates file-wiring coverage** (see the Copy section).
+4. **Thin headroom on shard 1:** 33m31s of the 45-minute limit on `ccaa2b3`. Put any restored contact lane on the lightest shard.
+5. **The font commits have never run in CI.** PR #74's remote head is `1e12716`; `9454668` and `23a4ca2` are unpushed. CI on `1e12716` failed `dev lane 2/4` with the very bug this fixes ("next/font/google queries have exactly one entry", Bitter), then cascaded to a 45-minute cancel. That is pre-fix evidence. A green PR run on the pushed head is needed before merge.
+6. **The branch is behind main by PR #75.** A trial `merge-tree` conflicts only in `docs/TODO.md` (a Rule 16 file, for the orchestrator). Main adds no `next/font/google` use. The fonts commits touch no Rule 16 file.
+7. **Environment hazard for other agents.** The `presby-deps` worktree upgraded Playwright (browser build 1248) at about 17:59. Its install garbage-collected build 1223 from the shared `~/Library/Caches/ms-playwright`. Every worktree still on `@playwright/test` 1.60.0 will fail with "Executable doesn't exist" until it reinstalls. I used a private `PLAYWRIGHT_BROWSERS_PATH` for every run after 17:59, so the shared cache is untouched.
+
+## Verdict
+
+**FAIL.** Two findings send PR #74 back:
+- **Fonts:** the build fix works. No Google fetch, the same faces, pixel-identical `/help` and `/signin`, no swap shift, all gates green. But it silently drops non-latin coverage, which contradicts the stated "renders identically", and a code comment asserts otherwise.
+- **Sharding:** the integration merge removed the contact-form CI lanes.
+
+---
+
+**Per-Phase Status rows**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification (`2026-11-01-self-host-fonts`) | qa | Run 1 complete | FAIL (Unicode coverage regression; false subset comment and work-log claims) | 2026-11-01 |
+| 5 — Verification (`2026-11-01-e2e-shard`, re-opened) | qa | Run 1 complete | FAIL (merge `836feb99` dropped the contact-form lanes) | 2026-11-01 |
+
+**Handoff**
+- **Fonts:** back to **full-stack-developer**, after a **tech-lead or operator ruling** on coverage, (a) or (b) above. Cite `src/lib/brand/fonts.ts:30,36` and work-log `:8`, `:24`, `:129`. Fix `sites.ts:444-445` and the three mock comments in the same pass.
+- **Sharding:** back to the **orchestrator**. Restore the steps in `.github/workflows/e2e.yml` (the dev contact lane, the CA13 prod proof, the artifact paths). Correct `2026-11-01-e2e-shard.md:48`.
+- **Next:** push, get a green PR #74 run on the new head, then QA run 2 (scoped to the fixes and the CI result). Phase 6 cannot start from this verdict.
+
+**Evidence** is in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/qa-out/`:
+- `fontprobe.json`: the per-glyph face report.
+- `shots/`: the 360px screenshots and branch-against-main crops.
+- `visual-check-branch.log`: the parity run.
+- `e2e-dev.log`, `e2e-prod.log`, `unit.log`, `build-*.log`: the test and build logs.
+- `ci-shard2.log`: the failed CI shard's log.
+
+The two scratch copies (with their `.env.local`) and the private browsers are deleted, and nothing is listening on 3570, 3571 or 3810.

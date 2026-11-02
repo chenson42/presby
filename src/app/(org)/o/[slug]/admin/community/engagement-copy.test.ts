@@ -289,7 +289,7 @@ describe("archive and restore dialog copy (Group D)", () => {
       body: "Wren Alder will leave the Visitors list and appear under Former. Their record is kept and you can restore it any time.",
       lines: [
         "Wren Alder has a sign-in connected and will no longer reach Alder Creek Church through this record.",
-        "An invitation to Wren Alder is still open. It will stop working.",
+        "An invitation to Wren Alder is still open. It will stop working, and restoring them will not turn it back on.",
       ],
       cancel: "Keep",
       confirm: "Archive",
@@ -302,7 +302,7 @@ describe("archive and restore dialog copy (Group D)", () => {
     expect(copy.lines).toEqual([]);
     expect(copy.body).toContain("leave the Inactive list");
     expect(archiveDialogCopy("W", "O", { list: "Inactive", signInConnected: false, invitationOpen: true }).lines).toEqual([
-      "An invitation to W is still open. It will stop working.",
+      "An invitation to W is still open. It will stop working, and restoring them will not turn it back on.",
     ]);
   });
 

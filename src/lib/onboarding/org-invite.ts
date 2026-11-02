@@ -306,7 +306,48 @@ async function readStates(tx: OrgTx, ctx: SignInContext, personIds: readonly str
       connectedOn: typeof row.connected_on === "string" ? row.connected_on : null,
     });
   }
+  await reinterpretEndedBlocks(tx, ctx, out);
   return out;
+}
+
+/**
+ * A stored `blocked` / `membership_ended` row records "the connection had ended
+ * when the person pressed Accept". Restore (3a) and the voiding of a participant
+ * removal (0061) make that stale: once the membership is live again the row says
+ * nothing about today, and its terminal block would leave the card on "has
+ * ended" with no button for good (F417). Report such a row as `none`. The stored
+ * row is untouched (terminal, immutable); only the answer changes. Only
+ * `membership_ended` is reinterpreted; every other blocked reason, and an ended
+ * membership, stay as stored. `ended_on is null` is the acceptance core's own
+ * `membership_ended` test (0066 `presby__person_sign_in_standing`), not a
+ * restatement of standing. One extra query, and only when such a row is present.
+ */
+async function reinterpretEndedBlocks(tx: OrgTx, ctx: SignInContext, states: Map<string, StateRow>): Promise<void> {
+  const stale = [...states.values()].filter((s) => !s.linked && s.state === "blocked" && s.outcome === "membership_ended");
+  if (stale.length === 0) return;
+  const live = await tx.execute(sql`
+    select m.person_id::text as person_id
+      from memberships m
+     where m.organization_id = ${ctx.organizationId}::uuid
+       and m.person_id = any(${uuidArray(stale.map((s) => s.personId))})
+       and m.ended_on is null
+  `);
+  for (const row of rowsOf(live)) {
+    const s = states.get(String(row.person_id));
+    if (!s) continue;
+    states.set(s.personId, {
+      ...s,
+      state: "none",
+      outcome: null,
+      sentAt: null,
+      expiresAt: null,
+      nextResendAt: null,
+      invitedAddress: null,
+      addressCurrent: null,
+      resendCount: 0,
+      delivery: deliveryState(null),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +522,63 @@ export function resendSignInInvitation(ctx: SignInContext, input: SignInSendInpu
 // revokeSignInInvitation
 // ---------------------------------------------------------------------------
 
+/** Where a revoke came from: the audit row's `via`. `archive` is `archivePerson`'s (F417). */
+type RevokeVia = "single" | "archive";
+
+/**
+ * The revoke, in the CALLER's transaction: the definer (which re-checks
+ * `people.manage` for the acting user and takes the organization lock), the
+ * cancellation of a still-queued email (its stored credential body is scrubbed
+ * in the same UPDATE) and the `invitation.revoked` audit row. `null` is
+ * `not_open`: nothing was written. Any other outcome, and any throw (the audit
+ * insert's included), propagates so the caller's whole transaction rolls back.
+ */
+async function revokeInTx(tx: OrgTx, ctx: SignInContext, personId: string, via: RevokeVia): Promise<string | null> {
+  const row = rowsOf(
+    await tx.execute(sql`
+      select * from presby_revoke_sign_in_invitation(${personId}::uuid, ${ctx.actingUserId}::uuid)`),
+  )[0];
+  if (!row) throw new Error("presby_revoke_sign_in_invitation returned no row");
+  if (row.outcome === "not_open") return null;
+  if (row.outcome !== "ok") throw new Error("presby_revoke_sign_in_invitation returned an unknown outcome");
+
+  const invitationId = String(row.invitation_id);
+  if (typeof row.cancel_email_queue_id === "string") await cancelQueuedEmail(tx, row.cancel_email_queue_id);
+  await insertAuditRow(tx, {
+    action: AUDIT_ACTIONS.INVITATION_REVOKED,
+    actor: { userId: ctx.actingUserId, email: ctx.actingUserEmail ?? null },
+    resourceType: "account_invitation",
+    resourceId: invitationId,
+    metadata: {
+      invitationId,
+      organizationId: ctx.organizationId,
+      purpose: "sign_in",
+      origin: "org",
+      personId,
+      via,
+    },
+  });
+  return invitationId;
+}
+
+/**
+ * Archiving a person revokes their open sign-in invitation in the archive's own
+ * transaction (F417, DECISION-315): `archivePersonAction` hands this to
+ * `archivePerson` as its required `sideEffects`, so `community-engagement.ts`
+ * never imports this file (2b B2). Returns whether an open invitation was
+ * revoked (`false`: there was none, nothing written). The caller has already
+ * checked `people.manage`; the definer checks it again for the acting user.
+ */
+export async function revokeOpenSignInInvitationInTx(
+  tx: OrgTx,
+  ctx: SignInContext,
+  personId: string,
+  via: "archive",
+): Promise<boolean> {
+  if (!validContext(ctx) || !UUID_RE.test(personId)) throw new Error("revokeOpenSignInInvitationInTx: invalid context");
+  return (await revokeInTx(tx, ctx, personId, via)) !== null;
+}
+
 export async function revokeSignInInvitation(
   ctx: SignInContext,
   input: { personId: string },
@@ -494,34 +592,9 @@ export async function revokeSignInInvitation(
       if (!(await holds(tx, ctx.actingPersonId, ctx.organizationId, PEOPLE_MANAGE))) {
         throw new SignInAbort<SignInRevokeResult>({ kind: "forbidden" });
       }
-      const row = rowsOf(
-        await tx.execute(sql`
-          select * from presby_revoke_sign_in_invitation(${input.personId}::uuid, ${ctx.actingUserId}::uuid)`),
-      )[0];
-      if (!row) throw new Error("presby_revoke_sign_in_invitation returned no row");
-      if (row.outcome === "not_open") {
+      if ((await revokeInTx(tx, ctx, input.personId, "single")) === null) {
         throw new SignInAbort<SignInRevokeResult>({ kind: "refused", reason: "not_open" });
       }
-      if (row.outcome !== "ok") throw new Error("presby_revoke_sign_in_invitation returned an unknown outcome");
-
-      const invitationId = String(row.invitation_id);
-      // A still-queued email is cancelled in the same transaction; its stored
-      // credential body is scrubbed in the same UPDATE.
-      if (typeof row.cancel_email_queue_id === "string") await cancelQueuedEmail(tx, row.cancel_email_queue_id);
-      await insertAuditRow(tx, {
-        action: AUDIT_ACTIONS.INVITATION_REVOKED,
-        actor: { userId: ctx.actingUserId, email: ctx.actingUserEmail ?? null },
-        resourceType: "account_invitation",
-        resourceId: invitationId,
-        metadata: {
-          invitationId,
-          organizationId: ctx.organizationId,
-          purpose: "sign_in",
-          origin: "org",
-          personId: input.personId,
-          via: "single",
-        },
-      });
     });
     return { kind: "ok" };
   } catch (err) {

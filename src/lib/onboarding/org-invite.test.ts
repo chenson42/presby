@@ -96,6 +96,8 @@ interface Script {
   probe: Record<string, unknown>[];
   seats: Record<string, unknown>[];
   name: string | null;
+  /** F417: the `memberships ... ended_on is null` answer for the stale-block reinterpretation. */
+  live: Record<string, unknown>[];
 }
 let script: Script;
 
@@ -116,6 +118,7 @@ function install() {
     if (/presby_sign_in_card_standing/.test(text)) return { rows: script.standing };
     if (/from officer_terms/.test(text)) return { rows: script.probe };
     if (/from group_memberships/.test(text)) return { rows: script.seats };
+    if (/from memberships m/.test(text)) return { rows: script.live };
     if (/from people p where p\.id/.test(text)) return { rows: script.name ? [{ name: script.name }] : [] };
     throw new Error(`unexpected SQL in org-invite.test: ${text.slice(0, 80)}`);
   });
@@ -123,7 +126,7 @@ function install() {
 
 beforeEach(() => {
   for (const fn of [h.execute, h.withOrgContext, h.insertAuditRow, h.insertQueueRowInTx, h.cancelQueuedEmail, h.attemptQueuedSend, h.getPersonEmail, h.personIdsWithCredentialEmail, h.orgFeatureEnabledInTx, h.isTotpConfigured]) fn.mockReset();
-  script = { peopleManage: true, officersManage: true, definer: okIssue(), states: [], standing: [], probe: [], seats: [], name: "Wendeline Ashgrove" };
+  script = { peopleManage: true, officersManage: true, definer: okIssue(), states: [], standing: [], probe: [], seats: [], name: "Wendeline Ashgrove", live: [] };
   install();
   h.origin = "https://app.example.invalid";
   h.isTotpConfigured.mockReturnValue(true);
@@ -485,6 +488,70 @@ describe("revokeSignInInvitation", () => {
 });
 
 // ===========================================================================
+describe("revokeOpenSignInInvitationInTx (F417: archive revokes an open invitation)", () => {
+  beforeEach(() => {
+    script.definer = { outcome: "ok", invitation_id: INVITATION, cancel_email_queue_id: SUPERSEDED_QUEUE };
+  });
+
+  it("ok: runs in the CALLER's transaction (opens none), cancels the queued email, writes one invitation.revoked row via 'archive', returns true", async () => {
+    expect(await org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).toBe(true);
+    expect(h.withOrgContext).not.toHaveBeenCalled();
+    expect(h.cancelQueuedEmail).toHaveBeenCalledWith(tx, SUPERSEDED_QUEUE);
+    expect(h.insertAuditRow).toHaveBeenCalledTimes(1);
+    const [txArg, row] = h.insertAuditRow.mock.calls[0]! as [unknown, { action: string; actor: unknown; resourceType: string; resourceId: string; metadata: Record<string, unknown> }];
+    expect(txArg).toBe(tx);
+    expect(row.action).toBe("invitation.revoked");
+    expect(row.actor).toEqual({ userId: ACTING_USER, email: "sender@example.invalid" });
+    expect(row.resourceType).toBe("account_invitation");
+    expect(row.resourceId).toBe(INVITATION);
+    expect(row.metadata).toEqual({ invitationId: INVITATION, organizationId: ORG, purpose: "sign_in", origin: "org", personId: PERSON, via: "archive" });
+    const { params } = sqlOf(callsMatching(/presby_revoke_sign_in_invitation/)[0]![0]);
+    expect(params).toEqual([PERSON, ACTING_USER]);
+  });
+
+  it("ok with no queued email to cancel does not call the cancel helper", async () => {
+    script.definer = { outcome: "ok", invitation_id: INVITATION, cancel_email_queue_id: null };
+    expect(await org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).toBe(true);
+    expect(h.cancelQueuedEmail).not.toHaveBeenCalled();
+  });
+
+  it("not_open: returns false and writes nothing (no cancel, no audit row)", async () => {
+    script.definer = { outcome: "not_open" };
+    expect(await org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).toBe(false);
+    expect(h.cancelQueuedEmail).not.toHaveBeenCalled();
+    expect(h.insertAuditRow).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an unknown outcome", { outcome: "surprise" }],
+    ["no row at all", undefined],
+  ])("%s throws, so the archive's transaction rolls back", async (_label, definer) => {
+    script.definer = definer;
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).rejects.toThrow();
+    expect(h.insertAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("the definer's own refusal (42501, the actor lost people.manage) propagates", async () => {
+    h.execute.mockImplementation(async (q: unknown) => {
+      if (/presby_revoke_sign_in_invitation/.test(sqlOf(q).sql)) throw Object.assign(new Error("denied"), { code: "42501" });
+      return { rows: [] };
+    });
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).rejects.toThrow("denied");
+  });
+
+  it("a throw from the audit insert propagates (the caller's transaction rolls the revoke back)", async () => {
+    h.insertAuditRow.mockRejectedValue(new Error("audit insert failed (test-injected)"));
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).rejects.toThrow("audit insert failed");
+  });
+
+  it("an invalid context or person id throws before any query", async () => {
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, { ...ctx, actingUserId: "x" }, PERSON, "archive")).rejects.toThrow();
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, ctx, "not-a-uuid", "archive")).rejects.toThrow();
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
 describe("getSignInCard", () => {
   const row = (over: Record<string, unknown> = {}) => ({
     person_id: PERSON,
@@ -679,6 +746,92 @@ describe("getSignInMarkers", () => {
     h.withOrgContext.mockRejectedValue(Object.assign(new Error(`for ${ADDRESS}`), { code: "40001" }));
     expect(await org.getSignInMarkers(ctx, [PERSON])).toEqual({});
     expect(JSON.stringify((console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls)).not.toContain(ADDRESS);
+  });
+});
+
+// ===========================================================================
+describe("the reader reinterprets a stale membership_ended block (F417 backstop)", () => {
+  const row = (id: string, over: Record<string, unknown> = {}) => ({
+    person_id: id, linked: false, state: "blocked", sent_at: new Date("2026-10-20T12:00:00Z"), expires_at: new Date("2026-10-27T12:00:00Z"),
+    resend_count: 2, next_resend_at: new Date("2026-10-21T12:00:00Z"), invited_address: ADDRESS, address_current: true,
+    outcome: "membership_ended", queue_status: "sent", connected_via: null, connected_on: null, ...over,
+  });
+  const membershipQueries = () => callsMatching(/from memberships m/);
+
+  beforeEach(() => {
+    script.standing = [{ standing: "visitor", authority_bearing: false, address_shared: false }];
+  });
+
+  it("the card: blocked / membership_ended over a LIVE membership reads state none, with every invitation field cleared — regression for the permanent 'has ended' card after Restore", async () => {
+    script.states = [row(PERSON)];
+    script.live = [{ person_id: PERSON }];
+    const result = (await org.getSignInCard(ctx, PERSON)) as { kind: "ok"; card: import("./sign-in-types").SignInCardState };
+    expect(result.card).toMatchObject({
+      state: "none", blockedOutcome: null, sentAt: null, expiresAt: null, nextResendAt: null,
+      invitedAddress: null, addressCurrent: null, resendCount: 0, chainCapReached: false, cooldownMinutes: 0,
+    });
+    expect(result.card.delivery).toBe("unknown"); // what a reader row with no queue row gives
+  });
+
+  it("the card: the same block over an ENDED membership stays blocked and says why", async () => {
+    script.states = [row(PERSON)];
+    script.live = [];
+    const result = (await org.getSignInCard(ctx, PERSON)) as { kind: "ok"; card: import("./sign-in-types").SignInCardState };
+    expect(result.card).toMatchObject({ state: "blocked", blockedOutcome: "membership_ended" });
+  });
+
+  it.each(["person_merged", "person_deceased", "needs_support"])("%s stays blocked even over a live membership, and costs no membership query", async (outcome) => {
+    script.states = [row(PERSON, { outcome })];
+    script.live = [{ person_id: PERSON }];
+    const result = (await org.getSignInCard(ctx, PERSON)) as { kind: "ok"; card: import("./sign-in-types").SignInCardState };
+    expect(result.card).toMatchObject({ state: "blocked", blockedOutcome: outcome });
+    expect(membershipQueries()).toHaveLength(0);
+  });
+
+  it("no extra query when nothing is blocked / membership_ended (none, pending, revoked)", async () => {
+    script.states = [row(PERSON, { state: "pending", outcome: null }), row(OTHER, { state: "revoked", outcome: null })];
+    script.live = [{ person_id: PERSON }];
+    await org.getSignInMarkers(ctx, [PERSON, OTHER]);
+    expect(membershipQueries()).toHaveLength(0);
+  });
+
+  it("the check is one query for all stale rows, scoped to the context's organization and to live memberships", async () => {
+    script.states = [row(PERSON), row(OTHER)];
+    script.live = [{ person_id: PERSON }];
+    await org.getSignInMarkers(ctx, [PERSON, OTHER]);
+    expect(membershipQueries()).toHaveLength(1);
+    const { sql: text, params } = sqlOf(membershipQueries()[0]![0]);
+    expect(text).toMatch(/m\.organization_id = \$1::uuid/);
+    expect(text).toMatch(/m\.ended_on is null/);
+    expect(params[0]).toBe(ORG);
+  });
+
+  it("the markers: a live person gets the ordinary none marker (none for an ordinary member), an ended person still 'couldn't be completed'", async () => {
+    script.states = [row(PERSON), row(OTHER)];
+    script.live = [{ person_id: PERSON }];
+    const markers = await org.getSignInMarkers(ctx, [PERSON, OTHER]);
+    expect(markers[PERSON]).toBeUndefined();
+    expect(markers[OTHER]).toEqual({ kind: "blocked" });
+  });
+
+  it("the markers: a live person who holds inert authority reads 'not connected', not 'blocked'", async () => {
+    script.states = [row(PERSON)];
+    script.live = [{ person_id: PERSON }];
+    script.probe = [{ id: PERSON }];
+    h.personIdsWithCredentialEmail.mockResolvedValue(new Set([PERSON]));
+    expect((await org.getSignInMarkers(ctx, [PERSON]))[PERSON]).toEqual({ kind: "not_connected", noEmail: false });
+  });
+
+  it("the Session rows: a live person reads 'not_invited', an ended one stays blocked", async () => {
+    script.seats = [{ id: PERSON, name: "Wendeline Ashgrove" }, { id: OTHER, name: "Corwin Dellacroix" }];
+    script.states = [row(PERSON), row(OTHER)];
+    script.live = [{ person_id: PERSON }];
+    h.personIdsWithCredentialEmail.mockResolvedValue(new Set([PERSON, OTHER]));
+    const result = await org.listSessionSignInRows(ctx);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(result.rows.find((r) => r.personId === PERSON)).toMatchObject({ state: "not_invited" });
+    expect(result.rows.find((r) => r.personId === OTHER)).toMatchObject({ state: "blocked" });
   });
 });
 

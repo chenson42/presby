@@ -95,8 +95,21 @@ export type ArchiveRefusal =
   | "pending_action";
 
 export type ArchivePersonResult =
-  | { kind: "ok"; engagement: Engagement; signInConnected: boolean }
+  | { kind: "ok"; engagement: Engagement; signInConnected: boolean; invitationRevoked: boolean }
   | { kind: ArchiveRefusal };
+
+/**
+ * What an archive does besides ending the membership, handed in by the `(org)`
+ * caller so this file never imports `org-invite.ts` (the 2b B2 boundary:
+ * `org-invite.ts` is imported only from `src/app/(org)/`). REQUIRED, so a caller
+ * that forgets it is a type error and not a silent regression (F417).
+ * `revokeOpenSignInInvitation` runs in the archive's own transaction and
+ * resolves true when it revoked an open invitation; a throw rolls the whole
+ * archive back.
+ */
+export type ArchiveSideEffects = {
+  revokeOpenSignInInvitation: (tx: OrgTx, personId: string) => Promise<boolean>;
+};
 
 export type RestoreRefusal = "forbidden" | "not_found" | "not_archived" | "person_unavailable";
 
@@ -337,12 +350,18 @@ const ARCHIVABLE_STANDINGS: readonly MembershipStanding[] = ["visitor", "inactiv
  * officer term, an open role grant of the person's own, or an open staff
  * position; the same predicate the participant-removal pre-check uses, without
  * a start-date test, so a future-dated seat also stops it).
+ *
+ * An archive also revokes the person's open sign-in invitation, in the same
+ * transaction (`sideEffects.revokeOpenSignInInvitation`; F417, DECISION-315):
+ * the dialog says "It will stop working", and a link left open was blocked for
+ * good when the archived person pressed Accept. Restore never re-opens it.
  */
 export async function archivePerson(
   viewerPersonId: string,
   organizationId: string,
   input: { personId: string },
   actor: EngagementActor,
+  sideEffects: ArchiveSideEffects,
 ): Promise<ArchivePersonResult> {
   try {
     return await withOrgContext(viewerPersonId, organizationId, async (tx) => {
@@ -403,6 +422,10 @@ export async function archivePerson(
       `);
       if (rowsOf(updated).length === 0) return { kind: "not_eligible" } as const;
 
+      // After the membership write, before the audit insert: a throw from either
+      // rolls the archive and the revoke back together.
+      const invitationRevoked = await sideEffects.revokeOpenSignInInvitation(tx, input.personId);
+
       await insertAuditRow(tx, {
         action: AUDIT_ACTIONS.TENANT_PERSON_ARCHIVED,
         actor,
@@ -413,6 +436,7 @@ export async function archivePerson(
           personId: input.personId,
           engagement: row.engagement_status,
           signInConnected: row.sign_in_connected,
+          invitationRevoked,
         },
       });
 
@@ -420,6 +444,7 @@ export async function archivePerson(
         kind: "ok",
         engagement: row.engagement_status,
         signInConnected: row.sign_in_connected,
+        invitationRevoked,
       } as const;
     });
   } catch (err) {

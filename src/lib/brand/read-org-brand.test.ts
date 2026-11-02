@@ -23,27 +23,21 @@ import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
 
-// `read-org-brand.ts` imports `./fonts.ts`, which calls `next/font/google` at
+// `read-org-brand.ts` imports `./fonts.ts`, which calls `next/font/local` at
 // MODULE SCOPE — populated only by Next's SWC compiler plugin at build time,
 // a blank file outside that transform. Same mock `fonts.test.ts` uses, one
 // level closer to the boundary than mocking `./fonts` itself, so the real
 // `getOrgMarkForLayout` code path (which never touches fonts) still loads
 // through its real module graph rather than a stubbed sibling.
-vi.mock("next/font/google", () => {
-  const fakeLoader = (name: string) => (opts: { variable: string }) => ({
-    className: `mock-${name}-${opts.variable}`,
+vi.mock("next/font/local", () => {
+  // Same shape the real loader returns ({ className, variable }). This file
+  // only needs the shape: it does not check which file each face is wired to.
+  // That is asserted by `fonts.test.ts` ("wires each face to its own file").
+  const localFont = (opts: { src: string; variable: string }) => ({
+    className: `mock-${opts.src}-${opts.variable}`,
     variable: opts.variable,
   });
-  return {
-    Lora: fakeLoader("lora"),
-    Source_Sans_3: fakeLoader("source-sans-3"),
-    Libre_Franklin: fakeLoader("libre-franklin"),
-    Public_Sans: fakeLoader("public-sans"),
-    Bitter: fakeLoader("bitter"),
-    Karla: fakeLoader("karla"),
-    Montserrat: fakeLoader("montserrat"),
-    Open_Sans: fakeLoader("open-sans"),
-  };
+  return { default: localFont };
 });
 
 const hasDb = Boolean(

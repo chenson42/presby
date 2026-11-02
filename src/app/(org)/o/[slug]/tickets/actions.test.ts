@@ -96,7 +96,7 @@ vi.mock("next/cache", () => ({
 // real module load) also avoids the real module's `import "server-only"`
 // (this file has no top-level `vi.mock("server-only", ...)`, unlike
 // admin/organizations/[id]/actions.test.ts) and its transitive
-// `next/font/google` import path in a plain Node vitest environment.
+// `next/font/local` import path in a plain Node vitest environment.
 const mockMarkSiteContactMessageRead = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/sites", () => ({
   markSiteContactMessageRead: (...args: unknown[]) =>

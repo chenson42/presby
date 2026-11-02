@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   execute: vi.fn(),
   withOrgContext: vi.fn(),
   insertAuditRow: vi.fn(),
+  revoke: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ db: {} }));
@@ -36,6 +37,8 @@ const PERSON = "40000000-0000-4000-8000-000000000004";
 const MEMBERSHIP = "60000000-0000-4000-8000-000000000006";
 const ACTOR = { userId: "30000000-0000-4000-8000-000000000003", email: "admin@example.invalid" };
 const tx = { execute: h.execute };
+/** What the `(org)` caller hands `archivePerson` (F417); `h.revoke` is its one function. */
+const SIDE_EFFECTS = { revokeOpenSignInInvitation: (...a: [unknown, string]) => h.revoke(...a) } as Parameters<typeof lib.archivePerson>[4];
 
 interface Script {
   allowed: boolean;
@@ -92,6 +95,7 @@ function pgError(message: string, code = "23514"): Error {
 beforeEach(() => {
   h.execute.mockReset();
   h.insertAuditRow.mockReset().mockResolvedValue(undefined);
+  h.revoke.mockReset().mockResolvedValue(false);
   h.withOrgContext.mockReset().mockImplementation(async (_p: string, _o: string, fn: (t: unknown) => unknown) => fn(tx));
   script = {
     allowed: true,
@@ -115,7 +119,7 @@ const auditCall = () => h.insertAuditRow.mock.calls[0]![1] as {
 describe("every write is scoped and gated the same way", () => {
   const calls: Array<[string, () => Promise<unknown>]> = [
     ["changeEngagement", () => lib.changeEngagement(VIEWER, ORG, { personId: PERSON, to: "regular" }, ACTOR)],
-    ["archivePerson", () => lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)],
+    ["archivePerson", () => lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)],
     ["restorePerson", () => lib.restorePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)],
     [
       "updateVisitDetails",
@@ -142,7 +146,7 @@ describe("every write is scoped and gated the same way", () => {
   it.each(calls)("%s answers a non-UUID id as not_found before any lookup", async (name, _call) => {
     const fns: Record<string, (id: string) => Promise<unknown>> = {
       changeEngagement: (id) => lib.changeEngagement(VIEWER, ORG, { personId: id, to: "regular" }, ACTOR),
-      archivePerson: (id) => lib.archivePerson(VIEWER, ORG, { personId: id }, ACTOR),
+      archivePerson: (id) => lib.archivePerson(VIEWER, ORG, { personId: id }, ACTOR, SIDE_EFFECTS),
       restorePerson: (id) => lib.restorePerson(VIEWER, ORG, { personId: id }, ACTOR),
       updateVisitDetails: (id) =>
         lib.updateVisitDetails(VIEWER, ORG, { personId: id, firstVisitDate: null, howHeard: null }, ACTOR),
@@ -326,8 +330,8 @@ describe("archivePerson", () => {
   it("ends the membership with the fixed archive marker, audits, and returns the kept engagement", async () => {
     archivable();
     script.row = baseRow({ sign_in_connected: true });
-    const result = await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR);
-    expect(result).toEqual({ kind: "ok", engagement: "visitor", signInConnected: true });
+    const result = await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS);
+    expect(result).toEqual({ kind: "ok", engagement: "visitor", signInConnected: true, invitationRevoked: false });
 
     const write = sqlOf(updates()[0]![0]);
     expect(write.sql).toMatch(/ended_on = current_date/);
@@ -338,8 +342,79 @@ describe("archivePerson", () => {
 
     const audit = auditCall();
     expect(audit.action).toBe("tenant.person.archived");
-    expect(Object.keys(audit.metadata).sort()).toEqual(["engagement", "organizationId", "personId", "signInConnected"]);
-    expect(audit.metadata).toEqual({ organizationId: ORG, personId: PERSON, engagement: "visitor", signInConnected: true });
+    expect(Object.keys(audit.metadata).sort()).toEqual(["engagement", "invitationRevoked", "organizationId", "personId", "signInConnected"]);
+    expect(audit.metadata).toEqual({
+      organizationId: ORG, personId: PERSON, engagement: "visitor", signInConnected: true, invitationRevoked: false,
+    });
+  });
+
+  describe("F417: an archive revokes the person's open sign-in invitation in its own transaction", () => {
+    it("calls the revoke once, with the transaction and the person id, after the membership update and before the audit insert", async () => {
+      archivable();
+      const order: string[] = [];
+      h.execute.mockImplementation(async (q: unknown) => {
+        const text = sqlOf(q).sql;
+        if (/presby_has_permission/.test(text)) return { rows: [{ allowed: true }] };
+        if (/for update of m/.test(text)) return { rows: [script.row] };
+        if (/pending_action/.test(text)) return { rows: [script.blockers] };
+        if (/^\s*update memberships/i.test(text)) {
+          order.push("update");
+          return { rows: script.updated };
+        }
+        throw new Error(`unscripted query: ${text}`);
+      });
+      h.revoke.mockImplementation(async () => {
+        order.push("revoke");
+        return true;
+      });
+      h.insertAuditRow.mockImplementation(async () => {
+        order.push("audit");
+      });
+      await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS);
+      expect(order).toEqual(["update", "revoke", "audit"]);
+      expect(h.revoke).toHaveBeenCalledTimes(1);
+      expect(h.revoke).toHaveBeenCalledWith(tx, PERSON);
+    });
+
+    it.each([true, false])("invitationRevoked %s reaches the result and the tenant.person.archived row", async (revoked) => {
+      archivable();
+      h.revoke.mockResolvedValue(revoked);
+      expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).toMatchObject({ kind: "ok", invitationRevoked: revoked });
+      expect(auditCall().action).toBe("tenant.person.archived");
+      expect(auditCall().metadata.invitationRevoked).toBe(revoked);
+    });
+
+    it.each([
+      ["forbidden", () => { script.allowed = false; }, PERSON],
+      ["not_found", () => { script.row = null; }, PERSON],
+      ["not_found (not a uuid)", () => {}, "not-a-uuid"],
+      ["self_target", () => {}, VIEWER],
+      ["already_ended", () => { script.row = baseRow({ ended_on: "2026-01-02" }); }, PERSON],
+      ["not_eligible", () => { script.row = baseRow({ standing: "listed", engagement_status: "regular" }); }, PERSON],
+      ["not_eligible (the conditional update matched nothing)", () => { script.updated = []; }, PERSON],
+      ["pending_action", () => { script.blockers = { pending_action: true, holds_position: false }; }, PERSON],
+      ["holds_position", () => { script.blockers = { pending_action: false, holds_position: true }; }, PERSON],
+    ])("never revokes on %s", async (_label, arrange, personId) => {
+      archivable();
+      arrange();
+      await lib.archivePerson(VIEWER, ORG, { personId }, ACTOR, SIDE_EFFECTS);
+      expect(h.revoke).not.toHaveBeenCalled();
+    });
+
+    it("a throw from the revoke rejects the archive and writes no audit row (the transaction rolls both back)", async () => {
+      archivable();
+      h.revoke.mockRejectedValue(new Error("presby_revoke_sign_in_invitation failed"));
+      await expect(lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).rejects.toThrow("presby_revoke_sign_in_invitation failed");
+      expect(h.insertAuditRow).not.toHaveBeenCalled();
+    });
+
+    it("a throw from the audit insert after a revoke still rejects, so the revoke is rolled back with it", async () => {
+      archivable();
+      h.revoke.mockResolvedValue(true);
+      h.insertAuditRow.mockRejectedValue(new Error("audit insert failed"));
+      await expect(lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).rejects.toThrow("audit insert failed");
+      expect(h.revoke).toHaveBeenCalledTimes(1);
+    });
   });
 
   it.each([
@@ -349,31 +424,31 @@ describe("archivePerson", () => {
   ])("a %s standing is eligible", async (standing, engagement) => {
     script.row = baseRow({ standing, engagement_status: engagement });
     script.updated = [{ engagement_status: engagement }];
-    expect((await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).kind).toBe("ok");
+    expect((await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).kind).toBe("ok");
   });
 
   it.each(["listed", "staff_anchor"])("a %s standing is `not_eligible` and nothing is written", async (standing) => {
     script.row = baseRow({ standing, engagement_status: "regular" });
-    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).toEqual({ kind: "not_eligible" });
+    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).toEqual({ kind: "not_eligible" });
     expect(updates()).toHaveLength(0);
     expect(h.insertAuditRow).not.toHaveBeenCalled();
   });
 
   it("the viewer's own record is `self_target`, ahead of every state refusal", async () => {
     script.row = baseRow({ ended_on: "2026-01-02" });
-    expect(await lib.archivePerson(VIEWER, ORG, { personId: VIEWER }, ACTOR)).toEqual({ kind: "self_target" });
+    expect(await lib.archivePerson(VIEWER, ORG, { personId: VIEWER }, ACTOR, SIDE_EFFECTS)).toEqual({ kind: "self_target" });
     expect(updates()).toHaveLength(0);
   });
 
   it("an already-ended membership is `already_ended`", async () => {
     script.row = baseRow({ ended_on: "2026-01-02", ended_reason: "community_archived" });
-    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).toEqual({ kind: "already_ended" });
+    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).toEqual({ kind: "already_ended" });
   });
 
   it("a pending roll action is `pending_action`; it is reported ahead of holds_position", async () => {
     archivable();
     script.blockers = { pending_action: true, holds_position: true };
-    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).toEqual({ kind: "pending_action" });
+    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).toEqual({ kind: "pending_action" });
     expect(updates()).toHaveLength(0);
     expect(h.insertAuditRow).not.toHaveBeenCalled();
   });
@@ -381,13 +456,13 @@ describe("archivePerson", () => {
   it("an open officer term, role grant or staff position is `holds_position`", async () => {
     archivable();
     script.blockers = { pending_action: false, holds_position: true };
-    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).toEqual({ kind: "holds_position" });
+    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).toEqual({ kind: "holds_position" });
     expect(updates()).toHaveLength(0);
   });
 
   it("the blocker query is scoped to this person at this organization and names all four conditions", async () => {
     archivable();
-    await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR);
+    await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS);
     const q = sqlOf(callsMatching(/pending_action/)[0]![0]);
     for (const table of ["roll_actions", "officer_terms", "role_grants", "staff_positions"]) {
       expect(q.sql).toContain(`from ${table}`);
@@ -401,27 +476,27 @@ describe("archivePerson", () => {
     script.updateThrows = pgError(
       "memberships: cannot end this relationship on 2026-10-31 - the ruling_elder term beginning 2024-01-01 is still open at this organization",
     );
-    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).toEqual({ kind: "holds_position" });
+    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).toEqual({ kind: "holds_position" });
     expect(h.insertAuditRow).not.toHaveBeenCalled();
   });
 
   it("an unrelated database error is rethrown", async () => {
     archivable();
     script.updateThrows = pgError("connection terminated", "57P01");
-    await expect(lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).rejects.toThrow("connection terminated");
+    await expect(lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).rejects.toThrow("connection terminated");
   });
 
   it("zero rows from the conditional update is `not_eligible`, with no audit row", async () => {
     archivable();
     script.updated = [];
-    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).toEqual({ kind: "not_eligible" });
+    expect(await lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).toEqual({ kind: "not_eligible" });
     expect(h.insertAuditRow).not.toHaveBeenCalled();
   });
 
   it("a throw from the audit insert propagates (EC-16)", async () => {
     archivable();
     h.insertAuditRow.mockRejectedValue(new Error("audit insert failed"));
-    await expect(lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR)).rejects.toThrow("audit insert failed");
+    await expect(lib.archivePerson(VIEWER, ORG, { personId: PERSON }, ACTOR, SIDE_EFFECTS)).rejects.toThrow("audit insert failed");
   });
 });
 

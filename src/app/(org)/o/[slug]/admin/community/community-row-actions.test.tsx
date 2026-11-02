@@ -172,7 +172,7 @@ describe("Archive (Visitors and Inactive rows)", () => {
     expect(
       within(dialog).getByText("Wren Alder has a sign-in connected and will no longer reach Alder Creek Presbyterian Church through this record."),
     ).toBeTruthy();
-    expect(within(dialog).getByText("An invitation to Wren Alder is still open. It will stop working.")).toBeTruthy();
+    expect(within(dialog).getByText("An invitation to Wren Alder is still open. It will stop working, and restoring them will not turn it back on.")).toBeTruthy();
   });
 
   it("an inactive row names the Inactive list and omits both lines when the facts are absent", () => {

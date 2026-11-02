@@ -32,21 +32,34 @@ vi.mock("server-only", () => ({}));
 // REAL audit modules run: the library writes its rows with insertAuditRow() in
 // the change's own transaction, so the tests read them back.
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
+// Sending a sign-in invitation (the F417 describe at the foot) hands the queued row
+// to the provider after commit; nothing real is sent.
+const sendMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/email/send", () => ({ sendEmail: sendMock }));
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 240_000 });
 
 // Lets a test force the in-transaction audit insert to throw, to prove the
 // whole change rolls back with it (EC-16).
-const auditControl = vi.hoisted(() => ({ fail: false }));
+// `failAction` narrows the throw to one audit key (the F417 rollback test makes the
+// ARCHIVE's own row fail after the revoke's row has been written).
+const auditControl = vi.hoisted(() => ({ fail: false, failAction: null as string | null }));
 vi.mock("@/lib/audit-tx", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit-tx")>();
   return {
     ...actual,
     insertAuditRow: async (...args: Parameters<typeof actual.insertAuditRow>) => {
-      if (auditControl.fail) throw new Error("audit insert failed (test-injected)");
+      if (auditControl.fail && (auditControl.failAction === null || args[1].action === auditControl.failAction)) {
+        throw new Error("audit insert failed (test-injected)");
+      }
       return actual.insertAuditRow(...args);
     },
   };
 });
+
+// The membership-standing fixture's viewer has no linked sign-in account, so the
+// archive suites below pass a revoke that finds nothing. The real revoke, in the
+// archive's own transaction, is exercised by the F417 describe at the foot.
+const NO_INVITATION = { revokeOpenSignInInvitation: async () => false };
 
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL);
 
@@ -263,8 +276,8 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
   describe("archivePerson and restorePerson", () => {
     it("archives a visitor: ended with the marker, both derived rows end, one audit row; the person is in Former and out of Visitors", async () => {
       const { personId, membershipId } = await make(null, "visitor");
-      const result = await lib.archivePerson(viewer, orgA, { personId }, ACTOR);
-      expect(result).toEqual({ kind: "ok", engagement: "visitor", signInConnected: false });
+      const result = await lib.archivePerson(viewer, orgA, { personId }, ACTOR, NO_INVITATION);
+      expect(result).toEqual({ kind: "ok", engagement: "visitor", signInConnected: false, invitationRevoked: false });
 
       const [row] = await fx.q(sql`select ended_on::text as ended_on, ended_reason, engagement_status from memberships where id = ${membershipId}`);
       expect(row).toEqual({ ended_on: today, ended_reason: "community_archived", engagement_status: "visitor" });
@@ -274,8 +287,8 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
       const audits = await auditsFor(personId);
       expect(audits).toHaveLength(1);
       expect(audits[0]).toMatchObject({ action: "tenant.person.archived", resource_type: "person", actor_user_id: actorUserId });
-      expect(keysOf(audits[0]!)).toEqual(["engagement", "organizationId", "personId", "signInConnected"]);
-      expect(audits[0]!.metadata).toEqual({ organizationId: orgA, personId, engagement: "visitor", signInConnected: false });
+      expect(keysOf(audits[0]!)).toEqual(["engagement", "invitationRevoked", "organizationId", "personId", "signInConnected"]);
+      expect(audits[0]!.metadata).toEqual({ organizationId: orgA, personId, engagement: "visitor", signInConnected: false, invitationRevoked: false });
 
       const community = await import("./community");
       const former = await community.listFormer(viewer, orgA, { page: 1, pageSize: 500 });
@@ -287,7 +300,7 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
     it("archives an inactive and a moved-away person", async () => {
       for (const engagement of ["inactive", "moved_away"]) {
         const { personId } = await make(null, engagement);
-        expect(await lib.archivePerson(viewer, orgA, { personId }, ACTOR)).toMatchObject({ kind: "ok", engagement });
+        expect(await lib.archivePerson(viewer, orgA, { personId }, ACTOR, NO_INVITATION)).toMatchObject({ kind: "ok", engagement });
       }
     });
 
@@ -295,7 +308,7 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
       const cases = [await make("active", "regular"), await make("other_participant", "regular"), await make(null, "staff"), await make(null, "regular"), await make("active", "inactive")];
       for (const who of cases) {
         const before = await digest(who.personId, who.membershipId);
-        expect(await lib.archivePerson(viewer, orgA, { personId: who.personId }, ACTOR)).toEqual({ kind: "not_eligible" });
+        expect(await lib.archivePerson(viewer, orgA, { personId: who.personId }, ACTOR, NO_INVITATION)).toEqual({ kind: "not_eligible" });
         expect(await digest(who.personId, who.membershipId)).toBe(before);
       }
     });
@@ -303,7 +316,7 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
     it("refuses the viewer's own record (self_target), ahead of everything else", async () => {
       const [m] = await fx.q(sql`select id from memberships where person_id = ${viewer} and organization_id = ${orgA}`);
       const before = await digest(viewer, String(m!.id));
-      expect(await lib.archivePerson(viewer, orgA, { personId: viewer }, ACTOR)).toEqual({ kind: "self_target" });
+      expect(await lib.archivePerson(viewer, orgA, { personId: viewer }, ACTOR, NO_INVITATION)).toEqual({ kind: "self_target" });
       expect(await digest(viewer, String(m!.id))).toBe(before);
     });
 
@@ -336,13 +349,13 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
       ];
       for (const [who, kind] of cases) {
         const before = await digest(who.personId, who.membershipId);
-        expect(await lib.archivePerson(viewer, orgA, { personId: who.personId }, ACTOR), kind).toEqual({ kind });
+        expect(await lib.archivePerson(viewer, orgA, { personId: who.personId }, ACTOR, NO_INVITATION), kind).toEqual({ kind });
         expect(await digest(who.personId, who.membershipId), `${kind}: nothing written`).toBe(before);
       }
 
       // Ending the position first makes the archive go through (the sentence says "End that first").
       await fx.q(sql`update staff_positions set ends_on = current_date - 1 where person_id = ${staffHolder.personId}`);
-      expect(await lib.archivePerson(viewer, orgA, { personId: staffHolder.personId }, ACTOR)).toMatchObject({ kind: "ok" });
+      expect(await lib.archivePerson(viewer, orgA, { personId: staffHolder.personId }, ACTOR, NO_INVITATION)).toMatchObject({ kind: "ok" });
     });
 
     it("a seat that has not started yet also holds the archive: the pre-check is stricter than memberships_guard_end, by design (the guard itself is mapped in the unit file)", async () => {
@@ -351,27 +364,27 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
         insert into officer_terms (organization_id, person_id, office, starts_on)
         values (${orgA}, ${who.personId}, 'ruling_elder', date '2999-01-01')`);
       const before = await digest(who.personId, who.membershipId);
-      expect(await lib.archivePerson(viewer, orgA, { personId: who.personId }, ACTOR)).toEqual({ kind: "holds_position" });
+      expect(await lib.archivePerson(viewer, orgA, { personId: who.personId }, ACTOR, NO_INVITATION)).toEqual({ kind: "holds_position" });
       expect(await digest(who.personId, who.membershipId)).toBe(before);
     });
 
     it("already_ended on a second archive; not_found for another organization, a merged and a deceased person", async () => {
       const { personId } = await make(null, "visitor");
-      expect((await lib.archivePerson(viewer, orgA, { personId }, ACTOR)).kind).toBe("ok");
-      expect(await lib.archivePerson(viewer, orgA, { personId }, ACTOR)).toEqual({ kind: "already_ended" });
+      expect((await lib.archivePerson(viewer, orgA, { personId }, ACTOR, NO_INVITATION)).kind).toBe("ok");
+      expect(await lib.archivePerson(viewer, orgA, { personId }, ACTOR, NO_INVITATION)).toEqual({ kind: "already_ended" });
 
       const elsewhere = await make(null, "visitor", orgB);
       const deceased = await fx.person("Deceased", { deceased: true });
       await fx.membership(orgA, deceased, null, "visitor");
       for (const id of [elsewhere.personId, deceased]) {
-        expect(await lib.archivePerson(viewer, orgA, { personId: id }, ACTOR)).toEqual({ kind: "not_found" });
+        expect(await lib.archivePerson(viewer, orgA, { personId: id }, ACTOR, NO_INVITATION)).toEqual({ kind: "not_found" });
       }
-      expect(await lib.archivePerson(outsider, orgA, { personId }, ACTOR)).toEqual({ kind: "forbidden" });
+      expect(await lib.archivePerson(outsider, orgA, { personId }, ACTOR, NO_INVITATION)).toEqual({ kind: "forbidden" });
     });
 
     it("restore reopens the all row and, for a visitor, leaves the member row closed (EC-7); an archived inactive person returns inactive", async () => {
       const visitor = await make(null, "visitor");
-      await lib.archivePerson(viewer, orgA, { personId: visitor.personId }, ACTOR);
+      await lib.archivePerson(viewer, orgA, { personId: visitor.personId }, ACTOR, NO_INVITATION);
       const restored = await lib.restorePerson(viewer, orgA, { personId: visitor.personId }, ACTOR);
       expect(restored).toEqual({ kind: "ok", engagement: "visitor", signInConnected: false });
 
@@ -386,7 +399,7 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
       expect(keysOf(audits[1]!)).toEqual(["engagement", "organizationId", "personId", "signInConnected"]);
 
       const inactive = await make(null, "inactive");
-      await lib.archivePerson(viewer, orgA, { personId: inactive.personId }, ACTOR);
+      await lib.archivePerson(viewer, orgA, { personId: inactive.personId }, ACTOR, NO_INVITATION);
       expect(await lib.restorePerson(viewer, orgA, { personId: inactive.personId }, ACTOR)).toMatchObject({ kind: "ok", engagement: "inactive" });
     });
 
@@ -405,7 +418,7 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
 
     it("restore refuses an archived person who is now deceased or merged (person_unavailable); another organization's person is not_found; forbidden without people.manage", async () => {
       const deceased = await make(null, "visitor");
-      await lib.archivePerson(viewer, orgA, { personId: deceased.personId }, ACTOR);
+      await lib.archivePerson(viewer, orgA, { personId: deceased.personId }, ACTOR, NO_INVITATION);
       await fx.q(sql`update people set date_of_death = date '2026-01-01' where id = ${deceased.personId}`);
       const before = await digest(deceased.personId, deceased.membershipId);
       expect(await lib.restorePerson(viewer, orgA, { personId: deceased.personId }, ACTOR)).toEqual({ kind: "person_unavailable" });
@@ -413,20 +426,20 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
 
       const merged = await make(null, "visitor");
       const survivor = await make(null, "regular");
-      await lib.archivePerson(viewer, orgA, { personId: merged.personId }, ACTOR);
+      await lib.archivePerson(viewer, orgA, { personId: merged.personId }, ACTOR, NO_INVITATION);
       await fx.q(sql`update people set merged_into_id = ${survivor.personId} where id = ${merged.personId}`);
       expect(await lib.restorePerson(viewer, orgA, { personId: merged.personId }, ACTOR)).toEqual({ kind: "person_unavailable" });
 
       const elsewhere = await make(null, "visitor", orgB);
       expect(await lib.restorePerson(viewer, orgA, { personId: elsewhere.personId }, ACTOR)).toEqual({ kind: "not_found" });
       const archived = await make(null, "visitor");
-      await lib.archivePerson(viewer, orgA, { personId: archived.personId }, ACTOR);
+      await lib.archivePerson(viewer, orgA, { personId: archived.personId }, ACTOR, NO_INVITATION);
       expect(await lib.restorePerson(outsider, orgA, { personId: archived.personId }, ACTOR)).toEqual({ kind: "forbidden" });
     });
 
     it("engagement cannot change while archived (ended), and visit details cannot either", async () => {
       const { personId, membershipId } = await make(null, "visitor");
-      await lib.archivePerson(viewer, orgA, { personId }, ACTOR);
+      await lib.archivePerson(viewer, orgA, { personId }, ACTOR, NO_INVITATION);
       const before = await digest(personId, membershipId);
       expect(await lib.changeEngagement(viewer, orgA, { personId, to: "regular" }, ACTOR)).toEqual({ kind: "ended" });
       expect(await lib.updateVisitDetails(viewer, orgA, { personId, firstVisitDate: "2026-03-01", howHeard: "x" }, ACTOR)).toEqual({ kind: "ended" });
@@ -505,7 +518,7 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
       const { personId, membershipId } = await make(null, "visitor");
       const before = await digest(personId, membershipId);
       auditControl.fail = true;
-      await expect(lib.archivePerson(viewer, orgA, { personId }, ACTOR)).rejects.toThrow("audit insert failed");
+      await expect(lib.archivePerson(viewer, orgA, { personId }, ACTOR, NO_INVITATION)).rejects.toThrow("audit insert failed");
       auditControl.fail = false;
       expect(await digest(personId, membershipId)).toBe(before);
       const [row] = await fx.q(sql`select ended_on from memberships where id = ${membershipId}`);
@@ -514,7 +527,7 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
 
     it("restorePerson: still archived", async () => {
       const { personId, membershipId } = await make(null, "visitor");
-      await lib.archivePerson(viewer, orgA, { personId }, ACTOR);
+      await lib.archivePerson(viewer, orgA, { personId }, ACTOR, NO_INVITATION);
       const before = await digest(personId, membershipId);
       auditControl.fail = true;
       await expect(lib.restorePerson(viewer, orgA, { personId }, ACTOR)).rejects.toThrow("audit insert failed");
@@ -571,7 +584,7 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
       const { personId, membershipId } = await make(null, "visitor");
       const result = await raceWith(
         membershipId,
-        () => lib.archivePerson(viewer, orgA, { personId }, ACTOR),
+        () => lib.archivePerson(viewer, orgA, { personId }, ACTOR, NO_INVITATION),
         async (tx) => {
           await tx.execute(sql`update memberships set engagement_status = 'regular' where id = ${membershipId}`);
         },
@@ -673,6 +686,306 @@ describe.skipIf(!hasDb)("community-engagement.ts (Postgres-backed)", () => {
       // Joined on the person: every row names the same one (the email row by resource, the others by metadata too).
       for (const r of chain) expect(r.resource_id).toBe(personId);
       expect(chain.filter((r) => r.person_id !== null).every((r) => r.person_id === personId)).toBe(true);
+    });
+  });
+});
+
+// ===========================================================================
+// F417: archive revokes an open sign-in invitation
+// (docs/work-log/2026-11-02-archive-revokes-invite.md). The membership-standing
+// fixture above has no sign-in sender, so this describe builds its own on the
+// sign-in fixture.
+// ===========================================================================
+describe.skipIf(!hasDb)("F417: archive revokes an open sign-in invitation (Postgres-backed)", () => {
+  let f: import("@/lib/testing/sign-in-fixture").SignInFixture;
+  let lib: typeof import("./community-engagement");
+  let invite: typeof import("./onboarding/org-invite");
+  let org: string;
+  let sender: { userId: string; personId: string; email: string };
+  let ctx: import("./onboarding/org-invite").SignInContext;
+  let actor: { userId: string; email: string | null };
+  let mint: typeof import("@/lib/testing/invitation-fixture").mintToken;
+
+  /** What `archivePersonAction` hands the library: the real revoke, in the archive's own transaction. */
+  const sideEffects = () => ({
+    revokeOpenSignInInvitation: (tx: import("@/lib/authz").OrgTx, personId: string) =>
+      invite.revokeOpenSignInInvitationInTx(tx, ctx, personId, "archive"),
+  });
+
+  beforeAll(async () => {
+    const { createSignInFixture } = await import("@/lib/testing/sign-in-fixture");
+    f = await createSignInFixture("f417");
+    lib = await import("./community-engagement");
+    invite = await import("./onboarding/org-invite");
+    ({ mintToken: mint } = await import("@/lib/testing/invitation-fixture"));
+    org = await f.congregation("a");
+    sender = await f.sender(org, ["people.manage"]);
+    ctx = { organizationId: org, actingPersonId: sender.personId, actingUserId: sender.userId, actingUserEmail: sender.email };
+    actor = { userId: sender.userId, email: sender.email };
+  });
+
+  afterAll(async () => {
+    if (!f) return;
+    try {
+      await f.q(sql`delete from audit_events where metadata->>'organizationId' = ${org}`);
+      await f.q(sql`delete from email_queue where to_email like ${`f417-%`}`);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  beforeEach(() => {
+    auditControl.fail = false;
+    sendMock.mockReset();
+    sendMock.mockResolvedValue({ id: "provider-ok" });
+  });
+
+  /** A visitor with an address and a verified, active account on it, plus an issued sign-in invitation. */
+  async function invited() {
+    const p = await f.person(org, { engagement: "visitor", roll: null, first: "Visitor" });
+    const userId = await f.user(p.email!);
+    const { token, tokenHash } = mint();
+    const issued = await f.issue(org, sender.userId, p.id, { confirmed: p.email!, tokenHash });
+    expect(issued.outcome).toBe("ok");
+    return { personId: p.id, email: p.email!, userId, token, invitationId: String(issued.invitation_id) };
+  }
+
+  const invitationRows = (personId: string) =>
+    f.q(sql`select id::text as id, revoked_at, revoked_by_user_id::text as revoked_by, blocked_at, blocked_reason, accepted_at
+              from account_invitations where person_id = ${personId} and purpose = 'sign_in' order by created_at, id`);
+  const auditRows = (action: string, personId: string) =>
+    f.q(sql`select action, actor_user_id::text as actor_user_id, resource_id, metadata from audit_events
+             where action = ${action} and metadata->>'personId' = ${personId} order by created_at, id`);
+
+  it("D1: archive, the person presses Accept, restore, the card offers the invitation again — regression for F417 (archive left the link open, acceptance blocked it for good)", async () => {
+    const v = await invited();
+
+    // Archive: the dialog's promise ("It will stop working") is kept by the archive itself.
+    const archived = await lib.archivePerson(sender.personId, org, { personId: v.personId }, actor, sideEffects());
+    // (soft: on the unmodified tree the failure at each later step is then reported too)
+    expect.soft(archived).toMatchObject({ kind: "ok", invitationRevoked: true });
+    // The archived record's own card no longer says "While this invitation is open".
+    expect.soft(await invite.getSignInCard(ctx, v.personId)).toMatchObject({ kind: "ok", card: { state: "revoked" } });
+
+    // The person presses Accept: the dead link, not a block on the row.
+    expect.soft(await f.preview(v.token)).toHaveLength(0);
+    const accepted = await f.acceptInPlace(v.invitationId, v.userId, false);
+    expect.soft(accepted).toMatchObject({ outcome: "dead", blocked_reason: null });
+    const [row] = await invitationRows(v.personId);
+    expect.soft(row).toMatchObject({ blocked_at: null, blocked_reason: null, accepted_at: null, revoked_by: sender.userId });
+    expect.soft(row!.revoked_at).not.toBeNull();
+
+    // Restore: the card offers the invitation again and a send works.
+    expect(await lib.restorePerson(sender.personId, org, { personId: v.personId }, actor)).toMatchObject({ kind: "ok" });
+    const card = await invite.getSignInCard(ctx, v.personId);
+    expect.soft(card).toMatchObject({ kind: "ok", card: { state: "revoked", blockedOutcome: null } });
+    const markers = await invite.getSignInMarkers(ctx, [v.personId]);
+    expect.soft(markers[v.personId]).toBeUndefined(); // no "couldn't be completed" marker
+    const sent = await invite.sendSignInInvitation(ctx, { personId: v.personId, confirmedAddress: v.email, acknowledged: false });
+    expect.soft(sent).toMatchObject({ kind: "ok" });
+    const rows = await invitationRows(v.personId);
+    expect.soft(rows).toHaveLength(2);
+    expect.soft(rows.filter((r) => r.revoked_at === null && r.blocked_at === null && r.accepted_at === null)).toHaveLength(1);
+  });
+
+  it("archive of a person with an open invitation: the row is revoked by the actor, an invitation.revoked row says via archive, and tenant.person.archived says invitationRevoked", async () => {
+    const v = await invited();
+    expect(await lib.archivePerson(sender.personId, org, { personId: v.personId }, actor, sideEffects())).toMatchObject({ kind: "ok", invitationRevoked: true });
+
+    const [row] = await invitationRows(v.personId);
+    expect(row).toMatchObject({ id: v.invitationId, revoked_by: sender.userId, accepted_at: null, blocked_at: null });
+    expect(row!.revoked_at).not.toBeNull();
+
+    const revoked = await auditRows("invitation.revoked", v.personId);
+    expect(revoked).toHaveLength(1);
+    expect(revoked[0]).toMatchObject({ actor_user_id: sender.userId, resource_id: v.invitationId });
+    expect(revoked[0]!.metadata).toEqual({
+      invitationId: v.invitationId, organizationId: org, purpose: "sign_in", origin: "org", personId: v.personId, via: "archive",
+    });
+    const archivedRows = await f.q(sql`
+      select metadata from audit_events where action = 'tenant.person.archived' and resource_id = ${v.personId}`);
+    expect(archivedRows).toHaveLength(1);
+    expect(archivedRows[0]!.metadata).toMatchObject({ personId: v.personId, invitationRevoked: true });
+  });
+
+  it("archive with no open invitation: invitationRevoked is false and no invitation.revoked row is written", async () => {
+    const p = await f.person(org, { engagement: "visitor", roll: null });
+    expect(await lib.archivePerson(sender.personId, org, { personId: p.id }, actor, sideEffects())).toMatchObject({ kind: "ok", invitationRevoked: false });
+    expect(await auditRows("invitation.revoked", p.id)).toHaveLength(0);
+    const archivedRows = await f.q(sql`
+      select metadata from audit_events where action = 'tenant.person.archived' and resource_id = ${p.id}`);
+    expect(archivedRows[0]!.metadata).toMatchObject({ invitationRevoked: false });
+  });
+
+  it("an expired-but-open row is revoked too; another person's open row, an accepted row and another organization's row are untouched", async () => {
+    const other = await f.congregation("b");
+    const target = await f.person(org, { engagement: "visitor", roll: null });
+    const expired = await f.signInRow(org, target.id, target.email!, {
+      createdAt: sql`now() - interval '9 days'`,
+      expiresAt: sql`now() - interval '1 day'`,
+    });
+    const bystander = await f.person(org, { engagement: "visitor", roll: null });
+    const bystanderRow = await f.signInRow(org, bystander.id, bystander.email!);
+    const acceptedPerson = await f.person(org, { engagement: "visitor", roll: null });
+    const acceptedUser = await f.user(acceptedPerson.email!);
+    const acceptedRow = await f.signInRow(org, acceptedPerson.id, acceptedPerson.email!);
+    expect(await f.acceptInPlace(acceptedRow.id, acceptedUser, false)).toMatchObject({ outcome: "accepted" });
+    const foreign = await f.person(other, { engagement: "visitor", roll: null });
+    const foreignRow = await f.signInRow(other, foreign.id, foreign.email!);
+
+    expect(await lib.archivePerson(sender.personId, org, { personId: target.id }, actor, sideEffects())).toMatchObject({ kind: "ok", invitationRevoked: true });
+
+    const state = async (id: string) =>
+      (await f.q(sql`select revoked_at, accepted_at from account_invitations where id = ${id}`))[0]!;
+    expect((await state(expired.id)).revoked_at).not.toBeNull();
+    expect((await state(bystanderRow.id)).revoked_at).toBeNull();
+    expect((await state(acceptedRow.id)).revoked_at).toBeNull();
+    expect((await state(acceptedRow.id)).accepted_at).not.toBeNull();
+    expect((await state(foreignRow.id)).revoked_at).toBeNull();
+  });
+
+  it("a still-queued invitation email is cancelled and its stored body scrubbed", async () => {
+    const p = await f.person(org, { engagement: "visitor", roll: null });
+    sendMock.mockRejectedValue(new Error("provider down")); // the row stays queued, body unscrubbed
+    const sent = await invite.sendSignInInvitation(ctx, { personId: p.id, confirmedAddress: p.email!, acknowledged: false });
+    expect(sent).toMatchObject({ kind: "ok", delivery: "queued" });
+    const [inv] = await invitationRows(p.id);
+    const [before] = await f.q(sql`select e.status, e.text_body from email_queue e join account_invitations i on i.email_queue_id = e.id where i.id = ${inv!.id}`);
+    expect(before).toMatchObject({ status: "queued" });
+    expect(String(before!.text_body)).toContain("invite?token=");
+
+    expect(await lib.archivePerson(sender.personId, org, { personId: p.id }, actor, sideEffects())).toMatchObject({ kind: "ok", invitationRevoked: true });
+    const [after] = await f.q(sql`select e.status, e.html_body, e.text_body from email_queue e join account_invitations i on i.email_queue_id = e.id where i.id = ${inv!.id}`);
+    expect(after!.status).not.toBe("queued");
+    expect(String(after!.text_body)).not.toContain("invite?token=");
+    expect(String(after!.html_body)).not.toContain("invite?token=");
+  });
+
+  it("rollback: a forced throw from the archive's audit row, AFTER the revoke wrote its own, leaves the invitation open and the membership live", async () => {
+    const v = await invited();
+    auditControl.fail = true;
+    auditControl.failAction = "tenant.person.archived";
+    await expect(lib.archivePerson(sender.personId, org, { personId: v.personId }, actor, sideEffects())).rejects.toThrow("audit insert failed");
+    auditControl.fail = false;
+    auditControl.failAction = null;
+
+    const [row] = await invitationRows(v.personId);
+    expect(row).toMatchObject({ revoked_at: null, revoked_by: null, blocked_at: null, accepted_at: null });
+    const [m] = await f.q(sql`select ended_on, ended_reason from memberships where person_id = ${v.personId} and organization_id = ${org}`);
+    expect(m).toEqual({ ended_on: null, ended_reason: null });
+    expect(await auditRows("invitation.revoked", v.personId)).toHaveLength(0);
+    // And the link still works (the person is not archived): the preview resolves.
+    expect(await f.preview(v.token)).toHaveLength(1);
+  });
+
+  it("a throw from the revoke rolls the membership write back too", async () => {
+    const v = await invited();
+    const failing = { revokeOpenSignInInvitation: async () => { throw new Error("revoke failed (test-injected)"); } };
+    await expect(lib.archivePerson(sender.personId, org, { personId: v.personId }, actor, failing)).rejects.toThrow("revoke failed");
+    const [m] = await f.q(sql`select ended_on from memberships where person_id = ${v.personId} and organization_id = ${org}`);
+    expect(m!.ended_on).toBeNull();
+    expect(await auditRows("tenant.person.archived", v.personId)).toHaveLength(0);
+  });
+
+  describe("an acceptance and an archive on two connections end in exactly one of two consistent states (extends EC-8)", () => {
+    async function waitForQueuedLocks(n: number): Promise<void> {
+      for (let attempt = 0; attempt < 150; attempt += 1) {
+        const [row] = await f.q(sql`
+          select count(*)::int as n from pg_stat_activity
+           where datname = current_database() and wait_event_type = 'Lock' and pid <> pg_backend_pid()`);
+        if (Number(row!.n) >= n) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error(`fewer than ${n} calls queued behind the organization lock`);
+    }
+
+    /** Hold the organization row lock (the lock both definers take) on the owner connection while the two calls queue in the given order. */
+    async function race<A, B>(first: () => Promise<A>, second: () => Promise<B>): Promise<[A, B]> {
+      let a!: Promise<A>;
+      let b!: Promise<B>;
+      await f.platform.transaction(async (tx) => {
+        await tx.execute(sql`select 1 from organizations where id = ${org} for update`);
+        a = first();
+        a.catch(() => {});
+        await waitForQueuedLocks(1);
+        b = second();
+        b.catch(() => {});
+        await waitForQueuedLocks(2);
+      });
+      return [await a, await b];
+    }
+
+    it("the acceptance queues first: accepted, and the archive that follows finds nothing open to revoke (no block, no half-write)", async () => {
+      const v = await invited();
+      const [accepted, archived] = await race(
+        () => f.acceptInPlace(v.invitationId, v.userId, false),
+        () => lib.archivePerson(sender.personId, org, { personId: v.personId }, actor, sideEffects()),
+      );
+      expect(accepted).toMatchObject({ outcome: "accepted" });
+      expect(archived).toMatchObject({ kind: "ok", invitationRevoked: false });
+      const [row] = await invitationRows(v.personId);
+      expect(row).toMatchObject({ revoked_at: null, blocked_at: null });
+      expect(row!.accepted_at).not.toBeNull();
+      expect(await auditRows("invitation.revoked", v.personId)).toHaveLength(0);
+    });
+
+    it("the archive queues first: the invitation is revoked and the acceptance is dead, never blocked", async () => {
+      const v = await invited();
+      const [archived, accepted] = await race(
+        () => lib.archivePerson(sender.personId, org, { personId: v.personId }, actor, sideEffects()),
+        () => f.acceptInPlace(v.invitationId, v.userId, false),
+      );
+      expect(archived).toMatchObject({ kind: "ok", invitationRevoked: true });
+      expect(accepted).toMatchObject({ outcome: "dead", blocked_reason: null });
+      const [row] = await invitationRows(v.personId);
+      expect(row).toMatchObject({ accepted_at: null, blocked_at: null, revoked_by: sender.userId });
+      expect(row!.revoked_at).not.toBeNull();
+      expect(await auditRows("invitation.revoked", v.personId)).toHaveLength(1);
+    });
+  });
+
+  describe("the reader's backstop (b) works with no revoke at all", () => {
+    /** Issue, end the membership on the owner path (as an archive does, but not through archivePerson), press Accept. */
+    async function blockedByEndedMembership(reason: string) {
+      const v = await invited();
+      await f.q(sql`update memberships set ended_on = current_date, ended_reason = ${reason}
+                     where person_id = ${v.personId} and organization_id = ${org}`);
+      expect(await f.acceptInPlace(v.invitationId, v.userId, false)).toMatchObject({ outcome: "blocked", blocked_reason: "membership_ended" });
+      return v;
+    }
+
+    it("archive marker, then Accept (blocked / membership_ended), then Restore: the card is none and a send succeeds", async () => {
+      const v = await blockedByEndedMembership("community_archived");
+      expect(await invite.getSignInCard(ctx, v.personId)).toMatchObject({ card: { state: "blocked", blockedOutcome: "membership_ended" } });
+
+      expect(await lib.restorePerson(sender.personId, org, { personId: v.personId }, actor)).toMatchObject({ kind: "ok" });
+      expect(await invite.getSignInCard(ctx, v.personId)).toMatchObject({ kind: "ok", card: { state: "none", blockedOutcome: null, invitedAddress: null } });
+      expect((await invite.getSignInMarkers(ctx, [v.personId]))[v.personId]).toBeUndefined();
+      const sent = await invite.sendSignInInvitation(ctx, { personId: v.personId, confirmedAddress: v.email, acknowledged: false });
+      expect(sent).toMatchObject({ kind: "ok" });
+      // The old row is untouched: still the terminal block.
+      const rows = await invitationRows(v.personId);
+      expect(rows.find((r) => r.id === v.invitationId)).toMatchObject({ blocked_reason: "membership_ended" });
+    });
+
+    it("a membership that stays ended keeps the card on blocked", async () => {
+      const v = await blockedByEndedMembership("community_archived");
+      expect(await invite.getSignInCard(ctx, v.personId)).toMatchObject({ card: { state: "blocked", blockedOutcome: "membership_ended" } });
+      expect((await invite.getSignInMarkers(ctx, [v.personId]))[v.personId]).toEqual({ kind: "blocked" });
+    });
+
+    it("a participant-style removal reopened (SIMULATED on the owner path, NOT through presby_void_roll_action) reads none", async () => {
+      const v = await blockedByEndedMembership("other_participant_removed");
+      await f.q(sql`update memberships set ended_on = null, ended_reason = null
+                     where person_id = ${v.personId} and organization_id = ${org}`);
+      expect(await invite.getSignInCard(ctx, v.personId)).toMatchObject({ card: { state: "none", blockedOutcome: null } });
+    });
+
+    it("a merged person stays blocked: person_merged is not reinterpreted", async () => {
+      const v = await invited();
+      await f.merge(v.personId);
+      expect(await f.acceptInPlace(v.invitationId, v.userId, false)).toMatchObject({ outcome: "blocked", blocked_reason: "person_merged" });
+      expect((await invite.getSignInMarkers(ctx, [v.personId]))[v.personId]).toEqual({ kind: "blocked" });
     });
   });
 });

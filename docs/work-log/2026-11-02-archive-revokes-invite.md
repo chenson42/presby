@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Done: D1 in the 3a live-walk addendum is the bug confirmation | Bug confirmed | 2026-11-01 |
 | 2 — Architectural review | architect | Skipped, noted in the Phase 2 section: no migration, no definer change, no dependency, 2b B2 boundary kept | — | 2026-11-02 |
 | 3 — Technical design | tech-lead | Done: ruling is both (a) archive revokes in-transaction, `invitation.revoked` via `archive`, and (b) the reader treats a stored `membership_ended` block as stale over a live membership; no migration | Design complete | 2026-11-02 |
-| 4 — Implementation | full-stack-developer | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Done: (a) archive revokes in-transaction, (b) reader backstop, C1 and H1-H3, tests red-then-green; no migration | Complete | 2026-11-02 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -236,3 +236,90 @@ Archiving a person (Community, 3a) revokes their open sign-in invitation in the 
 5. Verify the "unverified" items above actually ran: the race test, the participant-removal path, and the dialog wrap at 360 px; anything that could not run is reported as such, not as a pass.
 6. Not auth-touching (`src/auth.ts`, `src/proxy.ts`, `(auth)`, `src/lib/auth/` are not edited), so the MFA-login e2e gate does not apply; the new e2e still signs in as a seeded account.
 7. Phase 6 (analyst): re-walk the D1 sequence on the record and the list, and the six pages the addendum left open, `adding-people` and `sign-in-invitations` included.
+
+---
+
+# Phase 4 — Implementation (full-stack-developer)
+
+**Date:** 2026-11-02. Bug-fix variant. Scratch server on port 3580 from a copy outside the platform folder; flags reset first with `e2e-reset-flags.sql`.
+
+## Red, then green
+
+The regression test is `D1: archive, the person presses Accept, restore, the card offers the invitation again — regression for F417` in `src/lib/community-engagement.db.test.ts` (new `describe("F417: ...")`, on `createSignInFixture`). Its assertions are `expect.soft`, so the red run lists every failing step. **Run against the unmodified tree** (the test written first, before any source edit; `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism src/lib/community-engagement.db.test.ts -t F417`): 1 failed, 8 soft failures, in D1 order:
+
+- archive result: `invitationRevoked: true` expected, absent;
+- card after archive: expected `state: "revoked"`, got `"pending"` (the second symptom, "While this invitation is open");
+- preview of the token: expected 0 rows, got 1 (the archived person is offered Accept);
+- Accept (`presby_accept_in_place`): expected `outcome: "dead"`, got `outcome: "blocked"`, `blocked_reason: "membership_ended"`;
+- the row: expected `blocked_at: null`, `revoked_by: <sender>`; got `blocked_at` set, `blocked_reason: "membership_ended"`, `revoked_by: null`;
+- after Restore, card: expected `state: "revoked"`, got `state: "blocked"`, `blockedOutcome: "membership_ended"` (the D1 dead end);
+- marker: expected none, got `{ kind: "blocked" }`;
+- `sendSignInInvitation` and the open-row count: not reached by the old code as a fix (the send itself would work; the card offered no button).
+
+Full output kept in the scratchpad (`red.txt`). **After the fix**: the same test passes (`community-engagement.db.test.ts`: 45 passed, serial, against the pipeline branch).
+
+The e2e test 14 was run only with the fix (52 passed with its neighbours); it was not run red on the unmodified tree, because that needs a second server on unmodified source. The DB regression test is the red-first evidence.
+
+## Files Modified
+
+- `src/lib/onboarding/org-invite.ts`: `revokeInTx` (shared inner revoke: definer, `cancelQueuedEmail`, `invitation.revoked` audit row with `via`), exported `revokeOpenSignInInvitationInTx(tx, ctx, personId, "archive"): Promise<boolean>`, `revokeSignInInvitation` refactored onto `revokeInTx` with `via: "single"` (results unchanged), and `reinterpretEndedBlocks`, called at the end of `readStates` (one extra query on `memberships ... ended_on is null`, only when a `blocked`/`membership_ended` row is present, rewriting it to the `none` shape).
+- `src/lib/community-engagement.ts`: `ArchiveSideEffects`; `archivePerson` takes it as a required fifth parameter, calls it after the membership update and before the audit insert; `invitationRevoked` in the result and in the `tenant.person.archived` metadata. No import of `org-invite.ts`.
+- `src/app/(org)/o/[slug]/admin/community/actions.ts`: `archivePersonAction` builds the side effect from the session's actor and the resolved organization.
+- `.../engagement-copy.ts`: C1.
+- `src/lib/audit.ts`: comments only (`invitationRevoked`, `via: 'archive'`).
+- `src/content/help/adding-people.md` (H1, H2), `src/content/help/sign-in-invitations.md` (H3). `verifiedIn` not moved.
+- Tests: `src/lib/community-engagement.db.test.ts`, `src/lib/community-engagement.test.ts`, `src/lib/onboarding/org-invite.test.ts`, `src/lib/onboarding/org-invite.db.test.ts`, `.../community/actions.test.ts`, `.../community/engagement-copy.test.ts`, `.../community/community-row-actions.test.tsx`, `.../[id]/edit/page.test.tsx` (the four pinned C1 strings), `e2e/community-engagement.spec.ts` (test 14).
+
+## Schema Changes
+
+None. No migration, no definer change, no new env var or `FEATURES` entry, no new audit key (`invitation.revoked` gains the metadata value `via: "archive"`).
+
+## Audit Events
+
+`invitation.revoked` (`via: "archive"`, actor the archiving administrator, same transaction); `tenant.person.archived` gains `invitationRevoked`.
+
+## Tests added
+
+- Unit `community-engagement.test.ts`: revoke called once with the tx and person id, order update, revoke, audit; `invitationRevoked` true/false in result and audit; never called on forbidden, not_found (both forms), self_target, already_ended, not_eligible (both forms), pending_action, holds_position; a revoke throw rejects and writes no audit; an audit throw after a revoke rejects.
+- Unit `org-invite.test.ts`: `revokeOpenSignInInvitationInTx` ok / no queued email / not_open / unknown outcome / no row / 42501 / audit throw / invalid context; the reader backstop through the card, markers and Session rows (live membership reads none, ended stays blocked, merged/deceased/support stay blocked, no extra query when nothing is `membership_ended`, one query for many rows, scoped to the organization).
+- Unit `actions.test.ts`: the side effect is bound to the session actor and resolved org, never to input.
+- DB `community-engagement.db.test.ts` (F417 describe, 12 tests): the regression; archive with an open invitation (row revoked by the actor, `invitation.revoked` via archive, `invitationRevoked: true`); no open row (false, no revoked row); expired-but-open revoked while another person's open, an accepted and another organization's row are untouched; queued email cancelled and body scrubbed; rollback on a forced throw from the archive's own audit row after the revoke's row was written (invitation still open, membership live, link still previews); rollback on a revoke throw; race, both orders (below); backstop (b) with no revoke (archive marker, Accept blocks, Restore, card `none`, send succeeds, old row still terminal; a still-ended membership stays blocked; a merged person stays blocked). `NO_INVITATION` (a revoke that finds nothing) added to the existing archive calls in that file, whose viewer has no linked account.
+- DB `org-invite.db.test.ts` (3 tests): `revokeOpenSignInInvitationInTx` in a real transaction (revoke, cancel, scrub, audit via archive, second call false and writes nothing), another person's row untouched and `revokeSignInInvitation` still audits via `single`, an actor without `people.manage` refused by the definer.
+- Race, both orders (held organization-row lock on the owner connection, calls queued in a known order): the acceptance first gives `accepted`, then the archive finds nothing open (`invitationRevoked: false`); the archive first gives revoked and the acceptance `dead`, never `blocked`. The design's "unverified under real concurrency" item is now run; these pin the observable result of the lock order, not a free-running interleaving.
+- e2e `community-engagement.spec.ts` test 14 (both viewports, 360px included): C1 in the dialog, `expectDialogFits`, `noHorizontalOverflow`, confirm; invitation row revoked and not blocked; `invitation.revoked` (via archive, actor the sender) and `tenant.person.archived` (`invitationRevoked: true`); the person's own session at `/no-organization` shows no "Accept the invitation" button and `/invite?token=...` is the dead-link page; Restore, then the Sign in card reads "Invite {name} to sign in." with "Send invitation" and neither "couldn't be completed" nor "has ended".
+
+## Gates
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | pass |
+| `npm run lint` | pass, 0 warnings |
+| `npm run check` | all ten tripwires pass (audit, sql-date, deps-drift, brand-scope, secrets, hydration-gate, giving-boundaries, treasury-boundaries, proxy-imports, help) |
+| `npm test` (no DB env) | 833 files passed, 140 skipped; 13247 tests passed, 3786 skipped (the DB-backed suites skip without `.env.local`); `onboarding/boundaries.test.ts` unchanged and green |
+| DB, serial, pipeline branch | `community-engagement.db.test.ts` 45 passed; `onboarding/org-invite.db.test.ts` 31 passed; neighbours `membership-standing.db`, `community.db`, `sign-in-invitations.db`, `sign-in-accept.db`: 172 passed |
+| e2e, own server on 3580, flags reset first | `community-engagement.spec.ts` (28 incl. new 14 at both widths), `community-sign-in-invite.spec.ts` (20), `hydration/community-engagement-controls.spec.ts`: 52 passed |
+| 360px archive dialog, light and dark | a 53-character unbroken surname aside, the dialog fits (x 16, width 328, no page overflow, buttons inside); the new sentence wraps like the line it extends; screenshots read in both schemes |
+
+`npm run build` was not run (not in the requested gates).
+
+## Departures and findings
+
+1. **The design's regression step 6 and marker assertion were adjusted to the code.** The design said the card is `none` and the marker `not_connected` after archive-revoke then Restore. A revoked row reads `revoked` (the design's own Carry-forward says so) and the card then renders the "Invite..." text with "Send invitation"; a plain visitor with no inert authority has no marker at all (`deriveSignInMarker`). The test asserts `state: "revoked"`, `blockedOutcome: null`, no marker, a successful send and one open row. `none` is asserted where it applies, in the (b) backstop tests.
+2. **The participant-removal path was simulated, not driven through `presby_void_roll_action`.** The (b) test ends the membership with `other_participant_removed` on the owner path, presses Accept (blocked), then reopens it by owner SQL. The reader looks only at `ended_on`, so it exercises the same branch, but the real void function was not run: report as unverified through the real void. The Session-rows backstop is covered by the unit test only (an open Session seat prevents ending the membership, so the DB state is unreachable).
+3. Regression assertions use `expect.soft` so the red run lists every step; this stays in the committed test.
+4. `issue.ts:893` (`via` union) untouched, as the design predicted.
+5. **Pre-existing, not caused or fixed here:** with a 53-character unbroken surname at 360px the archive dialog's title, first body line, the new line and its buttons clip at the right edge (the title and the unchanged "will leave the ... list" line clip the same way). Page overflow stays 0. Suggest a TODO line for the orchestrator (long unbroken names in the Archive/Restore dialogs).
+6. **Confirmed from a browser** (it was "read from the code" in the design): the archived record's Sign in card reads "Invite {name} to sign in..." with "Send invitation" and the "When {name} signs in..." line; a send there is refused with the existing sentence. Not changed (Out of Scope 3). Screenshots in the scratchpad (`f417shots/`).
+7. DECISION-315 text is in this log's Phase 3; not added to `docs/decisions.md` (Rule 16).
+
+Strings changed: `engagement-copy.ts:299` (C1); `engagement-copy.test.ts:292,305`, `community-row-actions.test.tsx:175`, `.../[id]/edit/page.test.tsx:1085`; help `adding-people.md` (H1, H2), `sign-in-invitations.md` (H3). `check:help` passes.
+
+## For QA
+
+1. Re-run the regression test on a copy of the pre-fix tree (`git show 054b3ebd:...` sources) to see the eight soft failures; then on the fix.
+2. `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism src/lib/community-engagement.db.test.ts src/lib/onboarding/org-invite.db.test.ts` (the race tests count `Lock` waiters in `pg_stat_activity`: run on the pipeline branch with nothing else active).
+3. e2e from a scratch copy outside the platform folder, `E2E_BASE_URL` on a port of your own: `community-engagement.spec.ts` (test 14), `community-sign-in-invite.spec.ts`, the hydration spec. The dev server also needs `CRON_SECRET`, the three `DOMAINS_*` fakes and `E2E_ALLOW_SHARED_DB=true`.
+4. Copy-truthfulness at 360px: C1 in the dialog, the archived record, the restored record, the dead-link page for the archived person's link, against H1-H3.
+5. Items not run: the real participant-removal void (departure 2); a revoke that raises 42501 mid-request end to end (unit-pinned only); e2e test 14 on the pre-fix tree.
+6. `boundaries.test.ts` (2b B2) green unchanged; `archivePerson` is still gated by session, `people.manage` and the Community flag; no route, action or `getPlatformDb()` added.
+7. Phase 6: re-walk D1 on the record and the list; the Archive dialog's long-name clipping (departure 5) is pre-existing.

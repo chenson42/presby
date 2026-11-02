@@ -38,7 +38,11 @@
  *       their fields, an audit row that never carries the text;
  *   11. Archive and Restore on the person's own record;
  *   12. the wizard's archived match: "Restore" there, then the restored record;
- *   13. the viewer's own Inactive row and own record offer no Archive (F-3).
+ *   13. the viewer's own Inactive row and own record offer no Archive (F-3);
+ *   14. Archive revokes an open sign-in invitation (F417, the Increment 3a live
+ *       walk D1): the dialog line, the person's own link and Accept button are
+ *       dead, the audit rows, and Restore leaves the Sign in card on "Send
+ *       invitation" instead of a permanent "has ended".
  *
  * FLAGS. `org_portal.members_create` (global) is captured, set and restored; the
  * congregation's own members_create and sign_in_connect toggles are written by
@@ -59,7 +63,9 @@ import {
   grantCustomRole,
   linkUser,
   noHorizontalOverflow,
+  invitationsAt,
   removeSignInOrg,
+  seedSignInInvitation,
   setOrgToggle,
   signInAs,
   VIEWPORTS,
@@ -67,6 +73,7 @@ import {
   type FixtureSender,
 } from "./support/sign-in-invite-fixture";
 import { setupInviteOrg, type InviteOrg } from "./support/invitation-fixture";
+import { deadHeading } from "./support/invitation-ui";
 
 // The dev server compiles each route on first touch: give assertions room.
 const expect = baseExpect.configure({ timeout: 30_000 });
@@ -728,6 +735,67 @@ test.describe("Community engagement, archive and restore (Increment 3a)", () => 
         await expect(page.getByRole("button", { name: `Archive ${other.name}`, exact: true })).toBeVisible();
         await noHorizontalOverflow(page);
         expect((await membershipOf(sql, org!, sender.personId)).ended_on, "nothing was archived").toBeNull();
+      });
+
+      // -----------------------------------------------------------------
+      test("14. Archive revokes an open sign-in invitation: the dialog says so, the person's link and Accept button are dead, and Restore leaves the card on Send invitation — regression for F417 (archive left it open and Accept blocked it for good)", async ({ page, browser }) => {
+        const o = org!;
+        const account = await addAccount(sql, o, "wren", { name: "Wren Alder" });
+        const person = await addPerson(sql, o, { first: "Wren", last: "Alder", engagement: "visitor", email: account.email });
+        const seeded = await seedSignInInvitation(sql, o, { personId: person.personId, address: account.email, createdByUserId: sender.user.id });
+        await signIn(page);
+        await openRecord(page, person);
+        const signInCard = page.getByTestId("sign-in-card");
+        await expect(signInCard).toContainText(`Invitation sent to ${account.email}`, { timeout: 45_000 });
+
+        // The dialog's promise, in full, at this width.
+        await page.getByRole("button", { name: `Archive ${person.name}`, exact: true }).click();
+        await expect(dialog(page).getByRole("heading", { name: `Archive ${person.name}?` })).toBeVisible();
+        await expect(dialog(page)).toContainText(
+          `An invitation to ${person.name} is still open. It will stop working, and restoring them will not turn it back on.`,
+        );
+        await expectDialogFits(page);
+        await noHorizontalOverflow(page);
+        await dialog(page).getByRole("button", { name: "Archive", exact: true }).click();
+        await expect(page.getByText(`${person.name} is archived. You can restore them from Former.`)).toBeVisible();
+
+        // The invitation is revoked (never blocked), and both audit rows say so.
+        const [inv] = await invitationsAt(sql, o);
+        expect(inv).toMatchObject({ id: seeded.id, accepted_at: null, blocked_at: null });
+        expect(inv!.revoked_at, "the archive revoked the open invitation").not.toBeNull();
+        const revoked = await auditFor(sql, "invitation.revoked", seeded.id);
+        expect(revoked).toHaveLength(1);
+        expect(revoked[0]!.actor_user_id).toBe(sender.user.id);
+        expect(revoked[0]!.metadata).toMatchObject({ via: "archive", purpose: "sign_in", personId: person.personId, organizationId: o.orgId });
+        const archivedAudit = await auditFor(sql, "tenant.person.archived", person.personId);
+        expect(archivedAudit).toHaveLength(1);
+        expect(archivedAudit[0]!.metadata).toMatchObject({ invitationRevoked: true });
+
+        // The archived person: no Accept button, and the emailed link is the one dead-link page.
+        const device = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+        try {
+          const personPage = await device.newPage();
+          await signInAs(personPage, account, /\/no-organization/);
+          await expect(personPage.getByRole("button", { name: "Accept the invitation" })).toHaveCount(0);
+          await personPage.goto(`/invite?token=${seeded.token}`);
+          await expect(deadHeading(personPage)).toBeVisible({ timeout: 30_000 });
+          await noHorizontalOverflow(personPage);
+        } finally {
+          await device.close();
+        }
+        expect((await invitationsAt(sql, o))[0]!.blocked_at, "nothing blocked the row").toBeNull();
+
+        // Restore: the card offers a new invitation; no "has ended" line, no dead end.
+        await page.getByRole("button", { name: `Restore ${person.name}`, exact: true }).click();
+        await dialog(page).getByRole("button", { name: "Restore", exact: true }).click();
+        await expect(page.getByText(`${person.name} is back on the Visitors list.`)).toBeVisible();
+        await openRecord(page, person);
+        await expect(signInCard).toContainText(`Invite ${person.name} to sign in.`, { timeout: 45_000 });
+        await expect(signInCard).not.toContainText("couldn't be completed");
+        await expect(signInCard).not.toContainText("has ended");
+        await expect(signInCard.getByRole("button", { name: "Send invitation", exact: true })).toBeVisible();
+        await noHorizontalOverflow(page);
+        expect((await invitationsAt(sql, o))[0]!.revoked_at, "Restore does not reopen it").not.toBeNull();
       });
     });
   }

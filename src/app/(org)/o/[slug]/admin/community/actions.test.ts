@@ -31,6 +31,11 @@ vi.mock("@/lib/community-engagement", () => ({
   updateVisitDetails: (...args: unknown[]) => mockVisit(...args),
 }));
 
+const mockRevokeInTx = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/onboarding/org-invite", () => ({
+  revokeOpenSignInInvitationInTx: (...args: unknown[]) => mockRevokeInTx(...args),
+}));
+
 const mockRevalidatePath = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => mockRevalidatePath(...args),
@@ -88,7 +93,7 @@ beforeEach(() => {
   mockAuth.mockResolvedValue(SESSION);
   mockResolveOrgContext.mockResolvedValue(RESOLVED_OK);
   mockChange.mockResolvedValue({ kind: "ok", from: "visitor", to: "regular", standingFrom: "visitor", standingTo: "listed", signInConnected: false });
-  mockArchive.mockResolvedValue({ kind: "ok", engagement: "visitor", signInConnected: false });
+  mockArchive.mockResolvedValue({ kind: "ok", engagement: "visitor", signInConnected: false, invitationRevoked: false });
   mockRestore.mockResolvedValue({ kind: "ok", engagement: "visitor", signInConnected: false });
   mockVisit.mockResolvedValue({ kind: "ok" });
 });
@@ -192,6 +197,24 @@ describe("forged input (EC-9)", () => {
       expect(mock.mock.calls[0]![1]).toBe("org-1");
       expect(mock.mock.calls[0]![3]).toEqual(ACTOR);
     }
+  });
+
+  it("archivePersonAction hands the library a revoke bound to the session's acting user and the resolved organization, never to the input (F417)", async () => {
+    const forged = { personId: PERSON, userId: "evil", actor: { userId: "evil" }, organizationId: "org-evil" };
+    await archivePersonAction(SLUG, forged as never);
+    const sideEffects = mockArchive.mock.calls[0]![4] as {
+      revokeOpenSignInInvitation: (tx: unknown, personId: string) => Promise<unknown>;
+    };
+    mockRevokeInTx.mockResolvedValue(true);
+    const tx = { marker: "the archive's own transaction" };
+    expect(await sideEffects.revokeOpenSignInInvitation(tx, PERSON)).toBe(true);
+    expect(mockRevokeInTx).toHaveBeenCalledTimes(1);
+    expect(mockRevokeInTx).toHaveBeenCalledWith(
+      tx,
+      { organizationId: "org-1", actingPersonId: "person-1", actingUserId: "user-1", actingUserEmail: "clerk@example.invalid" },
+      PERSON,
+      "archive",
+    );
   });
 
   it("the optional stale-guard is passed only when it is one of the five stored values", async () => {

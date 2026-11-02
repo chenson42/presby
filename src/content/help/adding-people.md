@@ -56,11 +56,11 @@ When a change would add someone to the directory or take them out, a dialog asks
 
 ## Archiving a visitor, and restoring
 
-A visitor, or a person marked inactive or moved away, can be archived with "Archive", from their row or their record. The dialog says they will leave the list and appear under "Former", that their record is kept, and that you can restore it any time. It adds a line if they have a sign-in connected, and another if an invitation to them is still open.
+A visitor, or a person marked inactive or moved away, can be archived with "Archive", from their row or their record. The dialog says they will leave the list and appear under "Former", that their record is kept, and that you can restore it any time. It adds a line if they have a sign-in connected, and another if an invitation to them is still open. Archiving cancels that invitation.
 
 Someone who still holds an office, a role or a staff position cannot be archived: end that first. A member on the roll leaves through a roll action, and a participant is removed as a participant. You cannot archive your own record.
 
-To bring someone back, open "Former" and choose "Restore", or choose "Restore" on their record. A dialog asks first, with "Restore" and "Keep archived". When you add a person who was archived, the match step says so and offers the same button.
+To bring someone back, open "Former" and choose "Restore", or choose "Restore" on their record. A dialog asks first, with "Restore" and "Keep archived". When you add a person who was archived, the match step says so and offers the same button. Restoring does not bring back an invitation that was open when they were archived. Open their record and choose "Send invitation" to send a new one.
 
 ## Correcting a visit
 

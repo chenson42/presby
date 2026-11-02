@@ -11,6 +11,7 @@ import {
   type EngagementActor,
 } from "@/lib/community-engagement";
 import { isUuid } from "@/lib/is-uuid";
+import { revokeOpenSignInInvitationInTx } from "@/lib/onboarding/org-invite";
 import {
   isEditableEngagement,
   isEngagement,
@@ -164,7 +165,9 @@ export async function changeEngagementAction(
  * in, a member of this organization, `people.manage`. A member on the roll, a
  * participant, a staff anchor, the viewer's own record, a person holding an
  * office, a role or a staff position, and a person with a pending roll action
- * are each refused with their own sentence.
+ * are each refused with their own sentence. An open sign-in invitation to the
+ * person is revoked in the archive's own transaction (F417, DECISION-315); the
+ * acting user comes from the session, never from the input.
  */
 export async function archivePersonAction(
   slug: string,
@@ -181,7 +184,20 @@ export async function archivePersonAction(
 
   let result: Awaited<ReturnType<typeof archivePerson>>;
   try {
-    result = await archivePerson(g.viewerPersonId, g.organizationId, { personId }, g.actor);
+    result = await archivePerson(g.viewerPersonId, g.organizationId, { personId }, g.actor, {
+      revokeOpenSignInInvitation: (tx, id) =>
+        revokeOpenSignInInvitationInTx(
+          tx,
+          {
+            organizationId: g.organizationId,
+            actingPersonId: g.viewerPersonId,
+            actingUserId: g.actor.userId,
+            actingUserEmail: g.actor.email ?? null,
+          },
+          id,
+          "archive",
+        ),
+    });
   } catch (err) {
     return failure("archivePersonAction", err, ARCHIVE_COPY.db_error);
   }

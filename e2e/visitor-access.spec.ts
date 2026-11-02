@@ -20,8 +20,15 @@
  * goes with the congregation; no person-id range is claimed and nothing under
  * `e2e/support/*` changes (Workflow Rule 16).
  *
- * FLAGS. `org_portal.events` and `org_portal.directory` (global) are captured, set
- * and restored; the congregation's own `org_portal.calendar` toggle is written by
+ * MEMBERS-ONLY EVENTS (DECISION-316, F418; docs/work-log/2026-11-02-members-only-
+ * events.md, E1-E3). The congregation also gets three events (public, members-only,
+ * cancelled; inline SQL, the cascade delete on the congregation removes them). A
+ * visitor sees the public one on the calendar and in "Coming up" and never the
+ * members-only one, and a direct link to it answers exactly as a random id does;
+ * the regular member sees both.
+ *
+ * FLAGS. `org_portal.events`, `org_portal.directory` and `org_portal.home_v2` (the
+ * "Coming up" card) (global) are captured, set and restored; the congregation's own `org_portal.calendar` toggle is written by
  * SQL on the throwaway congregation. No key is added to `e2e-baseline-flags.sql`.
  */
 import { test, expect as baseExpect, type Page } from "@playwright/test";
@@ -45,7 +52,43 @@ const expect = baseExpect.configure({ timeout: 30_000 });
 
 const EVENTS_FLAG = "org_portal.events";
 const DIRECTORY_FLAG = "org_portal.directory";
+const HOME_FLAG = "org_portal.home_v2";
 const CALENDAR_TOGGLE = "org_portal.calendar";
+
+const TITLE_PUBLIC = "E2E Visitor Public Event";
+const TITLE_MEMBERS_ONLY = "E2E Members Only Gathering";
+const TITLE_CANCELLED = "E2E Cancelled Gathering";
+const RANDOM_EVENT_ID = "00000000-0000-4000-8000-00000000e2e1";
+
+interface WorldEvents {
+  /** 'YYYY-MM' of the events (the org's zone; the default zone is New York). */
+  month: string;
+  membersOnlyId: string;
+}
+
+/** The title as rendered once (the month grid and the list are both in the DOM; one is hidden by CSS at each width). */
+const shown = (page: Page, title: string) => page.getByText(title).locator("visible=true").first();
+
+/** Three events tomorrow in the congregation's zone: public, members-only, cancelled. */
+async function addEvents(sql: Sql, org: InviteOrg): Promise<WorldEvents> {
+  const rows = (await sql`
+    with day as (
+      select date_trunc('day', now() at time zone 'America/New_York') + interval '1 day' as d
+    ), ins as (
+      insert into events (organization_id, title, starts_at, is_public, cancelled_at)
+      select ${org.orgId}::uuid, v.title, day.d + v.at_, v.is_public, case when v.cancelled then now() end
+        from day, (values
+          (${TITLE_PUBLIC}, interval '10 hours', true, false),
+          (${TITLE_MEMBERS_ONLY}, interval '11 hours', false, false),
+          (${TITLE_CANCELLED}, interval '12 hours', true, true)
+        ) as v(title, at_, is_public, cancelled)
+      returning id, title
+    )
+    select to_char((select d from day), 'YYYY-MM') as month,
+           (select id::text from ins where title = ${TITLE_MEMBERS_ONLY}) as members_only_id
+  `) as { month: string; members_only_id: string }[];
+  return { month: rows[0].month, membersOnlyId: rows[0].members_only_id };
+}
 
 /** The `calendar_viewer` baseline: `events.view`, bound to the derived All Current Records group (as `createOrganization` seeds it). */
 async function addCalendarViewerRole(sql: Sql, org: InviteOrg): Promise<void> {
@@ -72,8 +115,8 @@ test.describe("A visitor's access (Increment 3a)", () => {
 
   test.beforeAll(async () => {
     sql = platformSql("visitor-access.spec");
-    flags = await captureFlags(sql, [EVENTS_FLAG, DIRECTORY_FLAG]);
-    for (const key of [EVENTS_FLAG, DIRECTORY_FLAG]) await setFlag(sql, key, true);
+    flags = await captureFlags(sql, [EVENTS_FLAG, DIRECTORY_FLAG, HOME_FLAG]);
+    for (const key of [EVENTS_FLAG, DIRECTORY_FLAG, HOME_FLAG]) await setFlag(sql, key, true);
   });
 
   test.afterAll(async () => {
@@ -87,6 +130,7 @@ test.describe("A visitor's access (Increment 3a)", () => {
       let org: InviteOrg | undefined;
       let visitor: FixtureAccount;
       let member: FixtureAccount;
+      let world: WorldEvents;
 
       test.beforeEach(async () => {
         org = await setupInviteOrg(sql);
@@ -99,6 +143,7 @@ test.describe("A visitor's access (Increment 3a)", () => {
         member = await addAccount(sql, org, "member");
         const memberPerson = await addMember(sql, org, { first: "Wendeline", last: "Ashgrove", email: member.email });
         await linkUser(sql, memberPerson.personId, member.id);
+        world = await addEvents(sql, org);
       });
 
       test.afterEach(async () => {
@@ -143,6 +188,61 @@ test.describe("A visitor's access (Increment 3a)", () => {
         // The member is listed, so the directory shows them (and never the visitor).
         await expect(page.getByText("Ashgrove").first()).toBeVisible();
         await expect(page.getByText("Quillon")).toHaveCount(0);
+      });
+
+      test("E1: a visitor's calendar and \"Coming up\" card show the public event and never the members-only one", async ({ page }) => {
+        const o = org!;
+        await signInAs(page, visitor, new RegExp(`/o/${o.slug}`));
+
+        await page.goto(`/o/${o.slug}/calendar?month=${world.month}&view=list`);
+        await expect(page.getByRole("heading", { level: 1, name: "Calendar" })).toBeVisible();
+        await expect(shown(page, TITLE_PUBLIC)).toBeVisible();
+        expect(await page.content()).not.toContain(TITLE_MEMBERS_ONLY);
+        expect(await page.content()).not.toContain(TITLE_CANCELLED);
+        await noHorizontalOverflow(page);
+
+        await page.goto(`/o/${o.slug}`);
+        await expect(page.getByRole("heading", { level: 2, name: "Coming up" })).toBeVisible();
+        await expect(shown(page, TITLE_PUBLIC)).toBeVisible();
+        expect(await page.content()).not.toContain(TITLE_MEMBERS_ONLY);
+        await noHorizontalOverflow(page);
+      });
+
+      test("E2: the regular member sees both the public and the members-only event (the control)", async ({ page }) => {
+        const o = org!;
+        await signInAs(page, member, new RegExp(`/o/${o.slug}`));
+
+        await page.goto(`/o/${o.slug}/calendar?month=${world.month}&view=list`);
+        await expect(shown(page, TITLE_PUBLIC)).toBeVisible();
+        await expect(shown(page, TITLE_MEMBERS_ONLY)).toBeVisible();
+        expect(await page.content()).not.toContain(TITLE_CANCELLED);
+
+        await page.goto(`/o/${o.slug}`);
+        await expect(shown(page, TITLE_MEMBERS_ONLY)).toBeVisible();
+        await noHorizontalOverflow(page);
+      });
+
+      test("E3: a visitor's direct link to a members-only event answers exactly as a random id does; the member opens it", async ({ page }) => {
+        const o = org!;
+        await signInAs(page, visitor, new RegExp(`/o/${o.slug}`));
+
+        const hidden = await page.goto(`/o/${o.slug}/calendar/${world.membersOnlyId}`);
+        const hiddenHeading = await page.getByRole("heading", { level: 1 }).innerText();
+        const hiddenBody = await page.content();
+        expect(hidden?.status()).toBe(404);
+        expect(hiddenHeading).toBe("We couldn't find that event");
+        expect(hiddenBody).not.toContain(TITLE_MEMBERS_ONLY);
+        await noHorizontalOverflow(page);
+
+        const missing = await page.goto(`/o/${o.slug}/calendar/${RANDOM_EVENT_ID}`);
+        expect(missing?.status()).toBe(hidden?.status());
+        expect(await page.getByRole("heading", { level: 1 }).innerText()).toBe(hiddenHeading);
+
+        await page.context().clearCookies();
+        await signInAs(page, member, new RegExp(`/o/${o.slug}`));
+        const visible = await page.goto(`/o/${o.slug}/calendar/${world.membersOnlyId}`);
+        expect(visible?.status()).toBe(200);
+        await expect(page.getByRole("heading", { level: 1, name: TITLE_MEMBERS_ONLY })).toBeVisible();
       });
     });
   }

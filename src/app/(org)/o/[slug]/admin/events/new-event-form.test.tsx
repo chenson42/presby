@@ -219,7 +219,7 @@ describe("NewEventForm — the event type picker", () => {
     expect(screen.getByLabelText("Open to everyone, not only members")).toBeTruthy();
     expect(
       screen.getByText(
-        "If unchecked, the event shows only on the member calendar, for members of Alder Creek Presbyterian Church who have calendar access. It also stays out of Copy month and cannot be shown on the website.",
+        "If unchecked, visitors to Alder Creek Presbyterian Church do not see the event on the calendar. Members, staff and everyone else who can see the calendar still do. It also stays out of Copy month and cannot be shown on the website.",
       ),
     ).toBeTruthy();
     // The old, false wording is gone.

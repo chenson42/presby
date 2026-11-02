@@ -11,7 +11,11 @@
  *     congregation's public events calendar being turned on and on a website page
  *     carrying the calendar, neither of which an event row can know.
  *   - "Open to everyone" is `is_public`. It is the veto: a members-only event
- *     cannot go on the website (database CHECK plus a read-time filter).
+ *     cannot go on the website (database CHECK plus a read-time filter). On the
+ *     member calendar it is hidden from a VISITOR only (standing `visitor`,
+ *     DECISION-316; operator ruling 2026-11-02): members, staff, people marked
+ *     Inactive or Moved away and event managers still see it, so the hint says
+ *     "visitors" and never "only members".
  *   - Free text goes out verbatim and search engines and web archives keep
  *     copies; the hint says so rather than implying a take-down recalls them.
  * Pure: no `server-only`, safe in a client component and a unit test.
@@ -32,7 +36,7 @@ export const OPEN_TO_EVERYONE_LABEL = "Open to everyone, not only members";
 
 /** E4 hint */
 export function openToEveryoneHint(orgName: string): string {
-  return `If unchecked, the event shows only on the member calendar, for members of ${orgName} who have calendar access. It also stays out of Copy month and cannot be shown on the website.`;
+  return `If unchecked, visitors to ${orgName} do not see the event on the calendar. Members, staff and everyone else who can see the calendar still do. It also stays out of Copy month and cannot be shown on the website.`;
 }
 
 /** E9 (edit form, a series occurrence only) */

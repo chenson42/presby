@@ -57,10 +57,14 @@ import { todayInOrgZone } from "@/lib/shared/org-time";
  * `new Date()` is permitted at most once per export, as the default for the
  * injectable `now`, and it only ever reaches `todayInOrgZone`.
  *
- * VISIBILITY (operator ruling 4): cancelled rows are excluded; `is_public` is
- * NOT a member filter (it means "open to everyone" vs. "members only", and
- * every active member sees both; being on the PUBLIC website is the separate
- * `website_listed`, read only by the anonymous presby_public_events_calendar()). Nothing admin-only is ever selected:
+ * VISIBILITY (operator ruling 4, amended by DECISION-316 / F418): cancelled rows
+ * are excluded for everyone. `is_public = false` ("members only") events are
+ * hidden from a viewer whose standing here is `visitor` (the 0066 classifier,
+ * `presby_membership_standing`), unless they hold `events.manage`; members,
+ * staff, Inactive, Moved away and unclassified viewers still see them. A direct
+ * link to a hidden event answers as a missing one. Being on the PUBLIC website
+ * is the separate `website_listed`, read only by the anonymous
+ * presby_public_events_calendar(). Nothing admin-only is ever selected:
  * `allows_checkin`, `created_by`, `recurrence_count`, `recurrence_pattern`,
  * `parent_event_id` (as such), `created_at`, `updated_at`.
  *
@@ -183,8 +187,20 @@ const MEMBER_FROM = sql`
    and t.organization_id = e.organization_id
 `;
 
-/** Operator ruling 4: cancelled events are hidden. is_public is NOT a member filter. */
-const MEMBER_VISIBLE = sql`e.cancelled_at is null`;
+/**
+ * The private visibility predicate every member-side read of `events` shares
+ * (docs/work-log/2026-11-02-members-only-events.md, DECISION-316, F418).
+ * Cancelled events are hidden from everyone. A members-only event
+ * (`is_public = false`) is hidden from a viewer whose standing at this
+ * congregation is `visitor` and who does not hold `events.manage`; the
+ * gate computes `seesMembersOnly`. The argument is REQUIRED so a query that
+ * forgets the rule does not compile.
+ */
+function memberVisible(seesMembersOnly: boolean): SQL {
+  return seesMembersOnly
+    ? sql`e.cancelled_at is null`
+    : sql`e.cancelled_at is null and e.is_public`;
+}
 
 /** Text times, never a Date (check:sql-date, the wall-clock invariant). */
 const STARTS_AT_WC = sql<string>`to_char(e.starts_at, 'YYYY-MM-DD"T"HH24:MI') as starts_at_wc`;
@@ -202,11 +218,12 @@ const TYPE_COLUMNS = sql`
 type GateOutcome =
   | { kind: "disabled" }
   | { kind: "forbidden" }
-  | { kind: "open"; canManage: boolean };
+  | { kind: "open"; canManage: boolean; seesMembersOnly: boolean };
 
 /**
  * Steps (1) and (2) of the fixed order: toggle, then the permission gate.
- * `events.view OR events.manage` is ONE statement with both resolver calls.
+ * `events.view OR events.manage` is ONE statement with both resolver calls,
+ * and the same statement reads the viewer's standing (`seesMembersOnly`).
  */
 async function openMemberGate(
   tx: OrgTx,
@@ -231,18 +248,34 @@ async function openMemberGate(
            ) as can_view,
            presby_has_permission(
              ${personId}::uuid, ${organizationId}::uuid, ${EVENTS_MANAGE}
-           ) as can_manage
+           ) as can_manage,
+           exists (
+             select 1 from memberships m
+              where m.organization_id = ${organizationId}::uuid
+                and m.person_id = ${personId}::uuid
+                and m.ended_on is null
+                and presby_membership_standing(m.current_roll, m.engagement_status)
+                    <> 'visitor'
+           ) as has_non_visitor_standing
   `);
   const row = (
     result as unknown as {
-      rows?: Array<{ can_view?: boolean; can_manage?: boolean }>;
+      rows?: Array<{
+        can_view?: boolean;
+        can_manage?: boolean;
+        has_non_visitor_standing?: boolean;
+      }>;
     }
   ).rows?.[0];
   const canManage = row?.can_manage === true;
   if (row?.can_view !== true && !canManage) {
     return { kind: "forbidden" };
   }
-  return { kind: "open", canManage };
+  // Fail closed: a missing row, a null or a classifier error hides members-only
+  // events. A manager always sees what they manage.
+  const seesMembersOnly =
+    canManage || row?.has_non_visitor_standing === true;
+  return { kind: "open", canManage, seesMembersOnly };
 }
 
 function rowsOf<T>(result: unknown): T[] {
@@ -349,7 +382,7 @@ export async function getMonthCalendar(
                ${TYPE_COLUMNS}
           ${MEMBER_FROM}
          where e.organization_id = ${organizationId}::uuid
-           and ${MEMBER_VISIBLE}
+           and ${memberVisible(gate.seesMembersOnly)}
            and e.starts_at >= ${grid.firstKey}::timestamp
            and e.starts_at < ${grid.dayAfterLastKey}::timestamp
            ${typeFilter}
@@ -384,7 +417,7 @@ export async function getMonthCalendar(
           select count(*)::int as n
             from events e
            where e.organization_id = ${organizationId}::uuid
-             and ${MEMBER_VISIBLE}
+             and ${memberVisible(gate.seesMembersOnly)}
              and e.starts_at >= ${monthStart}::timestamp
              and e.starts_at < ${monthEndExclusive}::timestamp
         `),
@@ -400,7 +433,7 @@ export async function getMonthCalendar(
           select exists (
             select 1 from events e
              where e.organization_id = ${organizationId}::uuid
-               and ${MEMBER_VISIBLE}
+               and ${memberVisible(gate.seesMembersOnly)}
           ) as has
         `),
       );
@@ -479,7 +512,7 @@ export async function getMemberEvent(
           ${MEMBER_FROM}
          where e.id = ${eventId}::uuid
            and e.organization_id = ${organizationId}::uuid
-           and ${MEMBER_VISIBLE}
+           and ${memberVisible(gate.seesMembersOnly)}
          limit 1
       `),
     );
@@ -527,7 +560,7 @@ interface UpcomingRow extends TypeColumns {
  * The card needs no permission or toggle check of its own: it switches on
  * `kind` and renders nothing for `disabled` and `forbidden`. The set is a
  * subset of the calendar's default set by construction — same gate, same
- * `MEMBER_FROM`, same `MEMBER_VISIBLE`.
+ * `MEMBER_FROM`, same `memberVisible()`.
  */
 export async function listUpcomingMemberEvents(
   viewerPersonId: string,
@@ -561,7 +594,7 @@ export async function listUpcomingMemberEvents(
                  ${TYPE_COLUMNS}
             ${MEMBER_FROM}
            where e.organization_id = ${organizationId}::uuid
-             and ${MEMBER_VISIBLE}
+             and ${memberVisible(gate.seesMembersOnly)}
              and e.starts_at >= ${todayKey}::timestamp
            order by coalesce(e.parent_event_id, e.id), e.starts_at, e.id
         ) s

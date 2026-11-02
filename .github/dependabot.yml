@@ -15,6 +15,10 @@ updates:
     # dependencies review rather than auto-PRing breaking bumps.
     ignore:
       - dependency-name: "next-auth"
+      # Held at 7.86.0: 7.90+ changes pre-hydration behaviour that DECISION-159
+      # (HydrationGate) rests on. Lift only after the ruling in docs/TODO.md
+      # ("react-hook-form 7.91 ruling").
+      - dependency-name: "react-hook-form"
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 

@@ -4,6 +4,14 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-315 — Archive revokes an open sign-in invitation; the reader never reports a stored `membership_ended` block over a live membership.**
+
+**Status:** Resolved (tech-lead, Phase 3; QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-11-02 · **Feature:** `2026-11-02-archive-revokes-invite` (F417; v0.54.1); amends DECISION-235
+
+Archiving a person (Community, 3a) revokes their open sign-in invitation in the archive's own transaction, through the existing `presby_revoke_sign_in_invitation`, audited as `invitation.revoked` with `via: "archive"`; the `tenant.person.archived` row carries `invitationRevoked`. Restore does nothing to invitations: a revoked link stays revoked and the administrator sends a new one. Separately, `readStates` reports state `none` for a `blocked`/`membership_ended` row whose membership has `ended_on is null`, so Restore (3a) and the voiding of a participant removal (0061) never leave a card on "has ended". `archivePerson` receives the revoke as a required function argument from its `(org)` caller so `org-invite.ts` keeps being imported only from the tenant portal (2b B2). Why: 3a made an ended connection reversible, which made a terminal block about a point-in-time state wrong. No migration, no definer change. Accepted, `paper`: the dead-link page's generic "ask whoever invited you" reaches an archived person whose inviter cannot send until Restore; the archived record's Sign in card still offers "Send invitation" and the send is refused with the existing sentence (a TODO line).
+
+---
+
 **DECISION-237 — Derived rosters are chargeable like any group; Archive is hidden on the viewer's own record.**
 
 **Status:** Resolved (tech-lead, Phase 3 ruling on Phase 5 run 1, F-1 and F-3; implemented in Batch E; QA run 2 PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-11-01 · **Feature:** `2026-10-22-founding-admin-directory-inc3` (Community Increment 3a; migration 0066; v0.54.0); amends nothing in treasury's DECISION-271

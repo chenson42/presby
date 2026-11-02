@@ -20,7 +20,7 @@
 | 3 — Technical design | tech-lead | Done: ruling is both (a) archive revokes in-transaction, `invitation.revoked` via `archive`, and (b) the reader treats a stored `membership_ended` block as stale over a live membership; no migration | Design complete | 2026-11-02 |
 | 4 — Implementation | full-stack-developer | Done: (a) archive revokes in-transaction, (b) reader backstop, C1 and H1-H3, tests red-then-green; no migration | Complete | 2026-11-02 |
 | 5 — Verification | qa | Regression red on `d530c41f` (8 soft failures), green at HEAD; unit 13,247; DB 76 + 269; e2e dev 56/56, prod 6/6; D1, (b) and the real participant void walked at 360px | PASS | 2026-11-02 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | D1 walked at 360px light/dark on record and list; re-invite accepted end to end; QA observations ruled follow-ups; roles-who-can-do-what cleared for 0.54.1 | SHIP WITH NOTES | 2026-11-02 |
 
 ## The bug (from the analyst's D1, verbatim summary in the inc3 addendum)
 
@@ -560,3 +560,196 @@ Evidence is all under `/private/tmp/claude-501/-Users-cshenso-git-presby-platfor
 - logs: `red.log`, `db1.log`, `db2.log`, `unit.log`, `build.log` and `build2.log`, `e2e-dev.log`, `e2e-prod.log`, `e2e-prodserver.log`, `e2e-prodserver2.log`;
 - the walk: `walk.log`, `walk-p.log`, `walk-h.log`, `walk-main.log`;
 - screenshots: `shots/`.
+
+---
+
+## Phase 6: Shipped vs Intent (analyst), F417, archive revokes an open sign-in invitation
+
+**Date:** 2026-11-02. Bug-fix variant. HEAD `da39cda0`, branch `pipeline/archive-revokes-invite`, Neon `pipeline-archive-revokes-invite`.
+
+**How I walked it**
+- A dev server from a scratch copy outside `~/git/presby-platform/`, on port 3610, with `NEXT_PUBLIC_APP_URL=http://localhost:3610` and a private `PLAYWRIGHT_BROWSERS_PATH`. The first compile hit the transient Open Sans fetch error QA reported, and a clean restart fixed it.
+- Chromium at 360px, light and dark. Page overflow was 0 on every page.
+- I made a fresh organization, "Larkspur Fells Presbyterian Church", through the app. The platform admin created it. The founding administrator was created by accepting an invitation, then enrolled two-factor and landed on `/o/walk-f417`. This is the person the path creates, not a seeded fixture.
+- I turned Community on from the Features switch.
+- SQL supplied only what the app cannot:
+  - flags;
+  - bcrypt accounts for the invitees;
+  - one known-token invitation;
+  - an events role set up the way the PresbyPortal team would set it up.
+- I reset the 13 flags I changed to `false`, so only the baseline flags are on. I stopped the server by PID and port 3610 is free. The repo is untouched.
+- Fixtures stay on the throwaway branch.
+
+---
+
+## VERDICT
+
+**SHIP WITH NOTES**
+
+F417 is fixed and I found no regression. The notes are follow-ups, not blockers. One of them is a release-note requirement: the fix deliberately changes a behaviour.
+
+## ONE-LINE TAKE
+
+> Archive now cancels the person's open invitation, the person gets the dead-link page, and Restore leaves the record offering "Send invitation". I re-invited an archived-then-restored visitor through the UI, and he accepted and landed in the congregation.
+
+## What's Working
+
+**D1, exact sequence, on the record, light.** Marguerite Thistlewood was a visitor with a verified account on her address.
+1. The UI send left the card reading "Invitation sent to … It expires 11/9/2026" with "While this invitation is open…".
+2. Archive, from the record. The dialog read: "An invitation to Marguerite Thistlewood is still open. It will stop working, and restoring them will not turn it back on." Its box was x 16, width 328, with the Archive and Keep buttons inside. The row went `revoked`, revoked by the sender.
+3. The archived record no longer says "While this invitation is open" (checked: false).
+4. She signed in and landed on `/no-organization`. It has 0 "Accept the invitation" buttons and says "…or to invite you".
+5. Restore. The dialog said "Return to the Visitors list" with "Keep archived" and "Restore". The record then read "Invite Marguerite Thistlewood to sign in…" with Send invitation. It does not contain "couldn't be completed" or "has ended".
+6. A second send worked, and the DB holds one revoked row and one open row.
+
+**D1 on the list, dark.** Barnaby Quillfeather had a seeded invitation with a known token.
+- As a control before the archive, the signed-in link offered "Accept invitation".
+- The Archive dialog from the list row carried the same line and fit at 360px, with overflow 0.
+- The Former row read "Archived visitor, 11/2/2026".
+- The signed-in link now shows "This link isn't active … ask whoever invited you to send a new one", with no Accept button.
+- The signed-out link shows the same page. It names no congregation and gives no reason.
+- After a Restore from the Former row, the Visitors row has no marker and the record card offers Send invitation.
+- The old link stays dead after Restore.
+- A new UI send worked.
+
+**The end-to-end outcome D1 broke.** Barnaby signed in and `/no-organization` offered "You're invited to Larkspur Fells Presbyterian Church" with "Accept the invitation". He accepted and landed on `/o/walk-f417` with the "Coming up" card and the tiles. The DB shows `people.user_id` set. A person who was archived and restored can now be invited and connected from the product.
+
+**Pages the person lands on.**
+- Marguerite after the archive: `/no-organization`, "You're not connected to a congregation yet", with "Check again". She has no Accept button.
+- Barnaby after the accept: `/o/walk-f417`, with `/calendar` opening and listing events.
+
+**Audit, from QA's walk and consistent with mine.**
+- `invitation.revoked` carries `via: "archive"`, the sender as actor and `purpose: "sign_in"`.
+- `tenant.person.archived` carries `invitationRevoked: true`.
+
+## Intent-vs-Shipped Diff
+
+- **D1:** Phase 1 said Restore must never leave a terminal "connection has ended" card or marker. Shipped: archive revokes the open invitation, and the reader treats a stored `membership_ended` block as stale over a live membership. QA's walk of a pre-existing blocked row and of the real participant void confirms the reader half. Matches.
+- **D1 second symptom, "Accept the invitation" offered while archived:** shipped as 0 buttons, plus the dead-link page. Matches.
+- **D1 second symptom, "While this invitation is open…" on the archived record:** gone. Matches.
+- **"Contrast: never opened the link, archive then restore leaves it working":** now the link stops at archive and Restore leaves it stopped, as the dialog says. This is a deliberate behaviour change, not a regression, and the design's Carry-forward already records it. **It must appear in the release note.** Acceptable drift.
+- **Dead-link wording:** "ask whoever invited you" reaches an archived person whose inviter cannot send until Restore. This is the design's accepted `paper` residual (DECISION-147). Acceptable.
+
+## Rulings on QA's two observations
+
+1. **The archived record's Sign in card still offers "Send invitation", with "PresbyPortal connects them to this record if it can." — follow-up TODO, not NEEDS REWORK.**
+   - I saw it on both archived records. The send is refused with the truthful "connection to … has ended, so they can't be invited".
+   - It is pre-existing. It happens today for an archived person who was never invited.
+   - It is no longer a dead end. F417 closes that path, and Restore clears the state.
+   - It is wording and affordance, not a defect in the fix. The proper fix is a state on the card for an ended connection: say "Restore them first" and drop the button. That is a card change with its own copy and tests, so it should not ride this bug fix.
+2. **`archivePersonAction` does not check the Community flag — follow-up TODO, not NEEDS REWORK.**
+   - The same holds for every 3a Community action; the flag is checked at the page.
+   - `people.manage` is checked inside the archive transaction, and the revoke definer re-checks it.
+   - A flag never grants access, so the exposure is a `people.manage` holder posting directly while Community is off.
+   - Decide as one change across all the 3a Community actions whether flag-off should refuse at the action.
+
+## Edge Cases
+
+- Empty state: pass. An empty calendar says "hasn't added any events yet" with "Add an event". Community empty says "No one is listed yet".
+- Failure microcopy: pass. The archived-record send refusal is human. The dead-link page is neutral.
+- Permission gate: pass (read from QA's audit; I added no probe). `people.manage` is checked in the transaction, and the action takes the actor from the session.
+- Audit event: pass, as above.
+- Mobile (360px): pass in light and dark. Overflow was 0 on every page. The Archive and Restore dialogs fit at 328px wide.
+- Help pages read as their reader (the two named by the Phase 3 Help impact line, `adding-people` and `sign-in-invitations`): pass for H1, H2 and H3, with the other wording items below. Each H1, H2 and H3 claim was true on screen, as follows:
+  - Archiving cancels the invitation: seen, in the audit and on the screens.
+  - Restoring does not bring it back, and "Send invitation" on the record sends a new one: seen.
+  - The "Cancel invitation" dialog is "Cancel this invitation?" with "Keep it": seen.
+  - No `limitationUntil` sentence is affected.
+
+## The four open help pages (the 3a walk)
+
+**1. `roles-who-can-do-what`: may move to `verifiedIn: "0.54.1"`. Nothing blocks.** (The text is identical on 0.54.0, so either label is true.)
+
+Read at 360px, light and dark, as the founding administrator, with `org_portal.branding` on:
+- **First-day Branding refusal.** The tile appears on the hub, and the page says "You don't have permission to manage branding at Larkspur Fells Presbyterian Church. If you think this is a mistake, ask your stated clerk or another administrator there." This matches the help's quoted prefix.
+- **"Manage events" and "Event types" refusals.** The same shape, with the same quoted prefixes.
+- **The six-role table.** Founding Administrator and Stated Clerk are held by the person (Ottoline), and four are held by groups. In the catalog, those two show "Edit" and four are "Constitutional".
+- **"Role granted."** I granted a role through the form and the message matched.
+- **"Website domain".** It is absent from the Features page, as the help says. "Job openings" is present.
+- **Disclosure.** I did not re-walk the Revoke, Create role, template adoption and Deactivate sections this time. The 3a diff did not touch them. The sections 3a did change (the group rows, the "All Current Records … visitors" sentence, the first-day lists) all matched. The move is on that scope.
+
+**2. `events-and-the-calendar`: NOT yet.** Two blockers, both from your N-notes, and both reproduced on this build.
+- **N2.** At 360px "Month" and "List" are hidden (`isVisible` false). The calendar shows "Today", "Copy month", "Show filters" and the arrows. "On a phone it shows a list of days. The links 'Month' and 'List' switch the view" is false on a phone. An empty calendar shows no controls at all.
+- **N1.**
+  - Barnaby is a connected visitor. He saw "Session retreat (members only)" in "Coming up" and on `/calendar`. The event page is tagged "Members only".
+  - The help says an unticked event "shows only on the member calendar, for members who have calendar access". A reader takes that to exclude visitors.
+  - Both the help and the label "Open to everyone, not only members" are literally contradicted for visitors.
+  - This needs an operator ruling: filter, or reword.
+- **Everything else was walked and matches.**
+  - "Add an event", "Manage events" and "New event".
+  - "Event created." and "Enter a number of occurrences from 1 to 52."
+  - "Part of a series", "Extend this series", the "Cancel event" dialog and "Cancelled" in the list.
+  - The Event types page: the "Retired" and "Offered" labels and "The default type can't be retired."
+  - The members-only event's website tick is disabled.
+  - "Put this and later events on the website", with its dialog and toast ("4 events marked for the website.").
+  - "It appears on your public website once your congregation's public events calendar is turned on and your website has a calendar page."
+- **Unwalked:** the "Public events calendar" end to end on a real website.
+- **Unlocks when:** N2 is reworded (a text edit), N1 is decided and applied, then a re-walk.
+
+**3. `adding-people`: NOT yet.** One blocker plus unwalked sections.
+- **N3.** The engagement dialog's buttons are "Keep as it is" and "Mark as regular attender". The help puts 'Choose "Save engagement"' after the dialog sentence. "Save engagement" is the card button that opens the dialog. This is still unfixed in HEAD (line 55).
+- **Walked and matching:**
+  - "Step 1 of 6" and the three connection labels.
+  - The Community views.
+  - "Visitor added." The member proposal: "Person added. They'll appear as a member once the Session approves."
+  - "Pending approvals", the "1 waiting" count, "You proposed this", "Withdraw", and "Your Session roster is empty".
+  - H1 and H2, archive and restore.
+  - QA's participant remove and "Undo last entry" via the real void.
+- **Not walked:** Session approve, deny and "Select all on this page", "Self-approved", and the three other banners ("No one can approve yet" with its variants and the per-member rows).
+- **Unlocks when:** N3 is reordered and the approval and banner sections are walked.
+
+**4. `sign-in-invitations`: NOT yet.** Two text blockers.
+- **TODO line 487.** `:17` and `:49` still say a person "isn't listed in the member directory" is not connected. A staff record is not listed but connects. The line is still open.
+- **One new wording mismatch.**
+  - A role-holder who has not set up two-factor sees "One more step: set up two-factor sign-in to finish connecting. Then come back here and select Check again." with the button "Set up two-factor sign-in".
+  - The help quotes "…confirm two-factor sign-in…" for that state, and then says the button is "Continue to verification, or 'Set up two-factor sign-in' if they have not set it up".
+  - It presents one sentence for two states. I saw only the unenrolled sentence.
+- **Walked and matching:**
+  - The send dialog.
+  - The do-not-contact acknowledgement. The first press of Send brings up "…asked not to be contacted at this address. This is a one-time account email, not marketing. Send it anyway?" with the checkbox "I understand, send it anyway".
+  - "Invitation sent … It expires …", "Sent", "Send again", the Cancel dialog, and H3.
+  - The existing-account acceptance page ("You're invited to …" with "Accept the invitation").
+  - The list marker "Invitation sent" and a date.
+- **Not walked:** the enrolled-person variant of the two-factor step ("Continue to verification").
+- **Unlocks when:** `:17`/`:49` and the two-factor sentence are corrected, and the enrolled variant is walked.
+
+## `verifiedIn`
+
+| Page | May move now? | To |
+|---|---|---|
+| `roles-who-can-do-what` | **Yes** | `"0.54.1"` |
+| `events-and-the-calendar` | No | blocked by N1, N2 |
+| `adding-people` | No | blocked by N3, plus the unwalked approval sections |
+| `sign-in-invitations` | No | blocked by TODO 487 and the two-factor sentence |
+
+From the 3a addendum, `using-the-directory` and `what-presby-portal-does` already clear to "0.54.0" (the addendum calls the second `what-presbyportal-does`). The orchestrator moves them with `roles-who-can-do-what`. After the text edits above, the other three can be re-walked in one short pass and move to "0.54.1".
+
+## Follow-Ups (TODO lines)
+
+1. `- [ ] **Archived record's Sign in card still offers "Send invitation" and "connects them … if it can" (F417 observation, pre-existing).** Show an ended-connection state on an archived person's card ("Restore them first"), with no send button, so the offer matches the refusal. Not a dead end since F417. — 2026-11-02-archive-revokes-invite`
+2. `- [ ] **Community actions do not check the Community flag (pre-existing across 3a).** The page checks \`org_portal.members_create\`; \`archivePersonAction\` and its siblings check only \`people.manage\`. Decide once whether flag-off should refuse at the action, then apply it to all of them. — 2026-11-02-archive-revokes-invite`
+3. `- [ ] **Long unbroken names clip in the Archive and Restore dialogs at 360px (pre-existing, confirmed on origin/main).** Title, body lines and buttons run past the dialog's right edge; the page itself does not overflow. — 2026-11-02-archive-revokes-invite`
+4. `- [ ] **Release note for F417 must state the behaviour change.** An open invitation now stops working at Archive and Restore does not turn it back on; before, an unopened link survived archive then restore. The administrator sends a new one. — 2026-11-02-archive-revokes-invite`
+5. **Add to the existing TODO line 487 (`sign-in-invitations` wording):** the two-factor sentence. The unenrolled role-holder sees "set up two-factor sign-in to finish connecting", and the help quotes "confirm" for the page generally. Say which sentence goes with which state, then walk the enrolled variant ("Continue to verification").
+6. **Existing lines stay open:** N1 (members-only events versus visitors, operator decision), N2 and N3 help edits, and the re-walk and `verifiedIn` bump for `events-and-the-calendar`, `adding-people` and `sign-in-invitations`. Edit the existing 3a lines; do not add duplicates.
+7. `- [ ] **Walk the unwalked adding-people approval sections** (approve, deny, select all, "Self-approved", and the three other banners) with a connected Session member, then move its \`verifiedIn\`.`
+8. QA's proposed lines: the `prod-build` Playwright project cannot run invitation-send specs, and a local production server needs an https `NEXT_PUBLIC_APP_URL` for sends to work. Optional, at the orchestrator's discretion.
+
+**Housekeeping at ship.**
+- **Rule 12:** no feedback row. The source is my own live walk.
+- **Rule 13:** no what's-new. It is a bug fix, and the operator holds what's-new for now.
+- **Rule 14:** no functionality-map change. It is a correction of an existing line.
+- **Rule 15:** `docs/architecture.md` unchanged.
+- **DECISION-315:** the orchestrator adds the drafted DECISION-315 to `docs/decisions.md` at integration.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 6 — Shipped vs intent (F417) | analyst | Done: D1 walked in the exact sequence at 360px in light and dark, on the record and on the list, as a founding administrator created by the real invitation path. Archive revokes, the person gets the dead-link page with no Accept button, Restore offers Send invitation, and a re-sent invitation was accepted end to end. Both QA observations ruled follow-ups. Four help pages read against the live screens: `roles-who-can-do-what` may move to 0.54.1; the other three stay blocked on N1, N2, N3, TODO 487 and a new two-factor wording mismatch. Flags reset, server stopped by PID. | SHIP WITH NOTES | 2026-11-02 |
+
+**Handoff:** the orchestrator records this section in `docs/work-log/2026-11-02-archive-revokes-invite.md`, files the TODO lines in `docs/TODO.md`, moves `roles-who-can-do-what` (and the two 3a pages the addendum cleared) to the `verifiedIn` values above, and adds DECISION-315 and the release note. The next agent for the three blocked pages is the tech-lead for the help text edits, then the analyst for one short re-walk. N1 goes to the operator first.
+
+Absolute paths:
+- Work-log: `/Users/cshenso/git/presby-platform/presby-archive-invite/docs/work-log/2026-11-02-archive-revokes-invite.md`
+- Walk scripts and screenshots (scratch, not in the repo): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/f417-walk/` and `.../f417-walk/shots/`

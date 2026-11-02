@@ -19,7 +19,7 @@ export const HELP_PAGES = [
     audience: "prospective",
     covers: [],
     labels: [],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.54.0",
   },
   {
     slug: "how-a-congregation-gets-started",
@@ -162,7 +162,7 @@ export const HELP_PAGES = [
     audience: "everyone",
     covers: ["tile:directory"],
     labels: ["Directory", "Households", "Search the directory", "You don't have permission to view the directory."],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.54.0",
   },
   {
     slug: "getting-help",
@@ -589,7 +589,7 @@ export const HELP_PAGES = [
       "You don't have permission to manage branding",
       "Website domain",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.54.1",
     limitationUntil: "founder-events-branding",
   },
   {

@@ -497,3 +497,19 @@ This FAIL does not trace to a design claim: the design specified the coverage an
 | 5 — Verification | qa | Gates, DB suites (261), e2e (53 dev, 111 prod lane), the 360px/1280px light/dark walk, copy and feature-gate audits all green; the per-site mutation found `calendar.ts:420` (the type-filtered unfiltered count) with no behavioural test; handback | FAIL | 2026-11-02 |
 
 **Handoff:** to **full-stack-developer** (Phase 4) to add the F1 test, watched failing with site 420 mutated, then passing. Then back to qa for the scoped re-check above. N1 goes forward to the Phase 6 analyst.
+
+## Phase 4 loop-back (QA run 1, F1)
+
+**Added** (`src/lib/calendar.test.ts`, inside "members-only events and standing", a nested describe "with a type filter active (the unfiltered count is its own query)"): a new fixture org `orgF` with two active types (Worship, Study), a visitor and a member. October holds one public typed event, one members-only typed event and one members-only untyped event; November holds only a members-only typed event. Three cases, each under the three process time zones:
+- Visitor and member filter October by Worship. The visitor's `unfilteredInMonthCount` is 1 (public rows only); the member's is 3 (both, including the untyped row the filter drops).
+- The visitor filters November, whose only event is members-only: `unfilteredInMonthCount` 0 and `orgHasEvents` true, so the page's decision (restated in the test from `calendar/page.tsx`) is "Nothing is scheduled", not "No events match these event types". Unfiltered, the same month reads identically to the visitor. The member's count is 1.
+- Visitor filters October by Study (no events): "No events match" from the public count of 1, never the hidden ones.
+
+The surname list in the fixture grew by two names for the two new viewers.
+
+**Fail-first**, as `presby_app` against the pipeline branch:
+- `calendar.ts:420` mutated to `memberVisible(true)`: 9 failed (3 new cases x 3 zones), 190 passed, and only the new cases failed. Messages: "expected 3 to be 1" and "expected 1 to be +0".
+- Mutated to `memberVisible(!gate.canManage)` (the non-literal class QA named): the same 9 failed.
+- Line restored (`git checkout src/lib/calendar.ts`; no diff in `calendar.ts`): `calendar.test.ts` 199 of 199 pass, serially, three zones. `calendar-visibility.source.test.ts` 5 of 5, `typecheck`, `lint` and `npm run check` clean (exit 0).
+
+**N1 for Phase 6 (QA note, no code change):** a person on the roll still marked "Visitor" is classified `listed` and sees members-only events, while the Edit card says "Visitor" and the help copy says a visitor does not see them. It is consistent with the ruling (standing, roll wins, as in the Directory). The analyst or operator may add a clause such as "a person on the roll counts as a member even if still marked as a visitor".

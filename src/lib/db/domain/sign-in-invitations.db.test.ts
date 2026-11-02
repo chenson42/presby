@@ -730,7 +730,9 @@ describe.skipIf(!hasDb)("drizzle/0065 sign-in invitation callables, A2 (Postgres
           await s.addEmail(q2.id, p.email!);
           return { id: p.id, confirmed: p.email };
         }],
-        ["needs_acknowledgement", async () => { const p = await s.person(org, { engagement: "visitor", roll: null }); return { id: p.id, confirmed: p.email }; }],
+        // The visitor case left this list with drizzle/0066 section 9
+        // (Increment 3a): a visitor is no longer an acknowledgement reason,
+        // so the issue succeeds (asserted in the acknowledgements case below).
         ["needs_acknowledgement", async () => {
           const p = await s.person(org);
           await s.q(sql`update contact_methods set do_not_contact = true where person_id = ${p.id}`);
@@ -758,14 +760,17 @@ describe.skipIf(!hasDb)("drizzle/0065 sign-in invitation callables, A2 (Postgres
       expect((await s.issue(org, admin.userId, p.id, { confirmed: p.email })).outcome).toBe("ok");
     });
 
-    it("acknowledgements: the reasons come from the definer, never the client (F177 conditions 1 and 2)", async () => {
+    it("acknowledgements: the reasons come from the definer, never the client (F177 condition 2; condition 1 retired by drizzle/0066 section 9)", async () => {
+      // Increment 3a (0066 section 9, check 10): a visitor is no longer an
+      // acknowledgement reason; a visitor's sign-in carries no directory
+      // (F177 Option 1), so the issue goes through unacknowledged and records [].
       const v = await s.person(org, { engagement: "visitor", roll: null });
-      expect(await s.issue(org, admin.userId, v.id, { confirmed: v.email })).toMatchObject({ outcome: "needs_acknowledgement", ack_reasons: ["visitor"] });
-      expect(await s.issue(org, admin.userId, v.id, { confirmed: v.email, acknowledged: true })).toMatchObject({ outcome: "ok", ack_reasons: ["visitor"] });
+      expect(await s.issue(org, admin.userId, v.id, { confirmed: v.email })).toMatchObject({ outcome: "ok", ack_reasons: [] });
 
       const d = await s.person(org, { engagement: "visitor", roll: null });
       await s.q(sql`update contact_methods set do_not_contact = true where person_id = ${d.id}`);
-      expect(await s.issue(org, admin.userId, d.id, { confirmed: d.email })).toMatchObject({ outcome: "needs_acknowledgement", ack_reasons: ["do_not_contact", "visitor"] });
+      expect(await s.issue(org, admin.userId, d.id, { confirmed: d.email })).toMatchObject({ outcome: "needs_acknowledgement", ack_reasons: ["do_not_contact"] });
+      expect(await s.issue(org, admin.userId, d.id, { confirmed: d.email, acknowledged: true })).toMatchObject({ outcome: "ok", ack_reasons: ["do_not_contact"] });
 
       // A client that acknowledges for a non-visitor records nothing.
       const m = await s.person(org);

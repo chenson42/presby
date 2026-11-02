@@ -411,8 +411,15 @@ test.describe("Reimbursements, treasurer side", () => {
     await expect(property).toContainText("1 chair or leader can approve.");
     const worship = page.getByTestId("chargeable-row").filter({ hasText: NAMES.worship });
     await expect(worship).toContainText("No chair or leader right now: requests go to the treasurer.");
-    // Every group has a switch: the two committees and the derived Active Membership roster.
-    await expect(page.getByRole("switch", { name: "Can receive requests" })).toHaveCount(3);
+    // Every group has a switch: the two committees and the two derived rosters, Active Membership and its
+    // sibling All Current Records (the 0066 pair trigger gives every Active Membership group one). A derived
+    // roster is listed like any group (treasury Q5), starts off, and has no seat, so its requests go to the treasurer.
+    await expect(page.getByRole("switch", { name: "Can receive requests" })).toHaveCount(4);
+    for (const name of ["Active Membership", "All Current Records"]) {
+      const derived = page.getByTestId("chargeable-row").filter({ hasText: name });
+      await expect(derived).toContainText("No chair or leader: requests go to the treasurer.");
+      await expect(derived.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    }
     for (const row of [property, worship]) await expect(row.getByRole("switch")).toHaveAttribute("aria-checked", "true");
     await noHorizontalScroll(page);
     await shot(page, "360", "settings");

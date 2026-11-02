@@ -1998,3 +1998,12 @@ commit;
 -- Idempotent. scripts/sign-in-invitations/test-rls-65.sql and
 -- scripts/giving/test-rls-46.sql need it.
 \ir sign-in-invitations/seed-dev-sign-in.sql
+
+-- Community Increment 3a fixture (drizzle/0066). Its own file and transaction,
+-- run LAST, after every include that creates an organization: on a database
+-- built from empty, 0066's backfill ran before any organization existed, so
+-- this gives each fixture organization that has the All Current Records group
+-- the calendar_viewer baseline role createOrganization() seeds. Byte-identical
+-- to 0066's backfill-calendar-viewer block; idempotent.
+-- scripts/membership-standing/test-rls-66.sql needs it.
+\ir membership-standing/seed-dev-membership-standing.sql

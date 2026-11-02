@@ -628,6 +628,16 @@ describe.skipIf(!hasDb)("src/lib/onboarding/issue.ts (Postgres-backed)", { timeo
       await expectNothing(bare, address);
     });
 
+    it("provisioning_incomplete: an org that has Active Membership but not All Current Records (drizzle/0066 pairs them; a hand-built half is caught at send)", async () => {
+      const half = await org();
+      // The pair trigger made the sibling; the owner removes it to build the half-state.
+      await q(sql`delete from groups where organization_id = ${half} and derived_from = 'all_memberships'`);
+      const address = fx.email("half");
+      const r = await issue.createInvitation({ organizationId: half, purpose: "founding_administrator", email: address, firstName: "A", lastName: "B", inviter: actor() });
+      expect(r).toEqual({ kind: "provisioning_incomplete" });
+      await expectNothing(half, address);
+    });
+
     it("no_matching_person: nobody enrolled at this congregation has that email (and a person at ANOTHER org does not count)", async () => {
       const orgId = await org();
       const elsewhere = await org();

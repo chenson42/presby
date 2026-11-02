@@ -273,17 +273,25 @@ describe("sendSignInInvitation: the audit row (Rule 7; F177 condition 2)", () =>
     expect((h.insertAuditRow.mock.calls[0]![1] as { metadata: { acknowledged: unknown } }).metadata.acknowledged).toEqual([]);
   });
 
-  it("a visitor send records ['visitor'] and a do-not-contact address records it too", async () => {
-    script.definer = okIssue({ ack_reasons: ["visitor", "do_not_contact"] });
+  // 3a (drizzle/0066 section 9): a do-not-contact address is the one reason the
+  // database asks; a visitor send is unacknowledged and audits `[]` (EC-21).
+  it("a do-not-contact address records ['do_not_contact']; a visitor send records []", async () => {
+    script.definer = okIssue({ ack_reasons: ["do_not_contact"] });
     const result = await org.sendSignInInvitation(ctx, input({ acknowledged: true }));
-    expect((h.insertAuditRow.mock.calls[0]![1] as { metadata: { acknowledged: unknown } }).metadata.acknowledged).toEqual(["visitor", "do_not_contact"]);
-    expect(result).toMatchObject({ kind: "ok", acknowledged: ["visitor", "do_not_contact"] });
+    expect((h.insertAuditRow.mock.calls[0]![1] as { metadata: { acknowledged: unknown } }).metadata.acknowledged).toEqual(["do_not_contact"]);
+    expect(result).toMatchObject({ kind: "ok", acknowledged: ["do_not_contact"] });
+
+    h.insertAuditRow.mockClear();
+    script.definer = okIssue({ ack_reasons: [] });
+    const visitor = await org.sendSignInInvitation(ctx, input());
+    expect((h.insertAuditRow.mock.calls[0]![1] as { metadata: { acknowledged: unknown } }).metadata.acknowledged).toEqual([]);
+    expect(visitor).toMatchObject({ kind: "ok", acknowledged: [] });
   });
 
-  it("an array returned as a Postgres text literal is parsed, and an unknown reason is dropped", async () => {
-    script.definer = okIssue({ ack_reasons: "{visitor,teleported}" });
+  it("an array returned as a Postgres text literal is parsed, and an unknown reason (a retired 'visitor' included) is dropped", async () => {
+    script.definer = okIssue({ ack_reasons: "{do_not_contact,visitor,teleported}" });
     const result = await org.sendSignInInvitation(ctx, input({ acknowledged: true }));
-    expect(result).toMatchObject({ acknowledged: ["visitor"] });
+    expect(result).toMatchObject({ acknowledged: ["do_not_contact"] });
   });
 
   it("contains no address, name or token", async () => {
@@ -333,8 +341,8 @@ describe("sendSignInInvitation: refusals abort the transaction and write nothing
   });
 
   it("needs_acknowledgement carries the reasons the DEFINER found (F177 condition 1: the database asks)", async () => {
-    script.definer = { outcome: "needs_acknowledgement", ack_reasons: ["visitor"] };
-    expect(await org.sendSignInInvitation(ctx, input())).toEqual({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["visitor"] });
+    script.definer = { outcome: "needs_acknowledgement", ack_reasons: ["do_not_contact"] };
+    expect(await org.sendSignInInvitation(ctx, input())).toEqual({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["do_not_contact"] });
   });
 
   it("cooldown carries when Send again opens; already_pending carries whether the open row has expired", async () => {
@@ -518,8 +526,10 @@ describe("getSignInCard", () => {
     const result = await org.getSignInCard(ctx, PERSON);
     expect(result).toMatchObject({
       kind: "ok",
-      card: { personId: PERSON, state: "none", linked: false, address: ADDRESS, outlook: "by_sign_in", selfConnectEnabled: true, isVisitor: false },
+      card: { personId: PERSON, state: "none", linked: false, address: ADDRESS, outlook: "by_sign_in", selfConnectEnabled: true },
     });
+    // 3a (D13 (b)): the visitor flag is gone from the card; the outlook carries it.
+    expect(Object.keys((result as { card: object }).card)).not.toContain("isVisitor");
     expect(h.getPersonEmail).toHaveBeenCalledWith(tx, PERSON, "credential");
     expect(h.orgFeatureEnabledInTx).toHaveBeenCalledWith(tx, ORG, "org_portal.sign_in_connect", false);
   });
@@ -530,9 +540,22 @@ describe("getSignInCard", () => {
     expect(result).toMatchObject({ card: { linked: true, connectedVia: "sign_in", connectedOn: "2026-10-22", outlook: "connected" } });
   });
 
-  it("a visitor, a shared address and an authority-bearing record are surfaced from the standing core's answers", async () => {
+  it("a connected person who is not listed reads connected_not_listed; a connected listed one reads connected (D13 (e))", async () => {
+    script.states = [row({ linked: true, state: "signs_in", connected_via: "invitation", connected_on: "2026-10-22" })];
     script.standing = [{ standing: "visitor", authority_bearing: false, address_shared: false }];
-    expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { isVisitor: true, outlook: "visitor" } });
+    expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { linked: true, outlook: "connected_not_listed" } });
+    script.standing = [{ standing: "listed", authority_bearing: false, address_shared: false }];
+    expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { linked: true, outlook: "connected" } });
+  });
+
+  it("a person who is not listed, a shared address and an authority-bearing record are surfaced from the standing core's answers", async () => {
+    // Not listed: a visitor, an inactive or moved-away person (standing `inactive`), an unclassified one.
+    for (const standing of ["visitor", "inactive", "unclassified"]) {
+      script.standing = [{ standing, authority_bearing: false, address_shared: false }];
+      expect(await org.getSignInCard(ctx, PERSON), standing).toMatchObject({ card: { outlook: "not_listed" } });
+    }
+    script.standing = [{ standing: "staff_anchor", authority_bearing: false, address_shared: false }];
+    expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { outlook: "by_sign_in" } });
     script.standing = [{ standing: "listed", authority_bearing: false, address_shared: true }];
     expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { addressShared: true, outlook: "shared_address" } });
     script.standing = [{ standing: "listed", authority_bearing: true, address_shared: false }];

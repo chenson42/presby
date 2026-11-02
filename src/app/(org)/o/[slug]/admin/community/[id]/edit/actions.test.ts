@@ -695,8 +695,8 @@ describe("sign-in invitation actions", () => {
     });
 
     it("needs_acknowledgement is NOT an error: the dialog re-opens with the reasons the server found, and the error string is empty", async () => {
-      lib.mockResolvedValue({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["visitor", "do_not_contact"] });
-      expect(await action("alder-creek", SEND_INPUT)).toEqual({ ok: false, error: "", needsAcknowledgement: ["visitor", "do_not_contact"] });
+      lib.mockResolvedValue({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["do_not_contact"] });
+      expect(await action("alder-creek", SEND_INPUT)).toEqual({ ok: false, error: "", needsAcknowledgement: ["do_not_contact"] });
     });
 
     it("a refusal names the person and the congregation from the server's own facts (Copy: {Name}, {Congregation})", async () => {

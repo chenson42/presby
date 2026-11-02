@@ -23,6 +23,7 @@ import {
   ROLL_WITHDRAW_REFUSALS,
   isApprovableKind,
   PARTICIPANT_RECORD_REFUSALS,
+  COMMUNITY_ARCHIVE_ENDED_REASON,
   PARTICIPANT_REMOVAL_ENDED_REASON,
   PARTICIPANT_VOID_REFUSALS,
   ROLL_ACTION_KIND_LABELS,
@@ -146,6 +147,14 @@ describe("on-record kinds (DECISION-198, R4)", () => {
     expect(functionBody("presby_record_participant_action")).toContain(
       `ended_reason = '${PARTICIPANT_REMOVAL_ENDED_REASON}'`,
     );
+  });
+
+  it("the archive marker is its own fixed literal, distinct from the removal marker (the Former list matches a closed pair)", () => {
+    expect(COMMUNITY_ARCHIVE_ENDED_REASON).toBe("community_archived");
+    expect(COMMUNITY_ARCHIVE_ENDED_REASON).not.toBe(PARTICIPANT_REMOVAL_ENDED_REASON);
+    // Neither is a prefix of the other, so no prefix match could confuse them.
+    expect(PARTICIPANT_REMOVAL_ENDED_REASON.startsWith(COMMUNITY_ARCHIVE_ENDED_REASON)).toBe(false);
+    expect(COMMUNITY_ARCHIVE_ENDED_REASON.startsWith(PARTICIPANT_REMOVAL_ENDED_REASON)).toBe(false);
   });
 
   it("every on-record kind has a label", () => {

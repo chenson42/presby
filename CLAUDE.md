@@ -617,7 +617,8 @@ exist for that.
 ### The Court Is Not a Group
 
 Session and diaconate rosters are **materialized** from `officer_terms` by
-trigger and reject direct writes. Materialized rather than a view because the
+trigger and reject direct writes, and the seat group's roster is written only by
+the officer sync (0066, DECISION-236). Materialized rather than a view because the
 permission resolver reads `group_memberships` — a view would be invisible to it
 and a role granted to the Session group would resolve to nobody (F3).
 

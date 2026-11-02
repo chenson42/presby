@@ -106,8 +106,10 @@ test.describe("Admin — create organization (leaves no residue)", () => {
          where o.slug = ${slug}
          order by g.name
       `) as Array<{ name: string; derived_from: string }>;
+      // 3a: the pair trigger gives every Active Membership group its All Current Records sibling.
       expect(groupRows.map((r) => r.name).sort()).toEqual([
         "Active Membership",
+        "All Current Records",
         "Board of Deacons",
         "Board of Deacons Moderator",
         "Session",

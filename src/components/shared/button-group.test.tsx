@@ -3,8 +3,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { Home, Users } from "lucide-react";
 import { ButtonGroup, type ButtonGroupItem } from "./button-group";
+import { centredScrollLeft, fadeState } from "./button-group-scroll";
 
 afterEach(cleanup);
+
+// jsdom has no ResizeObserver or layout; the real behaviour is proved at 360px in
+// e2e/community-nav-scroll.spec.ts.
+class StubResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = StubResizeObserver as unknown as typeof ResizeObserver;
 
 const ITEMS: ButtonGroupItem[] = [
   { key: "a", label: "Members", href: "/o/acme/directory", icon: Users, active: true, "aria-current": "page" },
@@ -120,5 +130,45 @@ describe("ButtonGroup", () => {
     const inactive = screen.getByRole("link", { name: "Households" }).className;
     expect(inactive).toContain("shadow-none");
     expect(inactive).toContain("hover:shadow-none");
+  });
+});
+
+describe("centredScrollLeft", () => {
+  const base = { itemWidth: 100, clientWidth: 300, scrollWidth: 900 };
+  it("centres an item in the middle of the range", () => {
+    expect(centredScrollLeft({ ...base, itemLeft: 400 })).toBe(300);
+  });
+  it("clamps to 0 for an item near the start", () => {
+    expect(centredScrollLeft({ ...base, itemLeft: 10 })).toBe(0);
+  });
+  it("clamps to the end for an item near the end", () => {
+    expect(centredScrollLeft({ ...base, itemLeft: 850 })).toBe(600);
+  });
+  it("is 0 when nothing overflows", () => {
+    expect(centredScrollLeft({ itemLeft: 50, itemWidth: 100, clientWidth: 300, scrollWidth: 300 })).toBe(0);
+  });
+});
+
+describe("fadeState", () => {
+  it("shows no fade when nothing overflows", () => {
+    expect(fadeState({ scrollLeft: 0, clientWidth: 300, scrollWidth: 300 })).toEqual({ left: false, right: false });
+  });
+  it("fades the right only at the start", () => {
+    expect(fadeState({ scrollLeft: 0, clientWidth: 300, scrollWidth: 900 })).toEqual({ left: false, right: true });
+  });
+  it("fades both in the middle", () => {
+    expect(fadeState({ scrollLeft: 300, clientWidth: 300, scrollWidth: 900 })).toEqual({ left: true, right: true });
+  });
+  it("fades the left only at the end", () => {
+    expect(fadeState({ scrollLeft: 600, clientWidth: 300, scrollWidth: 900 })).toEqual({ left: true, right: false });
+  });
+});
+
+describe("ButtonGroup scroll mount", () => {
+  it("marks the container with fade state after mount (no overflow in jsdom)", () => {
+    render(<ButtonGroup items={ITEMS} aria-label="Directory view" />);
+    const group = screen.getByRole("group", { name: "Directory view" });
+    expect(group.dataset.fadeLeft).toBe("false");
+    expect(group.dataset.fadeRight).toBe("false");
   });
 });

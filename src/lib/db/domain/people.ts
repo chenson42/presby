@@ -271,12 +271,28 @@ export const memberships = pgTable(
     // excluded from getDirectory()'s/findPersonMatches()'s 'regular'-only OR
     // branch so a staff-only anchor row never leaks into the public
     // directory or the admin/community roster).
+    //
+    // drizzle/0066 (F243, R53): a CLOSED vocabulary of five,
+    // `memberships_engagement_status_allowed` below (visitor, regular,
+    // inactive, moved_away, staff), plus a guard Drizzle cannot express,
+    // `memberships_guard_engagement` (0066 section 8b), which binds EVERY role,
+    // the owner included: no change on an ended membership, no transition into
+    // or out of `staff`, and no `visitor` while current_roll is set. Member
+    // standing is `presby_membership_standing(current_roll, engagement_status)`
+    // (0065) through `presby_standing_is_member` (0066 section 2), never
+    // re-coded here.
     engagementStatus: text("engagement_status").notNull().default("visitor"),
     firstVisitDate: date("first_visit_date"),
     howHeard: text("how_heard"),
 
     // Projection of APPROVED roll actions, maintained by trigger. A cache for
     // the directory only — reports replay via rollAsOf(). See F6.
+    //
+    // drizzle/0066 (F244): OWNER PATH ONLY. `memberships_guard_roll_cache_insert`
+    // and `_update` (0066 section 8c; triggers, which Drizzle cannot express)
+    // refuse a non-owner write of either column; the writers are the 0012
+    // definers presby_sync_current_roll / presby_reconcile_current_roll and
+    // fixtures on the owner connection.
     currentRoll: text("current_roll"),
     currentRollSince: date("current_roll_since"),
 
@@ -331,6 +347,12 @@ export const memberships = pgTable(
       foreignColumns: [orgUnits.id, orgUnits.organizationId],
       name: "memberships_org_unit_fk",
     }),
+    // drizzle/0066 section 8a (F243). Pinned to ENGAGEMENT_STATUSES in
+    // src/lib/membership-standing.ts (Batch B).
+    check(
+      "memberships_engagement_status_allowed",
+      sql`${t.engagementStatus} in ('visitor', 'regular', 'inactive', 'moved_away', 'staff')`,
+    ),
   ],
 );
 

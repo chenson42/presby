@@ -23,8 +23,9 @@
  *   2. Send again inside the cooldown is disabled and says why; after the clock
  *      is advanced it succeeds, the earlier link is dead, the chain is recorded;
  *   3. Cancel invitation, and the dead-link page for the old token;
- *   4. a visitor: the acknowledgement paragraph, and Send is refused until the
- *      box is ticked;
+ *   4. a visitor: the card says signing in won't connect them, and there is no
+ *      acknowledgement (3a retired it); 4b. a person who asked not to be
+ *      contacted still has one: Send is refused until the box is ticked;
  *   5. a person with no email: the no-address state and no Send button;
  *   6. editing the person's email after sending makes the old link the dead-link
  *      page (R27 end to end), and the card says the address changed;
@@ -307,19 +308,46 @@ test.describe("Community sign-in invitation", () => {
       });
 
       // -----------------------------------------------------------------
-      test("4. a visitor: the acknowledgement is shown, and Send is refused until the box is ticked", async ({ page }) => {
+      test("4. a visitor: the card says signing in won't connect them, and there is no acknowledgement; Send goes straight through (3a: a visitor's access is the calendar only)", async ({ page }) => {
         const o = org!;
         const visitor = await personWithAddress("visitor", { engagement: "visitor" });
         await openCard(page, visitor);
 
         await expect(card(page)).toContainText(
-          `${visitor.name} is a visitor, so signing in won't connect them by itself. Send an invitation if you want them to have access.`,
+          `${visitor.name} isn't listed in the member directory, so signing in won't connect them by itself. Send an invitation if you want them to have access.`,
         );
         const trigger = card(page).getByRole("button", { name: "Send invitation", exact: true });
         await expect(trigger).toBeEnabled({ timeout: 30_000 });
         await trigger.click();
+        // The visitor acknowledgement is retired: no paragraph, no checkbox, and Send is not held back.
+        await expect(dialog(page)).not.toContainText("is recorded as a visitor");
+        await expect(dialog(page).getByRole("checkbox"), "no acknowledgement for a visitor").toHaveCount(0);
+        const send = dialog(page).getByRole("button", { name: "Send invitation", exact: true });
+        await expect(send).toBeEnabled();
+        await expectDialogFits(page);
+        expect(await invitationsAt(sql, o)).toHaveLength(0);
+
+        await send.click();
+        await expect(dialog(page)).toHaveCount(0, { timeout: 45_000 });
+        await expect(card(page)).toContainText(`Invitation sent to ${visitor.email} on `, { timeout: 45_000 });
+        expect(await invitationsAt(sql, o)).toHaveLength(1);
+      });
+
+      // -----------------------------------------------------------------
+      test("4b. a person who asked not to be contacted still needs the acknowledgement: Send asks, and is refused until the box is ticked", async ({ page }) => {
+        const o = org!;
+        const person = await personWithAddress("dnc");
+        await sql`update contact_methods set do_not_contact = true where person_id = ${person.personId}::uuid`;
+        await openCard(page, person);
+
+        const trigger = card(page).getByRole("button", { name: "Send invitation", exact: true });
+        await expect(trigger).toBeEnabled({ timeout: 30_000 });
+        await trigger.click();
+        await expect(dialog(page).getByRole("checkbox")).toHaveCount(0); // asked for only after the first Send
+        await dialog(page).getByRole("button", { name: "Send invitation", exact: true }).click();
+
         await expect(dialog(page)).toContainText(
-          `${visitor.name} is recorded as a visitor. Anyone who signs in can see your member directory and your calendar, with each person's privacy settings applied. Only continue if you want ${visitor.name} to have that.`,
+          `${person.name} asked not to be contacted at this address. This is a one-time account email, not marketing. Send it anyway?`,
         );
         const box = dialog(page).getByRole("checkbox", { name: "I understand, send it anyway" });
         await expect(box).toBeVisible();
@@ -333,7 +361,7 @@ test.describe("Community sign-in invitation", () => {
         await expect(send).toBeEnabled();
         await send.click();
         await expect(dialog(page)).toHaveCount(0, { timeout: 45_000 });
-        await expect(card(page)).toContainText(`Invitation sent to ${visitor.email} on `, { timeout: 45_000 });
+        await expect(card(page)).toContainText(`Invitation sent to ${person.email} on `, { timeout: 45_000 });
         expect(await invitationsAt(sql, o)).toHaveLength(1);
       });
 

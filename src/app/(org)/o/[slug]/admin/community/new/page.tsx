@@ -146,6 +146,7 @@ export default async function NewMemberPage({
       </div>
       <MemberWizard
         slug={slug}
+        organization={resolved.org.name}
         households={households}
         canProposeRoll={canProposeRoll}
         memberAvailable={memberAvailable}

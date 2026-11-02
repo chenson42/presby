@@ -1728,6 +1728,220 @@ founding-administrator invitation.
 
 **5. Dev and e2e.** Cloudflare's public test keys (`docs/testing.md`) go in a gitignored `.env.local` or a Playwright server's environment, never in a Vercel scope.
 
+## Membership standing (0066)
+
+Added by Community Increment 3a (DECISION-232 to 237; F240 to F247). Migration
+`0066`. Design and rulings: `docs/work-log/2026-10-22-founding-admin-directory-inc3.md`
+(Phase 3 sections 3 and 4 as amended, A4 to A6). `0066` gives every
+organization an `all_memberships` group ("All Current Records", created next to
+each Active Membership group by a trigger) and a protected `calendar_viewer`
+role (`events.view` only) bound to it; narrows `active_membership` to people
+with member standing (a person on the current roll, a regular attender or a
+staff record); adds a vocabulary CHECK and an update guard on
+`memberships.engagement_status` and an owner-only guard on `current_roll` and
+`current_roll_since`; and adds the guards that make derived group rows and
+derived groups writable only on the owner path (two shape CHECKs on `groups`).
+Nothing is deleted.
+
+**Takes effect when it is applied, not when the code deploys.** Tenant
+permissions resolve per request, so the narrowing is live the moment `0066`
+commits. A visitor, inactive or moved-away person who has a sign-in keeps the
+calendar (through `calendar_viewer`) and loses `directory.view` at that moment.
+
+### Pre-deploy runbook: 0066, then the code
+
+Apply `0066` BEFORE promoting the 0.54.0 code. Old code against the new schema
+survives: the guards refuse only writes no old code path attempts. The reverse
+(new code before the schema) fails, because the code reads the
+`all_memberships` group, `calendar_viewer` and the new guard messages.
+
+**Forward only.** Once the `all_memberships` groups and rows exist, removing
+them would strand grants and rows. Rollback is a forward migration, never an
+edit of `0066` (DECISION-298's conditions are not met).
+
+0. **Preconditions.**
+   - **`0065` is applied** (the file's first stop-block refuses and rolls back
+     whole otherwise): `select to_regprocedure('presby_membership_standing(text,text)') is not null`.
+   - **The measurements below, read-only, on production** with
+     `PGOPTIONS='-c default_transaction_read_only=on'` and `psql -X`. Run them
+     once now and again on deploy day, just before the apply. Counts only; copy
+     nothing but the numbers. Record them under "Recorded results" below.
+   - **P1 and P10 must be 0** or the file refuses (its own stop-blocks mirror
+     them). Do not edit the migration to get past a refusal: correct the rows
+     first and report the count, never a group name.
+   - **0066 applies after 0067 to 0082 on every existing database and before
+     them on a fresh `db:migrate`;** both orders end in the same state. A
+     fresh `db:migrate` has no organizations at that point, so every backfill
+     inserts nothing.
+
+```sql
+-- P1  Stop-block mirror: engagement values outside the five (must be 0 or 0066 refuses to apply)
+select count(*) as bad_engagement
+  from memberships
+ where engagement_status is null
+    or engagement_status not in ('visitor','regular','inactive','moved_away','staff');
+
+-- P2  Live memberships by standing, and those whose person has a sign-in (who loses the directory)
+with s as (
+  select m.person_id,
+         case when m.current_roll in ('active','baptized','affiliate','other_participant')
+                   or m.engagement_status = 'regular' then 'listed'
+              when m.engagement_status = 'staff'   then 'staff_anchor'
+              when m.engagement_status = 'visitor' then 'visitor'
+              when m.engagement_status in ('inactive','moved_away') then 'inactive'
+              else 'unclassified' end as standing
+    from memberships m where m.ended_on is null)
+select s.standing, count(*) as live, count(*) filter (where p.user_id is not null) as with_sign_in
+  from s join people p on p.id = s.person_id
+ group by s.standing order by 1;
+
+-- P3  Custom grants that bind to active_membership (they narrow too): by role key, live only
+select r.key, count(*)
+  from role_grants rg
+  join groups g on g.id = rg.group_id and g.derived_from = 'active_membership'
+  join app_roles r on r.id = rg.role_id
+ where rg.ends_on is null or rg.ends_on > current_date
+ group by r.key order by 1;
+
+-- P4  Organisations: total / with the group / holding memberships but no group (left as they are)
+select (select count(*) from organizations),
+       (select count(*) from groups where derived_from = 'active_membership'),
+       (select count(distinct m.organization_id) from memberships m
+         where not exists (select 1 from groups g
+                            where g.organization_id = m.organization_id
+                              and g.derived_from = 'active_membership'));
+
+-- P5  D4: organisations with the group but no live member grant, and the live memberships there
+select count(*) as orgs_without_member_grant,
+       coalesce(sum((select count(*) from memberships m
+                      where m.organization_id = g.organization_id and m.ended_on is null)), 0) as live_memberships_gaining_events_view
+  from groups g
+ where g.derived_from = 'active_membership'
+   and not exists (select 1 from role_grants rg join app_roles r on r.id = rg.role_id
+                    where rg.group_id = g.id and r.key = 'member'
+                      and (rg.ends_on is null or rg.ends_on > current_date));
+
+-- P6  Live memberships with no active_membership derived row
+select count(*) from memberships m
+ where m.ended_on is null
+   and not exists (select 1 from group_memberships gm join groups g on g.id = gm.group_id
+                    where gm.membership_id = m.id and g.derived_from = 'active_membership');
+
+-- P7  Org-owned roles that already use the new key (never modified; any hit is reported)
+select count(*) from app_roles where key = 'calendar_viewer';
+
+-- P8  Open sign_in invitations addressed to a person who will NOT have member standing after 0066
+--     (they stay valid and connect to a calendar-only account). Requires 0065.
+select count(*)
+  from account_invitations i
+  join memberships m on m.person_id = i.person_id and m.organization_id = i.organization_id and m.ended_on is null
+ where i.purpose = 'sign_in'
+   and i.accepted_at is null and i.revoked_at is null and i.superseded_at is null
+   and i.blocked_at is null and i.redacted_at is null and i.expires_at > now()
+   and not (m.current_roll in ('active','baptized','affiliate','other_participant')
+            or m.engagement_status in ('regular','staff'));
+
+-- P9  Writers: how many memberships could a guard on current_roll ever see written by presby_app?
+--     (static, from the code: 0 application writers; no query)
+
+-- P10 arch-A2 stop-block mirror (five kinds, A4.1): groups that would violate the two new shape CHECKs
+--     (each must be 0 or 0066 refuses to apply). Counts only.
+select count(*) filter (where (membership_source = 'derived') <> (derived_from is not null))               as shape_mismatch,
+       count(*) filter (where derived_from is not null
+                          and derived_from not in ('active_membership','all_memberships','session','diaconate','deacons_moderator')) as unknown_kind
+  from groups;
+
+-- P11 (AFTER 0066 is applied; both must be 0): the pair and the baseline role are complete
+select count(*) filter (where has_am is distinct from has_all)        as exactly_one_of_pair,
+       count(*) filter (where has_all and not has_role)               as pair_without_calendar_viewer
+  from (select o.id,
+               coalesce(bool_or(g.derived_from = 'active_membership'), false) as has_am,
+               coalesce(bool_or(g.derived_from = 'all_memberships'), false)   as has_all,
+               exists (select 1 from app_roles r where r.organization_id = o.id and r.key = 'calendar_viewer') as has_role
+          from organizations o left join groups g on g.organization_id = o.id
+         group by o.id) s;
+
+-- P12 (before and after): groups by kind. Before, no all_memberships; after, equal to active_membership
+select coalesce(derived_from, 'managed') as kind, count(*) from groups group by 1 order by 1;
+```
+
+   What each decides:
+   - **P1 > 0:** `0066` stops; repair the rows first.
+   - **P2** `with_sign_in` for `visitor`, `inactive` and `unclassified` is the
+     exact number of signed-in people who lose the directory at apply. If it
+     is non-zero, the release note names the number and the change is
+     immediate at apply, not at deploy. **P2 was 0 on production as of
+     2026-10-31** (production held one listed person and one staff record, both
+     with a sign-in, and no visitor, inactive or unclassified person) and 0 on
+     the `development` copy.
+   - **P3:** non-`member` keys mean a custom role is narrowed to member
+     standing.
+   - **P5** non-zero is the widening: organizations where the baseline
+     `member` grant is missing, so their live memberships newly gain
+     `events.view`. **P5 was 0 for every real organization on both databases
+     on 2026-10-31** (the only two hits on the `development` copy were
+     throwaway test fixtures). If it is non-zero on deploy day, read the
+     number before the apply and add the widening sentence, with that number,
+     to the release note.
+   - **P6** non-zero (outside organizations that have no group) means people
+     gain `events.view` now but no Active Membership row until their next
+     membership write (unchanged behavior). 0 on production on 2026-10-31.
+   - **P7** non-zero: report it; the role is never modified and a collision
+     would mean the baseline is absent there.
+   - **P8** informs the release note only.
+   - **P9** is static (no application writer of `current_roll`; nothing to run).
+   - **P10** either column above 0: `0066` stops; correct the rows before the
+     apply.
+1. **Apply to `development` first.** Apply `0066` there with the same command
+   as step 4 and re-run `scripts/test-rls.sql` and
+   `scripts/parishes/test-rls-68.sql` as `presby_app` (any known drift is
+   commented in the file itself; a from-empty database shows none). Then the
+   rehearsal: create a throwaway Neon branch from `production` (never
+   `development`), apply `0066` there with `-1`, run P11 and P12, apply the
+   whole file a SECOND time (zero rows change), then delete the branch.
+   Record the date and result.
+2. **Snapshot** the Neon `production` branch (`pre-0066-<date>`).
+3. **Re-run P1 to P12** on production just before the apply. Before the apply
+   P11 reads the number of organizations that have an Active Membership group
+   (no sibling exists yet); that is expected, and only the post-apply reading
+   must be 0 / 0.
+4. **Apply with `-1`, as the owner, on the direct (non-pooler) endpoint:**
+   `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0066_presby_membership_standing.sql`.
+   `-1` is mandatory. Never `drizzle-kit migrate` on an existing database: its
+   ledger records only the first ten migrations (above). The file is
+   idempotent; a failed run can be repeated whole.
+5. **Verify (before promoting the code).**
+   - **P11 = 0 / 0** (`exactly_one_of_pair`, `pair_without_calendar_viewer`).
+     If `pair_without_calendar_viewer` is non-zero, re-run the delimited
+     `-- BEGIN backfill-calendar-viewer` ... `-- END backfill-calendar-viewer`
+     block of the file (it is idempotent) and re-check.
+   - **P12:** `all_memberships` now equals `active_membership`; no other kind
+     changed.
+   - The guards are present and refuse what they should:
+     `scripts/membership-standing/test-rls-66.sql` run as `presby_app` on a
+     scratch or `development` database, never production.
+6. **Create no organization between the apply and the deploy.** An
+   organization created by the old code gets the pair (by trigger) but no
+   `calendar_viewer` role until the block above is re-run; re-check P11 after
+   the deploy as well.
+7. **Promote the code** (merge; Vercel builds). Then the analyst walks the
+   visitor and archived-person paths on `development` (a `docs/TODO.md` line)
+   before the help pages' `verifiedIn` moves.
+
+**Recorded results.** Pipeline branch, 2026-10-31 (a copy of `development`,
+before the apply): P1 0; P2 listed 83 / 28 with a sign-in, visitor 3 / 0; P3
+`member` 18; P4 20 / 20 / 0; P5 2 organizations / 8 memberships, both test
+fixtures; P6 4; P7 0; P8 0; P10 0 / 0; P11 20 / 0 before the apply and 0 / 0
+after; P12 `active_membership` 20, `deacons_moderator` 11, `diaconate` 12,
+`session` 10, managed 4, plus `all_memberships` 20 after. Production,
+2026-10-31, before the apply: P1 0; P2 listed 1 / 1, staff anchor 1 / 1, no
+visitor, inactive or unclassified; P3 `member` 2; P4 2 / 2 / 0; P5 0 / 0; P6 0;
+P7 0; P8 0; P10 0 / 0; P11 2 / 0 (the pair is absent before the apply); P12
+`active_membership` 2, `deacons_moderator` 1, `diaconate` 1, `session` 1.
+Production is re-measured on deploy day; add that row here with the apply date.
+
+---
+
 ## Deferred by operator decision (2026-09-23)
 
 These are **not** oversights.

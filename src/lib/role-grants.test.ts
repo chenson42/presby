@@ -567,6 +567,17 @@ describe.skipIf(!hasDb)("role-grants.ts (Postgres-backed, real dev database)", (
       const group = result.options.groups.find((g) => g.groupId === groupA);
       expect(group).toBeDefined();
       expect(group?.derived).toBe(false);
+      expect(group?.derivedFrom).toBeNull();
+    });
+
+    it("carries each derived group's kind, so the form can word it by who it reaches (3a, S15)", async () => {
+      const result = await getGrantFormOptions(clerkPerson, orgA);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      const active = result.options.groups.find((g) => g.derivedFrom === "active_membership");
+      expect(active).toMatchObject({ derived: true, name: "Active Membership" });
+      // drizzle/0066's pair trigger made the sibling when the fixture inserted Active Membership.
+      const all = result.options.groups.find((g) => g.derivedFrom === "all_memberships");
+      expect(all).toMatchObject({ derived: true, name: "All Current Records" });
     });
   });
 

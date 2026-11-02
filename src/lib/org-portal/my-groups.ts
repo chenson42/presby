@@ -30,7 +30,8 @@ import { todayInOrgZone } from "@/lib/shared/org-time";
  *      as a `'YYYY-MM-DD'` string. Never `current_date` / `now()` — the
  *      database session zone is not the congregation's.
  *   4. A DB-BACKED TEST proves another member's rows, another org's rows, the
- *      `active_membership` group and ended memberships are not returned.
+ *      `active_membership` and `all_memberships` groups and ended memberships
+ *      are not returned.
  *
  * A member-facing groups page would get its own `groups.view` permission; this
  * function stays self-only.
@@ -40,10 +41,14 @@ import { todayInOrgZone } from "@/lib/shared/org-time";
  * started. This diverges on purpose from the admin roster (`groups.ts` counts
  * `ends_on is null` only).
  *
- * EXCLUDES `derived_from = 'active_membership'` — filtered on the column,
- * never on the name (a managed group may legally be named "Active
- * Membership"). That group is a baseline-grant mechanism, and a pill reading
- * "Active Membership" on every home would be a status claim (DECISION-039).
+ * EXCLUDES the two baseline kinds, `derived_from = 'active_membership'` and
+ * `derived_from = 'all_memberships'` (Increment 3a, DECISION-232) — filtered on
+ * the column, never on the name (a managed group may legally be named "Active
+ * Membership"). Those groups are baseline-grant mechanisms, and a pill reading
+ * "Active Membership" or "All Current Records" on every home would be a status
+ * claim (DECISION-039): the second is held by EVERY live membership, visitors
+ * included, and a pill saying so would tell a visitor, and anyone looking over
+ * their shoulder, which standing the congregation recorded for them.
  * INCLUDES managed groups and the derived `session` and `diaconate` groups.
  *
  * `exists`, not a join: a person holding two overlapping current rows in one
@@ -77,6 +82,7 @@ export async function getViewerGroups(
         from groups g
        where g.organization_id = ${organizationId}::uuid
          and g.derived_from is distinct from 'active_membership'
+         and g.derived_from is distinct from 'all_memberships'
          and exists (
            select 1
              from group_memberships gm

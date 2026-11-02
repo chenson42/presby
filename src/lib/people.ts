@@ -23,6 +23,7 @@ import {
 } from "@/lib/roll";
 import { isPgError } from "@/lib/db/errors";
 import { deriveConnection, type Connection } from "@/lib/community-labels";
+import { MAX_HOW_HEARD } from "@/lib/membership-standing";
 import { isRealYmd, todayUtcYmd } from "@/lib/ymd";
 import { AUDIT_ACTIONS, insertAuditRow } from "@/lib/audit-tx";
 import {
@@ -330,7 +331,8 @@ class CreatePersonAbort extends Error {
   }
 }
 
-const MAX_HOW_HEARD = 200;
+// MAX_HOW_HEARD is the one shared bound (membership-standing.ts): the creation
+// path here, the edit writer (community-engagement.ts) and the forms use it.
 const MAX_MINUTE_REFERENCE = 200;
 
 /** Concatenates `err.message` with every `.cause` in the chain — Drizzle's

@@ -32,10 +32,11 @@ const DAY_MS = 86_400_000;
  * The send names the address the sender SAW; the database chooses where the
  * email goes and refuses a stale confirmation (`address_changed`), so a posted
  * value can only be refused, never used. The acknowledgement (F177 Option 3) is
- * shown up front for a visitor and again whenever the server asks: the
- * `do_not_contact` paragraph only when the server asks. The checkbox must be
- * ticked to send once any acknowledgement paragraph is showing; what is recorded
- * is what the DEFINER returned, never this flag.
+ * shown only when the server asks, and since Increment 3a it asks for one
+ * reason: the address is marked do-not-contact (a visitor no longer needs an
+ * acknowledgement; a visitor's access is the calendar only). The checkbox must
+ * be ticked to send once the paragraph is showing; what is recorded is what the
+ * DEFINER returned, never this flag.
  *
  * `needs_acknowledgement` is not an error: the action answers `error: ""` with
  * `needsAcknowledgement`, and the dialog re-opens its paragraphs instead of
@@ -50,7 +51,6 @@ export function SendSignInDialog({
   personId,
   personName,
   address,
-  isVisitor,
   triggerLabel,
   disabled = false,
   triggerVariant = "default",
@@ -61,7 +61,6 @@ export function SendSignInDialog({
   personName: string;
   /** The address on file now: what the sender confirms. */
   address: string;
-  isVisitor: boolean;
   triggerLabel: string;
   disabled?: boolean;
   triggerVariant?: "default" | "outline";
@@ -77,9 +76,8 @@ export function SendSignInDialog({
   const [expires, setExpires] = useState<Date | null>(null);
 
   const copy = SIGN_IN_DIALOG_COPY;
-  const showVisitor = (mode === "send" && isVisitor) || asked.includes("visitor");
   const showDoNotContact = asked.includes("do_not_contact");
-  const needsAck = showVisitor || showDoNotContact;
+  const needsAck = showDoNotContact;
 
   function handleOpenChange(next: boolean) {
     if (pending) return;
@@ -157,7 +155,6 @@ export function SendSignInDialog({
 
         {needsAck && (
           <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-            {showVisitor && <p>{copy.send.visitorAcknowledgement(personName)}</p>}
             {showDoNotContact && <p>{copy.send.doNotContactAcknowledgement(personName)}</p>}
             <div className="flex items-start gap-3">
               <input

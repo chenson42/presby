@@ -17,6 +17,16 @@
  * to this screen by design).
  */
 import type { DeliveryState } from "./status";
+import {
+  MEMBERSHIP_STANDINGS,
+  isMemberStanding,
+  type MembershipStanding,
+} from "@/lib/membership-standing";
+
+// One standing vocabulary (Increment 3a, D13 (c)): 2b named it here, 3a's
+// `membership-standing.ts` owns it, and this module re-exports the names so
+// there is not a second list for the two to drift apart.
+export { MEMBERSHIP_STANDINGS, type MembershipStanding };
 
 /**
  * Durable limits (G9, R32), counted over `origin = 'org'` rows in a rolling 24
@@ -62,8 +72,13 @@ export type SignInRefusal = (typeof SIGN_IN_REFUSALS)[number];
 export const SIGN_IN_REVOKE_OUTCOMES = ["ok", "not_open"] as const;
 export type SignInRevokeOutcome = (typeof SIGN_IN_REVOKE_OUTCOMES)[number];
 
-/** Why a send needs the sender's acknowledgement (F177 Option 3, condition 1: the database asks). */
-export const SIGN_IN_ACK_REASONS = ["do_not_contact", "visitor"] as const;
+/**
+ * Why a send needs the sender's acknowledgement (F177 Option 3, condition 1:
+ * the database asks). Since Increment 3a the database asks for exactly one
+ * reason: the address is marked do-not-contact. A visitor no longer needs one,
+ * because a visitor's access is the calendar only (drizzle/0066 section 9).
+ */
+export const SIGN_IN_ACK_REASONS = ["do_not_contact"] as const;
 export type SignInAckReason = (typeof SIGN_IN_ACK_REASONS)[number];
 
 /** The reader's state column. `signs_in` is `people.user_id is not null` and takes precedence. */
@@ -82,10 +97,6 @@ export type SignInBlockOutcome = (typeof SIGN_IN_BLOCK_OUTCOMES)[number];
 /** Where a connection came from, as the reader derives it from this organization's own rows. */
 export const SIGN_IN_CONNECTED_VIA = ["sign_in", "invitation"] as const;
 export type SignInConnectedVia = (typeof SIGN_IN_CONNECTED_VIA)[number];
-
-/** `presby_membership_standing()`'s closed result (S13/R50). Only `visitor` is tested in 2b. */
-export const MEMBERSHIP_STANDINGS = ["listed", "staff_anchor", "visitor", "inactive", "unclassified"] as const;
-export type MembershipStanding = (typeof MEMBERSHIP_STANDINGS)[number];
 
 /**
  * What a revoke-all revokes (F198, one lever per origin, never a mixed one).
@@ -131,9 +142,10 @@ export type SignInActionResult =
  */
 export const CONNECT_OUTLOOKS = [
   "connected",
+  "connected_not_listed",
   "by_sign_in",
   "by_sign_in_second_factor",
-  "visitor",
+  "not_listed",
   "shared_address",
   "turned_off",
   "none",
@@ -155,7 +167,14 @@ export interface ConnectOutlookInput {
  * What an administrator is told will happen when the person signs in with the
  * address on their record. Precedence, first match wins:
  *
- *   1. linked                                  -> connected
+ *   1. linked                                  -> connected, or
+ *                                                 connected_not_listed when the
+ *                                                 standing is known and is not
+ *                                                 member standing (a connected
+ *                                                 visitor, inactive or moved-away
+ *                                                 person: the usual member access
+ *                                                 does not reach them; the
+ *                                                 calendar does)
  *   2. an open invitation (pending), a blocked
  *      one, or no address on file              -> none (the card's own state
  *                                                 copy says why; the pending
@@ -163,24 +182,34 @@ export interface ConnectOutlookInput {
  *                                                 card's, not this function's)
  *   3. the organization's toggle is off        -> turned_off
  *   4. another live person holds the address   -> shared_address
- *   5. the person is a visitor                 -> visitor
+ *   5. the standing is not member standing     -> not_listed (a visitor, an
+ *                                                 inactive or moved-away person,
+ *                                                 or an unclassified one;
+ *                                                 exactly the people auto-connect
+ *                                                 declines, R55)
  *   6. the record bears authority              -> by_sign_in_second_factor
  *   7. otherwise                               -> by_sign_in
  *
  * Why the toggle comes before the others: with it off nothing connects, so the
- * lines about visitors or shared addresses would describe a distinction that
- * does not matter. `by_sign_in*` are hedged in the copy ("if it can", "once
+ * lines about people who are not listed or shared addresses would describe a
+ * distinction that does not matter. `by_sign_in*` are hedged in the copy ("if it can", "once
  * they have confirmed") because a global decline (the address shared in another
  * congregation, the account already linked elsewhere, an unproven account) is
  * invisible here by design. No branch claims prevention (F232).
  */
 export function connectOutlook(input: ConnectOutlookInput): ConnectOutlook {
-  if (input.state === "signs_in") return "connected";
+  if (input.state === "signs_in") {
+    // An unknown standing (the read failed or returned something unrecognised)
+    // is never called "not listed": claim only what was read.
+    return input.standing !== null && !isMemberStanding(input.standing)
+      ? "connected_not_listed"
+      : "connected";
+  }
   if (input.state === "pending" || input.state === "blocked") return "none";
   if (!input.hasAddress) return "none";
   if (!input.selfConnectEnabled) return "turned_off";
   if (input.addressShared) return "shared_address";
-  if (input.standing === "visitor") return "visitor";
+  if (input.standing !== null && !isMemberStanding(input.standing)) return "not_listed";
   if (input.authorityBearing) return "by_sign_in_second_factor";
   return "by_sign_in";
 }
@@ -209,8 +238,6 @@ export interface SignInCardState {
   chainCapReached: boolean;
   delivery: DeliveryState;
   blockedOutcome: SignInBlockOutcome | null;
-  /** The person is a visitor: the send dialog shows the acknowledgement paragraph up front. */
-  isVisitor: boolean;
   /** The address is marked do-not-contact: the dialog asks once the server says so. */
   addressDoNotContact: boolean;
   authorityBearing: boolean;

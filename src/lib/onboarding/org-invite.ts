@@ -595,7 +595,6 @@ export async function getSignInCard(ctx: SignInContext, personId: string): Promi
         chainCapReached: open && st.resendCount >= SIGN_IN_INVITATION_LIMITS.maxResendsPerChain,
         delivery: st.delivery,
         blockedOutcome: st.outcome,
-        isVisitor: standing === "visitor",
         addressDoNotContact: email?.doNotContact === true,
         authorityBearing,
         addressShared,

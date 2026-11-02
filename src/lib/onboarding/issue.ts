@@ -307,12 +307,17 @@ async function provisioningComplete(
   organizationId: string,
   organizationType: string,
 ): Promise<boolean> {
+  // Both baseline groups: Active Membership (the membership sync raises
+  // without it, F16) and All Current Records (the sync raises without it
+  // since drizzle/0066, and the calendar baseline is bound to it). The
+  // database pairs them by trigger, so a missing one means a hand-built
+  // organization; the operator hears at send, not at acceptance.
   const group = await tx.execute(sql`
-    select 1 as ok from groups
-     where organization_id = ${organizationId}::uuid and derived_from = 'active_membership'
-     limit 1
+    select count(distinct derived_from)::int as n from groups
+     where organization_id = ${organizationId}::uuid
+       and derived_from in ('active_membership', 'all_memberships')
   `);
-  if (rowsOf(group).length === 0) return false;
+  if (Number(rowsOf<{ n: number }>(group)[0]?.n ?? 0) !== 2) return false;
   if (purpose === "founding_administrator") return true;
   // Treasurer: both role templates in scope for the org type must exist.
   const templates = await tx.execute(sql`

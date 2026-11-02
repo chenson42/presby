@@ -36,6 +36,25 @@ describe("HouseholdRow", () => {
     expect(screen.getByText("Visitor")).toBeTruthy();
   });
 
+  it("tags an inactive and a moved-away person with the Community labels (Copy group J, EC-42)", () => {
+    render(
+      <ul>
+        <HouseholdRow
+          household={{
+            householdId: "h2",
+            name: "The Jones Family",
+            people: [
+              { name: "Lee Jones", masked: false, connection: "inactive" },
+              { name: "Kim Jones", masked: false, connection: "moved_away" },
+            ],
+          }}
+        />
+      </ul>,
+    );
+    expect(screen.getByText("Inactive")).toBeTruthy();
+    expect(screen.getByText("Moved away")).toBeTruthy();
+  });
+
   it("a household with no current person says so", () => {
     render(
       <ul>

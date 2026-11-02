@@ -191,6 +191,12 @@ describe("UnassignedPage - rendering", () => {
     ).toBeTruthy();
     expect(screen.getByRole("link", { name: "Hide Members (2)" })).toBeTruthy();
     expect(screen.getByText(/appears under the first group that fits: Members, then Participants/)).toBeTruthy();
+    // Copy group J: Others includes the people the Community lists call inactive or moved away.
+    expect(
+      screen.getByText(
+        /Others are households where everyone is only listed, on\s+staff, or marked inactive or moved away\./,
+      ),
+    ).toBeTruthy();
     expect(screen.getAllByTestId("household-row")).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: /^Assign / })).toHaveLength(2);
     expect(screen.getByText("Private")).toBeTruthy();

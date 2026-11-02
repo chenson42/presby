@@ -16,8 +16,10 @@
  * Fixtures are self-contained (created and torn down per file, not mutating
  * scripts/seed-dev.sql's fixture ids) — same discipline as sites.test.ts.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { fixtureDeletableUntil } from "@/lib/db/fixture-deletable";
 
 vi.mock("server-only", () => ({}));
@@ -54,6 +56,7 @@ describe.skipIf(!hasDb)(
     let eventTypes: typeof import("@/lib/db/domain/events").eventTypes;
     let eventTypeSeedPlan: typeof import("./org-provisioning").eventTypeSeedPlan;
     let baselineRoleSeedPlan: typeof import("./org-provisioning").baselineRoleSeedPlan;
+    let groupSeedPlan: typeof import("./org-provisioning").groupSeedPlan;
     let users: typeof import("@/lib/db/schema").users;
 
     const stamp = Date.now();
@@ -89,6 +92,7 @@ describe.skipIf(!hasDb)(
         getOrganizationAffiliationAdminDetail,
         eventTypeSeedPlan,
         baselineRoleSeedPlan,
+        groupSeedPlan,
       } = await import("./org-provisioning"));
       ({ organizationSettings } = await import("@/lib/db/domain/org"));
       ({ organizationFeatureToggles } = await import(
@@ -201,6 +205,61 @@ describe.skipIf(!hasDb)(
       });
     });
 
+    describe("groupSeedPlan (pure plan; Increment 3a, arch-A3)", () => {
+      const TYPES = [
+        "congregation",
+        "presbytery",
+        "synod",
+        "general_assembly",
+        "new_worshiping_community",
+      ] as const;
+
+      it("lists All Current Records (all_memberships) EXPLICITLY for every organization type, beside Active Membership", () => {
+        for (const type of TYPES) {
+          const plan = groupSeedPlan(type);
+          expect(plan.filter((g) => g.derivedFrom === "active_membership"), type).toHaveLength(1);
+          const all = plan.filter((g) => g.derivedFrom === "all_memberships");
+          expect(all, type).toEqual([
+            { groupTypeKey: "roster", name: "All Current Records", derivedFrom: "all_memberships" },
+          ]);
+        }
+      });
+
+      it("a plan without the entry would fail this test: the explicit entry is what lets the baseline-role lookup find the group (a RETURNING clause does not return trigger-inserted rows)", () => {
+        const without = (type: (typeof TYPES)[number]) =>
+          groupSeedPlan(type).filter((g) => g.derivedFrom !== "all_memberships");
+        for (const type of TYPES) {
+          expect(without(type).length, type).toBe(groupSeedPlan(type).length - 1);
+          expect(without(type).some((g) => g.derivedFrom === "all_memberships")).toBe(false);
+        }
+      });
+
+      it("the congregation plan is Session, Board of Deacons, the Moderator seat, Active Membership, All Current Records; every other type is the last two", () => {
+        expect(groupSeedPlan("congregation").map((g) => g.derivedFrom)).toEqual([
+          "session",
+          "diaconate",
+          "deacons_moderator",
+          "active_membership",
+          "all_memberships",
+        ]);
+        for (const type of TYPES.filter((t) => t !== "congregation")) {
+          expect(groupSeedPlan(type).map((g) => g.derivedFrom), type).toEqual([
+            "active_membership",
+            "all_memberships",
+          ]);
+        }
+      });
+
+      it("the group name is the literal the pair trigger writes (the derived-edit trigger forbids a later rename)", () => {
+        const sql66 = readFileSync(
+          path.join(process.cwd(), "drizzle", "0066_presby_membership_standing.sql"),
+          "utf8",
+        );
+        const name = groupSeedPlan("congregation").find((g) => g.derivedFrom === "all_memberships")!.name;
+        expect(sql66).toContain(`'${name}', 'derived', 'all_memberships', true`);
+      });
+    });
+
     describe("baselineRoleSeedPlan / eventTypeSeedPlan (pure plans)", () => {
       it("gives the member role a LIST of permissions: directory.view and events.view, for EVERY organization type", () => {
         for (const type of [
@@ -226,6 +285,7 @@ describe.skipIf(!hasDb)(
         const plan = baselineRoleSeedPlan("congregation");
         expect(plan.map((r) => r.key)).toEqual([
           "member",
+          "calendar_viewer",
           "session_member",
           "deacons_moderator",
         ]);
@@ -259,7 +319,7 @@ describe.skipIf(!hasDb)(
         }
       });
 
-      it("every other organization type is unchanged: one member role, no Session role (F185: nobody could approve)", () => {
+      it("every other organization type: the member role and the calendar_viewer role, no Session role (F185: nobody could approve)", () => {
         for (const type of [
           "presbytery",
           "synod",
@@ -267,7 +327,52 @@ describe.skipIf(!hasDb)(
           "new_worshiping_community",
         ] as const) {
           const plan = baselineRoleSeedPlan(type);
-          expect(plan.map((r) => r.key), type).toEqual(["member"]);
+          expect(plan.map((r) => r.key), type).toEqual(["member", "calendar_viewer"]);
+        }
+      });
+
+      // DECISION-232 (Increment 3a): `member` is held by people with MEMBER
+      // STANDING (through Active Membership) and carries the directory; the
+      // calendar baseline is held by everyone with a live membership (through
+      // All Current Records) and carries events.view and nothing else.
+      it("EVERY type gets calendar_viewer: events.view ONLY, bound to the derived all_memberships group", () => {
+        for (const type of [
+          "congregation",
+          "presbytery",
+          "synod",
+          "general_assembly",
+          "new_worshiping_community",
+        ] as const) {
+          const role = baselineRoleSeedPlan(type).find((r) => r.key === "calendar_viewer");
+          expect(role, type).toEqual({
+            key: "calendar_viewer",
+            name: "Calendar viewer",
+            permissionKeys: ["events.view"],
+            boundToDerivedFrom: "all_memberships",
+          });
+        }
+      });
+
+      it("the role key and name are the literals drizzle/0066's backfill writes (the key is the backfill's only discriminator)", () => {
+        const sql66 = readFileSync(
+          path.join(process.cwd(), "drizzle", "0066_presby_membership_standing.sql"),
+          "utf8",
+        );
+        expect(sql66).toContain("'calendar_viewer', 'Calendar viewer', 'constitutional', true");
+      });
+
+      it("every role's bound group is a group the same type's group plan seeds (the lookup cannot miss in the plan)", () => {
+        for (const type of [
+          "congregation",
+          "presbytery",
+          "synod",
+          "general_assembly",
+          "new_worshiping_community",
+        ] as const) {
+          const kinds = new Set<string>(groupSeedPlan(type).map((g) => g.derivedFrom));
+          for (const role of baselineRoleSeedPlan(type)) {
+            expect(kinds.has(role.boundToDerivedFrom), `${type}/${role.key}`).toBe(true);
+          }
         }
       });
 
@@ -417,7 +522,7 @@ describe.skipIf(!hasDb)(
             .select({ permissionKey: appRolePermissions.permissionKey })
             .from(appRolePermissions)
             .innerJoin(appRoles, eq(appRolePermissions.roleId, appRoles.id))
-            .where(eq(appRoles.organizationId, id));
+            .where(and(eq(appRoles.organizationId, id), eq(appRoles.key, "member")));
           expect(rows.map((r) => r.permissionKey).sort()).toEqual([
             "directory.view",
             "events.view",
@@ -457,7 +562,9 @@ describe.skipIf(!hasDb)(
           .from(groups)
           .where(eq(groups.organizationId, result.organizationId));
 
-        expect(groupRows).toHaveLength(4);
+        // Five: drizzle/0066's groups_pair_derived trigger adds All Current
+        // Records whenever Active Membership is inserted (Increment 3a, D1).
+        expect(groupRows).toHaveLength(5);
         const byDerivedFrom = new Map(
           groupRows.map((g) => [g.derivedFrom, g]),
         );
@@ -468,6 +575,9 @@ describe.skipIf(!hasDb)(
         );
         expect(byDerivedFrom.get("active_membership")?.name).toBe(
           "Active Membership",
+        );
+        expect(byDerivedFrom.get("all_memberships")?.name).toBe(
+          "All Current Records",
         );
         for (const g of groupRows) {
           expect(g.membershipSource).toBe("derived");
@@ -491,6 +601,7 @@ describe.skipIf(!hasDb)(
           .from(appRoles)
           .where(eq(appRoles.organizationId, result.organizationId));
         expect(roleRows.map((r) => r.key).sort()).toEqual([
+          "calendar_viewer",
           "deacons_moderator",
           "member",
           "session_member",
@@ -498,6 +609,8 @@ describe.skipIf(!hasDb)(
         const memberRole = roleRows.find((r) => r.key === "member")!;
         const sessionRole = roleRows.find((r) => r.key === "session_member")!;
         const seatRole = roleRows.find((r) => r.key === "deacons_moderator")!;
+        const calendarRole = roleRows.find((r) => r.key === "calendar_viewer")!;
+        expect(calendarRole.name).toBe("Calendar viewer");
         expect(memberRole.name).toBe("Member");
         expect(sessionRole.name).toBe("Session member");
         expect(seatRole.name).toBe("Moderator of the Board of Deacons");
@@ -522,6 +635,10 @@ describe.skipIf(!hasDb)(
             .map((r) => r.permissionKey)
             .sort(),
         ).toEqual(["directory.view", "events.view"]);
+        // DECISION-232: the calendar baseline carries events.view and nothing else.
+        expect(
+          permissionRows.filter((r) => r.roleId === calendarRole.id).map((r) => r.permissionKey),
+        ).toEqual(["events.view"]);
         // DECISION-202: roll.approve ONLY, never roll.propose, never both.
         expect(
           permissionRows.filter((r) => r.roleId === sessionRole.id).map((r) => r.permissionKey),
@@ -547,10 +664,15 @@ describe.skipIf(!hasDb)(
           .from(roleGrants)
           .innerJoin(appRoles, eq(roleGrants.roleId, appRoles.id))
           .where(eq(appRoles.organizationId, result.organizationId));
-        expect(grantRows).toHaveLength(3);
+        expect(grantRows).toHaveLength(4);
         for (const grant of grantRows) expect(grant.personId).toBeNull();
         expect(grantRows.find((g) => g.roleId === memberRole.id)?.groupId).toBe(
           activeMembershipGroupId,
+        );
+        // DECISION-232: calendar_viewer reaches everyone with a live record,
+        // through All Current Records, never through Active Membership.
+        expect(grantRows.find((g) => g.roleId === calendarRole.id)?.groupId).toBe(
+          byDerivedFrom.get("all_memberships")?.id,
         );
         expect(grantRows.find((g) => g.roleId === sessionRole.id)?.groupId).toBe(sessionGroupId);
         // The seat role is bound to the seat group, and to nothing else.
@@ -581,31 +703,43 @@ describe.skipIf(!hasDb)(
           .from(groups)
           .where(eq(groups.organizationId, result.organizationId));
 
-        expect(groupRows).toHaveLength(1);
-        expect(groupRows[0].derivedFrom).toBe("active_membership");
-        expect(groupRows[0].name).toBe("Active Membership");
+        // Active Membership and, by drizzle/0066's pair trigger, All Current
+        // Records (Increment 3a, D1).
+        expect(groupRows).toHaveLength(2);
+        expect(
+          groupRows.map((g) => `${g.derivedFrom}:${g.name}`).sort(),
+        ).toEqual([
+          "active_membership:Active Membership",
+          "all_memberships:All Current Records",
+        ]);
 
         // Same baseline role seed as the congregation case above — the
         // non-congregation plan has a single group, but the role/permission/
         // group-arm-grant shape is identical (DECISION-100: one uniform plan
         // for every organizationType today).
-        const [roleRow] = await platform
-          .select({ key: appRoles.key })
+        const roleRows = await platform
+          .select({ id: appRoles.id, key: appRoles.key })
           .from(appRoles)
           .where(eq(appRoles.organizationId, result.organizationId));
-        expect(roleRow?.key).toBe("member");
+        expect(roleRows.map((r) => r.key).sort()).toEqual(["calendar_viewer", "member"]);
 
         const grantRows = await platform
           .select({
+            roleId: roleGrants.roleId,
             personId: roleGrants.personId,
             groupId: roleGrants.groupId,
           })
           .from(roleGrants)
           .innerJoin(appRoles, eq(roleGrants.roleId, appRoles.id))
           .where(eq(appRoles.organizationId, result.organizationId));
-        expect(grantRows).toHaveLength(1);
-        expect(grantRows[0].personId).toBeNull();
-        expect(grantRows[0].groupId).toBe(groupRows[0].id);
+        expect(grantRows).toHaveLength(2);
+        for (const grant of grantRows) expect(grant.personId).toBeNull();
+        expect(grantRows.find((g) => g.roleId === roleRows.find((r) => r.key === "member")!.id)?.groupId).toBe(
+          groupRows.find((g) => g.derivedFrom === "active_membership")!.id,
+        );
+        expect(grantRows.find((g) => g.roleId === roleRows.find((r) => r.key === "calendar_viewer")!.id)?.groupId).toBe(
+          groupRows.find((g) => g.derivedFrom === "all_memberships")!.id,
+        );
       });
 
       it("does not leak one organization's baseline role/grant rows into another's (composite-key discipline, F2-style)", async () => {
@@ -642,10 +776,10 @@ describe.skipIf(!hasDb)(
           .select({ id: appRoles.id, organizationId: appRoles.organizationId })
           .from(appRoles)
           .where(eq(appRoles.organizationId, resultB.organizationId));
-        // A congregation's plan is three roles (member, session_member,
-        // deacons_moderator).
-        expect(rolesA).toHaveLength(3);
-        expect(rolesB).toHaveLength(3);
+        // A congregation's plan is four roles (member, calendar_viewer,
+        // session_member, deacons_moderator).
+        expect(rolesA).toHaveLength(4);
+        expect(rolesB).toHaveLength(4);
         const idsA = new Set(rolesA.map((r) => r.id));
         for (const r of rolesB) expect(idsA.has(r.id)).toBe(false);
         // Each org's own query returns exactly its own row — no cross-org id
@@ -665,8 +799,8 @@ describe.skipIf(!hasDb)(
           .select({ groupId: roleGrants.groupId, roleId: roleGrants.roleId })
           .from(roleGrants)
           .where(eq(roleGrants.organizationId, resultB.organizationId));
-        expect(grantsA).toHaveLength(3);
-        expect(grantsB).toHaveLength(3);
+        expect(grantsA).toHaveLength(4);
+        expect(grantsB).toHaveLength(4);
         // The two orgs' grants point at their OWN roles and their OWN
         // (org-scoped) groups — never the other org's id, which would
         // indicate a copy-paste of the wrong org's id.

@@ -96,6 +96,8 @@ interface Script {
   probe: Record<string, unknown>[];
   seats: Record<string, unknown>[];
   name: string | null;
+  /** F417: the `memberships ... ended_on is null` answer for the stale-block reinterpretation. */
+  live: Record<string, unknown>[];
 }
 let script: Script;
 
@@ -116,6 +118,7 @@ function install() {
     if (/presby_sign_in_card_standing/.test(text)) return { rows: script.standing };
     if (/from officer_terms/.test(text)) return { rows: script.probe };
     if (/from group_memberships/.test(text)) return { rows: script.seats };
+    if (/from memberships m/.test(text)) return { rows: script.live };
     if (/from people p where p\.id/.test(text)) return { rows: script.name ? [{ name: script.name }] : [] };
     throw new Error(`unexpected SQL in org-invite.test: ${text.slice(0, 80)}`);
   });
@@ -123,7 +126,7 @@ function install() {
 
 beforeEach(() => {
   for (const fn of [h.execute, h.withOrgContext, h.insertAuditRow, h.insertQueueRowInTx, h.cancelQueuedEmail, h.attemptQueuedSend, h.getPersonEmail, h.personIdsWithCredentialEmail, h.orgFeatureEnabledInTx, h.isTotpConfigured]) fn.mockReset();
-  script = { peopleManage: true, officersManage: true, definer: okIssue(), states: [], standing: [], probe: [], seats: [], name: "Wendeline Ashgrove" };
+  script = { peopleManage: true, officersManage: true, definer: okIssue(), states: [], standing: [], probe: [], seats: [], name: "Wendeline Ashgrove", live: [] };
   install();
   h.origin = "https://app.example.invalid";
   h.isTotpConfigured.mockReturnValue(true);
@@ -273,17 +276,25 @@ describe("sendSignInInvitation: the audit row (Rule 7; F177 condition 2)", () =>
     expect((h.insertAuditRow.mock.calls[0]![1] as { metadata: { acknowledged: unknown } }).metadata.acknowledged).toEqual([]);
   });
 
-  it("a visitor send records ['visitor'] and a do-not-contact address records it too", async () => {
-    script.definer = okIssue({ ack_reasons: ["visitor", "do_not_contact"] });
+  // 3a (drizzle/0066 section 9): a do-not-contact address is the one reason the
+  // database asks; a visitor send is unacknowledged and audits `[]` (EC-21).
+  it("a do-not-contact address records ['do_not_contact']; a visitor send records []", async () => {
+    script.definer = okIssue({ ack_reasons: ["do_not_contact"] });
     const result = await org.sendSignInInvitation(ctx, input({ acknowledged: true }));
-    expect((h.insertAuditRow.mock.calls[0]![1] as { metadata: { acknowledged: unknown } }).metadata.acknowledged).toEqual(["visitor", "do_not_contact"]);
-    expect(result).toMatchObject({ kind: "ok", acknowledged: ["visitor", "do_not_contact"] });
+    expect((h.insertAuditRow.mock.calls[0]![1] as { metadata: { acknowledged: unknown } }).metadata.acknowledged).toEqual(["do_not_contact"]);
+    expect(result).toMatchObject({ kind: "ok", acknowledged: ["do_not_contact"] });
+
+    h.insertAuditRow.mockClear();
+    script.definer = okIssue({ ack_reasons: [] });
+    const visitor = await org.sendSignInInvitation(ctx, input());
+    expect((h.insertAuditRow.mock.calls[0]![1] as { metadata: { acknowledged: unknown } }).metadata.acknowledged).toEqual([]);
+    expect(visitor).toMatchObject({ kind: "ok", acknowledged: [] });
   });
 
-  it("an array returned as a Postgres text literal is parsed, and an unknown reason is dropped", async () => {
-    script.definer = okIssue({ ack_reasons: "{visitor,teleported}" });
+  it("an array returned as a Postgres text literal is parsed, and an unknown reason (a retired 'visitor' included) is dropped", async () => {
+    script.definer = okIssue({ ack_reasons: "{do_not_contact,visitor,teleported}" });
     const result = await org.sendSignInInvitation(ctx, input({ acknowledged: true }));
-    expect(result).toMatchObject({ acknowledged: ["visitor"] });
+    expect(result).toMatchObject({ acknowledged: ["do_not_contact"] });
   });
 
   it("contains no address, name or token", async () => {
@@ -333,8 +344,8 @@ describe("sendSignInInvitation: refusals abort the transaction and write nothing
   });
 
   it("needs_acknowledgement carries the reasons the DEFINER found (F177 condition 1: the database asks)", async () => {
-    script.definer = { outcome: "needs_acknowledgement", ack_reasons: ["visitor"] };
-    expect(await org.sendSignInInvitation(ctx, input())).toEqual({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["visitor"] });
+    script.definer = { outcome: "needs_acknowledgement", ack_reasons: ["do_not_contact"] };
+    expect(await org.sendSignInInvitation(ctx, input())).toEqual({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["do_not_contact"] });
   });
 
   it("cooldown carries when Send again opens; already_pending carries whether the open row has expired", async () => {
@@ -477,6 +488,70 @@ describe("revokeSignInInvitation", () => {
 });
 
 // ===========================================================================
+describe("revokeOpenSignInInvitationInTx (F417: archive revokes an open invitation)", () => {
+  beforeEach(() => {
+    script.definer = { outcome: "ok", invitation_id: INVITATION, cancel_email_queue_id: SUPERSEDED_QUEUE };
+  });
+
+  it("ok: runs in the CALLER's transaction (opens none), cancels the queued email, writes one invitation.revoked row via 'archive', returns true", async () => {
+    expect(await org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).toBe(true);
+    expect(h.withOrgContext).not.toHaveBeenCalled();
+    expect(h.cancelQueuedEmail).toHaveBeenCalledWith(tx, SUPERSEDED_QUEUE);
+    expect(h.insertAuditRow).toHaveBeenCalledTimes(1);
+    const [txArg, row] = h.insertAuditRow.mock.calls[0]! as [unknown, { action: string; actor: unknown; resourceType: string; resourceId: string; metadata: Record<string, unknown> }];
+    expect(txArg).toBe(tx);
+    expect(row.action).toBe("invitation.revoked");
+    expect(row.actor).toEqual({ userId: ACTING_USER, email: "sender@example.invalid" });
+    expect(row.resourceType).toBe("account_invitation");
+    expect(row.resourceId).toBe(INVITATION);
+    expect(row.metadata).toEqual({ invitationId: INVITATION, organizationId: ORG, purpose: "sign_in", origin: "org", personId: PERSON, via: "archive" });
+    const { params } = sqlOf(callsMatching(/presby_revoke_sign_in_invitation/)[0]![0]);
+    expect(params).toEqual([PERSON, ACTING_USER]);
+  });
+
+  it("ok with no queued email to cancel does not call the cancel helper", async () => {
+    script.definer = { outcome: "ok", invitation_id: INVITATION, cancel_email_queue_id: null };
+    expect(await org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).toBe(true);
+    expect(h.cancelQueuedEmail).not.toHaveBeenCalled();
+  });
+
+  it("not_open: returns false and writes nothing (no cancel, no audit row)", async () => {
+    script.definer = { outcome: "not_open" };
+    expect(await org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).toBe(false);
+    expect(h.cancelQueuedEmail).not.toHaveBeenCalled();
+    expect(h.insertAuditRow).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an unknown outcome", { outcome: "surprise" }],
+    ["no row at all", undefined],
+  ])("%s throws, so the archive's transaction rolls back", async (_label, definer) => {
+    script.definer = definer;
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).rejects.toThrow();
+    expect(h.insertAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("the definer's own refusal (42501, the actor lost people.manage) propagates", async () => {
+    h.execute.mockImplementation(async (q: unknown) => {
+      if (/presby_revoke_sign_in_invitation/.test(sqlOf(q).sql)) throw Object.assign(new Error("denied"), { code: "42501" });
+      return { rows: [] };
+    });
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).rejects.toThrow("denied");
+  });
+
+  it("a throw from the audit insert propagates (the caller's transaction rolls the revoke back)", async () => {
+    h.insertAuditRow.mockRejectedValue(new Error("audit insert failed (test-injected)"));
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, ctx, PERSON, "archive")).rejects.toThrow("audit insert failed");
+  });
+
+  it("an invalid context or person id throws before any query", async () => {
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, { ...ctx, actingUserId: "x" }, PERSON, "archive")).rejects.toThrow();
+    await expect(org.revokeOpenSignInInvitationInTx(tx as never, ctx, "not-a-uuid", "archive")).rejects.toThrow();
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
 describe("getSignInCard", () => {
   const row = (over: Record<string, unknown> = {}) => ({
     person_id: PERSON,
@@ -518,8 +593,10 @@ describe("getSignInCard", () => {
     const result = await org.getSignInCard(ctx, PERSON);
     expect(result).toMatchObject({
       kind: "ok",
-      card: { personId: PERSON, state: "none", linked: false, address: ADDRESS, outlook: "by_sign_in", selfConnectEnabled: true, isVisitor: false },
+      card: { personId: PERSON, state: "none", linked: false, address: ADDRESS, outlook: "by_sign_in", selfConnectEnabled: true },
     });
+    // 3a (D13 (b)): the visitor flag is gone from the card; the outlook carries it.
+    expect(Object.keys((result as { card: object }).card)).not.toContain("isVisitor");
     expect(h.getPersonEmail).toHaveBeenCalledWith(tx, PERSON, "credential");
     expect(h.orgFeatureEnabledInTx).toHaveBeenCalledWith(tx, ORG, "org_portal.sign_in_connect", false);
   });
@@ -530,9 +607,22 @@ describe("getSignInCard", () => {
     expect(result).toMatchObject({ card: { linked: true, connectedVia: "sign_in", connectedOn: "2026-10-22", outlook: "connected" } });
   });
 
-  it("a visitor, a shared address and an authority-bearing record are surfaced from the standing core's answers", async () => {
+  it("a connected person who is not listed reads connected_not_listed; a connected listed one reads connected (D13 (e))", async () => {
+    script.states = [row({ linked: true, state: "signs_in", connected_via: "invitation", connected_on: "2026-10-22" })];
     script.standing = [{ standing: "visitor", authority_bearing: false, address_shared: false }];
-    expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { isVisitor: true, outlook: "visitor" } });
+    expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { linked: true, outlook: "connected_not_listed" } });
+    script.standing = [{ standing: "listed", authority_bearing: false, address_shared: false }];
+    expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { linked: true, outlook: "connected" } });
+  });
+
+  it("a person who is not listed, a shared address and an authority-bearing record are surfaced from the standing core's answers", async () => {
+    // Not listed: a visitor, an inactive or moved-away person (standing `inactive`), an unclassified one.
+    for (const standing of ["visitor", "inactive", "unclassified"]) {
+      script.standing = [{ standing, authority_bearing: false, address_shared: false }];
+      expect(await org.getSignInCard(ctx, PERSON), standing).toMatchObject({ card: { outlook: "not_listed" } });
+    }
+    script.standing = [{ standing: "staff_anchor", authority_bearing: false, address_shared: false }];
+    expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { outlook: "by_sign_in" } });
     script.standing = [{ standing: "listed", authority_bearing: false, address_shared: true }];
     expect(await org.getSignInCard(ctx, PERSON)).toMatchObject({ card: { addressShared: true, outlook: "shared_address" } });
     script.standing = [{ standing: "listed", authority_bearing: true, address_shared: false }];
@@ -656,6 +746,92 @@ describe("getSignInMarkers", () => {
     h.withOrgContext.mockRejectedValue(Object.assign(new Error(`for ${ADDRESS}`), { code: "40001" }));
     expect(await org.getSignInMarkers(ctx, [PERSON])).toEqual({});
     expect(JSON.stringify((console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls)).not.toContain(ADDRESS);
+  });
+});
+
+// ===========================================================================
+describe("the reader reinterprets a stale membership_ended block (F417 backstop)", () => {
+  const row = (id: string, over: Record<string, unknown> = {}) => ({
+    person_id: id, linked: false, state: "blocked", sent_at: new Date("2026-10-20T12:00:00Z"), expires_at: new Date("2026-10-27T12:00:00Z"),
+    resend_count: 2, next_resend_at: new Date("2026-10-21T12:00:00Z"), invited_address: ADDRESS, address_current: true,
+    outcome: "membership_ended", queue_status: "sent", connected_via: null, connected_on: null, ...over,
+  });
+  const membershipQueries = () => callsMatching(/from memberships m/);
+
+  beforeEach(() => {
+    script.standing = [{ standing: "visitor", authority_bearing: false, address_shared: false }];
+  });
+
+  it("the card: blocked / membership_ended over a LIVE membership reads state none, with every invitation field cleared — regression for the permanent 'has ended' card after Restore", async () => {
+    script.states = [row(PERSON)];
+    script.live = [{ person_id: PERSON }];
+    const result = (await org.getSignInCard(ctx, PERSON)) as { kind: "ok"; card: import("./sign-in-types").SignInCardState };
+    expect(result.card).toMatchObject({
+      state: "none", blockedOutcome: null, sentAt: null, expiresAt: null, nextResendAt: null,
+      invitedAddress: null, addressCurrent: null, resendCount: 0, chainCapReached: false, cooldownMinutes: 0,
+    });
+    expect(result.card.delivery).toBe("unknown"); // what a reader row with no queue row gives
+  });
+
+  it("the card: the same block over an ENDED membership stays blocked and says why", async () => {
+    script.states = [row(PERSON)];
+    script.live = [];
+    const result = (await org.getSignInCard(ctx, PERSON)) as { kind: "ok"; card: import("./sign-in-types").SignInCardState };
+    expect(result.card).toMatchObject({ state: "blocked", blockedOutcome: "membership_ended" });
+  });
+
+  it.each(["person_merged", "person_deceased", "needs_support"])("%s stays blocked even over a live membership, and costs no membership query", async (outcome) => {
+    script.states = [row(PERSON, { outcome })];
+    script.live = [{ person_id: PERSON }];
+    const result = (await org.getSignInCard(ctx, PERSON)) as { kind: "ok"; card: import("./sign-in-types").SignInCardState };
+    expect(result.card).toMatchObject({ state: "blocked", blockedOutcome: outcome });
+    expect(membershipQueries()).toHaveLength(0);
+  });
+
+  it("no extra query when nothing is blocked / membership_ended (none, pending, revoked)", async () => {
+    script.states = [row(PERSON, { state: "pending", outcome: null }), row(OTHER, { state: "revoked", outcome: null })];
+    script.live = [{ person_id: PERSON }];
+    await org.getSignInMarkers(ctx, [PERSON, OTHER]);
+    expect(membershipQueries()).toHaveLength(0);
+  });
+
+  it("the check is one query for all stale rows, scoped to the context's organization and to live memberships", async () => {
+    script.states = [row(PERSON), row(OTHER)];
+    script.live = [{ person_id: PERSON }];
+    await org.getSignInMarkers(ctx, [PERSON, OTHER]);
+    expect(membershipQueries()).toHaveLength(1);
+    const { sql: text, params } = sqlOf(membershipQueries()[0]![0]);
+    expect(text).toMatch(/m\.organization_id = \$1::uuid/);
+    expect(text).toMatch(/m\.ended_on is null/);
+    expect(params[0]).toBe(ORG);
+  });
+
+  it("the markers: a live person gets the ordinary none marker (none for an ordinary member), an ended person still 'couldn't be completed'", async () => {
+    script.states = [row(PERSON), row(OTHER)];
+    script.live = [{ person_id: PERSON }];
+    const markers = await org.getSignInMarkers(ctx, [PERSON, OTHER]);
+    expect(markers[PERSON]).toBeUndefined();
+    expect(markers[OTHER]).toEqual({ kind: "blocked" });
+  });
+
+  it("the markers: a live person who holds inert authority reads 'not connected', not 'blocked'", async () => {
+    script.states = [row(PERSON)];
+    script.live = [{ person_id: PERSON }];
+    script.probe = [{ id: PERSON }];
+    h.personIdsWithCredentialEmail.mockResolvedValue(new Set([PERSON]));
+    expect((await org.getSignInMarkers(ctx, [PERSON]))[PERSON]).toEqual({ kind: "not_connected", noEmail: false });
+  });
+
+  it("the Session rows: a live person reads 'not_invited', an ended one stays blocked", async () => {
+    script.seats = [{ id: PERSON, name: "Wendeline Ashgrove" }, { id: OTHER, name: "Corwin Dellacroix" }];
+    script.states = [row(PERSON), row(OTHER)];
+    script.live = [{ person_id: PERSON }];
+    h.personIdsWithCredentialEmail.mockResolvedValue(new Set([PERSON, OTHER]));
+    const result = await org.listSessionSignInRows(ctx);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(result.rows.find((r) => r.personId === PERSON)).toMatchObject({ state: "not_invited" });
+    expect(result.rows.find((r) => r.personId === OTHER)).toMatchObject({ state: "blocked" });
   });
 });
 

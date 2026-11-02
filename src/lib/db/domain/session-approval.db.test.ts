@@ -370,7 +370,11 @@ describe.skipIf(!hasDb)("drizzle/0062 session approval (Postgres-backed)", () =>
                 from roll_actions ra where ra.organization_id = ${org} and ra.person_id = ${person}) as roll_rows,
              m.ended_on::text as ended_on, m.current_roll, m.current_roll_since::text as current_roll_since,
              m.engagement_status,
-             (select gm.ends_on::text from group_memberships gm where gm.membership_id = m.id) as group_ends_on
+             -- drizzle/0066 (Increment 3a): a membership now holds one derived row per
+             -- group (all_memberships and, with member standing, active_membership);
+             -- this reads the Active Membership row, the one this helper always meant.
+             (select gm.ends_on::text from group_memberships gm join groups g on g.id = gm.group_id
+               where gm.membership_id = m.id and g.derived_from = 'active_membership') as group_ends_on
         from memberships m where m.organization_id = ${org} and m.person_id = ${person}`);
     return row!;
   }
@@ -1198,7 +1202,9 @@ describe.skipIf(!hasDb)("drizzle/0062 session approval (Postgres-backed)", () =>
         await tx.execute(sql.raw(section(M62, 7)));
         const once = Object.fromEntries((await shape()).map((r) => [r.org, r]));
         expect(once[fresh]).toMatchObject({
-          groups: "active_membership:Active Membership:derived:true:roster,diaconate:Board of Deacons:derived:true:court,session:Session:derived:true:court",
+          // drizzle/0066's groups_pair_derived trigger adds All Current Records
+          // whenever an active_membership group is inserted (Increment 3a, D1).
+          groups: "active_membership:Active Membership:derived:true:roster,all_memberships:All Current Records:derived:true:roster,diaconate:Board of Deacons:derived:true:court,session:Session:derived:true:court",
           roles: "session_member:Session member:constitutional:true",
           perms: "roll.approve",
           grants: "session:true:true",

@@ -325,20 +325,14 @@ begin;
   end $$;
 rollback;
 
--- One ACTIVE roll per person, denomination-wide.
-begin;
-  select set_config('app.current_org_id', :BRAMBLE, true);
-  select set_config('app.person_claim_authorized', :ELDER, true);
-  do $$
-  begin
-    insert into memberships (organization_id, person_id, engagement_status, current_roll)
-    values ('33333333-3333-3333-3333-333333333333',
-            'c0000000-0000-0000-0000-000000000001', 'regular', 'active');
-    raise exception 'FAIL — a person holds two active-roll memberships';
-  exception when unique_violation then
-    raise notice 'pass  one active-roll membership per person enforced';
-  end $$;
-rollback;
+-- One ACTIVE roll per person, denomination-wide. MOVED (drizzle/0066, F244):
+-- presby_app can no longer write memberships.current_roll at all (the roll
+-- cache is owner-path only, memberships_guard_roll_cache), so the insert this
+-- block used to make is refused before the unique index is reached. The
+-- unique-index property (memberships_one_active_roll_idx) is now asserted on
+-- the OWNER connection in src/lib/db/domain/engagement-guards.db.test.ts, and
+-- the presby_app refusal is section 66 (g) in
+-- scripts/membership-standing/test-rls-66.sql.
 
 -- ---------------------------------------------------------------------------
 -- 8. Identity. Verified+unshared is unique; shared household emails are not.
@@ -8777,3 +8771,15 @@ rollback;
 --     organization and no person), and every block rolls back.
 -- ===========================================================================
 \ir help-contact/test-rls-83.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/visitor-follow-ups (integration).
+-- 66. Community Increment 3a: member standing, the derived-row guards, the
+--     pair, the engagement and roll-cache guards (drizzle/0066_presby_
+--     membership_standing.sql). Its own file, as 46, 47, 59 to 83 above; \ir
+--     resolves relative to this script. It needs the test helpers and the
+--     seed's calendar_viewer fixture rows (scripts/membership-standing/
+--     seed-dev-membership-standing.sql), so it is never run against
+--     production.
+-- ===========================================================================
+\ir membership-standing/test-rls-66.sql

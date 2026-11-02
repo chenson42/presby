@@ -441,6 +441,32 @@ describe.skipIf(!hasDb)("reads.ts (Postgres-backed)", () => {
       expect(result.settings.payHolderCount).toBe(2);
     });
 
+    it("a derived roster is listed like any group (treasury Q5): All Current Records can be switched on, has no seat, and routes to the treasurer — regression for the 0066 sibling the settings page now lists", async () => {
+      const allCurrent = String(one(await fx.q(sql`select id from groups where organization_id = ${A} and derived_from = 'all_memberships'`)).id);
+      const link = await fx.chargeable(A, allCurrent, t1.userId);
+      try {
+        const settings = await reads.getSettings(manager);
+        expect(settings.kind).toBe("ok");
+        if (settings.kind !== "ok") return;
+        const row = settings.settings.groups.find((g) => g.id === allCurrent);
+        expect(row).toMatchObject({ name: "All Current Records", chargeable: true, approverCount: 0, membershipSource: "derived" });
+
+        // Chargeable, not eligible: the filing rule is unchanged, so a visitor is still offered nothing.
+        expect((await reads.getFormOptions(requester)).groups.map((g) => g.id)).toContain(allCurrent);
+        expect(await reads.getFormOptions(visitor)).toEqual({ mayFile: false, groups: [], categories: [], canRequestForOthers: false });
+
+        // No seat: a request charged to it goes to the treasurer, and no chair's waiting list gets it.
+        const mine = await filed(requester, { groupId: allCurrent });
+        const override = await reads.listTreasurerRequests(t1, { tab: "override", groupId: null, from: null, to: null, page: 1 });
+        expect(override.kind === "ok" && override.items.map((i) => i.id)).toContain(mine.id);
+        const waiting = await reads.listWaitingForMe(chair);
+        expect(waiting.kind === "ok" && waiting.items.map((i) => i.id)).not.toContain(mine.id);
+      } finally {
+        // The neighbouring tests assert the exact chargeable names, so leave the group un-listed.
+        await fx.q(sql`update reimbursement_chargeable_groups set ended_at = now(), ended_by_user = ${t1.userId} where id = ${link}`);
+      }
+    });
+
     it("anyone without reimbursement.manage - a pay-only holder, a view-only holder, a plain member - is denied", async () => {
       const payOnly = actor(A, await fx.member(A, "PayOnly"));
       await fx.grant(A, await fx.makeRole(A, "pay_only", ["reimbursement.pay"]), payOnly.personId);

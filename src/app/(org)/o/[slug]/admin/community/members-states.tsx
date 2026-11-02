@@ -97,8 +97,8 @@ export function MembersLimited({ name }: { name: string }) {
       <p className="text-sm text-muted-foreground">
         You can add and edit people at {name}, but browsing the full list needs
         directory access (the directory.view permission). Ask your stated clerk
-        or another administrator to add it. Visitors, Staff and Former above
-        still work.
+        or another administrator to add it. Visitors, Inactive, Staff and Former
+        above still work.
       </p>
     </div>
   );

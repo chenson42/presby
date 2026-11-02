@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ButtonGroupScroll } from "./button-group-scroll";
 
 /**
  * A segmented view-switcher tray — a rounded, muted "tray" container holding
@@ -73,9 +74,13 @@ export function ButtonGroup({
       aria-label={ariaLabel}
       className={cn(
         "inline-flex max-w-full flex-nowrap items-center gap-1 overflow-x-auto rounded-full bg-muted p-1",
+        "data-[fade-right=true]:[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]",
+        "data-[fade-left=true]:[mask-image:linear-gradient(to_left,black_calc(100%-2rem),transparent)]",
+        "data-[fade-left=true]:data-[fade-right=true]:[mask-image:linear-gradient(to_right,transparent,black_2rem,black_calc(100%-2rem),transparent)]",
         className,
       )}
     >
+      <ButtonGroupScroll />
       {items.map((item) => (
         <Button
           key={item.key}

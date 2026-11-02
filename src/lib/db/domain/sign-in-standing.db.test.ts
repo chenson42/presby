@@ -27,7 +27,7 @@
  * Run with (serial, per docs/testing.md):
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/db/domain/sign-in-standing.db.test.ts
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sql, type SQL } from "drizzle-orm";
@@ -39,7 +39,16 @@ vi.setConfig({ testTimeout: 120_000, hookTimeout: 300_000 });
 
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_URL);
 
-const MIGRATION = readFileSync(path.join(process.cwd(), "drizzle", "0065_presby_sign_in_and_connect.sql"), "utf8");
+// drizzle/0066 section 9 (Increment 3a, Batch A2) re-creates three of these
+// bodies (the core's closed list gains all_memberships; check 10 drops the
+// visitor acknowledgement; connect step 10 asks for member standing), so the
+// migration-text scans read 0065 then 0066 and the LAST definition of each
+// function wins, as it does in the database. 0066 is found by name, not
+// number (the orchestrator may renumber it at integration).
+const M65 = readFileSync(path.join(process.cwd(), "drizzle", "0065_presby_sign_in_and_connect.sql"), "utf8");
+const M66_FILES = readdirSync(path.join(process.cwd(), "drizzle")).filter((f) => /^\d{4}_presby_membership_standing\.sql$/.test(f));
+if (M66_FILES.length !== 1) throw new Error(`expected one *_presby_membership_standing.sql, found ${M66_FILES.length}`);
+const MIGRATION = M65 + "\n" + readFileSync(path.join(process.cwd(), "drizzle", M66_FILES[0]!), "utf8");
 const COMMUNITY = readFileSync(path.join(process.cwd(), "src", "lib", "community.ts"), "utf8");
 
 /** Every function body in a migration text, keyed by name (the last definition wins). */
@@ -62,8 +71,24 @@ export function functionBodies(text: string): Map<string, string> {
 const MARKERS = {
   classifier: "presby_membership_standing(",
   r31: "m2.organization_id <> p_org",
-  closedList: "derived_from in ('active_membership', 'session', 'diaconate')",
+  // drizzle/0066 section 9 (D10b): all_memberships joins the list;
+  // deacons_moderator deliberately does not (the Moderator seat carries
+  // parishes.assign and stays in T; F247).
+  closedList: "derived_from in ('active_membership', 'all_memberships', 'session', 'diaconate')",
 } as const;
+
+/**
+ * Which function bodies hold each marker. drizzle/0066 section 2 (Increment
+ * 3a, DECISION-233) adds ONE other caller of the classifier, by design:
+ * presby_membership_is_member_standing, the composition member standing is
+ * read through. No sign-in caller is added. The same map holds for the
+ * migration text (0065 then 0066) and the live catalog.
+ */
+const HOLDERS: Record<keyof typeof MARKERS, string[]> = {
+  classifier: ["presby__person_sign_in_standing", "presby_membership_is_member_standing"],
+  r31: ["presby__person_sign_in_standing"],
+  closedList: ["presby__person_sign_in_standing"],
+};
 
 class Rollback extends Error {}
 
@@ -153,16 +178,32 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
       { ...refused("person_elsewhere", "needs_support", "needs_support"), standing: "listed" }],
     ["two organizations, the other ended", () => async () => { const p = await f.person(orgA); await f.elsewhere(p.id, orgB, "2023-01-01"); return p.id; },
       { ...refused("person_elsewhere", "needs_support", "needs_support"), standing: "listed" }],
+    // drizzle/0066 section 9 (Increment 3a): issue no longer asks for a
+    // visitor acknowledgement (check 10), and connect declines every standing
+    // that is not member standing (step 10, R55); acceptance is unchanged.
     ["visitor without a roll", () => async () => (await f.person(orgA, { engagement: "visitor", roll: null })).id,
-      { refusal: null, standing: "visitor", authority: false, ...AUTH_FREE_OK, issue: "needs_acknowledgement", connect: "declined", connectFactor: "declined" }],
+      { refusal: null, standing: "visitor", authority: false, ...AUTH_FREE_OK, connect: "declined", connectFactor: "declined" }],
     ["visitor with a roll (a member now, E-36)", () => async () => (await f.person(orgA, { engagement: "visitor", roll: "active" })).id,
       { refusal: null, standing: "listed", authority: false, ...AUTH_FREE_OK }],
     ["visitor engagement with an unlisted roll value (the documented difference)", () => async () => (await f.person(orgA, { engagement: "visitor", roll: "legacy_roll" })).id,
-      { refusal: null, standing: "visitor", authority: false, ...AUTH_FREE_OK, issue: "needs_acknowledgement", connect: "declined", connectFactor: "declined" }],
+      { refusal: null, standing: "visitor", authority: false, ...AUTH_FREE_OK, connect: "declined", connectFactor: "declined" }],
+    // drizzle/0066 section 9 (R55): inactive and moved away are declined by
+    // connect like a visitor (2b connected them: only 'visitor' declined).
+    ["inactive without a roll (0066, R55)", () => async () => (await f.person(orgA, { engagement: "inactive", roll: null })).id,
+      { refusal: null, standing: "inactive", authority: false, ...AUTH_FREE_OK, connect: "declined", connectFactor: "declined" }],
+    ["moved away without a roll (0066, R55)", () => async () => (await f.person(orgA, { engagement: "moved_away", roll: null })).id,
+      { refusal: null, standing: "inactive", authority: false, ...AUTH_FREE_OK, connect: "declined", connectFactor: "declined" }],
+    ["inactive WITH a roll stays listed and connects (0066: member standing)", () => async () => (await f.person(orgA, { engagement: "inactive", roll: "active" })).id,
+      { refusal: null, standing: "listed", authority: false, ...AUTH_FREE_OK }],
+    ["regular without a roll is listed and connects", () => async () => (await f.person(orgA, { engagement: "regular", roll: null })).id,
+      { refusal: null, standing: "listed", authority: false, ...AUTH_FREE_OK }],
     ["staff anchor", () => async () => (await f.person(orgA, { engagement: "staff", roll: null })).id,
       { refusal: null, standing: "staff_anchor", authority: false, ...AUTH_FREE_OK }],
-    ["unclassified engagement", () => async () => (await f.person(orgA, { engagement: "fixture_unknown", roll: null })).id,
-      { refusal: null, standing: "unclassified", authority: false, ...AUTH_FREE_OK }],
+    // "unclassified engagement" left this matrix with drizzle/0066 (Increment
+    // 3a, D3): memberships_engagement_status_allowed refuses any engagement
+    // outside the five, so no stored row can classify as `unclassified`. The
+    // classifier's `unclassified` arm is covered by the SQL cross-product in
+    // src/lib/membership-standing.db.test.ts; the refusal is asserted below.
     ["elder seat", () => async () => { const p = await f.person(orgA); await f.seat(orgA, p.id); return p.id; },
       { refusal: null, standing: "listed", authority: true, session: true, keys: [], issue: "ok", ...AUTH }],
     ["future-dated elder seat (no starts_on bound)", () => async () => { const p = await f.person(orgA); await f.seat(orgA, p.id, "ruling_elder", "2099-01-01"); return p.id; },
@@ -185,7 +226,11 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
       { refusal: null, standing: "listed", authority: false, ...AUTH_FREE_OK }],
     ["ended managed-group membership", () => async () => { const p = await f.person(orgA); await f.groupGrant(orgA, p.id, ["roles.manage"], { memberEndsOn: "2021-01-01" }); return p.id; },
       { refusal: null, standing: "listed", authority: false, ...AUTH_FREE_OK }],
-    ["a derived group of an unclassified kind (A5: fails closed)", () => async () => { const p = await f.person(orgA); await f.groupGrant(orgA, p.id, ["roles.manage"], { derivedFrom: "fixture_new_kind" }); return p.id; },
+    // D11 (Increment 3a): an unclassified kind can no longer be stored
+    // (groups_derived_kind_check, drizzle/0066), so the A5 arm is exercised by
+    // a REAL kind outside the T exclusion list: the Moderator of the Board of
+    // Deacons seat, which carries authority (parishes.assign) and stays in T.
+    ["a derived kind outside the T exclusion list counts in T (the Moderator seat; F247)", () => async () => { const p = await f.person(orgA); await f.groupGrant(orgA, p.id, ["roles.manage"], { derivedFrom: "deacons_moderator" }); return p.id; },
       { refusal: null, standing: "listed", authority: true, keys: ["roles.manage"], issue: "exceeds_your_access", ...AUTH }],
   ];
 
@@ -218,7 +263,9 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
       select * from presby_issue_sign_in_invitation(${personId}::uuid, ${"a".repeat(64)}, now() + interval '7 days',
              null::uuid, ${address}, false, ${full.userId}::uuid)`);
     expect(issued.outcome, "issue").toBe(e.issue);
-    if (e.issue === "needs_acknowledgement") expect(issued.ack_reasons).toEqual(["visitor"]);
+    // drizzle/0066 section 9: no row in this matrix carries an
+    // acknowledgement any more (do_not_contact is the only reason; none here).
+    if (e.issue === "ok") expect(issued.ack_reasons, "no acknowledgement reason").toEqual([]);
     expect(verdict(await rb(null, sql`select * from presby_connect_signed_in_account(${userId}::uuid, false)`)), "connect").toBe(e.connect);
     expect(verdict(await rb(null, sql`select * from presby_connect_signed_in_account(${userId}::uuid, true)`)), "connect with a factor").toBe(e.connectFactor);
 
@@ -267,6 +314,32 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
     expect(r.outcome).toBe("ok");
   });
 
+  it("a grant on All Current Records (all_memberships) is outside T, and auto-connect needs no factor for it (0066 section 9, R49, EC-12)", async () => {
+    const orgE = await f.congregation("e");
+    const sender = await f.sender(orgE, ["people.manage", "officers.manage"]);
+    const roleId = await f.role(orgE, ["roles.manage"]);
+    const inserted = await f.q(sql`
+      insert into role_grants (organization_id, role_id, group_id, starts_on)
+      select ${orgE}, ${roleId}, g.id, '2020-01-01' from groups g
+       where g.organization_id = ${orgE} and g.derived_from = 'all_memberships'
+      returning id`);
+    expect(inserted, "premise: the organization has All Current Records (the pair trigger made it)").toHaveLength(1);
+    // A visitor and a member both hold the all_memberships row; neither is
+    // authority-bearing through it.
+    for (const [engagement, roll, standing] of [["regular", "active", "listed"], ["visitor", null, "visitor"]] as const) {
+      const p = await f.person(orgE, { engagement, roll });
+      const core = await f.standing(p.id, orgE);
+      expect(core, `${engagement}`).toMatchObject({ refusal: null, standing, authority_bearing: false, role_keys: [], permission_keys: [] });
+    }
+    const member = await f.person(orgE);
+    const userId = await f.user(member.email!);
+    expect(verdict(await rb(null, sql`select * from presby_connect_signed_in_account(${userId}::uuid, false)`))).toBe("connected");
+    const r = await rb(orgE, sql`
+      select * from presby_issue_sign_in_invitation(${member.id}::uuid, ${"e".repeat(64)}, now() + interval '7 days',
+             null::uuid, ${member.email}, false, ${sender.userId}::uuid)`);
+    expect(r.outcome).toBe("ok");
+  });
+
   it("a Session-bound tenant role is outside T (the seat gate covers it; DECISION-207's recorded consequence)", async () => {
     const orgD = await f.congregation("d");
     const roleId = await f.role(orgD, ["roles.manage"]);
@@ -291,7 +364,12 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
   // ===========================================================================
   // F177 condition 3: the classifier's visitor = the Community Visitors list
   // ===========================================================================
-  it("the classifier's 'visitor' equals listPredicate('visitors') over roll null and every listed roll, with exactly the one documented difference", async () => {
+  // 3a (Batch B, R51/EC-1): the Community Visitors list now ASKS the classifier
+  // (`presby_membership_standing(...) = 'visitor'`), so the one difference 2b
+  // documented (a visitor-engagement membership with an UNLISTED non-null roll:
+  // 'visitor' to the classifier, not on the old column-based list, M11) is gone.
+  // The two now agree over the whole grid, the unlisted roll included.
+  it("the classifier's 'visitor' equals listPredicate('visitors') over roll null, every listed roll and an unlisted one, with NO difference (3a: the list asks the classifier)", async () => {
     const m = COMMUNITY.match(/case "visitors":[\s\S]*?return sql`([\s\S]*?)`;/);
     expect(m, "community.ts visitors predicate").not.toBeNull();
     const predicate = m![1]!.replace(/\s+/g, " ").trim();
@@ -308,9 +386,10 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
                      (select null::uuid as merged_into_id, null::date as date_of_death) p) as list
         from (select v.*, null::uuid as person_id from (values ${sql.join(values, sql`, `)}) v(current_roll, engagement_status)) x`);
     const differ = rows.filter((r) => r.classifier !== r.list);
-    expect(differ.map((r) => `${String(r.current_roll)}/${String(r.engagement_status)}`)).toEqual(["legacy_roll/visitor"]);
-    const knownRolls = rows.filter((r) => r.current_roll !== "legacy_roll");
-    expect(knownRolls.every((r) => r.classifier === r.list)).toBe(true);
+    expect(differ.map((r) => `${String(r.current_roll)}/${String(r.engagement_status)}`)).toEqual([]);
+    // Non-vacuity: the grid really contains the old difference (an unlisted roll with engagement visitor), and it is a visitor in both.
+    const unlisted = rows.find((r) => r.current_roll === "legacy_roll" && r.engagement_status === "visitor");
+    expect(unlisted).toMatchObject({ classifier: true, list: true });
   });
 
   it("the classifier's listed rolls are exactly DIRECTORY_STATUSES, and its values and order are R50's", async () => {
@@ -330,22 +409,39 @@ describe.skipIf(!hasDb)("drizzle/0065 the standing core and its callers (T-5)", 
   // ===========================================================================
   // (2) migration-text and live-catalog scans
   // ===========================================================================
-  it("migration text: the classifier call, the R31 exists and the closed derived list occur only in the core's body", () => {
+  it("migration text (0065 then 0066, last definition wins): the R31 exists and the closed derived list occur only in the core's body; the classifier call also in 0066's composition", () => {
     const bodies = functionBodies(MIGRATION);
     expect(bodies.size).toBeGreaterThan(15);
-    for (const [label, marker] of Object.entries(MARKERS)) {
+    for (const [label, marker] of Object.entries(MARKERS) as Array<[keyof typeof MARKERS, string]>) {
       const holders = [...bodies.entries()].filter(([, b]) => b.includes(marker)).map(([n]) => n);
-      expect(holders, label).toEqual(["presby__person_sign_in_standing"]);
+      expect(holders.sort(), label).toEqual([...HOLDERS[label]].sort());
+    }
+    // D10b: the Moderator seat is NOT excluded from T.
+    expect(bodies.get("presby__person_sign_in_standing")).not.toContain("deacons_moderator");
+  });
+
+  it("live catalog: the same three markers occur only in the core (and the classifier call also in 0066's classifier layer)", async () => {
+    const LIVE_HOLDERS = HOLDERS;
+    for (const [label, marker] of Object.entries(MARKERS) as Array<[keyof typeof MARKERS, string]>) {
+      const rows = await f.q(sql`
+        select p.proname from pg_proc p
+         where p.pronamespace = 'public'::regnamespace and strpos(p.prosrc, ${marker}) > 0
+         order by 1`);
+      expect(rows.map((r) => r.proname), label).toEqual(LIVE_HOLDERS[label]);
     }
   });
 
-  it("live catalog: the same three markers occur in exactly one function in the database", async () => {
-    for (const [label, marker] of Object.entries(MARKERS)) {
-      const rows = await f.q(sql`
-        select p.proname from pg_proc p
-         where p.pronamespace = 'public'::regnamespace and strpos(p.prosrc, ${marker}) > 0`);
-      expect(rows.map((r) => r.proname), label).toEqual(["presby__person_sign_in_standing"]);
+  it("an engagement outside the five can no longer be stored, so `unclassified` is unreachable from rows (drizzle/0066, D3)", async () => {
+    const p = await f.person(orgA);
+    let caught: unknown;
+    try {
+      await f.q(sql`update memberships set engagement_status = 'fixture_unknown' where person_id = ${p.id}`);
+    } catch (err) {
+      caught = err;
     }
+    const chain: unknown[] = [];
+    for (let cur: unknown = caught; cur && chain.length < 6; cur = (cur as { cause?: unknown }).cause) chain.push(cur);
+    expect(chain.some((e) => (e as { constraint?: unknown }).constraint === "memberships_engagement_status_allowed")).toBe(true);
   });
 
   it("the scan can fail: an offending sample body is detected", () => {

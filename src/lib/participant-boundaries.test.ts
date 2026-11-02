@@ -102,8 +102,10 @@ describe("visitors and staff stay out of the member Directory (DECISION-200)", (
     expect(start).toBeGreaterThan(-1);
     const body = directoryCode.slice(start, directoryCode.indexOf("\n}\n", start));
     expect(body).not.toMatch(/'visitor'|'staff'|"visitor"|"staff"/);
-    // And the only engagement value it admits is the one it always did.
-    expect(body).toContain("m.engagement_status = 'regular'");
+    // The default branch asks the one classifier (R51), never the columns.
+    expect(body).toContain(
+      "presby_membership_standing(m.current_roll, m.engagement_status) = 'listed'",
+    );
   });
 
   it("nothing in directory.ts as a whole names those values in code", () => {

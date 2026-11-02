@@ -19,7 +19,7 @@ export const HELP_PAGES = [
     audience: "prospective",
     covers: [],
     labels: [],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.54.0",
   },
   {
     slug: "how-a-congregation-gets-started",
@@ -162,7 +162,7 @@ export const HELP_PAGES = [
     audience: "everyone",
     covers: ["tile:directory"],
     labels: ["Directory", "Households", "Search the directory", "You don't have permission to view the directory."],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.54.0",
   },
   {
     slug: "getting-help",
@@ -432,6 +432,19 @@ export const HELP_PAGES = [
     },
     covers: ["org_portal.members_create", "tile:members"],
     labels: [
+      "Inactive",
+      "Engagement",
+      "Save engagement",
+      "Regular attender",
+      "Moved away",
+      "Mark as regular",
+      "Mark as regular attender",
+      "Archive",
+      "Restore",
+      "Keep archived",
+      "Visit details",
+      "Save visit details",
+      "This is a staff record, so engagement isn't tracked.",
       "Administration",
       "Features",
       "Community: add people and record roll actions",
@@ -537,6 +550,8 @@ export const HELP_PAGES = [
     },
     covers: ["tile:roles"],
     labels: [
+      "Calendar viewer",
+      "All Current Records",
       "Administration",
       "Roles",
       "Who holds what",
@@ -574,7 +589,7 @@ export const HELP_PAGES = [
       "You don't have permission to manage branding",
       "Website domain",
     ],
-    verifiedIn: "0.47.0",
+    verifiedIn: "0.54.3",
     limitationUntil: "founder-events-branding",
   },
   {
@@ -591,6 +606,8 @@ export const HELP_PAGES = [
     },
     covers: ["org_portal.calendar", "org_portal.public_calendar", "tile:calendar", "tile:events"],
     labels: [
+      "Calendar viewer",
+      "All Current Records",
       "Calendar",
       "Worship & Events",
       "Show filters",
@@ -677,6 +694,7 @@ export const HELP_PAGES = [
     },
     covers: ["org_portal.sign_in_connect"],
     labels: [
+      "Engagement",
       "Sign in to PresbyPortal",
       "Send invitation",
       "I understand, send it anyway",

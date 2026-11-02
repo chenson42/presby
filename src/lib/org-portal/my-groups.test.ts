@@ -307,6 +307,43 @@ describe.skipIf(!hasDb)(
       expect(names(result).filter((n) => n === "Active Membership")).toHaveLength(1);
     });
 
+    // Increment 3a, drizzle/0066 (DECISION-232): every live membership holds an
+    // All Current Records row, visitors included. A pill reading "All Current
+    // Records" on every home is a status claim, so the second baseline kind is
+    // excluded exactly as the first is.
+    it("excludes the derived all_memberships group by derived_from, even while the viewer holds a current row in it", async () => {
+      const platform = getPlatformDb();
+      // The derived row starts on the REAL creation date; this suite pins the
+      // clock to March, so backdate it on the owner path (F240 lets the owner
+      // through) to make the row genuinely current at the pinned time.
+      await platform.execute(sql`
+        update group_memberships gm set starts_on = date '2020-01-01'
+          from groups g
+         where g.id = gm.group_id
+           and g.organization_id = ${orgA}::uuid
+           and g.derived_from = 'all_memberships'
+           and gm.person_id = ${viewer}::uuid
+      `);
+      // Non-vacuity: the viewer really does hold a current all_memberships row.
+      const held = await platform.execute(sql`
+        select g.id from group_memberships gm
+          join groups g on g.id = gm.group_id
+         where gm.person_id = ${viewer}::uuid
+           and g.organization_id = ${orgA}::uuid
+           and g.derived_from = 'all_memberships'
+           and gm.starts_on <= date '2026-03-01'
+           and gm.ends_on is null
+      `);
+      expect(held.rows.length).toBe(1);
+
+      const result = await getViewerGroups(viewer, orgA);
+      expect(result.map((g) => g.groupId)).not.toContain(held.rows[0].id);
+      expect(names(result)).not.toContain("All Current Records");
+      // The managed groups and the court groups are untouched.
+      expect(names(result)).toContain("Altar Guild");
+      expect(names(result)).toContain("Session");
+    });
+
     it("includes the derived session group (via an active officer term) and excludes an ended diaconate term", async () => {
       const result = names(await getViewerGroups(viewer, orgA));
       expect(result).toContain("Session");

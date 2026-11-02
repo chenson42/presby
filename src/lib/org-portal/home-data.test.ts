@@ -52,7 +52,11 @@ describe.skipIf(!hasDb)(
     let hiddenViewer: string; // H3: directory_hidden, with a visible spouse
     let visibleSpouse: string;
     let hiddenViewerHouseholdId: string;
-    let visitorViewer: string; // H4: not eligible themself, two eligible housemates
+    // H4: not eligible themself, two eligible housemates. A STAFF ANCHOR since
+    // drizzle/0066 (Increment 3a): a visitor no longer holds directory.view
+    // (F177 Option 1), and a staff anchor is the standing that holds it while
+    // never being directory content (DECISION-129, DECISION-207).
+    let visitorViewer: string;
     let visitorHouseholdMateOne: string;
     let visitorHouseholdMateTwo: string;
     let visitorHouseholdId: string;
@@ -260,7 +264,7 @@ describe.skipIf(!hasDb)(
         {
           organizationId: org,
           personId: visitorViewer,
-          engagementStatus: "visitor",
+          engagementStatus: "staff",
           currentRoll: null,
           householdId: visitorHouseholdId,
         },
@@ -391,6 +395,12 @@ describe.skipIf(!hasDb)(
         name: "The Pemberton Household",
         memberCount: 2,
       });
+    });
+
+    it("a visitor viewer holds no directory.view since 0066, so no household card (F177 Option 1)", async () => {
+      const result = await getPortalHomeData(offRollVisitor, org);
+      expect(result.canViewDirectory).toBe(false);
+      expect(result.household).toBeNull();
     });
 
     it("a viewer without directory.view gets canViewDirectory false, no household, and still a display name", async () => {

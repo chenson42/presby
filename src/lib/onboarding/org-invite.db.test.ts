@@ -195,14 +195,14 @@ describe.skipIf(!hasDb)("src/lib/onboarding/org-invite.ts (Postgres-backed)", ()
       expect(result).toMatchObject({ kind: "ok", address: p.email });
     });
 
-    it("F177 condition 2: a visitor is refused until acknowledged, then audited as ['visitor']; a client claiming acknowledgement for a non-visitor still records []", async () => {
+    it("a visitor sends without an acknowledgement and is audited as [] (drizzle/0066 section 9 retired F177 condition 1); a client claiming acknowledgement for a non-visitor still records []", async () => {
+      // Increment 3a: the definer no longer asks for a visitor acknowledgement
+      // (check 10), so the unchanged TypeScript sends and records what the
+      // definer found: nothing (EC-21). Batch B removed `visitor` from
+      // SIGN_IN_ACK_REASONS and the dialog.
       const v = await f.person(org, { engagement: "visitor", roll: null });
-      const before = await counts(v.id);
-      expect(await send(v.id, v.email!)).toEqual({ kind: "refused", reason: "needs_acknowledgement", ackReasons: ["visitor"] });
-      expect(await counts(v.id)).toEqual(before);
-
-      expect(await send(v.id, v.email!, true)).toMatchObject({ kind: "ok", acknowledged: ["visitor"] });
-      expect((await auditFor("invitation.created", v.id))[0]!.metadata).toMatchObject({ acknowledged: ["visitor"] });
+      expect(await send(v.id, v.email!)).toMatchObject({ kind: "ok", acknowledged: [] });
+      expect((await auditFor("invitation.created", v.id))[0]!.metadata).toMatchObject({ acknowledged: [] });
 
       const m = await f.person(org);
       expect(await send(m.id, m.email!, true)).toMatchObject({ kind: "ok", acknowledged: [] });
@@ -459,9 +459,15 @@ describe.skipIf(!hasDb)("src/lib/onboarding/org-invite.ts (Postgres-backed)", ()
       expect(card.card.invitedAddress).toBeNull();
     });
 
-    it("a visitor, a shared address and an off toggle are surfaced from the real standing core and toggle row", async () => {
-      const v = await f.person(org, { engagement: "visitor", roll: null });
-      expect(await lib.getSignInCard(ctx, v.id)).toMatchObject({ card: { isVisitor: true, outlook: "visitor" } });
+    it("a person who is not listed, a shared address and an off toggle are surfaced from the real standing core and toggle row", async () => {
+      // Not listed (3a, R55): a visitor, and a person marked inactive or moved away.
+      for (const engagement of ["visitor", "inactive", "moved_away"] as const) {
+        const v = await f.person(org, { engagement, roll: null });
+        expect(await lib.getSignInCard(ctx, v.id), engagement).toMatchObject({ card: { outlook: "not_listed" } });
+      }
+      // A rolled person marked inactive keeps member standing (the roll lists them).
+      const rolledInactive = await f.person(org, { engagement: "inactive", roll: "active" });
+      expect(await lib.getSignInCard(ctx, rolledInactive.id)).toMatchObject({ card: { outlook: "by_sign_in" } });
 
       const a = await f.person(org);
       const b = await f.person(org, { email: false });
@@ -546,6 +552,58 @@ describe.skipIf(!hasDb)("src/lib/onboarding/org-invite.ts (Postgres-backed)", ()
       expect(await lib.listSessionSignInRows({ ...roomCtx, actingPersonId: peopleOnly.personId, actingUserId: peopleOnly.userId })).toEqual({ kind: "forbidden" });
       const officersOnly = await f.sender(room, ["officers.manage"]);
       expect(await lib.listSessionSignInRows({ ...roomCtx, actingPersonId: officersOnly.personId, actingUserId: officersOnly.userId })).toEqual({ kind: "forbidden" });
+    });
+  });
+
+  // ===========================================================================
+  describe("revokeOpenSignInInvitationInTx (F417: the archive's own transaction)", () => {
+    async function inTx<T>(fn: (tx: import("@/lib/authz").OrgTx) => Promise<T>): Promise<T> {
+      const { withOrgContext } = await import("@/lib/authz");
+      return withOrgContext(ctx.actingPersonId, ctx.organizationId, fn);
+    }
+
+    it("revokes the open row, cancels and scrubs its queued email and writes one invitation.revoked row via 'archive'; a second call finds nothing open", async () => {
+      sendMock.mockRejectedValue(new Error("provider down")); // the row stays queued
+      const p = await f.person(org);
+      expect(await send(p.id, p.email!)).toMatchObject({ kind: "ok", delivery: "queued" });
+      const [inv] = await rowsFor(p.id);
+
+      expect(await inTx((tx) => lib.revokeOpenSignInInvitationInTx(tx, ctx, p.id, "archive"))).toBe(true);
+      expect((await rowsFor(p.id))[0]).toMatchObject({ id: inv!.id, revoked_by_user_id: sender.userId });
+      expect((await queueRow(String(inv!.email_queue_id))).status).not.toBe("queued");
+      expect((await queueRow(String(inv!.email_queue_id))).html_body).toBe(MARKER);
+      const audits = await auditFor("invitation.revoked", p.id);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]!.metadata).toMatchObject({ via: "archive", purpose: "sign_in", origin: "org" });
+
+      const before = await counts(p.id);
+      expect(await inTx((tx) => lib.revokeOpenSignInInvitationInTx(tx, ctx, p.id, "archive"))).toBe(false);
+      expect(await counts(p.id)).toEqual(before);
+    });
+
+    it("another person's open row is untouched, and the single-cancel path still audits via 'single' and refuses not_open the second time", async () => {
+      const a = await f.person(org);
+      const b = await f.person(org);
+      await send(a.id, a.email!);
+      await send(b.id, b.email!);
+      expect(await inTx((tx) => lib.revokeOpenSignInInvitationInTx(tx, ctx, a.id, "archive"))).toBe(true);
+      expect((await rowsFor(b.id))[0]!.revoked_at).toBeNull();
+
+      expect(await lib.revokeSignInInvitation(ctx, { personId: b.id })).toEqual({ kind: "ok" });
+      expect((await auditFor("invitation.revoked", b.id))[0]!.metadata).toMatchObject({ via: "single" });
+      expect(await lib.revokeSignInInvitation(ctx, { personId: b.id })).toEqual({ kind: "refused", reason: "not_open" });
+    });
+
+    it("an actor without people.manage is refused by the definer itself (42501) and nothing is written", async () => {
+      const p = await f.person(org);
+      await send(p.id, p.email!);
+      const nobody = await f.sender(org, []);
+      const before = await counts(p.id);
+      await expect(
+        inTx((tx) => lib.revokeOpenSignInInvitationInTx(tx, { ...ctx, actingUserId: nobody.userId }, p.id, "archive")),
+      ).rejects.toThrow();
+      expect(await counts(p.id)).toEqual(before);
+      expect((await rowsFor(p.id))[0]!.revoked_at).toBeNull();
     });
   });
 });

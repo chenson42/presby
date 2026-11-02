@@ -1,5 +1,5 @@
 import { Badge as UiBadge } from "@/components/ui/badge";
-import type { CommunityBadge as Badge } from "@/lib/community";
+import type { CommunityBadge as Badge, EngagementBadge as Engagement } from "@/lib/community";
 
 /** Plain-language badge labels (Phase 3 copy table). "Waiting for the Session"
  * is the person with a pending roll action and no roll yet. Type-only import
@@ -37,4 +37,16 @@ export function CommunityBadge({ badge }: { badge: Badge }) {
       {BADGE_LABELS[badge]}
     </UiBadge>
   );
+}
+
+/** The engagement badge beside a rolled person's roll badge (Copy group C):
+ * the roll lists them whatever their engagement, and this says how they are
+ * marked. Outline, like the other non-member badges; the word is the signal. */
+export const ENGAGEMENT_BADGE_LABELS: Record<Engagement, string> = {
+  inactive: "Inactive",
+  moved_away: "Moved away",
+};
+
+export function EngagementStatusBadge({ engagement }: { engagement: Engagement }) {
+  return <UiBadge variant="outline">{ENGAGEMENT_BADGE_LABELS[engagement]}</UiBadge>;
 }

@@ -142,8 +142,8 @@ export default async function UnassignedPage({
             <GroupToggles basePath={basePath} hidden={hidden} counts={counts} />
             <p className="mt-2 text-xs text-muted-foreground">
               A household appears under the first group that fits: Members, then Participants,
-              then Visitors, then Others. Others are households where everyone is only listed or
-              on staff.
+              then Visitors, then Others. Others are households where everyone is only listed, on
+              staff, or marked inactive or moved away.
             </p>
           </div>
 

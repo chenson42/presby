@@ -12,17 +12,16 @@ The link works once and stops working after seven days. The email names your con
 
 A person with no email address on file has no button: the card says to add one under "Contact & address", then come back.
 
-Two people need an extra step:
+One person needs an extra step: if the person asked not to be contacted at the address, the dialog says this is a one-time account email, not marketing, and asks you to tick "I understand, send it anyway".
 
-- If the person is recorded as a visitor, the dialog tells you that anyone who signs in can see your member directory and your calendar, with each person's privacy settings applied. Tick "I understand, send it anyway" to continue.
-- If the person asked not to be contacted at the address, the dialog says this is a one-time account email, not marketing, and asks you to tick the same box.
+A person who is connected but not listed in the member directory, such as a visitor, can see the calendar if your congregation uses it, and not the member directory. To list them, mark them as a regular attender under "Engagement". See [Adding people and recording members](/help/adding-people).
 
 ### After you send it
 
 The card now says "Invitation sent to" the address "on" a date, and "It expires" a date. A word beside it, "Queued", "Sent" or "Delivered", says how far the email has got. While the invitation is open it says that signing in does not connect the person by itself. They accept the invitation instead.
 
 - "Send again" sends a new link and turns off the earlier one. You can send again five minutes after the last send, and the card shows how long is left. After several sends PresbyPortal stops sending more, and suggests asking the person to check their spam folder or sending a ticket.
-- "Cancel invitation" turns the link off. Confirm in the dialog "Cancel this invitation?", or choose "Keep it".
+- "Cancel invitation" turns the link off. Confirm in the dialog "Cancel this invitation?", or choose "Keep it". Archiving a person cancels an open invitation too, and restoring them does not turn it back on.
 - If the email bounced, the card says "The email to" the address "bounced. Check the address on file, fix it, and send again." If the link expired, the card offers "Send a new one".
 - If the address on the record changed after you sent, the earlier link no longer works. Send again to reach the new address.
 
@@ -47,13 +46,13 @@ Many people connect without an invitation. "Connect people when they sign in" is
 
 It does not connect everyone. Among the people it does not connect are:
 
-- a person recorded as a visitor. The card says that signing in won't connect them by itself;
+- a person who isn't listed in the member directory, such as a visitor or someone marked inactive or moved away. The card says that signing in won't connect them by itself;
 - a person whose email address is also on another person's record. Each person needs their own address;
 - a person who has more than one current connection to a congregation;
 - a person whose address is on an open invitation. The invitation comes first;
 - anyone, if you turn "Connect people when they sign in" off. Then invitations still work and people already connected stay connected.
 
-The card says so under its heading for a visitor, a shared address, and when the option is off. This option adds no role. The person gets whatever access their record already carries.
+The card says so under its heading for a person who isn't listed, a shared address, and when the option is off. This option adds no role. The person gets whatever access their record already carries.
 
 ### People who hold a role or a seat
 

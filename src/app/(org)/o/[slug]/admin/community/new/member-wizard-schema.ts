@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_HOW_HEARD } from "@/lib/membership-standing";
 import {
   blankEmailRow,
   contactEmailsSchema,
@@ -76,7 +77,7 @@ export const memberWizardSchema = z
     /** Visitor only. */
     visit: z.object({
       firstVisitDate: z.string().optional(),
-      howHeard: z.string().max(200, "Keep this under 200 characters").optional(),
+      howHeard: z.string().max(MAX_HOW_HEARD, "Keep this under 200 characters").optional(),
     }),
     /** Participant and Member only. */
     rollAction: z.object({

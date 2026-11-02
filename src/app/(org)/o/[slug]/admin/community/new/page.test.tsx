@@ -76,6 +76,16 @@ vi.mock("next/navigation", () => ({
 import NewMemberPage from "./page";
 import { OrgAccessError } from "@/lib/authz";
 
+// The Community engagement Server Actions reach the database; the screens under
+// test only call them through the dialogs, which these files do not drive.
+vi.mock("../actions", () => ({
+  changeEngagementAction: vi.fn(),
+  archivePersonAction: vi.fn(),
+  restorePersonAction: vi.fn(),
+  updateVisitDetailsAction: vi.fn(),
+}));
+
+
 afterEach(() => {
   cleanup();
   cachedAuth.mockReset();

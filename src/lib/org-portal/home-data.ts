@@ -39,7 +39,8 @@ import {
  * A directory-hidden viewer with one visible housemate therefore gets a count
  * of one (they are not in the count) and no card (D3): they never see a wrong
  * number, and the household stays reachable from the directory. A viewer who
- * is themselves ineligible (a visitor) but whose household has two eligible
+ * is themselves ineligible (a staff anchor; since drizzle/0066 a visitor holds
+ * no directory.view at all) but whose household has two eligible
  * members sees "2 members" — it is the directory's count, and the card links to
  * a page showing exactly those two.
  */

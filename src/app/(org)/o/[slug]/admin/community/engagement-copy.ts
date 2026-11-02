@@ -296,7 +296,7 @@ export function archiveDialogCopy(name: string, organization: string, facts: Arc
     lines.push(`${name} has a sign-in connected and will no longer reach ${organization} through this record.`);
   }
   if (facts.invitationOpen) {
-    lines.push(`An invitation to ${name} is still open. It will stop working.`);
+    lines.push(`An invitation to ${name} is still open. It will stop working, and restoring them will not turn it back on.`);
   }
   return {
     title: `Archive ${name}?`,

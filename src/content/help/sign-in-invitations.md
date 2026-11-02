@@ -21,7 +21,7 @@ A person who is connected but not listed in the member directory, such as a visi
 The card now says "Invitation sent to" the address "on" a date, and "It expires" a date. A word beside it, "Queued", "Sent" or "Delivered", says how far the email has got. While the invitation is open it says that signing in does not connect the person by itself. They accept the invitation instead.
 
 - "Send again" sends a new link and turns off the earlier one. You can send again five minutes after the last send, and the card shows how long is left. After several sends PresbyPortal stops sending more, and suggests asking the person to check their spam folder or sending a ticket.
-- "Cancel invitation" turns the link off. Confirm in the dialog "Cancel this invitation?", or choose "Keep it".
+- "Cancel invitation" turns the link off. Confirm in the dialog "Cancel this invitation?", or choose "Keep it". Archiving a person cancels an open invitation too, and restoring them does not turn it back on.
 - If the email bounced, the card says "The email to" the address "bounced. Check the address on file, fix it, and send again." If the link expired, the card offers "Send a new one".
 - If the address on the record changed after you sent, the earlier link no longer works. Send again to reach the new address.
 

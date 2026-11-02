@@ -502,7 +502,7 @@ export const AUDIT_ACTIONS = {
   //     resent: { invitationId (new), supersededInvitationId, organizationId,
   //       purpose, resendCount }.
   //     revoked: { invitationId, organizationId, purpose, via:
-  //       'single' | 'revoke_all' }.
+  //       'single' | 'revoke_all' | 'archive' }.
   //   - INVITATION_ACCEPTED: actor = the accepting user (for an in-place
   //     acceptance, 2b, the account itself, with `via` and `secondFactor` added).
   //     { invitationId,
@@ -685,7 +685,9 @@ export const AUDIT_ACTIONS = {
   //     tenant.person_email.added | primary_changed, then this row, then
   //     tenant.person.sign_in_connected, joined on personId.
   //   - TENANT_PERSON_ARCHIVED: { organizationId, personId, engagement,
-  //     signInConnected }.
+  //     signInConnected, invitationRevoked } (invitationRevoked: an open sign-in
+  //     invitation was revoked in the same transaction, F417; that revoke also
+  //     writes its own INVITATION_REVOKED row with via 'archive').
   //   - TENANT_PERSON_RESTORED: { organizationId, personId, engagement,
   //     signInConnected }.
   //   - TENANT_PERSON_VISIT_DETAILS_UPDATED: { organizationId, personId,

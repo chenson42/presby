@@ -1082,7 +1082,7 @@ describe("EditMemberPage — Engagement, Visit details, Archive and Restore (Inc
     );
     fireEvent.click(screen.getByRole("button", { name: "Archive Nora Ashgrove" }));
     const dialog = screen.getByRole("alertdialog");
-    expect(within(dialog).getByText("An invitation to Nora Ashgrove is still open. It will stop working.")).toBeTruthy();
+    expect(within(dialog).getByText("An invitation to Nora Ashgrove is still open. It will stop working, and restoring them will not turn it back on.")).toBeTruthy();
     expect(
       within(dialog).getByText(
         "Nora Ashgrove has a sign-in connected and will no longer reach Alder Creek Presbyterian Church through this record.",

@@ -441,8 +441,9 @@ async function hydratePublishedSite(
       // src/lib/brand/fonts.ts calls next/font/local at MODULE SCOPE, which
       // only resolves correctly under Next's own compiler (webpack/SWC) —
       // under plain Node (vitest, this module's own integration test) a
-      // static import crashes at MODULE LOAD time with "Lora is not a
-      // function", before any test body runs, regardless of whether the
+      // static import crashes at MODULE LOAD time (`next/font/local`'s export
+      // is empty outside the compiler, so the `localFont(...)` calls throw
+      // "is not a function"), before any test body runs, regardless of whether the
       // brand branch is ever exercised. A static import here would also
       // force every OTHER consumer of this file (provisionSiteAction,
       // setSiteStatusAction, markSiteContactMessageReadAction — none of

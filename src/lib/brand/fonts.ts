@@ -25,18 +25,24 @@
  * file), with each family's `OFL.txt`. No build and no member's browser ever
  * contacts Google: next/font serves the files from this origin.
  *
- * One file per family: the latin-subset VARIABLE woff2 that Google serves for
- * the weight range, rather than one static file per weight. That is what
- * `next/font/google` was already downloading for these families (all nine are
- * variable fonts), it is one request instead of three or four, and
- * `weight: "400 700"` declares the range so the browser interpolates real
- * weights. The range is each face's old weight list: 400-700 for the heading
- * faces, 400-600 for the body faces (body copy never goes bold; 600 is
+ * One file per family, FULL coverage: a single variable woff2 per family, cut
+ * from that family's own upstream variable TTF (github.com/google/fonts
+ * `ofl/<family>/`) and subsetted to the union of every unicode subset Google's
+ * CSS2 API serves for it (latin, latin-ext, vietnamese, cyrillic, cyrillic-ext,
+ * greek, greek-ext, and where a family has them, math, symbols and hebrew).
+ * That is the coverage `next/font/google` gave these faces: it emitted an
+ * `@font-face` with `unicode-range` per subset. A latin-only file would let
+ * Ł, ő, ș, ễ, Cyrillic, Greek and № fall back to Arial mid-word. The weight axis
+ * is kept at the range declared below (`weight: "400 700"` and so on), so the
+ * browser interpolates real weights; italic is not bundled (nothing asks for
+ * it). The range is each face's old weight list: 400-700 for the heading faces,
+ * 400-600 for the body faces (body copy never goes bold; 600 is
  * `font-semibold`, TYPE_SCALE's title/section/subhead roles), and 400-800 for
- * Montserrat. The latin subset is the same one `subsets: ["latin"]` selected
- * before. To change a weight range or add a family, fetch the woff2 from the
- * Google Fonts CSS2 API with a modern User-Agent (the URL must end `.woff2`
- * and the file must start `wOF2`), and commit it with the family's OFL.txt.
+ * Montserrat. `font-files/README.md` records the exact rebuild command, source
+ * commit and URLs; `fonts.test.ts` parses each woff2 and pins the coverage.
+ * The one visible difference from the old setup is the CSS family name, which
+ * next/font/local derives from the variable's identifier (`classicHeading`)
+ * rather than `Lora`; nothing in `src/` names a family literally.
  *
  * `adjustFontFallback` keeps the metric-matched fallback `next/font/google`
  * generated automatically (`next/font/local` only does so when told to), so
@@ -67,7 +73,7 @@ import type { TypePairingKey } from "./contract";
  * ---------------------------------------------------------------------- */
 
 const classicHeading = localFont({
-  src: "./font-files/lora/lora-latin-variable.woff2",
+  src: "./font-files/lora/lora-variable.woff2",
   weight: "400 700",
   style: "normal",
   display: "swap",
@@ -77,7 +83,7 @@ const classicHeading = localFont({
 });
 
 const classicBody = localFont({
-  src: "./font-files/source-sans-3/source-sans-3-latin-variable.woff2",
+  src: "./font-files/source-sans-3/source-sans-3-variable.woff2",
   weight: "400 600",
   style: "normal",
   display: "swap",
@@ -91,7 +97,7 @@ const classicBody = localFont({
  * ---------------------------------------------------------------------- */
 
 const modernHeading = localFont({
-  src: "./font-files/libre-franklin/libre-franklin-latin-variable.woff2",
+  src: "./font-files/libre-franklin/libre-franklin-variable.woff2",
   weight: "400 700",
   style: "normal",
   display: "swap",
@@ -101,7 +107,7 @@ const modernHeading = localFont({
 });
 
 const modernBody = localFont({
-  src: "./font-files/public-sans/public-sans-latin-variable.woff2",
+  src: "./font-files/public-sans/public-sans-variable.woff2",
   weight: "400 600",
   style: "normal",
   display: "swap",
@@ -115,7 +121,7 @@ const modernBody = localFont({
  * ---------------------------------------------------------------------- */
 
 const warmHeading = localFont({
-  src: "./font-files/bitter/bitter-latin-variable.woff2",
+  src: "./font-files/bitter/bitter-variable.woff2",
   weight: "400 700",
   style: "normal",
   display: "swap",
@@ -125,7 +131,7 @@ const warmHeading = localFont({
 });
 
 const warmBody = localFont({
-  src: "./font-files/karla/karla-latin-variable.woff2",
+  src: "./font-files/karla/karla-variable.woff2",
   weight: "400 600",
   style: "normal",
   display: "swap",
@@ -139,7 +145,7 @@ const warmBody = localFont({
  * ---------------------------------------------------------------------- */
 
 const contemporaryHeading = localFont({
-  src: "./font-files/montserrat/montserrat-latin-variable.woff2",
+  src: "./font-files/montserrat/montserrat-variable.woff2",
   weight: "400 800",
   style: "normal",
   // 800 included (unlike the other three pairings' heading faces): the
@@ -154,7 +160,7 @@ const contemporaryHeading = localFont({
 });
 
 const contemporaryBody = localFont({
-  src: "./font-files/open-sans/open-sans-latin-variable.woff2",
+  src: "./font-files/open-sans/open-sans-variable.woff2",
   weight: "400 600",
   style: "normal",
   display: "swap",

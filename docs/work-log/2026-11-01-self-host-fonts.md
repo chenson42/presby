@@ -5,7 +5,7 @@
 > **Permission(s):** not applicable
 > **Flag(s):** not needed
 > **Estimated complexity:** small
-> **Pipeline mode:** Polish / refactor (CLAUDE.md → Classification): fonts move from `next/font/google` to `next/font/local` with the same families, weights and CSS variables. No new dependency, no schema, no API surface, no visible change intended.
+> **Pipeline mode:** Polish / refactor (CLAUDE.md → Classification): fonts move from `next/font/google` to `next/font/local` with the same families, weights, CSS variables and script coverage (every subset `next/font/google` served: latin, latin-ext, vietnamese, cyrillic, greek and the rest; see the loop-back section). No new dependency, no schema, no API surface. The only visible differences are the CSS family names (next/font/local's own) and slightly different fallback metrics (sub-pixel).
 > **Branch:** `pipeline/e2e-shard` (PR #74). This shares the branch because the bug was found there, and a new worktree would have disturbed a running sibling dev server (TODO line on the Turbopack-root hazard).
 
 ---
@@ -21,7 +21,7 @@
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
-**Skips, stated:** Phases 1–3 are skipped. This adds no behaviour, the design is the operator's instruction ("lets bundle the fonts", 2026-11-01), and the families, weights and variables are fixed by the current `src/lib/brand/fonts.ts` and `src/app/layout.tsx`. The font files are static assets under the existing tree, so no new subdirectory of note is added. If the implementer finds that something needs a structural choice, it comes back here. **Help impact:** none. No label, page or flow changes, and fonts should render identically.
+**Skips, stated:** Phases 1–3 are skipped. This adds no behaviour, the design is the operator's instruction ("lets bundle the fonts", 2026-11-01), and the families, weights and variables are fixed by the current `src/lib/brand/fonts.ts` and `src/app/layout.tsx`. The font files are static assets under the existing tree, so no new subdirectory of note is added. If the implementer finds that something needs a structural choice, it comes back here. **Help impact:** none. No label, page or flow changes, and the same faces render with the same coverage as before, apart from the CSS family name and sub-pixel fallback metrics (Visible difference, below).
 
 ## Why
 
@@ -72,13 +72,13 @@ These are recorded here because they were found while this work was in progress.
   - `src/lib/brand/fonts.test.ts`: mock moved to `next/font/local`, plus a new "self-hosted fonts" block.
   - `src/lib/sites.test.ts`, `src/lib/brand/read-org-brand.test.ts`: mock moved to `next/font/local`.
   - Comment-only: `src/lib/sites.ts`, `src/lib/brand/contract.ts`, `src/app/globals.css`, and the two `actions.test.ts` files.
-- Added: `src/lib/brand/font-files/<family>/<family>-latin-variable.woff2` and `OFL.txt` for lora, source-sans-3, libre-franklin, public-sans, bitter, karla, montserrat, open-sans and inter.
+- Added: `src/lib/brand/font-files/<family>/<family>-variable.woff2` (renamed from `-latin-variable` in the loop-back below) and `OFL.txt` for lora, source-sans-3, libre-franklin, public-sans, bitter, karla, montserrat, open-sans and inter.
   - The directory is `font-files`, not `fonts`, so `./fonts` still resolves unambiguously to `fonts.ts`.
   - Inter's files sit in the same tree; `layout.tsx` reaches them with `../lib/brand/font-files/inter/...`.
 
 ### Choice: variable woff2, one file per family
 
-- The CSS2 API returns a single variable latin woff2 for every one of the nine families. All nine are variable fonts, and `next/font/google` was already downloading that same file.
+- All nine families are variable fonts. The first cut used the single variable latin woff2 the CSS2 API returns per family; that dropped every other subset, which QA run 1 caught (finding 1). The files are now one full-coverage variable woff2 per family, cut from the upstream TTF (see the loop-back section).
 - One file per family is simpler than three or four statics and no larger.
 - Weight ranges equal the old weight lists' extremes:
   - 400 700: Lora, Libre Franklin, Bitter.
@@ -91,8 +91,7 @@ These are recorded here because they were found while this work was in progress.
 
 ### Bytes and licences
 
-- Total woff2: 307,892 bytes (about 301 KB). The `.next/static/media` output was 320K on disk.
-  - Per file: lora 37,792; source-sans-3 28,804; libre-franklin 29,336; public-sans 26,636; bitter 34,156; karla 24,264; montserrat 35,508; open-sans 42,964; inter 48,432.
+- First cut (latin only, superseded): 307,892 bytes. Current total woff2: 902,692 bytes (about 882 KB); per-file sizes are in the loop-back section.
 - Nine `OFL.txt` files, each fetched from `github.com/google/fonts` `ofl/<family>/OFL.txt` (about 4.4 KB each). All nine families are SIL OFL 1.1.
 - `npm run check:secrets`: passes with the font tree staged. It skips `.woff2` by extension and scans the nine `OFL.txt` files with no findings. It scans only git-tracked files, so it was re-run after `git add`.
 
@@ -126,7 +125,7 @@ These are recorded here because they were found while this work was in progress.
   - `document.fonts` reports each loaded with the expected weight range.
   - All nine woff2 were served from `/_next/static/media/`.
   - Requests whose URL contains google or gstatic: none.
-- **Visible difference:** the CSS family names are now next/font's local names (the variable's identifier, e.g. `classicHeading`), not `Lora`. Nothing in `src/` references a family literally, so nothing breaks. A person inspecting computed styles sees different names for the same glyphs.
+- **Visible difference:** the same faces with the same coverage as before (after the loop-back), with two differences. (1) The CSS family names are now next/font's local names (the variable's identifier, e.g. `classicHeading`), not `Lora`. Nothing in `src/` references a family literally, so nothing breaks; a person inspecting computed styles sees different names for the same glyphs. (2) The metric-matched fallback is generated from local metrics, not Google's: QA measured `size-adjust` 107.89% against 107.12% for Inter, which gives sub-pixel differences (arrows are where QA saw them) until the web font loads, and none after. (The first cut of this section said the family name was the only difference and that no visible change was intended. Both were wrong: the first cut also lost every non-latin subset, fixed below.)
 - Screenshots (not committed, scratchpad only), all in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/shots-final`:
   - `help-light-360.png`, `help-dark-360.png`
   - `signin-light-360.png`, `signin-dark-360.png`
@@ -142,3 +141,55 @@ These are recorded here because they were found while this work was in progress.
 5. Confirm `OFL.txt` sits beside each woff2 in `src/lib/brand/font-files/`.
 6. Confirm the diff touches no Rule 16 shared file.
 7. Help impact: none. No label, page or flow changed.
+
+## Phase 4 loop-back (QA run 1, finding 1)
+
+**Finding (FAIL):** coverage regression. On `main`, `next/font/google` emitted an `@font-face` with `unicode-range` for every subset each family has (51 woff2 across the nine). The first bundled cut was latin-only, so Ł ő ș č ā ễ ặ, Cyrillic, Greek and № fell back to Arial mid-word, in Inter and in all eight pairing faces. The "same latin subset" comment in `fonts.ts` and the "same faces" claims in this log were wrong.
+
+**Operator ruling (2026-11-01):** full coverage, subsetted. One woff2 per family, every subset the family offers, cut from the family's own upstream variable TTF with fonttools, a local tool and not a repo dependency.
+
+### What changed
+
+- **Files:** `src/lib/brand/font-files/<family>/<family>-variable.woff2` replaces `<family>-latin-variable.woff2` (nine files; the nine `OFL.txt` are unchanged). `fonts.ts` and `layout.tsx` point at the new names.
+  - Cut from `github.com/google/fonts` at commit `6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec`, `ofl/<dir>/<Family>[axes].ttf` (roman only).
+  - `fonttools varLib.instancer` keeps the `wght` axis at the range each face declares (400:700, 400:600, 400:800, Inter 100:900) and pins other axes at their default (Open Sans `wdth=100`, Inter `opsz=14`).
+  - `pyftsubset --flavor=woff2 --layout-features='*'` with the **union of every subset Google's CSS2 API serves for that family**. The per-subset `unicode-range` values were read from the CSS2 response (modern Chrome User-Agent) and are committed as `font-files/subsets.json`.
+  - Subsets present per family: latin and latin-ext for all nine; vietnamese for all but Karla; cyrillic and cyrillic-ext for all but Karla and Public Sans; greek and greek-ext for Inter, Source Sans 3 and Open Sans; and the small `math`, `symbols` (Lora, Open Sans) and `hebrew` (Open Sans) subsets. I included those last three because `main` emitted them (that is what makes 51), though the operator's list named only the first seven. Their glyph counts are tiny (a handful per font).
+  - Not covered, because Google does not serve them either: Greek in Lora, Libre Franklin, Bitter and Montserrat; Cyrillic and Vietnamese in Karla; Cyrillic and Greek in Public Sans. Those glyphs fall back, as they did on `main`.
+- **Rebuild kit:** `font-files/README.md` (exact command, source commit, URLs, versions), `font-files/build-fonts.sh` (the script that produced the committed files; `WORK` must be a scratch directory) and `font-files/subsets.json`. fonttools 4.68.0 and brotli 1.2.1 in a throwaway venv.
+- **Comments fixed:** `fonts.ts` header (the false "same latin subset" claim; now states full coverage and the family-name difference) and `layout.tsx`; `sites.ts` ("Lora is not a function" became a description of the real failure under plain Node); the three mock comments in `fonts.test.ts`, `sites.test.ts` and `read-org-brand.test.ts`.
+- **Tests:**
+  - New `src/lib/brand/font-coverage.test.ts` (62 tests). It decodes each committed woff2 (a small in-file WOFF2 reader: header, directory, brotli stream via `node:zlib`, then `cmap` formats 4 and 12 and `fvar`) and asserts, per family and per subset Google serves it, that sample code points are mapped (Ł ő ș č ā; ễ ặ; Ж №; Ә Ө; Ω α; ἀ; א; ∂ ∑; and so on), and that the only axis is `wght`, spanning the declared range. The expectations are hand-written from Google's CSS2 subsets, not read back from the build script or the files. I validated the reader against fonttools: the code-point sets are identical for all nine files.
+  - **Fail-first:** I swapped `lora-variable.woff2` for the old latin-only cut from `HEAD`: six Lora tests failed (latin-ext, vietnamese, cyrillic, cyrillic-ext, math, symbols) naming the missing code points (U+0141, U+1EC5, U+0416 ...). Restored, 62 pass.
+  - `fonts.test.ts` now asserts every face's file: "wires each face to its own file (all eight)" compares each pairing's mock class name to the exact `font-files/<family>/<family>-variable.woff2` path and variable. Fail-first: renaming one path in `fonts.ts` failed it (and the exists test).
+  - The `next/font/google` guard now scans `.ts .tsx .js .jsx .mjs .cjs` and matches any quoted specifier (import, `import()`, `require()`, `vi.mock()`). Fail-first: a planted `require("next/font/google")` in a `.cjs` and an `import("next/font/google")` in a `.mjs` both failed it; plants removed.
+  - The directory test now also pins the three loose files beside the family directories.
+
+### Bytes (woff2, actual)
+
+| file | first cut (latin) | now |
+|---|---|---|
+| lora | 37,792 | 80,796 |
+| source-sans-3 | 28,804 | 127,004 |
+| libre-franklin | 29,336 | 60,908 |
+| public-sans | 26,636 | 32,156 |
+| bitter | 34,156 | 95,632 |
+| karla | 24,264 | 28,404 |
+| montserrat | 35,508 | 207,872 |
+| open-sans | 42,964 | 88,536 |
+| inter | 48,432 | 181,384 |
+| **total** | **307,892** | **902,692** |
+
+About 2.9 times the first cut, inside the expected 0.8 to 1 MB. A browser downloads only the face a page uses, and the platform pages use Inter only (181 KB). `next/font/local` emits one `@font-face` per file with no `unicode-range`, so the whole file for a face is fetched once that face is used, where `next/font/google` split it by subset. That is the price of one file per family, accepted in the ruling.
+
+### Gates
+
+- `npm run typecheck`, `npm run lint`: clean. `npm run check`: all ten pass (exit 0), with the font tree staged.
+- `npm test`: 834 files passed, 140 skipped; 13,289 tests passed, 3,770 skipped (the DB-backed suites).
+- Two production builds in a scratch copy under the session scratchpad (outside `~/git/presby-platform/`; main checkout's `.env.local` copied in): plain, and with `CI=1`. Both exit 0 and emit nine woff2 in `.next/static/media` (sizes equal the table above). `grep -rlE "fonts\.googleapis|fonts\.gstatic" .next` finds nothing after either, and neither build log mentions Google. The copy was deleted.
+- **Glyph check at 360px**, `next dev` on port 3560 in the scratch copy (stopped by PID), Playwright Chromium from a private `PLAYWRIGHT_BROWSERS_PATH`, CDP `CSS.getPlatformFontsForNode` on a throwaway route that renders `Łukasz Nguyễn Đặng Zoë Šimić Őry Ștefan Ünal Жанна Ωmega № ἀρχή` in Inter and in all four pairings (heading and body, `nowrap` so wrapped spaces are not dropped from the count). For all nine faces the number of glyphs drawn by the bundled (custom) face equals the number of characters in that file's `cmap`, and the rest fell back: no Google request was made. The only fallbacks are the scripts Google does not serve for that family: Greek and polytonic Greek in the four heading faces (Lora, Libre Franklin, Bitter, Montserrat), Cyrillic, Greek and ễ ặ in Karla, Cyrillic and Greek in Public Sans, ἀ in Open Sans. Inter, Source Sans 3 and Open Sans draw every character they have. Screenshot (scratchpad only, not committed): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/glyph-360.png`.
+- Observation, not a defect: Chromium reports the files' internal family names ("Libre Franklin Thin", "Source Sans 3 ExtraLight"): the upstream name table names the default instance of the source TTF. It affects the "Rendered Fonts" pane only; the CSS family name is next/font's own.
+
+### For QA run 2
+
+Re-run typecheck, lint, `npm run check` and `npm test`; read `font-coverage.test.ts` and, if you want, re-run the swap fail-first; rebuild in a scratch copy and grep for Google; confirm the loose files in `font-files/` are `README.md`, `build-fonts.sh` and `subsets.json`; read the correction to the "Visible difference" section above.

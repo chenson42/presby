@@ -63,9 +63,9 @@ vi.mock("@/lib/audit", () => ({
 // boundary, exactly `fonts.test.ts`'s own approach — each fake loader
 // returns the same `{ className, variable }` shape the real one does.
 vi.mock("next/font/local", () => {
-  // Same shape the real loader returns ({ className, variable }). One default
-  // export serves all eight faces; the class name carries the font file path
-  // and the CSS variable, so a face wired to the wrong file shows in a test.
+  // Same shape the real loader returns ({ className, variable }). This file
+  // only needs the shape: it does not check which file each face is wired to.
+  // That is asserted by `fonts.test.ts` ("wires each face to its own file").
   const localFont = (opts: { src: string; variable: string }) => ({
     className: `mock-${opts.src}-${opts.variable}`,
     variable: opts.variable,

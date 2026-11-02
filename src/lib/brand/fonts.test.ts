@@ -16,7 +16,8 @@ import path from "node:path";
 vi.mock("next/font/local", () => {
   // Same shape the real loader returns ({ className, variable }). One default
   // export serves all eight faces; the class name carries the font file path
-  // and the CSS variable, so a face wired to the wrong file shows in a test.
+  // and the CSS variable, which the "wires each face to its own file" test
+  // below reads back, so a face pointed at the wrong file fails there.
   const localFont = (opts: { src: string; variable: string }) => ({
     className: `mock-${opts.src}-${opts.variable}`,
     variable: opts.variable,
@@ -67,6 +68,30 @@ describe("resolveTypePairing", () => {
     },
   );
 
+  // Every face, by file. The mock's className carries `opts.src`, so this
+  // reads back what fonts.ts really passed to localFont().
+  const WIRING: Record<string, [heading: string, body: string]> = {
+    classic: ["lora", "source-sans-3"],
+    modern: ["libre-franklin", "public-sans"],
+    warm: ["bitter", "karla"],
+    contemporary: ["montserrat", "open-sans"],
+  };
+
+  it("wires each face to its own file (all eight)", () => {
+    expect(Object.keys(WIRING).sort()).toEqual(
+      TYPE_PAIRINGS.map((p) => p.key).sort(),
+    );
+    for (const [key, [heading, body]] of Object.entries(WIRING)) {
+      const resolved = resolveTypePairing(key as (typeof TYPE_PAIRINGS)[number]["key"]);
+      expect(resolved.headingClassName).toBe(
+        `mock-./font-files/${heading}/${heading}-variable.woff2-${resolved.headingVariable}`,
+      );
+      expect(resolved.bodyClassName).toBe(
+        `mock-./font-files/${body}/${body}-variable.woff2-${resolved.bodyVariable}`,
+      );
+    }
+  });
+
   // BRAND_UTILITY_RE, copied verbatim from scripts/check-brand-scope.mjs
   // (not imported: that script is a build tripwire over source text, not a
   // module with a stable export surface). Guards Phase 2 Ruling 3's warning
@@ -98,7 +123,8 @@ describe("resolveTypePairing", () => {
  * once failed at random because `next/font/google` fetches Google Fonts at
  * build time (vercel/next.js#99114). These pin the replacement: every font
  * file the app names is committed, is really woff2, and sits beside its
- * licence, and nothing in `src/` imports `next/font/google` again.
+ * licence, and nothing in `src/` imports `next/font/google` again. What each
+ * file can draw is pinned in `font-coverage.test.ts`.
  */
 describe("self-hosted fonts", () => {
   const root = path.resolve(__dirname, "../..");
@@ -129,12 +155,16 @@ describe("self-hosted fonts", () => {
   it("every committed font directory is used and holds only a woff2 and an OFL.txt", () => {
     const base = path.join(root, "lib/brand/font-files");
     const used = new Set(named.map((f) => path.dirname(f)));
-    for (const dir of readdirSync(base)) {
+    // Loose files beside the family directories are the rebuild kit.
+    expect(readdirSync(base).filter((e) => statSync(path.join(base, e)).isFile()).sort())
+      .toEqual(["README.md", "build-fonts.sh", "subsets.json"]);
+    for (const dir of readdirSync(base).filter((e) =>
+      statSync(path.join(base, e)).isDirectory(),
+    )) {
       const full = path.join(base, dir);
-      expect(statSync(full).isDirectory()).toBe(true);
       expect(used.has(full)).toBe(true);
       expect(readdirSync(full).sort()).toEqual(
-        [`${dir}-latin-variable.woff2`, "OFL.txt"].sort(),
+        [`${dir}-variable.woff2`, "OFL.txt"].sort(),
       );
     }
   });
@@ -146,11 +176,14 @@ describe("self-hosted fonts", () => {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
         else if (
-          /\.(ts|tsx)$/.test(entry.name) &&
+          /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name) &&
           !entry.name.endsWith("fonts.test.ts")
         ) {
           if (
-            /from\s+["']next\/font\/google["']|mock\(\s*["']next\/font\/google["']/.test(
+            // Any quoted specifier: import/export ... from, side-effect
+            // import, import(), require(), vi.mock(). Prose mentions use
+            // backticks, so they do not match.
+            /["']next\/font\/google["']/.test(
               readFileSync(full, "utf8"),
             )
           ) {

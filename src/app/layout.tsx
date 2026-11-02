@@ -17,14 +17,15 @@ import "./globals.css";
  * regardless of the two classes' equal specificity.
  *
  * Self-hosted (2026-11-01, docs/work-log/2026-11-01-self-host-fonts.md): the
- * latin variable woff2 (weights 100-900) and its OFL.txt are committed under
+ * variable woff2 (weights 100-900, every Google subset: latin, latin-ext,
+ * vietnamese, cyrillic, greek) and its OFL.txt are committed under
  * `src/lib/brand/font-files/inter/`, so no build ever requests Google Fonts
  * (vercel/next.js#99114 made `next/font/google` builds fail at random). The
  * path is relative to THIS file, and the call is static at module scope, as
  * `next/font/local` requires.
  */
 const inter = localFont({
-  src: "../lib/brand/font-files/inter/inter-latin-variable.woff2",
+  src: "../lib/brand/font-files/inter/inter-variable.woff2",
   weight: "100 900",
   style: "normal",
   display: "swap",

@@ -18,7 +18,7 @@
 | 1 — Functional refinement | analyst | Brief: the behaviour and the operator's ruling are below; the tech-lead may ask for a full Phase 1 if the scope is wider than it looks | Ruled by operator | 2026-11-02 |
 | 2 — Architectural review | architect | Skipped with notation: no migration, schema, definer, route, action, dependency or structural change (see Phase 3, Classification). Reopens if the operator asks for the database to enforce it (Q2). | Skipped | 2026-11-02 |
 | 3 — Technical design | tech-lead | Design complete; Accelerated Feature; implementer named; one operator question (Q1) with a recommended default | Complete | 2026-11-02 |
-| 4 — Implementation | TBD | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Built to the design with the operator's Q1 and Q2 rulings; gates green; handoff to QA | Complete | 2026-11-02 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -272,3 +272,75 @@ Strings, with the four checks recorded per group.
 
 - **Q1.** Hide members-only events from visitors only, or from everyone without member standing (visitors, Inactive, Moved away)? Recommended: everyone without member standing. Built that way unless you say "visitors only".
 - **Q2 (optional).** Is a TypeScript-level filter plus a failing-test tripwire acceptable, rather than database enforcement (a full Feature with a person GUC, a policy change and migration 0085)? Recommended: yes.
+
+## Operator rulings (2026-11-02), recorded at Phase 4
+
+- **Q1 = VISITORS ONLY.** A members-only (`is_public = false`) event is hidden from a viewer whose standing at this congregation is `visitor`, and from nobody else. Members, staff anchors, Inactive, Moved away, unclassified and `events.manage` holders keep seeing it. This overrides the Phase 3 recommendation ("everyone without member standing"); the design's "visitors only" Copy variants (C1, C3 to C6) apply, with the C1 wording adjusted for truth (see Departures). DECISION-316's "Scope" sentence must be read with this ruling: members, staff, Inactive, Moved away, unclassified and managers see members-only events; visitors do not.
+- **Q2 = accepted.** The filter lives in the TypeScript reader with the T1 source-scan tripwire (`calendar-visibility.source.test.ts`); no database enforcement. The tradeoff stands as written in Phase 3 section 1: a future member-side reader of `events` that forgets the predicate leaks, and the scan makes that a failing test. The Accelerated classification holds (no migration; 0085 is not used and goes back to the pool).
+
+## Phase 4 — Implementation (full-stack-developer)
+
+### Rulings applied
+
+- **Q1:** the gate's one statement gained `exists (select 1 from memberships m where m.organization_id = <org> and m.person_id = <person> and m.ended_on is null and presby_membership_standing(m.current_roll, m.engagement_status) <> 'visitor') as has_non_visitor_standing`; `seesMembersOnly = canManage || has_non_visitor_standing`. It keys on the 0066/0065 classifier (`presby_membership_standing`), not on raw engagement text. A person with no live membership row at this org (unreachable through `/o/<slug>`) is hidden-from, i.e. fails closed, as the design says. `presby_membership_standing` is the classifier 0065 introduced (the design's `presby_membership_is_member_standing` is not used under Q1); it is a plain `immutable` SQL function with no definer (0065 11a), so it runs inside the RLS-scoped transaction; the DB tests run as `presby_app` and prove the call works there.
+- **Q2:** TypeScript filter plus T1 tripwire; no RLS, definer or `authz.ts` change.
+
+### Files created / modified
+
+- `src/lib/calendar.ts`: `MEMBER_VISIBLE` deleted; `memberVisible(seesMembersOnly: boolean)` (required argument, no literal accepted by the scan); `openMemberGate` third column and `seesMembersOnly` on the `open` outcome; the five interpolations; header paragraph "VISIBILITY" rewritten. `getMemberEvent` returns `{ event: null }` for a hidden event, the value it already returns for a missing, foreign, cancelled and non-UUID id, so `[eventId]/page.tsx` answers with the same `notFound()`; `not-found.tsx` is unchanged.
+- `src/app/(org)/o/[slug]/admin/events/website-listing-copy.ts`: `openToEveryoneHint` (C1) and its comment block.
+- `src/content/help/events-and-the-calendar.md`: C3, C4 (including the N2 phone sentence), C5, visitors-only variants. No registry change; `verifiedIn` not moved.
+- Tests: `src/lib/calendar.test.ts` (new describe "members-only events and standing", T2 to T8, three process time zones), `src/lib/testing/calendar-fixture.ts` (`MemberStanding`, `addMember` standing option, `addMemberElsewhere` via the claim GUC, `enroll` standing option), `src/lib/calendar-visibility.source.test.ts` (T1, new), `src/lib/membership-standing.source.test.ts` (scan 2 gains the calendar assertion), `src/app/(org)/o/[slug]/calendar/page-copy-left-out.test.tsx` (T9, new), `.../admin/events/website-listing-copy.test.ts` (T10, new), `new-event-form.test.tsx` and `edit-event-form.test.tsx` (hint string), `e2e/visitor-access.spec.ts` (E1 to E3, both viewports).
+- No migration, schema change, route, action, permission, flag, audit event, env var or `FEATURES` entry. Nothing under Rule 16 was edited.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint` | clean (`--max-warnings=0`) |
+| `npm run check` | all ten tripwires report passed (including `check:help`: 29 entries, 24 published) |
+| `npm test` | 836 files passed, 140 skipped; 13226 tests passed, 3818 skipped (the DB-backed files skip without `.env.local`) |
+| DB-backed, serial, as `presby_app` (`DATABASE_URL` role verified), pipeline Neon branch: `calendar.test.ts`, `event-types.test.ts`, `public-calendar.db.test.ts` | 3 files, 239 tests passed (the new matrix runs under UTC, America/New_York, Pacific/Honolulu) |
+| Source scans: `calendar-visibility.source.test.ts` (5), `membership-standing.source.test.ts` (17) | pass |
+| Calendar route and admin events unit tests | 34 files, 348 tests passed |
+| e2e (own server on port 3630 from a scratch copy, flags reset with `e2e-reset-flags.sql -v pipeline_branch=1`, private `PLAYWRIGHT_BROWSERS_PATH`): `visitor-access.spec.ts` | 10 passed (5 tests at desktop and 360px) |
+| e2e: `member-calendar.spec.ts` + `public-calendar.spec.ts` (unchanged) | 32 passed |
+| 360px and 1280px, light and dark, visitor and member (calendar list and month, home, event page): throwaway spec in the scratch copy, screenshots read | no horizontal overflow; visitor DOM never contains the members-only title; member sees both; cancelled shown to neither |
+
+Server stopped by PID; the scratch copy (with its `.env.local`) was deleted.
+
+### Fail-first evidence
+
+- **Unit/DB:** with `memberVisible` changed to ignore its argument (`void seesMembersOnly; return sql\`e.cancelled_at is null\``), the new describe ran 48 cases and **30 failed** (every visitor-hidden case: month, counts, page, feed, orgHasEvents, direct-link equality T3, manager-versus-role T4, per-organization standing T5, home-card limit T6, mixed series T7, public-to-members-only flip T8; the same ten in each of the three zones); the 18 "member sees it" cases passed, as they should. The predicate was restored and the full file passes (190 tests).
+- **e2e:** with the same removal in the scratch copy, E1 (members-only title in the visitor's page content) and E3 (the direct link answered 200, not 404) failed; with it restored all 10 pass.
+- T1 passes on the final source and has its own deliberately offending sample proving it can fail. The six-way mutation check (delete the predicate from each call site in turn) was not run per site; the single all-sites removal above and the compile-time required argument stand in for it. Phase 5 may run the per-site check.
+
+### Departures from the design (all small; none change behaviour the design promised)
+
+1. **C1 wording.** The design's visitors-only variant ("only members of {orgName} see the event ... Visitors do not") would be false under Q1: an Inactive or Moved away person, and a manager, also see it. Shipped: "If unchecked, visitors to {orgName} do not see the event on the calendar. Members, staff and everyone else who can see the calendar still do. It also stays out of Copy month and cannot be shown on the website." The same truth boundary drives C5 ("a visitor does not see the event ... Members, staff, people marked "Inactive" or "Moved away", and people who can manage events still see it"). The release-note line C6 must follow it: say "visitors", not "everyone without member standing".
+2. **T7 and T8 mutate rows by SQL**, not through `updateEvent`: the same row state without importing the audit-writing action into a read-path test. The flip is restored in a `finally`.
+3. **T5 is verified at DB level** (the claim-GUC mechanic is reproducible in `calendar-fixture.ts`): a person who is a member at one organization and a visitor at another sees the members-only event at the first and not at the second. No "unverified" note.
+4. **T4's "non-manage role" viewer** holds `events.view` plus `directory.view` through a custom role; it does not see members-only events and has `canManage` false.
+5. **T9** lives in a new file, `page-copy-left-out.test.tsx`, because stubbing `CopyMonthButton` to expose `leftOutCount` would have changed every test in the existing `page.test.tsx`.
+6. **E1 and the "Coming up" card** need `org_portal.home_v2`; the spec now captures, sets and restores it beside the two flags it already managed. Nothing goes into `e2e-baseline-flags.sql`.
+7. **`membership-standing.source.test.ts`** asserts the calendar's `<> 'visitor'` test, not the design's member-standing call (Q1).
+
+### Help: written from the screens
+
+At 360px and 1280px (screens read): the previous and next month arrows show on both; "Month" and "List" show only at 1280px (zero visible at 360px). C4's sentence ("On a wider screen the links "Month" and "List" switch the view. On any screen the arrows move between months.") matches. The 404 heading is "We couldn't find that event" (screen read). `npm run check:help` passes; no label or registry change, no screenshot added.
+
+### Not done here (orchestrator / ship housekeeping)
+
+- `docs/product/functionality-map.md:23` is stale ("`is_public` means 'open to everyone who signs in'"); Rule 14 at ship.
+- **`scripts/seed-dev.sql:1879`** comment ("members still see it - is_public is only the public-site and Copy-month switch") is stale (Rule 16, the orchestrator edits it at integration): a visitor no longer sees a members-only event.
+- `docs/TODO.md` line 491 (the "members" wording pass for `events-and-the-calendar`) is closed by C3 and C4; `docs/decisions.md` DECISION-316 needs the Q1 and Q2 rulings folded in (Rule 16, orchestrator). Release note (C6) per departure 1.
+- `src/lib/org-features.ts:108` and `turning-features-on-and-off.md:35` ("every member who has calendar access") are read and unchanged, as the design says.
+
+### For QA
+
+- Run the DB suites serially against the pipeline branch (`npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/calendar.test.ts src/lib/event-types.test.ts src/lib/public-calendar.db.test.ts`, about 4 minutes), `npm test`, `npm run check`, `npm run typecheck`, `npm run lint`.
+- e2e on your own server on port 3630 with `E2E_BASE_URL` set: `visitor-access.spec.ts`, `member-calendar.spec.ts`, `public-calendar.spec.ts`, `portal-home-cards.spec.ts` (not run by me), at 1280 and 360px.
+- Mutation check per call site (delete the predicate at each of the five interpolations in turn; confirm T2/T3/T6 fail each time) and that an omitted `memberVisible()` argument fails `tsc`.
+- Copy truthfulness over C1, C3 to C5 as shipped (departure 1) and the help diff; confirm the Inactive and Moved away claims against the matrix rows ("Inactive and Moved away keep seeing members-only events").
+- Open question for Phase 6: the DB matrix proves Inactive and Moved away still see members-only events; the shipped copy says so in C1 and C5. The open-tab behaviour after a flip is unverified in a browser, as designed.

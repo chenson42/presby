@@ -2,27 +2,66 @@
  * Font RESOLUTION for the four curated type pairings (`TYPE_PAIRINGS` in
  * `contract.ts`).
  *
- * This file is deliberately NOT `contract.ts`. `next/font/google` calls must
+ * This file is deliberately NOT `contract.ts`. `next/font/local` calls must
  * be static, module-top-level invocations — the Next.js compiler resolves
  * them at build time by static analysis, not at runtime, so a family cannot
  * be selected by a runtime variable, a function argument, or a switch keyed
  * on one. `contract.ts`'s zero-runtime-imports rule forbids a `next/font`
  * import outright, so the two constraints point at the same design: eight
- * `next/font/google` calls live here, at module scope, one per (pairing x
+ * `localFont` calls live here, at module scope, one per (pairing x
  * heading/body); `resolveTypePairing()` is a plain object lookup over
  * already-instantiated results, never a dynamic font call.
  *
  * `import type` only from `contract.ts` — the pairing-key type, nothing else.
- * Self-hosted at build time (next/font/google downloads and serves the font
- * files from this origin); no runtime request to Google Fonts ever leaves a
- * member's browser (A8 in Phase 1's adversarial pass — font as a payload).
  *
- * Weight selection, per family, chosen narrow rather than "variable" to keep
- * the self-hosted byte budget down (slice e's own acceptance criterion) while
- * covering the two weights the type scale actually uses: 400 (body/most
- * headings) and 600 (`font-semibold`, TYPE_SCALE's title/section/subhead
- * roles). 700 is kept on each heading face for an explicit bold a future
- * surface may want; body stays at 400/600 since body copy never goes bold.
+ * SELF-HOSTED, committed, never fetched (2026-11-01,
+ * docs/work-log/2026-11-01-self-host-fonts.md). These faces used to come from
+ * `next/font/google`, which makes the BUILD request Google Fonts once per
+ * family. Google intermittently answers with an extensionless `/l/font?kit=`
+ * URL, which Turbopack mis-parses ("next/font/google queries have exactly one
+ * entry", vercel/next.js#99114), so builds failed at random and then
+ * production deploys failed. The woff2 files now live in `font-files/<family>/`
+ * beside this file (`next/font/local` resolves `src` relative to the calling
+ * file), with each family's `OFL.txt`. No build and no member's browser ever
+ * fetches these fonts from Google: next/font serves the files from this origin.
+ *
+ * One file per family, FULL coverage: a single variable woff2 per family, cut
+ * from that family's own upstream variable TTF (github.com/google/fonts
+ * `ofl/<family>/`) and subsetted to the union of every unicode subset Google's
+ * CSS2 API serves for THAT family (latin, latin-ext, vietnamese, cyrillic,
+ * cyrillic-ext, greek, greek-ext, math, symbols and hebrew, each only where the
+ * family has it: Karla has latin and latin-ext alone, Open Sans has hebrew).
+ * That is the coverage `next/font/google` gave these faces: it emitted an
+ * `@font-face` with `unicode-range` per subset. A latin-only file would let
+ * Ł, ő, ș, ễ, Cyrillic, Greek and № fall back to Arial mid-word. The weight axis
+ * is kept at the range declared below (`weight: "400 700"` and so on), so the
+ * browser interpolates real weights; italic is not bundled (nothing asks for
+ * it). The range is each face's old weight list: 400-700 for the heading faces,
+ * 400-600 for the body faces (body copy never goes bold; 600 is
+ * `font-semibold`, TYPE_SCALE's title/section/subhead roles), and 400-800 for
+ * Montserrat. `font-files/README.md` records the exact rebuild command, source
+ * commit and URLs; `font-coverage.test.ts` parses each woff2 and pins the
+ * coverage and the weight range. Two things differ from the old setup, neither
+ * visible: the CSS family name, which next/font/local derives from the
+ * variable's identifier (`classicHeading`) rather than `Lora`, and the font's
+ * internal name, which is "PP Classic Serif" / "PP Classic Sans" for the two
+ * families whose licence reserves their name (see `font-files/README.md`).
+ * Nothing in `src/` names a family literally.
+ *
+ * `adjustFontFallback` makes next/font/local generate a metric-matched
+ * fallback from the metrics of the named local font (Arial, Times New Roman),
+ * as `next/font/google` did from its own table, so the swap from fallback to
+ * web font does not shift layout.
+ *
+ * `preload: false` on all eight faces, deliberately. next/font emits a preload
+ * for every font file of every module a route imports, as an HTTP `Link`
+ * header, and the (org) and public trees import this module for all four
+ * pairings, so with preload on every `/o/*` and `/site/*` page fetched all
+ * eight pairing faces (about 720 KB) to draw one. With it off the @font-face
+ * rules are still emitted and the browser fetches a file only when text on the
+ * page uses it. The platform face (Inter, `src/app/layout.tsx`) keeps its
+ * preload. `fonts.test.ts` pins the split. See the work-log's QA run 2 section
+ * for the measurements, including layout shift during the swap.
  *
  * `display: "swap"` on every face — the alternative (`block`/`auto`) risks
  * invisible text while the font loads, which a screenshot cannot catch and a
@@ -41,93 +80,116 @@
  * docs/work-log/2026-08-24-custom-brand-fonts.md, Phase 4.
  */
 
-import {
-  Lora,
-  Source_Sans_3,
-  Libre_Franklin,
-  Public_Sans,
-  Bitter,
-  Karla,
-  Montserrat,
-  Open_Sans,
-} from "next/font/google";
+import localFont from "next/font/local";
 import type { TypePairingKey } from "./contract";
 
 /* -------------------------------------------------------------------------
  * classic — Lora / Source Sans 3
  * ---------------------------------------------------------------------- */
 
-const classicHeading = Lora({
-  subsets: ["latin"],
-  weight: ["400", "600", "700"],
+const classicHeading = localFont({
+  src: "./font-files/lora/lora-variable.woff2",
+  weight: "400 700",
+  style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-heading-classic",
+  adjustFontFallback: "Times New Roman",
+  fallback: ["serif"],
 });
 
-const classicBody = Source_Sans_3({
-  subsets: ["latin"],
-  weight: ["400", "600"],
+const classicBody = localFont({
+  src: "./font-files/source-sans-3/source-sans-3-variable.woff2",
+  weight: "400 600",
+  style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-body-classic",
+  adjustFontFallback: "Arial",
+  fallback: ["system-ui", "sans-serif"],
 });
 
 /* -------------------------------------------------------------------------
  * modern — Libre Franklin / Public Sans
  * ---------------------------------------------------------------------- */
 
-const modernHeading = Libre_Franklin({
-  subsets: ["latin"],
-  weight: ["400", "600", "700"],
+const modernHeading = localFont({
+  src: "./font-files/libre-franklin/libre-franklin-variable.woff2",
+  weight: "400 700",
+  style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-heading-modern",
+  adjustFontFallback: "Arial",
+  fallback: ["system-ui", "sans-serif"],
 });
 
-const modernBody = Public_Sans({
-  subsets: ["latin"],
-  weight: ["400", "600"],
+const modernBody = localFont({
+  src: "./font-files/public-sans/public-sans-variable.woff2",
+  weight: "400 600",
+  style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-body-modern",
+  adjustFontFallback: "Arial",
+  fallback: ["system-ui", "sans-serif"],
 });
 
 /* -------------------------------------------------------------------------
  * warm — Bitter / Karla
  * ---------------------------------------------------------------------- */
 
-const warmHeading = Bitter({
-  subsets: ["latin"],
-  weight: ["400", "600", "700"],
+const warmHeading = localFont({
+  src: "./font-files/bitter/bitter-variable.woff2",
+  weight: "400 700",
+  style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-heading-warm",
+  adjustFontFallback: "Times New Roman",
+  fallback: ["serif"],
 });
 
-const warmBody = Karla({
-  subsets: ["latin"],
-  weight: ["400", "600"],
+const warmBody = localFont({
+  src: "./font-files/karla/karla-variable.woff2",
+  weight: "400 600",
+  style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-body-warm",
+  adjustFontFallback: "Arial",
+  fallback: ["system-ui", "sans-serif"],
 });
 
 /* -------------------------------------------------------------------------
  * contemporary — Montserrat / Open Sans
  * ---------------------------------------------------------------------- */
 
-const contemporaryHeading = Montserrat({
-  subsets: ["latin"],
+const contemporaryHeading = localFont({
+  src: "./font-files/montserrat/montserrat-variable.woff2",
+  weight: "400 800",
+  style: "normal",
   // 800 included (unlike the other three pairings' heading faces): the
   // reference site this pairing recreates sets its h1s at weight 800, and
   // without the real cut the browser would fake-bold 700 — visibly lighter
   // and rounder than the genuine ExtraBold. site-kit's hero h1 asks for
   // 800 with a 700 fallback for the other pairings.
-  weight: ["400", "600", "700", "800"],
   display: "swap",
+  preload: false,
   variable: "--font-heading-contemporary",
+  adjustFontFallback: "Arial",
+  fallback: ["system-ui", "sans-serif"],
 });
 
-const contemporaryBody = Open_Sans({
-  subsets: ["latin"],
-  weight: ["400", "600"],
+const contemporaryBody = localFont({
+  src: "./font-files/open-sans/open-sans-variable.woff2",
+  weight: "400 600",
+  style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-body-contemporary",
+  adjustFontFallback: "Arial",
+  fallback: ["system-ui", "sans-serif"],
 });
 
 /* -------------------------------------------------------------------------
@@ -210,7 +272,7 @@ const RESOLVED_PAIRINGS = {
 
 /**
  * Resolve a curated pairing key to its pre-instantiated `next/font` result.
- * A plain object lookup — every `next/font/google` call already happened at
+ * A plain object lookup — every `localFont` call already happened at
  * module load, above, so this function performs no font resolution of its
  * own and is safe to call from anywhere `TypePairingKey` is available
  * (server component, the emitter in slice c4, the preview in `/admin/design-system`).

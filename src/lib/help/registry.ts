@@ -589,7 +589,7 @@ export const HELP_PAGES = [
       "You don't have permission to manage branding",
       "Website domain",
     ],
-    verifiedIn: "0.54.1",
+    verifiedIn: "0.54.3",
     limitationUntil: "founder-events-branding",
   },
   {

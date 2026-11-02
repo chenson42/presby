@@ -18,9 +18,9 @@
 | 1 — Functional refinement | analyst | Brief: the behaviour and the operator's ruling are below; the tech-lead may ask for a full Phase 1 if the scope is wider than it looks | Ruled by operator | 2026-11-02 |
 | 2 — Architectural review | architect | Skipped with notation: no migration, schema, definer, route, action, dependency or structural change (see Phase 3, Classification). Reopens if the operator asks for the database to enforce it (Q2). | Skipped | 2026-11-02 |
 | 3 — Technical design | tech-lead | Design complete; Accelerated Feature; implementer named; one operator question (Q1) with a recommended default | Complete | 2026-11-02 |
-| 4 — Implementation | full-stack-developer | Built to the design with the operator's Q1 and Q2 rulings; gates green; handoff to QA | Complete | 2026-11-02 |
+| 4 — Implementation | full-stack-developer | memberVisible(seesMembersOnly) at five sites, direct link as missing, copy and help; loop-back added the type-filtered count test | Complete | 2026-11-02 |
 | 5 — Verification | qa | Run 1 FAIL (no test reached calendar.ts:420); run 2 PASS: the 9 new cases catch all three site-420 mutants; e2e 53 dev + 111 prod lane from run 1 | PASS | 2026-11-02 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Live walk at 360px light/dark (visitor, Inactive, on-roll "Visitor", member, manager) matches the ruling; N1 help clause and verifiedIn 0.54.5 applied at integration; N2 a TODO line | SHIP WITH NOTES | 2026-11-02 |
 
 ## Phase 1 (brief, orchestrator, from the analyst's N1 and the operator's ruling)
 
@@ -628,3 +628,180 @@ Files referenced:
 - /Users/cshenso/git/presby-platform/presby-members-only/src/app/(org)/o/[slug]/calendar/page.tsx
 - /Users/cshenso/git/presby-platform/presby-members-only/src/app/(org)/o/[slug]/calendar/page.test.tsx
 - /Users/cshenso/git/presby-platform/presby-members-only/docs/work-log/2026-11-02-members-only-events.md
+
+
+---
+
+# Phase 6 — Shipped vs Intent (analyst)
+
+**Date:** 2026-11-02
+**Reviewed:** `pipeline/members-only-events` at `6a01fc65` (code `d437cf94`, test loop-back `50e845d6`)
+
+## VERDICT
+
+**SHIP WITH NOTES**
+
+- The behaviour matches the operator's ruling. I found no defect in the build.
+- One required edit lands in the integration commit: a single help sentence (N1 ruling below). It needs no re-walk if applied verbatim.
+- One TODO line (N2).
+- `events-and-the-calendar` `verifiedIn` moves to "0.54.5" once the sentence is in.
+
+## ONE-LINE TAKE
+
+> A visitor with a connected sign-in no longer sees an event whose "Open to everyone, not only members" box is unticked, anywhere on the member side. A direct link answers as a missing event. Everyone else keeps today's view, and the form hint and help page now say so truthfully.
+
+## What's Working
+
+- **Visitor walk at 360px, light and dark, four combinations.** Calendar, "Coming up" card and event page.
+  - The calendar and the card show only the public event.
+  - The members-only and cancelled titles are absent from the page source.
+  - The direct link returns 404 with "We couldn't find that event", the same status and heading as a random id.
+  - Horizontal overflow is 0 everywhere.
+- **Inactive person, light and dark.** Sees the public and members-only events on the calendar, in "Coming up" and on the event page (200). This is the Q1 ruling ("visitors only").
+- **Phone sentence (N2 from 3a).** At 360px the previous/next arrows are visible (2) and "Month" and "List" are not (0). The shipped sentence is true.
+- **Event form hint.** On the manager's new and edit forms it is truthful and fits 360px: "visitors to {org} do not see the event on the calendar. Members, staff and everyone else who can see the calendar still do."
+- **Manager's own screens.** The manager sees the members-only event on the calendar and in the events list, tagged "Members only" on the admin event page.
+- **Fail-first evidence.** QA's per-site mutation check now covers all five predicate sites, including the type-filtered count at `calendar.ts:420`.
+
+## Intent-vs-Shipped Diff
+
+- **Operator ruling "hide them from visitors" (Q1 = visitors only).**
+  - Shipped: hidden when standing is `visitor` and the viewer lacks `events.manage`. Matches.
+  - Live proof: Visitor (standing `visitor`) hidden. Inactive (`inactive`) sees it. Member (`listed`) sees it. Manager sees it.
+- **Q2 = TypeScript filter plus tripwire.** Shipped as ruled: no migration, schema change, definer or `authz.ts` change. `calendar-visibility.source.test.ts` fails if a second unfiltered `events` reader appears. QA proved the scan fails on a planted reader. Matches.
+- **Phase 1: "a direct link answers the same way a missing event does".** Matches. Status, heading and `<main>` text are identical.
+- **Phase 1 edge cases.**
+  - Recurring series: T7 (mixed series). Matches.
+  - Public-to-members-only flip: T8. The open-tab behaviour was never measured in a browser, as designed. Acceptable.
+  - Home card count: T6. Matches.
+  - Per-congregation standing: T5, verified at DB level. Matches.
+  - Public website: untouched; its definer already excludes members-only. Matches.
+  - Platform admin with no membership: cannot reach `(org)`. Matches.
+  - RSVP/sign-up: none exist. Matches.
+- **Copy departure (design variant replaced by Phase 4 departure 1).** The visitors-only wording applies. Acceptable and correct. The design's "only members and staff see it" would now be false.
+- **Accepted by design: a visitor's empty states.** "Nothing is scheduled for {month}." and an empty "Coming up" card are true only of what they may see. Operator-ruled indistinguishability. Not a defect.
+
+## Edge Cases
+
+- **Empty state:** pass. A visitor in a month whose only events are members-only gets "Nothing is scheduled", never "No events match". Pinned by the three F1 tests.
+- **Failure microcopy:** pass. The 404 reads "We couldn't find that event … cancelled or removed, or the link may belong to a different organization". It says nothing about visibility and is identical for both audiences. The dev "1 Issue" badge is dev-only and identical on both 404s.
+- **Permission gate:** pass. `events.view` is still required; `seesMembersOnly` only narrows what an admitted viewer reads. A non-manage role holder still cannot see members-only events (T4).
+- **Audit event:** not applicable. The change only reads.
+- **Mobile (360px):** pass. Overflow is 0 on every page walked, light and dark.
+- **Help pages read as their reader:** pass after the N1 sentence. See "Help read-through" below.
+
+## Rulings
+
+### N1: person on the current roll still marked "Visitor"
+
+**Ruling: a help clause now. No TODO line, and no code change.** I reproduced it live: Rosalind has `current_roll = 'active'` and engagement "Visitor", standing `listed`. She sees the members-only event on her calendar, home card and event page, in both colour schemes.
+
+- **Rule is consistent.** The roll wins, as in the Directory, and the code says so.
+- **The state is common, not exotic.** It is what happens when a visitor is received as a member and nobody has clicked "Mark as regular attender". `adding-people.md:53` already describes it.
+- **The help sentence is incomplete for an administrator.** An administrator reading "a visitor does not see the event" beside an Edit card that says "Visitor" will conclude Rosalind is hidden from it, and she is not.
+- **Not a contradiction.** The page does not say anything false, so this is an incomplete sentence, not NEEDS REWORK.
+
+**Replace** the last-but-one sentence of "Open to everyone, or members only" (`src/content/help/events-and-the-calendar.md`): "Who counts as a visitor follows each person's record, so changing a person's engagement on their record changes what they see." With:
+
+> A person on the current roll counts as a member, even if their engagement still says "Visitor". For everyone else, changing a person's engagement on their record changes what they see.
+
+- **Truth.** Off the roll, Visitor is hidden. Regular, Staff, Inactive and Moved away see it. "On the current roll" is the phrase `roles-who-can-do-what.md:18` already uses.
+- **Form hint: leave unchanged.** "Members … still do" already covers the on-roll person, and the hint should not grow.
+- **No registry change.** `npm run check:help` must still pass.
+
+### N2: the test restates the page logic
+
+**Ruling: yes, one TODO line (Papercuts), low priority.**
+
+- **Why it earns a line.** The guard does not depend on the restatement; QA showed the count assertions catch all three mutants. But the page's three-way empty-state decision is exactly what keeps a hidden event unannounced to a visitor. A copy of it in a test can drift silently.
+- **Fix when next in the file.** Extract the decision as a pure function that `page.tsx` and the tests both import. Not a condition of this ship.
+
+## Help read-through
+
+**`events-and-the-calendar`**, read as an administrator at 360px against the screens. Walked: the calendar for visitor, member and manager; the manager's "Add an event" and "Manage events" links; the events list; the new, edit and series event forms; "Part of a series" and "Extend this series"; the seeded event types with "Retired" and "Offered"; and a no-role person's "You don't have permission to manage events at …".
+
+- **Opening paragraph:** matches. A visitor with a connected sign-in does read the calendar.
+- **"The calendar every member sees":**
+  - "Calendar" tile under "Worship & Events": matches the home screen.
+  - "On a phone it shows a list of days": matches.
+  - Month/List/arrows sentence: matches (see What's Working).
+  - "Show filters" appears when event types exist: matches in the manager's walk.
+  - The heading still says "every member". It is loose, not false, and QA's note stands. Nothing links to its anchor, so the heading can change in a later wording pass.
+- **"Coming up" sentence** ("kept for members do not show to visitors"): matches.
+- **Who can add events:**
+  - The no-role message matches.
+  - The "Calendar viewer" role and "All Current Records" group claims match `org-provisioning.ts` and my fixture, where visitor and Inactive both read the calendar.
+  - The `limitationUntil: "founder-events-branding"` sentence stays. It is still true (TODO line 141 is open).
+- **Open to everyone, or members only:** matches after the N1 sentence. The 404 heading is verbatim. "Copy month" leaves members-only out for a manager, and a visitor's Copy month never reports a left-out event (QA toast walk).
+- **Repeating events, event types, public website:** match. Not re-clicked: the Cancel-event dialog, the "Put this and later events on the website" dialog, and the public site's Previous/Today/Next. No events or public-calendar source has changed since 0.47.0 beyond this change and 3a, per `git log`.
+- **Image:** the `calendar-month` capture loads and shows fixture data only, still a correct picture of a member's phone list view.
+
+### `verifiedIn` ruling
+
+**Move `events-and-the-calendar` to "0.54.5", in the same commit as the N1 sentence.** This walk is the one my earlier blockers named. Both are now cleared: N1 by the sentence, N2 (phone) by the verified Month/List sentence.
+
+- **Do not move the other five pages named on TODO line 311.** Reword that line to strike `events-and-the-calendar` from its list.
+- **Treat my walk as a fixture walk, not a real invitation.** The visitor in my walk came from SQL fixtures, not a person accepting a sign-in invitation. If you want the 3a walk's own W1 to W4 on a truly accepted invitation, line 311 still covers it for the other pages.
+
+## Follow-Ups
+
+**TODO lines** (Rule 10, same commit):
+
+1. **Done (replaces open line 491, "`events-and-the-calendar.md` says 'members'…"):**
+   `- [x] 2026-11-02 — **Members-only events hidden from visitors (`2026-11-02-members-only-events`; F418; DECISION-316; no migration; v0.54.5) — SHIP WITH NOTES.** An event with "Open to everyone, not only members" unticked is no longer shown to a visitor on the calendar, in "Coming up" or on its own page; a direct link answers as a missing event. Members, staff, people marked Inactive or Moved away, people on the current roll and event managers still see it. The filter is in `calendar.ts` with a source-scan tripwire (`calendar-visibility.source.test.ts`), not in the database. Closes the "members" wording line for `events-and-the-calendar` (line 1 reworded; the section heading "The calendar every member sees" is kept, nothing links to it) and the N2 phone sentence. — `docs/work-log/2026-11-02-members-only-events.md` Help: `events-and-the-calendar` edited and verifiedIn 0.54.5.`
+2. **Papercut (new, N2):**
+   `- [ ] **Calendar: extract the empty-state decision into a pure function.** The three-way choice in `calendar/page.tsx` (no events at all, nothing scheduled this month, filters hide everything) is copied as `emptyState` in `calendar.test.ts` and can drift silently; it is what keeps a hidden members-only event unannounced to a visitor. Move it next to `calendar-states.tsx` and import it from the page and the tests. — `docs/work-log/2026-11-02-members-only-events.md` Phase 5 run 2 N2`
+3. **Edit line 311:** remove `events-and-the-calendar` from the list of pages whose `verifiedIn` the 3a walk bumps (moved by this walk).
+
+**Integration housekeeping already owed by the orchestrator** (not notes against the build):
+- Rule 14: `docs/product/functionality-map.md` line 23 ("`is_public` means 'open to everyone who signs in' (not members-only)") is stale. The member-calendar bullet at line 93 should also say that a visitor does not see members-only events.
+- `scripts/seed-dev.sql:1879` comment ("members still see it") is stale (Rule 16, orchestrator).
+- Fold the Q1 and Q2 rulings into DECISION-316, and add the point that the roll wins over a leftover "Visitor" engagement. Its "Scope" sentence otherwise reads the design's recommended rule, not the ruled one.
+- Rule 12: no originating feedback row. The source is the 3a live walk N1, not a `feedback` row.
+- Rule 13 / operator memory: no what's-new entry is published. The release-note draft below stays in the work-log.
+
+## Release-note draft (0.54.5)
+
+> **Events kept for members no longer show to visitors.** When an administrator unticks "Open to everyone, not only members" on an event, a visitor who is signed in to your congregation can no longer see it on the calendar, in the "Coming up" card on your congregation's page, or on its own page. A link to it opens the same "We couldn't find that event" page as an event that does not exist.
+>
+> **Who still sees these events:** members, staff, people marked Inactive or Moved away, anyone on the current roll (even if their record still says Visitor), and anyone who can manage events. Who counts as a visitor follows each person's record, so changing a person's engagement changes what they see.
+>
+> Nothing changes on your public website, which never showed these events. The note under the box on the event form and the help page "Events and the calendar" now say who is kept out.
+
+## Red Flags
+
+None. The one pre-commit edit is the N1 help sentence above.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Live walk at 360px light and dark (visitor, Inactive, on-roll "Visitor", member, manager) matches the ruling. N1 ruled a help clause (applied at integration), N2 a TODO line. `events-and-the-calendar` verifiedIn moves to 0.54.5 with the clause. Housekeeping owed: functionality map, seed comment, DECISION-316 fold-in | SHIP WITH NOTES | 2026-11-02 |
+
+## Handoff
+
+To the **orchestrator** (the pipeline's writer):
+
+1. Apply the N1 sentence to `src/content/help/events-and-the-calendar.md`.
+2. Set `verifiedIn: "0.54.5"` in `src/lib/help/registry.ts`.
+3. Run `npm run check:help`.
+4. Write this section into the work-log.
+5. Reconcile the TODO lines.
+6. Do the housekeeping list.
+7. Commit through the usual gate.
+
+No further analyst pass is needed.
+
+**Clean-up.** The dev server on port 3650 was stopped by PID and nothing listens there. The scratch copy with its `.env.local` and the private browsers directory were deleted. The fixture congregations were removed (0 `e2e-invite-*` organizations remain on the pipeline branch). Flags were reset with `-v pipeline_branch=1` and the specs restored what they set. The worktree is clean; I edited nothing.
+
+Files referenced:
+- /Users/cshenso/git/presby-platform/presby-members-only/docs/work-log/2026-11-02-members-only-events.md
+- /Users/cshenso/git/presby-platform/presby-members-only/src/content/help/events-and-the-calendar.md
+- /Users/cshenso/git/presby-platform/presby-members-only/src/lib/help/registry.ts
+- /Users/cshenso/git/presby-platform/presby-members-only/src/lib/calendar.ts
+- /Users/cshenso/git/presby-platform/presby-members-only/docs/TODO.md
+- /Users/cshenso/git/presby-platform/presby-members-only/docs/product/functionality-map.md
+
+### Orchestrator: integration (2026-11-02)
+
+Applied the N1 sentence verbatim; `events-and-the-calendar` verifiedIn 0.54.5; DECISION-316 written with the Q1 and Q2 rulings and the roll-wins point; TODO reconciled (Done line, the "members" wording line closed, N2 papercut added; the N1 product-decision line and line 311 are edited after main is merged in); functionality map and the `seed-dev.sql` comment updated.

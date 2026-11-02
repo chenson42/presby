@@ -28,7 +28,7 @@ The events list shows each event with its time and status. Choose an event to ed
 
 ### Open to everyone, or members only
 
-"Open to everyone, not only members" is ticked at first. If you untick it, a visitor does not see the event: not on the calendar, not in "Coming up", and a link to it shows the same "We couldn't find that event" page as an event that does not exist. Members, staff, people marked "Inactive" or "Moved away", and people who can manage events still see it. Who counts as a visitor follows each person's record, so changing a person's engagement on their record changes what they see. The event also stays out of "Copy month" and cannot be shown on the website.
+"Open to everyone, not only members" is ticked at first. If you untick it, a visitor does not see the event: not on the calendar, not in "Coming up", and a link to it shows the same "We couldn't find that event" page as an event that does not exist. Members, staff, people marked "Inactive" or "Moved away", and people who can manage events still see it. A person on the current roll counts as a member, even if their engagement still says "Visitor". For everyone else, changing a person's engagement on their record changes what they see. The event also stays out of "Copy month" and cannot be shown on the website.
 
 ## A repeating event
 

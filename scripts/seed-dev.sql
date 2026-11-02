@@ -1876,8 +1876,8 @@ on conflict (role_id, permission_key) do nothing;
 --
 --    Exercises: a typed weekly series that spans the previous, current and
 --    next months (10 stored rows, 1 parent + 9 children); typed single
---    events; one NON-PUBLIC event (members still see it - is_public is only
---    the public-site and Copy-month switch); one CANCELLED event (members
+--    events; one NON-PUBLIC event (members see it, visitors do not - DECISION-316;
+--    it is also left out of Copy month and the public site); one CANCELLED event (members
 --    never see it); one event typed with a RETIRED type (visible under "All",
 --    absent under any type filter); one UNTYPED event (renders as General).
 -- ---------------------------------------------------------------------------

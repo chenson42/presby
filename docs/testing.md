@@ -236,7 +236,7 @@ These specs run in the normal `npm run test:e2e` (the `chromium` project, dev se
 npm run test:e2e:prod     # PW_PROD_BUILD=1: npm run build && npm run start -- --port 3800, hydration specs only
 ```
 
-The lane always starts its own server (`reuseExistingServer: false`, port 3800, `PW_PROD_PORT` to override), rejects `E2E_BASE_URL`, and `globalSetup` fails if the server on that port is not a production build. It coexists with a dev server in the same checkout (`next build` preserves `.next/dev`). **From a worktree** the build can fail intermittently with `Can't resolve '@vercel/turbopack-next/internal/font/google/font'` (the committed `turbopack.root` is the repo's parent directory, shared with every sibling worktree); build in a scratch copy outside `~/git/presby-platform/` with a **hardlinked** `node_modules`:
+The lane always starts its own server (`reuseExistingServer: false`, port 3800, `PW_PROD_PORT` to override), rejects `E2E_BASE_URL`, and `globalSetup` fails if the server on that port is not a production build. It coexists with a dev server in the same checkout (`next build` preserves `.next/dev`). **From a worktree** the build could fail intermittently with `Can't resolve '@vercel/turbopack-next/internal/font/google/font'`. Until 0.54.2 this was blamed on the committed `turbopack.root` (the repo's parent directory, shared with every sibling worktree); the cause was upstream (vercel/next.js#99114), and the fonts are now bundled, so that error is gone; build in a scratch copy outside `~/git/presby-platform/` with a **hardlinked** `node_modules`:
 
 ```bash
 # 1. Nothing exported may beat .env.local; nothing may hold the port.

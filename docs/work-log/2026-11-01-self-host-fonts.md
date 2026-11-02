@@ -19,7 +19,7 @@
 | 3 — Technical design | tech-lead | Skipped | — | 2026-11-01 |
 | 4 — Implementation | full-stack-developer | Done: nine families on next/font/local, full Google subset coverage, Inter-only preload, Lora/Source Sans 3 renamed (OFL RFN), coverage/wiring/preload/RFN/weight tests | Complete | 2026-11-02 |
 | 5 — Verification | qa | Run 1 FAIL (latin-only coverage; dropped contact lanes), run 2 FAIL (all nine faces preloaded), run 3 PASS (Inter-only preload, /signin 181 KB, /o 389 KB, CLS 0, RFN rename pixel-identical, two Google-free builds, prod lane 111/111) | PASS | 2026-11-02 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Intent met on all five points; release-note weight bullet, TODO and map corrected by the orchestrator | SHIP WITH NOTES | 2026-11-02 |
 
 **Skips, stated:** Phases 1–3 are skipped. This adds no behaviour, the design is the operator's instruction ("lets bundle the fonts", 2026-11-01), and the families, weights and variables are fixed by the current `src/lib/brand/fonts.ts` and `src/app/layout.tsx`. The font files are static assets under the existing tree, so no new subdirectory of note is added. If the implementer finds that something needs a structural choice, it comes back here. **Help impact:** none. No label, page or flow changes, and the same faces render with the same coverage as before, apart from the CSS family name and sub-pixel fallback metrics (Visible difference, below).
 
@@ -993,3 +993,130 @@ No user-facing string changed, and there is no help diff. I checked the correcte
 - `gates.txt` and the `*.log` files.
 
 The harnesses are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/q3/tools/`. The extracted `c1d96d26` and HEAD fonts are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/q3/fonts/`. The copies, venv, private browsers and plants are deleted. The worktree is clean at `9ad401fc`.
+
+
+---
+
+## Phase 6 — Shipped vs Intent (analyst), `2026-11-01-self-host-fonts` and `2026-11-01-e2e-shard`
+
+**Date:** 2026-11-02
+**Verified by:** analyst (read-only; no file edited)
+**Scope:** PR #74, release 0.54.2, worktree `/Users/cshenso/git/presby-platform/presby-e2e-shard`, HEAD `ef5589c0`.
+
+**What I did**
+- I re-read both work-logs through QA run 3 and the orchestrator's corrections.
+- I read the 0.54.2 section of `/Users/cshenso/git/presby-platform/presby-e2e-shard/docs/release-notes/v0.54.md` against QA's measured numbers.
+- I diffed `docs/TODO.md` against `origin/main` and read `docs/testing.md`, `docs/product/functionality-map.md`, `.github/workflows/e2e.yml` and the help content.
+- I ran `gh pr checks 74`.
+- I did not do the optional 360px look. QA's pixel diffs are 0 differing pixels on `/help` and `/signin`, light and dark, and 0 of 2,515,680 pixels on `/o` after the font rename.
+- Neither work touches how an account joins an organization, how a role is granted, or what a new account can reach. The "walk as the person the path creates" requirement does not apply.
+
+### Verdict: SHIP WITH NOTES
+
+The shipped change meets the operator's intent. The release note makes one claim a non-engineer would read wrongly, and two housekeeping items are stale. All three are text-only and can be fixed in the same push; none needs a re-walk. The one gate left is a green PR #74 CI run, which is still running.
+
+### Fonts: intent against shipped
+
+| Intent | Shipped | Result |
+|---|---|---|
+| "Avoid the build error": no build dependency on Google Fonts | All nine families are `next/font/local`. QA built twice (plain and `CI=1`) with 0 Google references in `.next/` and none in the logs. A test fails if anything imports `next/font/google`, shown by fail-first in six shapes. | Met |
+| Coverage at least what Google served ("Full coverage, subsetted") | One variable woff2 per family with the union of every subset Google serves (51 subsets). For every family the branch maps every code point main could draw: 0 missing, 2 to 58 extra. Per-word glyph checks show the branch draws exactly what main drew, with no new fallbacks. `font-coverage.test.ts` pins this, and QA showed it is not circular. | Met |
+| Nothing visible to members changes except what the note admits | `/help` and `/signin` are pixel-identical. Layout shift is 0 with the fonts delayed 1.5 s. Lora and Source Sans 3 are renamed inside the files because of the OFL Reserved Font Names, and QA found them pixel-identical. Differences that exist: CSS family names, sub-pixel fallback metrics (arrows only, until the web font loads), and larger first-visit weight on some pages (see Note 1). | Met, except the weight disclosure |
+| Orchestrator ruling: pairing faces `preload: false`, Inter preloaded | All 133 routes in `next-font-manifest.json` preload Inter only. `fonts.test.ts` pins the eight-face split and Inter's preload, with fail-first. | Met |
+| Licences | Nine `OFL.txt` files. Reserved Font Names were handled for Lora and Source. The rebuild kit reproduces the files. | Met |
+
+**Help impact: "no help impact" confirmed.** No help page mentions fonts or typefaces. The only "Google" hits are the Google sign-in button and Google Docs paste, and neither changed. No label, route, toggle, role or flow moved, and no `limitationUntil` sentence names fonts. No help page needs editing and none had its `verifiedIn` moved.
+
+### Release note: truthful for a non-engineer?
+
+Mostly accurate, with one claim that misleads. Checked against QA run 3's measured table (bytes of fonts downloaded per page, branch against `main`):
+
+| Page | Main | Branch | Change |
+|---|---|---|---|
+| `/signin` | 307,892 | 181,384 | −126,508 |
+| `/help` | 48,432 | 181,384 | +132,952 |
+| `/o` congregation page (classic) | 307,892 | 388,748 | +80,856 |
+| `/site` branded (contemporary) | 307,892 | 477,792 | +169,900 |
+
+**True in the note**
+- The bad-answer mechanism, and that 0.54.0 production builds failed.
+- The fonts are in the repository and cover the same alphabets (a superset).
+- "Pages do not jump".
+- The Lora and Source Sans 3 rename.
+- The `classicHeading` name.
+- The 181 KB cost of Inter on a public site, which it does not draw.
+- The migration statement, which matches the work-log's 2026-11-01 production apply.
+- The test descriptions.
+
+**Defects**
+1. **The bullet "Pages download less on first visit" is false for most pages.** Only `/signin` got lighter (308 to 181 KB). `/help` is about 3.7 times heavier (48 to 181 KB), a congregation page is about 26% heavier (308 to 389 KB), and a branded public site is about 55% heavier (308 to 478 KB). The note quotes "389 KB" next to "308 KB before" without saying it is more. The "Known cost" bullet admits only the 181 KB of Inter on a public site, not the net increase. QA run 2 had already flagged an earlier version of this claim as false. The operator accepted the per-face file cost in the ruling, so these numbers are accepted. The note's framing is what is wrong.
+   - Suggested text: "**Fonts load differently.** Every page preloads only Inter; a congregation's pages also download its own pairing, and no other. Sign-in drops from 308 KB of fonts to 181 KB. The help pages grow from 48 KB to 181 KB, a congregation page from 308 KB to 389 KB, and a branded public website from 308 KB to 478 KB (it preloads Inter without drawing it; tracked). Each file is downloaded once and cached. Pages do not jump when the fonts arrive."
+2. **"About 25 minutes instead of over 75" is an estimate.** The first measured run on `ccaa2b3` had shards of 34, 19, 16 and 15 minutes (the PR wall time is the slowest job, about 34). Say "about 35 minutes". The shard work-log's own "~25" has the same problem.
+
+### Sharding: intent against shipped
+
+- **Intent:** the dev lane stays inside its limit as specs grow. The operator asked for it.
+- **Shipped:** four `--shard=i/4` dev rows plus the prod row. Each has its own ephemeral Neon branch (`…-s<shard>`) and its own artifact name. The limit is 45 minutes per job. The contact-form dev lane is gated to shard 4 (`e2e.yml:185`), and the CA13 prod proof and its trace paths are restored. QA run 2 verified the `e2e.yml` diff as the matrix rows, names, limit, `--shard` flag and that one `if:`, nothing else. `docs/testing.md` is updated.
+- **Evidence:** the first CI run on `ccaa2b3` gave 33m31s, 19m14s, 15m55s and 14m42s, plus 7m33s for the prod lane, all green, with no spec depending on another file's leftovers. Run 1's dropped-lanes finding is resolved.
+- **Current CI, `gh pr checks 74`, head `ef5589c0`:** it is in progress. Pending: dev lane 1/4 to 4/4, prod lane, `test-rls.sql`, `typecheck + build`, vitest shards 1 to 4. Passing: commit grammar, the two "neon secrets present?" checks, and Vercel Preview Comments. Vercel is "Canceled by Ignored Build Step", which is expected for a branch. Nothing has failed yet. This head is the first with the fonts commits to reach CI. The earlier remote head `1e12716` failed on the very font bug being fixed, so a green run here is the real proof. Shard 1 had 33m31s of 45 on the earlier run, and that is the number to read when it finishes.
+- **Open operator question, not blocking:** per PR against nightly for the full suite. It is recorded in the work-log and mentioned in the Done line, but it is not an open TODO line.
+
+### Gap check
+
+- The coverage regression (QA run 1, finding 1), the dropped contact lanes (finding 2), the preload cost (finding A) and the Reserved Font Names: all resolved and tested.
+- The QA run 3 copy defects 1 to 4 were corrected in text by the orchestrator. I confirmed the `layout.tsx` comment now says "platform face". I did not re-open every correction.
+- Finding B (branded `/site` preloads Inter and never draws it) is accepted and tracked at `docs/TODO.md:637`, together with QA's advisories 1 and 2. Advisory 4, the missing fixture site, is filed at line 638.
+- Advisory 3: confirm `fonts.ts` scopes "never contacts Google" to fonts. I did not re-check it; it is a one-line comment.
+
+### TODO filing
+
+Filed correctly:
+- The Done line for fonts (v0.54.2) and the Done line for the sharding.
+- The open line for finding B and the preload-set pin.
+- The open line for the missing fixture `/site` page.
+- The open line for the sibling-worktree Turbopack-root hazard.
+- The old "Shard the Playwright dev lane" line is removed.
+
+Not filed or stale:
+1. **`docs/TODO.md:528` is still open.** It is "Intermittent Turbopack `next/font/google` build failure … Fix: self-host the brand fonts via `next/font/local`". That is exactly what shipped. Rule 10 says move the line to Done.
+2. **Lines 649 and 657, and `docs/testing.md:239`,** still attribute the `@vercel/turbopack-next/internal/font/google/font` error to sibling worktrees. The root cause is now the upstream Google Fonts answer, which no longer applies. Annotate the lines ("the font/google error is gone as of 0.54.2; the sibling-root hazard may remain and is unverified"). The same applies to line 640, though it reports a real observation.
+3. **`docs/product/functionality-map.md:106` says "self-hosted `next/font/google` faces".** That is false now, and Rule 14 requires the map to be updated at ship time. Change it to bundled `next/font/local` faces from `src/lib/brand/font-files/`, Inter-only preload.
+
+### Required before merge (text only, same push)
+
+1. Rewrite the first-visit-weight bullet in the 0.54.2 release note (defect 1 above), and fix the "about 25 minutes" figure.
+2. Move `docs/TODO.md:528` to Done, with the note about 649 and 657.
+3. Update `functionality-map.md:106`.
+4. Keep the green PR #74 CI run on `ef5589c0` as the merge gate.
+
+If these are done as stated, no Phase 6 re-walk is needed. Anything beyond them returns here.
+
+**Not required by the pipeline:** a what's-new entry. The operator's standing rule is no what's-new for now, and this is a bug fix and CI change.
+
+### Per-Phase Status rows
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent (`2026-11-01-self-host-fonts`) | analyst | Complete | SHIP WITH NOTES (intent met on all five points; release note's "Pages download less" bullet misstates the net weight on three of four measured pages; TODO `:528` still open; functionality-map `:106` stale; help impact "none" confirmed) | 2026-11-02 |
+| 6 — Shipped vs intent (`2026-11-01-e2e-shard`) | analyst | Complete | SHIP WITH NOTES (intent met; contact lanes restored; "about 25 minutes" is an estimate, measured about 34; per-PR-or-nightly question open; PR #74 CI on `ef5589c0` still running) | 2026-11-02 |
+
+### Handoff
+
+- **Orchestrator:** make the text corrections above and push. Record this section verbatim in both work-logs. Replace the shard log's row "6, orchestrator, Done" with the analyst's row above.
+- **Operator:** the per-PR-or-nightly question stays open (recommendation: keep per PR).
+- **Next:** watch `gh pr checks 74`. If any dev shard fails, re-open at Phase 4 and report the shard and spec; Phase 6 does not need to re-run.
+
+**Files read**
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/docs/work-log/2026-11-01-self-host-fonts.md`
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/docs/work-log/2026-11-01-e2e-shard.md`
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/docs/release-notes/v0.54.md`
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/docs/TODO.md`
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/docs/testing.md`
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/docs/product/functionality-map.md`
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/.github/workflows/e2e.yml`
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/src/lib/brand/fonts.ts`
+- `/Users/cshenso/git/presby-platform/presby-e2e-shard/src/app/layout.tsx`
+
+### Orchestrator: Phase 6 corrections applied (2026-11-02)
+
+Release note: the first-visit weight bullet now gives every measured page (sign-in down, help, congregation and public-site pages up) and the run time is "about 35 minutes". `docs/TODO.md`: the intermittent `next/font/google` line moved to Done with the root cause; `docs/testing.md` annotated. Functionality map updated. `fonts.ts` scopes "never contacts Google" to the fonts.

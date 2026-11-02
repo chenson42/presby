@@ -23,7 +23,7 @@
  * production deploys failed. The woff2 files now live in `font-files/<family>/`
  * beside this file (`next/font/local` resolves `src` relative to the calling
  * file), with each family's `OFL.txt`. No build and no member's browser ever
- * contacts Google: next/font serves the files from this origin.
+ * fetches these fonts from Google: next/font serves the files from this origin.
  *
  * One file per family, FULL coverage: a single variable woff2 per family, cut
  * from that family's own upstream variable TTF (github.com/google/fonts

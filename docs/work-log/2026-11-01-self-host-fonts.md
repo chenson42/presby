@@ -169,8 +169,8 @@ These are recorded here because they were found while this work was in progress.
 
 | file | first cut (latin) | now |
 |---|---|---|
-| lora | 37,792 | 80,796 |
-| source-sans-3 | 28,804 | 127,004 |
+| lora | 37,792 | 80,796 (80,556 after the RFN rename, QA run 2) |
+| source-sans-3 | 28,804 | 127,004 (126,808 after the RFN rename) |
 | libre-franklin | 29,336 | 60,908 |
 | public-sans | 26,636 | 32,156 |
 | bitter | 34,156 | 95,632 |
@@ -178,16 +178,16 @@ These are recorded here because they were found while this work was in progress.
 | montserrat | 35,508 | 207,872 |
 | open-sans | 42,964 | 88,536 |
 | inter | 48,432 | 181,384 |
-| **total** | **307,892** | **902,692** |
+| **total** | **307,892** | **902,692** (902,256 after the RFN rename) |
 
-About 2.9 times the first cut, inside the expected 0.8 to 1 MB. A browser downloads only the face a page uses, and the platform pages use Inter only (181 KB). `next/font/local` emits one `@font-face` per file with no `unicode-range`, so the whole file for a face is fetched once that face is used, where `next/font/google` split it by subset. That is the price of one file per family, accepted in the ruling.
+About 2.9 times the first cut, inside the expected 0.8 to 1 MB. **Correction (QA run 2, finding A): this sentence was false as first written.** With next/font's default `preload: true`, `/signin`, every `/o/*` page and every `/site/*` page preloaded all nine files (902,692 bytes against 307,892 on `main`) through the HTTP `Link` header; the claim is true only after the QA run 2 loop-back below, which measured it. `next/font/local` emits one `@font-face` per file with no `unicode-range`, so the whole file for a face is fetched once that face is used, where `next/font/google` split it by subset. That is the price of one file per family, accepted in the ruling.
 
 ### Gates
 
 - `npm run typecheck`, `npm run lint`: clean. `npm run check`: all ten pass (exit 0), with the font tree staged.
 - `npm test`: 834 files passed, 140 skipped; 13,289 tests passed, 3,770 skipped (the DB-backed suites).
 - Two production builds in a scratch copy under the session scratchpad (outside `~/git/presby-platform/`; main checkout's `.env.local` copied in): plain, and with `CI=1`. Both exit 0 and emit nine woff2 in `.next/static/media` (sizes equal the table above). `grep -rlE "fonts\.googleapis|fonts\.gstatic" .next` finds nothing after either, and neither build log mentions Google. The copy was deleted.
-- **Glyph check at 360px**, `next dev` on port 3560 in the scratch copy (stopped by PID), Playwright Chromium from a private `PLAYWRIGHT_BROWSERS_PATH`, CDP `CSS.getPlatformFontsForNode` on a throwaway route that renders `Łukasz Nguyễn Đặng Zoë Šimić Őry Ștefan Ünal Жанна Ωmega № ἀρχή` in Inter and in all four pairings (heading and body, `nowrap` so wrapped spaces are not dropped from the count). For all nine faces the number of glyphs drawn by the bundled (custom) face equals the number of characters in that file's `cmap`, and the rest fell back: no Google request was made. The only fallbacks are the scripts Google does not serve for that family: Greek and polytonic Greek in the four heading faces (Lora, Libre Franklin, Bitter, Montserrat), Cyrillic, Greek and ễ ặ in Karla, Cyrillic and Greek in Public Sans, ἀ in Open Sans. Inter, Source Sans 3 and Open Sans draw every character they have. Screenshot (scratchpad only, not committed): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/glyph-360.png`.
+- **Glyph check at 360px**, `next dev` on port 3560 in the scratch copy (stopped by PID), Playwright Chromium from a private `PLAYWRIGHT_BROWSERS_PATH`, CDP `CSS.getPlatformFontsForNode` on a throwaway route that renders `Łukasz Nguyễn Đặng Zoë Šimić Őry Ștefan Ünal Жанна Ωmega № ἀρχή` in Inter and in all four pairings (heading and body, `nowrap` so wrapped spaces are not dropped from the count). For all nine faces the number of glyphs drawn by the bundled (custom) face equals the number of characters in that file's `cmap`, and the rest fell back: no Google request was made. The only fallbacks are the scripts Google does not serve for that family: Greek and polytonic Greek in three of the four heading faces (Libre Franklin, Bitter, Montserrat), and only polytonic Greek (ἀρχή) in Lora, which draws Ω from its math and symbols subsets and falls back on ἀρχή exactly as `main` did, Cyrillic, Greek and ễ ặ in Karla, Cyrillic and Greek in Public Sans, ἀ in Open Sans. Inter, Source Sans 3 and Open Sans draw every character they have. Screenshot (scratchpad only, not committed): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/glyph-360.png`.
 - Observation, not a defect: Chromium reports the files' internal family names ("Libre Franklin Thin", "Source Sans 3 ExtraLight"): the upstream name table names the default instance of the source TTF. It affects the "Rendered Fonts" pane only; the CSS family name is next/font's own.
 
 ### For QA run 2
@@ -432,3 +432,60 @@ No user-facing string changed. The diff's `.tsx` change is the font loader only.
 - `ci-shard2.log`: the failed CI shard's log.
 
 The two scratch copies (with their `.env.local`) and the private browsers are deleted, and nothing is listening on 3570, 3571 or 3810.
+
+---
+
+## Phase 4 loop-back (QA run 2, finding A and RFNs)
+
+**Finding A (FAIL):** the log said a browser downloads only the face a page uses. It did not: `/signin`, every `/o/*` page and every `/site/*` page preloaded all nine woff2 (902,692 bytes against 307,892 on `main`), because `next/font` turns `preload: true` (its default) into an HTTP `Link: rel=preload` header per font file, for every route that imports the module, and `next-font-manifest.json` lists all nine files for 87 routes. **Orchestrator ruling: option (a)**, `preload: false` on the eight pairing faces; Inter keeps its preload.
+
+### What changed
+
+- `src/lib/brand/fonts.ts`: `preload: false` on all eight `localFont()` calls, with the reason in the header comment. `src/app/layout.tsx`: Inter's `preload: true` is now written out (it was the default) so the test can pin it.
+- **Test, fail-first:** `fonts.test.ts` now records every options object `fonts.ts` passes to `localFont()` and asserts all eight (named by variable, so a ninth or a missing one fails too) have `preload === false`; a second test reads Inter's `localFont({...})` in `layout.tsx` and asserts `preload: true`. With the eight `preload: false` lines and Inter's `preload: true` removed, both failed (`--font-heading-classic: expected undefined to be false`; `expected ... to match /preload:\s*true/`); restored, 25 pass.
+- **Reserved Font Names (OFL 1.1 section 3).** Our files are instanced and subsetted Modified Versions, so they may not carry a Reserved Font Name. Every family's `OFL.txt` was read for a "Reserved Font Name" clause:
+
+  | family | Reserved Font Name | action |
+  |---|---|---|
+  | Lora | `Lora` | renamed to "PP Classic Serif" |
+  | Source Sans 3 | `Source` | renamed to "PP Classic Sans" |
+  | Bitter | `Bitter Pro` | none: we ship "Bitter", which is not that name |
+  | Libre Franklin, Public Sans, Karla, Montserrat, Open Sans, Inter | none | none |
+
+  New `font-files/rename-rfn.py` (run at the end of `build-fonts.sh`) rewrites name IDs 1, 3, 4, 6, 16, 17, 21 and 22 and exits non-zero if the RFN is left in any of them. Name ID 0, the copyright notice that itself says "with Reserved Font Name ...", is kept as upstream wrote it: the licence requires the notice and it is a statement, not a use of the name. Lora's names are now `PP Classic Serif`, `PPClassicSerif-Regular` and so on; Source Sans 3's `PP Classic Sans`, `PPClassicSans-Roman`. While there, Source Sans 3's name ID 1 and 3 no longer say "ExtraLight" (an instancer leftover; the default instance is 400). The README documents all of this.
+- **Glyphs identical, verified.** `build-fonts.sh` was run end to end (rebuild from the pinned upstream commit) and the two outputs compared table by table, with fontTools, against the pre-rename files from `HEAD` and against the rename applied directly to them: `cmap`, `glyf`, `gvar`, `GSUB`, `GPOS`, `hmtx`, `fvar`, `avar` (Source), `HVAR`, `STAT`, `OS/2`, `hhea`, `maxp` and the glyph order all identical; `head` differs only in `checkSumAdjustment` and `modified`. The two committed files are the pre-rename bytes put through `rename-rfn.py`, so only the `name` table differs; the other seven woff2 are untouched (a full rebuild re-encodes them with new bytes and no content change, so those were restored from `HEAD`). Sizes: Lora 80,796 to 80,556, Source Sans 3 127,004 to 126,808; the nine now total 902,256 bytes.
+- **Tests added** to `font-coverage.test.ts` (81 tests, was 62): per family, no `name` record other than ID 0 contains that family's Reserved Font Name (a small `name`-table reader in the file; Lora, Source and Bitter checked); and per family, the `weight:` range declared in `fonts.ts` / `layout.tsx` equals the file's `fvar` range, plus a test that the declarations cover all nine families. **Fail-first:** the HEAD (un-renamed) Lora and Source files failed the RFN test (2 failures); `classicBody`'s weight changed to "400 700" failed the weight test (1 failure); restored, all pass.
+- **QA's minor items:** `fonts.ts` header (per-family subsets: Karla has latin and latin-ext only; `font-coverage.test.ts` is what parses each woff2; two visible differences, the CSS family name and, now, the font's internal name; the fallback is generated from the local Arial / Times New Roman metrics, not "the one `next/font/google` generated"); `layout.tsx` (Inter also has cyrillic-ext and greek-ext); `font-files/README.md` ("the union of the subsets Google serves for that family"; byte table); the stale U+1E9E mention in `font-coverage.test.ts` (Public Sans's latin-ext row is now just the shared sample); this log's former line 183 (marked as a correction in place, above) and the Lora Ω line (190). `fonts.test.ts`'s loose-files pin now lists `rename-rfn.py` too.
+
+### Measured, before and after
+
+Production build of a scratch copy (`next build`, `next start -p 3820`), Chromium at 360 x 800, a fresh context per page, woff2 `responseBodySize` summed from `requestfinished`; "before" is QA run 2's own measurement. `/o/e2e-presbytery` signed in as the seeded `presbytery-clerk` (classic pairing).
+
+| page | before: font preloads (Link header) | before: woff2 downloaded | after: font preloads | after: woff2 downloaded |
+|---|---|---|---|---|
+| `/help` | 1 (Inter) | 1 file, 181,384 B | 1 (Inter, an HTML `<link>`) | 1 file, 181,384 B |
+| `/signin` | 9 | 9 files, 902,692 B | 1 (Inter) | 1 file, 181,384 B |
+| `/o/e2e-presbytery` | 9 | 9 files, 902,692 B | 1 (Inter) | 3 files, 388,748 B (Inter, Lora, Source Sans 3) |
+
+(For `main`, with `next/font/google` and its per-subset `unicode-range`: 48,432 B for `/help` and 307,892 B for the other two, from QA's earlier capture. Our per-family files are bigger because the whole file for a face comes down once that face is used, the price accepted in the ruling.) The other two `Link` entries on each page are stylesheets, not fonts. The `/o` page now draws only `classicHeading` and `classicBody`; the other six pairing faces are never requested.
+
+**Cumulative layout shift, every woff2 delayed 1.5 s** (Playwright `page.route`, `PerformanceObserver` for `layout-shift` entries without recent input, read 5 s after load; a positive control that prepends a 120 px block read 0.15, so the observer does see shifts):
+
+| page | CLS, no delay | CLS, fonts delayed 1.5 s |
+|---|---|---|
+| `/help` | 0 | 0 |
+| `/signin` | 0 | 0 |
+| `/o/e2e-presbytery` | 0 | 0 |
+
+Zero with preload off, as well as on. `adjustFontFallback` holds the metrics through the swap, including for the pairing faces that now load late. I measured the pages named in the ruling; `/site/<slug>` pages draw the same pairing faces through the same mechanism but were not separately timed.
+
+### Gates
+
+- `npm run typecheck`, `npm run lint`, `npm run check` (all ten): clean. `npm test`: 834 files passed, 140 skipped; 13,310 tests passed, 3,770 skipped.
+- Two production builds in a scratch copy under the session scratchpad (outside `~/git/presby-platform/`; main checkout's `.env.local` copied in): plain, and `CI=1`. Both exit 0, nine woff2 in `.next/static/media` totalling 902,256 bytes; `grep -rlE "fonts\.googleapis|fonts\.gstatic" .next` finds nothing and neither log mentions Google.
+- Prod-lane hydration specs (`PW_PROD_PORT=3810 npm run test:e2e:prod`, scratch copy): 111 passed. Brand dev specs (`color-scheme`, `branded-signin`, `public-sites`, `help`) on port 3570: 50 passed. No server is left listening (each stopped by PID).
+- The visual proof of the swap is the CLS table above; the dev specs also exercise the `(org)` and `/site` trees under the renamed Lora and Source Sans 3 files.
+
+### For QA run 3
+
+Re-run the gates; read the two new tests and re-run both fail-firsts; re-measure preloads and bytes on a production build (the `Link` header on `/signin` and a signed-in `/o/<slug>` should name only the Inter file); confirm `font-files/` loose files are `README.md`, `build-fonts.sh`, `rename-rfn.py`, `subsets.json`; read the README's RFN section against each `OFL.txt`.

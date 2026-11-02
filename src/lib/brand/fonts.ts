@@ -28,8 +28,9 @@
  * One file per family, FULL coverage: a single variable woff2 per family, cut
  * from that family's own upstream variable TTF (github.com/google/fonts
  * `ofl/<family>/`) and subsetted to the union of every unicode subset Google's
- * CSS2 API serves for it (latin, latin-ext, vietnamese, cyrillic, cyrillic-ext,
- * greek, greek-ext, and where a family has them, math, symbols and hebrew).
+ * CSS2 API serves for THAT family (latin, latin-ext, vietnamese, cyrillic,
+ * cyrillic-ext, greek, greek-ext, math, symbols and hebrew, each only where the
+ * family has it: Karla has latin and latin-ext alone, Open Sans has hebrew).
  * That is the coverage `next/font/google` gave these faces: it emitted an
  * `@font-face` with `unicode-range` per subset. A latin-only file would let
  * Ł, ő, ș, ễ, Cyrillic, Greek and № fall back to Arial mid-word. The weight axis
@@ -39,14 +40,28 @@
  * 400-600 for the body faces (body copy never goes bold; 600 is
  * `font-semibold`, TYPE_SCALE's title/section/subhead roles), and 400-800 for
  * Montserrat. `font-files/README.md` records the exact rebuild command, source
- * commit and URLs; `fonts.test.ts` parses each woff2 and pins the coverage.
- * The one visible difference from the old setup is the CSS family name, which
- * next/font/local derives from the variable's identifier (`classicHeading`)
- * rather than `Lora`; nothing in `src/` names a family literally.
+ * commit and URLs; `font-coverage.test.ts` parses each woff2 and pins the
+ * coverage and the weight range. Two things differ from the old setup, neither
+ * visible: the CSS family name, which next/font/local derives from the
+ * variable's identifier (`classicHeading`) rather than `Lora`, and the font's
+ * internal name, which is "PP Classic Serif" / "PP Classic Sans" for the two
+ * families whose licence reserves their name (see `font-files/README.md`).
+ * Nothing in `src/` names a family literally.
  *
- * `adjustFontFallback` keeps the metric-matched fallback `next/font/google`
- * generated automatically (`next/font/local` only does so when told to), so
- * the swap from fallback to web font does not shift layout.
+ * `adjustFontFallback` makes next/font/local generate a metric-matched
+ * fallback from the metrics of the named local font (Arial, Times New Roman),
+ * as `next/font/google` did from its own table, so the swap from fallback to
+ * web font does not shift layout.
+ *
+ * `preload: false` on all eight faces, deliberately. next/font emits a preload
+ * for every font file of every module a route imports, as an HTTP `Link`
+ * header, and the (org) and public trees import this module for all four
+ * pairings, so with preload on every `/o/*` and `/site/*` page fetched all
+ * eight pairing faces (about 720 KB) to draw one. With it off the @font-face
+ * rules are still emitted and the browser fetches a file only when text on the
+ * page uses it. The platform face (Inter, `src/app/layout.tsx`) keeps its
+ * preload. `fonts.test.ts` pins the split. See the work-log's QA run 2 section
+ * for the measurements, including layout shift during the swap.
  *
  * `display: "swap"` on every face — the alternative (`block`/`auto`) risks
  * invisible text while the font loads, which a screenshot cannot catch and a
@@ -77,6 +92,7 @@ const classicHeading = localFont({
   weight: "400 700",
   style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-heading-classic",
   adjustFontFallback: "Times New Roman",
   fallback: ["serif"],
@@ -87,6 +103,7 @@ const classicBody = localFont({
   weight: "400 600",
   style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-body-classic",
   adjustFontFallback: "Arial",
   fallback: ["system-ui", "sans-serif"],
@@ -101,6 +118,7 @@ const modernHeading = localFont({
   weight: "400 700",
   style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-heading-modern",
   adjustFontFallback: "Arial",
   fallback: ["system-ui", "sans-serif"],
@@ -111,6 +129,7 @@ const modernBody = localFont({
   weight: "400 600",
   style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-body-modern",
   adjustFontFallback: "Arial",
   fallback: ["system-ui", "sans-serif"],
@@ -125,6 +144,7 @@ const warmHeading = localFont({
   weight: "400 700",
   style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-heading-warm",
   adjustFontFallback: "Times New Roman",
   fallback: ["serif"],
@@ -135,6 +155,7 @@ const warmBody = localFont({
   weight: "400 600",
   style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-body-warm",
   adjustFontFallback: "Arial",
   fallback: ["system-ui", "sans-serif"],
@@ -154,6 +175,7 @@ const contemporaryHeading = localFont({
   // and rounder than the genuine ExtraBold. site-kit's hero h1 asks for
   // 800 with a 700 fallback for the other pairings.
   display: "swap",
+  preload: false,
   variable: "--font-heading-contemporary",
   adjustFontFallback: "Arial",
   fallback: ["system-ui", "sans-serif"],
@@ -164,6 +186,7 @@ const contemporaryBody = localFont({
   weight: "400 600",
   style: "normal",
   display: "swap",
+  preload: false,
   variable: "--font-body-contemporary",
   adjustFontFallback: "Arial",
   fallback: ["system-ui", "sans-serif"],

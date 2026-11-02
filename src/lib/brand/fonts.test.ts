@@ -13,15 +13,28 @@ import { vi, describe, it, expect } from "vitest";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
+// Every options object fonts.ts passes to localFont(), in call order, so the
+// preload test below reads what the module really asked for.
+const calls = vi.hoisted(
+  () => [] as { src: string; variable: string; preload?: boolean }[],
+);
+
 vi.mock("next/font/local", () => {
   // Same shape the real loader returns ({ className, variable }). One default
   // export serves all eight faces; the class name carries the font file path
   // and the CSS variable, which the "wires each face to its own file" test
   // below reads back, so a face pointed at the wrong file fails there.
-  const localFont = (opts: { src: string; variable: string }) => ({
-    className: `mock-${opts.src}-${opts.variable}`,
-    variable: opts.variable,
-  });
+  const localFont = (opts: {
+    src: string;
+    variable: string;
+    preload?: boolean;
+  }) => {
+    calls.push(opts);
+    return {
+      className: `mock-${opts.src}-${opts.variable}`,
+      variable: opts.variable,
+    };
+  };
   return { default: localFont };
 });
 
@@ -92,6 +105,33 @@ describe("resolveTypePairing", () => {
     }
   });
 
+  // next/font turns `preload` into an HTTP `Link: rel=preload` header per
+  // font FILE for every route that imports the module, so with the default
+  // (true) every /o/* and /site/* page downloaded all eight pairing faces to
+  // draw one (QA run 2, finding A). The pairing faces opt out; the platform
+  // face, which every page draws, keeps its preload.
+  it("opts all eight pairing faces out of preload", () => {
+    expect(calls.map((c) => c.variable).sort()).toEqual(
+      TYPE_PAIRINGS.flatMap((p) => [
+        `--font-heading-${p.key}`,
+        `--font-body-${p.key}`,
+      ]).sort(),
+    );
+    for (const call of calls) {
+      expect(call.preload, call.variable).toBe(false);
+    }
+  });
+
+  it("keeps the platform face (Inter) preloaded", () => {
+    const layout = readFileSync(
+      path.resolve(__dirname, "../../app/layout.tsx"),
+      "utf8",
+    );
+    const options = layout.match(/localFont\(\{([\s\S]*?)\}\);/)?.[1] ?? "";
+    expect(options).toContain("inter-variable.woff2");
+    expect(options).toMatch(/preload:\s*true/);
+  });
+
   // BRAND_UTILITY_RE, copied verbatim from scripts/check-brand-scope.mjs
   // (not imported: that script is a build tripwire over source text, not a
   // module with a stable export surface). Guards Phase 2 Ruling 3's warning
@@ -157,7 +197,7 @@ describe("self-hosted fonts", () => {
     const used = new Set(named.map((f) => path.dirname(f)));
     // Loose files beside the family directories are the rebuild kit.
     expect(readdirSync(base).filter((e) => statSync(path.join(base, e)).isFile()).sort())
-      .toEqual(["README.md", "build-fonts.sh", "subsets.json"]);
+      .toEqual(["README.md", "build-fonts.sh", "rename-rfn.py", "subsets.json"]);
     for (const dir of readdirSync(base).filter((e) =>
       statSync(path.join(base, e)).isDirectory(),
     )) {

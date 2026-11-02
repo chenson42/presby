@@ -15,11 +15,12 @@ All nine are SIL Open Font License 1.1.
   the `wght` axis limited to the range `fonts.ts` / `layout.tsx` declare
   (400-700, 400-600, 400-800, Inter 100-900). Other axes are pinned at their
   default (Open Sans `wdth`, Inter `opsz`).
-- Subsetted to the **union of every unicode subset Google's CSS2 API serves for
-  that family**, so the coverage equals what `next/font/google` gave: latin,
-  latin-ext, vietnamese, cyrillic, cyrillic-ext, greek, greek-ext, and where a
-  family has them math, symbols and hebrew. The per-subset `unicode-range`
-  values are in `subsets.json`.
+- Subsetted, per family, to **the union of the subsets Google's CSS2 API serves
+  for that family**, so the coverage equals what `next/font/google` gave. The
+  candidates are latin, latin-ext, vietnamese, cyrillic, cyrillic-ext, greek,
+  greek-ext, math, symbols and hebrew, and each family has only some of them
+  (Karla has latin and latin-ext alone; Open Sans has hebrew). The per-subset
+  `unicode-range` values are in `subsets.json`.
 - All layout features kept (`--layout-features='*'`).
 
 `../font-coverage.test.ts` decodes each woff2 and fails if a subset's sample
@@ -27,8 +28,8 @@ code points (Ł ő ș ễ ặ Ж № Ω ...) or the weight axis go missing.
 
 | file | bytes |
 |---|---|
-| `lora/lora-variable.woff2` | 80,796 |
-| `source-sans-3/source-sans-3-variable.woff2` | 127,004 |
+| `lora/lora-variable.woff2` | 80,556 |
+| `source-sans-3/source-sans-3-variable.woff2` | 126,808 |
 | `libre-franklin/libre-franklin-variable.woff2` | 60,908 |
 | `public-sans/public-sans-variable.woff2` | 32,156 |
 | `bitter/bitter-variable.woff2` | 95,632 |
@@ -36,7 +37,32 @@ code points (Ł ő ș ễ ặ Ж № Ω ...) or the weight axis go missing.
 | `montserrat/montserrat-variable.woff2` | 207,872 |
 | `open-sans/open-sans-variable.woff2` | 88,536 |
 | `inter/inter-variable.woff2` | 181,384 |
-| total | 902,692 |
+| total | 902,256 |
+
+## Two files are renamed (Reserved Font Names)
+
+These files are instanced and subsetted, which makes them *Modified Versions*
+under OFL 1.1, and section 3 forbids a Modified Version from using a Reserved
+Font Name. Every `OFL.txt` here was checked for a "Reserved Font Name" clause:
+
+| family | Reserved Font Name | what we did |
+|---|---|---|
+| Lora | `Lora` | renamed to **PP Classic Serif** |
+| Source Sans 3 | `Source` | renamed to **PP Classic Sans** |
+| Bitter | `Bitter Pro` | nothing: the family we ship is "Bitter", which is not that name |
+| the other six | none | nothing |
+
+`rename-rfn.py` rewrites the `name` table's family-naming records (IDs 1, 3, 4,
+6, 16, 17, 21, 22) and fails the build if the Reserved Font Name is left in any
+of them. Name ID 0, the copyright notice ("... with Reserved Font Name ..."),
+is **kept exactly as upstream wrote it**: the licence requires the notice, and
+it is a statement, not a use of the name. Nothing visible changes: the CSS
+family name comes from `next/font`'s variable, never from the font's own name,
+and the outlines, metrics, kerning and variation data are untouched (compared
+table by table against the pre-rename files: `cmap`, `glyf`, `gvar`, `GSUB`,
+`GPOS`, `hmtx`, `fvar`, `HVAR`, `STAT`, `OS/2`, `hhea` and `maxp` identical;
+`head` differs only in its checksum and timestamp). `../font-coverage.test.ts`
+fails if a Reserved Font Name reappears in a name record.
 
 ## Rebuilding
 
@@ -59,6 +85,7 @@ It:
 2. Runs `fonttools varLib.instancer` to limit `wght` and pin other axes.
 3. Runs `pyftsubset <ttf> --unicodes=<union of subsets.json> --flavor=woff2
    --layout-features='*'` (fonttools 4.68.0, brotli 1.2.1).
+4. Runs `rename-rfn.py` over the Lora and Source Sans 3 outputs (above).
 
 `subsets.json` came from the Google CSS2 API, fetched with a current desktop
 Chrome User-Agent, one request per family, for example

@@ -18,7 +18,7 @@ import "./globals.css";
  *
  * Self-hosted (2026-11-01, docs/work-log/2026-11-01-self-host-fonts.md): the
  * variable woff2 (weights 100-900, every Google subset: latin, latin-ext,
- * vietnamese, cyrillic, greek) and its OFL.txt are committed under
+ * vietnamese, cyrillic, cyrillic-ext, greek, greek-ext) and its OFL.txt are committed under
  * `src/lib/brand/font-files/inter/`, so no build ever requests Google Fonts
  * (vercel/next.js#99114 made `next/font/google` builds fail at random). The
  * path is relative to THIS file, and the call is static at module scope, as
@@ -29,6 +29,11 @@ const inter = localFont({
   weight: "100 900",
   style: "normal",
   display: "swap",
+  // The one face every page uses, so the one face worth a preload. The eight
+  // pairing faces in src/lib/brand/fonts.ts are `preload: false`: next/font
+  // preloads per file for every route that imports the module, and a page
+  // only draws one pairing (fonts.test.ts pins both halves of this).
+  preload: true,
   adjustFontFallback: "Arial",
   fallback: ["system-ui", "sans-serif"],
 });

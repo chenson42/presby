@@ -3694,3 +3694,139 @@ Files read, all under `/Users/cshenso/git/presby-platform/presby-inc3`:
 - `e2e/visitor-access.spec.ts`
 - `src/lib/help/registry.ts` (diff)
 - the six edited pages under `src/content/help/`
+
+---
+
+# Phase 6 addendum — live walk (analyst, 2026-11-01)
+
+## VERDICT
+
+**NEEDS REWORK, narrow.** One defect in what 3a shipped needs a bug-fix pipeline: Archive then Restore can leave a person permanently uninvitable (D1). Every other 3a flow I walked works as Phase 1 and Phase 3 describe, and the help diff does not contradict the build. Four small items are filed as follow-ups. Of the six pages, `using-the-directory` and `what-presbyportal-does` may move to `verifiedIn: "0.54.0"` now. The other four may not (see "Help pages" below).
+
+If you would rather ship 0.54.0 and fix D1 forward, the honest label is SHIP WITH NOTES with D1 as the first note. I am calling it NEEDS REWORK because D1 is a dead end with no recovery in the product, reached by an ordinary sequence.
+
+## What I walked
+
+Branch `ep-round-rice` (child of `development`, after 0066 was applied), my own dev server on 3540, Chromium at 360px in light and dark. Overflow was 0 on every page. Everything was made through the app: the platform admin created the organization, and the founding administrator and the invitees were created by accepting invitations. SQL only supplied what the app cannot give me:
+- the known invitation tokens;
+- bcrypt-hashed accounts for the existing-account path;
+- two calendar events.
+
+**The founding administrator (the person this path creates).**
+1. `/invite?token=` shows "You're invited".
+2. After creating the account, `/invite/accepted` shows "Your account is ready".
+3. Sign-in goes to `/totp`, then `/account/2fa`, then the recovery codes, then Continue lands on `/o/walk-inc3a`.
+4. `/admin/community` says "Member management isn't turned on for Hartwell Fells Presbyterian Church yet."
+5. The Features switch turns Community on and the Community empty state follows.
+
+All of it matches the help. The founding administrator is asked to enrol two-factor, because `auth.require_2fa` is on.
+
+| Walk | Result |
+|---|---|
+| **W1 visitor** (really accepted) | Two paths walked. One was a real UI send, then an existing account signed in and saw "You're invited to Hartwell Fells Presbyterian Church" with "Accept the invitation". The other was a seeded token accepted as a new account. In both the visitor lands on `/o/<slug>`. |
+| | `/home` shows the one organization card and no error. |
+| | `/o/<slug>` shows "Coming up" and the Community, Directory, Groups, Staff, Calendar and Officers tiles. |
+| | `/calendar` opens and lists events. |
+| | `/directory` says "You don't have permission to view the directory. If you think this is a mistake, ask an administrator at Hartwell Fells Presbyterian Church." with HTTP 200. |
+| | The Community, Groups, Staff, Officers and Roles tiles each end in a polite no-permission sentence. |
+| | A regular attender of the same congregation sees the directory list, and never the visitors. |
+| **W2a** moved away, already connected | Marisol had the directory open as a listed regular attender. The administrator marked her Moved away. The dialog showed the connected line: "has a sign-in connected, so this can also change what they can see." |
+| | After reload she gets the directory refusal. The calendar and `/o/<slug>` still open, and `/launch` goes to `/o/<slug>`. |
+| **W2b** moved away, not connected | Tabitha's `/launch` goes to `/no-organization`. Check again says "Nothing new yet." and she is not connected. |
+| | The control, a regular attender with a proven address, auto-connected and lands in the congregation. |
+| **W3** archive and restore | Visitors list, then the Archive dialog. It carries the connected line, "has a sign-in connected and will no longer reach Hartwell Fells Presbyterian Church through this record.", and the invitation line, "An invitation to … is still open. It will stop working." |
+| | The role-held person is refused: "This person still holds an office, a role or a staff position here. End that first, then try again." |
+| | The Former row reads "Archived visitor, 11/1/2026". The Restore dialog has "Keep archived" and "Restore". The wizard match step says "They were archived on 11/1/2026." with "Restore T. Oakes". |
+| **Archived connected person** | `/launch` goes to `/no-organization`: "Your access has ended — Your access to Hartwell Fells Presbyterian Church ended on 11/1/2026." |
+| | `/o/<slug>`, `/calendar` and `/directory` all say "Your access to Hartwell Fells Presbyterian Church has ended. Your relationship with this organization ended on 11/1/2026. If that is not right, ask an administrator there to restore it." The page offers "Back to your organizations" and "Visit the public site". It is named and dated, in light and dark. |
+| | A tab already open on the portal gets the same page on reload. After Restore the person is back in the calendar at once. |
+| **W4 nav** | The seven segments at 360px, light and dark. The active segment is in view from every landing, every segment is 44px tall, and overflow is 0. |
+| **Audit** | `tenant.person.engagement_changed`, `archived`, `restored` and `invitation.accept_blocked` all wrote rows. |
+| **People, rolled** | A participant on the roll who was marked Inactive stays in Participants with an "Inactive" tag and in the directory. They are not in the Inactive view. |
+
+## Defects
+
+**D1. Archive, then the person opens the link, then Restore: a permanent dead end. This is the NEEDS REWORK item.**
+- **Reproduce.**
+  1. Send a visitor a sign-in invitation.
+  2. Archive the visitor. The dialog says "It will stop working."
+  3. The person signs in and presses "Accept the invitation". The page answers "This invitation can't be completed. Contact Hartwell Fells Presbyterian Church's office." and the invitation is blocked with reason `membership_ended`.
+  4. The administrator restores the person.
+- **Result.**
+  - The record's Sign in card, and the list row, still say "This invitation couldn't be completed because … connection to … has ended."
+  - The card has no button, and the word "ended" now sits on a live record.
+  - Changing the email address does not clear it.
+  - The administrator can never invite that person from the product again.
+- **Contrast.** If the person never opens the link, archive then restore leaves the invitation open and working. The failure appears only when someone opens the link during the archived window.
+- **Why it is 3a's.** Restore is new in 3a. Before it, an ended connection never came back, so a terminal block was correct.
+- **Second symptom.** While archived, the person is offered "Accept the invitation" and only learns it cannot work after pressing it. The administrator's archived record also still says "While this invitation is open…".
+- **Suggested fix, for the tech-lead.** Make Archive revoke the open invitation, as its dialog promises ("will stop working"). The person then sees the dead-link page, and Restore leaves the card on "Invite". Alternatively, derive the `membership_ended` card from the current membership instead of the stored block.
+
+## Notes (follow-ups, not blockers)
+
+**N1. "Members only" events are visible to visitors and inactive people.**
+- A "Session retreat (members only)" event with "Open to everyone, not only members" unticked is listed on the visitor's calendar, `/o/<slug>` "Coming up" card and event page. The same calendar's "Copy month" leaves it out ("Calendar copied (1 members-only event left out)").
+- This is not a regression. `calendar.ts` records that `is_public` is not a member filter (operator ruling 4), and visitors held `events.view` before 0066. But 3a made "everyone with a current record sees the calendar" explicit.
+- `events-and-the-calendar` says an unticked event "shows only on the member calendar, for members who have calendar access", which a reader takes to exclude visitors. Either filter these events for non-member standing or reword the label and the sentence. This needs an operator decision.
+
+**N2. The calendar sentence is wrong at 360px.** `events-and-the-calendar` says "On a phone it shows a list of days. The links 'Month' and 'List' switch the view." At 360px those links are in the DOM but hidden. They appear at desktop width, and Previous/Next month, Today, Copy month and Show filters are present. Reword.
+
+**N3. Two help-wording items.**
+- `officers-and-the-session.md:34` says "Automatic rosters" "lists 'Session' and 'Board of Deacons'". The live section lists five rows: Active Membership ("Members, regular attenders and staff"), All Current Records, Board of Deacons, Board of Deacons Moderator and Session. It is true but incomplete, and it was the unwalked line. The accompanying sentence (generated from officer terms and the membership roll; read-only here) matches.
+- `adding-people` puts "Choose 'Save engagement'" after the sentence about the confirming dialog. The dialog's buttons are "Keep as it is" and "Mark as regular attender" (or "Mark as moved away"); "Save engagement" is the card's button that opens it. Reorder.
+
+**N4. Three smaller items on screens that already exist.**
+- A moved-away person who is not connected reads "Ask them to check that [address] is on your record, or to invite you". Their address is on the record. The wording is accurate for the general case and not for this one.
+- The Directory, Community, Groups, Staff and Officers tiles are still shown to a visitor (D14, already tracked as Follow-up 5). I also saw the administration hub (`/o/<slug>/admin`) list "Manage events", "Roles" and "Features" for a visitor; each opens a refusal.
+- The wizard's counter reads "Step 2 of 7" on the match step while the help says "Step 1 of 6". This predates 3a.
+
+## Help pages
+
+All six pages were read against the live build at 360px, and all labels and strings they quote matched, except the items under N3.
+
+| Page | Walked | Move `verifiedIn` to "0.54.0"? |
+|---|---|---|
+| `using-the-directory` | In full. Opening, Members and Households views, search and Status choices, the refusal sentence verbatim, who is not listed (visitor, moved away, archived), a rolled Inactive participant still listed, initials. | **Yes.** |
+| `what-presbyportal-does` | In full. The seven views and the "inactive people" wording. "Members can read the congregation's calendar" is incomplete rather than false; the wording pass is already queued. | **Yes.** |
+| `roles-who-can-do-what` | The six-role table, the group holders, the "Constitutional" status on four roles, the Grant a role form, and the first-day "can't manage events" refusal. The Branding refusal wording was not seen, because that flag is off on this branch. | **Not yet.** The first-day Branding wording is unverified here. Move it after one more look with `org_portal.branding` on. |
+| `events-and-the-calendar` | The member and visitor reading sections. Add-event, repeat, event-type and public-calendar sections were not walked (the Founding Administrator cannot reach them). | **No**, because of N1 and N2. |
+| `adding-people` | Views, wizard, visitor and participant connections, engagement, archive, restore, visit details, staff card and the roll-action menu. Not walked: Session approval, withdraw, and the banner cases beyond "Your Session roster is empty". | **No**, because of N3 and the unwalked approval sections. |
+| `sign-in-invitations` | Send, dialog, pending card, list markers, the new-account and existing-account acceptance pages, "Connected through…" lines, and the auto-connect non-connection. Not walked: the do-not-contact checkbox and the two-factor "People who hold a role or a seat" section. | **No.** The known wording item (`:17` and `:49`) is still open, and D1 touches its "invitations" section. |
+
+`officers-and-the-session.md`: I read line 34 against the Groups page (N3). That page is not on my list of six, so I am not moving its `verifiedIn`.
+
+Not fully walked: the approval banners (other than the empty-Session banner), the two-factor connect section, `org_portal.branding` on, and the "Mark as regular attender" card for a person on the roll who is still marked Visitor (the database guard refuses to create that state).
+
+## Proposed TODO lines
+
+1. **Bug fix (D1): Archive should revoke an open sign-in invitation.** Restore must never leave a terminal "connection has ended" card or a list marker. Add the regression test: archive, person presses Accept, restore, card offers "Send invitation". This is a bug-fix pipeline; the work-log is still `-inc3`.
+2. **Decide "members only" events versus the visitor calendar (N1).** Operator ruling: filter, or reword the label and `events-and-the-calendar`.
+3. **Help edits: phone sentence in `events-and-the-calendar`, `officers-and-the-session.md:34`, reorder "Save engagement" in `adding-people` (N2, N3).**
+4. **Re-walk and bump `verifiedIn`** for `roles-who-can-do-what`, `events-and-the-calendar`, `adding-people` and `sign-in-invitations` after items 1 and 3.
+5. **The moved-away person's not-connected copy (N4).**
+6. **Follow-ups 1 and 5 of the original Phase 6:** Follow-up 1 is satisfied by this walk, except D1. Follow-up 5 (the visitor's dead-end tiles) stays open.
+
+## Fixtures left on `walk-inc3a-analyst`
+
+The branch is throwaway and will be deleted.
+- Organization `walk-inc3a` ("Hartwell Fells Presbyterian Church"), created by the platform admin through the app.
+- The founding administrator `walk-admin@example.invalid` and one enrolment secret.
+- People, with `.invalid` addresses on all of them:
+  - Verity Quillon, Ignatius Holloway, Marisol Thackeray, Barnaby Ashgrove, Wendeline Fairbairn;
+  - Cornelius Dunmore, Philippa Ravensworth, Tabitha Oakes, Lysander Fenwick;
+  - Dorothea Pickering, Remy Castellane, Gideon Marlowe.
+- Accounts for all but the last three of these.
+- Two events, nine-plus invitation rows, queued mail to `example.invalid`, and the audit rows.
+- The feature flags on the branch were changed: `org_portal.directory`, `events`, `members_create`, `officers`, `roles`, `groups`, `staff`, `directory_v2` and `members_roll_action_edit` are on.
+
+Nothing was edited in the repository, and `.env.local` was never touched. The server on 3540 was stopped by PID and the port is free. Scratch scripts and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/walk3a/`.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|---|---|---|---|---|
+| 6 — Shipped vs intent, live walk addendum (Increment 3a) | analyst | Live persona walk done on a throwaway branch at 360px, light and dark: founding administrator, visitor (two real acceptance paths), moved away connected and not connected, archived connected person, archive and restore, nav. All Phase 1 flows hold, but Archive then Restore can leave a person permanently uninvitable (D1). Four notes filed. `using-the-directory` and `what-presbyportal-does` may move to 0.54.0. | NEEDS REWORK (D1; bug-fix pipeline) | 2026-11-01 |
+
+## Handoff
+
+**Next agent: tech-lead.** Rule on the D1 fix: revoke at Archive or derive the block from live state. Then the usual bug-fix path (implementer, qa, then my re-walk of the record card and list marker). The orchestrator then bumps `verifiedIn` for the two cleared pages and files the TODO lines above. Return to me after the fix to close the walk on the four remaining pages and issue SHIP IT.

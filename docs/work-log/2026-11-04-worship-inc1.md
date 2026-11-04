@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete (in parent; R1 to R16, F421 to F427) | Approved with suggestions | 2026-11-04 |
 | 3 — Technical design | tech-lead | Complete (this file) | Design complete; implementers named; F428 to F432 and DECISION-317 to 327 proposed | 2026-11-04 |
 | 3 — amendment 1 (architect addendum C1 to C5) | tech-lead | Complete (this file, "Phase 3 amendment 1") | C1 to C5 folded in; S1 adopted; S2 recorded as a `paper` residual (DECISION-317); DECISION-326 as amended | 2026-11-04 |
-| 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | In progress: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) in flight | — | — |
+| 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | In progress: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) complete 2026-11-04 (0085 hand-written, applied twice to the pipeline branch; section 85 147/147 as presby_app) | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -869,6 +869,106 @@ No schema, no worship code. Behaviour-preserving refactor, shipped green on its 
 - Mutation check: removing `.for("no key update")` from `mutate.ts` makes both C3 lock-first tests fail (restored).
 
 **Next:** Batch 1 (database-admin) is running in the same worktree. Batch 3 wires `worship/event-hooks.ts` into the two lists in `hooks.ts` (one line each) and must keep the C1 scan green. Strings added or changed: none.
+
+### Batch 1 (database-admin, 2026-11-04): migration 0085, the schema
+
+**Migration mode: hand-written.** `drizzle/0085_presby_worship.sql`, applied with `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0085_presby_worship.sql` to the pipeline Neon branch `pipeline-worship-inc1` (`ep-autumn-hall-axbadmif`, owner, direct endpoint) only. `development` and `production` were not touched. **Idempotence proof:** I applied the committed file twice in a row (and the earlier drafts several times). Both runs exit 0; the closing assertions pass both times. A snapshot (worship keys 3, template 1, worship bindings 3, flag rows 0, triggers 26, policies 9, presby_app column privileges 147, assignments 7, teams 2) is identical before, between and after. The backfill prints `0 founding_administrator role(s) topped up`: this branch, like `development`, holds no org-owned `founding_administrator` role. **`_journal.json`:** the `{idx: 85, tag: "0085_presby_worship"}` entry ships as `scripts/worship/_journal.json.integration.patch` (Rule 16). I have not edited the journal in the worktree.
+
+**Live body re-read first.** On this branch `presby_founding_administrator_permission_keys` was 0071's body (eleven base keys, the presbytery oversight case, no F362 keys). 0085 re-creates it with that text byte for byte plus the worship case. F362 has not merged, so whichever of the two merges second must carry the other's keys (the 0085 header says so; `invitations.db.test.ts` catches a miss).
+
+**Files created**
+
+- `drizzle/0085_presby_worship.sql`: the nine sections of the design, in order (catalog, bundle, backfill with `raise notice`, `worship_leader` template, flag delete, nine tables, functions and triggers, RLS and grants, comments and the closing `do` assertions).
+- `src/lib/db/domain/worship.ts`: the Drizzle mirror (nine tables, every constraint and index name, the vocabularies `WORSHIP_ASSIGNMENT_STATUSES`, `WORSHIP_REASONS`, `WORSHIP_RESPONSE_SOURCES`, `WORSHIP_NOTICE_OUTCOMES`, `WORSHIP_WITHDRAWN_REASONS`, and `WORSHIP_GUARD_CODES`, the guards' CONSTRAINT codes for the store to map). Not yet exported from `index.ts` (Rule 16).
+- `src/lib/db/domain/worship.schema.test.ts` (24, pure): every name 0085 creates is declared in the mirror and nothing else; every tenant FK is composite, ends in `organization_id`, targets the right key, NO ACTION; the vocabularies equal the CHECK lists; no `$onUpdate`; every CHECK is drop-then-add; no defaulted parameter; the bundle body keeps the live base array verbatim; section order.
+- `src/lib/db/domain/worship.db.test.ts` (35, owner path): every guard on the owner connection (F44); the FKs a guard pre-empts on the tenant path, each with the guard disabled in a rolled-back transaction; the delete guard on all nine; the teardown cascade; a merged, deceased or ended-relationship leader and person; the 50-blockout cap under two concurrent connections; the reminder claim (windows, exclusions, once per kind, the batch clamp, the address); the bundle per organization type; the backfill re-run from the migration text; the date helpers pinned to `DEFAULT_ORG_TIME_ZONE`; `WORSHIP_GUARD_CODES` equal to what the migration raises.
+- `scripts/worship/test-rls-85.sql` (147 assertions, presby_app): (a) structure, (b) catalog, bundle, template, backfill, flag, (c) exact column grants and no DELETE/TRUNCATE by `aclexplode` for presby_app and presby_platform, (d) isolation and a cross-organization refusal through **every one of the 18 composite FKs** plus R5's two three-column keys, (e) the guards and the full state machine, (f) the seat, `may_schedule`, the toggle composition, the open count, the claim's ACL. Needs only the stock seed; every block rolls back.
+- `scripts/worship/seed-dev-worship.sql`: Alder Creek, two teams on new managed groups ("Sunday Band" led through the seat by Tobias Renwick, "Chancel Choir" chaired by Aldous Fennimore), twelve positions, qualifications, a "Sunday worship" type, the next two Sundays' services, one assignment in each state (requested/emailed, confirmed on behalf, draft, declined "family", requested/guardian for the child, a confirmed guest), and one blockout. The toggle stays **off**. Applied twice to the branch: exit 0, identical counts.
+- Integration patches (all `git apply --check` clean against the current tree): `scripts/worship/domain-index.ts.integration.patch`, `_journal.json.integration.patch`, `test-rls.sql.integration.patch` (template count 8 to 9 at line 7932, plus the `\ir worship/test-rls-85.sql` line), `seed-dev.sql.integration.patch` (`\ir worship/seed-dev-worship.sql` after the last include).
+
+**Files modified:** none. No shared Rule 16 file was edited.
+
+**Schema changes**
+
+- Keys `worship.manage`, `worship.plan`, `worship.schedule` (tier 1, no 2FA, module `worship`); the founding bundle carries them for `congregation` and `new_worshiping_community` (order base, worship, oversight) with the backfill; template `worship_leader` (custom, unprotected, universal scope, exactly the three keys); `feature_flags` row `org_portal.worship` deleted.
+- Tables: `worship_teams` (PK `group_id`), `worship_positions`, `worship_position_qualifications`, `worship_service_types`, `worship_service_type_teams`, `worship_services` (PK `event_id`), `worship_service_teams`, `worship_assignments`, `worship_blockouts`. All are FORCE RLS with `tenant_isolation`. presby_app holds SELECT plus the design's exact column-limited INSERT and UPDATE lists; presby_platform holds nothing; no one holds DELETE.
+- Functions: `presby_worship_org_today(uuid)`, `presby_worship_org_now(uuid)` (definers), `presby_worship_enabled(uuid)`, `presby_worship_leads_team(uuid, uuid, uuid, date)`, `presby_worship_may_schedule(uuid, uuid, uuid)` (invokers), `presby_worship_open_count()` (definer), all EXECUTE presby_app; `presby_worship_claim_reminders(integer)` owner-only, returning `(kind 'unanswered'|'confirmed', organization_id, assignment_id, event_id, person_id, address)`.
+- 26 triggers: the generic set-once/immutable guard on the eight non-assignment tables, the delete guard on all nine, insert guards (teams, positions, service teams, blockouts, assignments), the service-team re-add guard, the assignment update guard, and the two `updated_at` touches.
+
+**Restated in English and checked against the design (self-verification)**
+
+| Mechanism | In English | Matches design |
+|---|---|---|
+| `worship_assignments_response_shape` | `response_source`, `responded_at` and `responded_by_person_id` are all set or all null (two equalities: SQL's `a = b = c` would compare a boolean with the third) | yes (the design's chained form, written correctly) |
+| `worship_assignments_withdrawn_shape` | withdrawn exactly when `withdrawn_at` is set, and `withdrawn_at` exactly when a reason is set | yes |
+| `worship_assignments_guest_status` | a guest row is only confirmed or withdrawn | yes |
+| `worship_blockouts_range_length` | at most 366 days counting both ends (`ends_on - starts_on <= 365`) | yes ("over 366 days" refused) |
+| assignment insert guard | a person is born draft, a guest confirmed on the placer's behalf; the placer holds the key or the seat on this team; the service is not cancelled and has not started; team and position are live; the serving row is present; the person is on the roster now, unmerged, living, relationship open | yes |
+| assignment update guard | identity fixed; withdrawn terminal; exactly one of send (draft to requested, sender may schedule, outcome given), respond (to confirmed/declined; self by the assignee, on_behalf by a scheduler, link refused), withdraw (removed by a scheduler, or service_cancelled with no actor once the event is cancelled), or no change; stamps trigger-owned; reminder stamps set once | yes |
+| `presby_worship_leads_team` | chair or leader row in date on `p_as_of` (start on or before, end strictly after), on a managed group with a worship_teams row, person unmerged, living, relationship open; per team | yes (R7) |
+| `presby_worship_enabled` | the organization type is congregation or NWC, AND (the category axis is off OR the worship category row is not off), AND the toggle row is on | yes (`orgFeatureEnabledInTx`'s order) |
+
+**Deviations from the design** (each is also recorded in the 0085 header)
+
+1. `worship_position_qualifications` and `worship_blockouts` also declare `unique (id, organization_id)` (Composite Tenant Keys).
+2. `worship_service_type_teams` carries `created_at` (house style).
+3. `worship_assignments` has three extra CHECKs: `_sent_shape` (sent_by, requested_at and notice_outcome together; a requested row has them), `_decline_reason_shape` (a reason only on declined or withdrawn) and `_withdrawn_actor_shape` (an actor exactly when the reason is `removed`).
+4. The guest-name CHECK refuses every control character, not only line breaks (the same rule as `validateGuestName`).
+5. The send transition is also refused on a cancelled or started service. Re-adding a removed serving team (clearing `removed_at`) passes the same guard as an insert (team live, service not cancelled).
+6. An index `worship_service_teams_team_ix (organization_id, group_id)` for "the services this team serves" (team page, the retire check).
+7. Guard refusals set the CONSTRAINT field to a stable `worship_guard_<code>` (listed in `WORSHIP_GUARD_CODES`) so the store maps on a code, not on message text.
+8. Uniques and FKs are inline in `create table if not exists` (the 0071 idiom); only CHECKs are drop-then-add. An in-place correction of an FK needs an explicit drop-then-add.
+9. The reminder claim's return shape was not specified; it is the one above. `sweep.ts` (Batch 3) builds bodies from those ids on the owner connection.
+
+**Finding for the orchestrator (proposed next F-number; not assigned by me): the owner-path org-context contract.** The assignment guards' actor check calls `presby_has_permission`, and its resolver (`presby_effective_permissions`, 0010) raises `insufficient_privilege` unless `app.current_org_id` equals the organization asked about. On the tenant path `withOrgContext()` always satisfies this. On the owner path, a writer that places, sends, records on behalf or removes must set `app.current_org_id` in its transaction, or the guard **fails closed**. I kept fail-closed on purpose. The seed and `worship.db.test.ts` set the context, and a test pins the fail-closed behaviour. Paths that name no actor need no context: the reminder claim, the `service_cancelled` withdrawal, a self answer, and the generic guards. **Batch 6's `e2e/support/worship-fixture.ts` must set the context** if it writes assignments on the owner connection.
+
+**Expected red between Batch 1 and Batch 2 (not a Batch 1 defect).** With 0085 applied, 9 DB-backed tests fail until Batch 2 changes `foundingAdministratorPlan()` and regenerates `designation-parity.golden.json`, exactly as the design assigns. They are `invitations.db.test.ts` ("equals foundingAdministratorPlan() for EVERY organization_type": SQL 14 keys vs TS 11 for congregation) and 4 + 4 congregation and NWC cases in `designation-parity.db.test.ts` / `designation-parity-in-place.db.test.ts`. The presbytery cases still pass, which confirms the scoping. CI's db-tests job skips without Neon secrets, so CI is unaffected.
+
+**Failing-first evidence** (each mechanism sabotaged on the pipeline branch, suite run, restored by whole-file re-apply, suite green again at 147/147):
+
+| Sabotage | First failing assertion |
+|---|---|
+| `no force row level security` on assignments | 85a "all nine ... ENABLED and FORCED" (8, expected 9) |
+| `tenant_isolation` on teams replaced with `using (true)` | 85a "each carries tenant_isolation ..." (8, expected 9) |
+| `grant delete on worship_blockouts` | 85c "neither presby_app nor presby_platform holds DELETE ..." (1, expected 0) |
+| `grant update (requested_at)` | 85c "column-limited ... exactly the design's 18" (17) |
+| drop `worship_assignments_position_fk` | 85a "18 tenant FKs ..." (17) |
+| any guard trigger disabled | 85a "the 26 worship triggers ... ENABLED" (25) |
+| assignment insert guard body to pass-through | 85d person FK: got 23503 `worship_assignments_person_fk`, expected `worship_guard_not_on_roster` |
+| assignment update guard body to pass-through | 85d sent_by: got `worship_assignments_sent_shape`, expected `worship_guard_not_authorized` |
+| team insert guard to pass-through | 85d team on Fernwood's group: got 23505, expected `worship_guard_team_not_eligible` |
+| position insert guard to pass-through | 85e "no new position on a retired team" succeeded |
+| service-team add/re-add guard to pass-through | 85e "a team cannot be re-added to a cancelled service" succeeded |
+| blockout guard to pass-through | 85e "a blockout wholly in the past is refused" succeeded |
+| generic immutable guard to pass-through | 85e "a retired position stays retired" succeeded |
+| seat without the date and person conditions | 85f "a seat is not held before it starts" (1, expected 0) |
+| toggle without the type allow-list | 85f "a presbytery is never on" (1, expected 0) |
+| open count not distinct | 85f "counts once" (base+2, expected base+1) |
+| `grant execute` on the claim to presby_app | 85a "trigger functions and the reminder claim ... owner alone" (9, expected 10) |
+| delete guard to pass-through (owner path) | `worship.db.test.ts`: 9 of 9 "the owner cannot delete a row" fail |
+| claim without the minor exclusion (owner path) | `worship.db.test.ts` "claims exactly the due rows": the child's `unanswered` row appears |
+| mirror CHECK renamed | `worship.schema.test.ts`: "worship_blockouts does not declare worship_blockouts_range_length" |
+
+**Gates**
+
+- `npm run typecheck`: clean. `eslint` on the three new TS files: clean. `npm run check`: all ten tripwires pass, run with my files staged so `check:secrets` scanned them.
+- `worship.schema.test.ts` 24/24; `worship.db.test.ts` 35/35 (`--no-file-parallelism`, `.env.local`), green both before and after the dev seed; pure `src/lib/db` suites 208 passed, 152 skipped.
+- `scripts/worship/test-rls-85.sql` as presby_app: 147 passes, exit 0, with and without the dev seed applied.
+- **Full `scripts/test-rls.sql` as presby_app** (a scratch copy with the integration patch applied and error-stop disabled for a census): 1,943 passes. There are 2 failures, both pre-existing drift on development-derived data and unrelated to 0085: "presbytery: sees only its own members" (3, expected 2; Northern Reach has a third membership) and "exactly ONE org-owned role holds statistics.publish" (2; the 2026-10-14 `demo_everything` demo roles). Inside the same run, section 85 (147) and the patched NINE-template assertion pass.
+- `check:schema-parity` through a scratch wrapper that merges `./worship` into the domain namespace: 104 tables (95 + 9), 0 failing. The stock command still reports 95 until the `index.ts` export lands at integration.
+
+**Audit events:** none. A migration is provisioning (the 0071 precedent); Batches 2 and 3 write the five `WORSHIP_*` actions.
+
+**Strings added or changed:** the three permission descriptions, `drizzle/0085_presby_worship.sql:109`, `:111`, `:113` (Copy G1, verbatim); the template name "Worship Leader", `:192` (Copy G1). Guard messages are internal (`worship: ...`) and never shown; the store maps the CONSTRAINT codes to `copy.ts`.
+
+**Handoff to api-developer (Batches 2 and 3)**
+
+- Local apply: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0085_presby_worship.sql`, then optionally `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/worship/seed-dev-worship.sql`. `npm run db:seed` is unchanged until Batch 2 removes the flag from `scripts/seed.ts`. Until then a re-seed re-creates the inert global `org_portal.worship` row, and section 85b ("the global feature_flags row ... is gone") fails until 0085 is re-applied, since section 5 deletes it again. Remove it from `seed.ts` and `e2e-reset-flags.sql` in Batch 2 as designed.
+- Import the tables from `@/lib/db/domain/worship` until the integration export exists. Enter the domain cycle through `@/lib/db/schema` first in tests (see the two new test files).
+- Map guard refusals by `err.constraint` (a `WORSHIP_GUARD_CODES` value; SQLSTATE 23514). The state machine in `states.ts` must equal the update guard in section 7o; `states.db.test.ts` (Batch 3) drives the trigger.
+- Trigger-owned and never set by the store: `requested_at`, `responded_at`, `withdrawn_at`, both reminder stamps, `updated_at`, `created_at`. A guest insert sets `status 'confirmed'`, `response_source 'on_behalf'`, `responded_by_person_id = assigned_by_person_id`.
+- `presby_worship_enabled(org)`, `presby_worship_may_schedule(org, person, group)`, `presby_worship_leads_team(org, person, group, presby_worship_org_today(org))` and `presby_worship_open_count()` are callable on the tenant connection. `presby_worship_claim_reminders(batch)` only on `getPlatformDb()`.
+- Batch 6: the e2e fixture sets `app.current_org_id` for owner-path assignment writes (finding above).
 
 ## Files Created
 

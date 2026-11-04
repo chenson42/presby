@@ -72,6 +72,8 @@ const ALLOWED_READERS: Record<string, string> = {
   "src/lib/calendar.ts": "the member read path; every statement interpolates memberVisible()",
   "src/lib/events.ts": "the manager surface (events.manage): a manager must see what they manage",
   "src/lib/event-types.ts": "a usage COUNT behind event_types.manage; selects no event content",
+  "src/lib/events/mutate.ts":
+    "writer: locks and reads one event row by id; returns no event content to its caller beyond the id, and passes before/after start, end and location only to the update hooks",
 };
 
 describe("calendar visibility: the members-only rule has one reader (DECISION-316)", () => {

@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete (in parent; R1 to R16, F421 to F427) | Approved with suggestions | 2026-11-04 |
 | 3 — Technical design | tech-lead | Complete (this file) | Design complete; implementers named; F428 to F432 and DECISION-317 to 327 proposed | 2026-11-04 |
 | 3 — amendment 1 (architect addendum C1 to C5) | tech-lead | Complete (this file, "Phase 3 amendment 1") | C1 to C5 folded in; S1 adopted; S2 recorded as a `paper` residual (DECISION-317); DECISION-326 as amended | 2026-11-04 |
-| 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | Pending | — | — |
+| 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | In progress: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) in flight | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -832,6 +832,43 @@ Dated 2026-11-04. Source: "Phase 2 addendum (architect): `src/lib/events/mutate.
 ---
 
 # Phase 4 — Implementation
+
+### Batch 0 (api-developer, 2026-11-04): event and group writer extraction
+
+No schema, no worship code. Behaviour-preserving refactor, shipped green on its own.
+
+**Files created**
+
+- `src/lib/events/insert.ts`: `insertEventsInTx(tx, organizationId, actor, input)` (the body of `createEvent` after its gate); owns `EventsResult`, `EventActor`, `CreateEventInput`, `validateFieldLengths`, the three length constants, `eventTypeUsable`, `EVENT_TYPE_UNAVAILABLE`, `switchesAreBooleans`, `SWITCH_INVALID`. Reads no `events` row.
+- `src/lib/events/mutate.ts`: `updateEventFieldsInTx(tx, org, {eventId, title, description?, location?, startsAt, endsAt?})` returning `{eventId, queueIds}`, and `cancelEventInTx(tx, org, eventId, actor | null)` returning `{eventId, changed, queueIds}`. Both take the event row `FOR NO KEY UPDATE` as the first read (C3); update writes only title, description (omitted when undefined), location, starts_at, ends_at; cancel runs no hook on an already-cancelled event.
+- `src/lib/events/hooks.ts`: `runEventCancelledHooks`, `runEventUpdatedHooks`, both returning `{queueIds}`, both lists empty; plus the exported combinator `runHookList` (so the fan-out is unit-testable without a test-only registration API) and the argument types consumers `import type`.
+- Tests: `src/lib/events/boundaries.source.test.ts` (C1 transitive hook-import walk, C2 importer scan, each with offending samples), `src/lib/events/mutate.db.test.ts` (21), `src/lib/events/hooks.test.ts` (3), `src/lib/events/insert.test.ts` (4), `src/lib/groups.primitives.db.test.ts` (18).
+
+**Files modified**
+
+- `src/lib/events.ts`: `createEvent` is gate then `insertEventsInTx`; `cancelEvent` is gate then `cancelEventInTx` (one cancel writer); `updateEvent` keeps its own statement but its select is now `FOR NO KEY UPDATE` and gains start/end/location, and it calls `runEventUpdatedHooks` after the UPDATE and the listing audit row. Re-exports `EventsResult`, `EventActor`, `CreateEventInput`, `EVENT_TYPE_UNAVAILABLE`, so no importer changed.
+- `src/lib/groups.ts`: `insertManagedGroupInTx`, `updateManagedGroupInTx`, `addManagedGroupMemberInTx` (member role only; no `groupRole` parameter), `endManagedGroupMemberInTx`. `createGroup`, `updateGroup`, `endGroupMembership` gate then call them; `addGroupMember` gates then calls a private shared body (`addManagedGroupRosterRowInTx`) that the member-only primitive also calls, because `addGroupMember` accepts chair and leader and the exported primitive must not.
+- `src/lib/calendar-visibility.source.test.ts`: `ALLOWED_READERS` gains `src/lib/events/mutate.ts` (C5, the architect's text). `insert.ts` and `hooks.ts` read no `events` row, so they are not listed (the test is exact in both directions).
+- `src/app/(org)/o/[slug]/admin/events/actions.ts`: `cancelEventAction` passes `identity.actor` as the new optional fourth argument.
+- `src/lib/events/recurrence.ts`: comment only (names `insert.ts` as the caller of `generateRecurringDates`).
+
+**Deviations from the design**
+
+1. `cancelEvent` gained an optional fourth parameter `actor: EventActor | null = null` (design: signature unchanged). The cancel hook needs an actor for its `WORSHIP_SERVICE_CANCELLED` audit row (`insertAuditRow` takes the session actor), and the previous signature carried none. Existing 3-argument callers and tests are unchanged; the one production caller (`cancelEventAction`) now passes the actor. `cancelEventInTx` takes `EventActor | null` for the same reason.
+2. `mutate.ts` imports **values** from `insert.ts` (`validateFieldLengths`), not only types as the design row says. Still within the C1/C2 rules: `hooks.ts` does not import `mutate.ts` or `insert.ts` at runtime, so no cycle. `mutate.ts` also imports `OrgTx` (type) from `@/lib/authz`.
+3. `mutate.ts` returns `invalid_target` for a non-UUID event id (a new guard; `updateEvent` and the old `cancelEvent` would have thrown a 22P02). `cancelEvent` therefore returns `invalid_target` for a malformed id instead of throwing. No test pinned the throw.
+4. The C2 importer scan asserts a subset (`events.ts` required, anything else must be `worship/store.ts`) rather than exact equality, because `worship/store.ts` does not exist until Batch 2 and does not import `mutate.ts` until Batch 3. Batch 3 may tighten it to exact.
+5. `updateEventFieldsInTx` writes `location` on every call (`undefined` becomes null) and omits `description` only when `undefined`, exactly as the design states; Batch 3's `updateService` must pass the current location if it means to keep it.
+6. Hook spying is done by wrapping the real runners with `vi.mock("@/lib/events/hooks")` in `mutate.db.test.ts`, not by a test-only registration API on `hooks.ts`.
+
+**Gates (worktree `presby-worship`, own Neon branch)**
+
+- `npm run typecheck`: clean. `npm run lint`: clean (max-warnings 0). `npm run check`: all ten tripwires pass.
+- `npm test` (unit, no DB env): 840 files passed, 142 skipped; 13371 tests passed, 3882 skipped.
+- DB-backed, `--no-file-parallelism` with `.env.local`: `events.test.ts`, `groups.test.ts` (unchanged, green), `groups.primitives.db.test.ts`, `events/` directory, `calendar-visibility.source.test.ts`, and the admin `events` and `groups` page suites: 50 files, 700 tests, all passed.
+- Mutation check: removing `.for("no key update")` from `mutate.ts` makes both C3 lock-first tests fail (restored).
+
+**Next:** Batch 1 (database-admin) is running in the same worktree. Batch 3 wires `worship/event-hooks.ts` into the two lists in `hooks.ts` (one line each) and must keep the C1 scan green. Strings added or changed: none.
 
 ## Files Created
 

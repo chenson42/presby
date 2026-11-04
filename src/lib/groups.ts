@@ -571,51 +571,64 @@ export async function createGroup(
       return { kind: "forbidden" };
     }
 
-    const name = input.name.trim();
-    if (name.length === 0) {
-      return { kind: "invalid_input", message: "Name is required." };
-    }
-    if (name.length > 200) {
-      return {
-        kind: "invalid_input",
-        message: "Name must be 200 characters or fewer.",
-      };
-    }
-
-    const [groupType] = await tx
-      .select({ id: groupTypes.id, key: groupTypes.key })
-      .from(groupTypes)
-      .where(eq(groupTypes.id, input.groupTypeId))
-      .limit(1);
-    if (
-      !groupType ||
-      !(MANAGEABLE_GROUP_TYPE_KEYS as readonly string[]).includes(
-        groupType.key,
-      )
-    ) {
-      return {
-        kind: "invalid_input",
-        message:
-          "Choose a valid group type — committee, small group, choir, or team.",
-      };
-    }
-
-    const [inserted] = await tx
-      .insert(groups)
-      .values({
-        organizationId,
-        groupTypeId: groupType.id,
-        name,
-        description: input.description?.trim() || null,
-        meetsWhen: input.meetsWhen?.trim() || null,
-        membershipSource: "managed",
-        derivedFrom: null,
-        isProtected: false,
-      })
-      .returning({ id: groups.id });
-
-    return { kind: "ok", data: { groupId: inserted!.id } };
+    return insertManagedGroupInTx(tx, organizationId, input);
   });
+}
+
+/**
+ * The body of `createGroup` after its `groups.manage` gate, for a caller that
+ * has gated on its own key (the worship store, after `worship.manage`). NO
+ * PERMISSION CHECK here. The same validations: a name of 1 to 200 characters,
+ * and a `groupTypeId` that resolves to a platform-template row whose key is in
+ * `MANAGEABLE_GROUP_TYPE_KEYS`; the group is always `managed`, never protected.
+ */
+export async function insertManagedGroupInTx(
+  tx: OrgTx,
+  organizationId: string,
+  input: CreateGroupInput,
+): Promise<GroupsResult<{ groupId: string }>> {
+  const name = input.name.trim();
+  if (name.length === 0) {
+    return { kind: "invalid_input", message: "Name is required." };
+  }
+  if (name.length > 200) {
+    return {
+      kind: "invalid_input",
+      message: "Name must be 200 characters or fewer.",
+    };
+  }
+
+  const [groupType] = await tx
+    .select({ id: groupTypes.id, key: groupTypes.key })
+    .from(groupTypes)
+    .where(eq(groupTypes.id, input.groupTypeId))
+    .limit(1);
+  if (
+    !groupType ||
+    !(MANAGEABLE_GROUP_TYPE_KEYS as readonly string[]).includes(groupType.key)
+  ) {
+    return {
+      kind: "invalid_input",
+      message:
+        "Choose a valid group type — committee, small group, choir, or team.",
+    };
+  }
+
+  const [inserted] = await tx
+    .insert(groups)
+    .values({
+      organizationId,
+      groupTypeId: groupType.id,
+      name,
+      description: input.description?.trim() || null,
+      meetsWhen: input.meetsWhen?.trim() || null,
+      membershipSource: "managed",
+      derivedFrom: null,
+      isProtected: false,
+    })
+    .returning({ id: groups.id });
+
+  return { kind: "ok", data: { groupId: inserted!.id } };
 }
 
 // ---------------------------------------------------------------------------
@@ -646,43 +659,56 @@ export async function updateGroup(
       return { kind: "forbidden" };
     }
 
-    const [existing] = await tx
-      .select({ id: groups.id })
-      .from(groups)
-      .where(
-        and(
-          eq(groups.id, input.groupId),
-          eq(groups.organizationId, organizationId),
-          eq(groups.membershipSource, "managed"),
-        ),
-      )
-      .limit(1);
-    if (!existing) {
-      return { kind: "invalid_target" };
-    }
-
-    const name = input.name.trim();
-    if (name.length === 0) {
-      return { kind: "invalid_input", message: "Name is required." };
-    }
-    if (name.length > 200) {
-      return {
-        kind: "invalid_input",
-        message: "Name must be 200 characters or fewer.",
-      };
-    }
-
-    await tx
-      .update(groups)
-      .set({
-        name,
-        description: input.description?.trim() || null,
-        meetsWhen: input.meetsWhen?.trim() || null,
-      })
-      .where(eq(groups.id, input.groupId));
-
-    return { kind: "ok", data: { groupId: input.groupId } };
+    return updateManagedGroupInTx(tx, organizationId, input);
   });
+}
+
+/**
+ * The body of `updateGroup` after its gate, for a caller that has gated on its
+ * own key. NO PERMISSION CHECK here. Re-loads the group scoped to
+ * `membership_source = 'managed'` (`invalid_target` otherwise) before updating.
+ */
+export async function updateManagedGroupInTx(
+  tx: OrgTx,
+  organizationId: string,
+  input: UpdateGroupInput,
+): Promise<GroupsResult<{ groupId: string }>> {
+  const [existing] = await tx
+    .select({ id: groups.id })
+    .from(groups)
+    .where(
+      and(
+        eq(groups.id, input.groupId),
+        eq(groups.organizationId, organizationId),
+        eq(groups.membershipSource, "managed"),
+      ),
+    )
+    .limit(1);
+  if (!existing) {
+    return { kind: "invalid_target" };
+  }
+
+  const name = input.name.trim();
+  if (name.length === 0) {
+    return { kind: "invalid_input", message: "Name is required." };
+  }
+  if (name.length > 200) {
+    return {
+      kind: "invalid_input",
+      message: "Name must be 200 characters or fewer.",
+    };
+  }
+
+  await tx
+    .update(groups)
+    .set({
+      name,
+      description: input.description?.trim() || null,
+      meetsWhen: input.meetsWhen?.trim() || null,
+    })
+    .where(eq(groups.id, input.groupId));
+
+  return { kind: "ok", data: { groupId: input.groupId } };
 }
 
 // ---------------------------------------------------------------------------
@@ -737,72 +763,108 @@ export async function addGroupMember(
       return { kind: "forbidden" };
     }
 
-    const [group] = await tx
-      .select({ id: groups.id, name: groups.name })
-      .from(groups)
-      .where(
-        and(
-          eq(groups.id, input.groupId),
-          eq(groups.organizationId, organizationId),
-          eq(groups.membershipSource, "managed"),
-        ),
-      )
-      .limit(1);
-    if (!group) {
-      return { kind: "invalid_target" };
-    }
-
-    const [membership] = await tx
-      .select({
-        firstName: people.firstName,
-        lastName: people.lastName,
-        preferredName: people.preferredName,
-      })
-      .from(memberships)
-      .innerJoin(people, eq(people.id, memberships.personId))
-      .where(
-        and(
-          eq(memberships.personId, input.personId),
-          eq(memberships.organizationId, organizationId),
-          isNull(memberships.endedOn),
-        ),
-      )
-      .limit(1);
-    if (!membership) {
-      return { kind: "invalid_target" };
-    }
-    const personName = displayName(membership);
-
-    const [existingOpen] = await tx
-      .select({ id: groupMemberships.id })
-      .from(groupMemberships)
-      .where(
-        and(
-          eq(groupMemberships.organizationId, organizationId),
-          eq(groupMemberships.groupId, input.groupId),
-          eq(groupMemberships.personId, input.personId),
-          isNull(groupMemberships.endsOn),
-        ),
-      )
-      .limit(1);
-    if (existingOpen) {
-      return { kind: "overlap", personName, groupName: group.name };
-    }
-
-    const [inserted] = await tx
-      .insert(groupMemberships)
-      .values({
-        organizationId,
-        groupId: input.groupId,
-        personId: input.personId,
-        groupRole: input.groupRole,
-        source: "managed",
-        startsOn: input.startsOn,
-      })
-      .returning({ id: groupMemberships.id });
-
-    return { kind: "ok", data: { groupMembershipId: inserted!.id } };
+    return addManagedGroupRosterRowInTx(tx, organizationId, input);
   });
+}
+
+/**
+ * The body of `addGroupMember` after its gate, for a caller that has gated on
+ * its own key (the worship store, after `worship.manage`), restricted to the
+ * `member` role: a chair or leader row is a seat, appointed only under
+ * `groups.manage` through `addGroupMember` (R6). NO PERMISSION CHECK here.
+ * The same order and validations as `addGroupMember`: managed group
+ * (`invalid_target`), a CURRENT membership at this organization (F21 shape,
+ * `invalid_target`), then the open-row overlap check.
+ */
+export async function addManagedGroupMemberInTx(
+  tx: OrgTx,
+  organizationId: string,
+  input: { groupId: string; personId: string; startsOn: string },
+): Promise<GroupsResult<{ groupMembershipId: string }>> {
+  if (!DATE_RE.test(input.startsOn)) {
+    throw new Error(
+      `addManagedGroupMemberInTx: startsOn must be 'YYYY-MM-DD', got ${JSON.stringify(input.startsOn)}`,
+    );
+  }
+  return addManagedGroupRosterRowInTx(tx, organizationId, {
+    groupId: input.groupId,
+    personId: input.personId,
+    startsOn: input.startsOn,
+    groupRole: "member",
+  });
+}
+
+/** Shared body of `addGroupMember` and `addManagedGroupMemberInTx`; any role. Not exported. */
+async function addManagedGroupRosterRowInTx(
+  tx: OrgTx,
+  organizationId: string,
+  input: AddGroupMemberInput,
+): Promise<GroupsResult<{ groupMembershipId: string }>> {
+  const [group] = await tx
+    .select({ id: groups.id, name: groups.name })
+    .from(groups)
+    .where(
+      and(
+        eq(groups.id, input.groupId),
+        eq(groups.organizationId, organizationId),
+        eq(groups.membershipSource, "managed"),
+      ),
+    )
+    .limit(1);
+  if (!group) {
+    return { kind: "invalid_target" };
+  }
+
+  const [membership] = await tx
+    .select({
+      firstName: people.firstName,
+      lastName: people.lastName,
+      preferredName: people.preferredName,
+    })
+    .from(memberships)
+    .innerJoin(people, eq(people.id, memberships.personId))
+    .where(
+      and(
+        eq(memberships.personId, input.personId),
+        eq(memberships.organizationId, organizationId),
+        isNull(memberships.endedOn),
+      ),
+    )
+    .limit(1);
+  if (!membership) {
+    return { kind: "invalid_target" };
+  }
+  const personName = displayName(membership);
+
+  const [existingOpen] = await tx
+    .select({ id: groupMemberships.id })
+    .from(groupMemberships)
+    .where(
+      and(
+        eq(groupMemberships.organizationId, organizationId),
+        eq(groupMemberships.groupId, input.groupId),
+        eq(groupMemberships.personId, input.personId),
+        isNull(groupMemberships.endsOn),
+      ),
+    )
+    .limit(1);
+  if (existingOpen) {
+    return { kind: "overlap", personName, groupName: group.name };
+  }
+
+  const [inserted] = await tx
+    .insert(groupMemberships)
+    .values({
+      organizationId,
+      groupId: input.groupId,
+      personId: input.personId,
+      groupRole: input.groupRole,
+      source: "managed",
+      startsOn: input.startsOn,
+    })
+    .returning({ id: groupMemberships.id });
+
+  return { kind: "ok", data: { groupMembershipId: inserted!.id } };
 }
 
 // ---------------------------------------------------------------------------
@@ -842,35 +904,55 @@ export async function endGroupMembership(
       return { kind: "forbidden" };
     }
 
-    const [row] = await tx
-      .select({ id: groupMemberships.id, startsOn: groupMemberships.startsOn })
-      .from(groupMemberships)
-      .where(
-        and(
-          eq(groupMemberships.id, input.groupMembershipId),
-          eq(groupMemberships.organizationId, organizationId),
-          eq(groupMemberships.source, "managed"),
-        ),
-      )
-      .limit(1);
-    if (!row) {
-      return { kind: "invalid_target" };
-    }
-
-    if (input.endsOn < row.startsOn) {
-      return {
-        kind: "invalid_input",
-        message: "The end date can't be before the start date.",
-      };
-    }
-
-    await tx
-      .update(groupMemberships)
-      .set({ endsOn: input.endsOn })
-      .where(eq(groupMemberships.id, input.groupMembershipId));
-
-    return { kind: "ok", data: { groupMembershipId: input.groupMembershipId } };
+    return endManagedGroupMemberInTx(tx, organizationId, input);
   });
+}
+
+/**
+ * The body of `endGroupMembership` after its gate, for a caller that has gated
+ * on its own key. NO PERMISSION CHECK here. It ends a row of ANY role: a caller
+ * that must refuse a chair or leader (the worship store) reads the role itself
+ * first. Never a delete; a derived row is `invalid_target`.
+ */
+export async function endManagedGroupMemberInTx(
+  tx: OrgTx,
+  organizationId: string,
+  input: EndGroupMembershipInput,
+): Promise<GroupsResult<{ groupMembershipId: string }>> {
+  if (!DATE_RE.test(input.endsOn)) {
+    throw new Error(
+      `endManagedGroupMemberInTx: endsOn must be 'YYYY-MM-DD', got ${JSON.stringify(input.endsOn)}`,
+    );
+  }
+
+  const [row] = await tx
+    .select({ id: groupMemberships.id, startsOn: groupMemberships.startsOn })
+    .from(groupMemberships)
+    .where(
+      and(
+        eq(groupMemberships.id, input.groupMembershipId),
+        eq(groupMemberships.organizationId, organizationId),
+        eq(groupMemberships.source, "managed"),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    return { kind: "invalid_target" };
+  }
+
+  if (input.endsOn < row.startsOn) {
+    return {
+      kind: "invalid_input",
+      message: "The end date can't be before the start date.",
+    };
+  }
+
+  await tx
+    .update(groupMemberships)
+    .set({ endsOn: input.endsOn })
+    .where(eq(groupMemberships.id, input.groupMembershipId));
+
+  return { kind: "ok", data: { groupMembershipId: input.groupMembershipId } };
 }
 
 // ---------------------------------------------------------------------------

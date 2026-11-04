@@ -11,8 +11,9 @@
  *
  * `recurrencePattern` strings generated/consumed here are a CONVENIENCE
  * GENERATION FORMAT ONLY — never parsed at read time by any other module
- * (DECISION-113 ruling 1). `src/lib/events.ts`'s `createEvent`/
- * `extendSeriesPattern` are the only two callers of `generateRecurringDates`.
+ * (DECISION-113 ruling 1). `src/lib/events/insert.ts`'s `insertEventsInTx` (the body of
+ * `createEvent`) and `src/lib/events.ts`'s `extendSeriesPattern` are the only
+ * two callers of `generateRecurringDates`.
  *
  * Patterns:
  * - Simple: "weekly", "biweekly", "monthly"

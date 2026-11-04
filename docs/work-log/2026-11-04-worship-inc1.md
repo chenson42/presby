@@ -995,6 +995,10 @@ Strings added or changed: [file:line each, or "none"]
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with counts, and anything the next phase must know. Leave out narration of how the work went; git history already records it. Judgment output (analyst, architect, qa) is still recorded verbatim.*
 
+### Orchestrator note (2026-11-04): F433 numbered
+
+**F433.** The worship actor guards call `presby_has_permission`, which answers only when `app.current_org_id` equals the row's organization (0010). Inside the app every write goes through `withOrgContext()`, so this holds. Any owner-connection script that places, sends, records an answer on someone's behalf or withdraws must set the org context, or it is refused with 42501. Kept deliberately (fail closed); one test pins the refusal. The Batch 6 e2e fixture and any future importer must set the context. Record at integration in TODO.md (Rule 16) as a known constraint, not a defect.
+
 ---
 
 # Phase 5 — Verification (qa)

@@ -587,6 +587,38 @@ as $function$
            'America/New_York');
 $function$;
 
+-- 7a'. The IN-EFFECT day (F434, DECISION-328). Worship has two kinds of day:
+-- the SERVICE day (presby_worship_org_today, org_now above: blockouts, "the
+-- service has started", upcoming, reminders) and the in-effect day, for every
+-- comparison against a role_grants or group_memberships date (the resolver's
+-- p_as_of, the seat, the roster). In English: the later of the organization's
+-- calendar day and the UTC calendar day. Reason: the platform stamps and
+-- revokes grants and group rows on the UTC day (column default now(), the
+-- invitation and founding definers, the lockout revoke's ends_on =
+-- current_date) and every other reader compares on the UTC day; worship alone
+-- read them on the organization's day, refused a just-minted founder on a US
+-- evening and kept a just-revoked grant alive until the organization's
+-- midnight. `greatest` accepts a start stamped by either clock (starts_on <=
+-- day) and treats an end stamped by either clock as ended (ends_on > day).
+-- West of UTC it equals the day the app resolver uses. Same zone fallback as
+-- org_today (pinned to DEFAULT_ORG_TIME_ZONE by in-effect-day.db.test.ts).
+-- p_now is a test seam only (the fixed-instant test); every caller omits it.
+-- SECURITY DEFINER for the same reason as org_today (FORCE RLS on
+-- organization_settings, F26).
+create or replace function presby_worship_in_effect_day(p_org uuid, p_now timestamptz default now())
+returns date
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $function$
+  select greatest(
+           (p_now at time zone coalesce(
+              (select s.time_zone from organization_settings s where s.organization_id = p_org),
+              'America/New_York'))::date,
+           (p_now at time zone 'UTC')::date);
+$function$;
+
 -- 7b. The per-org toggle, composed in SQL exactly as orgFeatureEnabledInTx
 -- composes it for the org_portal.worship catalog entry: the organization
 -- type in the allow-list (congregation, new_worshiping_community), then the
@@ -620,7 +652,8 @@ $function$;
 -- not merged, not deceased, and their relationship with the organization has
 -- not ended. Roll membership is NOT required (a hired organist is `staff` or
 -- `regular`). Per team: a seat on team A says nothing about team B. Callers
--- pass presby_worship_org_today(p_org). Never treasury's helper
+-- pass presby_worship_in_effect_day(p_org) (F434: the seat's dates are
+-- platform-stamped on the UTC day). Never treasury's helper
 -- (check:treasury-boundaries).
 create or replace function presby_worship_leads_team(p_org uuid, p_person uuid, p_group uuid, p_as_of date)
 returns boolean
@@ -652,7 +685,8 @@ as $function$
 $function$;
 
 -- 7d. Scheduling authority: the organization-wide key, or the seat on THIS
--- team. Used by the assignment guards for every actor column.
+-- team. Used by the assignment guards for every actor column. Both are read
+-- on the IN-EFFECT day (a role_grants and a group_memberships date; F434).
 create or replace function presby_worship_may_schedule(p_org uuid, p_person uuid, p_group uuid)
 returns boolean
 language sql
@@ -660,8 +694,8 @@ stable
 set search_path = public, pg_temp
 as $function$
   select p_person is not null
-     and (presby_has_permission(p_person, p_org, 'worship.schedule', presby_worship_org_today(p_org))
-          or presby_worship_leads_team(p_org, p_person, p_group, presby_worship_org_today(p_org)));
+     and (presby_has_permission(p_person, p_org, 'worship.schedule', presby_worship_in_effect_day(p_org))
+          or presby_worship_leads_team(p_org, p_person, p_group, presby_worship_in_effect_day(p_org)));
 $function$;
 
 -- 7e. The Features-page warning count: distinct PEOPLE (guests are not
@@ -685,6 +719,7 @@ as $function$
      and a.person_id is not null
      and a.status in ('requested', 'confirmed')
      and e.cancelled_at is null
+     -- service clock (F434): the wall clock against events.starts_at, not a grant or roster date
      and e.starts_at > presby_worship_org_now(a.organization_id);
 $function$;
 
@@ -737,6 +772,7 @@ begin
      where a.person_id is not null
        and a.status in ('requested', 'confirmed')
        and e.cancelled_at is null
+       -- service clock (F434): the wall clock against events.starts_at, not a grant or roster date
        and e.starts_at > presby_worship_org_now(a.organization_id)
        and ((a.status = 'requested'
              and a.unanswered_reminded_at is null
@@ -930,7 +966,7 @@ declare
   v_count integer;
 begin
   new.ended_at := null;
-  if new.ends_on < presby_worship_org_today(new.organization_id) then
+  if new.ends_on < presby_worship_org_today(new.organization_id) then  -- service day: a blockout's own dates
     raise exception 'worship: a blockout may not end before today'
       using errcode = 'check_violation', constraint = 'worship_guard_blockout_past';
   end if;
@@ -968,15 +1004,16 @@ $function$;
 --     ties it to the team); the team's serving row on this service is not
 --     removed.
 --   * A person is on the team's roster now (a group_memberships row in date
---     on the organization's today), not merged, not deceased, and their
---     relationship with the organization has not ended.
+--     on the in-effect day, presby_worship_in_effect_day: F434), not merged,
+--     not deceased, and their relationship with the organization has not
+--     ended.
 create or replace function presby_worship_assignments_guard_insert()
 returns trigger
 language plpgsql
 set search_path = public, pg_temp
 as $function$
 declare
-  v_today date := presby_worship_org_today(new.organization_id);
+  v_day date := presby_worship_in_effect_day(new.organization_id);  -- in-effect day: the roster check (F434)
   v_event record;
 begin
   new.requested_at := null;
@@ -1023,6 +1060,7 @@ begin
     raise exception 'worship: the service was cancelled'
       using errcode = 'check_violation', constraint = 'worship_guard_service_cancelled';
   end if;
+  -- service clock (F434): the wall clock against events.starts_at, not a grant or roster date
   if v_event.starts_at is not null and v_event.starts_at <= presby_worship_org_now(new.organization_id) then
     raise exception 'worship: the service has already started'
       using errcode = 'check_violation', constraint = 'worship_guard_service_started';
@@ -1056,8 +1094,8 @@ begin
        where gm.organization_id = new.organization_id
          and gm.group_id = new.group_id
          and gm.person_id = new.person_id
-         and gm.starts_on <= v_today
-         and (gm.ends_on is null or gm.ends_on > v_today)
+         and gm.starts_on <= v_day
+         and (gm.ends_on is null or gm.ends_on > v_day)
          and pe.merged_into_id is null
          and pe.date_of_death is null
          and m.ended_on is null) then
@@ -1192,6 +1230,7 @@ begin
       raise exception 'worship: the service was cancelled'
         using errcode = 'check_violation', constraint = 'worship_guard_service_cancelled';
     end if;
+    -- service clock (F434): the wall clock against events.starts_at, not a grant or roster date
     if v_event.starts_at <= presby_worship_org_now(new.organization_id) then
       raise exception 'worship: the service has already started'
         using errcode = 'check_violation', constraint = 'worship_guard_service_started';
@@ -1234,6 +1273,7 @@ begin
       raise exception 'worship: the service was cancelled'
         using errcode = 'check_violation', constraint = 'worship_guard_service_cancelled';
     end if;
+    -- service clock (F434): the wall clock against events.starts_at, not a grant or roster date
     if v_event.starts_at <= presby_worship_org_now(new.organization_id) then
       raise exception 'worship: the service has already started'
         using errcode = 'check_violation', constraint = 'worship_guard_service_started';
@@ -1388,7 +1428,9 @@ begin
 
   foreach f in array array[
     'presby_worship_org_today(uuid)',
+    -- service clock (F434): the wall clock against events.starts_at, not a grant or roster date
     'presby_worship_org_now(uuid)',
+    'presby_worship_in_effect_day(uuid, timestamptz)',
     'presby_worship_enabled(uuid)',
     'presby_worship_leads_team(uuid, uuid, uuid, date)',
     'presby_worship_may_schedule(uuid, uuid, uuid)',
@@ -1502,7 +1544,10 @@ comment on column worship_assignments.response_source is
 comment on table worship_blockouts is
   'A person''s "dates I can''t serve" at one organization (DECISION-327, R12): an end-dated range with a closed reason (away, work, family, other) and NO free-text column. At most 366 days; may not end before the organization''s today; at most 50 live per person (trigger, advisory lock). Never deleted: ended (drizzle/0085).';
 comment on function presby_worship_org_today(uuid) is
-  'The organization''s calendar date in organization_settings.time_zone, falling back to America/New_York (DEFAULT_ORG_TIME_ZONE). SECURITY DEFINER (F26). EXECUTE: owner and presby_app (drizzle/0085).';
+  'The SERVICE day: the organization''s calendar date in organization_settings.time_zone, falling back to America/New_York (DEFAULT_ORG_TIME_ZONE). For worship''s own dates (blockouts); never compared with a role_grants or group_memberships date, which use presby_worship_in_effect_day (F434). SECURITY DEFINER (F26). EXECUTE: owner and presby_app (drizzle/0085).';
+comment on function presby_worship_in_effect_day(uuid, timestamptz) is
+  'The in-effect day (F434, DECISION-328): greatest(the organization''s calendar date, the UTC calendar date). Every worship comparison against a role_grants or group_memberships date uses it (the resolver''s p_as_of, the seat, the roster), because the platform stamps and revokes those rows on the UTC day; worship''s own service dates use presby_worship_org_today. Same zone fallback (America/New_York). p_now is a test seam only. SECURITY DEFINER. EXECUTE: owner and presby_app (drizzle/0085).';
+-- service clock (F434): the wall clock against events.starts_at, not a grant or roster date
 comment on function presby_worship_org_now(uuid) is
   'The organization''s wall-clock now (timestamp without time zone), compared with events.starts_at (DECISION-113 ruling 3). SECURITY DEFINER. EXECUTE: owner and presby_app (drizzle/0085).';
 comment on function presby_worship_enabled(uuid) is
@@ -1510,7 +1555,7 @@ comment on function presby_worship_enabled(uuid) is
 comment on function presby_worship_leads_team(uuid, uuid, uuid, date) is
   'The worship scheduling seat (R7, DECISION-318): a chair or leader row in date on p_as_of, on a managed group carrying a worship_teams row, held by an unmerged, living person whose relationship has not ended. Per team. Invoker (drizzle/0085).';
 comment on function presby_worship_may_schedule(uuid, uuid, uuid) is
-  'worship.schedule (presby_has_permission on the organization''s today) OR the leader seat on that team. The authority every assignment guard checks for its actor column (drizzle/0085).';
+  'worship.schedule (presby_has_permission on the in-effect day, presby_worship_in_effect_day: F434) OR the leader seat on that team. The authority every assignment guard checks for its actor column (drizzle/0085).';
 comment on function presby_worship_open_count() is
   'A bare count of distinct people with a requested or confirmed assignment on an uncancelled service starting after the organization''s now, for presby_current_org() only (zero with no context). Behind the Features-page warning. SECURITY DEFINER, EXECUTE presby_app (drizzle/0085).';
 comment on function presby_worship_claim_reminders(integer) is

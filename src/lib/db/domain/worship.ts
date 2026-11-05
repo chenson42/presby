@@ -63,8 +63,11 @@ import { users } from "../schema";
  *         42501 (0085 header, "OWNER-PATH CONTRACT").
  *       * `<table>_guard_delete` on all nine: only the fixture-teardown
  *         cascade gets through.
- *   - Functions (0085 section 7): `presby_worship_org_today`,
- *     `presby_worship_org_now`, `presby_worship_enabled` (the toggle in
+ *   - Functions (0085 section 7): `presby_worship_org_today` and
+ *     `presby_worship_org_now` (the SERVICE day and clock: blockouts, events),
+ *     `presby_worship_in_effect_day` (greatest(organization day, UTC day):
+ *     every comparison against a `role_grants` or `group_memberships` date,
+ *     F434, DECISION-328), `presby_worship_enabled` (the toggle in
  *     SQL), `presby_worship_leads_team` (the seat), `presby_worship_may_schedule`,
  *     `presby_worship_open_count`, and the owner-only
  *     `presby_worship_claim_reminders`.

@@ -38,6 +38,8 @@
 --           serving team, the set-once and immutable columns, blockouts
 --       (f) the helpers: the seat (per team, date boundary), may_schedule,
 --           the toggle composition, the open count, the claim's ACL
+--       (g) F434: grant and roster dates against the in-effect day,
+--           greatest(organization day, UTC day) (DECISION-328)
 --
 --     What presby_app CANNOT reach is proven on the owner connection in
 --     Vitest (src/lib/db/domain/worship.db.test.ts): every guard on the OWNER
@@ -299,10 +301,10 @@ begin;
     12, '85a: the nine trigger functions and the three tenant helpers are SECURITY INVOKER with search_path pinned');
   select assert_eq(
     (select count(*) from pg_proc p
-      where p.proname in ('presby_worship_org_today', 'presby_worship_org_now', 'presby_worship_open_count',
-                          'presby_worship_claim_reminders')
+      where p.proname in ('presby_worship_org_today', 'presby_worship_org_now', 'presby_worship_in_effect_day',
+                          'presby_worship_open_count', 'presby_worship_claim_reminders')
         and p.prosecdef and p.proconfig = array['search_path=public, pg_temp']),
-    4, '85a: the four definers (today, now, open count, the claim) pin search_path');
+    5, '85a: the five definers (today, now, the in-effect day, open count, the claim) pin search_path');
   select assert_eq(
     (select count(*) from pg_proc p
       where p.proname in ('presby_worship_guard_immutable', 'presby_worship_guard_delete',
@@ -314,16 +316,23 @@ begin;
     10, '85a: the trigger functions and the reminder claim are executable by their owner alone');
   select assert_eq(
     (select count(*) from pg_proc p
-      where p.proname in ('presby_worship_org_today', 'presby_worship_org_now', 'presby_worship_enabled',
-                          'presby_worship_leads_team', 'presby_worship_may_schedule', 'presby_worship_open_count')
+      where p.proname in ('presby_worship_org_today', 'presby_worship_org_now', 'presby_worship_in_effect_day',
+                          'presby_worship_enabled', 'presby_worship_leads_team', 'presby_worship_may_schedule',
+                          'presby_worship_open_count')
         and has_function_privilege('presby_app', p.oid, 'execute')
         and not has_function_privilege('presby_platform', p.oid, 'execute')
         and not exists (select 1 from aclexplode(p.proacl) x where x.grantee = 0)),
-    6, '85a: the six tenant-path helpers: EXECUTE presby_app, not presby_platform, not PUBLIC');
+    7, '85a: the seven tenant-path helpers: EXECUTE presby_app, not presby_platform, not PUBLIC');
   select assert_eq(
     (select count(*) from pg_proc p
-      where p.proname like 'presby\_worship\_%' and p.pronargdefaults > 0),
-    0, '85a: no worship function has a defaulted parameter');
+      where p.proname like 'presby\_worship\_%' and p.pronargdefaults > 0
+        and not (p.proname = 'presby_worship_in_effect_day' and p.pronargs = 2 and p.pronargdefaults = 1)),
+    0, '85a: no worship function has a defaulted parameter but the in-effect day''s p_now');
+  select assert_eq(
+    (select count(*) from pg_proc p
+      where p.proname = 'presby_worship_in_effect_day' and p.pronargs = 2 and p.pronargdefaults = 1
+        and p.proargtypes = '2950 1184'::oidvector),
+    1, '85a: presby_worship_in_effect_day(uuid, timestamptz) exists once, its trailing p_now the one default (a test seam, F434)');
 rollback;
 
 -- ===========================================================================
@@ -985,6 +994,83 @@ begin;
                        and presby_worship_org_now(:ALDER) between now()::timestamp - interval '15 hours'
                                                               and now()::timestamp + interval '15 hours'),
     1, '85f: presby_app reads the organization''s today and wall-clock now');
+rollback;
+
+-- ===========================================================================
+-- (g) F434: the in-effect day (DECISION-328). Grant and roster dates are
+-- compared against presby_worship_in_effect_day = greatest(organization day,
+-- UTC day), because the platform stamps and revokes them on the UTC day. The
+-- zone is chosen at run time so Alder Creek's day differs from UTC's
+-- (Etc/GMT+12 before UTC noon, else Etc/GMT-14). Before the fix this block
+-- fails in the hours before UTC noon (the F434 window); after UTC noon the old
+-- and new rules agree and it is a non-regression check. The always-failing
+-- proofs are the p_now seam in src/lib/worship/in-effect-day.db.test.ts and
+-- the source scan in boundaries.test.ts.
+-- ===========================================================================
+begin;
+  select pg_temp.t85_world();
+  select set_config('t85.tz', case when extract(hour from now() at time zone 'UTC') < 12
+                                   then 'Etc/GMT+12' else 'Etc/GMT-14' end, true);
+  update organization_settings set time_zone = current_setting('t85.tz') where organization_id = :ALDER;
+  select assert_eq(
+    (select count(*) where (now() at time zone current_setting('t85.tz'))::date <> current_date
+                       and presby_worship_org_today(:ALDER) = (now() at time zone current_setting('t85.tz'))::date),
+    1, '85g: precondition - Alder Creek''s day differs from the UTC day (a run straddling UTC midnight or noon: re-run)');
+  select assert_eq(
+    (select count(*) where presby_worship_in_effect_day(:ALDER)
+                           = greatest(current_date, (now() at time zone current_setting('t85.tz'))::date)),
+    1, '85g: presby_app reads the in-effect day: greatest(organization day, UTC day)');
+  select assert_eq(
+    (select count(*) where presby_worship_in_effect_day(:ALDER, timestamptz '2026-11-05 02:35+00') = date '2026-11-05'
+                       and presby_worship_in_effect_day(:FERN,  timestamptz '2026-11-05 02:35+00') = date '2026-11-05'),
+    1, '85g: at the F434 instant (21:35 New York, 02:35 UTC on the 5th) the in-effect day is the 5th');
+
+  -- A grant stamped exactly as the definers stamp it: no starts_on, the
+  -- column default (the UTC day).
+  insert into role_grants (organization_id, role_id, person_id)
+  values (:ALDER, (select id from app_roles where organization_id = :ALDER and key = 't85_scheduler'),
+          pg_temp.v('outsider'));
+  select assert_eq(
+    (select count(*) from role_grants where person_id = pg_temp.v('outsider') and organization_id = :ALDER
+                                        and starts_on = current_date),
+    1, '85g: the default stamp is current_date (UTC)');
+  select assert_eq(
+    (select count(*) where presby_worship_may_schedule(:ALDER, pg_temp.v('outsider'), pg_temp.v('g1'))),
+    1, '85g: a grant stamped today (UTC) schedules today, in either zone direction');
+  -- Through the trigger, as presby_app (rolled back with the block).
+  select pg_temp.t85_draft(pg_temp.v('member'), pg_temp.v('e1'), pg_temp.v('g1'), pg_temp.v('p1'), pg_temp.v('outsider'));
+
+  -- A roster row stamped today (UTC) is on the team now.
+  insert into group_memberships (organization_id, group_id, person_id, group_role)
+  values (:ALDER, pg_temp.v('g2'), pg_temp.v('child'), 'member');
+  select assert_eq(
+    (select count(*) from group_memberships where person_id = pg_temp.v('child') and group_id = pg_temp.v('g2')
+                                              and starts_on = current_date),
+    1, '85g: the roster row''s default stamp is current_date (UTC)');
+  select pg_temp.t85_draft(pg_temp.v('child'), pg_temp.v('e1'), pg_temp.v('g2'), pg_temp.v('p2'), pg_temp.v('keyp'));
+
+  -- The platform's revoke stamps ends_on = current_date: ended at once, never
+  -- kept alive by an organization day that lags UTC.
+  update role_grants set ends_on = current_date
+   where person_id = pg_temp.v('keyp') and organization_id = :ALDER;
+  select assert_eq(
+    (select count(*) where presby_worship_may_schedule(:ALDER, pg_temp.v('keyp'), pg_temp.v('g1'))),
+    0, '85g: a grant ended today (UTC) no longer schedules');
+  select pg_temp.t85_expect(
+    format('insert into worship_assignments (organization_id, event_id, group_id, position_id, person_id, assigned_by_person_id) values (%L, %L, %L, %L, %L, %L)',
+           pg_temp.v('a'), pg_temp.v('e2'), pg_temp.v('g1'), pg_temp.v('p1'), pg_temp.v('member'), pg_temp.v('keyp')),
+    '23514', 'worship_guard_not_authorized', '85g: and the trigger refuses its placement');
+  update group_memberships set ends_on = current_date
+   where group_id = pg_temp.v('g1') and person_id = pg_temp.v('leader');
+  select assert_eq(
+    (select count(*) where presby_worship_may_schedule(:ALDER, pg_temp.v('leader'), pg_temp.v('g1'))),
+    0, '85g: a seat ended today (UTC) no longer schedules');
+  update group_memberships set ends_on = current_date
+   where group_id = pg_temp.v('g1') and person_id = pg_temp.v('member');
+  select pg_temp.t85_expect(
+    format('insert into worship_assignments (organization_id, event_id, group_id, position_id, person_id, assigned_by_person_id) values (%L, %L, %L, %L, %L, %L)',
+           pg_temp.v('a'), pg_temp.v('e2'), pg_temp.v('g1'), pg_temp.v('p1'), pg_temp.v('member'), pg_temp.v('outsider')),
+    '23514', 'worship_guard_not_on_roster', '85g: a roster row ended today (UTC) is off the team now');
 rollback;
 
 \echo '======================================================'

@@ -487,15 +487,35 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     category: "administer",
     domain: "communications",
   },
+  // Worship (docs/work-log/2026-11-04-worship-inc1.md, Phase 3 "Component Plan";
+  // DECISION-319). TOGGLE-ONLY: no `flagKey` (drizzle/0085 deleted the global
+  // flag row) and no `comingSoon`; the per-org `org_portal.worship` toggle is
+  // the whole gate. Two tiles: the member-facing one (operate) opens the
+  // person's own requests and schedule, the other (administer) opens "Plan
+  // worship". `orgTypeScope` equals the catalog entry's `orgTypes`
+  // (set-equality, pinned in org-feature-catalog.test.ts). Permission-blind like
+  // every tile (DECISION-162): the page renders its own honest states.
   {
     key: "worship",
-    label: "Worship & Service Planning",
-    description: "Service templates, liturgical roles, and scheduling.",
-    href: (slug) => `/o/${slug}/admin/worship`,
-    flagKey: "org_portal.worship",
+    label: "Worship",
+    description:
+      "See when you're asked to serve, answer requests, and set dates you can't serve.",
+    href: (slug) => `/o/${slug}/worship`,
+    orgFeatureKey: "org_portal.worship",
     category: "operate",
     domain: "worship",
-    comingSoon: true,
+    orgTypeScope: ["congregation", "new_worshiping_community"],
+  },
+  {
+    key: "worship-admin",
+    label: "Plan worship",
+    description:
+      "For the people who plan worship. Set up teams and positions, plan services, and schedule people.",
+    href: (slug) => `/o/${slug}/admin/worship`,
+    orgFeatureKey: "org_portal.worship",
+    category: "administer",
+    domain: "worship",
+    orgTypeScope: ["congregation", "new_worshiping_community"],
   },
   {
     key: "committees",

@@ -175,12 +175,15 @@ describe.skipIf(!hasDb)(
         "careers.manage",
         "careers.applicants",
       ];
+      // worship Inc 1 (DECISION-319): congregations and new worshiping
+      // communities only, between the base and the presbytery oversight key.
+      const WORSHIP = ["worship.manage", "worship.plan", "worship.schedule"];
 
-      it("congregation: the base eleven keys (F118 — staff.manage joins the bundle; F150 — domains.manage joins it; F292 — careers.manage and careers.applicants join it), congregation_stated_clerk office, no congregation_oversight.manage", () => {
+      it("congregation: the base eleven keys (F118 — staff.manage joins the bundle; F150 — domains.manage joins it; F292 — careers.manage and careers.applicants join it) plus the three worship keys, congregation_stated_clerk office, no congregation_oversight.manage", () => {
         const plan = foundingAdministratorPlan("congregation");
         expect(plan.administration.key).toBe("founding_administrator");
         expect(plan.administration.permissionKeys.sort()).toEqual(
-          [...BASE].sort(),
+          [...BASE, ...WORSHIP].sort(),
         );
         expect(plan.administration.permissionKeys).not.toContain(
           "congregation_oversight.manage",
@@ -196,8 +199,8 @@ describe.skipIf(!hasDb)(
         expect(plan.officeTemplateKey).toBe("presbytery_stated_clerk");
       });
 
-      it.each(["synod", "general_assembly", "new_worshiping_community"] as const)(
-        "%s: administration half only, no office template",
+      it.each(["synod", "general_assembly"] as const)(
+        "%s: administration half only (no worship keys), no office template",
         (organizationType) => {
           const plan = foundingAdministratorPlan(organizationType);
           expect(plan.administration.permissionKeys.sort()).toEqual(
@@ -206,6 +209,21 @@ describe.skipIf(!hasDb)(
           expect(plan.officeTemplateKey).toBeNull();
         },
       );
+
+      it("new_worshiping_community: administration half plus the three worship keys, no office template", () => {
+        const plan = foundingAdministratorPlan("new_worshiping_community");
+        expect(plan.administration.permissionKeys.sort()).toEqual(
+          [...BASE, ...WORSHIP].sort(),
+        );
+        expect(plan.officeTemplateKey).toBeNull();
+      });
+
+      it("array order is base, worship, oversight - the order the SQL function's array uses (invitations.db.test.ts compares in order)", () => {
+        const congregation = foundingAdministratorPlan("congregation").administration.permissionKeys;
+        expect(congregation).toEqual([...BASE, ...WORSHIP]);
+        const presbytery = foundingAdministratorPlan("presbytery").administration.permissionKeys;
+        expect(presbytery).toEqual([...BASE, "congregation_oversight.manage"]);
+      });
 
       it("never carries an excluded tier-2 or tier-3 key (F111's enumerated-not-wildcard ceiling; staff.manage is CARRIED as of F118 and careers.applicants, tier 3, as of F292 / DECISION-265, so both are deliberately absent from this list)", () => {
         const excluded = [
@@ -264,6 +282,36 @@ describe.skipIf(!hasDb)(
         expect(plan.administration.key).toBe("founding_administrator");
         expect(plan.officeTemplateKey).toBe("congregation_stated_clerk");
         expect(plan.administration.permissionKeys.filter((k) => k === "domains.manage")).toHaveLength(1);
+      });
+    });
+
+    describe("foundingAdministratorPlan() — worship keys (worship Inc 1, DECISION-319)", () => {
+      const WORSHIP = ["worship.manage", "worship.plan", "worship.schedule"];
+
+      it.each(["congregation", "new_worshiping_community"] as const)(
+        "%s: carries each of the three worship keys exactly once, after the careers keys",
+        (organizationType) => {
+          const keys = foundingAdministratorPlan(organizationType).administration.permissionKeys;
+          for (const key of WORSHIP) expect(keys.filter((k) => k === key)).toHaveLength(1);
+          expect(keys.slice(keys.indexOf("careers.applicants"), keys.indexOf("careers.applicants") + 4)).toEqual([
+            "careers.applicants",
+            ...WORSHIP,
+          ]);
+        },
+      );
+
+      it.each(["presbytery", "synod", "general_assembly"] as const)(
+        "%s: carries none (no worship page exists there)",
+        (organizationType) => {
+          const keys = foundingAdministratorPlan(organizationType).administration.permissionKeys;
+          for (const key of WORSHIP) expect(keys).not.toContain(key);
+        },
+      );
+
+      it("the worship keys live on the enumerated administration role, never on the stated-clerk office template", () => {
+        const plan = foundingAdministratorPlan("congregation");
+        expect(plan.officeTemplateKey).toBe("congregation_stated_clerk");
+        expect(plan.administration.key).toBe("founding_administrator");
       });
     });
 

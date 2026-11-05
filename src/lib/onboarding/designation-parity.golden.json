@@ -30,7 +30,10 @@
           "role_grants.manage",
           "roles.manage",
           "staff.manage",
-          "tickets.file"
+          "tickets.file",
+          "worship.manage",
+          "worship.plan",
+          "worship.schedule"
         ]
       }
     ],
@@ -128,7 +131,10 @@
           "role_grants.manage",
           "roles.manage",
           "staff.manage",
-          "tickets.file"
+          "tickets.file",
+          "worship.manage",
+          "worship.plan",
+          "worship.schedule"
         ]
       }
     ],
@@ -296,7 +302,10 @@
           "role_grants.manage",
           "roles.manage",
           "staff.manage",
-          "tickets.file"
+          "tickets.file",
+          "worship.manage",
+          "worship.plan",
+          "worship.schedule"
         ]
       }
     ],
@@ -362,7 +371,10 @@
           "role_grants.manage",
           "roles.manage",
           "staff.manage",
-          "tickets.file"
+          "tickets.file",
+          "worship.manage",
+          "worship.plan",
+          "worship.schedule"
         ]
       }
     ],

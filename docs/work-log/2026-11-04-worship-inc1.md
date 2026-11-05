@@ -999,6 +999,49 @@ Strings added or changed: [file:line each, or "none"]
 
 **F433.** The worship actor guards call `presby_has_permission`, which answers only when `app.current_org_id` equals the row's organization (0010). Inside the app every write goes through `withOrgContext()`, so this holds. Any owner-connection script that places, sends, records an answer on someone's behalf or withdraws must set the org context, or it is refused with 42501. Kept deliberately (fail closed); one test pins the refusal. The Batch 6 e2e fixture and any future importer must set the context. Record at integration in TODO.md (Rule 16) as a known constraint, not a defect.
 
+### Batch 2 (api-developer, 2026-11-04): catalog, keys, pure modules, configuration store
+
+No schema (0085 is Batch 1's). Commit `feat(worship): catalog, keys, pure modules and the configuration store (Batch 2)`.
+
+**Files created** (`src/lib/worship/` unless noted)
+
+- Pure: `vocab.ts`, `states.ts` (the assignment state machine; `canTransition`, `serviceAllows`), `plan.ts` (`overlapWindow`, `pickerWarnings`, `mergeBlockoutRanges`, `validateBlockoutRange`, `sendPlan`, `summarizeSend`), `starters.ts`, `guest-name.ts`, `copy.ts` (Copy G1 to G8 in full, every group, so Batches 4 to 6 need no string of their own), `result.ts` (`WorshipResult`, `mapDatabaseError` over `WORSHIP_GUARD_CODES`), `input.ts` (zod shapes, unknown keys stripped).
+- Server: `access.ts` (`loadWorshipContext`, and `runGated`, the gate every export repeats inside its own `withOrgContext`: applicability, toggle with the category axis read OUTSIDE the transaction, then the named keys), `authority.ts` (`holdsKeys`, `holdsAllKeys`, `holdsPermission`, `leadsTeam`, `ledTeamIds`, `canScheduleTeam`; not treasury's helper), `sql-util.ts`, `action-gate.ts` (session plus slug to viewer; `toActionResult`), `store.ts` (the configuration exports: `createTeam`, `adoptTeam`, `updateTeam`, `retireTeam`, `addPosition`, `updatePosition`, `retirePosition`, `setQualifications`, `addTeamMember`, `endTeamMember`, `createServiceType`, `updateServiceType`, `retireServiceType`, `setServiceTypeTeams`), `reads.ts` (`getWorshipContext`, `getTeamsAdmin`, `getTeamAdmin`, `searchRosterCandidates`, `getAdoptableGroups`, `getServiceTypes`, `getServiceType`, `getServiceFormOptions`).
+- `src/app/(org)/o/[slug]/admin/worship/actions.ts`: 15 actions (team, position, qualification, roster, roster search, service type). The service actions are Batch 3.
+- Test support: `src/lib/testing/worship-world.ts` (the shared throwaway world; owner-path writes that name an actor go through `inOrg()`, F433).
+- Tests: `vocab.test.ts` (13), `states.test.ts` (12), `plan.test.ts` (23), `starters.test.ts` (6), `guest-name.test.ts` (7), `copy.test.ts` (20), `result.test.ts` (8), `input.test.ts` (3), `worship-toggle.test.ts` (7, pins the migration's toggle literals to the catalog entry), `admin/worship/actions.test.ts` (97, 15 actions x refusals and mapping); DB-backed `enabled.db.test.ts` (2; `presby_worship_enabled` equals `orgFeatureEnabledInTx` over all 135 type x axis x category x toggle combinations), `store.config.db.test.ts` (43), `store.audit.db.test.ts` (8).
+- `scripts/worship/dev-docs.ts.integration.patch` (see below).
+
+**Files modified**
+
+- `src/lib/org-features.ts`: the `org_portal.worship` catalog entry (`flag: null`, `provisionedOn: false`, `operatorEnabled: false`, `orgTypes` congregation and new_worshiping_community, category `worship`).
+- `src/lib/org-portal/tiles.ts`: the stub tile replaced by `worship` (operate) and `worship-admin` (administer), toggle-only, no `flagKey`, no `comingSoon`, scoped. `src/components/org-portal/tile-icons.tsx`: `worship-admin` gets `CalendarCheck`.
+- `src/lib/onboarding/founding-administrator.ts`: the three keys for the two types, order base, worship, oversight (the SQL order). `designation-parity.golden.json` regenerated with `WRITE_DESIGNATION_GOLDEN=1`; the diff is exactly the three keys on the four congregation and new-worshiping-community scenarios. `founding-administrator-section.tsx`: `PERMISSION_LABELS` gains the three labels.
+- `src/lib/audit.ts`: five `WORSHIP_*` actions (mirrored in `audit.test.ts`).
+- `scripts/seed.ts`, `scripts/ci/e2e-reset-flags.sql`: the global flag leaves both (the parity test `scripts/e2e-reset-flags.test.mjs` stays green).
+- Existing tests updated: `org-feature-catalog.test.ts`, `org-portal/tiles.test.ts` (26 tiles, scoped, byte-for-byte Copy), `org-portal/visible-tiles.test.ts`, `founding-administrator.test.ts`, `founding-administrator-section.test.tsx`, `calendar-visibility.source.test.ts` (`store.ts` listed: it counts upcoming events behind the retire refusals).
+- `src/lib/help/coverage-allowlist.ts` and `coverage.test.ts`: `org_portal.worship` and `tile:worship-admin` are TEMPORARY allowlist entries and `tile:worship` is re-reasoned; the pin goes 16 to 18. Batch 6 writes the pages, deletes all three entries and lowers the pin.
+
+**Audit events written** (Batch 2): `tenant.worship.team_created` (`{via, groupId}`), `tenant.worship.roster_changed` (`{change, groupId, personId}`). Positions, qualifications, service types, update and retire are unaudited by design; `store.audit.db.test.ts` pins that, the exact metadata keys, no name or description in any row, and that a failed audit insert rolls the change back.
+
+**Deviations from the design, and findings**
+
+1. **Inserts are raw SQL.** `presby_app` holds column-limited INSERT grants (no `id`, `created_at`, `retired_at`), and Drizzle's `insert().values()` names EVERY column (omitted ones as `default`), which Postgres refuses as a privilege error before any default applies. The first run of `store.config.db.test.ts` failed 17 of 43 on exactly this. Every worship insert in `store.ts` therefore lists exactly the granted columns. UPDATE `.set()` is unaffected. **Batch 3 and every later writer must do the same** (the Drizzle mirror's header should say so; database-admin's call).
+2. **Extra modules** beyond the design's list: `result.ts`, `sql-util.ts`, `input.ts`, `action-gate.ts`. The design's `gateInTx` idea became `runGated`.
+3. **Copy additions and adjustments.** `SERVICES_COPY.types.duplicate` ("You already have a service type called {name}.") is NOT in the Phase 3 Copy table; a duplicate service-type name needed a sentence, so I wrote the nearest one. Plural-aware forms where the table says "{n} upcoming services", "Send {n} requests?", "{n} people, {m} positions" ("1 upcoming service", "Send 1 request?"). The guest-name control-character refusal reuses the contact-details sentence. `adoptTeam` on an ineligible group answers the generic sentence (Copy has none). Needs a ruling or a Copy line at Phase 6.
+4. **Additions to the design's surface:** `getAdoptableGroups` (the "Or use a group you already have" picker needs a read; `worship.manage` and `groups.manage`), `searchRosterCandidatesAction`, `createServiceType`/`updateServiceType` accept `groupIds` so a type and its teams save in one transaction (`setServiceTypeTeams` remains).
+5. **`addTeamMember` for a person already on the team (any role, in date) is an `ok` no-op** (`changed: false`, no write, no audit), not an error: Copy has no sentence for it.
+6. **Dev-docs and the domain index.** `src/lib/dev-docs.test.ts` ("sees the same tables in the exports as are declared in the schema files") has been red since Batch 1 and stays red until the `domain/index.ts` export lands at integration (Rule 16). Adding the nine tables to `MODULES` before the export would make a second dev-docs test red (stale entry), so they ship as `scripts/worship/dev-docs.ts.integration.patch` ("V. Worship"; the sign-ups pipeline may want the same letter, the orchestrator reconciles). Verified: applying `domain-index.ts.integration.patch` and `dev-docs.ts.integration.patch` together makes the whole file green (15/15); both reverted.
+7. The old stub page `admin/worship/page.tsx` and its test still read the (now unseeded) global flag; Batch 5 replaces both. `check:help` still passes because the stub still prints "Worship & Service Planning"; when Batch 5 deletes it, Batch 6's registry label edit must land with it.
+
+**Gates (worktree `presby-worship`, own Neon branch)**
+
+- `npm run typecheck`, `npm run lint` (max-warnings 0): clean. `npm run check`: all ten tripwires pass (run with the Batch 2 files staged).
+- `npm test` (unit): 850 files passed, 146 skipped; 13593 tests passed, 3977 skipped, **1 failed: `dev-docs.test.ts` (item 6, expected until integration)**.
+- DB-backed, `--no-file-parallelism` with `.env.local`: `src/lib/onboarding`, `src/lib/worship`, `src/lib/db/domain/worship`, `src/lib/org-features*`, `src/lib/org-portal`: 58 files, 1071 tests, all passed. **The 9 tests Batch 1 left red are green** (`invitations.db.test.ts` equality for every organization type, and `designation-parity.db.test.ts` and `designation-parity-in-place.db.test.ts` for congregation and NWC).
+
+**Next:** Batch 3 (scheduling, mail, cron).
+
 ---
 
 # Phase 5 — Verification (qa)

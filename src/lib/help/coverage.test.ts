@@ -35,7 +35,8 @@ import type { HelpContentEntry, HelpEntry } from "./types";
 
 /** Shrink-only (P3-16): this number may be lowered, never raised. Batch 5a and 5b delete the
  * "written later in this increment" entries as the pages that cover them publish. */
-const ALLOWLIST_PIN = 16;
+// 16 + 2: worship Increment 1 adds org_portal.worship and tile:worship-admin until Batch 6 writes their pages and deletes them.
+const ALLOWLIST_PIN = 18;
 
 const ROOT = path.resolve(__dirname, "../../..");
 

@@ -699,6 +699,25 @@ export const AUDIT_ACTIONS = {
   TENANT_PERSON_ARCHIVED: "tenant.person.archived",
   TENANT_PERSON_RESTORED: "tenant.person.restored",
   TENANT_PERSON_VISIT_DETAILS_UPDATED: "tenant.person.visit_details_updated",
+  // Worship Increment 1 (docs/work-log/2026-11-04-worship-inc1.md, Phase 3
+  // "Audit actions"; DECISION-317..320). Written by src/lib/worship/store.ts
+  // (and WORSHIP_SERVICE_CANCELLED by src/lib/worship/event-hooks.ts) with
+  // insertAuditRow(tx, ...) in the SAME transaction as the change. Metadata is
+  // ids, counts and tags only: never a name, a reason, a note or a guest name.
+  // Configuration (positions, service types, qualifications, retire) is
+  // unaudited, as groups are; a self answer is not audited (the assignment
+  // row's response_source, responded_at and responded_by are the record).
+  //   - WORSHIP_TEAM_CREATED: { via: "new" | "existing", groupId }
+  //   - WORSHIP_ROSTER_CHANGED: { change: "added" | "ended", groupId, personId }
+  //   - WORSHIP_RESPONSE_RECORDED: { assignmentId, eventId, answer } (on behalf)
+  //   - WORSHIP_REQUESTS_SENT: { sent, emailed, guardian, noAddress,
+  //     doNotContact, services } (counts only)
+  //   - WORSHIP_SERVICE_CANCELLED: { eventId, withdrawn, notified }
+  WORSHIP_TEAM_CREATED: "tenant.worship.team_created",
+  WORSHIP_ROSTER_CHANGED: "tenant.worship.roster_changed",
+  WORSHIP_RESPONSE_RECORDED: "tenant.worship.response_recorded",
+  WORSHIP_REQUESTS_SENT: "tenant.worship.requests_sent",
+  WORSHIP_SERVICE_CANCELLED: "tenant.worship.service_cancelled",
   // ---------------------------------------------------------------------------
 } as const;
 

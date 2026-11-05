@@ -43,6 +43,11 @@ const PERMISSION_LABELS: Record<string, string> = {
   // (DECISION-265) in plain words rather than hiding it.
   "careers.manage": "job openings",
   "careers.applicants": "job applications and resumes",
+  // worship Inc 1, Copy G1 (DECISION-319): the three keys join the bundle for
+  // congregations and new worshiping communities.
+  "worship.manage": "worship teams",
+  "worship.plan": "worship services",
+  "worship.schedule": "worship scheduling",
   "congregation_oversight.manage": "congregation oversight",
 };
 

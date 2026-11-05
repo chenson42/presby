@@ -62,7 +62,7 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.person_photos, org_portal.public_calendar, org_portal.reimbursement, org_portal.sign_in_connect and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
+  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.person_photos, org_portal.public_calendar, org_portal.reimbursement, org_portal.sign_in_connect, org_portal.worship and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
@@ -75,6 +75,7 @@ describe("ORG_FEATURE_CATALOG", () => {
       "org_portal.public_calendar",
       "org_portal.reimbursement",
       "org_portal.sign_in_connect",
+      "org_portal.worship",
     ]);
 
     const provisioned = ORG_FEATURE_CATALOG.filter((e) => e.provisionedOn);
@@ -120,7 +121,7 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(giving!.provisionedOn).toBe(false);
     expect(giving!.category).toBe("giving");
     for (const entry of ORG_FEATURE_CATALOG) {
-      if (entry.key === "org_portal.giving" || entry.key === "org_portal.parishes" || entry.key === "org_portal.reimbursement") continue;
+      if (entry.key === "org_portal.giving" || entry.key === "org_portal.parishes" || entry.key === "org_portal.reimbursement" || entry.key === "org_portal.worship") continue;
       expect(entry.orgTypes, entry.key).toBeNull();
     }
   });
@@ -268,6 +269,21 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
+  it("scopes org_portal.worship to congregation + new_worshiping_community, provisioned OFF, toggle-only (the global flag row is gone), in the worship category, self-service (worship Inc 1, DECISION-319)", () => {
+    const entry = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.worship");
+    expect(entry).toBeDefined();
+    expect(entry!.name).toBe("Worship");
+    expect([...(entry!.orgTypes ?? [])].sort()).toEqual(["congregation", "new_worshiping_community"]);
+    expect(entry!.flag).toBeNull();
+    expect(entry!.provisionedOn).toBe(false);
+    expect(entry!.category).toBe("worship");
+    expect(entry!.operatorEnabled).toBe(false);
+    expect(entry!.description).toBe(
+      "Lets your congregation set up worship teams, plan services on the calendar, and ask people to serve. Turning this off hides every worship page and stops requests and reminders. Nothing is deleted.",
+    );
+    expect(SEEDED_FLAG_KEYS.has("org_portal.worship"), "no seeded global flag of the same key").toBe(false);
+  });
+
   it("names, for every PORTAL_TILES orgFeatureKey, a real catalog key (R1: a typo'd toggle key would hide the tile for everyone, forever)", () => {
     const catalogKeys = new Set<string>(ORG_FEATURE_CATALOG.map((e) => e.key));
     const gated = PORTAL_TILES.filter((t) => t.orgFeatureKey !== undefined);
@@ -291,6 +307,8 @@ describe("ORG_FEATURE_CATALOG", () => {
       "giving-admin",
       "reimbursements",
       "reimbursements-admin",
+      "worship",
+      "worship-admin",
     ]);
     for (const tile of scoped) {
       const entry = ORG_FEATURE_CATALOG.find((e) => e.key === tile.orgFeatureKey)!;

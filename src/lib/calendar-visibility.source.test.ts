@@ -74,6 +74,8 @@ const ALLOWED_READERS: Record<string, string> = {
   "src/lib/event-types.ts": "a usage COUNT behind event_types.manage; selects no event content",
   "src/lib/events/mutate.ts":
     "writer: locks and reads one event row by id; returns no event content to its caller beyond the id, and passes before/after start, end and location only to the update hooks",
+  "src/lib/worship/store.ts":
+    "writer: counts the distinct upcoming events that carry a live worship assignment (the retire-team and retire-position refusals); selects no event content",
 };
 
 describe("calendar visibility: the members-only rule has one reader (DECISION-316)", () => {

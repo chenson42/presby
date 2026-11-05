@@ -5,7 +5,10 @@
  * pending pages never count as coverage.
  *
  * The 16 entries that remain are decisions, each with its reason (Batch 5b deleted the 13 placeholders
- * that its pages cover).
+ * that its pages cover). Worship Increment 1 (docs/work-log/2026-11-04-worship-inc1.md) adds THREE
+ * temporary entries (`org_portal.worship`, `tile:worship-admin`, and the re-reasoned `tile:worship`):
+ * its three help pages are Batch 6's, in the same pipeline, and Batch 6 deletes all three entries and
+ * lowers the pin in coverage.test.ts.
  */
 export interface CoverageAllowlistEntry {
   key: string;
@@ -27,7 +30,9 @@ export const COVERAGE_ALLOWLIST: readonly CoverageAllowlistEntry[] = [
   { key: "tile:reports", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
   { key: "tile:filings", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
   { key: "tile:committees", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
-  { key: "tile:worship", reason: "A coming-soon stub; never documented as a feature." },
+  { key: "tile:worship", reason: "Worship Increment 1: the help pages worship-serving-on-a-team and worship-scheduling-a-team are written in Batch 6 of this pipeline, which deletes this entry." },
+  { key: "tile:worship-admin", reason: "Worship Increment 1: the help page worship-setting-up is written in Batch 6 of this pipeline, which deletes this entry." },
+  { key: "org_portal.worship", reason: "Worship Increment 1: the help page worship-setting-up is written in Batch 6 of this pipeline, which deletes this entry." },
   { key: "tile:insights", reason: "A coming-soon stub; never documented as a feature." },
   { key: "tile:communications", reason: "A coming-soon stub; never documented as a feature." },
 ];

@@ -285,6 +285,37 @@ export const ORG_FEATURE_CATALOG = [
     orgTypes: null,
     operatorEnabled: false as const,
   },
+  // Worship (docs/work-log/2026-11-04-worship-inc1.md, Phase 3 "Permissions &
+  // Flags"; DECISION-319). TOGGLE-ONLY (`flag: null`): the operator's standing
+  // rule is a per-org toggle, not a new global flag, before go-live, and
+  // drizzle/0085 deletes the old `org_portal.worship` feature_flags row (the
+  // 0055 precedent). Provisioned OFF (a missing row is off; `createOrganization()`
+  // writes nothing and 0085 backfills no rows). SELF-SERVICE (`operatorEnabled:
+  // false`): the congregation's `org_features.manage` holder turns it on.
+  // Congregations and new worshiping communities only (the allow-list the
+  // founding bundle's worship keys use), category `worship`.
+  //
+  // OFF: no page renders, no action runs, no request is sent, no reminder or
+  // cancel notice is queued, and nothing is deleted. THE DATABASE COMPOSES THIS
+  // ENTRY IN SQL: `presby_worship_enabled(org)` (drizzle/0085) repeats this
+  // entry's key, its `category`, its `orgTypes` and the category axis flag,
+  // because the reminder claim and Increment 1b's credential definers cannot
+  // call `orgFeatureEnabledInTx`. `worship-toggle.test.ts` pins every one of
+  // those literals to this entry and `enabled.db.test.ts` compares the SQL with
+  // `orgFeatureEnabledInTx` over the whole type x axis x category x toggle
+  // matrix. Changing the key, category or `orgTypes` here without the migration
+  // fails both, on purpose.
+  {
+    key: "org_portal.worship",
+    name: "Worship",
+    description:
+      "Lets your congregation set up worship teams, plan services on the calendar, and ask people to serve. Turning this off hides every worship page and stops requests and reminders. Nothing is deleted.",
+    category: "worship" as const,
+    flag: null,
+    provisionedOn: false as const,
+    orgTypes: ["congregation", "new_worshiping_community"] as const,
+    operatorEnabled: false as const,
+  },
   // Custom domains (docs/work-log/2026-10-19-custom-domains.md, Phase 3
   // "Permissions & Flags"; T9; DECISION-180; operator ruling Q1, 2026-10-19:
   // "platform admin only, for now"). TOGGLE-ONLY (`flag: null`): the operator's

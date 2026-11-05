@@ -1,4 +1,3 @@
-import { notFound } from "next/navigation";
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
 import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { ServiceSummary } from "@/components/worship/service-summary";
@@ -44,7 +43,6 @@ export default async function WorshipServicePage({ params }: { params: Promise<{
   const read = readOrState(board, { slug, name: identity.organizationName, heading, retryHref: path });
   if (!read.ok) return read.node;
   const service = read.data;
-  if (service.teams.length === 0 && !has.plan) notFound();
 
   const open = !service.cancelled && !service.started;
   const canPlan = has.plan && open;
@@ -73,13 +71,14 @@ export default async function WorshipServicePage({ params }: { params: Promise<{
         )}
       </div>
 
-      {(canPlan || serving.length > 0) && (
-        <section aria-labelledby="serving-heading" className="space-y-3" data-testid="teams-serving">
+      <section aria-labelledby="serving-heading" className="space-y-3" data-testid="teams-serving">
           <h2 id="serving-heading" className="text-xl font-semibold">
             {SERVICES_COPY.page.teamsServingHeading}
           </h2>
           {canPlan ? (
             <ServiceTeamsEditor slug={slug} eventId={eventId} serving={serving} allTeams={allTeams} />
+          ) : serving.length === 0 ? (
+            <p className="text-base text-muted-foreground">{NAV_COPY.noServingTeams}</p>
           ) : (
             <ul className="space-y-1 text-base">
               {serving.map((team) => (
@@ -90,7 +89,6 @@ export default async function WorshipServicePage({ params }: { params: Promise<{
             </ul>
           )}
         </section>
-      )}
 
       {open && has.schedule && drafts > 0 && <SendRequestsDialog slug={slug} eventId={eventId} draftCount={drafts} />}
 

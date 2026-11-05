@@ -319,6 +319,36 @@ describe("Services", () => {
     expect(screen.queryByTestId("add-someone-pos1")).toBeNull();
   });
 
+  it("a service with no serving team opens: a plan holder gets the empty state and the add-a-team control (F435)", async () => {
+    reads.getServiceBoard.mockResolvedValue({ kind: "ok", data: board({ teams: [] }) });
+    reads.getServiceFormOptions.mockResolvedValue({ kind: "ok", data: { types: [], teams: [{ groupId: GROUP, name: "Sunday Band" }] } });
+    render(await ServicePage(params({ eventId: EVENT })));
+    expect(within(screen.getByTestId("teams-serving")).getByText(NAV_COPY.noServingTeams)).toBeTruthy();
+    expect(within(screen.getByTestId("teams-serving")).getByRole("combobox")).toBeTruthy();
+    expect(screen.getByTestId("edit-service-open")).toBeTruthy();
+    expect(screen.getByTestId("cancel-service-open")).toBeTruthy();
+  });
+
+  it.each(["manage", "schedule"] as const)("a service with no serving team opens for a viewer holding only worship.%s, with the sentence and no 404 (F435)", async (key) => {
+    reads.getWorshipContext.mockResolvedValue({ kind: "ok", has: keys(key) });
+    reads.getServiceBoard.mockResolvedValue({ kind: "ok", data: board({ teams: [] }) });
+    render(await ServicePage(params({ eventId: EVENT })));
+    expect(screen.getByRole("heading", { level: 1, name: "Sunday worship" })).toBeTruthy();
+    expect(within(screen.getByTestId("teams-serving")).getByText(NAV_COPY.noServingTeams)).toBeTruthy();
+    expect(screen.queryByTestId("edit-service-open")).toBeNull();
+  });
+
+  it("a cancelled service with no team shows the same sentence to everyone", async () => {
+    reads.getServiceBoard.mockResolvedValue({ kind: "ok", data: board({ teams: [], cancelled: true }) });
+    render(await ServicePage(params({ eventId: EVENT })));
+    expect(within(screen.getByTestId("teams-serving")).getByText(NAV_COPY.noServingTeams)).toBeTruthy();
+  });
+
+  it("a read the viewer may not make is still the organization's 404", async () => {
+    reads.getServiceBoard.mockResolvedValue({ kind: "forbidden" });
+    await expect(ServicePage(params({ eventId: EVENT }))).rejects.toThrow("NOT_FOUND");
+  });
+
   it("an id that is not a worship service is the organization's 404", async () => {
     reads.getServiceBoard.mockResolvedValue({ kind: "not_found" });
     await expect(ServicePage(params({ eventId: EVENT }))).rejects.toThrow("NOT_FOUND");

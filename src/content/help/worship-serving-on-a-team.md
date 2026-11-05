@@ -22,7 +22,7 @@ Reminders are emailed once a night: one if a request is still waiting for you, a
 
 ## Dates I can't serve
 
-Choose "Dates I can't serve". Pick "From" and "To", optionally a reason, and choose "Save dates". People who schedule worship see these dates when they choose who to ask. Saving dates does not cancel anything you have already agreed to: if you are already confirmed on one of the days, the page says so, and you tell the person who asked you. Dates that touch or overlap are joined into one.
+Choose "Dates I can't serve". Pick "From" and "To", optionally a reason, and choose "Save dates". When people who schedule worship choose who to ask, they are warned about a date you saved. They do not see your reason. Saving dates does not cancel anything you have already agreed to: if you are already confirmed on one of the days, the page says so, and you tell the person who asked you. Dates that touch or overlap are joined into one.
 
 ## If you are under 18
 

@@ -1438,6 +1438,18 @@ Assignments 1 to 4 of "Phase 3 amendment 3". F435, F436 and DECISION-329 numbers
 - check W12's fail-before;
 - run one probe test file confirming finding 1.
 
+#### Phase 5 run 1 loop-back (ux-developer, 2026-11-05)
+
+Amendment 3 ux assignments, done. No schema, route, action, dependency or string added (copy came from the api-developer's `copy.ts`).
+
+- **F435 page.** `admin/worship/services/[eventId]/page.tsx`: the `notFound()` and its import are gone; "Teams serving" always renders. A plan holder on an open service gets `ServiceTeamsEditor` (its empty sentence plus Add a team); any other key holder, and everyone on a cancelled or started service, gets the list or `NAV_COPY.noServingTeams`. `forbidden` from the read is still the organization's 404.
+- **`generate/page.tsx`**: the empty state's title is `NAV_COPY.noServiceTypesTitle`.
+- **Unit.** `pages.test.tsx`: plan holder (empty state, add-a-team control, Edit and Cancel), manage-only and schedule-only (heading plus sentence, no 404), cancelled team-less service, and `forbidden` still 404. `add-group-member-form.test.tsx` pinned to the new `groupsRoleNote`.
+- **Help (walked against the screens on my own server).** `worship-setting-up.md:25`, `worship-serving-on-a-team.md:25`, `worship-scheduling-a-team.md:21` replaced with the amendment's text. The scheduling sentence was read against `09-send-dialog.png` ("Send 2 requests?" plus "1 can't be emailed (...)"). No label moved; `verifiedIn` untouched (set at integration). `npm run check:help` passes.
+- **E2E.** `e2e/worship-schedule.spec.ts`: a new serial test at 360px (no team ticked, lands on the service, sentence, Add a team with the fixture's Chancel Choir, listed; no sideways scroll, targets at least 44px). Screenshots `30-service-without-teams.png` and `31-service-team-added.png` opened and read: nothing clipped, controls full width. `e2e/hydration/worship-forms.spec.ts`: the third test (inert before release; then 17:30, 18:15, "Fellowship hall", only Chancel Choir ticked; asserts `events` row and live `worship_service_teams` equal to `[fx.choir]`), run in the production lane.
+- **Runs.** Dev lane on :3690 (own server, started by PID, stopped): worship-schedule, founder, toggle, respond, respond-mfa and hydration/worship-forms, 16 passed on the first run; the one new schedule test failed on my own ambiguous locator, fixed, schedule spec 4 of 4 green. Prod lane :3691: worship-forms 3 of 3. Typecheck, lint, `npm run check` clean. Unit suite serial: 13867 passed, 1 failed (`dev-docs.test.ts`, the known red), 4121 skipped.
+
+
 ## Type Check
 
 `npm run typecheck`: **PASS** (exit 0). `npm run lint`: **PASS** (no warnings). `npm run check`: **PASS**, all ten tripwires (help: 31 entries, 27 published, 7 images).

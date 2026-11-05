@@ -18,7 +18,7 @@ For someone who is not on record, such as a visiting preacher, choose "Add a gue
 
 ## Send the requests
 
-When the schedule is ready, choose "Send requests". The dialog says how many people will be emailed and how many cannot be. Each person gets one email listing their positions and dates. Choose "Send requests" again to confirm. A position then reads "Waiting for an answer" until the person answers.
+When the schedule is ready, choose "Send requests". The dialog shows how many requests you are about to send and, if some people cannot be emailed, how many and why. Each person gets one email listing their positions and dates. Choose "Send requests" again to confirm. A position then reads "Waiting for an answer" until the person answers.
 
 Some people cannot be emailed. Their line says why, for example "No email sent: may be under 18. Ask a parent or guardian, then record their answer." Two other lines you may see are "No email sent: no email address on file." and "No email sent: marked do not contact." For them, ask them yourself and then choose "Record answer", "Accepted" or "Declined". The answer is saved with your name on it.
 

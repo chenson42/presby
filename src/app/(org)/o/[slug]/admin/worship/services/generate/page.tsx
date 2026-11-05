@@ -30,7 +30,7 @@ export default async function GenerateServicesPage({ params }: { params: Promise
       <BackLink href={`/o/${slug}/admin/worship/services`} label={NAV_COPY.backToServices} />
       <h1 className="text-2xl font-semibold">{heading}</h1>
       {read.data.types.length === 0 ? (
-        <EmptyState title={SERVICES_COPY.types.empty} body={NAV_COPY.noServiceTypesToUse} />
+        <EmptyState title={NAV_COPY.noServiceTypesTitle} body={NAV_COPY.noServiceTypesToUse} />
       ) : (
         <GenerateForm slug={slug} types={read.data.types.map((t) => ({ id: t.id, name: t.name }))} />
       )}

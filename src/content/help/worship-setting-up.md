@@ -22,7 +22,7 @@ The service page lists the teams serving ("Teams serving"). To change the time o
 
 ## Who sees what
 
-The people who schedule worship see who is scheduled, who has answered, and the reason a person gave for declining or for dates they can't serve (Away, Work, Family or Other). Team members see their own requests and their team's names and positions.
+The people who schedule worship see who is scheduled, who has answered, and the reason a person gave for declining. When they choose who to ask, they are warned if a person has saved that date as one they can't serve; they do not see the person's reason for it. Someone who plans or sets up worship but does not schedule it sees that a person declined, not the reason. Team members see their own requests and their team's names and positions.
 
 ## What it does not do yet
 

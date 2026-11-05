@@ -251,4 +251,27 @@ test.describe("Worship: scheduling at 360px", () => {
     await expect(page.getByTestId("edit-service-open")).toHaveCount(0);
     await page.close();
   });
+
+  test("a service with no team ticked opens, says so, and takes a team from Add a team (F435)", async () => {
+    const page = await newPhonePage(planner);
+    await page.goto(`${base()}/admin/worship/services/new`);
+    await waitHydrated(page);
+    await page.getByLabel("Title").fill("Quiet midweek prayer");
+    await page.getByLabel("Date").fill(new Date(Date.now() + 50 * 86_400_000).toISOString().slice(0, 10));
+    await page.getByLabel("Starts at").fill("12:00");
+    await page.getByRole("button", { name: "Add service" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Quiet midweek prayer" })).toBeVisible();
+    await waitHydrated(page).catch(() => undefined);
+    await expect(page.getByTestId("teams-serving")).toContainText("No teams are serving yet.");
+    await noSidewaysScroll(page);
+    expect(await smallTargets(page)).toEqual([]);
+    await shot(page, "30-service-without-teams");
+
+    await page.getByLabel("Add a team").selectOption({ label: NAMES.choir });
+    await page.getByRole("button", { name: "Add a team" }).click();
+    await expect(page.getByTestId("teams-serving").getByRole("listitem").filter({ hasText: NAMES.choir })).toBeVisible();
+    await expect(page.getByTestId("teams-serving")).not.toContainText("No teams are serving yet.");
+    await shot(page, "31-service-team-added");
+    await page.close();
+  });
 });

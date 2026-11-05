@@ -77,4 +77,30 @@ test.describe("Hydration - worship forms (DECISION-159)", () => {
     expect(rows).toEqual([{ kind: "choir", greeters: 1 }]);
     await context.close();
   });
+
+  test("the new-service form saves the chosen times, place and only the ticked team", async ({ browser }) => {
+    const context = await signedInContext(browser, "planner", `${base()}/admin/worship`, { width: 360, height: 740 });
+    const page = await context.newPage();
+    const release = await holdScripts(page);
+    await inertThenOpen(page, "/admin/worship/services/new", release);
+    const day = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
+    await page.getByLabel("Title").fill("Hydration Vespers");
+    await page.getByLabel("Date").fill(day);
+    await page.getByLabel("Starts at").fill("17:30");
+    await page.getByLabel("Ends at (optional)").fill("18:15");
+    await page.getByLabel("Where (optional)").fill("Fellowship hall");
+    await page.getByLabel("Chancel Choir").check();
+    await page.getByRole("button", { name: "Add service" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Hydration Vespers" })).toBeVisible();
+    const rows = (await sql`
+      select e.title, to_char(e.starts_at, 'YYYY-MM-DD"T"HH24:MI') as starts, to_char(e.ends_at, 'YYYY-MM-DD"T"HH24:MI') as ends, e.location,
+             coalesce((select array_agg(t.group_id::text order by t.group_id::text) from worship_service_teams t
+                        where t.event_id = e.id and t.removed_at is null), '{}') as teams
+        from events e
+       where e.organization_id = ${fx.orgId}::uuid and e.title = 'Hydration Vespers'`) as Array<{ title: string; starts: string; ends: string; location: string; teams: string[] }>;
+    expect(rows).toEqual([
+      { title: "Hydration Vespers", starts: `${day}T17:30`, ends: `${day}T18:15`, location: "Fellowship hall", teams: [fx.choir] },
+    ]);
+    await context.close();
+  });
 });

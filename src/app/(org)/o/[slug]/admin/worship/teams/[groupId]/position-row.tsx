@@ -163,7 +163,7 @@ export function PositionRow({ slug, groupId, position }: { slug: string; groupId
             <AlertDialogCancel className="min-h-11" disabled={pending}>
               {TEAMS_COPY.retirePositionDialog.cancel}
             </AlertDialogCancel>
-            <Button type="button" className="min-h-11" disabled={pending} onClick={retire} data-testid="retire-position-confirm">
+            <Button type="button" variant="destructive" className="min-h-11" disabled={pending} onClick={retire} data-testid="retire-position-confirm">
               {TEAMS_COPY.retirePositionDialog.confirm}
             </Button>
           </AlertDialogFooter>

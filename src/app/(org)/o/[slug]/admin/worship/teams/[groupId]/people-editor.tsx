@@ -181,7 +181,7 @@ function PersonCard({
             <AlertDialogCancel className="min-h-11" disabled={pending}>
               {TEAMS_COPY.removeDialog.cancel}
             </AlertDialogCancel>
-            <Button type="button" className="min-h-11" disabled={pending} onClick={remove} data-testid="remove-member-confirm">
+            <Button type="button" variant="destructive" className="min-h-11" disabled={pending} onClick={remove} data-testid="remove-member-confirm">
               {TEAMS_COPY.removeDialog.confirm}
             </Button>
           </AlertDialogFooter>

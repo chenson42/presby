@@ -32,7 +32,10 @@ export function AssignmentRow({
     <li className="space-y-2 rounded-lg border border-border bg-card p-3" data-testid="assignment-row" data-assignment-id={assignment.assignmentId}>
       <p className="text-base font-medium [overflow-wrap:anywhere]">{assignment.name}</p>
       <StatusChip status={assignment.status} declineReason={assignment.declineReason} isGuest={assignment.isGuest} />
-      {sent && !assignment.isGuest ? <ReachNote outcome={assignment.noticeOutcome} /> : null}
+      {/* "Ask a parent or guardian, then record their answer" is an instruction: show it only while an answer is still needed. */}
+      {sent && !assignment.isGuest && !(assignment.noticeOutcome === "guardian" && assignment.status !== "requested") ? (
+        <ReachNote outcome={assignment.noticeOutcome} />
+      ) : null}
       {!sent && assignment.mayBeUnder18 ? (
         <p className="text-sm text-muted-foreground">{BOARD_COPY.picker.mayBeUnder18}</p>
       ) : null}

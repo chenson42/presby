@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
+import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { formatClockTime } from "@/components/worship/service-when";
@@ -32,6 +33,7 @@ export default async function ServiceTypesPage({ params }: { params: Promise<{ s
 
   return (
     <div className="max-w-3xl space-y-6">
+      <BackLink href={`/o/${slug}/admin/worship`} label={NAV_COPY.backToPlan} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold">{heading}</h1>
         <Button asChild className="min-h-11">

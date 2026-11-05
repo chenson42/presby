@@ -24,6 +24,7 @@ const actions = vi.hoisted(() => ({
 vi.mock("@/app/(org)/o/[slug]/worship/actions", () => actions);
 
 import { ACTION_COPY, BOARD_COPY } from "@/lib/worship/copy";
+import { AssignmentRow } from "./assignment-row";
 import { GuestForm } from "./guest-form";
 import { PersonPickerDialog } from "./person-picker-dialog";
 import { RecordResponseDialog } from "./record-response-dialog";
@@ -197,6 +198,46 @@ describe("RemoveAssignmentDialog", () => {
     fireEvent.click(screen.getByTestId("remove-confirm"));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(BOARD_COPY.removeDialog.toast));
     expect(actions.removeAssignmentAction).toHaveBeenCalledWith("alder", { assignmentId: A });
+  });
+});
+
+describe("AssignmentRow - the guardian instruction lasts only while an answer is needed", () => {
+  const row = (status: "requested" | "confirmed" | "declined") =>
+    render(
+      <ul>
+        <AssignmentRow
+          slug="alder"
+          positionName="Keys"
+          canAct
+          assignment={{ assignmentId: A, personId: "p", name: "Posy", isGuest: false, status, declineReason: null, noticeOutcome: "guardian", recordedBy: status === "requested" ? null : "Barnaby", mayBeUnder18: true }}
+        />
+      </ul>,
+    );
+
+  it("shown while the request is waiting", () => {
+    row("requested");
+    expect(screen.getByTestId("reach-note").textContent).toBe(BOARD_COPY.reach.guardian);
+  });
+  it.each(["confirmed", "declined"] as const)("gone once the answer is recorded (%s); 'Recorded by' stays", (status) => {
+    row(status);
+    expect(screen.queryByTestId("reach-note")).toBeNull();
+    expect(screen.getByTestId("recorded-by").textContent).toBe("Recorded by Barnaby");
+  });
+});
+
+describe("destructive confirms use the destructive variant; Send stays primary", () => {
+  it("Remove", () => {
+    render(<RemoveAssignmentDialog slug="alder" assignmentId={A} personName="Wren" positionName="Vocals" wasSent={false} />);
+    fireEvent.click(screen.getByTestId(`remove-${A}`));
+    expect(screen.getByTestId("remove-confirm").className).toContain("bg-destructive");
+  });
+  it("Send", async () => {
+    actions.getSendPreviewAction.mockResolvedValue({ ok: true, data: { assignments: 1, people: 1, services: 1, emailed: 1, guardian: 0, noAddress: 0, doNotContact: 0, notEmailed: 0, notOnTeam: 0, overCap: false, mailAvailable: true } });
+    render(<SendRequestsDialog slug="alder" eventId={E} groupId={G} draftCount={1} />);
+    fireEvent.click(screen.getByTestId("send-open"));
+    expect(screen.getByTestId("send-confirm").className).toContain("bg-primary");
+    expect(screen.getByTestId("send-confirm").className).not.toContain("bg-destructive");
+    await waitFor(() => expect((screen.getByTestId("send-confirm") as HTMLButtonElement).disabled).toBe(false));
   });
 });
 

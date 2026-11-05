@@ -1,6 +1,7 @@
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
+import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { OrgAccessError } from "@/lib/authz";
-import { SERVICES_COPY } from "@/lib/worship/copy";
+import { NAV_COPY, SERVICES_COPY } from "@/lib/worship/copy";
 import { getServiceFormOptions } from "@/lib/worship/reads";
 import { ServiceForm } from "../service-form";
 
@@ -25,6 +26,7 @@ export default async function NewServicePage({ params }: { params: Promise<{ slu
 
   return (
     <div className="max-w-xl space-y-6">
+      <BackLink href={`/o/${slug}/admin/worship/services`} label={NAV_COPY.backToServices} />
       <h1 className="text-2xl font-semibold">{heading}</h1>
       <ServiceForm slug={slug} mode="create" teams={read.data.teams} />
     </div>

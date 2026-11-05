@@ -1,6 +1,7 @@
 import { gateWorshipPage } from "@/app/(org)/o/[slug]/worship/worship-gate";
+import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { OrgAccessError } from "@/lib/authz";
-import { TEAMS_COPY } from "@/lib/worship/copy";
+import { NAV_COPY, TEAMS_COPY } from "@/lib/worship/copy";
 import { getAdoptableGroups, type AdoptableGroup } from "@/lib/worship/reads";
 import { ExistingGroupForm } from "./existing-group-form";
 import { TeamForm } from "./team-form";
@@ -31,6 +32,7 @@ export default async function NewWorshipTeamPage({ params }: { params: Promise<{
 
   return (
     <div className="max-w-xl space-y-8">
+      <BackLink href={`/o/${slug}/admin/worship/teams`} label={NAV_COPY.backToTeams} />
       <h1 className="text-2xl font-semibold">{TEAMS_COPY.newButton}</h1>
       <TeamForm slug={slug} />
       {adoptable.length > 0 && <ExistingGroupForm slug={slug} groups={adoptable} />}

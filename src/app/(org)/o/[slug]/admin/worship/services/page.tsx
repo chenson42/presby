@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { Ban, Plus } from "lucide-react";
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
+import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { formatWhen } from "@/components/worship/service-when";
 import { OrgAccessError } from "@/lib/authz";
-import { SERVICES_COPY } from "@/lib/worship/copy";
+import { NAV_COPY, SERVICES_COPY } from "@/lib/worship/copy";
 import { getServicesList } from "@/lib/worship/reads";
 
 /**
@@ -51,6 +52,7 @@ export default async function WorshipServicesPage({
 
   return (
     <div className="max-w-3xl space-y-6">
+      <BackLink href={`/o/${slug}/admin/worship`} label={NAV_COPY.backToPlan} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold">{heading}</h1>
         {canPlan && (

@@ -80,7 +80,7 @@ export function RemoveAssignmentDialog({
             <AlertDialogCancel className="min-h-11" disabled={pending}>
               {BOARD_COPY.removeDialog.cancel}
             </AlertDialogCancel>
-            <Button type="button" className="min-h-11" disabled={pending} onClick={remove} data-testid="remove-confirm">
+            <Button type="button" variant="destructive" className="min-h-11" disabled={pending} onClick={remove} data-testid="remove-confirm">
               {BOARD_COPY.removeDialog.confirm}
             </Button>
           </AlertDialogFooter>

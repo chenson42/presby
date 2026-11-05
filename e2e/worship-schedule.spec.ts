@@ -175,6 +175,8 @@ test.describe("Worship: scheduling at 360px", () => {
     await expect(page.getByText("Answer recorded.")).toBeVisible();
     await expect(posyRow.getByTestId("status-chip")).toContainText("Confirmed");
     await expect(posyRow.getByTestId("recorded-by")).toHaveText(`Recorded by ${NAMES.leader}`);
+    // The instruction is gone once the answer is recorded.
+    await expect(posyRow.getByTestId("reach-note")).toHaveCount(0);
 
     // Remove Wren after the Send: the dialog says she is not told.
     const wrenRow = page.getByTestId("assignment-row").filter({ hasText: NAMES.wren });
@@ -203,6 +205,7 @@ test.describe("Worship: scheduling at 360px", () => {
 
     await visit(page, `${base()}/admin/worship/teams`, "22-teams");
     await expect(page.getByTestId("teams-list")).toContainText(NAMES.band);
+    await expect(page.getByRole("link", { name: "Back to Plan worship" })).toHaveCount(1);
     await visit(page, `${base()}/admin/worship/teams/${fx.band}`, "23-team");
     await expect(page.getByTestId("position-row")).toHaveCount(4);
 

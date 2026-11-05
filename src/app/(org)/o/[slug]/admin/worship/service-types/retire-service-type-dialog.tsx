@@ -61,7 +61,7 @@ export function RetireServiceTypeDialog({ slug, serviceTypeId, name }: { slug: s
             <AlertDialogCancel className="min-h-11" disabled={pending}>
               {NAV_COPY.cancel}
             </AlertDialogCancel>
-            <Button type="button" className="min-h-11" disabled={pending} onClick={retire} data-testid="retire-type-confirm">
+            <Button type="button" variant="destructive" className="min-h-11" disabled={pending} onClick={retire} data-testid="retire-type-confirm">
               {SERVICES_COPY.types.retireDialog.confirm}
             </Button>
           </AlertDialogFooter>

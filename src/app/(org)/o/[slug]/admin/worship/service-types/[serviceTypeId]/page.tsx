@@ -1,4 +1,5 @@
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
+import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { OrgAccessError } from "@/lib/authz";
 import { NAV_COPY, SERVICES_COPY, TEAMS_COPY } from "@/lib/worship/copy";
 import { getServiceFormOptions, getServiceType } from "@/lib/worship/reads";
@@ -30,6 +31,7 @@ export default async function EditServiceTypePage({ params }: { params: Promise<
 
   return (
     <div className="max-w-xl space-y-6">
+      <BackLink href={`/o/${slug}/admin/worship/service-types`} label={NAV_COPY.backToServiceTypes} />
       <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold [overflow-wrap:anywhere]">
         {value.name}
         {value.retired && (

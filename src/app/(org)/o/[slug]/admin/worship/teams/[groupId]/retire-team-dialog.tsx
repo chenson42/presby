@@ -60,7 +60,7 @@ export function RetireTeamDialog({ slug, groupId, teamName }: { slug: string; gr
             <AlertDialogCancel className="min-h-11" disabled={pending}>
               {TEAMS_COPY.retireTeamDialog.cancel}
             </AlertDialogCancel>
-            <Button type="button" className="min-h-11" disabled={pending} onClick={retire} data-testid="retire-team-confirm">
+            <Button type="button" variant="destructive" className="min-h-11" disabled={pending} onClick={retire} data-testid="retire-team-confirm">
               {TEAMS_COPY.retireTeamDialog.confirm}
             </Button>
           </AlertDialogFooter>

@@ -66,7 +66,7 @@ export function CancelServiceDialog({ slug, eventId }: { slug: string; eventId: 
             <AlertDialogCancel className="min-h-11" disabled={pending}>
               {SERVICES_COPY.cancelDialog.keep}
             </AlertDialogCancel>
-            <Button type="button" className="min-h-11" disabled={pending} onClick={cancel} data-testid="cancel-service-confirm">
+            <Button type="button" variant="destructive" className="min-h-11" disabled={pending} onClick={cancel} data-testid="cancel-service-confirm">
               {SERVICES_COPY.cancelDialog.confirm}
             </Button>
           </AlertDialogFooter>

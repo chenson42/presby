@@ -401,3 +401,12 @@ describe("ServiceTeamsEditor", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Sunday Band is still scheduled for 1 upcoming service. Remove those people first."));
   });
 });
+
+describe("destructive confirms use the destructive variant", () => {
+  it.each([
+    ["cancel service", () => { render(<CancelServiceDialog slug="alder" eventId={E} />); fireEvent.click(screen.getByTestId("cancel-service-open")); return "cancel-service-confirm"; }],
+    ["retire team", () => { render(<RetireTeamDialog slug="alder" groupId={G} teamName="Band" />); fireEvent.click(screen.getByTestId("retire-team-open")); return "retire-team-confirm"; }],
+  ])("%s", (_n, open) => {
+    expect(screen.getByTestId(open()).className).toContain("bg-destructive");
+  });
+});

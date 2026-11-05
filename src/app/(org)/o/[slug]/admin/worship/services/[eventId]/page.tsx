@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
+import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { ServiceSummary } from "@/components/worship/service-summary";
 import { SendRequestsDialog } from "@/components/worship/send-requests-dialog";
 import { TeamBoard } from "@/components/worship/team-board";
 import { OrgAccessError } from "@/lib/authz";
-import { ACTION_COPY, SERVICES_COPY } from "@/lib/worship/copy";
+import { ACTION_COPY, NAV_COPY, SERVICES_COPY } from "@/lib/worship/copy";
 import { getServiceBoard, getServiceFormOptions } from "@/lib/worship/reads";
 import { CancelServiceDialog } from "./cancel-service-dialog";
 import { EditServiceDialog } from "./edit-service-dialog";
@@ -56,6 +57,7 @@ export default async function WorshipServicePage({ params }: { params: Promise<{
 
   return (
     <div className="max-w-3xl space-y-8">
+      <BackLink href={`/o/${slug}/admin/worship/services`} label={NAV_COPY.backToServices} />
       <div className="space-y-3">
         <h1 className="text-2xl font-semibold [overflow-wrap:anywhere]">{service.title}</h1>
         <ServiceSummary startsAt={service.startsAt} location={service.location} cancelled={service.cancelled} />

@@ -395,7 +395,7 @@ export const HELP_PAGES = [
       "Community",
       "Worship & Events",
       "Governance & Courts",
-      "Worship & Service Planning",
+      "Worship",
       "Insights & Analytics",
       "Administration",
       "Organization Administration",

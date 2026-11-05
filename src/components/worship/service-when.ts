@@ -29,3 +29,14 @@ export function formatCalendarDay(dayKey: string): string {
 export function formatCalendarShort(dayKey: string): string {
   return formatShortDate(dayKey);
 }
+
+/** '10:00 AM' from a bare 'HH:MM' (a service type's usual start). A label: no zone, no `Date`. */
+export function formatClockTime(hhmm: string): string {
+  return formatTime(`2000-01-01T${hhmm}`);
+}
+
+/** Splits wall-clock text into the 'YYYY-MM-DD' and 'HH:MM' halves the date and time inputs hold. */
+export function splitWallClock(wallClock: string | null): { date: string; time: string } {
+  if (!wallClock) return { date: "", time: "" };
+  return { date: wallClock.slice(0, 10), time: wallClock.slice(11, 16) };
+}

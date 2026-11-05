@@ -119,7 +119,8 @@ describe.skipIf(!hasDb)("worship/store.ts scheduling exports (Postgres-backed)",
 
     it("a seat that ended, has not begun, or belongs to a merged, deceased or ended-relationship person schedules nothing", async () => {
       const w = await t.build("m3");
-      const today = String((await t.one(sql`select presby_worship_org_today(${w.org})::text as d`)).d);
+      // the in-effect day: the day the trigger and the resolver compare grant and seat dates against (F434), not the service day
+      const day = String((await t.one(sql`select presby_worship_in_effect_day(${w.org})::text as d`)).d);
       const seat = async () => {
         const id = await t.person(w.org, `Seat${Math.floor(Math.random() * 1e6)}`);
         await t.onRoster(w.org, w.band, id, "leader");
@@ -129,11 +130,11 @@ describe.skipIf(!hasDb)("worship/store.ts scheduling exports (Postgres-backed)",
 
       // The leader seat that ends TODAY has ended (ends_on is exclusive).
       const ended = await seat();
-      await t.q(sql`update group_memberships set ends_on = ${today}::date where group_id = ${w.band} and person_id = ${ended}`);
+      await t.q(sql`update group_memberships set ends_on = ${day}::date where group_id = ${w.band} and person_id = ${ended}`);
       expect(await attempt(ended)).toEqual({ kind: "forbidden" });
       // A seat that begins tomorrow has not begun.
       const future = await seat();
-      await t.q(sql`update group_memberships set starts_on = (${today}::date + 1) where group_id = ${w.band} and person_id = ${future}`);
+      await t.q(sql`update group_memberships set starts_on = (${day}::date + 1) where group_id = ${w.band} and person_id = ${future}`);
       expect(await attempt(future)).toEqual({ kind: "forbidden" });
       // A merged leader, a deceased leader, and a leader whose relationship ended.
       const merged = await seat();

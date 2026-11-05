@@ -384,6 +384,7 @@ describe.skipIf(!hasDb)("worship/store.ts configuration exports (Postgres-backed
       expect(await store.addTeamMember(v(w.manager, w), { groupId: w.choir, personId: w.bob })).toEqual({ kind: "ok", data: { changed: true } });
       const row = await t.one(sql`select group_role, source, starts_on::text as starts_on, ends_on from group_memberships
                                    where group_id = ${w.choir} and person_id = ${w.bob}`);
+      // service day: the roster add stamps the organization's day
       const today = await t.one(sql`select presby_worship_org_today(${w.org})::text as d`);
       expect(row).toMatchObject({ group_role: "member", source: "managed", starts_on: today.d, ends_on: null });
       expect(await store.addTeamMember(v(w.manager, w), { groupId: w.choir, personId: w.bob })).toEqual({ kind: "ok", data: { changed: false } });
@@ -422,7 +423,8 @@ describe.skipIf(!hasDb)("worship/store.ts configuration exports (Postgres-backed
       const id = String(bobRow!.id);
       expect(await store.endTeamMember(v(w.manager, w), { groupId: w.band, groupMembershipId: id })).toEqual({ kind: "ok", data: { changed: true } });
       const ended = await t.one(sql`select ends_on::text as ends_on from group_memberships where id = ${id}`);
-      const today = await t.one(sql`select presby_worship_org_today(${w.org})::text as d`);
+      // the in-effect day: endTeamMember stamps it (F434), not the service day
+      const today = await t.one(sql`select presby_worship_in_effect_day(${w.org})::text as d`);
       expect(ended.ends_on).toBe(today.d);
       expect(await store.endTeamMember(v(w.manager, w), { groupId: w.band, groupMembershipId: id })).toEqual({ kind: "ok", data: { changed: false } });
       const [seat] = await t.q(sql`select id::text as id from group_memberships where group_id = ${w.band} and person_id = ${w.leader}`);

@@ -398,6 +398,44 @@ export const MEMBER_COPY = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Navigation and page chrome. NOT in the Phase 3 Copy table (the table names the
+// controls and states, not the back links and one-line page descriptions every
+// page needs); added in Batches 4 and 5 and listed in the work-log for the
+// Phase 6 copy read and a fork's branding pass.
+// ---------------------------------------------------------------------------
+
+export const NAV_COPY = {
+  tryAgain: "Try again",
+  backToWorship: "Back to Worship",
+  backToPlan: "Back to Plan worship",
+  backToTeams: "Back to Worship teams",
+  backToServiceTypes: "Back to Service types",
+  backToServices: "Back to Services",
+  /** "Back to {team}" on a board opened from a team page. */
+  backToTeam: (team: string) => `Back to ${team}`,
+  noServices: "No services are coming up for this team.",
+  loadingCandidates: "Loading...",
+  candidatesError: "We couldn't load that. Try again.",
+  saving: "Saving...",
+  cancel: "Cancel",
+  save: "Save",
+  edit: "Edit",
+  guestSubmit: "Add guest",
+  searchNone: "No one matches that search.",
+  slotsCount: (n: number) => `${n} ${n === 1 ? "person" : "people"}`,
+  newServiceType: "New service type",
+  editServiceType: "Edit service type",
+  noPositions: "This team has no positions yet.",
+  noServingTeams: "No teams are serving yet.",
+  noServiceTypesToUse: "Save a service type first, then come back to add several services.",
+  noTeamsToAdd: "Every team is already serving.",
+  chooseOne: "Choose one",
+  teamNone: "No teams yet. Make a team first, then choose it here.",
+  /** "{n} min" next to a service type's usual length. */
+  minutes: (n: number) => `${n} min`,
+} as const;
+
+// ---------------------------------------------------------------------------
 // G7 - emails (plain text plus the standard layout; no name of any person, no free text)
 // ---------------------------------------------------------------------------
 

@@ -6,14 +6,17 @@ import { guardedCall, resolveActionIdentity, toActionResult } from "@/lib/worshi
 import {
   addBlockoutSchema,
   endBlockoutSchema,
+  pickerCandidatesSchema,
   placeGuestSchema,
   placePersonSchema,
   recordResponseSchema,
   removeAssignmentSchema,
   respondToRequestSchema,
+  sendPreviewSchema,
   sendRequestsSchema,
 } from "@/lib/worship/input";
 import { sendQueued } from "@/lib/worship/notify";
+import { getPickerCandidates, getSendPreview, type PickerCandidate, type SendPreview } from "@/lib/worship/reads";
 import {
   addBlockout,
   endBlockout,
@@ -189,4 +192,32 @@ export async function sendRequestsAction(slug: string, input: unknown): Promise<
     notOnTeam: d.notOnTeam,
     services: d.services,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Reads the scheduling dialogs call (Batch 4). They write nothing; the store read
+// repeats the gate (`schedule` or a live seat on the team) inside its own
+// transaction, so a forged call is refused exactly as a forged write is.
+// ---------------------------------------------------------------------------
+
+/** The roster of one team, for one position on one service, with the picker's warnings. */
+export async function getPickerCandidatesAction(slug: string, input: unknown): Promise<ActionResult<PickerCandidate[]>> {
+  const who = await resolveActionIdentity(slug);
+  if (!who.ok) return { ok: false, error: who.error };
+  const parsed = pickerCandidatesSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: ACTION_COPY.generic };
+
+  const result = await guardedCall(() => getPickerCandidates(who.identity.viewer, parsed.data));
+  return toActionResult(result, who.identity.organizationName);
+}
+
+/** What a Send with this scope WOULD do, without writing: the counts the Send dialog prints. */
+export async function getSendPreviewAction(slug: string, input: unknown): Promise<ActionResult<SendPreview>> {
+  const who = await resolveActionIdentity(slug);
+  if (!who.ok) return { ok: false, error: who.error };
+  const parsed = sendPreviewSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: ACTION_COPY.generic };
+
+  const result = await guardedCall(() => getSendPreview(who.identity.viewer, parsed.data));
+  return toActionResult(result, who.identity.organizationName);
 }

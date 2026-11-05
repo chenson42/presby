@@ -118,3 +118,17 @@ export const respondToRequestSchema = z.object({ assignmentId: id, answer: z.enu
 export const addBlockoutSchema = z.object({ startsOn: text, endsOn: text, reason });
 
 export const endBlockoutSchema = z.object({ blockoutId: id });
+
+// ---------------------------------------------------------------------------
+// The two READ actions the scheduling dialogs call (Batch 4): the person picker's
+// candidates and the Send preview. Reads, so they write nothing.
+// ---------------------------------------------------------------------------
+
+export const pickerCandidatesSchema = z.object({
+  eventId: id,
+  groupId: id,
+  positionId: id,
+  showAll: z.boolean(),
+});
+
+export const sendPreviewSchema = z.object({ eventIds: z.array(id).max(200).optional(), groupId: id.optional() });

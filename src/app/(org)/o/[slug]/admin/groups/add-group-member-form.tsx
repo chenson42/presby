@@ -17,6 +17,7 @@ import {
 } from "./group-schema";
 import { addGroupMemberAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
+import { TEAMS_COPY } from "@/lib/worship/copy";
 
 const SELECT_CLASSES =
   "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 pr-8 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
@@ -148,6 +149,9 @@ export function AddGroupMemberForm({
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             This is descriptive only — it does not grant software access.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground" data-testid="group-role-worship-helper">
+            {TEAMS_COPY.groupsHelper}
           </p>
         </div>
 

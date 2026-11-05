@@ -64,6 +64,15 @@ describe("AddGroupMemberForm — role is descriptive-only copy", () => {
   });
 });
 
+describe("AddGroupMemberForm — the worship helper line (worship Copy G3)", () => {
+  it("says a chair or leader can also schedule a worship team and approve reimbursement requests, from copy.ts", () => {
+    render(<AddGroupMemberForm slug="alder-creek" groupId="group-2" people={PEOPLE} />);
+    expect(screen.getByTestId("group-role-worship-helper").textContent).toBe(
+      "A chair or leader can also schedule people when this group is a worship team, and can approve this group's reimbursement requests when your treasurer allows requests for it.",
+    );
+  });
+});
+
 describe("AddGroupMemberForm — submit and error surfacing", () => {
   it("submits groupId/personId/groupRole/startsOn, resets, and toasts success", async () => {
     mockAddGroupMemberAction.mockResolvedValueOnce({

@@ -24,6 +24,7 @@ const store = vi.hoisted(() => ({
   recordResponse: vi.fn(),
   sendRequests: vi.fn(),
 }));
+const reads = vi.hoisted(() => ({ getPickerCandidates: vi.fn(), getSendPreview: vi.fn() }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: revalidate }));
@@ -33,6 +34,7 @@ vi.mock("@/lib/authz", () => {
   return { OrgAccessError, resolveOrgContext: resolve };
 });
 vi.mock("@/lib/worship/store", () => store);
+vi.mock("@/lib/worship/reads", () => reads);
 vi.mock("@/lib/worship/notify", () => ({ sendQueued }));
 
 import { OrgAccessError } from "@/lib/authz";
@@ -63,6 +65,12 @@ const cases: Case[] = [
   ["removeAssignmentAction", () => actions.removeAssignmentAction("alder-creek", { assignmentId: ID }), store.removeAssignment],
   ["recordResponseAction", () => actions.recordResponseAction("alder-creek", { assignmentId: ID, answer: "declined", reason: "away" }), store.recordResponse],
   ["sendRequestsAction", () => actions.sendRequestsAction("alder-creek", {}), store.sendRequests],
+  [
+    "getPickerCandidatesAction",
+    () => actions.getPickerCandidatesAction("alder-creek", { eventId: ID, groupId: ID, positionId: ID, showAll: false }),
+    reads.getPickerCandidates,
+  ],
+  ["getSendPreviewAction", () => actions.getSendPreviewAction("alder-creek", { eventIds: [ID], groupId: ID }), reads.getSendPreview],
 ];
 
 describe.each(cases)("%s", (_name, call, mock) => {

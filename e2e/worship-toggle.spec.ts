@@ -9,12 +9,14 @@
  */
 import { test, expect, type BrowserContext } from "@playwright/test";
 import { platformSql, type Sql } from "./support/db";
+import { captureFlags, setFlag, type FlagCapture } from "./support/flags";
 import {
-  newPhonePage, noSidewaysScroll, removeWorshipFixture, seedAssignment, setToggle, setupWorshipFixture, signedInContext,
+  newPhonePage, noSidewaysScroll, removeWorshipFixture, seedAssignment, setToggle, setupWorshipFixture, signedInContext, waitHydrated,
   type WorshipFixture,
 } from "./support/worship-fixture";
 
 let sql: Sql;
+let flags: FlagCapture;
 let fx: WorshipFixture;
 let wren: BrowserContext;
 let planner: BrowserContext;
@@ -27,6 +29,9 @@ test.describe("Worship: the organization toggle", () => {
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(240_000);
     sql = platformSql("worship-toggle.spec");
+    // The Features page sits behind the PLATFORM flag org_portal.features: set it, and put it back as found.
+    flags = await captureFlags(sql, ["org_portal.features"]);
+    await setFlag(sql, "org_portal.features", true);
     fx = await setupWorshipFixture(sql, { tag: "t", toggle: null });
     await seedAssignment(sql, fx, { who: "wren", position: "vocals", upTo: "requested" });
     wren = await signedInContext(browser, "wren", `${base()}/worship`);
@@ -36,6 +41,7 @@ test.describe("Worship: the organization toggle", () => {
     await wren?.close();
     await planner?.close();
     if (sql && fx) await removeWorshipFixture(sql, fx);
+    await flags?.restore();
   });
 
   test("off: a member is told whom to ask, at 200", async () => {
@@ -74,6 +80,40 @@ test.describe("Worship: the organization toggle", () => {
     await setToggle(sql, fx.orgId, true);
     await page.reload();
     await expect(page.getByTestId("section-waiting")).toBeVisible();
+    await page.close();
+  });
+
+  test("the Features card: Worship (on) asks first and says how many are scheduled; 'Keep it on' leaves it; 'Turn it off' deletes nothing", async () => {
+    await setToggle(sql, fx.orgId, true);
+    const page = await newPhonePage(planner);
+    await page.goto(`${base()}/admin/features`);
+    await waitHydrated(page);
+    await expect(page.locator("h3", { hasText: /^Worship$/ })).toBeVisible();
+    await expect(
+      page.getByText("Lets your congregation set up worship teams, plan services on the calendar, and ask people to serve. Turning this off hides every worship page and stops requests and reminders. Nothing is deleted."),
+    ).toBeVisible();
+    await page.screenshot({ path: "test-results/worship-360/42-features-on.png", fullPage: true });
+    await page.getByRole("switch", { name: /^Worship, currently on/ }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("Turn off Worship?");
+    // Wren's one open request: Copy G8, singular.
+    await expect(dialog).toContainText(
+      "1 person is asked or scheduled for upcoming services. Turning this off hides the schedule and stops requests and reminders. People who were asked can't answer until you turn it back on. Nothing is deleted.",
+    );
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: "test-results/worship-360/43-features-off-warning.png", fullPage: true });
+    await dialog.getByRole("button", { name: "Keep it on" }).click();
+    await expect(dialog).toHaveCount(0);
+    const row = async () => (await sql`select enabled from organization_feature_toggles where organization_id = ${fx.orgId}::uuid and feature_key = 'org_portal.worship'`) as Array<{ enabled: boolean }>;
+    expect(await row()).toEqual([{ enabled: true }]);
+
+    await page.getByRole("switch", { name: /^Worship, currently on/ }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Turn it off" }).click();
+    await expect(page.getByText("Worship turned off.").first()).toBeVisible();
+    expect(await row()).toEqual([{ enabled: false }]);
+    const [{ n }] = (await sql`select count(*)::int as n from worship_assignments where organization_id = ${fx.orgId}::uuid`) as Array<{ n: number }>;
+    expect(n).toBe(1);
     await page.close();
   });
 });

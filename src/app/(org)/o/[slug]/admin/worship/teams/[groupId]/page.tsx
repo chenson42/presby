@@ -1,5 +1,4 @@
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
-import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { OrgAccessError } from "@/lib/authz";
 import { ACTION_COPY, NAV_COPY, TEAMS_COPY } from "@/lib/worship/copy";
 import { getTeamAdmin } from "@/lib/worship/reads";
@@ -35,7 +34,6 @@ export default async function WorshipTeamAdminPage({ params }: { params: Promise
 
   return (
     <div className="max-w-3xl space-y-8">
-      <BackLink href={`/o/${slug}/admin/worship/teams`} label={NAV_COPY.backToTeams} />
       <div className="space-y-2">
         <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold [overflow-wrap:anywhere]">
           {team.name}

@@ -25,7 +25,10 @@ let linus: BrowserContext;
 let waiting = "";
 let confirmed = "";
 const base = () => `/o/${fx.slug}`;
-const shot = (page: Page, name: string) => page.screenshot({ path: `test-results/worship-360/${name}.png`, fullPage: true });
+const shot = async (page: Page, name: string) => {
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: `test-results/worship-360/${name}.png`, fullPage: true });
+};
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 
 test.describe.configure({ mode: "serial" });

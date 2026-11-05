@@ -1,5 +1,4 @@
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
-import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { OrgAccessError } from "@/lib/authz";
 import { NAV_COPY, SERVICES_COPY } from "@/lib/worship/copy";
 import { getServiceFormOptions } from "@/lib/worship/reads";
@@ -25,7 +24,6 @@ export default async function NewServiceTypePage({ params }: { params: Promise<{
 
   return (
     <div className="max-w-xl space-y-6">
-      <BackLink href={`/o/${slug}/admin/worship/service-types`} label={NAV_COPY.backToServiceTypes} />
       <h1 className="text-2xl font-semibold">{SERVICES_COPY.types.heading}</h1>
       <ServiceTypeForm slug={slug} teams={read.data.teams} />
     </div>

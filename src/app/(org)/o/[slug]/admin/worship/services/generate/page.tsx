@@ -1,5 +1,4 @@
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
-import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { EmptyState } from "@/components/shared/empty-state";
 import { OrgAccessError } from "@/lib/authz";
 import { NAV_COPY, SERVICES_COPY } from "@/lib/worship/copy";
@@ -27,7 +26,6 @@ export default async function GenerateServicesPage({ params }: { params: Promise
 
   return (
     <div className="max-w-xl space-y-6">
-      <BackLink href={`/o/${slug}/admin/worship/services`} label={NAV_COPY.backToServices} />
       <h1 className="text-2xl font-semibold">{heading}</h1>
       {read.data.types.length === 0 ? (
         <EmptyState title={SERVICES_COPY.types.empty} body={NAV_COPY.noServiceTypesToUse} />

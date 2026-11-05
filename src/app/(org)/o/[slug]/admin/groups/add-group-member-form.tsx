@@ -148,7 +148,7 @@ export function AddGroupMemberForm({
             />
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            This is descriptive only — it does not grant software access.
+            {TEAMS_COPY.groupsRoleNote}
           </p>
           <p className="mt-1 text-sm text-muted-foreground" data-testid="group-role-worship-helper">
             {TEAMS_COPY.groupsHelper}

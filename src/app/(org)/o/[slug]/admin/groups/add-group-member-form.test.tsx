@@ -49,8 +49,8 @@ describe("AddGroupMemberForm — zero-people state", () => {
   });
 });
 
-describe("AddGroupMemberForm — role is descriptive-only copy", () => {
-  it("names that the role grants no software access", () => {
+describe("AddGroupMemberForm — what the role is and is not", () => {
+  it("says the role is a label that gives no general access (the sentence that replaced 'descriptive only')", () => {
     render(
       <AddGroupMemberForm
         slug="alder-creek"
@@ -59,7 +59,7 @@ describe("AddGroupMemberForm — role is descriptive-only copy", () => {
       />,
     );
     expect(
-      screen.getByText(/does not grant software access/i),
+      screen.getByText(/describe a person's part in the group. They give no access/i),
     ).toBeTruthy();
   });
 });

@@ -180,6 +180,14 @@ export const TEAMS_COPY = {
     notOnRoll: (orgName: string) => `Only people with a current record at ${orgName} can be added to a team.`,
     seatsUnderGroups: "Chairs and leaders are changed under Groups.",
   },
+  /**
+   * Replaces "This is descriptive only - it does not grant software access." under the role select on the
+   * Groups add-member form (Batch 6 coordinator item 5): that sentence stopped being true when a chair or
+   * leader gained scheduling (and, earlier, reimbursement approval). NOT in the Phase 3 Copy table; a
+   * string for Phase 6.
+   */
+  groupsRoleNote:
+    "Member, Chair and Leader describe a person's part in the group. They give no access to the rest of PresbyPortal.",
   /** The helper line under the role select on the Groups add-member form. */
   groupsHelper:
     "A chair or leader can also schedule people when this group is a worship team, and can approve this group's reimbursement requests when your treasurer allows requests for it.",

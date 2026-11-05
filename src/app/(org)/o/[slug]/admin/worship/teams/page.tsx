@@ -1,11 +1,10 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { gateWorshipPage, readOrState } from "@/app/(org)/o/[slug]/worship/worship-gate";
-import { BackLink } from "@/app/(org)/o/[slug]/worship/worship-states";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { OrgAccessError } from "@/lib/authz";
-import { NAV_COPY, TEAMS_COPY } from "@/lib/worship/copy";
+import { TEAMS_COPY } from "@/lib/worship/copy";
 import { getTeamsAdmin } from "@/lib/worship/reads";
 
 /** `/o/<slug>/admin/worship/teams` - the teams list (Copy G3): `worship.manage`. */
@@ -30,7 +29,6 @@ export default async function WorshipTeamsPage({ params }: { params: Promise<{ s
 
   return (
     <div className="max-w-3xl space-y-6">
-      <BackLink href={`/o/${slug}/admin/worship`} label={NAV_COPY.backToPlan} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold">{TEAMS_COPY.listHeading}</h1>
         <Button asChild className="min-h-11">

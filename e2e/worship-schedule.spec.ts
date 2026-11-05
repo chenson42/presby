@@ -45,6 +45,7 @@ const rows = async <T = Record<string, unknown>>(query: Promise<unknown>) => (aw
 const base = () => `/o/${fx.slug}`;
 
 async function shot(page: Page, name: string) {
+  await page.waitForTimeout(450); // let any dialog finish its fade before the picture
   await page.screenshot({ path: `test-results/worship-360/${name}.png`, fullPage: true });
 }
 

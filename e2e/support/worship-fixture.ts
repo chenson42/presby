@@ -35,8 +35,9 @@ import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { withDbRetry, type Sql } from "./db";
-import { signInOnPage } from "./invitation-ui";
+import { signInOnPage, submitTotp } from "./invitation-ui";
 import { addMembership, removeOrg } from "./reimbursement-fixture";
+import { E2E_TOTP_TEST_SECRET, seedTotpEnrollment } from "./totp-fixture";
 
 export const WORSHIP_TOGGLE_KEY = "org_portal.worship";
 
@@ -125,6 +126,14 @@ export interface SetupOptions {
   /** The org's Worship toggle (default on). `null` leaves it unset (the provisioned default: off). */
   toggle?: boolean | null;
   stamp?: number;
+  /**
+   * The planner holds her keys the way a real founder does: through `presby_apply_founding_administrator`
+   * (the F362 lesson: a bundle the definer mints must work with no further grant), instead of the custom
+   * worship role. She then also holds the founding bundle's `org_features.manage`.
+   */
+  founder?: boolean;
+  /** People whose account requires a second factor and has the shared enrolled TOTP secret (sign in, then `/totp`). */
+  mfa?: Who[];
 }
 
 export async function sweepStaleWorshipFixtures(sql: Sql): Promise<number> {
@@ -190,13 +199,32 @@ export async function setupWorshipFixture(sql: Sql, options: SetupOptions): Prom
   // Posy is a child (a presumed minor: no email of any kind, whatever her record says).
   await sql`update memberships set household_role = 'child' where organization_id = ${orgId}::uuid and person_id = ${pid(PEOPLE.posy.n)}::uuid`;
 
+  for (const who of options.mfa ?? []) {
+    if (!users[who]) throw new Error(`[worship-fixture] ${who} has no account to enrol`);
+    await sql`update users set two_factor_required = true where id = ${users[who]}::uuid`;
+    await seedTotpEnrollment(sql, users[who]!);
+  }
+
   // Keys: one custom role for the planner with the three worship keys, another with the Features key.
   const plannerRole = randomUUID();
   const featuresRole = randomUUID();
+  if (options.founder) {
+    const [applied] = await rows<{ outcome: string }>(
+      sql`select outcome from presby_apply_founding_administrator(${orgId}::uuid, ${pid(PEOPLE.planner.n)}::uuid, ${users.planner}::uuid)`,
+    );
+    if (applied?.outcome === "has_holders") throw new Error("[worship-fixture] the founding administrator was already designated");
+    // FINDING (reported in the work-log): the definer stamps `role_grants.starts_on` with the DATABASE's current_date
+    // (UTC), while the worship guards ask "as of the ORGANIZATION's today" (America/New_York). For the evening hours
+    // when UTC is already tomorrow, a freshly minted founder is refused at the trigger on the first placement
+    // (the page's own key read passed). The fixture back-dates the grant like every other fixture grant (2020),
+    // so the spec tests the bundle and not the hour of the day.
+    await sql`update role_grants set starts_on = date '2020-01-01' where organization_id = ${orgId}::uuid and person_id = ${pid(PEOPLE.planner.n)}::uuid`;
+  }
   for (const [roleId, key, name, permissions] of [
     [plannerRole, "e2e_worship_planner", "E2E Worship Planner", ["worship.manage", "worship.plan", "worship.schedule"]],
     [featuresRole, "e2e_worship_features", "E2E Features Manager", ["org_features.manage"]],
   ] as const) {
+    if (options.founder) break;
     await sql`
       insert into app_roles (id, organization_id, key, name, role_kind, is_protected)
       values (${roleId}::uuid, ${orgId}::uuid, ${key}, ${name}, 'custom', false)`;
@@ -348,6 +376,8 @@ export async function signedInContext(browser: Browser, who: Who, path: string, 
   await page.goto(`/signin?callbackUrl=${encodeURIComponent(path)}`);
   await signInOnPage(page, email, WORSHIP_PASSWORD);
   await page.waitForURL((url) => !url.pathname.startsWith("/signin"), { timeout: 30_000 });
+  // An account that requires a second factor is sent to /totp: answer it with the shared enrolled secret.
+  if (new URL(page.url()).pathname.startsWith("/totp")) await submitTotp(page, E2E_TOTP_TEST_SECRET);
   await page.close();
   return context;
 }

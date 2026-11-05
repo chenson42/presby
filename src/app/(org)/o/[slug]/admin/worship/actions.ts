@@ -7,9 +7,14 @@ import {
   addPositionSchema,
   addTeamMemberSchema,
   adoptTeamSchema,
+  cancelServiceSchema,
+  createServiceSchema,
   createServiceTypeSchema,
   createTeamSchema,
   endTeamMemberSchema,
+  generateServicesSchema,
+  setServiceTeamsForEventSchema,
+  updateServiceSchema,
   retirePositionSchema,
   retireServiceTypeSchema,
   retireTeamSchema,
@@ -25,9 +30,15 @@ import {
   addPosition,
   addTeamMember,
   adoptTeam,
+  cancelService,
+  createService,
   createServiceType,
   createTeam,
   endTeamMember,
+  generateServices,
+  setServiceTeams,
+  updateService,
+  type CreateServiceData,
   retirePosition,
   retireServiceType,
   retireTeam,
@@ -42,8 +53,9 @@ import type { ActionResult } from "@/types/actions";
 /**
  * Server actions for `/o/<slug>/admin/worship/**` - docs/work-log/
  * 2026-11-04-worship-inc1.md, Phase 3 "Server actions": the TEAM, POSITION,
- * QUALIFICATION, ROSTER and SERVICE-TYPE actions (the service actions are added
- * in Batch 3). Each action: authenticate and resolve the organization from the
+ * QUALIFICATION, ROSTER, SERVICE-TYPE and SERVICE actions (the scheduling
+ * actions - place, remove, record, send - live in the member tree's
+ * `worship/actions.ts`, which the board imports, so it has one set). Each action: authenticate and resolve the organization from the
  * URL slug (`resolveActionIdentity`), parse the input (`input.ts`), call ONE
  * store export with a viewer derived from the session, and map the result to
  * the `{ ok, data } | { ok: false, error }` shape the client toasts.
@@ -297,5 +309,77 @@ export async function setServiceTypeTeamsAction(
 
   const result = await guardedCall(() => setServiceTypeTeams(who.identity.viewer, parsed.data));
   revalidateTypes(who.identity.slug);
+  return toActionResult(result, who.identity.organizationName);
+}
+
+// ---------------------------------------------------------------------------
+// Services (worship.plan)
+// ---------------------------------------------------------------------------
+
+const SERVICES = (slug: string) => `/o/${slug}/admin/worship/services`;
+
+function revalidateServices(slug: string, eventId?: string) {
+  revalidatePath(`/o/${slug}/admin/worship`);
+  revalidatePath(SERVICES(slug));
+  if (eventId) revalidatePath(`${SERVICES(slug)}/${eventId}`);
+  revalidatePath(`/o/${slug}/worship`);
+  revalidatePath(`/o/${slug}/calendar`);
+}
+
+/** Add one service. When another service starts at the same minute, nothing is created and the duplicate is returned; resend with `allowDuplicate`. */
+export async function createServiceAction(slug: string, input: unknown): Promise<ActionResult<CreateServiceData>> {
+  const who = await resolveActionIdentity(slug);
+  if (!who.ok) return { ok: false, error: who.error };
+  const parsed = createServiceSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: ACTION_COPY.generic };
+
+  const result = await guardedCall(() => createService(who.identity.viewer, parsed.data));
+  revalidateServices(who.identity.slug);
+  return toActionResult(result, who.identity.organizationName);
+}
+
+/** Add several services from a service type. */
+export async function generateServicesAction(slug: string, input: unknown): Promise<ActionResult<{ eventIds: string[] }>> {
+  const who = await resolveActionIdentity(slug);
+  if (!who.ok) return { ok: false, error: who.error };
+  const parsed = generateServicesSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: ACTION_COPY.generic };
+
+  const result = await guardedCall(() => generateServices(who.identity.viewer, parsed.data));
+  revalidateServices(who.identity.slug);
+  return toActionResult(result, who.identity.organizationName);
+}
+
+export async function updateServiceAction(slug: string, input: unknown): Promise<ActionResult<{ eventId: string }>> {
+  const who = await resolveActionIdentity(slug);
+  if (!who.ok) return { ok: false, error: who.error };
+  const parsed = updateServiceSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: ACTION_COPY.generic };
+
+  const result = await guardedCall(() => updateService(who.identity.viewer, parsed.data));
+  revalidateServices(who.identity.slug, parsed.data.eventId);
+  return toActionResult(result, who.identity.organizationName);
+}
+
+/** Cancel a service: the one cancel writer, so the people involved are told by the cancel hook (queued, sent by the cron). */
+export async function cancelServiceAction(slug: string, input: unknown): Promise<ActionResult<{ changed: boolean }>> {
+  const who = await resolveActionIdentity(slug);
+  if (!who.ok) return { ok: false, error: who.error };
+  const parsed = cancelServiceSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: ACTION_COPY.generic };
+
+  const result = await guardedCall(() => cancelService(who.identity.viewer, parsed.data));
+  revalidateServices(who.identity.slug, parsed.data.eventId);
+  return toActionResult(result, who.identity.organizationName);
+}
+
+export async function setServiceTeamsAction(slug: string, input: unknown): Promise<ActionResult<{ eventId: string }>> {
+  const who = await resolveActionIdentity(slug);
+  if (!who.ok) return { ok: false, error: who.error };
+  const parsed = setServiceTeamsForEventSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: ACTION_COPY.generic };
+
+  const result = await guardedCall(() => setServiceTeams(who.identity.viewer, parsed.data));
+  revalidateServices(who.identity.slug, parsed.data.eventId);
   return toActionResult(result, who.identity.organizationName);
 }

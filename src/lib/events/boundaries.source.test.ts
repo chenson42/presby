@@ -228,10 +228,9 @@ describe("event writers' import boundaries", () => {
         .sort();
     }
 
-    it("only events.ts and worship/store.ts import it (store.ts arrives with the worship batches)", () => {
+    it("exactly events.ts and worship/store.ts import it (equality, both directions: a missing importer is as much a change as an extra one)", () => {
       const importers = importersOf(MUTATE, { files: sourceFiles("src"), read });
-      expect(importers).toContain("src/lib/events.ts");
-      expect(importers.filter((rel) => !ALLOWED_MUTATE_IMPORTERS.includes(rel))).toEqual([]);
+      expect(importers).toEqual([...ALLOWED_MUTATE_IMPORTERS].sort());
     });
 
     it("the scan can fail: a third importer is seen", () => {

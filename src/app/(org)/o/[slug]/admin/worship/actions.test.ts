@@ -27,6 +27,11 @@ const store = vi.hoisted(() => ({
   updateServiceType: vi.fn(),
   retireServiceType: vi.fn(),
   setServiceTypeTeams: vi.fn(),
+  createService: vi.fn(),
+  generateServices: vi.fn(),
+  updateService: vi.fn(),
+  cancelService: vi.fn(),
+  setServiceTeams: vi.fn(),
 }));
 const reads = vi.hoisted(() => ({ searchRosterCandidates: vi.fn() }));
 
@@ -75,6 +80,11 @@ const cases: Case[] = [
   ["retireServiceTypeAction", () => actions.retireServiceTypeAction("alder-creek", { serviceTypeId: GROUP }), store.retireServiceType],
   ["setServiceTypeTeamsAction", () => actions.setServiceTypeTeamsAction("alder-creek", { serviceTypeId: GROUP, groupIds: [] }), store.setServiceTypeTeams],
   ["searchRosterCandidatesAction", () => actions.searchRosterCandidatesAction("alder-creek", { groupId: GROUP, q: "al" }), reads.searchRosterCandidates],
+  ["createServiceAction", () => actions.createServiceAction("alder-creek", { title: "Sunday", startsAt: "2099-01-01T09:00", groupIds: [] }), store.createService],
+  ["generateServicesAction", () => actions.generateServicesAction("alder-creek", { serviceTypeId: GROUP, firstDate: "2099-01-01", pattern: "weekly", count: 4 }), store.generateServices],
+  ["updateServiceAction", () => actions.updateServiceAction("alder-creek", { eventId: GROUP, title: "Sunday", startsAt: "2099-01-01T09:00" }), store.updateService],
+  ["cancelServiceAction", () => actions.cancelServiceAction("alder-creek", { eventId: GROUP }), store.cancelService],
+  ["setServiceTeamsAction", () => actions.setServiceTeamsAction("alder-creek", { eventId: GROUP, groupIds: [] }), store.setServiceTeams],
 ];
 
 describe.each(cases)("%s", (_name, call, mock) => {
@@ -184,6 +194,31 @@ describe("revalidation and results", () => {
     store.createServiceType.mockResolvedValue({ kind: "ok", data: { serviceTypeId: "t" } });
     await actions.createServiceTypeAction("alder-creek", { name: "Sunday", startTime: "09:00" });
     expect(revalidate.mock.calls.map((c) => c[0])).toContain("/o/alder-creek/admin/worship/service-types");
+  });
+
+  it("a service change revalidates the services pages and the calendar; a cancel revalidates that service", async () => {
+    store.cancelService.mockResolvedValue({ kind: "ok", data: { changed: true } });
+    expect(await actions.cancelServiceAction("alder-creek", { eventId: GROUP })).toEqual({ ok: true, data: { changed: true } });
+    const paths = revalidate.mock.calls.map((c) => c[0]);
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "/o/alder-creek/admin/worship/services",
+        `/o/alder-creek/admin/worship/services/${GROUP}`,
+        "/o/alder-creek/worship",
+        "/o/alder-creek/calendar",
+      ]),
+    );
+  });
+
+  it("adding a service returns the duplicate hint untouched so the form can ask 'Add it anyway'", async () => {
+    store.createService.mockResolvedValue({ kind: "ok", data: { created: false, duplicate: { eventId: GROUP, title: "Morning worship" } } });
+    expect(await actions.createServiceAction("alder-creek", { title: "x", startsAt: "2099-01-01T09:00", groupIds: [] })).toEqual({
+      ok: true,
+      data: { created: false, duplicate: { eventId: GROUP, title: "Morning worship" } },
+    });
+    store.createService.mockResolvedValue({ kind: "ok", data: { created: true, eventId: GROUP } });
+    await actions.createServiceAction("alder-creek", { title: "x", startsAt: "2099-01-01T09:00", groupIds: [], allowDuplicate: true });
+    expect(store.createService.mock.calls[1]![1]).toMatchObject({ allowDuplicate: true });
   });
 
   it("the roster search is a read: it revalidates nothing and returns the names", async () => {

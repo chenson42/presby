@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete (in parent; R1 to R16, F421 to F427) | Approved with suggestions | 2026-11-04 |
 | 3 — Technical design | tech-lead | Complete (this file) | Design complete; implementers named; F428 to F432 and DECISION-317 to 327 proposed | 2026-11-04 |
 | 3 — amendment 1 (architect addendum C1 to C5) | tech-lead | Complete (this file, "Phase 3 amendment 1") | C1 to C5 folded in; S1 adopted; S2 recorded as a `paper` residual (DECISION-317); DECISION-326 as amended | 2026-11-04 |
-| 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | In progress: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) complete 2026-11-04 (0085 hand-written, applied twice to the pipeline branch; section 85 147/147 as presby_app) | — | — |
+| 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | In progress: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) complete 2026-11-04 (0085 hand-written, applied twice to the pipeline branch; section 85 147/147 as presby_app); Batches 2 and 3 (api-developer) complete 2026-11-04 (server side done; Batches 4 to 6 are ux-developer's) | — | — |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1041,6 +1041,49 @@ No schema (0085 is Batch 1's). Commit `feat(worship): catalog, keys, pure module
 - DB-backed, `--no-file-parallelism` with `.env.local`: `src/lib/onboarding`, `src/lib/worship`, `src/lib/db/domain/worship`, `src/lib/org-features*`, `src/lib/org-portal`: 58 files, 1071 tests, all passed. **The 9 tests Batch 1 left red are green** (`invitations.db.test.ts` equality for every organization type, and `designation-parity.db.test.ts` and `designation-parity-in-place.db.test.ts` for congregation and NWC).
 
 **Next:** Batch 3 (scheduling, mail, cron).
+
+### Batch 3 (api-developer, 2026-11-04): scheduling, mail, cron
+
+No schema. Commit `feat(worship): scheduling store, reads, mail and the reminder step (Batch 3)`.
+
+**Files created** (`src/lib/worship/` unless noted)
+
+- `event-hooks.ts` (`onServiceCancelledInTx`, the no-op `onServiceUpdatedInTx`): the second writer on the allow-list, imported only by `events/hooks.ts`. `notify.ts` (`decideReach`, `isPresumedMinor`, `queueRequestNotices`, `queueCancelledNotices`, `queueDeclinedNotice`, `sendQueued`), `messages.ts` (the four notices as pure builders and `worshipLinks`), `sweep.ts` (`sweepReminders(tx)`, `runWorshipReminderSweep()`; the only `getPlatformDb()` user), `drafts.ts` (the ONE read-only decision shared by `sendRequests` and `getSendPreview`: scope and sendable drafts), `counts.ts` (`countUpcomingScheduled`, re-exported by `reads.ts`).
+- `store.ts` gains `createService`, `generateServices`, `updateService`, `cancelService`, `setServiceTeams`, `placePerson`, `placeGuest`, `removeAssignment`, `recordResponse`, `sendRequests`, `respondToAssignment`, `addBlockout`, `endBlockout`. `reads.ts` gains `getMySchedule`, `getRequest`, `getMyBlockouts`, `getTeamPage`, `getServicesList`, `getServiceBoard`, `getPickerCandidates`, `getSendPreview`.
+- Actions: `src/app/(org)/o/[slug]/worship/actions.ts` (`respondToRequestAction`, `addBlockoutAction`, `endBlockoutAction`, `placePersonAction`, `placeGuestAction`, `removeAssignmentAction`, `recordResponseAction`, `sendRequestsAction`); `admin/worship/actions.ts` gains `createServiceAction`, `generateServicesAction`, `updateServiceAction`, `cancelServiceAction`, `setServiceTeamsAction`. `input.ts` gains the zod shapes.
+- Tests: `messages.test.ts` (14), `boundaries.test.ts` (23; W1 to W11), `worship/actions.test.ts` (member tree) and 5 more cases in the admin `actions.test.ts`, `org-feature-warnings.worship.test.ts` (6), DB-backed `store.db.test.ts` (41), `store.send.db.test.ts` (22), `store.cancel.db.test.ts` (10), `notify.db.test.ts` (12), `reads.db.test.ts` (22), `sweep.db.test.ts` (7), `states.db.test.ts` (3; every one of the 150 (from, to, actor) triples through the real trigger), and `store.audit.db.test.ts` (16 now).
+
+**Files modified**
+
+- `src/lib/events/hooks.ts`: the two lists now hold worship's handlers (one line each). `hooks.test.ts` proves it. `events/boundaries.source.test.ts`: the C2 importer scan is now EXACT equality (`events.ts` and `worship/store.ts`).
+- `src/lib/contact-methods/email-audience.ts` and its test: the four `person:role` keys; `NAMED["worshipMessage.templateKey"]`.
+- `src/lib/org-feature-warnings.ts`: the `org_portal.worship` loader and fallback (Copy G8). `src/app/api/cron/maintenance/route.ts` and its test: the isolated reminder step after the careers sweep, `worshipRemindersQueued` in the summary, fixed label on failure.
+- `src/lib/calendar-visibility.source.test.ts`: DECISION-316 readers `store.ts` (text broadened: the join-under-lock reads id, start, place and `cancelled_at`; the duplicate hint reads another service's title), `reads.ts`, `event-hooks.ts`, `sweep.ts`, `drafts.ts`, each only for events carrying a `worship_services` row.
+
+**Audit events written** (Batch 3): `tenant.worship.response_recorded` (`{assignmentId, eventId, answer}`), `tenant.worship.requests_sent` (`{sent, emailed, guardian, noAddress, doNotContact, services}`, on the organization), `tenant.worship.service_cancelled` (`{eventId, withdrawn, notified}`, by the hook, actor null when the caller passed none). Placement, removal, a volunteer's own answer, blockouts and service changes write none; `store.audit.db.test.ts` pins both halves, that a failed audit insert rolls each change back, and that no row carries a name, a reason or a position.
+
+**Deviations from the design, and findings**
+
+1. **`createService` returns `{created: false, duplicate}` and writes nothing** when another service starts at the same minute; the form resends with `allowDuplicate: true` ("Add it anyway"). The design said "returns a duplicate hint (never a refusal)" without saying how the form could ask before creating; this is the smallest shape that can.
+2. **Real-date validation.** `parseWallClock` checks the shape and `Date.UTC` rolls 2026-02-30 to March 2, so `createService`, `updateService` and `generateServices` refuse an impossible date or time themselves (`isRealWallClock`, `isDayKey`). A test caught `generateServices` storing a different day.
+3. **`decideReach` tells do-not-contact from no-address with the main (`credential`) row.** `chooseEmail('role')` never returns a do-not-contact address, so with no usable address a main row that exists must be the do-not-contact one. No second reader of `contact_methods`.
+4. **One reminder email per claimed assignment**, not per person (Copy G7 has single-line reminder forms); a volunteer with two positions the same day gets two. Grouping is a later refinement and needs a Copy line.
+5. **The decline notice is not sent when the placer is the decliner**, and a presumed-minor placer gets none (the shared predicate applies to every notice). With no safe platform origin the cancel and decline notices write nothing and the change still commits (the Send refuses up front instead, `mail_unavailable`).
+6. **`getSendPreview` also returns `overCap` and `mailAvailable`** so the dialog can disable Send with the right sentence before the click. `sendRequests` returns `notOnTeam` (drafts left behind because the person left the team).
+7. **`respondToAssignment` treats a draft's id as `not_found`** (the assignee cannot see a draft), identical to another person's id and an unknown id; the trigger would have answered `forbidden` for a foreign id, so the TypeScript ownership check is what keeps the three answers equal (mutation-checked).
+8. **Cancel with the toggle off** (reachable only from Manage events): the rows are withdrawn and audited, nothing is queued. The worship board's `cancelService` refuses with `toggle_off` before reaching the writer.
+9. **Test hygiene.** A stray `queued` row with no retry time is the oldest eligible row for `onboarding/issue.db.test.ts`'s `processQueueBatch(1)`; the gate caught my audit test leaving one. Every worship DB suite now deletes the `email_queue` rows it created by address, and the branch holds none.
+10. **Dev-docs and help are unchanged from Batch 2**: `dev-docs.test.ts` stays red until the `domain/index.ts` export lands at integration (both patches verified green together); the help allowlist is still +2 until Batch 6.
+
+**Mutation checks** (each mutation made, the named test watched fail, the file restored): remove the C2 join (`store.db.test.ts` "C2"); remove the respond ownership check (the id-guessing test); skip the minor check in `decideReach` (the four-outcomes test); make the cancel hook withdraw confirmed rows (the cancel-hook test); stop cutting a seat holder's Send scope (the scope test). All five failed on the expected assertion.
+
+**Gates (worktree `presby-worship`, own Neon branch)**
+
+- `npm run typecheck`, `npm run lint` (max-warnings 0): clean. `npm run check`: all ten tripwires pass (run with the files staged).
+- `npm test` (unit): 854 files passed, 153 skipped; 13725 tests passed, 4102 skipped, **1 failed: `dev-docs.test.ts` (item 10, expected until integration)**.
+- DB-backed, `--no-file-parallelism` with `.env.local`: `src/lib/worship`, `src/lib/events`, `src/lib/groups`, `src/lib/onboarding` (designation-parity and invitations included), `src/lib/db/domain/worship`, `src/lib/org-feature*`, `src/lib/calendar*`, `src/lib/contact-methods`, and the admin events, groups, worship and features pages: 134 files, 2647 tests; the one failure (`issue.db.test.ts`, item 9) was my audit suite's stray queue row, fixed and re-run green with `store.audit.db.test.ts` (80 passed).
+
+**Next:** Batch 4 (ux-developer, member surface). The contract a page consumes is the store and reads above plus the two actions files; every string is in `copy.ts`; the email links are built by `messages.ts#worshipLinks` (the pages those links open are Batch 4's: `/o/<slug>/worship`, `/worship/requests/<assignmentId>`, `/worship/teams/<groupId>/services/<eventId>`). Strings added or changed in this batch: none beyond `copy.ts` (Batch 2); the email bodies are `copy.ts` EMAIL_COPY as written in Copy G7.
 
 ---
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { STARTER_KEYS } from "./starters";
-import { TEAM_KINDS } from "./vocab";
+import { ANSWERS, REASONS, SERVICE_PATTERNS, TEAM_KINDS } from "./vocab";
 
 /**
  * The shape of every worship action input - docs/work-log/2026-11-04-worship-
@@ -67,3 +67,54 @@ export const updateServiceTypeSchema = z.object({ serviceTypeId: id, ...serviceT
 export const retireServiceTypeSchema = z.object({ serviceTypeId: id });
 
 export const setServiceTypeTeamsSchema = z.object({ serviceTypeId: id, groupIds: z.array(id).max(100) });
+
+// ---------------------------------------------------------------------------
+// Scheduling (Batch 3)
+// ---------------------------------------------------------------------------
+
+const reason = z.enum(REASONS).nullable().optional();
+
+export const createServiceSchema = z.object({
+  title: text,
+  startsAt: text,
+  endsAt: text.optional(),
+  location: text.optional(),
+  serviceTypeId: id.optional(),
+  groupIds: z.array(id).max(100),
+  allowDuplicate: z.boolean().optional(),
+});
+
+export const generateServicesSchema = z.object({
+  serviceTypeId: id,
+  firstDate: text,
+  pattern: z.enum(SERVICE_PATTERNS),
+  count: z.number(),
+});
+
+export const updateServiceSchema = z.object({
+  eventId: id,
+  title: text,
+  startsAt: text,
+  endsAt: text.optional(),
+  location: text.nullable().optional(),
+});
+
+export const cancelServiceSchema = z.object({ eventId: id });
+
+export const setServiceTeamsForEventSchema = z.object({ eventId: id, groupIds: z.array(id).max(100) });
+
+export const placePersonSchema = z.object({ eventId: id, groupId: id, positionId: id, personId: id });
+
+export const placeGuestSchema = z.object({ eventId: id, groupId: id, positionId: id, guestName: text.max(500) });
+
+export const removeAssignmentSchema = z.object({ assignmentId: id });
+
+export const recordResponseSchema = z.object({ assignmentId: id, answer: z.enum(ANSWERS), reason });
+
+export const sendRequestsSchema = z.object({ eventIds: z.array(id).max(200).optional(), groupId: id.optional() });
+
+export const respondToRequestSchema = z.object({ assignmentId: id, answer: z.enum(ANSWERS), reason });
+
+export const addBlockoutSchema = z.object({ startsOn: text, endsOn: text, reason });
+
+export const endBlockoutSchema = z.object({ blockoutId: id });

@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+// The registered consumers. `hooks.ts` imports them; this file proves the lists
+// call exactly them, in the caller's transaction, with the caller's input.
+const worship = vi.hoisted(() => ({
+  cancelled: vi.fn(async (_tx: unknown, _input: unknown) => ({ queueIds: ["wq1"] })),
+  updated: vi.fn(async (_tx: unknown, _input: unknown) => ({ queueIds: [] as string[] })),
+}));
+vi.mock("@/lib/worship/event-hooks", () => ({
+  onServiceCancelledInTx: worship.cancelled,
+  onServiceUpdatedInTx: worship.updated,
+}));
+
 import type { OrgTx } from "@/lib/authz";
 import {
   runEventCancelledHooks,
@@ -11,8 +22,8 @@ import {
   type EventUpdatedHookInput,
 } from "./hooks";
 
-// Neither runner touches the transaction while its list is empty, and the
-// combinator only passes it through, so an opaque stand-in is enough here.
+// The runners and the combinator only pass the transaction through to the
+// (mocked) consumers, so an opaque stand-in is enough here.
 const tx = {} as OrgTx;
 
 const cancelled: EventCancelledHookInput = {
@@ -32,9 +43,24 @@ const updated: EventUpdatedHookInput = {
 };
 
 describe("events/hooks.ts", () => {
-  it("both lists are empty in Batch 0: each runner resolves { queueIds: [] } and touches nothing", async () => {
-    await expect(runEventCancelledHooks(tx, cancelled)).resolves.toEqual({ queueIds: [] });
+  it("the cancel list is worship's handler: called once with the caller's tx and input, its queue ids returned (S1)", async () => {
+    worship.cancelled.mockClear();
+    await expect(runEventCancelledHooks(tx, cancelled)).resolves.toEqual({ queueIds: ["wq1"] });
+    expect(worship.cancelled).toHaveBeenCalledTimes(1);
+    expect(worship.cancelled).toHaveBeenCalledWith(tx, cancelled);
+    expect(worship.updated).not.toHaveBeenCalled();
+  });
+
+  it("the update list is worship's handler: called once with the caller's tx and input", async () => {
+    worship.updated.mockClear();
     await expect(runEventUpdatedHooks(tx, updated)).resolves.toEqual({ queueIds: [] });
+    expect(worship.updated).toHaveBeenCalledTimes(1);
+    expect(worship.updated).toHaveBeenCalledWith(tx, updated);
+  });
+
+  it("a worship handler that throws reaches the caller (so the cancel or the edit rolls back)", async () => {
+    worship.cancelled.mockRejectedValueOnce(new Error("queue write failed"));
+    await expect(runEventCancelledHooks(tx, cancelled)).rejects.toThrow("queue write failed");
   });
 
   it("runHookList runs every consumer in order, with the same tx and input, and combines their queue ids (S1)", async () => {

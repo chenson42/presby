@@ -75,7 +75,15 @@ const ALLOWED_READERS: Record<string, string> = {
   "src/lib/events/mutate.ts":
     "writer: locks and reads one event row by id; returns no event content to its caller beyond the id, and passes before/after start, end and location only to the update hooks",
   "src/lib/worship/store.ts":
-    "writer: counts the distinct upcoming events that carry a live worship assignment (the retire-team and retire-position refusals); selects no event content",
+    "writer: locks one event row joined to its worship_services row and reads its id, start, place and cancelled_at; counts the upcoming events that carry a live worship assignment; reads the title of another worship service at the same minute (the duplicate hint). Only for events that carry a worship_services row; never a description or an event that is not a service",
+  "src/lib/worship/reads.ts":
+    "reads only events carrying a worship_services row; authority is the viewer's own assignment, a leader seat on a serving team, or a worship key; selects title, start, end, location and cancelled_at only",
+  "src/lib/worship/event-hooks.ts":
+    "reads the cancelled service's start, only for an event carrying a worship_services row, to build the cancel notice; returns queue ids only",
+  "src/lib/worship/sweep.ts":
+    "the owner-only reminder step: reads the start of the event behind each claimed assignment to build its reminder; returns a count only",
+  "src/lib/worship/drafts.ts":
+    "reads the start of the services that carry a draft the viewer may send, only for events carrying a worship_services row; returns no event content to a caller beyond the start the Send needs",
 };
 
 describe("calendar visibility: the members-only rule has one reader (DECISION-316)", () => {

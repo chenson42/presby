@@ -33,6 +33,13 @@ vi.mock("@/lib/db", () => ({
 const mockRunCareersSweep = vi.hoisted(() => vi.fn().mockResolvedValue(0));
 vi.mock("@/lib/careers/sweep", () => ({ runCareersSweep: mockRunCareersSweep }));
 
+// The worship reminder step (src/lib/worship/sweep.ts) is its own module with its own
+// database tests; here only the route's ISOLATION of that step is under test. Like the
+// careers sweep it opens a transaction on the platform connection, which this mock does
+// not model.
+const mockRunWorshipSweep = vi.hoisted(() => vi.fn().mockResolvedValue(0));
+vi.mock("@/lib/worship/sweep", () => ({ runWorshipReminderSweep: mockRunWorshipSweep }));
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET } from "./route";
 
@@ -50,6 +57,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
   mockRunCareersSweep.mockResolvedValue(0);
+  mockRunWorshipSweep.mockResolvedValue(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -106,6 +114,7 @@ describe("GET /api/cron/maintenance — auth", () => {
       deletedTotpPending: 0,
       rollCacheRolledForward: 4,
       careersPostingsClosed: 0,
+      worshipRemindersQueued: 0,
     });
   });
 
@@ -227,6 +236,7 @@ describe("GET /api/cron/maintenance - the careers sweep step", () => {
       deletedTotpPending: 0,
       rollCacheRolledForward: 4,
       careersPostingsClosed: 0,
+      worshipRemindersQueued: 0,
     });
     expect(err).toHaveBeenCalledTimes(1);
     expect(err).toHaveBeenCalledWith("[cron/maintenance] careers sweep failed");
@@ -267,5 +277,109 @@ describe("GET /api/cron/maintenance - the careers sweep step", () => {
     vi.stubEnv("CRON_SECRET", "careers-secret");
     await GET(makeRequest("Bearer wrong"));
     expect(mockRunCareersSweep).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Worship reminders (docs/work-log/2026-11-04-worship-inc1.md, Phase 3 "Cron", DECISION-325)
+// ---------------------------------------------------------------------------
+
+describe("GET /api/cron/maintenance - the worship reminder step", () => {
+  it("reports how many reminders it queued, in the response and the structured log; counts only", async () => {
+    vi.stubEnv("CRON_SECRET", "worship-secret");
+    mockPlatformExecute.mockResolvedValueOnce({ rows: [{ fixed: 1 }] });
+    mockRunWorshipSweep.mockResolvedValueOnce(7);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const res = await GET(makeRequest("Bearer worship-secret"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, careersPostingsClosed: 0, worshipRemindersQueued: 7 });
+    const line = JSON.parse(log.mock.calls.at(-1)![1] as string) as Record<string, unknown>;
+    expect(line.worshipRemindersQueued).toBe(7);
+    log.mockRestore();
+  });
+
+  it("a throwing step still answers 200 with every other count, and logs a fixed label with no error text", async () => {
+    vi.stubEnv("CRON_SECRET", "worship-secret");
+    mockExecute
+      .mockResolvedValueOnce({ rows: [{ id: "a" }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    mockPlatformExecute.mockResolvedValueOnce({ rows: [{ fixed: 5 }] });
+    mockRunCareersSweep.mockResolvedValueOnce(2);
+    mockRunWorshipSweep.mockRejectedValueOnce(
+      new Error("function presby_worship_claim_reminders(integer) does not exist SECRET-SQL password=hunter2 to_email=person@example.invalid"),
+    );
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await GET(makeRequest("Bearer worship-secret"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      deletedPwdReset: 1,
+      deletedEmailVerify: 0,
+      deletedTotpPending: 0,
+      rollCacheRolledForward: 5,
+      careersPostingsClosed: 2,
+      worshipRemindersQueued: 0,
+    });
+    expect(err).toHaveBeenCalledTimes(1);
+    expect(err).toHaveBeenCalledWith("[cron/maintenance] worship reminders failed");
+    const logged = JSON.stringify(err.mock.calls);
+    expect(logged).not.toContain("SECRET-SQL");
+    expect(logged).not.toContain("hunter2");
+    expect(logged).not.toContain("person@example.invalid");
+    err.mockRestore();
+  });
+
+  it("a failing careers sweep does not stop the worship step, and a failing worship step does not undo careers", async () => {
+    vi.stubEnv("CRON_SECRET", "worship-secret");
+    mockRunCareersSweep.mockRejectedValueOnce(new Error("careers boom"));
+    mockRunWorshipSweep.mockResolvedValueOnce(4);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await GET(makeRequest("Bearer worship-secret"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ careersPostingsClosed: 0, worshipRemindersQueued: 4 });
+    expect(err).toHaveBeenCalledWith("[cron/maintenance] careers sweep failed");
+    err.mockRestore();
+  });
+
+  it("runs AFTER the token pruning, the roll reconcile and the careers sweep, so a failing step cannot stop any of them", async () => {
+    vi.stubEnv("CRON_SECRET", "worship-secret");
+    const order: string[] = [];
+    mockExecute.mockImplementation(async () => {
+      order.push("tokens");
+      return { rows: [] };
+    });
+    mockPlatformExecute.mockImplementation(async () => {
+      order.push("reconcile");
+      return { rows: [{ fixed: 0 }] };
+    });
+    mockRunCareersSweep.mockImplementation(async () => {
+      order.push("careers");
+      return 0;
+    });
+    mockRunWorshipSweep.mockImplementation(async () => {
+      order.push("worship");
+      throw new Error("boom");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await GET(makeRequest("Bearer worship-secret"));
+
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["tokens", "tokens", "tokens", "reconcile", "careers", "worship"]);
+    mockExecute.mockResolvedValue({ rows: [] });
+    mockPlatformExecute.mockResolvedValue({ rows: [] });
+  });
+
+  it("does not run for an unauthenticated request or when the cron is disabled", async () => {
+    vi.stubEnv("CRON_SECRET", "worship-secret");
+    await GET(makeRequest("Bearer wrong"));
+    vi.stubEnv("CRON_SECRET", "");
+    await GET(makeRequest());
+    expect(mockRunWorshipSweep).not.toHaveBeenCalled();
   });
 });

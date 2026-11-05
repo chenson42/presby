@@ -3,14 +3,21 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { AUDIT_ACTIONS } from "@/lib/audit";
 import { insertAuditRow } from "@/lib/audit-tx";
 import type { OrgTx } from "@/lib/authz";
+import { platformOrigin } from "@/lib/domains/host";
 import { groupMemberships, groups, groupTypes } from "@/lib/db/domain/groups";
 import {
+  worshipAssignments,
   worshipPositionQualifications,
   worshipPositions,
   worshipServiceTypeTeams,
   worshipServiceTypes,
+  worshipServices,
   worshipTeams,
 } from "@/lib/db/domain/worship";
+import { insertEventsInTx, type EventActor } from "@/lib/events/insert";
+import { cancelEventInTx, updateEventFieldsInTx } from "@/lib/events/mutate";
+import { isDayKey } from "@/lib/calendar/month";
+import { formatWallClock, parseWallClock, WALL_CLOCK_RE } from "@/lib/events/wall-clock";
 import {
   addManagedGroupMemberInTx,
   endManagedGroupMemberInTx,
@@ -19,8 +26,12 @@ import {
 } from "@/lib/groups";
 import { isUuidShaped } from "@/lib/shared/uuid";
 import { runGated, type WorshipViewer } from "./access";
-import { holdsPermission } from "./authority";
-import { ACTION_COPY, SERVICES_COPY, TEAMS_COPY } from "./copy";
+import { canScheduleTeam, holdsPermission } from "./authority";
+import { ACTION_COPY, GATE_COPY, MEMBER_COPY, SERVICES_COPY, TEAMS_COPY } from "./copy";
+import { loadSendableDrafts, resolveSendFilter } from "./drafts";
+import { validateGuestName } from "./guest-name";
+import { decideReach, queueDeclinedNotice, queueRequestNotices } from "./notify";
+import { mergeBlockoutRanges, sendPlan, validateBlockoutRange, type BlockoutRange } from "./plan";
 import {
   conflict,
   forbidden,
@@ -28,11 +39,24 @@ import {
   mapDatabaseError,
   notFound,
   ok,
+  type WorshipFailure,
   type WorshipResult,
 } from "./result";
 import { isStarterKey, startersFor, type StarterKey } from "./starters";
-import { orgName, orgToday, rowsOf } from "./sql-util";
-import { LIMITS, TEAM_KINDS, type TeamKind } from "./vocab";
+import { orgName, orgToday, rowsOf, uuidList } from "./sql-util";
+import {
+  ANSWERS,
+  LIMITS,
+  SERVICE_PATTERNS,
+  TEAM_KINDS,
+  isReason,
+  statusForAnswer,
+  type Answer,
+  type NoticeOutcome,
+  type Reason,
+  type ServicePattern,
+  type TeamKind,
+} from "./vocab";
 
 /**
  * THE WRITER of every `worship_*` table (with `event-hooks.ts`, the only other
@@ -906,5 +930,990 @@ export function setServiceTypeTeams(
     if (teams === null) return invalid(ACTION_COPY.stale);
     await applyServiceTypeTeams(tx, viewer.organizationId, existing.id, teams);
     return ok({ serviceTypeId: existing.id });
+  });
+}
+
+// ===========================================================================
+// SCHEDULING (Batch 3): services, placements, Send, answers, blockouts
+// ===========================================================================
+
+/** The audit/event actor for the shared event writers. */
+function eventActor(viewer: WorshipViewer): EventActor {
+  return { userId: viewer.userId, email: viewer.email };
+}
+
+interface ServiceRow {
+  id: string;
+  cancelled: boolean;
+  started: boolean;
+  /** Wall-clock 'YYYY-MM-DDTHH:mm'. */
+  startsAt: string;
+  location: string | null;
+}
+
+/**
+ * THE JOIN-UNDER-LOCK (architect addendum C2). Locks the event row `FOR NO KEY
+ * UPDATE` joined to its `worship_services` row in one statement: an event with
+ * no `worship_services` row yields NO row, which every caller answers as
+ * `not_found`, the same response as an unknown id. A `worship.plan` holder
+ * therefore reaches only worship services through `events/mutate.ts` (which
+ * checks no permission of its own), and a plain event is byte-unchanged and
+ * triggers no hook.
+ *
+ * The same lock serializes a service edit, a cancel (from Manage events or from
+ * the worship board), a Send and a placement on one row, taken first.
+ */
+async function lockService(tx: OrgTx, organizationId: string, eventId: string): Promise<ServiceRow | null> {
+  const row = rowsOf(
+    await tx.execute(sql`
+      select e.id::text as id,
+             (e.cancelled_at is not null) as cancelled,
+             (e.starts_at <= presby_worship_org_now(e.organization_id)) as started,
+             to_char(e.starts_at, 'YYYY-MM-DD"T"HH24:MI') as starts_at,
+             e.location
+        from events e
+        join worship_services ws on ws.event_id = e.id and ws.organization_id = e.organization_id
+       where e.id = ${eventId}::uuid and e.organization_id = ${organizationId}::uuid
+         for no key update of e
+    `),
+  )[0];
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    cancelled: row.cancelled === true,
+    started: row.started === true,
+    startsAt: String(row.starts_at),
+    location: row.location === null ? null : String(row.location),
+  };
+}
+
+/**
+ * 'YYYY-MM-DDTHH:mm[:ss]' that is a REAL date and time. `parseWallClock` only
+ * checks the shape and `Date.UTC` rolls 2026-02-30 over to March 2, so an
+ * impossible value must be refused here, not stored as a different day.
+ */
+function isRealWallClock(value: unknown): value is string {
+  if (typeof value !== "string" || !WALL_CLOCK_RE.test(value)) return false;
+  const [date = "", time = ""] = value.split("T");
+  const [hour = 99, minute = 99, second = 0] = time.split(":").map(Number);
+  return isDayKey(date) && hour < 24 && minute < 60 && second < 60;
+}
+
+function addMinutes(wallClock: string, minutes: number): string {
+  return formatWallClock(new Date(parseWallClock(wallClock).getTime() + minutes * 60_000)).slice(0, 16);
+}
+
+/** The organization's active event type named "Worship" (case-insensitive), else null (the service is untyped). */
+async function worshipEventTypeId(tx: OrgTx, organizationId: string): Promise<string | null> {
+  const row = rowsOf(
+    await tx.execute(sql`
+      select id::text as id from event_types
+       where organization_id = ${organizationId}::uuid and is_active and lower(name) = 'worship'
+       limit 1
+    `),
+  )[0];
+  return row ? String(row.id) : null;
+}
+
+async function loadLiveServiceType(
+  tx: OrgTx,
+  organizationId: string,
+  serviceTypeId: string,
+): Promise<{ id: string; name: string; startTime: string; durationMinutes: number | null; location: string | null; teamIds: string[] } | null> {
+  const row = rowsOf(
+    await tx.execute(sql`
+      select t.id::text as id, t.name, to_char(t.start_time, 'HH24:MI') as start_time,
+             t.duration_minutes::int as duration_minutes, t.location,
+             coalesce((select array_agg(tt.group_id::text order by tt.group_id)
+                         from worship_service_type_teams tt
+                         join worship_teams wt on wt.group_id = tt.group_id and wt.organization_id = tt.organization_id
+                        where tt.organization_id = t.organization_id and tt.service_type_id = t.id
+                          and tt.removed_at is null and wt.retired_at is null), array[]::text[]) as team_ids
+        from worship_service_types t
+       where t.id = ${serviceTypeId}::uuid and t.organization_id = ${organizationId}::uuid and t.retired_at is null
+    `),
+  )[0];
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    startTime: String(row.start_time),
+    durationMinutes: row.duration_minutes === null ? null : Number(row.duration_minutes),
+    location: row.location === null ? null : String(row.location),
+    teamIds: Array.isArray(row.team_ids) ? (row.team_ids as string[]) : [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Services
+// ---------------------------------------------------------------------------
+
+export interface CreateServiceInput {
+  title: string;
+  /** 'YYYY-MM-DDTHH:mm', wall-clock. */
+  startsAt: string;
+  endsAt?: string;
+  location?: string;
+  serviceTypeId?: string;
+  /** The teams that serve. Live worship teams only. */
+  groupIds: string[];
+  /** Skip the same-minute duplicate hint ("Add it anyway"). */
+  allowDuplicate?: boolean;
+}
+
+export type CreateServiceData =
+  | { created: true; eventId: string }
+  /** Not created: another service starts at the same minute. The hint is never a refusal; resend with `allowDuplicate`. */
+  | { created: false; duplicate: { eventId: string; title: string } };
+
+/**
+ * `worship.plan`. Adds one service: an events row (`insertEventsInTx`, open to
+ * everyone, not on the website, no check-in; the organization's active
+ * "Worship" event type when it has one) plus its `worship_services` row and the
+ * serving teams. Events are unaudited unless website-listed (DECISION-240).
+ *
+ * THE S2 RESIDUAL (`paper`, DECISION-317): the `worship_services` insert below
+ * follows `insertEventsInTx` in this same function, and `boundaries.test.ts`
+ * pins that this and `generateServices` are the only inserters. A service is
+ * only ever a newly created event.
+ */
+export function createService(
+  viewer: WorshipViewer,
+  input: CreateServiceInput,
+): Promise<WorshipResult<CreateServiceData>> {
+  return guarded<CreateServiceData>(viewer, ["plan"], async (tx, has) => {
+    if (!has.plan) return forbidden();
+    if (!isRealWallClock(input.startsAt)) return invalid(ACTION_COPY.generic);
+    if (input.endsAt !== undefined && input.endsAt !== "" && !isRealWallClock(input.endsAt)) return invalid(ACTION_COPY.generic);
+    if (!Array.isArray(input.groupIds)) return invalid(ACTION_COPY.generic);
+    const teams = await liveTeamIdsOrNull(tx, viewer.organizationId, input.groupIds);
+    if (teams === null) return invalid(ACTION_COPY.stale);
+    let serviceTypeId: string | null = null;
+    if (input.serviceTypeId !== undefined && input.serviceTypeId !== "") {
+      if (!isUuidShaped(input.serviceTypeId)) return invalid(ACTION_COPY.generic);
+      const type = await loadLiveServiceType(tx, viewer.organizationId, input.serviceTypeId);
+      if (!type) return invalid(ACTION_COPY.stale);
+      serviceTypeId = type.id;
+    }
+
+    if (input.allowDuplicate !== true) {
+      const duplicate = rowsOf(
+        await tx.execute(sql`
+          select e.id::text as id, e.title
+            from events e
+            join worship_services ws on ws.event_id = e.id and ws.organization_id = e.organization_id
+           where e.organization_id = ${viewer.organizationId}::uuid and e.cancelled_at is null
+             and date_trunc('minute', e.starts_at) = ${input.startsAt}::timestamp
+           order by e.id
+           limit 1
+        `),
+      )[0];
+      if (duplicate) {
+        return ok({ created: false, duplicate: { eventId: String(duplicate.id), title: String(duplicate.title) } });
+      }
+    }
+
+    const inserted = await insertEventsInTx(tx, viewer.organizationId, eventActor(viewer), {
+      title: input.title,
+      location: input.location,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt || undefined,
+      isPublic: true,
+      websiteListed: false,
+      allowsCheckin: false,
+      eventTypeId: await worshipEventTypeId(tx, viewer.organizationId),
+    });
+    if (inserted.kind === "invalid_input") return invalid(inserted.message);
+    if (inserted.kind !== "ok") return invalid(ACTION_COPY.generic);
+    const eventId = inserted.data.eventId;
+
+    await tx.execute(sql`
+      insert into worship_services (event_id, organization_id, service_type_id, updated_by)
+      values (${eventId}::uuid, ${viewer.organizationId}::uuid, ${serviceTypeId}::uuid, ${viewer.userId}::uuid)
+    `);
+    for (const groupId of teams) {
+      await tx.execute(sql`
+        insert into worship_service_teams (organization_id, event_id, group_id)
+        values (${viewer.organizationId}::uuid, ${eventId}::uuid, ${groupId}::uuid)
+      `);
+    }
+    return ok({ created: true, eventId });
+  });
+}
+
+export interface GenerateServicesInput {
+  serviceTypeId: string;
+  /** 'YYYY-MM-DD'. */
+  firstDate: string;
+  pattern: ServicePattern;
+  count: number;
+}
+
+/**
+ * `worship.plan`. Adds a series from a service type: the type's usual time,
+ * length, place and teams, repeated weekly, every two weeks or monthly, 1 to 26
+ * at a time (the events cap of 52 in total still applies). One transaction, so
+ * the whole series exists or none of it does. The `worship_services` insert
+ * follows `insertEventsInTx` in this function (the S2 residual, see
+ * `createService`).
+ */
+export function generateServices(
+  viewer: WorshipViewer,
+  input: GenerateServicesInput,
+): Promise<WorshipResult<{ eventIds: string[] }>> {
+  return guarded<{ eventIds: string[] }>(viewer, ["plan"], async (tx, has) => {
+    if (!has.plan) return forbidden();
+    if (!isUuidShaped(input.serviceTypeId)) return notFound();
+    if (!(SERVICE_PATTERNS as readonly string[]).includes(input.pattern)) return invalid(ACTION_COPY.generic);
+    if (typeof input.firstDate !== "string" || !isDayKey(input.firstDate)) return invalid(ACTION_COPY.generic);
+    if (!Number.isInteger(input.count) || input.count < 1 || input.count > LIMITS.generateMax) {
+      return invalid(SERVICES_COPY.several.tooMany);
+    }
+    const type = await loadLiveServiceType(tx, viewer.organizationId, input.serviceTypeId);
+    if (!type) return notFound();
+
+    const startsAt = `${input.firstDate}T${type.startTime}`;
+    if (!isRealWallClock(startsAt)) return invalid(ACTION_COPY.generic);
+    const inserted = await insertEventsInTx(tx, viewer.organizationId, eventActor(viewer), {
+      title: type.name,
+      location: type.location ?? undefined,
+      startsAt,
+      endsAt: type.durationMinutes ? addMinutes(startsAt, type.durationMinutes) : undefined,
+      isPublic: true,
+      websiteListed: false,
+      allowsCheckin: false,
+      eventTypeId: await worshipEventTypeId(tx, viewer.organizationId),
+      recurrence: input.count > 1 ? { pattern: input.pattern, count: input.count } : undefined,
+    });
+    if (inserted.kind === "invalid_input") return invalid(inserted.message);
+    if (inserted.kind !== "ok") return invalid(ACTION_COPY.generic);
+
+    for (const eventId of inserted.data.occurrenceIds) {
+      await tx.execute(sql`
+        insert into worship_services (event_id, organization_id, service_type_id, updated_by)
+        values (${eventId}::uuid, ${viewer.organizationId}::uuid, ${type.id}::uuid, ${viewer.userId}::uuid)
+      `);
+      for (const groupId of type.teamIds) {
+        await tx.execute(sql`
+          insert into worship_service_teams (organization_id, event_id, group_id)
+          values (${viewer.organizationId}::uuid, ${eventId}::uuid, ${groupId}::uuid)
+        `);
+      }
+    }
+    return ok({ eventIds: inserted.data.occurrenceIds });
+  });
+}
+
+export interface UpdateServiceInput {
+  eventId: string;
+  title: string;
+  /** 'YYYY-MM-DDTHH:mm', wall-clock. */
+  startsAt: string;
+  endsAt?: string;
+  /** `undefined` keeps the current place; an empty string clears it. */
+  location?: string | null;
+}
+
+/**
+ * `worship.plan`. Edits a service's title, time and place. First the
+ * join-under-lock (C2): an event that is not a worship service is `not_found`,
+ * identical to an unknown id, and `mutate.ts` is never reached. Then
+ * `updateEventFieldsInTx`, which writes only title, description (left alone),
+ * location, start and end and fans out to the update hooks. A cancelled service
+ * is `conflict not_open` ("That service was cancelled.").
+ *
+ * `updateEventFieldsInTx` writes `location` on every call (an undefined value
+ * clears it), so a caller that means to keep the place passes the current one:
+ * read here, under the same lock.
+ */
+export function updateService(
+  viewer: WorshipViewer,
+  input: UpdateServiceInput,
+): Promise<WorshipResult<{ eventId: string }>> {
+  return guarded<{ eventId: string }>(viewer, ["plan"], async (tx, has) => {
+    if (!has.plan) return forbidden();
+    if (!isUuidShaped(input.eventId)) return notFound();
+    const service = await lockService(tx, viewer.organizationId, input.eventId);
+    if (!service) return notFound();
+    if (service.cancelled) return conflict("not_open", ACTION_COPY.serviceCancelled);
+    if (!isRealWallClock(input.startsAt)) return invalid(ACTION_COPY.generic);
+    if (input.endsAt !== undefined && input.endsAt !== "" && !isRealWallClock(input.endsAt)) return invalid(ACTION_COPY.generic);
+
+    const location = input.location === undefined ? (service.location ?? undefined) : (input.location ?? undefined);
+    const updated = await updateEventFieldsInTx(tx, viewer.organizationId, {
+      eventId: input.eventId,
+      title: input.title,
+      location,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt || undefined,
+    });
+    if (updated.kind === "invalid_input") return invalid(updated.message);
+    if (updated.kind !== "ok") return conflict("not_open", ACTION_COPY.serviceCancelled);
+
+    await tx
+      .update(worshipServices)
+      .set({ updatedBy: viewer.userId })
+      .where(and(eq(worshipServices.eventId, input.eventId), eq(worshipServices.organizationId, viewer.organizationId)));
+    return ok({ eventId: input.eventId });
+  });
+}
+
+/**
+ * `worship.plan`. Cancels a service through the ONE cancel writer
+ * (`cancelEventInTx`), which sets `cancelled_at` and runs the cancel hook in
+ * this transaction: drafts and open requests withdrawn, the people who were
+ * asked or scheduled emailed (queued, sent by the cron), confirmed and declined
+ * rows retained, one audit row. The same code path as a cancel from Manage
+ * events. An event that is not a worship service is `not_found` (C2); a repeat
+ * cancel is an `ok` no-op that runs no hook.
+ */
+export function cancelService(
+  viewer: WorshipViewer,
+  input: { eventId: string },
+): Promise<WorshipResult<{ changed: boolean }>> {
+  return guarded<{ changed: boolean }>(viewer, ["plan"], async (tx, has) => {
+    if (!has.plan) return forbidden();
+    if (!isUuidShaped(input.eventId)) return notFound();
+    const service = await lockService(tx, viewer.organizationId, input.eventId);
+    if (!service) return notFound();
+    const cancelled = await cancelEventInTx(tx, viewer.organizationId, input.eventId, eventActor(viewer));
+    if (cancelled.kind !== "ok") return notFound();
+    return ok({ changed: cancelled.data.changed });
+  });
+}
+
+/**
+ * `worship.plan`. Replaces the teams serving a service: adds (or re-adds, clearing
+ * `removed_at`) and soft-removes. Removing a team that has a live (non-withdrawn)
+ * assignment on this service is refused (`in_use`). A cancelled service is
+ * `conflict not_open`.
+ */
+export function setServiceTeams(
+  viewer: WorshipViewer,
+  input: { eventId: string; groupIds: string[] },
+): Promise<WorshipResult<{ eventId: string }>> {
+  return guarded<{ eventId: string }>(viewer, ["plan"], async (tx, has) => {
+    if (!has.plan) return forbidden();
+    if (!isUuidShaped(input.eventId)) return notFound();
+    const service = await lockService(tx, viewer.organizationId, input.eventId);
+    if (!service) return notFound();
+    if (service.cancelled) return conflict("not_open", ACTION_COPY.serviceCancelled);
+    if (!Array.isArray(input.groupIds)) return invalid(ACTION_COPY.generic);
+    const wanted = await liveTeamIdsOrNull(tx, viewer.organizationId, input.groupIds);
+    if (wanted === null) return invalid(ACTION_COPY.stale);
+
+    const existing = rowsOf(
+      await tx.execute(sql`
+        select st.group_id::text as group_id, (st.removed_at is not null) as removed, g.name,
+               (select count(*)::int from worship_assignments a
+                 where a.organization_id = st.organization_id and a.event_id = st.event_id
+                   and a.group_id = st.group_id and a.status <> 'withdrawn') as live
+          from worship_service_teams st
+          join groups g on g.id = st.group_id and g.organization_id = st.organization_id
+         where st.organization_id = ${viewer.organizationId}::uuid and st.event_id = ${input.eventId}::uuid
+         order by st.group_id
+         for update of st
+      `),
+    );
+    const byGroup = new Map(existing.map((r) => [String(r.group_id), r]));
+    for (const row of existing) {
+      if (row.removed === false && !wanted.includes(String(row.group_id)) && Number(row.live) > 0) {
+        return conflict("in_use", ACTION_COPY.inUse(String(row.name), 1));
+      }
+    }
+    for (const row of existing) {
+      if (row.removed === false && !wanted.includes(String(row.group_id))) {
+        await tx.execute(sql`
+          update worship_service_teams set removed_at = now()
+           where organization_id = ${viewer.organizationId}::uuid and event_id = ${input.eventId}::uuid
+             and group_id = ${String(row.group_id)}::uuid
+        `);
+      }
+    }
+    for (const groupId of wanted) {
+      const row = byGroup.get(groupId);
+      if (!row) {
+        await tx.execute(sql`
+          insert into worship_service_teams (organization_id, event_id, group_id)
+          values (${viewer.organizationId}::uuid, ${input.eventId}::uuid, ${groupId}::uuid)
+        `);
+      } else if (row.removed === true) {
+        await tx.execute(sql`
+          update worship_service_teams set removed_at = null
+           where organization_id = ${viewer.organizationId}::uuid and event_id = ${input.eventId}::uuid
+             and group_id = ${groupId}::uuid
+        `);
+      }
+    }
+    return ok({ eventId: input.eventId });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// People in positions
+// ---------------------------------------------------------------------------
+
+interface PlacementTarget {
+  service: ServiceRow;
+  teamName: string;
+}
+
+/**
+ * The checks every placement shares, in order, after the scheduling authority:
+ * the service is a worship service (lock, `not_found` otherwise), is not
+ * cancelled and has not started; the team is live and is serving it; the
+ * position is a live position of that team. Each refusal carries its Copy
+ * sentence; the database triggers re-check all of it.
+ */
+async function checkPlacement(
+  tx: OrgTx,
+  organizationId: string,
+  input: { eventId: string; groupId: string; positionId: string },
+): Promise<{ kind: "ok"; target: PlacementTarget } | WorshipFailure> {
+  const service = await lockService(tx, organizationId, input.eventId);
+  if (!service) return notFound();
+  if (service.cancelled) return conflict("not_open", ACTION_COPY.serviceCancelled);
+  if (service.started) return conflict("not_open", ACTION_COPY.serviceStarted);
+  const team = await loadTeam(tx, organizationId, input.groupId);
+  if (!team) return notFound();
+  if (team.retired) return conflict("not_open", ACTION_COPY.teamRetired(team.name));
+  const serving = rowsOf(
+    await tx.execute(sql`
+      select (removed_at is not null) as removed from worship_service_teams
+       where organization_id = ${organizationId}::uuid and event_id = ${input.eventId}::uuid and group_id = ${input.groupId}::uuid
+    `),
+  )[0];
+  if (!serving || serving.removed === true) return conflict("not_open", ACTION_COPY.stale);
+  const position = await loadPosition(tx, organizationId, input.positionId);
+  if (!position || position.groupId !== input.groupId) return notFound();
+  if (position.retired) return conflict("not_open", ACTION_COPY.stale);
+  return { kind: "ok", target: { service, teamName: team.name } };
+}
+
+/** `worship.schedule` or a live seat on `groupId`. Places a person as a DRAFT: nobody is told until Send. */
+export function placePerson(
+  viewer: WorshipViewer,
+  input: { eventId: string; groupId: string; positionId: string; personId: string },
+): Promise<WorshipResult<{ assignmentId: string }>> {
+  return guarded<{ assignmentId: string }>(viewer, ["schedule"], async (tx, has) => {
+    if (![input.eventId, input.groupId, input.positionId, input.personId].every((id) => typeof id === "string" && isUuidShaped(id))) {
+      return notFound();
+    }
+    if (!(await canScheduleTeam(tx, viewer, input.groupId, has as { schedule: boolean }))) return forbidden();
+    const checked = await checkPlacement(tx, viewer.organizationId, input);
+    if (checked.kind !== "ok") return checked;
+
+    const person = rowsOf(
+      await tx.execute(sql`
+        select p.first_name, p.preferred_name, p.last_name,
+               exists (
+                 select 1 from group_memberships gm
+                   join memberships m on m.person_id = gm.person_id and m.organization_id = gm.organization_id
+                  where gm.organization_id = ${viewer.organizationId}::uuid and gm.group_id = ${input.groupId}::uuid
+                    and gm.person_id = ${input.personId}::uuid
+                    and gm.starts_on <= presby_worship_org_today(${viewer.organizationId}::uuid)
+                    and (gm.ends_on is null or gm.ends_on > presby_worship_org_today(${viewer.organizationId}::uuid))
+                    and p.merged_into_id is null and p.date_of_death is null and m.ended_on is null
+               ) as on_team
+          from people p
+          join memberships pm on pm.person_id = p.id and pm.organization_id = ${viewer.organizationId}::uuid
+         where p.id = ${input.personId}::uuid
+      `),
+    )[0];
+    if (!person) return notFound();
+    if (person.on_team !== true) {
+      const name = `${String(person.preferred_name ?? person.first_name)} ${String(person.last_name)}`;
+      return conflict("not_open", ACTION_COPY.notOnTeam(name));
+    }
+
+    const row = rowsOf(
+      await tx.execute(sql`
+        insert into worship_assignments (organization_id, event_id, group_id, position_id, person_id, assigned_by_person_id)
+        values (${viewer.organizationId}::uuid, ${input.eventId}::uuid, ${input.groupId}::uuid, ${input.positionId}::uuid,
+                ${input.personId}::uuid, ${viewer.personId}::uuid)
+        returning id::text as id
+      `),
+    )[0]!;
+    return ok({ assignmentId: String(row.id) });
+  });
+}
+
+/**
+ * `worship.schedule` or a live seat on `groupId`. Places a GUEST by name: the
+ * row is born `confirmed`, recorded on the leader's behalf, and a guest is never
+ * emailed. The name is validated by `validateGuestName` (no contact details).
+ */
+export function placeGuest(
+  viewer: WorshipViewer,
+  input: { eventId: string; groupId: string; positionId: string; guestName: string },
+): Promise<WorshipResult<{ assignmentId: string }>> {
+  return guarded<{ assignmentId: string }>(viewer, ["schedule"], async (tx, has) => {
+    if (![input.eventId, input.groupId, input.positionId].every((id) => typeof id === "string" && isUuidShaped(id))) {
+      return notFound();
+    }
+    if (!(await canScheduleTeam(tx, viewer, input.groupId, has as { schedule: boolean }))) return forbidden();
+    const guest = validateGuestName(input.guestName);
+    if (!guest.ok) return invalid(guest.message);
+    const checked = await checkPlacement(tx, viewer.organizationId, input);
+    if (checked.kind !== "ok") return checked;
+
+    const row = rowsOf(
+      await tx.execute(sql`
+        insert into worship_assignments
+          (organization_id, event_id, group_id, position_id, guest_name, assigned_by_person_id,
+           status, responded_by_person_id, response_source)
+        values (${viewer.organizationId}::uuid, ${input.eventId}::uuid, ${input.groupId}::uuid, ${input.positionId}::uuid,
+                ${guest.name}, ${viewer.personId}::uuid, 'confirmed', ${viewer.personId}::uuid, 'on_behalf')
+        returning id::text as id
+      `),
+    )[0]!;
+    return ok({ assignmentId: String(row.id) });
+  });
+}
+
+interface AssignmentRow {
+  id: string;
+  eventId: string;
+  groupId: string;
+  positionId: string;
+  personId: string | null;
+  status: string;
+  declineReason: string | null;
+  assignedBy: string;
+}
+
+/** Locks one assignment row of this organization (`FOR UPDATE`). */
+async function lockAssignment(tx: OrgTx, organizationId: string, assignmentId: string): Promise<AssignmentRow | null> {
+  const r = rowsOf(
+    await tx.execute(sql`
+      select id::text as id, event_id::text as event_id, group_id::text as group_id, position_id::text as position_id,
+             person_id::text as person_id, status, decline_reason, assigned_by_person_id::text as assigned_by
+        from worship_assignments
+       where id = ${assignmentId}::uuid and organization_id = ${organizationId}::uuid
+         for update
+    `),
+  )[0];
+  if (!r) return null;
+  return {
+    id: String(r.id),
+    eventId: String(r.event_id),
+    groupId: String(r.group_id),
+    positionId: String(r.position_id),
+    personId: r.person_id === null ? null : String(r.person_id),
+    status: String(r.status),
+    declineReason: r.decline_reason === null ? null : String(r.decline_reason),
+    assignedBy: String(r.assigned_by),
+  };
+}
+
+/**
+ * `worship.schedule` or a live seat on THE ASSIGNMENT'S TEAM. Takes a person
+ * off a position: `withdrawn` with reason `removed`. **No message is sent**
+ * (F430; the dialog says so). Allowed on a started or cancelled service (it
+ * only removes). Removing a withdrawn row is an `ok` no-op.
+ */
+export function removeAssignment(
+  viewer: WorshipViewer,
+  input: { assignmentId: string },
+): Promise<WorshipResult<{ changed: boolean }>> {
+  return guarded<{ changed: boolean }>(viewer, ["schedule"], async (tx, has) => {
+    if (!isUuidShaped(input.assignmentId)) return notFound();
+    const a = await lockAssignment(tx, viewer.organizationId, input.assignmentId);
+    if (!a) return notFound();
+    if (!(await canScheduleTeam(tx, viewer, a.groupId, has as { schedule: boolean }))) return forbidden();
+    if (a.status === "withdrawn") return ok({ changed: false });
+    await tx
+      .update(worshipAssignments)
+      .set({ status: "withdrawn", withdrawnByPersonId: viewer.personId, withdrawnReason: "removed" })
+      .where(and(eq(worshipAssignments.id, a.id), eq(worshipAssignments.organizationId, viewer.organizationId)));
+    return ok({ changed: true });
+  });
+}
+
+function parseAnswer(answer: unknown, reason: unknown): { ok: true; answer: Answer; reason: Reason | null } | { ok: false } {
+  if (typeof answer !== "string" || !(ANSWERS as readonly string[]).includes(answer)) return { ok: false };
+  if (answer === "declined" && reason !== undefined && reason !== null && reason !== "") {
+    if (!isReason(reason)) return { ok: false };
+    return { ok: true, answer: "declined", reason };
+  }
+  return { ok: true, answer: answer as Answer, reason: null };
+}
+
+/**
+ * `worship.schedule` or a live seat on the assignment's team. Records an answer
+ * on someone's behalf (`response_source = on_behalf`, attributed to the
+ * recorder). The same answer again is a no-op (no write, no audit). A guest has
+ * no answer to record. The service must be neither cancelled nor started (the
+ * trigger enforces it). The leader knows, so no message is queued.
+ */
+export function recordResponse(
+  viewer: WorshipViewer,
+  input: { assignmentId: string; answer: Answer; reason?: Reason | null },
+): Promise<WorshipResult<{ changed: boolean }>> {
+  return guarded<{ changed: boolean }>(viewer, ["schedule"], async (tx, has) => {
+    if (!isUuidShaped(input.assignmentId)) return notFound();
+    const parsed = parseAnswer(input.answer, input.reason);
+    if (!parsed.ok) return invalid(ACTION_COPY.generic);
+    const a = await lockAssignment(tx, viewer.organizationId, input.assignmentId);
+    if (!a) return notFound();
+    if (!(await canScheduleTeam(tx, viewer, a.groupId, has as { schedule: boolean }))) return forbidden();
+    if (a.personId === null) return invalid(ACTION_COPY.generic);
+    if (a.status === "withdrawn") return conflict("not_open", ACTION_COPY.stale);
+
+    const status = statusForAnswer(parsed.answer);
+    if (a.status === status && (status !== "declined" || a.declineReason === parsed.reason)) {
+      return ok({ changed: false });
+    }
+    await tx
+      .update(worshipAssignments)
+      .set({
+        status,
+        responseSource: "on_behalf",
+        respondedByPersonId: viewer.personId,
+        declineReason: status === "declined" ? parsed.reason : null,
+      })
+      .where(and(eq(worshipAssignments.id, a.id), eq(worshipAssignments.organizationId, viewer.organizationId)));
+    await insertAuditRow(tx, {
+      action: AUDIT_ACTIONS.WORSHIP_RESPONSE_RECORDED,
+      actor: { userId: viewer.userId, email: viewer.email },
+      resourceType: "worship_assignment",
+      resourceId: a.id,
+      metadata: { assignmentId: a.id, eventId: a.eventId, answer: parsed.answer },
+    });
+    return ok({ changed: true });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Send
+// ---------------------------------------------------------------------------
+
+export interface SendResult {
+  /** Assignments moved from draft to requested. */
+  sent: number;
+  /** People, by what happened to their notice. */
+  emailed: number;
+  guardian: number;
+  noAddress: number;
+  doNotContact: number;
+  /** Drafts left as drafts because the person is no longer on the team. */
+  notOnTeam: number;
+  /** Distinct services touched. */
+  services: number;
+  /** The `email_queue` rows written; the action attempts the inline send after commit. */
+  queueIds: string[];
+}
+
+/**
+ * `worship.schedule` or a seat (scope cut to the teams the seat holder leads).
+ * THE SEND: takes the drafts on future, uncancelled services, re-checks the
+ * roster and membership per person, sets `requested`, `sent_by`, and the notice
+ * outcome, and queues ONE email per person listing their positions and dates.
+ *
+ * ORDER, which is the lock order. (1) Refuse with `mail_unavailable` when
+ * `platformOrigin()` is null, before anything. (2) Resolve the scope. (3) Find
+ * the affected services, then lock their event rows `FOR NO KEY UPDATE` in
+ * `(starts_at, id)` order (the same order every multi-row locker uses, so two
+ * Sends cannot deadlock), THEN re-read the drafts: a Send that waited on the
+ * lock finds the first Send's rows no longer drafts and "nothing to send", so
+ * two concurrent Sends never double-queue a person, and a Send racing a cancel
+ * sees `cancelled_at`. (4) At most 200 assignments or 52 services per call
+ * (`over_cap`). (5) One outcome per person from `decideReach`: a presumed minor
+ * is `guardian` and is never emailed; no address; do not contact; else
+ * `emailed`. The audit row carries counts only.
+ */
+export function sendRequests(
+  viewer: WorshipViewer,
+  input: { eventIds?: string[]; groupId?: string },
+): Promise<WorshipResult<SendResult>> {
+  return guarded<SendResult>(viewer, ["schedule"], async (tx, has) => {
+    if (platformOrigin() === null) return conflict("mail_unavailable", ACTION_COPY.sendMailUnavailable);
+    const scope = await resolveSendFilter(tx, viewer, has, input);
+    if (scope.kind !== "ok") return scope;
+
+    const candidates = await loadSendableDrafts(tx, viewer.organizationId, scope.filter);
+    const candidateEvents = [...new Set(candidates.map((d) => d.eventId))];
+    if (candidateEvents.length > LIMITS.sendMaxServices) return conflict("over_cap", ACTION_COPY.sendOverCap);
+    if (candidateEvents.length > 0) {
+      await tx.execute(sql`
+        select e.id from events e
+         where e.organization_id = ${viewer.organizationId}::uuid and e.id in (${uuidList(candidateEvents)})
+         order by e.starts_at, e.id
+           for no key update of e
+      `);
+    }
+
+    // Re-read under the locks: this is the set that is sent.
+    const drafts = await loadSendableDrafts(tx, viewer.organizationId, scope.filter);
+    const sendable = drafts.filter((d) => d.onTeam);
+    const notOnTeam = drafts.length - sendable.length;
+    if (sendable.length === 0) return invalid(ACTION_COPY.sendNothing);
+    const plan = sendPlan(sendable);
+    if (plan.overAssignmentCap || plan.overServiceCap) return conflict("over_cap", ACTION_COPY.sendOverCap);
+
+    const reach = new Map<string, Awaited<ReturnType<typeof decideReach>>>();
+    for (const person of plan.people) reach.set(person.personId, await decideReach(tx, viewer.organizationId, person.personId));
+
+    let sent = 0;
+    const sentBy = new Map<string, string[]>();
+    for (const person of plan.people) {
+      const outcome = reach.get(person.personId)!.outcome;
+      for (const item of person.items) {
+        const moved = await tx
+          .update(worshipAssignments)
+          .set({ status: "requested", sentByPersonId: viewer.personId, noticeOutcome: outcome })
+          .where(
+            and(
+              eq(worshipAssignments.id, item.assignmentId),
+              eq(worshipAssignments.organizationId, viewer.organizationId),
+              eq(worshipAssignments.status, "draft"),
+            ),
+          )
+          .returning({ id: worshipAssignments.id });
+        if (moved.length === 1) {
+          sent += 1;
+          const list = sentBy.get(person.personId);
+          if (list) list.push(item.assignmentId);
+          else sentBy.set(person.personId, [item.assignmentId]);
+        }
+      }
+    }
+
+    const notices = plan.people
+      .filter((p) => reach.get(p.personId)!.outcome === "emailed" && sentBy.has(p.personId))
+      .map((p) => ({
+        personId: p.personId,
+        address: reach.get(p.personId)!.address!,
+        assignmentIds: sentBy.get(p.personId)!,
+        lines: p.items
+          .filter((item) => sentBy.get(p.personId)!.includes(item.assignmentId))
+          .map((item) => ({ startsAt: item.startsAt, positionName: item.positionName, teamName: item.teamName })),
+      }));
+    const queueIds = await queueRequestNotices(tx, { organizationId: viewer.organizationId, notices });
+
+    const counts: Record<NoticeOutcome, number> = { emailed: 0, guardian: 0, no_address: 0, do_not_contact: 0 };
+    for (const person of plan.people) if (sentBy.has(person.personId)) counts[reach.get(person.personId)!.outcome] += 1;
+
+    await insertAuditRow(tx, {
+      action: AUDIT_ACTIONS.WORSHIP_REQUESTS_SENT,
+      actor: { userId: viewer.userId, email: viewer.email },
+      resourceType: "organization",
+      resourceId: viewer.organizationId,
+      metadata: {
+        sent,
+        emailed: counts.emailed,
+        guardian: counts.guardian,
+        noAddress: counts.no_address,
+        doNotContact: counts.do_not_contact,
+        services: plan.services,
+      },
+    });
+    return ok({
+      sent,
+      emailed: counts.emailed,
+      guardian: counts.guardian,
+      noAddress: counts.no_address,
+      doNotContact: counts.do_not_contact,
+      notOnTeam,
+      services: plan.services,
+      queueIds,
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The volunteer's own answers and dates
+// ---------------------------------------------------------------------------
+
+/**
+ * Any member, on THEIR OWN row only; the person is derived from the viewer and
+ * the export takes no person parameter. `response_source = self`. A row that is
+ * not the viewer's, a draft (the assignee cannot see one) or one that does not
+ * exist is `not_found`, IDENTICAL for all three (the id-guessing hole). The row
+ * is locked first, then the service is read: a withdrawn row, a cancelled or a
+ * started service is `conflict not_open` (Copy: "This request is no longer
+ * open"). The same answer again is an `ok` no-op; a different answer is a normal
+ * transition and the last write wins under the row lock. A change TO `declined`
+ * queues one decline notice to the person who placed them (when they have a
+ * deliverable address; it never names the decliner); the action attempts the
+ * inline send after the commit.
+ */
+export function respondToAssignment(
+  viewer: WorshipViewer,
+  input: { assignmentId: string; answer: Answer; reason?: Reason | null },
+): Promise<WorshipResult<{ changed: boolean; queueIds: string[] }>> {
+  return guarded<{ changed: boolean; queueIds: string[] }>(viewer, [], async (tx) => {
+    if (!isUuidShaped(input.assignmentId)) return notFound();
+    const parsed = parseAnswer(input.answer, input.reason);
+    if (!parsed.ok) return invalid(ACTION_COPY.generic);
+
+    const a = await lockAssignment(tx, viewer.organizationId, input.assignmentId);
+    if (!a || a.personId !== viewer.personId || a.status === "draft") return notFound();
+    if (a.status === "withdrawn") return conflict("not_open", GATE_COPY.closedRequest.heading);
+
+    const event = rowsOf(
+      await tx.execute(sql`
+        select (e.cancelled_at is not null) as cancelled,
+               (e.starts_at <= presby_worship_org_now(e.organization_id)) as started,
+               to_char(e.starts_at, 'YYYY-MM-DD"T"HH24:MI') as starts_at
+          from events e
+         where e.id = ${a.eventId}::uuid and e.organization_id = ${viewer.organizationId}::uuid
+      `),
+    )[0];
+    if (!event || event.cancelled === true || event.started === true) return conflict("not_open", GATE_COPY.closedRequest.heading);
+
+    const status = statusForAnswer(parsed.answer);
+    if (a.status === status && (status !== "declined" || a.declineReason === parsed.reason)) {
+      return ok({ changed: false, queueIds: [] });
+    }
+    await tx
+      .update(worshipAssignments)
+      .set({
+        status,
+        responseSource: "self",
+        respondedByPersonId: viewer.personId,
+        declineReason: status === "declined" ? parsed.reason : null,
+      })
+      .where(and(eq(worshipAssignments.id, a.id), eq(worshipAssignments.organizationId, viewer.organizationId)));
+
+    let queueIds: string[] = [];
+    if (status === "declined" && a.status !== "declined" && a.assignedBy !== viewer.personId) {
+      const position = await loadPosition(tx, viewer.organizationId, a.positionId);
+      queueIds = await queueDeclinedNotice(tx, {
+        organizationId: viewer.organizationId,
+        toPersonId: a.assignedBy,
+        groupId: a.groupId,
+        eventId: a.eventId,
+        positionName: position?.name ?? "",
+        startsAt: String(event.starts_at),
+      });
+    }
+    return ok({ changed: true, queueIds });
+  });
+}
+
+export interface BlockoutConflict {
+  assignmentId: string;
+  eventId: string;
+  /** Wall-clock 'YYYY-MM-DDTHH:mm'. */
+  startsAt: string;
+  positionName: string;
+  teamName: string;
+}
+
+/**
+ * Any member, for themselves. Saves "dates I can't serve": a range joined with
+ * every live range it overlaps or touches (those are END-DATED and the union is
+ * inserted, so history is kept and nothing is deleted, DECISION-327). Refuses an
+ * end before the start, a range wholly in the past, one over 366 days, and a
+ * 51st live range (the trigger, under an advisory lock the merge shares). The
+ * blockout is SAVED even over a date the person has agreed to serve; their own
+ * requested or confirmed assignments inside the range come back as `conflicts`
+ * so the page can say so (a blockout never cancels anything).
+ */
+export function addBlockout(
+  viewer: WorshipViewer,
+  input: { startsOn: string; endsOn: string; reason?: Reason | null },
+): Promise<WorshipResult<{ blockoutId: string; merged: boolean; conflicts: BlockoutConflict[] }>> {
+  return guarded<{ blockoutId: string; merged: boolean; conflicts: BlockoutConflict[] }>(viewer, [], async (tx) => {
+    const reason = input.reason ?? null;
+    if (reason !== null && !isReason(reason)) return invalid(ACTION_COPY.generic);
+    const today = await orgToday(tx, viewer.organizationId);
+    const range: BlockoutRange = { startsOn: String(input.startsOn), endsOn: String(input.endsOn) };
+    const problem = validateBlockoutRange(range, today);
+    if (problem === "end_before_start") return invalid(MEMBER_COPY.blockouts.endBeforeStart);
+    if (problem === "in_past") return invalid(MEMBER_COPY.blockouts.inPast);
+    if (problem === "too_long") return invalid(MEMBER_COPY.blockouts.tooLong);
+    if (problem === "invalid_date") return invalid(ACTION_COPY.generic);
+
+    // The same advisory lock the insert trigger takes, so the merge and the cap see one consistent set.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`worship_blockouts:${viewer.organizationId}:${viewer.personId}`}, 0))`,
+    );
+    const live = rowsOf(
+      await tx.execute(sql`
+        select id::text as id, starts_on::text as starts_on, ends_on::text as ends_on
+          from worship_blockouts
+         where organization_id = ${viewer.organizationId}::uuid and person_id = ${viewer.personId}::uuid and ended_at is null
+         order by starts_on, id
+      `),
+    ).map((r) => ({ id: String(r.id), startsOn: String(r.starts_on), endsOn: String(r.ends_on) }));
+    const { merged, absorbedIds } = mergeBlockoutRanges(live, range);
+    if (merged.endsOn.localeCompare(merged.startsOn) >= 0 && daysSpan(merged) > LIMITS.blockoutMaxDays) {
+      return invalid(MEMBER_COPY.blockouts.tooLong);
+    }
+    for (const id of absorbedIds) {
+      await tx.execute(sql`
+        update worship_blockouts set ended_at = now()
+         where id = ${id}::uuid and organization_id = ${viewer.organizationId}::uuid
+      `);
+    }
+    const row = rowsOf(
+      await tx.execute(sql`
+        insert into worship_blockouts (organization_id, person_id, starts_on, ends_on, reason)
+        values (${viewer.organizationId}::uuid, ${viewer.personId}::uuid, ${merged.startsOn}::date, ${merged.endsOn}::date, ${reason})
+        returning id::text as id
+      `),
+    )[0]!;
+
+    const conflictRows = rowsOf(
+      await tx.execute(sql`
+        select a.id::text as assignment_id, a.event_id::text as event_id,
+               to_char(e.starts_at, 'YYYY-MM-DD"T"HH24:MI') as starts_at,
+               wp.name as position_name, g.name as team_name
+          from worship_assignments a
+          join events e on e.id = a.event_id and e.organization_id = a.organization_id
+          join worship_positions wp on wp.id = a.position_id and wp.organization_id = a.organization_id
+          join groups g on g.id = a.group_id and g.organization_id = a.organization_id
+         where a.organization_id = ${viewer.organizationId}::uuid and a.person_id = ${viewer.personId}::uuid
+           and a.status in ('requested', 'confirmed')
+           and e.cancelled_at is null and e.starts_at > presby_worship_org_now(a.organization_id)
+           and e.starts_at::date between ${merged.startsOn}::date and ${merged.endsOn}::date
+         order by e.starts_at, a.id
+      `),
+    );
+    return ok({
+      blockoutId: String(row.id),
+      merged: absorbedIds.length > 0,
+      conflicts: conflictRows.map((r) => ({
+        assignmentId: String(r.assignment_id),
+        eventId: String(r.event_id),
+        startsAt: String(r.starts_at),
+        positionName: String(r.position_name),
+        teamName: String(r.team_name),
+      })),
+    });
+  });
+}
+
+/** Days in a range counting both ends. */
+function daysSpan(range: BlockoutRange): number {
+  const [ay, am, ad] = range.startsOn.split("-").map(Number) as [number, number, number];
+  const [by, bm, bd] = range.endsOn.split("-").map(Number) as [number, number, number];
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86_400_000) + 1;
+}
+
+/** Any member, for themselves. Ends one of their own live ranges (never a delete). Another person's id is `not_found`. */
+export function endBlockout(
+  viewer: WorshipViewer,
+  input: { blockoutId: string },
+): Promise<WorshipResult<{ changed: boolean }>> {
+  return guarded<{ changed: boolean }>(viewer, [], async (tx) => {
+    if (!isUuidShaped(input.blockoutId)) return notFound();
+    const row = rowsOf(
+      await tx.execute(sql`
+        select (ended_at is not null) as ended from worship_blockouts
+         where id = ${input.blockoutId}::uuid and organization_id = ${viewer.organizationId}::uuid
+           and person_id = ${viewer.personId}::uuid
+           for update
+      `),
+    )[0];
+    if (!row) return notFound();
+    if (row.ended === true) return ok({ changed: false });
+    await tx.execute(sql`
+      update worship_blockouts set ended_at = now()
+       where id = ${input.blockoutId}::uuid and organization_id = ${viewer.organizationId}::uuid
+    `);
+    return ok({ changed: true });
   });
 }

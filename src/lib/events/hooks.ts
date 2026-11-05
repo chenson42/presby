@@ -1,6 +1,7 @@
 import "server-only";
 import type { OrgTx } from "@/lib/authz";
 import type { EventActor } from "@/lib/events/insert";
+import { onServiceCancelledInTx, onServiceUpdatedInTx } from "@/lib/worship/event-hooks";
 
 /**
  * The event fan-out: what other modules do, in the writer's own transaction,
@@ -25,9 +26,12 @@ import type { EventActor } from "@/lib/events/insert";
  * static imports reachable from this file and fails on any such path. A
  * consumer takes its argument types from this file with `import type`.
  *
- * Both lists are EMPTY in Batch 0 (the refactor ships green on its own). Batch 3
- * adds one line per consumer: worship's `onServiceCancelledInTx` and
- * `onServiceUpdatedInTx` from `worship/event-hooks.ts`.
+ * Both lists were EMPTY in Batch 0 (the refactor shipped green on its own).
+ * Worship Increment 1 (Batch 3) adds its line to each: `onServiceCancelledInTx`
+ * and `onServiceUpdatedInTx` from `worship/event-hooks.ts` (the update handler
+ * is a no-op in Increment 1; it is the registered place a later increment
+ * reacts to a service move, F430). Sign-ups adds its own hook-only file(s) at
+ * its integration, under the same import rule.
  */
 
 /** The start, end and place of an event: what the update hooks are given before and after. */
@@ -80,11 +84,11 @@ export async function runHookList<I>(
   return { queueIds };
 }
 
-/** One line per consumer. Empty until Batch 3. */
-const CANCELLED_HOOKS: ReadonlyArray<EventCancelledHook> = [];
+/** One line per consumer. */
+const CANCELLED_HOOKS: ReadonlyArray<EventCancelledHook> = [onServiceCancelledInTx];
 
-/** One line per consumer. Empty until Batch 3. */
-const UPDATED_HOOKS: ReadonlyArray<EventUpdatedHook> = [];
+/** One line per consumer. */
+const UPDATED_HOOKS: ReadonlyArray<EventUpdatedHook> = [onServiceUpdatedInTx];
 
 export function runEventCancelledHooks(
   tx: OrgTx,

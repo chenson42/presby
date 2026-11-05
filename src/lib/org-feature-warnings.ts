@@ -5,6 +5,9 @@ import { OFF_WARNING_FALLBACK, offWarningCopy } from "@/lib/person-photos/copy";
 import { countChosenPhotos } from "@/lib/person-photos/reader";
 import { openRequestCount } from "@/lib/reimbursement/counts";
 import { REIMBURSEMENT_TOGGLE_KEY } from "@/lib/reimbursement/keys";
+import { FEATURES_WARNING_COPY } from "@/lib/worship/copy";
+import { countUpcomingScheduled } from "@/lib/worship/counts";
+import { WORSHIP_TOGGLE_KEY } from "@/lib/worship/vocab";
 
 /**
  * Page-side "turning this OFF has a consequence" warnings for the Features
@@ -15,9 +18,15 @@ import { REIMBURSEMENT_TOGGLE_KEY } from "@/lib/reimbursement/keys";
  * toggles) free of feature-specific queries, so a warning is data the page asks
  * for, not logic the catalog carries. A key without an entry has no warning.
  *
- * Three entries: `org_portal.giving`, `org_portal.person_photos` and
+ * Four entries: `org_portal.giving`, `org_portal.person_photos`,
  * `org_portal.reimbursement` (treasury
- * Increment 1, Copy C1). Turning Reimbursements OFF hides the pages and deletes
+ * Increment 1, Copy C1) and `org_portal.worship` (worship Increment 1, Copy G8:
+ * turning Worship OFF hides the schedule and stops requests and reminders, and
+ * people who were asked cannot answer until it is back on, so an administrator is
+ * told how many people are asked or scheduled for upcoming services, by
+ * `presby_worship_open_count()` - the same kind of SECURITY DEFINER BARE COUNT,
+ * readable by an `org_features.manage` holder with no worship key. Zero: no
+ * warning.). Turning Reimbursements OFF hides the pages and deletes
  * nothing, so an administrator who turns it off with requests still in flight
  * is told how many ("open" = submitted, returned or approved; drafts are not
  * counted), by `openRequestCount()` - the same kind of SECURITY DEFINER BARE
@@ -79,6 +88,12 @@ const REGISTRY: Record<string, OffWarningLoader> = {
     const count = await openRequestCount(tx);
     return count > 0 ? reimbursementWarning(count) : null;
   },
+  [WORSHIP_TOGGLE_KEY]: async (tx) => {
+    const count = await countUpcomingScheduled(tx);
+    return count > 0
+      ? { title: FEATURES_WARNING_COPY.title, description: FEATURES_WARNING_COPY.description(count) }
+      : null;
+  },
 };
 
 /** Copy C1, verbatim. `n` is `presby_reimbursement_open_count()`. */
@@ -108,6 +123,10 @@ const FALLBACK: Record<string, OffWarning> = {
     title: "Reimbursement requests may still be open",
     description:
       "We couldn't check how many requests are open just now. Turning this off hides the pages and nothing is deleted.",
+  },
+  [WORSHIP_TOGGLE_KEY]: {
+    title: FEATURES_WARNING_COPY.fallbackTitle,
+    description: FEATURES_WARNING_COPY.fallbackDescription,
   },
 };
 

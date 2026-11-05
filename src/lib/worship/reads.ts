@@ -57,11 +57,11 @@ export function getWorshipContext(viewer: WorshipViewer): Promise<WorshipContext
   return loadWorshipContext(viewer);
 }
 
-/** The roster predicate every read and every guard shares: in date on the organization's today. */
+/** The roster predicate every read and every guard shares: in date on the in-effect day (F434: `presby_worship_in_effect_day`, the later of the organization day and the UTC day the platform stamps rows on). */
 function rosterToday(alias: "gm", org: string) {
   const a = sql.raw(alias);
-  return sql`${a}.starts_on <= presby_worship_org_today(${org}::uuid)
-             and (${a}.ends_on is null or ${a}.ends_on > presby_worship_org_today(${org}::uuid))`;
+  return sql`${a}.starts_on <= presby_worship_in_effect_day(${org}::uuid)
+             and (${a}.ends_on is null or ${a}.ends_on > presby_worship_in_effect_day(${org}::uuid))`;
 }
 
 const kindOf = (value: unknown): TeamKind => (value === "choir" ? "choir" : "team");
@@ -162,8 +162,8 @@ export function getTeamAdmin(viewer: WorshipViewer, input: { groupId: string }):
         select g.name, g.description, gt.key as kind, (wt.retired_at is not null) as retired,
                exists (select 1 from role_grants rg
                         where rg.organization_id = wt.organization_id and rg.group_id = wt.group_id
-                          and rg.starts_on <= presby_worship_org_today(wt.organization_id)
-                          and (rg.ends_on is null or rg.ends_on > presby_worship_org_today(wt.organization_id))) as role_bound
+                          and rg.starts_on <= presby_worship_in_effect_day(wt.organization_id)
+                          and (rg.ends_on is null or rg.ends_on > presby_worship_in_effect_day(wt.organization_id))) as role_bound
           from worship_teams wt
           join groups g on g.id = wt.group_id and g.organization_id = wt.organization_id
           join group_types gt on gt.id = g.group_type_id
@@ -485,7 +485,7 @@ export function getMySchedule(viewer: WorshipViewer): Promise<WorshipResult<MySc
       await tx.execute(sql`
         select wt.group_id::text as group_id, g.name,
                presby_worship_leads_team(wt.organization_id, ${viewer.personId}::uuid, wt.group_id,
-                                         presby_worship_org_today(wt.organization_id)) as you_lead
+                                         presby_worship_in_effect_day(wt.organization_id)) as you_lead
           from worship_teams wt
           join groups g on g.id = wt.group_id and g.organization_id = wt.organization_id
          where wt.organization_id = ${org}::uuid and wt.retired_at is null

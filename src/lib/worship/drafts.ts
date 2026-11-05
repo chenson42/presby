@@ -89,8 +89,8 @@ export async function loadSendableDrafts(tx: OrgTx, organizationId: string, filt
                  join people pe on pe.id = gm.person_id
                  join memberships m on m.person_id = gm.person_id and m.organization_id = gm.organization_id
                 where gm.organization_id = a.organization_id and gm.group_id = a.group_id and gm.person_id = a.person_id
-                  and gm.starts_on <= presby_worship_org_today(a.organization_id)
-                  and (gm.ends_on is null or gm.ends_on > presby_worship_org_today(a.organization_id))
+                  and gm.starts_on <= presby_worship_in_effect_day(a.organization_id)
+                  and (gm.ends_on is null or gm.ends_on > presby_worship_in_effect_day(a.organization_id))
                   and pe.merged_into_id is null and pe.date_of_death is null and m.ended_on is null
              ) as on_team
         from worship_assignments a

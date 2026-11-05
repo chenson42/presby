@@ -74,7 +74,7 @@ export async function holdsAllKeys(tx: OrgTx, viewer: AuthorityViewer): Promise<
 
 /**
  * Whether the viewer holds a live chair or leader seat on this team's group,
- * as of the organization's local today. False for a group that is not a worship
+ * as of the in-effect day (F434: the later of the organization day and the UTC day). False for a group that is not a worship
  * team, for a derived group, and for a seat that has ended, has not begun, or
  * is held by a merged, deceased or ended-relationship person.
  */
@@ -85,7 +85,7 @@ export async function leadsTeam(tx: OrgTx, viewer: AuthorityViewer, groupId: str
                ${viewer.organizationId}::uuid,
                ${viewer.personId}::uuid,
                ${groupId}::uuid,
-               presby_worship_org_today(${viewer.organizationId}::uuid)
+               presby_worship_in_effect_day(${viewer.organizationId}::uuid)
              ) as leads
     `),
   )[0];
@@ -106,7 +106,7 @@ export async function ledTeamIds(tx: OrgTx, viewer: AuthorityViewer): Promise<st
                wt.organization_id,
                ${viewer.personId}::uuid,
                wt.group_id,
-               presby_worship_org_today(wt.organization_id)
+               presby_worship_in_effect_day(wt.organization_id)
              )
     `),
   );

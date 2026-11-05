@@ -43,7 +43,7 @@ import {
   type WorshipResult,
 } from "./result";
 import { isStarterKey, startersFor, type StarterKey } from "./starters";
-import { orgName, orgToday, rowsOf, uuidList } from "./sql-util";
+import { inEffectDay, orgName, orgToday, rowsOf, uuidList } from "./sql-util";
 import {
   ANSWERS,
   LIMITS,
@@ -187,8 +187,8 @@ async function groupIsRoleBound(tx: OrgTx, organizationId: string, groupId: stri
         select 1 from role_grants rg
          where rg.organization_id = ${organizationId}::uuid
            and rg.group_id = ${groupId}::uuid
-           and rg.starts_on <= presby_worship_org_today(${organizationId}::uuid)
-           and (rg.ends_on is null or rg.ends_on > presby_worship_org_today(${organizationId}::uuid))
+           and rg.starts_on <= presby_worship_in_effect_day(${organizationId}::uuid)
+           and (rg.ends_on is null or rg.ends_on > presby_worship_in_effect_day(${organizationId}::uuid))
       ) as bound
     `),
   );
@@ -540,8 +540,8 @@ export function setQualifications(
                  select 1 from group_memberships gm
                   where gm.organization_id = ${viewer.organizationId}::uuid and gm.group_id = ${input.groupId}::uuid
                     and gm.person_id = ${input.personId}::uuid
-                    and gm.starts_on <= presby_worship_org_today(${viewer.organizationId}::uuid)
-                    and (gm.ends_on is null or gm.ends_on > presby_worship_org_today(${viewer.organizationId}::uuid))
+                    and gm.starts_on <= presby_worship_in_effect_day(${viewer.organizationId}::uuid)
+                    and (gm.ends_on is null or gm.ends_on > presby_worship_in_effect_day(${viewer.organizationId}::uuid))
                ) as on_roster
           from people p
           join memberships m on m.person_id = p.id and m.organization_id = ${viewer.organizationId}::uuid
@@ -681,7 +681,9 @@ export function endTeamMember(
       return conflict("role_bound", ACTION_COPY.roleBound);
     }
 
-    const today = await orgToday(tx, viewer.organizationId);
+    // The in-effect day (F434): the row's dates may have been stamped on either
+    // clock, and an end date earlier than its start is refused by the primitive.
+    const today = await inEffectDay(tx, viewer.organizationId);
     if (row.endsOn !== null && row.endsOn <= today) return ok({ changed: false });
 
     const result = await endManagedGroupMemberInTx(tx, viewer.organizationId, {
@@ -1411,8 +1413,8 @@ export function placePerson(
                    join memberships m on m.person_id = gm.person_id and m.organization_id = gm.organization_id
                   where gm.organization_id = ${viewer.organizationId}::uuid and gm.group_id = ${input.groupId}::uuid
                     and gm.person_id = ${input.personId}::uuid
-                    and gm.starts_on <= presby_worship_org_today(${viewer.organizationId}::uuid)
-                    and (gm.ends_on is null or gm.ends_on > presby_worship_org_today(${viewer.organizationId}::uuid))
+                    and gm.starts_on <= presby_worship_in_effect_day(${viewer.organizationId}::uuid)
+                    and (gm.ends_on is null or gm.ends_on > presby_worship_in_effect_day(${viewer.organizationId}::uuid))
                     and p.merged_into_id is null and p.date_of_death is null and m.ended_on is null
                ) as on_team
           from people p

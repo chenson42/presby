@@ -22,6 +22,20 @@ export async function orgToday(tx: OrgTx, organizationId: string): Promise<strin
   return String(row!.today);
 }
 
+/**
+ * The day a platform-stamped grant or roster row counts from and to, as
+ * 'YYYY-MM-DD' (`presby_worship_in_effect_day`, F434): the later of the
+ * organization's day and the UTC day. Use it for any comparison against, or
+ * end-stamp on, a `role_grants` or `group_memberships` date. Blockouts,
+ * "upcoming" and reminders stay on `orgToday`.
+ */
+export async function inEffectDay(tx: OrgTx, organizationId: string): Promise<string> {
+  const row = rowsOf(
+    await tx.execute(sql`select presby_worship_in_effect_day(${organizationId}::uuid)::text as day`),
+  )[0];
+  return String(row!.day);
+}
+
 /** The organization's name (the org tree is public, so this reads under any context). */
 export async function orgName(tx: OrgTx, organizationId: string): Promise<string> {
   const row = rowsOf(

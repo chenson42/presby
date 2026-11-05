@@ -236,10 +236,14 @@ describe("the migration text", () => {
     }
   });
 
-  it("no worship function has a defaulted parameter", () => {
+  it("no worship function has a defaulted parameter, bar the in-effect day's p_now test seam", () => {
     for (const m of SQL_NO_COMMENTS.matchAll(/create or replace function (presby_worship_\w+)\(([^)]*)\)/g)) {
-      expect(m[2]!.toLowerCase(), m[1]).not.toMatch(/\bdefault\b|=/);
+      // F434: presby_worship_in_effect_day(p_org, p_now default now()) - p_now exists so a test can fix the instant.
+      const params = m[1] === "presby_worship_in_effect_day" ? m[2]!.replace(/,\s*p_now timestamptz default now\(/i, "") /* the capture stops at now( */ : m[2]!;
+      expect(params.toLowerCase(), m[1]).not.toMatch(/\bdefault\b|=/);
     }
+    const seam = SQL_NO_COMMENTS.match(/create or replace function presby_worship_in_effect_day\(([^)]*)\)/);
+    expect(seam?.[1]).toMatch(/p_now timestamptz default now\(/i);
   });
 
   it("the founding bundle keeps the live base array verbatim and adds worship for the two types only", () => {

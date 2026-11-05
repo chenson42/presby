@@ -28,6 +28,9 @@
  *   W9  no `callbackUrl`, `next=` or `redirect(` in the module or its actions.
  *   W10 `directory_hidden` is never named.
  *   W11 every store export runs its gate inside its own transaction.
+ *   W12 no grant or roster date is compared against the SERVICE day
+ *       (`presby_worship_org_today`): the in-effect day is the only clock for a
+ *       `role_grants` / `group_memberships` date or a resolver call (F434).
  */
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import path from "node:path";
@@ -404,5 +407,71 @@ describe("W11: every store export runs through the gate", () => {
       const text = body.slice(m.index!, starts[i + 1]?.index ?? body.length);
       expect(text, m[1]).toMatch(/return guarded(?:<[^>]*>)?\(\s*viewer\b/);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W12 - the in-effect day (F434, DECISION-328)
+// ---------------------------------------------------------------------------
+
+/** SQL comments (`-- ...`) and block comments, so prose that names the function is not a use of it. */
+function stripSqlComments(sql: string): string {
+  return sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
+}
+
+/** The text between the parentheses opened at `open` (balanced), or null when unbalanced. */
+function argumentList(text: string, open: number): string | null {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return text.slice(open + 1, i);
+  }
+  return null;
+}
+
+const CLOCK_CALLERS = ["presby_has_permission", "presby_effective_permissions", "presby_worship_leads_team"];
+
+/**
+ * Every place a grant or roster date is read against the service day: a
+ * resolver or seat call whose arguments name `presby_worship_org_today`, or a
+ * `starts_on` / `ends_on` comparison written against it. The one exemption is a
+ * trigger's own `new.` row (the blockout guard compares worship's own dates).
+ */
+function serviceDayViolations(source: string): string[] {
+  const body = stripSqlComments(stripComments(source));
+  const found: string[] = [];
+  for (const caller of CLOCK_CALLERS) {
+    for (const m of body.matchAll(new RegExp(`\\b${caller}\\s*\\(`, "g"))) {
+      const args = argumentList(body, m.index! + m[0].length - 1);
+      if (args !== null && /presby_worship_org_today/.test(args)) found.push(`${caller}( ... presby_worship_org_today ... )`);
+    }
+  }
+  for (const m of body.matchAll(/([^\s()]+)\s*(?:<=|>=|<|>)\s*presby_worship_org_today/g)) {
+    const left = m[1]!;
+    if (/(?:^|\.)(?:starts_on|ends_on)$/.test(left) && !left.startsWith("new.")) found.push(`${left} compared with presby_worship_org_today`);
+  }
+  for (const m of body.matchAll(/presby_worship_org_today\s*\([^)]*\)\s*(?:<=|>=|<|>)\s*([^\s()]+)/g)) {
+    if (/(?:^|\.)(?:starts_on|ends_on)$/.test(m[1]!) && !m[1]!.startsWith("new.")) found.push(`presby_worship_org_today compared with ${m[1]}`);
+  }
+  return found;
+}
+
+describe("W12: a grant or roster date is never compared with the service day", () => {
+  const sources = [...moduleFiles, "drizzle/0085_presby_worship.sql"];
+
+  it("not in 0085 and not in any worship source file", () => {
+    for (const file of sources) expect(serviceDayViolations(read(file)), file).toEqual([]);
+  });
+
+  it("the scan can fail: each offending form is seen, the blockout guard and prose are not", () => {
+    expect(serviceDayViolations("rg.starts_on <= presby_worship_org_today(${organizationId}::uuid)")).toHaveLength(1);
+    expect(serviceDayViolations("(gm.ends_on is null or gm.ends_on > presby_worship_org_today(wt.organization_id))")).toHaveLength(1);
+    expect(serviceDayViolations("and ${a}.starts_on <= presby_worship_org_today(${org}::uuid)")).toHaveLength(1);
+    expect(serviceDayViolations("presby_worship_org_today(x) >= gm.starts_on")).toHaveLength(1);
+    expect(serviceDayViolations("presby_has_permission(p, o, 'worship.schedule', presby_worship_org_today(o))")).toHaveLength(1);
+    expect(serviceDayViolations("presby_worship_leads_team(o, p, g,\n presby_worship_org_today(o))")).toHaveLength(1);
+    expect(serviceDayViolations("if new.ends_on < presby_worship_org_today(new.organization_id) then")).toEqual([]);
+    expect(serviceDayViolations("rg.starts_on <= presby_worship_in_effect_day(o)")).toEqual([]);
+    expect(serviceDayViolations("-- gm.starts_on <= presby_worship_org_today(o)\n/* rg.ends_on > presby_worship_org_today(o) */")).toEqual([]);
   });
 });

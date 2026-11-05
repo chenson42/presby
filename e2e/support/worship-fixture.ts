@@ -213,12 +213,11 @@ export async function setupWorshipFixture(sql: Sql, options: SetupOptions): Prom
       sql`select outcome from presby_apply_founding_administrator(${orgId}::uuid, ${pid(PEOPLE.planner.n)}::uuid, ${users.planner}::uuid)`,
     );
     if (applied?.outcome === "has_holders") throw new Error("[worship-fixture] the founding administrator was already designated");
-    // FINDING (reported in the work-log): the definer stamps `role_grants.starts_on` with the DATABASE's current_date
-    // (UTC), while the worship guards ask "as of the ORGANIZATION's today" (America/New_York). For the evening hours
-    // when UTC is already tomorrow, a freshly minted founder is refused at the trigger on the first placement
-    // (the page's own key read passed). The fixture back-dates the grant like every other fixture grant (2020),
-    // so the spec tests the bundle and not the hour of the day.
-    await sql`update role_grants set starts_on = date '2020-01-01' where organization_id = ${orgId}::uuid and person_id = ${pid(PEOPLE.planner.n)}::uuid`;
+    // F434: the definer stamps `role_grants.starts_on` with the database's current_date (UTC), and worship
+    // compares grant dates on its in-effect day (`presby_worship_in_effect_day`, the later of the organization's
+    // day and the UTC day). The grant is left exactly as the definer wrote it, so this founder is the just-minted
+    // case: the spec passes at any hour, and in a US evening it only passes with the F434 fix. Every other
+    // fixture grant keeps its 2020 back-date (a long-held role, not a just-minted one).
   }
   for (const [roleId, key, name, permissions] of [
     [plannerRole, "e2e_worship_planner", "E2E Worship Planner", ["worship.manage", "worship.plan", "worship.schedule"]],

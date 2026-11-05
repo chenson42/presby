@@ -79,6 +79,10 @@ describe.skipIf(!hasDb)("worship/reads.ts scheduling reads (Postgres-backed)", (
     }
   }
 
+  /** A service start two weeks out, 09:00 on the organization's calendar. */
+  const futureStart = async (org: string) =>
+    String((await t.one(sql`select to_char(date_trunc('week', presby_worship_org_now(${org})) + make_interval(weeks => 2, days => 6, hours => 9), 'YYYY-MM-DD"T"HH24:MI') as s`)).s);
+
   /** A request in the given state, by the owner path (the Send has its own tests). */
   async function put(
     w: WorshipWorld,
@@ -312,11 +316,73 @@ describe.skipIf(!hasDb)("worship/reads.ts scheduling reads (Postgres-backed)", (
       const drums = band.positions[0]!.assignments[0]!;
       expect(drums).toMatchObject({ name: "Alice Worshiptest", status: "confirmed", recordedBy: "Leader Worshiptest", isGuest: false, mayBeUnder18: false });
       const vocals = band.positions[1]!.assignments;
-      expect(vocals.find((a) => a.personId === w.bob)).toMatchObject({ status: "declined", declineReason: "work", recordedBy: null });
+      // F436: a planner sees that Bob declined, not why; a viewer who can schedule the team sees the reason.
+      expect(vocals.find((a) => a.personId === w.bob)).toMatchObject({ status: "declined", declineReason: null, recordedBy: null });
+      const asScheduler = await reads.getServiceBoard(v(w.scheduler, w), { eventId: w.sunday });
+      if (asScheduler.kind !== "ok") throw new Error(JSON.stringify(asScheduler));
+      const schedVocals = asScheduler.data.teams[0]!.positions[1]!.assignments;
+      expect(schedVocals.find((a) => a.personId === w.bob)).toMatchObject({ status: "declined", declineReason: "work", recordedBy: null });
       expect(vocals.find((a) => a.personId === w.child)).toMatchObject({ status: "requested", mayBeUnder18: true });
       const guest = r.data.teams[1]!.positions[0]!.assignments[0]!;
       expect(guest).toMatchObject({ name: "Visiting organist", isGuest: true, personId: null, status: "confirmed" });
       expect(JSON.stringify(r.data)).not.toMatch(/@/);
+    });
+
+    it("a decline reason is shown only to a viewer who can schedule that team — regression for the reason read by planners (F436)", async () => {
+      const w = await t.build("b1r");
+      await put(w, w.bob, w.sunday, w.vocals, "declined", { reason: "work" });
+      await put(w, w.alice, w.sunday, w.drums, "declined", { reason: "family", onBehalf: true });
+      const reasonOf = async (who: string, personId: string, groupId?: string) => {
+        const r = await reads.getServiceBoard(v(who, w), { eventId: w.sunday, groupId });
+        if (r.kind !== "ok") throw new Error(JSON.stringify(r));
+        const a = r.data.teams.flatMap((x) => x.positions.flatMap((p) => p.assignments)).find((x) => x.personId === personId)!;
+        return { status: a.status, declineReason: a.declineReason, recordedBy: a.recordedBy };
+      };
+      for (const who of [w.scheduler, w.leader]) expect(await reasonOf(who, w.bob)).toMatchObject({ status: "declined", declineReason: "work" });
+      for (const who of [w.planner, w.manager]) expect(await reasonOf(who, w.bob)).toEqual({ status: "declined", declineReason: null, recordedBy: null });
+      // Recorded on someone's behalf follows the same rule.
+      expect(await reasonOf(w.scheduler, w.alice)).toMatchObject({ declineReason: "family", recordedBy: "Leader Worshiptest" });
+      expect(await reasonOf(w.planner, w.alice)).toMatchObject({ declineReason: null, recordedBy: "Leader Worshiptest" });
+      // The reason is not serialized at all for a planner.
+      const planner = await reads.getServiceBoard(v(w.planner, w), { eventId: w.sunday });
+      expect(JSON.stringify(planner)).not.toMatch(/"work"|"family"/);
+      // A seat is enough: the band chair sees the band's reasons; the choir leader does not reach the band board.
+      expect(await reads.getServiceBoard(v(w.choirLeader, w), { eventId: w.sunday, groupId: w.band })).toEqual({ kind: "forbidden" });
+      // A manage key plus a band seat sees the reason (the seat is enough), and only for that team.
+      const both = await t.person(w.org, "Managerchair", ["worship.manage"]);
+      await t.onRoster(w.org, w.band, both, "chair");
+      expect(await reasonOf(both, w.bob)).toMatchObject({ declineReason: "work" });
+      const choirPerson = await t.person(w.org, "Choirdecliner");
+      await t.onRoster(w.org, w.choir, choirPerson);
+      await put(w, choirPerson, w.sunday, w.soprano, "declined", { groupId: w.choir, reason: "away" });
+      expect(await reasonOf(both, choirPerson)).toMatchObject({ status: "declined", declineReason: null });
+      expect(await reasonOf(w.scheduler, choirPerson)).toMatchObject({ declineReason: "away" });
+    });
+
+    it("a service with no serving team opens, with an empty team list, for a key holder and for nobody else — regression for the team-less 404 (F435)", async () => {
+      const w = await t.build("b5");
+      const made = await store.createService(v(w.planner, w), { title: "No team yet", startsAt: await futureStart(w.org), groupIds: [] });
+      if (made.kind !== "ok" || !made.data.created) throw new Error(JSON.stringify(made));
+      const eventId = made.data.eventId;
+      for (const who of [w.planner, w.manager, w.scheduler]) {
+        expect(await reads.getServiceBoard(v(who, w), { eventId }), who).toMatchObject({ kind: "ok", data: { eventId, title: "No team yet", teams: [], cancelled: false } });
+      }
+      for (const who of [w.leader, w.plain]) expect(await reads.getServiceBoard(v(who, w), { eventId }), who).toEqual({ kind: "forbidden" });
+      expect(await reads.getServiceBoard(v(w.planner, w), { eventId, groupId: w.band })).toEqual({ kind: "forbidden" });
+      // A cancelled team-less service still opens, read-only.
+      expect((await store.cancelService(v(w.planner, w), { eventId })).kind).toBe("ok");
+      expect(await reads.getServiceBoard(v(w.planner, w), { eventId })).toMatchObject({ kind: "ok", data: { cancelled: true, teams: [] } });
+    });
+
+    it("removing the last team from a service leaves it open — regression for the team-less 404 (F435)", async () => {
+      const w = await t.build("b6");
+      const made = await store.createService(v(w.planner, w), { title: "One team", startsAt: await futureStart(w.org), groupIds: [w.band] });
+      if (made.kind !== "ok" || !made.data.created) throw new Error(JSON.stringify(made));
+      const eventId = made.data.eventId;
+      expect((await reads.getServiceBoard(v(w.planner, w), { eventId })).kind).toBe("ok");
+      expect((await store.setServiceTeams(v(w.planner, w), { eventId, groupIds: [] })).kind).toBe("ok");
+      expect(await reads.getServiceBoard(v(w.planner, w), { eventId })).toMatchObject({ kind: "ok", data: { teams: [] } });
+      expect(await reads.getServiceBoard(v(w.leader, w), { eventId })).toEqual({ kind: "forbidden" });
     });
 
     it("a scheduler can schedule every team; a leader sees (and may schedule) only the team they lead; groupId narrows to one", async () => {

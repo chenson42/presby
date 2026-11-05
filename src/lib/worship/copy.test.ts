@@ -11,6 +11,7 @@ import {
   GATE_COPY,
   HUB_COPY,
   MEMBER_COPY,
+  NAV_COPY,
   PERMISSION_COPY,
   PLATFORM_ADMIN_LABELS,
   SERVICES_COPY,
@@ -236,7 +237,7 @@ describe("G6 - member pages", () => {
 
   it("the blockout strings: a blockout never cancels what was agreed", () => {
     expect(MEMBER_COPY.blockouts.helper).toBe(
-      "The people who schedule worship see these dates when they choose who to ask. They don't cancel anything you've already agreed to.",
+      "People who schedule worship are told when you've saved a date they're choosing for, but they don't see your reason. Saving dates doesn't cancel anything you've already agreed to.",
     );
     expect(MEMBER_COPY.blockouts.row("Dec 1", "Dec 8", "away")).toBe("Dec 1 to Dec 8, Away");
     expect(MEMBER_COPY.blockouts.row("Dec 1", "Dec 8", null)).toBe("Dec 1 to Dec 8");
@@ -244,6 +245,28 @@ describe("G6 - member pages", () => {
       "You're already confirmed to serve on Sunday, December 7. This doesn't change that. Let the person who asked you know.",
     );
     expect(MEMBER_COPY.blockouts.tooMany).toBe("You can save up to 50 sets of dates. Remove some you no longer need.");
+  });
+});
+
+describe("G9 - strings reviewed in Phase 3 amendment 3", () => {
+  it("the Groups role note no longer denies the role coupling, and names no access it does not give", () => {
+    expect(TEAMS_COPY.groupsRoleNote).toBe(
+      "Member, Chair and Leader describe a person's part in the group. If the group has been given a role, everyone in it gets that role, whatever their part.",
+    );
+    expect(TEAMS_COPY.groupsRoleNote).not.toMatch(/no access/i);
+  });
+
+  it("the empty states name no action the surface's default role cannot take", () => {
+    expect(NAV_COPY.teamNone).toBe("No teams yet. When a team has been made, you can choose it here.");
+    expect(NAV_COPY.noServiceTypesTitle).toBe("No service types yet.");
+    expect(NAV_COPY.noServiceTypesToUse).toBe(
+      "Someone who sets up worship needs to save a service type first. Then you can add several services here.",
+    );
+    expect(NAV_COPY.searchNone).toBe(
+      "No one matches that search. People already on this team, and people without a current record, aren't listed.",
+    );
+    expect(NAV_COPY.teamNone).not.toMatch(/make a team first/i);
+    expect(NAV_COPY.noServiceTypesToUse).not.toMatch(/^Save a service type first/);
   });
 });
 

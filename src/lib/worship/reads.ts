@@ -830,7 +830,10 @@ export interface ServiceBoard {
  * assignments): no query per team or per person. `groupId` narrows to one team.
  * An event that is not a worship service is `not_found`; a viewer with neither a
  * key nor a seat on any serving team (or on the named team) is `forbidden`, which
- * a page renders as the same not-found as an unknown id.
+ * a page renders as the same not-found as an unknown id. A service with no serving
+ * team is served, with an empty team list, to a key holder (F435); a seat alone,
+ * and any call that names a `groupId`, stay `forbidden` there.
+ * A decline reason is returned only for a team the viewer can schedule (F436).
  */
 export function getServiceBoard(
   viewer: WorshipViewer,
@@ -866,7 +869,23 @@ export function getServiceBoard(
     );
     let visible = serving.filter((t) => anyKey || led.includes(String(t.group_id)));
     if (input.groupId !== undefined) visible = visible.filter((t) => String(t.group_id) === input.groupId);
-    if (visible.length === 0) return forbidden();
+    const serviceFields = {
+      eventId: String(service.event_id),
+      title: String(service.title),
+      startsAt: String(service.starts_at),
+      endsAt: textOrNull(service.ends_at),
+      location: textOrNull(service.location),
+      cancelled: service.cancelled === true,
+      started: service.started === true,
+    };
+    if (visible.length === 0) {
+      // F435: a service nobody has put a team on opens for a key holder. Returns before the position and
+      // assignment statements, which would build `in ()`.
+      if (!(anyKey && serving.length === 0 && input.groupId === undefined)) return forbidden();
+      return ok({ ...serviceFields, teams: [] });
+    }
+    // F436: the same condition feeds `canSchedule` and the decline-reason gate, so they cannot drift.
+    const maySchedule = (groupId: string): boolean => has.schedule === true || led.includes(groupId);
     const groupIds = visible.map((t) => String(t.group_id));
 
     const positionRows = rowsOf(
@@ -905,7 +924,7 @@ export function getServiceBoard(
           : displayName(r as { first_name: unknown; preferred_name: unknown; last_name: unknown }),
         isGuest: guest,
         status: r.status as AssignmentStatus,
-        declineReason: reasonOrNull(r.decline_reason),
+        declineReason: maySchedule(String(r.group_id)) ? reasonOrNull(r.decline_reason) : null,
         noticeOutcome: (r.notice_outcome as NoticeOutcome | null) ?? null,
         recordedBy:
           r.response_source === "on_behalf" && r.r_first !== null
@@ -923,7 +942,7 @@ export function getServiceBoard(
       return {
         groupId,
         name: String(t.name),
-        canSchedule: has.schedule === true || led.includes(groupId),
+        canSchedule: maySchedule(groupId),
         positions: positionRows
           .filter((p) => String(p.group_id) === groupId)
           .map((p) => {
@@ -938,16 +957,7 @@ export function getServiceBoard(
           }),
       };
     });
-    return ok({
-      eventId: String(service.event_id),
-      title: String(service.title),
-      startsAt: String(service.starts_at),
-      endsAt: textOrNull(service.ends_at),
-      location: textOrNull(service.location),
-      cancelled: service.cancelled === true,
-      started: service.started === true,
-      teams,
-    });
+    return ok({ ...serviceFields, teams });
   });
 }
 

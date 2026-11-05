@@ -35,6 +35,7 @@ const hasDb = Boolean(process.env.DATABASE_URL && process.env.PLATFORM_DATABASE_
 describe.skipIf(!hasDb)("worship/store.ts scheduling exports (Postgres-backed)", () => {
   let t: WorshipTestWorld;
   let store: typeof import("./store");
+  let reads: typeof import("./reads");
   let A: WorshipWorld;
   let B: WorshipWorld;
   let stamp: string;
@@ -53,6 +54,7 @@ describe.skipIf(!hasDb)("worship/store.ts scheduling exports (Postgres-backed)",
     const world = await import("@/lib/testing/worship-world");
     t = await world.createWorshipWorld("wstore");
     store = await import("./store");
+    reads = await import("./reads");
     stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
     A = await t.build("a");
     B = await t.build("b");
@@ -669,6 +671,26 @@ describe.skipIf(!hasDb)("worship/store.ts scheduling exports (Postgres-backed)",
       expect(teams.map((x) => x.g)).toEqual([w.band]);
       const gaps = await t.q(sql`select (lead(starts_at) over (order by starts_at) - starts_at) as gap from events where id in (${sql.join(r.data.eventIds.map((id) => sql`${id}::uuid`), sql`, `)}) order by starts_at`);
       expect(String(gaps[0]!.gap)).toMatch(/7 days/);
+    });
+
+    it("generate from a service type with no default teams, then each service opens — regression for the team-less 404 (F435)", async () => {
+      const w = await t.build("s5b");
+      const type = await store.createServiceType(v(w.manager, w), { name: "No teams yet", startTime: "09:00", groupIds: [] });
+      if (type.kind !== "ok") throw new Error("setup");
+      const firstDate = (await sundayStart(w.org)).slice(0, 10);
+      const r = await store.generateServices(v(w.planner, w), { serviceTypeId: type.data.serviceTypeId, firstDate, pattern: "weekly", count: 3 });
+      if (r.kind !== "ok") throw new Error("setup");
+      expect(r.data.eventIds).toHaveLength(3);
+      for (const eventId of r.data.eventIds) {
+        const board = await reads.getServiceBoard(v(w.planner, w), { eventId });
+        expect(board).toMatchObject({ kind: "ok", data: { eventId, teams: [] } });
+      }
+      // Add a team to one of them: the board shows it.
+      const first = r.data.eventIds[0]!;
+      expect((await store.setServiceTeams(v(w.planner, w), { eventId: first, groupIds: [w.band] })).kind).toBe("ok");
+      const after = await reads.getServiceBoard(v(w.planner, w), { eventId: first });
+      if (after.kind !== "ok") throw new Error(JSON.stringify(after));
+      expect(after.data.teams.map((x) => x.name)).toEqual(["Band"]);
     });
 
     it("generateServices: biweekly, monthly, one occurrence, and the limits - 26 at a time, the events cap of 52, a retired or unknown type", async () => {

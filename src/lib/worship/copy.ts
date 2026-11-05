@@ -183,11 +183,10 @@ export const TEAMS_COPY = {
   /**
    * Replaces "This is descriptive only - it does not grant software access." under the role select on the
    * Groups add-member form (Batch 6 coordinator item 5): that sentence stopped being true when a chair or
-   * leader gained scheduling (and, earlier, reimbursement approval). NOT in the Phase 3 Copy table; a
-   * string for Phase 6.
+   * leader gained scheduling (and, earlier, reimbursement approval). Reviewed in Phase 3 amendment 3 (G9).
    */
   groupsRoleNote:
-    "Member, Chair and Leader describe a person's part in the group. They give no access to the rest of PresbyPortal.",
+    "Member, Chair and Leader describe a person's part in the group. If the group has been given a role, everyone in it gets that role, whatever their part.",
   /** The helper line under the role select on the Groups add-member form. */
   groupsHelper:
     "A chair or leader can also schedule people when this group is a worship team, and can approve this group's reimbursement requests when your treasurer allows requests for it.",
@@ -376,7 +375,7 @@ export const MEMBER_COPY = {
   blockouts: {
     heading: "Dates I can't serve",
     helper:
-      "The people who schedule worship see these dates when they choose who to ask. They don't cancel anything you've already agreed to.",
+      "People who schedule worship are told when you've saved a date they're choosing for, but they don't see your reason. Saving dates doesn't cancel anything you've already agreed to.",
     fromLabel: "From",
     toLabel: "To",
     reasonLabel: "Reason (optional)",
@@ -429,16 +428,17 @@ export const NAV_COPY = {
   save: "Save",
   edit: "Edit",
   guestSubmit: "Add guest",
-  searchNone: "No one matches that search.",
+  searchNone: "No one matches that search. People already on this team, and people without a current record, aren't listed.",
   slotsCount: (n: number) => `${n} ${n === 1 ? "person" : "people"}`,
   newServiceType: "New service type",
   editServiceType: "Edit service type",
   noPositions: "This team has no positions yet.",
   noServingTeams: "No teams are serving yet.",
-  noServiceTypesToUse: "Save a service type first, then come back to add several services.",
+  noServiceTypesTitle: "No service types yet.",
+  noServiceTypesToUse: "Someone who sets up worship needs to save a service type first. Then you can add several services here.",
   noTeamsToAdd: "Every team is already serving.",
   chooseOne: "Choose one",
-  teamNone: "No teams yet. Make a team first, then choose it here.",
+  teamNone: "No teams yet. When a team has been made, you can choose it here.",
   /** "{n} min" next to a service type's usual length. */
   minutes: (n: number) => `${n} min`,
 } as const;

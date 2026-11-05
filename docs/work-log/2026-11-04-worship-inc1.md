@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete (this file) | Design complete; implementers named; F428 to F432 and DECISION-317 to 327 proposed | 2026-11-04 |
 | 3 — amendment 1 (architect addendum C1 to C5) | tech-lead | Complete (this file, "Phase 3 amendment 1") | C1 to C5 folded in; S1 adopted; S2 recorded as a `paper` residual (DECISION-317); DECISION-326 as amended | 2026-11-04 |
 | 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | Complete: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) complete 2026-11-04 (0085 hand-written, applied twice to the pipeline branch; section 85 147/147 as presby_app); Batches 2 and 3 (api-developer) complete 2026-11-04 (server side done; Batches 4 to 6 are ux-developer's); F434 fix (database-admin) complete 2026-11-05 UTC (0085 in place, re-applied twice; section 85 158 pass); F434 fix (application, api-developer) complete 2026-11-05 UTC (all in-effect-day sites, W12 scan, founder fixture un-back-dated). **Phase 4 Complete** (all batches, both F434 halves) | — | — |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 complete; loop-back to Phases 3/4 | FAIL | 2026-11-05 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1250,52 +1250,248 @@ Step 4 and 5 of "Phase 3 amendment 2 (F434)", on the database half's `presby_wor
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Run 1 of Phase 5** (later runs are appended below this one).
+
+
+**Date:** 2026-11-05 (run 2026-11-05 03:10 to 05:20 UTC, which is 22:10 to 00:20 EST)
 **Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-worship`, `pipeline/worship-inc1` at `abbe51ea`; database is Neon branch `pipeline-worship-inc1` with 0085 applied. I checked that every connection string points at that branch without printing it.
+
+**Auth gate.** `git diff 82c0d529..HEAD --name-only` touches none of `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/` or `src/lib/auth/`. The stricter auth gate doesn't apply. The MFA worship spec ran and passed anyway.
+
+**What I ran, and why.** The diff touches a migration, `src/lib/db/domain/worship.ts`, `e2e/support/` and a shared component (`src/components/org-portal/tile-icons.tsx`). Under the run-scope rules that means the **whole DB-backed suite** and the **whole `--project=chromium` e2e suite**. Before the e2e run I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`, exit 0).
+- Dev server: my own on :3690, stopped by PID (16142/16297, then 34889/35043).
+- Production lane: built in a scratch copy with cloned `node_modules`, run on :3691, server torn down by the runner. :3000 was never used.
+- Not run:
+  - `visual-parity.spec.ts`: the `visual` project only runs with `PW_VISUAL=1`.
+  - The `custom-hosts` project: no proxy or domain change.
+  - The full production lane: only `hydration/worship-forms` ran there; CI runs the rest.
+
+**Scratch-only work (nothing in the repo changed; `git status` is clean).** I made a copy of the worktree outside the repo and used it to:
+- apply the five integration patches;
+- run a test-rls census copy with error-stop turned off;
+- check W12's fail-before;
+- run one probe test file confirming finding 1.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS** (exit 0). `npm run lint`: **PASS** (no warnings). `npm run check`: **PASS**, all ten tripwires (help: 31 entries, 27 published, 7 images).
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+**Unit suite, no database:** 863 files ran, 862 passed and 1 failed; 154 skipped. 13,860 tests passed, 1 failed, 4,117 skipped. Duration 43.6s.
+- The one failure is `src/lib/dev-docs.test.ts:80`, as expected: the domain index doesn't export the nine worship tables until integration.
+- **I confirmed that claim in the scratch copy.** With `domain-index.ts` and `dev-docs.ts` integration patches applied, `dev-docs.test.ts` passes. The only red there was 3 git-dependent tests (`scripts/pre-push-gate.test.mjs`, `scripts/stats-escape.test.mjs`), which fail only because the copy has no `.git`.
+- `check:schema-parity` in the patched copy against the branch: 104 tables, 0 failing.
+
+**Full DB-backed suite, all 1,017 files, serial:** 1,013 files passed, 4 failed. 17,972 tests passed, 5 failed, 1 skipped. About 60 minutes.
+- `dev-docs.test.ts`: expected, as above.
+- **`src/lib/worship/store.db.test.ts:137`**: "a seat that ended, has not begun…".
+  - It expected `{kind:"forbidden"}` and got `{kind:"ok"}`.
+  - Line 122 takes "today" from `presby_worship_org_today`, and line 136 builds the "begins tomorrow" seat from it. Under the F434 rule (`greatest(org day, UTC day)`), that seat is already in effect between UTC midnight and the organization's midnight.
+  - **It failed again** on a single re-run at 04:22 UTC.
+- **`src/lib/worship/store.config.db.test.ts:426`**: "ends a member row (end-dated to today…)".
+  - It expected `2026-11-04` and got `2026-11-05`.
+  - The F434 application fix now stamps the in-effect day, but line 425 still compares against `presby_worship_org_today`.
+  - **It failed again** on a single re-run at 04:22 UTC.
+- **These two are test defects, not code defects.** Both use the service day for grant and roster dates, which is exactly what F434 ruled out. They go red every US evening; CI runs at any hour, so they will be intermittently red. The W12 scan skips test files, which is why it didn't catch them.
+- **`src/lib/db/fixture-deletable.test.ts` (2 tests): branch pollution, not a code defect.**
+  - The branch holds 387 leftover fixture people from the worship test helper (`src/lib/testing/worship-world.ts`), all named "…Worshiptest".
+  - Their delete windows closed at 02:53–02:56 UTC, before my run began (about 03:13 UTC). They were left by an earlier, interrupted run.
+  - My run left none: after every suite and the probe, `count(*) where deletable_until > now()` was 0.
+  - The rows can no longer be deleted, but they disappear when the branch is deleted. CI's fresh database is unaffected.
+
+**Database schema and permissions, checked against the live catalog.**
+- As the owner: all 9 tables have `relrowsecurity` and `relforcerowsecurity` set. Each has exactly one `tenant_isolation` policy (`organization_id = presby_current_org()`).
+- `aclexplode(relacl)`: `presby_app` has SELECT on all nine tables and no DELETE. `presby_platform` and `public` have nothing.
+- Column grants match the design table exactly. For example, `worship_assignments` has 11 INSERT and 8 UPDATE columns.
+- 26 triggers, all enabled. The function permissions are as designed: the reminder claim and every guard trigger are owner-only.
+- `feature_flags` has 0 rows for `org_portal.worship`.
+- **Probes as `presby_app` with no org context:**
+  - Reading `worship_teams`, `worship_assignments`, `worship_blockouts` and `worship_services` returns 0 rows, while the owner sees 7 assignments. RLS is what refuses here.
+  - `delete from worship_blockouts` and `update worship_assignments set requested_at = now()` are both refused with "permission denied". The grant is what refuses these, not a trigger.
+- `scripts/worship/test-rls-85.sql` as `presby_app`: **158 passes, exit 0**. Block 85g ran with the org day and UTC day different, so it actually exercised the F434 case.
+- Full `scripts/test-rls.sql`, patched, as `presby_app`: **1,954 passes, 2 failures, both pre-existing.**
+  - Line 219, "presbytery: sees only its own members", expected 2 and got 3. The extra Northern Reach membership dates from 2026-10-14.
+  - Line 7947, "exactly ONE org-owned role holds statistics.publish". The extra roles are `demo_everything` from 2026-10-14 and `e2e_statistics_publish` from 2026-10-19.
+  - Both come from data inherited from `development` and predate this pipeline. Section 85 and the patched "NINE template roles" assertion pass inside the same run.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+**Full `--project=chromium` on :3690:** 772 tests: 767 passed, 1 failed, 4 did not run (the rest of a serial file). 45.6 minutes.
+- **All 15 worship tests passed:**
+  - `worship-founder.spec.ts:39`
+  - `worship-respond-mfa.spec.ts:37`
+  - `worship-respond.spec.ts` (4)
+  - `worship-schedule.spec.ts` (3)
+  - `worship-toggle.spec.ts` (4)
+  - `hydration/worship-forms.spec.ts` (2)
+- The blast-radius specs passed: `portal-footer-sitemap`, `portal-home-cards`, `member-home`, `post-login-routing`. The three `/help/worship-*` pages each return 200 with one h1.
+- **Failure: `e2e/reimbursement-member.spec.ts:897`, the receipt upload got a 403. Test-environment problem, not a regression.**
+  - It failed again on a single re-run.
+  - **Cause:** `NEXT_PUBLIC_APP_URL` isn't set for a server I start myself, so `platformOrigin()` falls back to `http://localhost:3000`. The upload route's Origin check (`reimbursements/[id]/receipts/route.ts:128`) then refuses a page served from :3690.
+  - I restarted the server with `NEXT_PUBLIC_APP_URL=http://localhost:3690` and the spec passed **24/24**, including the 4 that didn't run before.
+  - The diff touches no reimbursement code.
+- **Worship specs re-run** on the restarted server, to regenerate the screenshots: **15/15 passed** (2.2 min).
+
+**Production-build lane** (`PW_PROD_BUILD=1 PW_PROD_PORT=3691 --project=prod-build e2e/hydration/worship-forms.spec.ts`): **2/2 passed.**
+
+**Time window.** Both worship e2e runs happened after midnight EST, when the org day and the UTC day agree. So `worship-founder.spec.ts` didn't exercise the F434 evening case in my runs. That case is covered by the DB tests and by 85g, which did run inside the window.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+- `src/lib/worship/boundaries.test.ts` (W12): stops grant or roster dates being compared on the service day (F434).
+  - **I checked that it fails first.** With `store/reads/authority/drafts.ts` at `abbe51ea^`, W12 fails (1 of 25) and the current files pass 25/25.
+  - With `0085` at `1dfc10b5^`, W12 fails on `presby_has_permission(… presby_worship_org_today …)` and `presby_worship_leads_team(…)`.
+  - Limit: it scans only non-test files (see the two failing tests above).
+- `src/lib/worship/in-effect-day.db.test.ts:95–228` (F434): passes.
+  - The before-fix result (13 failed, 2 passed) comes from database-admin's record. I couldn't re-check it without reverting the shared branch's migration.
+  - My DB run was before UTC noon, so part 2 of the test used `Etc/GMT+12` and was able to tell old from new.
+- `store.db.test.ts:383`: another person's assignment id gets the same answer as an unknown id.
+  - The UI half is `worship-respond.spec.ts:85`: same 404.
+- `store.db.test.ts:747`: C2. A `worship.plan` holder gets `not_found` on a plain event and the row is unchanged.
+- `src/lib/events/mutate.db.test.ts:506`, `:592`: C3, the event lock is taken first.
+- `store.send.db.test.ts:345` (two simultaneous Sends) and `:377` (a Send racing a cancel).
+- `store.cancel.db.test.ts:187`: cancelling from Manage events behaves the same as from worship.
+- `store.cancel.db.test.ts:256`: if the hook fails, the cancel rolls back.
+- `reads.db.test.ts:155`: you can only read your own schedule.
+- `worship-founder.spec.ts:39`: the F362 lesson; the founder needs no further grant.
+- `worship-respond-mfa.spec.ts:37`: MFA user follows the email link signed out, enters a code, and lands on the request.
+- **Missing:**
+  - Nothing covers a service with no serving teams (finding 1 below).
+  - The new-service form has no hydration test (finding 4 below).
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.11% statements
+- `src/lib/flags.ts`: 100%
+- Pure worship modules: 98.75% statements (`plan.ts` 100, `states.ts` 100, `copy.ts` 95.7, `result.ts` 97.3).
 
 ## Feature-Gate Audit
 
-*(Mandatory. Verified by reading route/action bodies, not by inferring from green tests.)*
+*(Verified by reading the action and page bodies, not inferred from green tests.)*
+
+How the gates work:
+- **Every action:** `resolveActionIdentity` (`action-gate.ts`) calls `auth()`, then `resolveOrgContext(session.user.id, slug)`. The viewer comes only from the session. Input is parsed with zod. The store export is called inside `guardedCall`.
+- **Every store export:** repeats `runGated` inside its own transaction (`access.ts`): org type, then the toggle (with the category axis), then the keys.
+- **Every page:** `gateWorshipPage` checks the signed-in user, the four-way org miss, `assertOrgAccess`, the org type, the toggle, then the `anyOf` keys. In `readOrState`, `forbidden` and `not_found` both become `notFound()`.
 
 | Route or action | `auth()` present? | Gate (toggle, then key or seat or own row) present? | Correct key? |
-|-----------------|-------------------|-----------------------------------------------------|--------------|
-| [action name] | yes / no | yes / no | `worship.X` or seat or own row |
+|---|---|---|---|
+| `respondToRequestAction` | yes | yes | own row (`store.ts:1753`; another person's, a draft and an unknown id all give `not_found`) |
+| `addBlockoutAction`, `endBlockoutAction` | yes | yes | own row (person comes from the viewer, `store.ts:1839/1909`) |
+| `placePersonAction`, `placeGuestAction` | yes | yes | `worship.schedule` or seat on `groupId` (`store.ts:1404/1456`) |
+| `removeAssignmentAction`, `recordResponseAction` | yes | yes | `worship.schedule` or seat on the assignment's team (`store.ts:1525/1561`) |
+| `sendRequestsAction` | yes | yes | `worship.schedule`, or seat with scope cut to the teams led (`drafts.ts:51–60`) |
+| `getPickerCandidatesAction`, `getSendPreviewAction` | yes | yes | `worship.schedule` or seat (`reads.ts:985`, `:1122`) |
+| `createTeamAction`, `updateTeamAction`, `retireTeamAction`, position, qualification, roster and service-type actions (13) | yes | yes | `worship.manage` |
+| `adoptTeamAction` | yes | yes | `worship.manage` and `groups.manage` (`store.ts:312–313`) |
+| `searchRosterCandidatesAction` | yes | yes | `worship.manage` |
+| `createServiceAction`, `generateServicesAction`, `setServiceTeamsAction` | yes | yes | `worship.plan` |
+| `updateServiceAction`, `cancelServiceAction` | yes | yes | `worship.plan` plus a lock on the event joined to its worship-service row (C2) |
+| `cancelEventAction` (Manage events, touched) | yes | unchanged | `events.manage`; now also passes the actor |
+| Member pages (`worship/`, `requests/[id]`, `blockouts`, `teams/[g]`) | yes (page) | yes | member; team page needs roster membership or any key (`reads.ts:652`) |
+| Member board (`teams/[g]/services/[e]`) | yes | yes | schedule or seat (`page.tsx:44`) |
+| `admin/worship` hub, services list, `services/[e]` | yes | yes | any worship key |
+| `admin/worship/teams/**`, `service-types/**` | yes | yes | `worship.manage` |
+| `admin/worship/services/new`, `generate` | yes | yes | `worship.plan` |
+| `/api/cron/maintenance` (touched) | existing bearer guard | not applicable | reminder step is isolated; `sweep.ts` is the only `getPlatformDb()` user |
+
+Other checks:
+- **No new route handler.**
+- **`(member)` and `/home`:** nothing under `src/app/(member)` imports or names worship. No worship data is shown there.
+- **No `loading.tsx`** under `worship/**` or `admin/worship/**`.
+- **Every form root is wrapped in `HydrationGate`**: 12 files, none uses `useForm`.
+- **No native dialogs** and no `console.log`. Confirms use `AlertDialog` with the destructive variant.
 
 ## Copy Truthfulness
 
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
-- [ ] Help diff covered: every labels string is on screen, every claim walked at 360px, every committed image opened
+- [ ] Every added or changed string is in the design's Copy table: **no**. These strings aren't in the table:
+  - `NAV_COPY` (`copy.ts:415–444`)
+  - `SERVICES_COPY.types.duplicate` (`copy.ts:212`)
+  - the singular/plural variants
+  - `TEAMS_COPY.groupsRoleNote` (`copy.ts:189–190`)
+
+  All were flagged for Phase 6 by the implementer. `groupsRoleNote` is also false (finding 3c).
+- [x] I opened the query behind each claim.
+- [ ] Each instruction is doable by the role that sees it: **fails 3a, 3b, 3d**.
+- [x] I grepped for older strings on the same subject. The old "descriptive only" Groups sentence was replaced, but the replacement is false (3c).
+- [x] Help diff walked:
+  - I read all three pages and screenshotted them at 360px (`/help/worship-*`; page width is 360, so nothing scrolls sideways).
+  - The labels show up in the worship screenshots, and `check:help` passes.
+  - **I opened all 7 committed images under `src/content/help/images/`.** They show only fixture data (Alder Creek Presbyterian Church, Marguerite Ashcombe, Corwin Ashgrove). No real name, address, email, brand or tenant.
+
+**copy truthfulness: FAIL**
+
+- **3a. `src/content/help/worship-setting-up.md:25`** (seen by administrators).
+  - It says schedulers see "the reason a person gave … for dates they can't serve (Away, Work, Family or Other)".
+  - No one but the person ever sees a blockout reason. The picker only checks that a blockout exists (`reads.ts:1013`), and `getMyBlockouts` returns only your own.
+  - This wording came from the design's help draft, so tech-lead should pick the wording.
+- **3b. `src/content/help/worship-serving-on-a-team.md:11` and `src/lib/worship/copy.ts:371`** (seen by any member who declines).
+  - They say "People who schedule worship can see it, and PresbyPortal does not show it to anyone else."
+  - In fact, any holder of `worship.manage` or `worship.plan` sees decline reasons on the admin service board, with or without a scheduling key or seat (`reads.ts:856–869, 908`). `reads.db.test.ts:299–313` confirms it, using the planner.
+  - **This understates who can see something about a member.** Tech-lead decides: limit reasons to people who can schedule, or change the wording.
+- **3c. `src/lib/worship/copy.ts:189–190`**, shown at `add-group-member-form.tsx:151` (seen by `groups.manage` holders).
+  - It says Member/Chair/Leader "give no access to the rest of PresbyPortal".
+  - The next line, `copy.ts:192–193`, says a chair or leader can schedule worship and approve reimbursements.
+  - And on a group that carries a role, being a member grants that role (`ACTION_COPY.roleBound`, `copy.ts:87`).
+- **3d. `src/content/help/worship-scheduling-a-team.md:21`.**
+  - It says "The dialog says how many people will be emailed".
+  - The dialog shows the number of requests and the number who can't be emailed, never the number who will be (`send-requests-dialog.tsx:107–120`).
+
+## Other findings that make this a FAIL
+
+**1. A service with no serving team can't be opened by anyone: functional defect, no test.**
+- The cause is in `src/lib/worship/reads.ts:868–869`. `getServiceBoard` returns `forbidden` whenever the list of visible teams is empty, and the page turns that into a 404.
+- How a user hits it: "Add service" allows zero teams (`input.ts:60` has no minimum; `service-form.tsx:61`). On success the form sends the user straight to the service page, which is a 404.
+  - This includes a founder's first service before any team exists. The form even shows "No teams yet. Make a team first, then choose it here."
+  - The same happens for a series generated from a service type with no default teams.
+- Because the page 404s:
+  - The plan-holder branch at `admin/worship/services/[eventId]/page.tsx:47` and the empty state at `service-teams-editor.tsx:59–60` can never be reached.
+  - Nobody can add a team to the service, edit it, or cancel it from Plan worship.
+- **Evidence:** a scratch-only probe test. `createService` (planner, `groupIds: []`) returned `{kind:"ok", created:true}`. `getServiceBoard` then returned `{kind:"forbidden"}` for the planner, the scheduler and the all-keys viewer.
+- Needs a fix and a regression test. Tech-lead to rule if they'd rather require at least one team.
+
+**2. Two DB tests fail in the evening window:** `store.db.test.ts:122,136–137` and `store.config.db.test.ts:425–426` (detail above). Switch them to `presby_worship_in_effect_day`, and consider making W12 scan test files too.
+
+**4. Missing hydration coverage.** `e2e/hydration/worship-forms.spec.ts:3–7` says it covers the new-service form, and the design (Tests, E2E) requires it, but there are only two tests (blockout and new team).
+
+## Notes, not blocking
+
+- **Known open item (the `portal-tiles` and `admin-hub` screenshots): neither BLOCKED nor an integration step.** I opened both. Neither shows the old "Worship & Service Planning" tile; `portal-tiles` shows Calendar alone under "Worship & Events". Under the design's own condition ("re-capture only if it appears") no re-capture is needed. Drop the TODO line.
+- `verifiedIn: "0.54.5"` on the three new help pages names the release before this feature. Set it when the pages are re-walked against the shipping release.
+- `worship-toggle.spec.ts` doesn't cover the not-applicable state (a presbytery). That's covered by `store.db.test.ts:71` (real gate) and the two `pages.test.tsx` cases (with mocks). It's a deviation from the design's e2e list, not a gap in what's tested.
+- **360px check.** All 37 screenshots came from my own run. I opened 10 (board after Send), 12 (remove dialog), 28 (service page), 30 (member home), 35 (blockouts) and 40 (off state). Nothing scrolls sideways, buttons are at least 44px, and long names wrap. The specs also assert sideways scroll and 44px buttons on every page they visit.
+- **Branch hygiene:** the 387 permanent "Worshiptest" leftovers are only on `pipeline-worship-inc1`, which is deleted at cleanup.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** Required checks went red: findings 1 (functional), 2 (DB tests), 3a–3d (copy truthfulness) and 4 (missing hydration coverage), each cited `file:line` above. The feature-gate audit, the database checks, the F434 W12 fail-before check and all worship e2e specs on both lanes pass.
+
+**What I didn't re-run or confirm:** the full production lane, `visual-parity`, the `custom-hosts` project, and in-effect-day's before-fix result (that rests on database-admin's record).
+
+---
+
+**Per-Phase Status row**
+
+| 5 — Verification | qa | Complete | FAIL | 2026-11-05 |
+
+**Handoff.** This goes back to Phase 4.
+- **Tech-lead rulings first:**
+  - Finding 1: require at least one team, or let a key holder open a service with none.
+  - Finding 3b: limit decline reasons to people who can schedule, or reword.
+  - Finding 3a: wording.
+- **api-developer:**
+  - Fix 1 in `reads.ts` and the service page, plus a regression test.
+  - Fix the two tests in finding 2, and decide whether W12 should scan test files.
+  - Fix 3b on the code side if tech-lead chooses to restrict.
+  - Fix `copy.ts:189–190`.
+- **ux-developer:**
+  - Edit the help pages for 3a, 3b and 3d.
+  - Add the new-service hydration test (finding 4).
+
+QA then re-runs the worship DB suites (once inside the 19:00–24:00 EST window), the worship e2e specs, and the copy check on the changed strings.
 
 ---
 

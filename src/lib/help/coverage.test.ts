@@ -35,8 +35,8 @@ import type { HelpContentEntry, HelpEntry } from "./types";
 
 /** Shrink-only (P3-16): this number may be lowered, never raised. Batch 5a and 5b delete the
  * "written later in this increment" entries as the pages that cover them publish. */
-// 16 + 2: worship Increment 1 adds org_portal.worship and tile:worship-admin until Batch 6 writes their pages and deletes them.
-const ALLOWLIST_PIN = 18;
+// 16 - 1: worship Increment 1 documents tile:worship (and its toggle and admin tile), so it leaves the list.
+const ALLOWLIST_PIN = 15;
 
 const ROOT = path.resolve(__dirname, "../../..");
 
@@ -199,7 +199,7 @@ describe("the shrink-only allowlist", () => {
       "org_portal.giving", "tile:giving", "tile:giving-admin", "org_portal.mail_domain",
       "org_portal.sensitive_info", "org_portal.parishes", "tile:groups", "tile:staff",
       "tile:credentials", "tile:oversight", "tile:reports", "tile:filings", "tile:committees",
-      "tile:worship", "tile:insights", "tile:communications",
+      "tile:insights", "tile:communications",
     ]) expect(keys.has(k), k).toBe(true);
   });
 });

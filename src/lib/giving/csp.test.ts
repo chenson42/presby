@@ -187,7 +187,7 @@ describe("next.config.ts redirects(): /orgs is scoped to platform hosts (F151)",
     const [orgs, ...rest] = await loadRedirects();
     // The only other redirect is the admin people-section move (Batch M, DECISION-201); it is
     // platform-host scoped too, and covered in src/lib/route-move-community.test.ts.
-    expect(rest.map((r) => r.source)).toEqual(["/o/:slug/admin/members/:path*"]);
+    expect(rest.map((r) => r.source)).toEqual(["/o/:slug/admin/members/:path*", "/help/planned/worship-planning"]);
     expect(orgs).toMatchObject({ source: "/orgs", destination: "/home", permanent: true });
     expect(orgs!.has).toEqual([{ type: "host", value: expect.any(String) }]);
     // Same pattern as the HSTS split: one definition of "platform host".

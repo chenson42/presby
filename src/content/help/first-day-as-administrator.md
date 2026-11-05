@@ -32,7 +32,7 @@ You can use these:
 - "Officers": record officers and the Session. See [Officers and the Session](/help/officers-and-the-session).
 - "Roles": give roles and take them away. See [Roles: who can do what](/help/roles-who-can-do-what).
 - "Groups": committees, small groups, choirs and teams.
-- "Worship": set up teams and schedule people. Turn on "Worship" first.
+- "Worship": set up teams and schedule people. Turn on "Worship" first. See [Setting up worship planning](/help/worship-setting-up).
 - "Staff": paid, non-ordained staff positions.
 - "Directory": search for people. See [Using the directory](/help/using-the-directory).
 - "Calendar": read the congregation's events. It is on from the start.

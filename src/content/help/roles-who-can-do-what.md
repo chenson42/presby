@@ -36,7 +36,7 @@ You cannot take away the last way anyone has to give roles. The page says "Revok
 The "Role catalog" lists each role with its number of permissions, its holders and its status. "Founding Administrator" and "Stated Clerk" show "Edit". "Member", "Calendar viewer", "Session member" and "Moderator of the Board of Deacons" are "Constitutional" and cannot be edited.
 
 - To make your own role, choose "Create role". Give it a key (lowercase letters, numbers and underscores, starting with a letter) and a name, and tick what it allows. The list is grouped by how sensitive the information is: directory, financial, and pastoral, demographic and medical. Each item has a short description. Choose "Create role". The message is "Role created."
-- To start from a stock role, use "Or adopt a template". The templates are "Committee Chair", "Giving Recorder", "Hiring Committee", "Personnel Administrator", "Stated Clerk" and "Treasurer". Choose one, then "Adopt template". The message is "Role adopted from template."
+- To start from a stock role, use "Or adopt a template". The templates are "Committee Chair", "Giving Recorder", "Hiring Committee", "Personnel Administrator", "Stated Clerk", "Treasurer" and "Worship Leader". Choose one, then "Adopt template". The message is "Role adopted from template."
 - To change a role, choose "Edit", change the ticks and choose "Save changes". The change applies at once to everyone who holds the role.
 - To retire a role, choose "Deactivate role" under "Danger zone". The dialog says it ends every current grant of the role, and that the role and its ended grants stay on record. The role stays in the catalog marked "Deactivated".
 
@@ -56,7 +56,8 @@ A Founding Administrator can:
 - create and manage groups, and record staff positions;
 - give roles, take them away, and create and edit roles from what they hold;
 - ask the PresbyPortal team for help with a ticket;
-- write and publish job openings, once "Job openings" is turned on.
+- write and publish job openings, once "Job openings" is turned on;
+- plan worship and schedule teams, once "Worship" is turned on.
 
 A Founding Administrator cannot, on the first day:
 

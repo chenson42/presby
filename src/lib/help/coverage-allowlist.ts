@@ -30,9 +30,6 @@ export const COVERAGE_ALLOWLIST: readonly CoverageAllowlistEntry[] = [
   { key: "tile:reports", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
   { key: "tile:filings", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
   { key: "tile:committees", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
-  { key: "tile:worship", reason: "Worship Increment 1: the help pages worship-serving-on-a-team and worship-scheduling-a-team are written in Batch 6 of this pipeline, which deletes this entry." },
-  { key: "tile:worship-admin", reason: "Worship Increment 1: the help page worship-setting-up is written in Batch 6 of this pipeline, which deletes this entry." },
-  { key: "org_portal.worship", reason: "Worship Increment 1: the help page worship-setting-up is written in Batch 6 of this pipeline, which deletes this entry." },
   { key: "tile:insights", reason: "A coming-soon stub; never documented as a feature." },
   { key: "tile:communications", reason: "A coming-soon stub; never documented as a feature." },
 ];

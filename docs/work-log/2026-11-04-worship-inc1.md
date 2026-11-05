@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete (this file) | Design complete; implementers named; F428 to F432 and DECISION-317 to 327 proposed | 2026-11-04 |
 | 3 — amendment 1 (architect addendum C1 to C5) | tech-lead | Complete (this file, "Phase 3 amendment 1") | C1 to C5 folded in; S1 adopted; S2 recorded as a `paper` residual (DECISION-317); DECISION-326 as amended | 2026-11-04 |
 | 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | Complete: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) complete 2026-11-04 (0085 hand-written, applied twice to the pipeline branch; section 85 147/147 as presby_app); Batches 2 and 3 (api-developer) complete 2026-11-04 (server side done; Batches 4 to 6 are ux-developer's); F434 fix (database-admin) complete 2026-11-05 UTC (0085 in place, re-applied twice; section 85 158 pass); F434 fix (application, api-developer) complete 2026-11-05 UTC (all in-effect-day sites, W12 scan, founder fixture un-back-dated). **Phase 4 Complete** (all batches, both F434 halves) | — | — |
-| 5 — Verification | qa | Run 1 complete; loop-back to Phases 3/4 | FAIL | 2026-11-05 |
+| 5 — Verification | qa | Run 1 FAIL; run 2 complete except the evening-window DB run | BLOCKED (clock window: worship DB suites inside 00:00–05:00 UTC) | 2026-11-05 |
 | 3 — amendment 3 (Phase 5 run 1 rulings; the orchestrator's "Amendment 2", numbered 3 because the F434 amendment already holds 2) | tech-lead | Complete (this file, "Phase 3 amendment 3"). Rules on QA findings 1, 2, 3a to 3d and 4, the missing Copy rows, and two Phase 6 notes. Phase 4 resumes: api-developer, then ux-developer; QA run 2 after. F435, F436 and DECISION-329 proposed. | Rulings issued | 2026-11-05 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1669,6 +1669,206 @@ Other checks:
   - Add the new-service hydration test (finding 4).
 
 QA then re-runs the worship DB suites (once inside the 19:00–24:00 EST window), the worship e2e specs, and the copy check on the changed strings.
+
+---
+
+## Run 2 (2026-11-05)
+
+**Date:** 2026-11-05 (run 16:02 to 16:40 UTC, which is 11:02 to 11:40 EST. The brief said about 01:15 EST, but the database's `now()` and the system clock both read 16:02 UTC, so this whole run was in daytime.)
+**Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-worship`, `pipeline/worship-inc1` at `dd2d7671`, `git status` clean before and after.
+**Database:** the worktree's `.env.local`. All five `*DATABASE_URL` variables point at one Neon endpoint, a different one from the main checkout's `.env.local`, and migration 0085's 9 worship tables exist there. I compared endpoint IDs inside a script and printed only true/false; no value was shown. `RATE_LIMIT_DISABLED=true` is set, and the shell itself has no database variables.
+
+**Auth gate.** `git diff e2243133..HEAD` touches none of `src/auth.ts`, `src/proxy.ts`, `src/app/(auth)/`, `src/app/api/auth/` or `src/lib/auth/`, so the stricter auth gate doesn't apply. The MFA worship spec ran and passed anyway.
+
+**Scope.** As amendment 3 asked:
+- typecheck, lint, `npm run check`, the full unit suite;
+- the worship and events DB suites, serially;
+- `test-rls-85.sql` as `presby_app`;
+- all worship e2e specs on the dev lane, and `hydration/worship-forms` on the production lane.
+
+Not re-run: the full DB-backed suite, the full `--project=chromium` e2e suite and coverage. This loop-back diff touches no migration, `authz.ts`, `src/lib/db/`, shared fixture, layout, `e2e/support/` or shared component. Those results rest on run 1 and CI.
+
+**Flag state.** Before the e2e run I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`, exit 0, `COMMIT`). I ran it after the DB suites finished, because `enabled.db.test.ts` and `store.config.db.test.ts` flip `org_portal.feature_categories` and restore it.
+
+**Environment finding: why the e2e servers ran from a scratch copy.**
+- A dev server started in the worktree reloaded every page about 30 times a second, including untouched pages like `/help` and `/signin`. The browser got `{"type":"reloadPage","data":"HMR hash mismatch"}` after a Turbopack `restart` of the entry chunk list `.next/dev/static/chunks/presby-worship_1anvha4rlo79g._.js` (dated 2026-11-04 21:23).
+- No file anywhere under the Turbopack root was changing. Restarting the server by PID didn't help.
+- The cause is the worktree's stale `.next/dev` cache, which is not in git. I left it alone, because deleting it would be a write in the worktree.
+- So I made a copy of the worktree outside the repo, checked it was byte-identical to all 3,022 tracked files at `dd2d7671` by `shasum`, and gave it a fresh `.next`. A server from that copy made 2 navigations in 10 s.
+- Both lanes' servers and Playwright ran from that copy, so no test output was written into the worktree.
+- **For the orchestrator:** the worktree's `.next/dev` needs clearing before anyone runs `npm run dev` there again. Also, `turbopack.root` is the parent directory (`next.config.ts:155`), so writes in any sibling worktree also reach this server's watcher. That's worth knowing while pipelines run in parallel.
+
+**Servers.**
+- Dev: :3690, with `NEXT_PUBLIC_APP_URL` and `AUTH_URL` set to `http://localhost:3690` and the domain fakes and `CRON_SECRET` from `playwright.config.ts`. I stopped each server I started by PID: 5222/5068 and 8784/8613 (the two looping worktree servers), then 61224/60789 (the scratch copy).
+- Production: :3691, built and torn down by the runner.
+- I never used :3000. Both ports are free at the end.
+
+## Type Check
+
+- `npm run typecheck`: **PASS** (exit 0).
+- `npm run lint`: **PASS** (`--max-warnings=0`, exit 0).
+- `npm run check`: **PASS**, all ten tripwires. Help: 31 registry entries, 27 published, 27 content files, 7 images.
+
+## Unit Tests
+
+**Unit suite, no database (`npm run test`):** 1,017 files, 862 passed, 1 failed, 154 skipped. 17,989 tests: 13,867 passed, 1 failed, 4,121 skipped. 41.1 s.
+- The one failure is `src/lib/dev-docs.test.ts`, "sees the same tables in the exports as are declared in the schema files". This is the known red until the `domain/index.ts` export lands at integration. Run 1 checked it passes in a patched copy.
+- The 4,121 skipped tests are the DB-backed ones, which skip when there's no database. They ran in the run below.
+
+**Worship and events DB suites, serial** (`dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/worship src/components/worship src/lib/db/domain/worship src/lib/events`): **36 files, 694 tests, 694 passed, 0 failed, 0 skipped.** 1,217 s (16:03:42 to 16:24:00 UTC).
+- The 36 files include `store.db.test.ts`, `store.config.db.test.ts`, `reads.db.test.ts`, `in-effect-day.db.test.ts`, `worship.db.test.ts`, `worship.schema.test.ts` and `events/mutate.db.test.ts`.
+- This run was **outside** the evening window (see Finding 2).
+
+**`scripts/worship/test-rls-85.sql` as `presby_app`** (`current_user = presby_app`, `rolbypassrls = f`): **158 passes, 0 failures, exit 0.**
+- Run at 16:38 UTC, so 85g picked `Etc/GMT-14`. By its own comment (`test-rls-85.sql:1000-1008`) that makes it a non-regression check here, not the F434 discriminator.
+
+**Leftover fixture rows (read-only, no clean-up).**
+- 552 "Worshiptest" people on the branch (run 1 counted 387). All 552 have closed delete windows; none can be deleted. They disappear when the branch is deleted.
+- My run left none behind: the 552 count was the same before and after every suite, both e2e lanes and the fail-before probes. People and organizations with `deletable_until > now()`: 0 and 0.
+
+## End-to-End Tests
+
+**Dev lane, `--project=chromium`, :3690, all worship specs:** Total 17 | Passed 17 | Failed 0 | Skipped 0 | 2.5 min.
+- `hydration/worship-forms.spec.ts` (3), including the new **new-service form** test at `:81`
+- `worship-founder.spec.ts:39`
+- `worship-respond-mfa.spec.ts:37`
+- `worship-respond.spec.ts` (4)
+- `worship-schedule.spec.ts` (4), including the new **team-less service** test at `:255`
+- `worship-toggle.spec.ts` (4)
+
+**Production lane** (`PW_PROD_BUILD=1 PW_PROD_PORT=3691 --project=prod-build e2e/hydration/worship-forms.spec.ts`): Total 3 | Passed 3 | Failed 0 | 50.9 s. This includes the new-service hydration test.
+
+**360px.**
+- I opened `30-service-without-teams.png` and `31-service-team-added.png` from my own run. Before: title, Edit details, Cancel service, "Teams serving", "No teams are serving yet.", then Add a team with Chancel Choir. After: Chancel Choir listed with Remove, its board below, and the empty sentence gone.
+- Nothing is clipped, and controls are full width. The spec also asserts no sideways scroll and no target under 44px.
+
+**Time window.** Both e2e lanes ran in the daytime, so `worship-founder.spec.ts` did not exercise the F434 evening case in this run.
+
+## Regression Tests Added
+
+Each was confirmed to **fail before the fix**. I took the pre-fix files from git into a scratch copy outside the repo; nothing in the worktree was edited or stashed.
+
+**F435 and F436, against `reads.ts` at `d5cad87c`** (before `03833473`): 5 of 5 failed. All pass at HEAD.
+- `reads.db.test.ts`, "a key holder sees every serving team with … reasons …" (the edited test, now reading the reason as `w.scheduler`). Before the fix the planner received `declineReason: "work"` (F436).
+- `reads.db.test.ts`, "a decline reason is shown only to a viewer who can schedule that team — regression for the reason read by planners (F436)". Guards: planner and manager see "Declined" with no reason; the scheduler and the band seat see it; a reason recorded on someone's behalf follows the same rule; nothing about the reason reaches the planner's serialized result; manage plus a band seat sees band reasons but not choir reasons. It also covers the design's "unverified" case.
+- `reads.db.test.ts`, "a service with no serving team opens … for a key holder and for nobody else — regression for the team-less 404 (F435)". Before the fix: `forbidden`.
+- `reads.db.test.ts`, "removing the last team from a service leaves it open — regression for the team-less 404 (F435)". Before the fix: `forbidden`.
+- `store.db.test.ts`, "generate from a service type with no default teams, then each service opens — regression for the team-less 404 (F435)". Before the fix: `forbidden`.
+
+**F435 page, against `page.tsx` at `03833473`** (before `867be2c9`): 3 failed, as they should.
+- `pages.test.tsx`, "a service with no serving team opens for a viewer holding only worship.manage …" and "… only worship.schedule …": the old page called `notFound()`.
+- `pages.test.tsx`, "a cancelled service with no team shows the same sentence to everyone".
+- The plan-holder case passes before the fix, which is correct: the old page already rendered the editor for a plan holder, and that defect was in the read, covered above. "a read the viewer may not make is still the organization's 404" also passes before and after; it's a non-regression guard.
+
+**G9 exact-text pins, against `copy.ts` at `d5cad87c`:** 4 of 4 failed on the old text.
+- `copy.test.ts`, "the blockout strings …"
+- `copy.test.ts` G9, "the Groups role note …"
+- `copy.test.ts` G9, "the empty states name no action …"
+- `add-group-member-form.test.tsx`, "says the role is a part …"
+
+**Not regression tests for a bug, so no fail-before applies:**
+- New coverage: `e2e/hydration/worship-forms.spec.ts:81` (finding 4) and `e2e/worship-schedule.spec.ts:255` (the browser half of F435). I didn't run the F435 e2e against the pre-fix page; the unit and DB evidence above covers that.
+- Test fixes: the two clock tests (`store.db.test.ts:124`, `store.config.db.test.ts:427`) corrected tests, not code. See Finding 2.
+
+## Coverage on Critical Modules
+
+Not re-run. The diff touches none of these modules, and run 1's figures stand:
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.11%
+- `src/lib/flags.ts`: 100%
+
+## Feature-Gate Audit
+
+*(Verified by reading `reads.ts:838-962` and the two page bodies.)*
+
+No route handler or server action was added or changed. The changes are two read widenings and narrowings inside an existing gate.
+
+| Route or action | `auth()` present? | Gate present? | Correct key? |
+|---|---|---|---|
+| `getServiceBoard` (read behind both service pages) | yes (page gate via `gateWorshipPage`) | yes: `runGated(viewer, ["manage","plan","schedule"])` unchanged | F435 widening is limited to `anyKey && serving.length === 0 && input.groupId === undefined` (`reads.ts:881-886`). A seat alone, a plain member and any call naming a `groupId` (the member team board) still get `forbidden`. It returns before the `uuidList` statements, so no `in ()` is built. F436: one `maySchedule` (`reads.ts:888`) feeds both `canSchedule` (`:945`) and `declineReason` (`:927`). |
+| `admin/worship/services/[eventId]/page.tsx` | yes | yes: `anyOf: ["manage","plan","schedule"]` unchanged | `notFound()` and its import are gone. `forbidden` and `not_found` from the read still become the organization's 404 via `readOrState`. Plan controls still need `has.plan && open`. |
+| `worship/teams/[groupId]/services/[eventId]/page.tsx` | yes | unchanged | Always passes `groupId`, so the team-less branch is never reachable there. |
+
+Other reads of a decline reason (grepped `decline_reason` / `declineReason` across `src`):
+- `reads.ts:481` and `:566`: the member's own schedule and own request. These are the person's own rows, unchanged as ruled.
+- `store.ts:1506` (`lockAssignment`): internal, never returned.
+- Audit metadata for `WORSHIP_RESPONSE_RECORDED` (`store.ts:1583`): carries `answer` only, no reason.
+- `queueDeclinedNotice`: carries no reason.
+
+No other path leaks a reason.
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the design's Copy table.** All six code strings match G9 rows B and E character for character: `groupsRoleNote`, `blockouts.helper`, `searchNone`, `noServiceTypesTitle`, `noServiceTypesToUse`, `teamNone`. The three help sentences match rulings 3(i), 3(ii) and 5 word for word.
+- [x] **I opened the query behind each claim.**
+  - "If the group has been given a role, everyone in it gets that role, whatever their part": the live `presby_effective_permissions` (`pg_get_functiondef`), whose group path joins `group_memberships` with no `group_role` filter.
+  - "Warned … do not see the reason" (help pages and `blockouts.helper`): the picker reads only `exists(… worship_blockouts …) as blocked` (`reads.ts:1023-1025`) and shows `cantServeOn(date)` (`person-picker-dialog.tsx:36-37`). `reason` isn't selected.
+  - "Someone who plans or sets up worship but does not schedule it sees that a person declined, not the reason": `maySchedule` (above).
+  - "The dialog shows how many requests … and, if some people cannot be emailed, how many and why": `send-requests-dialog.tsx:107-120` and `copy.ts:331-333`.
+  - `searchNone`'s "already on this team, and people without a current record": `reads.ts:261-269`, which excludes an ended membership, merged, deceased, and anyone on the roster today.
+  - "No service types yet.": `getServiceFormOptions` filters retired types (`reads.ts:387`).
+- [x] **Each instruction is doable by the role that sees it.**
+  - `noServiceTypesToUse` is shown on the `worship.plan` generate page and names "someone who sets up worship", which is the `worship.manage` description (`copy.ts:44`). It gives the viewer no instruction.
+  - `teamNone` gives no instruction.
+  - `SERVICES_COPY.types.empty` ("Save the usual time…") now renders only on the `worship.manage` service-types page (`service-types/page.tsx:48`).
+  - The help instructions ("Send requests", "Save dates") are unchanged and doable by their readers.
+- [x] **Older strings grepped:** "see these dates", "make a team first", "save a service type first", "no one matches that search", "give no access", "how many people will be emailed", "dates they can't serve", "descriptive only", "does not grant software access", across `src`, `e2e` and `docs/product`. The only hits are the new strings, their pins, and a historical code comment (`copy.ts:184`). Nothing is left false.
+- [x] **Help diff covered.**
+  - I walked all three changed pages at 360px on my own server: `/help/worship-setting-up`, `/help/worship-serving-on-a-team` and `/help/worship-scheduling-a-team`. Each is 200 with one h1, `scrollWidth` 360, and the changed paragraph reads as amended.
+  - No `labels` moved, and `check:help` passes.
+  - I opened all 7 committed images under `src/content/help/images/` (`admin-hub`, `calendar-month`, `community-list`, `features-list`, `portal-tiles`, `signin-form`, `totp-boxes`). They show fixture data only (Alder Creek Presbyterian Church, Marguerite Ashcombe, Corwin Ashgrove). The only brand mark is the Google sign-in button on the platform's own form. No real name, address, email, brand or tenant.
+
+**copy truthfulness: PASS** (findings 3a, 3b, 3c, 3d and the G9 strings are closed).
+
+## Findings from run 1, one by one
+
+1. **F435 (team-less service): CLOSED.** The code reads as ruled (above), and the DB, page, store and e2e tests are green and fail before the fix.
+2. **The two clock tests: code CLOSED; runtime OUTSTANDING.**
+   - `store.db.test.ts:124` now takes `presby_worship_in_effect_day`; the "ends today" (`:135`) and "begins tomorrow" (`:139`) dates are built from it. `store.config.db.test.ts:427` compares `endTeamMember`'s stamp with the in-effect day; `:388` keeps the service day, with the one-line comment.
+   - Reading the code, both now hold at any hour: the in-effect day is `greatest(org day, UTC day)` (`0085:608-620`), so `day + 1` is in the future and `ends_on = day` has ended under either clock.
+   - Both pass in today's daytime run. That run **cannot discriminate**: both files build their worlds with the default zone (America/New_York), and the clocks differ only from 00:00 to 05:00 UTC.
+   - **Can the evening case be produced now without editing files? No.**
+     - Neither test exposes a time-zone parameter or environment variable.
+     - The functions read `now()` with no seam, apart from `presby_worship_in_effect_day`'s `p_now`, which the tests don't use.
+     - At 16:02 UTC, a query over `pg_timezone_names` (offsets −12 to +14) found **zero** zones whose local date is behind the UTC date. The `organization_settings_time_zone_valid` check (`0054:159-163`) only allows real zone names, so no honest zone exists right now.
+     - `in-effect-day.db.test.ts` and 85g use the same approach and also chose the non-discriminating `Etc/GMT-14` today.
+   - **Needs a window run:** `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism src/lib/worship/store.db.test.ts src/lib/worship/store.config.db.test.ts src/lib/worship/in-effect-day.db.test.ts`, plus `test-rls-85.sql` as `presby_app`. It must run between **00:00 and 05:00 UTC** (19:00 to 24:00 EST); the next window opens 19:00 EST today, 2026-11-05. A wider window, 00:00 to 12:00 UTC, serves `in-effect-day` part 2 and 85g, but not the two clock tests. If it's convenient, run `e2e/worship-founder.spec.ts` in the same window; that's optional, since run 1's founder evidence came from the implementer's in-window run.
+3. **3a, 3b, 3c and 3d, and the G9 strings: CLOSED** (Copy Truthfulness above).
+   - 3b is fixed in code (F436), so `copy.ts:370` and `worship-serving-on-a-team.md:11` are now true unchanged.
+4. **New-service hydration test: CLOSED.** `e2e/hydration/worship-forms.spec.ts:81` asserts the form is inert before release. After release it asserts the saved `events` row: title, start 17:30, end 18:15 and place. It also asserts the live `worship_service_teams` rows equal `[fx.choir]`. Green on both lanes.
+
+## Notes, not blocking
+
+- **The worktree's stale `.next/dev` cache** and **`turbopack.root` set to the parent directory** (above). The orchestrator should clear `.next/dev` before the next dev-server use in this worktree.
+- **"No service types yet."** also shows when every type has been retired. That's slightly off ("yet"), but it's the ruled G9 text and the same wording as the old title. I'm not raising it as a finding.
+- `admin/worship/services/[eventId]/page.tsx:74-91`: the `<section>`'s contents kept their old indentation after the conditional wrapper was removed. Cosmetic only; lint is clean.
+
+## Verdict
+
+**BLOCKED.** The unmet prerequisite is the clock window: the worship DB suites inside 00:00 to 05:00 UTC (19:00 to 24:00 EST), which amendment 3 requires and which cannot happen at this hour (Finding 2).
+
+Every other required check is green:
+- typecheck, lint and all ten tripwires;
+- the unit suite (only the known `dev-docs.test.ts` red);
+- 36 of 36 worship and events DB files, 694 of 694 tests (daytime);
+- `test-rls-85.sql`, 158 of 158 as `presby_app`;
+- worship e2e 17 of 17 (dev lane) and 3 of 3 (production lane);
+- the feature-gate audit;
+- copy truthfulness, including the help walk at 360px and all 7 images opened;
+- fail-before confirmed for every F435, F436 and G9 regression test.
+
+There is no FAIL to hand back. When the window run is green, this becomes PASS without another full run: only the window command above needs repeating.
+
+**Not re-run here (rests on run 1 and CI):** the full DB-backed suite, the full `--project=chromium` e2e suite, the full production lane, `visual-parity`, the `custom-hosts` project, and coverage.
+
+---
+
+**Per-Phase Status row**
+
+| 5 — Verification | qa | Run 2 complete except the evening-window DB run | BLOCKED (clock window: worship DB suites inside 00:00–05:00 UTC) | 2026-11-05 |
+
+**Handoff.** Back to the orchestrator and user to schedule the window run (QA, a short run 2b: the command in Finding 2, plus `test-rls-85.sql`). On green, the verdict becomes PASS and the next agent is **analyst** (Phase 6). If either clock test goes red in the window, the failure goes to api-developer, citing `src/lib/worship/store.db.test.ts:139` or `src/lib/worship/store.config.db.test.ts:428`. Separately, the orchestrator should clear `presby-worship/.next/dev` before the next `npm run dev` there.
 
 ---
 

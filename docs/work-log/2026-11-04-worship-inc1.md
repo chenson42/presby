@@ -24,7 +24,7 @@
 | 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | Complete: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) complete 2026-11-04 (0085 hand-written, applied twice to the pipeline branch; section 85 147/147 as presby_app); Batches 2 and 3 (api-developer) complete 2026-11-04 (server side done; Batches 4 to 6 are ux-developer's); F434 fix (database-admin) complete 2026-11-05 UTC (0085 in place, re-applied twice; section 85 158 pass); F434 fix (application, api-developer) complete 2026-11-05 UTC (all in-effect-day sites, W12 scan, founder fixture un-back-dated). **Phase 4 Complete** (all batches, both F434 halves) | — | — |
 | 5 — Verification | qa | Complete (run 1 FAIL; run 2 plus run 2b, the evening clock window) | PASS | 2026-11-06 |
 | 3 — amendment 3 (Phase 5 run 1 rulings; the orchestrator's "Amendment 2", numbered 3 because the F434 amendment already holds 2) | tech-lead | Complete (this file, "Phase 3 amendment 3"). Rules on QA findings 1, 2, 3a to 3d and 4, the missing Copy rows, and two Phase 6 notes. Phase 4 resumes: api-developer, then ux-developer; QA run 2 after. F435, F436 and DECISION-329 proposed. | Rulings issued | 2026-11-05 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Run 1 complete (help-only rework requested; accepted-invitation walk outstanding) | NEEDS REWORK | 2026-11-05 |
 
 ---
 
@@ -2022,36 +2022,129 @@ Run 2 cleared every other required check, and no code has changed since run 2. P
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Run 1 of Phase 6** (later runs are appended below this one).
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**NEEDS REWORK.** The loop-back is help copy only, to Phase 4 (ux-developer). No code, schema, Phase 2 or Phase 3 change is needed.
+
+- **The defect.** `src/content/help/first-day-as-administrator.md:35` tells a founding administrator that `"Worship": set up teams and schedule people`. The tile that does this is **"Plan worship"**. The tile named "Worship" is the member tile. It opens the person's own requests. It has no link to "Plan worship" (`worship/page.tsx` has no admin link). A founder who follows the bullet lands on "You're not asked to serve at any upcoming services" and has no way forward.
+- **Why the gate missed it.** The registry label for that page was changed from "Worship & Service Planning" to `"Worship"` (`registry.ts`, first-day entry). `check:help` passes because "Worship" is on screen, so it cannot see that the bullet points at the wrong tile.
+- **The rule.** Rule 17 says a page that contradicts the build is NEEDS REWORK, so I am applying it. It is a one-word fix plus the registry label.
+- **After the fix.** I expect SHIP WITH NOTES. SHIP IT also needs the accepted-invitation walk (see Edge Cases), which I could not do read-only.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> The scheduling spine Phase 1 asked for is built and holds up, but the founder's own first-day page sends them to the wrong tile.
 
 ## What's Working
 
-- [Specific.]
+- **The weekly job fits a phone.** A leader places people as drafts, presses Send, and each person gets one email listing their positions. People are never told until Send.
+- **The reasons for not emailing someone are shown.** The board says "No email sent: may be under 18…", "no email address on file" or "marked do not contact". The leader records the answer on the person's behalf, attributed.
+- **The founder bundle works.** I opened the QA run 2b founder screenshots `50-founder-hub.png`, `51-founder-team.png` and `52-founder-board.png` (360px, grant minted by `presby_apply_founding_administrator`, evening window).
+  - The hub shows three cards.
+  - The team page carries the reimbursement-coupling note.
+  - The board shows "Not sent yet" and "Send requests (1)".
+  - The earlier "You don't have permission to do that" refusal is gone (F434).
+- **Quiet on privacy.** No email names a person.
+- **The Phase 2 and operator rulings are in the build.** F435 (a team-less service opens for a key holder) and F436 are shipped. The "session" word is pinned out by `copy.test.ts`.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Q9, who holds the keys.** Phase 1 recommended a template only. The operator re-ruled (F421): the founder gets all three keys. Shipped: the founder bundle plus a "Worship Leader" template (`founding-administrator.ts`; spec asserts all three keys). **Matches the re-ruling.**
+- **Send, not send-on-placement (addendum 2).** Shipped as `draft`, then "Send requests". **Matches.**
+- **Flow 3 reminders and the decline notice.** Phase 1 said a decliner reopens the slot and the leader is notified. Shipped: the person who placed them gets an email with no name. **Matches.** Reminders are per assignment, not per person (see rulings).
+- **Flow 4, accept or decline with an optional note.** Shipped as a closed list (Away, Work, Family, Other), per the operator's R12 re-ruling. **Matches.** A non-addressee gets the same `notFound` as an unknown id.
+- **Flow 5, blockout "reason visible to leaders only".** Shipped: the reason is saved but nothing displays it to anyone except the person. The picker reads only `exists(…)`, and only `getMyBlockouts` returns `reason` (`reads.ts:587`). **Acceptable drift, but the field has no reader.** It is a follow-up for an operator ruling.
+- **Flow 1, "a person with no record is not in the picker".** Shipped (`searchRosterCandidates`: memberships not ended). **Matches.** The setting-up help does not say people must be on file first (follow-up).
+- **Flow 2, services as calendar events, cancel notifies.** Shipped (`insertEventsInTx`, one cancel writer, the cancel hook). **Matches.**
+- **Minors (R9).** Shipped as "may be under 18" with no direct notice of any kind, and the residual stated in help. **Matches.**
+- **F436.** Phase 1 and the architect's R12 both put absence reasons with "leaders" or "the scheduling authority over that person". Shipped: a decline reason is shown only to someone who can schedule that team. **Consistent with Phase 1 intent; I do not see a departure.** Directors who only plan see "Declined" and the slot reopening, which covers what they need.
+- **Residuals.** F428 and S2 are not denied anywhere in the strings. F429 is admitted in the help ("They can arrive late in the evening"). Removal and time-move silence (F430) is stated in the Remove dialog and the help.
+- **Phase 1 "Worship tile only if one exists for them".** Shipped: any member sees the "Worship" tile once the toggle is on (tiles are permission-blind, DECISION-162). **Acceptable drift.**
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
-- Walked as the accepted-invitation founding administrator (F362 lesson): [pass | fail]
-- Help pages read as their reader (each page named in Help impact): [pass | fail]
+- **Empty state: pass.** "No worship teams yet. Start with a ready-made team or make your own." and "No services yet. Add this Sunday's service to start scheduling."
+- **Failure microcopy: pass.** `WorshipLoadError`, "That has changed. Refresh the page…", and the "no longer open" state. QA passed copy truthfulness (run 2).
+- **Permission gate: pass.** QA's feature-gate audit read the bodies. I spot-checked the F435 and F436 sites in `reads.ts`.
+- **Audit event: pass.** Five audit actions: team created, roster changed, response recorded, requests sent (counts only), service cancelled.
+- **Mobile (360px): pass.** I opened screenshots 50 to 52. QA opened the team-less service pair, and both lanes assert no sideways scroll and 44px targets, except the layout's own back link (see rulings).
+- **Walked as the accepted-invitation founding administrator: partial, not complete. SHIP IT is withheld on this.**
+  - **What I did.** Opened screenshots 50 to 52 (a founder minted by the real definer, not a hand-made grant) and traced the first-day path in code (`visible-tiles.ts`, `tiles.ts`, `founding-administrator.ts`).
+  - **What I could not do.** A real invitation accepted on `development`, in a browser at 360px.
+  - **Pages and what they show:**
 
-## Follow-Ups (if SHIP WITH NOTES)
+| Page | What the founder sees | Evidence |
+|---|---|---|
+| After accepting an invitation, `/launch` then `/o/<slug>` | A new congregation has Worship **off**. Neither worship tile shows. | Code only |
+| First-day help, then Administration, then Features | The "Worship" card, a switch with no warning when nothing is scheduled. The first-day bullet misleads here. | Code and the help page |
+| `/admin/worship` ("Plan worship") | Three cards. | Screenshot 50 |
+| Teams, "Create team" from Greeters | Positions, the seat note, the empty roster. | Screenshot 51 |
+| Add a person | Only people with a current record at the congregation appear. A new congregation has none until people are added. | Code (`reads.ts:239-282`) |
+| New service, board, "Add someone", "Send requests (1)" | Draft with "Not sent yet". | Screenshot 52 |
+| `/o/<slug>/worship` as a member | "You're not asked to serve at any upcoming services…" | Code and Copy |
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+  - **Needed before SHIP IT.** Run that walk on `development` at 360px. Also confirm `org_portal.features` and `org_portal.admin_hub` are on, because the toggle and the "Plan worship" tile depend on them. The founder spec starts after the toggle is on and navigates by URL, so it does not walk the Features step or the tile.
+- **Help pages read as their reader: fail** (one contradiction, plus imprecisions).
+  - **How I read them.** Against the shipped code and screens, not on a fresh 360px dev server, because the brief was read-only. QA's run 2 walk covered the three changed paragraphs at 360px.
+  - **Contradiction (NEEDS REWORK trigger):** `first-day-as-administrator.md:35`, above.
+  - **Imprecise:**
+    - `worship-serving-on-a-team.md:21`: "one if a request is still waiting for you". Reminders go one per assignment (`sweep.ts:36-39`), so a person with two positions gets two.
+    - `worship-serving-on-a-team.md:9`: "the page 'Your request to serve' opens". That is true only for a single request. With several requests the button opens "Worship" (`notify.ts:122-123`). A reminder email always opens "Worship" (`notify.ts:155`).
+    - `worship-setting-up.md:13`: "Under 'Can fill:' tick the positions". The control is the button "Can fill" beside a person. "Can fill:" is only the summary line.
+  - **Gaps to note:**
+    - `worship-setting-up.md` never says that people must already be on record to be added to a team.
+    - `worship-setting-up.md:19` sends the founder to "Manage events" for the website listing. The first-day page says the founder cannot use that page yet.
+  - **Pages I found true:** the rest of the three new pages, the added "Worship Leader" and founder bullets in `roles-who-can-do-what`, the Features row and tile sentence in `turning-features-on-and-off`, the `events-and-the-calendar` section, and the `why-cant-i-see-this` section.
 
-## Red Flags (if NEEDS REWORK)
+## Rulings on the Phase 4 and 5 notes
 
-- [Specific.]
+| Note | Ruling |
+|---|---|
+| `NAV_COPY` and the other G9 strings | **Accepted.** QA passed copy truthfulness. I read `NAV_COPY` (`copy.ts:415-444`) and the five changed strings. None denies a residual, none instructs a role that cannot act, and none uses "session". |
+| Team page height (buttons not collapsed) | **Accepted for Increment 1.** It is the one-time admin set-up page (`worship.manage`), not the weekly surface. The weekly surfaces, the board and the schedule, fit. A later pass can collapse the three row actions into a menu. Tracked as a polish item. |
+| Features "Turn it off" and reimbursement "Withdraw" dialogs not destructive-styled | **Out of scope for this feature.** They are shared UI used by Giving and Reimbursements. Tracked as its own polish item. |
+| 20px "Back to portal" in `admin/layout.tsx` | **Out of scope.** It is a pre-existing layout file, and this diff does not touch it. It does appear on every new worship admin page at 360px, below the 44px standard (`ui-standards.md:672`). Tracked. The stacked double back link on worship sub-pages is acceptable. |
+| Reminders one per assignment, not per person | **Within design but not ideal.** DECISION-325 and Copy G7 are per assignment, so it is not a departure. Request mail is one per person, so reminders feel inconsistent. The help sentence must stop saying "one". Tracked as a grouping follow-up. |
+| "No service types yet." when every type is retired | **Accepted.** It is the ruled text, and the retired types are not offered. No follow-up. |
+| `verifiedIn` on the three new pages set at integration | **Agreed.** They stay at `0.54.5` (the pre-feature release) until the rework pass and a re-read. One correction: an implementer already moved `turning-features-on-and-off` from `0.50.0` to `0.54.5` (`registry.ts`). That is a claim of a full re-walk that nobody made. I read the new table row and tile sentence and they are true, but the page was not re-walked as a whole. Revert it to `0.50.0`, or set it to the shipping release only after that walk. |
+| F436 (tech-lead ruling) | **No departure from Phase 1 intent.** It follows R12 and Phase 1's "leaders". |
+
+## Follow-Ups
+
+**Required before ship (the rework, all help or registry text, ux-developer; then QA re-runs `check:help`, then Phase 6 re-reads):**
+
+1. `first-day-as-administrator.md:35` and the registry label in its `labels`: change `"Worship"` to `"Plan worship"`. Keep "Turn on 'Worship' first". Check the first-day text against the card names on Administration.
+2. `worship-serving-on-a-team.md:21`: say that each request or scheduled position can get its own reminder. Also say the button opens "Your request to serve" for one request and "Worship" for several. Reminder emails open "Worship".
+3. `worship-setting-up.md:13`: "Choose 'Can fill' beside a person, then tick the positions". Keep the `labels` entry only if "Can fill:" is still quoted.
+4. Move or revert `turning-features-on-and-off` `verifiedIn` (see rulings).
+
+**Tracked follow-ups for `docs/TODO.md` (Rule 10):**
+
+- Worship help: say in `worship-setting-up` that people must be on the congregation's record before they can be added to a team, with a link to "Adding people". Also say that putting a service on the website needs "Manage events", which a founder cannot use on the first day.
+- Worship 1b candidate: group the nightly reminders per person (one email listing their positions) to match the request email, then reword the serving help.
+- Worship: the blockout "Reason (optional)" is read by no one. Operator ruling needed: show the closed reason to the scheduling authority in the picker (as F436 does for declines), or drop the field.
+- Worship polish: collapse the three per-row buttons on the admin team page into a menu (the page runs about three screens for a team of five people and seven positions).
+- Platform UI polish: the Features "Turn it off" dialog and the reimbursement "Withdraw" dialog should use the destructive style.
+- Platform UI polish: `admin/layout.tsx` "Back to portal" is a 20px target. Raise it to 44px.
+- Integration (orchestrator): set `verifiedIn` on the three new pages and `first-day-as-administrator` to the shipping release after the walk. Re-cut TODO line 634 as the design says.
+
+**Housekeeping, Rules 12 to 15:** Rule 12 is not applicable, because the work came from an operator request, not an in-app feedback row. Rule 13: no what's-new entry (operator standing rule). The functionality map is done. `docs/architecture.md` is not triggered.
+
+## Red Flags
+
+- The first-day page sends the founding administrator to the wrong tile (`first-day-as-administrator.md:35`).
+- SHIP IT additionally needs a real accepted-invitation walk on `development` at 360px (see Edge Cases).
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete (help-only rework requested; accepted-invitation walk outstanding) | NEEDS REWORK | 2026-11-05 |
+
+## Handoff
+
+The next agent is **ux-developer** (Phase 4 loop-back, help text and registry labels only). QA then runs `npm run check:help` and re-reads the three diffs, and the analyst re-issues Phase 6.
+
+The orchestrator or operator should do the accepted-invitation walk on `development` before integration. I can re-run Phase 6 against its notes.

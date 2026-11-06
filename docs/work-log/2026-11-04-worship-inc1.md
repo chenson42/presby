@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete (this file) | Design complete; implementers named; F428 to F432 and DECISION-317 to 327 proposed | 2026-11-04 |
 | 3 — amendment 1 (architect addendum C1 to C5) | tech-lead | Complete (this file, "Phase 3 amendment 1") | C1 to C5 folded in; S1 adopted; S2 recorded as a `paper` residual (DECISION-317); DECISION-326 as amended | 2026-11-04 |
 | 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | Complete: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) complete 2026-11-04 (0085 hand-written, applied twice to the pipeline branch; section 85 147/147 as presby_app); Batches 2 and 3 (api-developer) complete 2026-11-04 (server side done; Batches 4 to 6 are ux-developer's); F434 fix (database-admin) complete 2026-11-05 UTC (0085 in place, re-applied twice; section 85 158 pass); F434 fix (application, api-developer) complete 2026-11-05 UTC (all in-effect-day sites, W12 scan, founder fixture un-back-dated). **Phase 4 Complete** (all batches, both F434 halves) | — | — |
-| 5 — Verification | qa | Run 1 FAIL; run 2 complete except the evening-window DB run | BLOCKED (clock window: worship DB suites inside 00:00–05:00 UTC) | 2026-11-05 |
+| 5 — Verification | qa | Complete (run 1 FAIL; run 2 plus run 2b, the evening clock window) | PASS | 2026-11-06 |
 | 3 — amendment 3 (Phase 5 run 1 rulings; the orchestrator's "Amendment 2", numbered 3 because the F434 amendment already holds 2) | tech-lead | Complete (this file, "Phase 3 amendment 3"). Rules on QA findings 1, 2, 3a to 3d and 4, the missing Copy rows, and two Phase 6 notes. Phase 4 resumes: api-developer, then ux-developer; QA run 2 after. F435, F436 and DECISION-329 proposed. | Rulings issued | 2026-11-05 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1869,6 +1869,154 @@ There is no FAIL to hand back. When the window run is green, this becomes PASS w
 | 5 — Verification | qa | Run 2 complete except the evening-window DB run | BLOCKED (clock window: worship DB suites inside 00:00–05:00 UTC) | 2026-11-05 |
 
 **Handoff.** Back to the orchestrator and user to schedule the window run (QA, a short run 2b: the command in Finding 2, plus `test-rls-85.sql`). On green, the verdict becomes PASS and the next agent is **analyst** (Phase 6). If either clock test goes red in the window, the failure goes to api-developer, citing `src/lib/worship/store.db.test.ts:139` or `src/lib/worship/store.config.db.test.ts:428`. Separately, the orchestrator should clear `presby-worship/.next/dev` before the next `npm run dev` there.
+
+---
+
+## Run 2b (2026-11-06)
+
+**Date:** 2026-11-06, run 00:47 to 00:55 UTC (19:47 to 19:55 EST on 2026-11-05). That is inside the 00:00 to 05:00 UTC window where an America/New_York organization's day is behind the UTC day.
+**Verified by:** qa
+**Worktree / HEAD:** `/Users/cshenso/git/presby-platform/presby-worship`, `pipeline/worship-inc1` at `09100327`. `git status` was clean before and after, and `git stash list` is empty.
+- The only commit since run 2's `dd2d7671` is `09100327`, which changes only `docs/work-log/2026-11-04-worship-inc1.md`. So no code differs from what run 2 verified.
+
+**Database:** the worktree's `.env.local`.
+- All five `*DATABASE_URL` variables point at one Neon endpoint, and it is a different endpoint from the main checkout's `.env.local`. I compared endpoint IDs inside a script and printed only true/false.
+- The 9 worship tables are present.
+- `RATE_LIMIT_DISABLED=true` is set (checked by length).
+- Free disk on `/System/Volumes/Data`: 537 GiB.
+
+**Scope:** only the window-sensitive checks: the three clock DB files, `test-rls-85.sql`, and the optional `worship-founder.spec.ts`. Everything else rests on run 2 (typecheck, lint, `npm run check`, unit suite, 36 worship and events DB files, the full worship e2e on both lanes, the feature-gate audit, copy truthfulness, the help walk, fail-before proofs) and on run 1 and CI (full DB-backed suite, full chromium e2e, coverage).
+
+**Auth gate:** doesn't apply. The diff touches no auth path, as run 2 established.
+
+### 1. Is the window live (checked in the database)
+
+The query ran as `presby_app` at the start:
+
+| | value |
+|---|---|
+| `now() at time zone 'UTC'` | 2026-11-06 00:47:31 |
+| UTC day | **2026-11-06** |
+| `now() at time zone 'America/New_York'` | 2026-11-05 19:47:31 |
+| America/New_York day | **2026-11-05** |
+| days differ | `t` |
+
+The window stays live until 05:00 UTC, and every check below finished by 00:54:33 UTC.
+
+## Type Check
+
+Not re-run. The diff since run 2 is a work-log edit only, so run 2's PASS stands.
+
+## Unit Tests
+
+**The three clock DB files, serial:** `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism src/lib/worship/store.db.test.ts src/lib/worship/store.config.db.test.ts src/lib/worship/in-effect-day.db.test.ts`
+- Result: **3 of 3 files, 100 of 100 tests passed, 0 failed, 0 skipped.**
+- Timing: started 00:47:37 UTC, ended 00:53:16 UTC, 338 s, exit 0.
+- The whole run was inside the window, so every clock test below ran while the New York day (11-05) was behind the UTC day (11-06).
+
+These worlds use the default zone: `worship-world.ts:143` passes `timeZone: null`, which falls back to America/New_York. So in-window:
+- the in-effect day is **2026-11-06**;
+- the organization's service day is **2026-11-05**.
+
+| Test | Result in window | Does it discriminate in this window? |
+|---|---|---|
+| `store.db.test.ts:125` "a seat that ended, has not begun, or belongs to a merged, deceased or ended-relationship person schedules nothing" (4.6 s) | pass | Yes. |
+| `store.config.db.test.ts:427-428` "ends a member row (end-dated to today, never deleted) …" (3.1 s) | pass | Yes. |
+| `in-effect-day.db.test.ts` part 1 (the `p_now` seam, 5 tests) | pass | Yes, at any hour, by design. |
+| `in-effect-day.db.test.ts` part 2 (11 tests: precondition, (a), (b)×3, (c)×3, one day ahead, agreement) | pass | Yes. It chose **`Etc/GMT+12`** ("precondition: in Etc/GMT+12 the organization's day differs from the UTC day", passed), which is the F434 discriminating zone. Run 2 got `Etc/GMT-14`. |
+
+Why the two clock tests discriminate here:
+- **`store.db.test.ts`:**
+  - `:135-136` sets `ends_on` to the in-effect day (11-06), and the placement is `forbidden`. The old organization-day rule would have kept that seat live on 11-05 and returned `ok`.
+  - `:139-140` sets `starts_on` to 11-07, and the placement is `forbidden`.
+  - Run 1's version of this test built the dates from the service day; in this window that would have made the "begins tomorrow" seat start on 11-06, live under the in-effect rule, so it would have failed here. The corrected test is green.
+- **`store.config.db.test.ts`:** `:428` asserts that `endTeamMember` stamped 11-06. A service-day stamp would read 11-05.
+
+**`scripts/worship/test-rls-85.sql` as `presby_app`** via `$APP_DATABASE_URL`, with `-v ON_ERROR_STOP=1`:
+- Connection: `current_user = presby_app`, `rolbypassrls = f`.
+- Result: **158 passes, 0 failures, exit 0**, from 00:53:33 to 00:53:39 UTC. The output ends `ROLLBACK` / "Section 85 (worship) complete."
+- **85g picked `Etc/GMT+12`** (log line 1024). Its precondition "Alder Creek's day differs from the UTC day" passed (`test-rls-85.sql:1018`), so 85g **ran as the F434 discriminator** this time, not as a non-regression check. All ten 85g assertions passed (`:1018`, `:1022`, `:1026`, `:1036`, `:1039`, `:1049`, `:1058`, `:1062`, `:1067`, `:1073`).
+- The refusing layer is named in the output:
+  - an ended grant is refused by the trigger, `23514 worship_guard_not_authorized`;
+  - an ended roster row is refused by the trigger, `23514 worship_guard_not_on_roster`.
+
+**Leftover fixture rows (read-only):**
+- There are 552 "Worshiptest" people, the same count as run 2.
+- People and organizations with `deletable_until > now()`: 0 and 0.
+- This run left nothing behind.
+
+## End-to-End Tests
+
+**Flag state.** Before the e2e run I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`, on `PLATFORM_DATABASE_URL`).
+- The first call's exit code was lost to a zsh pipe, so I ran it a second time (it is idempotent). That run: exit 0, `COMMIT`.
+
+**Server.**
+- Dev server on **:3690**, started in the worktree. `.next/dev` was absent beforehand, so the cache had been cleared.
+- Environment: `NEXT_PUBLIC_APP_URL` and `AUTH_URL` set to `http://localhost:3690`, plus `RATE_LIMIT_DISABLED=true` and the `CRON_SECRET`, Stripe test secret and domain fakes from `playwright.config.ts`.
+- Ready in 291 ms. `/help`, `/signin` and `/api/auth/csrf` returned 200.
+- **No reload loop:** the spec finished in 15.6 s, and the server log has 0 error or HMR-mismatch lines. So no scratch copy was needed.
+- The server log shows 9 `/o/…/admin/worship` requests, which shows the run attached to :3690. I never used :3000; something else is listening there and I didn't touch it.
+- I stopped the server by PID (68325, launcher 68152). Port :3690 is free.
+
+**`E2E_BASE_URL=http://localhost:3690 … npx playwright test --project=chromium e2e/worship-founder.spec.ts`:** Total 1 | Passed 1 | Failed 0 | Skipped 0.
+- Time: 31.3 s, from 00:53:51 to 00:54:33 UTC, inside the window.
+- The test that passed is `worship-founder.spec.ts:39:7`, "the minted bundle carries all three keys, and she can set up, schedule and place".
+- The definer stamps the founder's grant on the UTC day (11-06) while the organization's day is 11-05. So this is the in-window F434 case run 1 relied on the implementer for, now seen by QA.
+
+**Worktree writes:** the dev server wrote `.next/dev`, and Playwright wrote `e2e/support/.auth/*.json` and `test-results/`. All of these are gitignored, and `git status` is clean.
+
+## Regression Tests Added
+
+There are no new tests since run 2.
+- I did **not** re-prove fail-before for `in-effect-day.db.test.ts` part 2 or for 85g in this window. That would need the pre-fix migration on a database, which is a write.
+- What this run does establish: both ran with the discriminating zone and passed.
+- The always-failing proofs (the `p_now` seam and the `boundaries.test.ts` source scan) stand from run 1 and run 2.
+- The two clock tests are test corrections, not regression tests, as run 2 noted. This run shows they hold in the hours where the old versions broke.
+
+## Coverage on Critical Modules
+
+Not re-run. The diff touches none of these modules, so run 1's figures stand.
+
+## Feature-Gate Audit
+
+No protected routes were touched since run 2 (work-log-only diff). Run 2's table stands.
+
+## Copy Truthfulness
+
+No user-facing string changed since run 2. Run 2's **PASS** stands.
+
+## Findings from run 2, one by one
+
+2. **The two clock tests, runtime: CLOSED.**
+   - `store.db.test.ts:125-140` and `store.config.db.test.ts:427-428` passed inside the window, against the New York default zone, with the in-effect day (11-06) a day ahead of the organization's day (11-05).
+   - `in-effect-day.db.test.ts` part 2 and 85g both chose `Etc/GMT+12` and passed, so this time they discriminated.
+
+Every other run-2 finding was already closed.
+
+## Notes, not blocking
+
+- The worktree dev server ran cleanly after `.next/dev` was cleared, which confirms run 2's diagnosis of the reload loop.
+- Run 2's note about `turbopack.root` being the parent directory still applies while other pipelines run alongside this one.
+
+## Verdict
+
+**PASS.** The window run is green:
+- 100 of 100 clock DB tests and 158 of 158 `test-rls-85.sql` checks as `presby_app`, both discriminating;
+- the founder e2e passed in the window, 1 of 1.
+
+Run 2 cleared every other required check, and no code has changed since run 2. Phase 5 is complete.
+
+**Not re-run here** (rests on run 2, run 1 and CI): typecheck, lint, `npm run check`, the unit suite, the other 33 worship and events DB files, the remaining worship e2e specs and the production lane, the full DB-backed and chromium suites, `visual-parity`, `custom-hosts`, and coverage.
+
+---
+
+**Per-Phase Status row**
+
+| 5 — Verification | qa | Complete (run 2 plus run 2b, the evening clock window) | PASS | 2026-11-06 |
+
+**Handoff.** The next agent is **analyst** (Phase 6, shipped vs intent).
+- The orchestrator records this section verbatim under run 2 in `/Users/cshenso/git/presby-platform/presby-worship/docs/work-log/2026-11-04-worship-inc1.md`.
+- The known `src/lib/dev-docs.test.ts` red still clears at integration, when the `domain/index.ts` export lands.
 
 ---
 

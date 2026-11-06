@@ -18,7 +18,7 @@ If the page says "This request is no longer open", the service was cancelled, it
 
 Choose the "Worship" tile. The page lists "Waiting for your answer", "You're scheduled" and "You said you can't serve", each with the date, your team and your position. Under "Your teams" you can open a team to see who is on it and which positions each person can fill.
 
-Reminders are emailed once a night. Each request still waiting for you, and each position you are scheduled in soon, can get its own reminder, so you may receive more than one. A reminder email opens "Worship". They can arrive late in the evening. You get none for a request you declined, or for a service that was cancelled.
+Reminders are emailed once a night. Each request still waiting for you, and each position you are scheduled in soon, can get its own reminder, so you may receive more than one. A reminder about a request still waiting for you opens that request. A reminder about a position you are scheduled in opens "Worship". They can arrive late in the evening. You get none for a request you declined, or for a service that was cancelled.
 
 ## Dates I can't serve
 

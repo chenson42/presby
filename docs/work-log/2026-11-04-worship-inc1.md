@@ -24,7 +24,7 @@
 | 4 — Implementation | database-admin (Batch 1), api-developer (Batches 0, 2, 3), ux-developer (Batches 4 to 6) | Complete: Batch 0 (api-developer) complete 2026-11-04; Batch 1 (database-admin) complete 2026-11-04 (0085 hand-written, applied twice to the pipeline branch; section 85 147/147 as presby_app); Batches 2 and 3 (api-developer) complete 2026-11-04 (server side done; Batches 4 to 6 are ux-developer's); F434 fix (database-admin) complete 2026-11-05 UTC (0085 in place, re-applied twice; section 85 158 pass); F434 fix (application, api-developer) complete 2026-11-05 UTC (all in-effect-day sites, W12 scan, founder fixture un-back-dated). **Phase 4 Complete** (all batches, both F434 halves) | — | — |
 | 5 — Verification | qa | Complete (run 1 FAIL; run 2 plus run 2b, the evening clock window) | PASS | 2026-11-06 |
 | 3 — amendment 3 (Phase 5 run 1 rulings; the orchestrator's "Amendment 2", numbered 3 because the F434 amendment already holds 2) | tech-lead | Complete (this file, "Phase 3 amendment 3"). Rules on QA findings 1, 2, 3a to 3d and 4, the missing Copy rows, and two Phase 6 notes. Phase 4 resumes: api-developer, then ux-developer; QA run 2 after. F435, F436 and DECISION-329 proposed. | Rulings issued | 2026-11-05 |
-| 6 — Shipped vs intent | analyst | Run 1 complete (help-only rework requested; accepted-invitation walk outstanding) | NEEDS REWORK | 2026-11-05 |
+| 6 — Shipped vs intent | analyst | Run 2 complete (founder walk accepted; one reminder sentence fixed by orchestrator, awaiting re-read) | NEEDS REWORK | 2026-11-05 |
 
 ---
 
@@ -2211,3 +2211,78 @@ No sideways scroll on any page (asserted each time).
 ### Handoff
 
 Next: QA re-reads the four help diffs and re-runs `check:help`; analyst re-issues Phase 6, with the walk table above standing in for the missing `development` walk (accepted-invitation, 360px, on the pipeline branch). Orchestrator: confirm production values of the two flags; the "Manage events" help gap and the Statistical Filings sentence remain tracked.
+
+---
+
+## Phase 6 — Shipped vs Intent (Run 2)
+
+Analyst, 2026-11-05. Read-only. Scope: `git diff f308bbd8..f7b47e83` (three help pages, `registry.ts`, the work-log), the ux-developer's accepted-invitation founder walk, and `npm run check:help`.
+
+### What I checked
+
+- **`npm run check:help`:** "Help check passed (31 registry entries, 27 published, 27 content files, 7 images)." Exit code is 0 for the command itself.
+- **The walk stands in for the `development` walk.**
+  - It was done as the person the path creates: a real accepted invitation, password sign-in, TOTP enrolment, then Continue.
+  - It ran at 360x740 on the pipeline's Neon branch, with no sideways scroll asserted on every page.
+  - I opened screenshots 09, 14, 16 and 23. They match the walk table.
+- **Production flags.** You confirmed `org_portal.admin_hub` and `org_portal.features` are on, and `org_portal.filings` and `org_portal.statistical_publication` are off. So the flags-on view minus Statistical Filings is what a production founder sees, and the first-day page's five-card sentence holds. The flags being off on the branch is a test artifact, not a defect.
+- **The Phase 1 gaps from run 1 are unchanged.** Run 1's rulings and follow-ups stand except where this run says otherwise.
+
+### Run 1 required fixes, re-read as the reader
+
+| # | Fix | Verdict |
+|---|---|---|
+| 1 | `first-day-as-administrator.md:35` says "Plan worship", keeps "Turn on 'Worship' first, and the tile then appears", and "Plan worship" is added to `labels`. | **Closed.** Walk screenshot 09 shows "Plan worship" under "Worship & Events" once Worship is on, and the Features switch is labelled "Worship". The bullet now matches both. |
+| 2 | `worship-serving-on-a-team.md`: the button opens one request or the Worship list, and reminders may come more than once. | **Partly closed; one sentence is false.** See below. |
+| 3 | `worship-setting-up.md`: "Choose 'Can fill' beside a person, then tick the positions … and choose 'Save'", with `labels` changed to "Can fill". | **Closed.** Screenshot 16 shows the Greeter checkbox with Save and Cancel, and screenshot 17 shows "Can fill" on the row after Save. |
+| 4 | `turning-features-on-and-off` `verifiedIn` reverted to `0.50.0`. | **Closed.** |
+| Walk addition | `worship-setting-up.md` now says only people with a current record are listed, and links to `/help/adding-people`. | **Closed.** It quotes the on-screen text in screenshot 14 accurately, and `check:help` resolves the link. |
+
+**The false sentence is my own run 1 instruction.** `worship-serving-on-a-team.md` now says "A reminder email opens 'Worship'." The build does not do that for every reminder. `src/lib/worship/sweep.ts:97-100` links:
+
+- an unanswered-request reminder to `worshipLinks.request(...)`, the "Your request to serve" page for that one request;
+- a confirmed-assignment reminder to `worshipLinks.home(...)`, the Worship page.
+
+The other new claims check out:
+
+- The request email opens "Your request to serve" for exactly one request and the Worship page for several (`notify.ts:119-123`).
+- A person can get more than one reminder (per assignment, DECISION-325).
+
+The wrong sentence makes no one lose access, because both landing pages work for a signed-in volunteer. But Phase 6 treats a help page that contradicts the build as NEEDS REWORK, and I won't wave it through.
+
+**Fix:** replace "A reminder email opens 'Worship'." with "A reminder about a request still waiting for you opens that request. A reminder about a position you are scheduled in opens 'Worship'." This is one sentence, no code, no label change, so `check:help` is unaffected. I will accept a read of that one-line diff as closing the pipeline. The pages do not need a fresh walk.
+
+### Other findings, not blockers
+
+- **After "Add" the Can fill editor opens by itself** (screenshot 16). The help describes the later case, choosing "Can fill" on a row. That is accurate and not contradicted, so no action.
+- **Statistical Filings.** `first-day-as-administrator.md` says a new congregation lists "Manage events", "Roles", "Tickets", "Features" and "Branding". That is true only while `org_portal.filings` is off in production. If the operator flips it, the sentence goes false with no commit to catch it. That is a Rule 17 flip event, tracked below.
+- **Other `org_portal.*` flags.** The branch also had roles, tickets, events, branding, groups, staff, directory, officers and members_create off. You only verified four flags in production. Those other pages predate worship and the first-day page already claims them. They are not a worship risk, but the first-day re-walk at integration should check them in production.
+- **`verifiedIn`.** The three worship pages and `first-day-as-administrator` still carry the pre-feature value. They move only at integration, after a walk against the shipping release.
+
+### Verdict: NEEDS REWORK (one help sentence, no code, no re-walk)
+
+Everything else delivers what Phase 1 promised, and the founder walk found no blocker. Once the reminder sentence above is corrected and `npm run check:help` still passes, this becomes **SHIP WITH NOTES** on the follow-ups below. Rule 12 is not applicable (operator request, not a feedback row). Rule 13 is not applicable (the standing no-what's-new ruling). Functionality map done; `docs/architecture.md` not triggered.
+
+### Final follow-up lines for `docs/TODO.md` (Rule 10)
+
+1. Worship help: `worship-setting-up` says nothing about putting a service on the website, which needs "Manage events". A founder cannot use that on the first day. Tie it to F362's help list, where the worship page's "You can put services on the calendar as events" line is restored. The "people must be on record first" half is done.
+2. Worship 1b candidate: group the nightly reminders per person, one email listing their positions, to match the request email. Then reword the reminder paragraph in `worship-serving-on-a-team`.
+3. Worship: the blockout "Reason (optional)" has no reader. Operator ruling needed: show the closed reason to the scheduling authority in the picker (as F436 does for declines), or drop the field.
+4. Worship polish: collapse the three per-row buttons on the admin team page into a menu. The page is about three screens at 360px for five people and seven positions.
+5. Platform UI polish: the Features "Turn it off" dialog and the reimbursement "Withdraw" dialog should use the destructive style.
+6. Platform UI polish: `admin/layout.tsx` "Back to portal" is a 20px target. Raise it to 44px (`ui-standards.md:672`).
+7. Help, flag event: if `org_portal.filings` is turned on in production, the five-card sentence in `first-day-as-administrator` becomes false ("Statistical Filings" appears). Re-read that page when the flag flips.
+8. Integration (orchestrator):
+   - At integration, `grep -n "\[help:" docs/TODO.md` and re-cut line 634 (`[help:worship-planning]`) as Phase 3 says.
+   - Set `verifiedIn` on `worship-setting-up`, `worship-serving-on-a-team`, `worship-scheduling-services` (or whatever the third page is named in the registry) and `first-day-as-administrator` to the shipping release, after a walk against that release.
+   - At the same re-walk, confirm the other `org_portal.*` flags in production.
+
+### Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent (run 2) | analyst | Founder walk accepted; one help sentence contradicts the reminder link in `sweep.ts:97-100` | NEEDS REWORK (one sentence; reads as SHIP WITH NOTES once fixed) | 2026-11-05 |
+
+### Handoff
+
+Next agent: **ux-developer**, or the orchestrator directly since it is one sentence. Replace the sentence in `/Users/cshenso/git/presby-platform/presby-worship/src/content/help/worship-serving-on-a-team.md`, run `npm run check:help`, and send me the one-line diff. I will re-issue Phase 6 as SHIP WITH NOTES, with the eight lines above landing in `docs/TODO.md`, and no further walk is needed.

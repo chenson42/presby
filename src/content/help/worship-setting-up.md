@@ -10,7 +10,7 @@ A Founding Administrator can set up worship from the first day: no other role is
 
 Choose the "Plan worship" tile, then "Teams" (the page is headed "Worship teams"), then "New team". Name it, choose "Team" or "Choir", and under "Start with" choose a ready-made set of positions such as Praise band, Choir, Liturgical team, Ushers, Greeters or Sound and projection, or none. Choose "Create team". If you also manage groups, you can use a group you already have.
 
-On a team's page, "Add position" takes a "Position name" and "How many people". Under "People", use "Add a person" to search by name; "Remove from team" takes someone off the roster. "Retire team" at the bottom of the page stops the team appearing when you plan services. Under "Can fill:" tick the positions each person can fill. A person who leaves the team stops being offered at once.
+On a team's page, "Add position" takes a "Position name" and "How many people". Under "People", use "Add a person" to search by name. Only people with a current record at your congregation are listed, so a new congregation has to add its people first: see [Adding people and recording members](/help/adding-people); "Remove from team" takes someone off the roster. "Retire team" at the bottom of the page stops the team appearing when you plan services. Choose "Can fill" beside a person, then tick the positions that person can fill and choose "Save". A person who leaves the team stops being offered at once.
 
 Chairs and leaders are chosen under "Groups". A leader can schedule only their own team. If a group's people receive a role, only someone who manages groups can change who is on it.
 

@@ -2148,3 +2148,66 @@ Run 2 cleared every other required check, and no code has changed since run 2. P
 The next agent is **ux-developer** (Phase 4 loop-back, help text and registry labels only). QA then runs `npm run check:help` and re-reads the three diffs, and the analyst re-issues Phase 6.
 
 The orchestrator or operator should do the accepted-invitation walk on `development` before integration. I can re-run Phase 6 against its notes.
+
+---
+
+## Phase 4 loop-back (help only) and the accepted-invitation founder walk
+
+Owner: ux-developer. Date: 2026-11-05. Help text and registry only; no code changed.
+
+### The four required fixes
+
+1. `first-day-as-administrator.md`: the worship bullet is now "Plan worship" (keeps "Turn on 'Worship' first", and says the tile then appears); "Plan worship" added to `labels`. Every other card name on that page matches `tiles.ts` (Community, Directory, Groups, Staff, Officers, Roles, Tickets, Features, Branding, Calendar, Job openings, Manage events, Website domain).
+2. `worship-serving-on-a-team.md`: the button opens "Your request to serve" for one request and "Worship" for several; reminders can come per request or position, so a person may get more than one; a reminder email opens "Worship".
+3. `worship-setting-up.md`: "Choose 'Can fill' beside a person, then tick the positions that person can fill and choose 'Save'" (the walk showed the Save button). `labels` entry changed from "Can fill:" to "Can fill" (the summary line "Can fill:" is no longer quoted).
+4. `registry.ts`: `turning-features-on-and-off` `verifiedIn` back to "0.50.0".
+
+Added from the walk (help only): `worship-setting-up.md` now says only people with a current record are listed under "Add a person", so a new congregation adds its people first, with a link to Adding people (the on-screen text says the same: "People already on this team, and people without a current record, aren't listed."). This closes the first Tracked follow-up bullet's first half. The "Manage events" half is still open.
+
+### The walk
+
+Real accepted invitation, not a hand-made grant: a throwaway congregation (`e2e-invite-<stamp>`, `deletable_until` set), a founding-administrator invitation seeded with a known token for an invented person (example.invalid address), accepted in the browser, password sign-in, TOTP enrolment, Continue. Pipeline's own Neon branch (worktree `.env.local`), own server on :3690, 360x740, Chromium. The throwaway spec was deleted after the run; the org, users and queued mail were removed (confirmed by the fixture's own checks) and the flags restored. Screenshots: /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/ (all opened).
+
+| Page | What the founder sees | Screenshot |
+|---|---|---|
+| `/invite?token=` | "You're invited", founding administrator at the congregation, create-account form | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/01-invite.png |
+| `/invite/accepted` | "Your account is ready", Sign in | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/02-accepted.png |
+| `/launch` to `/o/<slug>`, flags as on the branch | Greeting, Find a person, only the "Communications" (Coming soon) tile. No worship tile | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/03-portal-worship-off.png |
+| `/help/first-day-as-administrator` | Page renders at 360px; Plan worship bullet reads correctly | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/04-first-day-help.png |
+| `/admin` with `org_portal.admin_hub` off | "Organization administration isn't turned on for <name> yet." | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/05a-admin-hub-flag-off.png |
+| `/admin/features` with `org_portal.features` off | "Feature administration isn't turned on for <name> yet." | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/05b-features-flag-off.png |
+| `/admin`, every `org_portal.*` flag on, Worship off | Manage events; Statistical Filings; Roles, Tickets, Features, Branding. No "Plan worship" | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/05-admin-hub-before.png |
+| `/admin/features` | Ten switches, Worship last, off, with its description | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/06-features.png |
+| Worship switched on | Toast "Worship turned on.", switch on, "Last changed" line, no warning (nothing scheduled) | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/07-features-worship-on.png |
+| `/o/<slug>` after | "Worship" tile under "Worship & Events" | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/08-portal-worship-on.png |
+| `/admin` after | "Plan worship" card under "Worship & Events" | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/09-admin-hub-after.png |
+| `/admin/worship` | Three cards: Services, Teams, Service types | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/10-plan-worship.png |
+| Teams, empty | "No worship teams yet. Start with a ready-made team or make your own." | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/11-teams-empty.png |
+| New team (Greeters) | Team name, Kind, Start with | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/12-new-team.png |
+| Team page | "Team created."; Greeter position, "No one is on this team yet." | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/13-team-empty.png |
+| Add a person, nobody on record | "No one matches that search. People already on this team, and people without a current record, aren't listed." | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/14-add-person-nobody.png |
+| Same, after a person is on record | "Linus Ashby" with Add | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/15-add-person-found.png |
+| After Add | "Added to the team."; the Can fill editor opens with a Greeter checkbox, Save, Cancel | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/16-can-fill-open.png |
+| After Save | "Saved."; the row shows "Can fill" and "Remove from team" | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/17-team-with-person.png |
+| Add a service | Title, Date, Starts at, Ends at, Where, Welcome Team ticked | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/18-new-service.png |
+| Service board | "Service added."; Greeter, 0 of 2, Open, Add someone, Add a guest | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/19-board-empty.png |
+| Add someone dialog | Picker (screenshot caught the dialog mid-open) | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/20-picker.png |
+| After Add | "Added. Send requests when you're ready." | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/21-board-draft.png |
+| Send dialog | "Send 1 request?" (caught mid-open) with "Send requests (1)" behind | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/22-send-dialog.png |
+| After Send | "Requests sent. 1 emailed, 0 not emailed."; Linus Ashby "Waiting for an answer", "Request emailed." | /private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/410a32fe-fd9e-4967-be0f-2033724f8e16/scratchpad/founder-walk/23-after-send.png |
+
+No sideways scroll on any page (asserted each time).
+
+### What the walk found
+
+- **Platform flags.** On the pipeline's branch database, `org_portal.admin_hub` and `org_portal.features` are **off** (and so are most other `org_portal.*` flags: roles, tickets, events, branding, groups, staff, directory, officers, members_create). With them off the founder sees only "Communications" on the portal, and Administration and Features say "isn't turned on for <name> yet". The Worship toggle and the "Plan worship" tile depend on both flags: with them on (set for the walk, then restored by SELECT-verified restore) everything works as the help says. **The branch is not production.** Whether production has `org_portal.admin_hub` and `org_portal.features` on is the orchestrator's or operator's to confirm before release; help already describes both as on. If production has them off, the first-day page, the Features page and the worship pages are all false for every congregation, not only worship.
+- **Statistical Filings card.** With every flag on, a new congregation's Administration page also lists "Statistical Filings" (under "Reports & Insights"). `first-day-as-administrator.md` says a new congregation lists "Manage events", "Roles", "Tickets", "Features" and "Branding". That is true only while `org_portal.filings` is off in production; not touched here (flag-dependent, not worship). Worth a look at the next re-walk of that page.
+- Nothing blocked the founder and nothing in code needs fixing. The Worship switch carries no warning when nothing is scheduled, as the help says.
+
+### Checks
+
+`npm run check:help` pass; `npm run typecheck` pass; `npm run lint` pass; `npm run check` pass (all ten); unit suite 13867 passed, one failure, `src/lib/dev-docs.test.ts` only (as allowed).
+
+### Handoff
+
+Next: QA re-reads the four help diffs and re-runs `check:help`; analyst re-issues Phase 6, with the walk table above standing in for the missing `development` walk (accepted-invitation, 360px, on the pipeline branch). Orchestrator: confirm production values of the two flags; the "Manage events" help gap and the Statistical Filings sentence remain tracked.

@@ -6,7 +6,7 @@ Your congregation has to use Worship. An administrator turns it on under "Featur
 
 ## When you're asked
 
-You get an email from your congregation listing the dates and positions. It does not say who asked you and does not name anyone else. Choose the button, sign in if you are asked to, and the page "Your request to serve" opens. PresbyPortal cannot tell whether an email reached your inbox or was read. If you expected a request and none came, it may not have been sent yet, or the email may not have reached you. Open "Worship" to see any request waiting for you.
+You get an email from your congregation listing the dates and positions. It does not say who asked you and does not name anyone else. Choose the button and sign in if you are asked to. With one request waiting, the page "Your request to serve" opens. With several, "Worship" opens and lists them. PresbyPortal cannot tell whether an email reached your inbox or was read. If you expected a request and none came, it may not have been sent yet, or the email may not have reached you. Open "Worship" to see any request waiting for you.
 
 Choose "Accept" or "Decline". If you decline, you can choose a "Reason (optional)": Away, Work, Family or Other. People who schedule worship can see it, and PresbyPortal does not show it to anyone else.
 
@@ -18,7 +18,7 @@ If the page says "This request is no longer open", the service was cancelled, it
 
 Choose the "Worship" tile. The page lists "Waiting for your answer", "You're scheduled" and "You said you can't serve", each with the date, your team and your position. Under "Your teams" you can open a team to see who is on it and which positions each person can fill.
 
-Reminders are emailed once a night: one if a request is still waiting for you, and one when you are scheduled soon. They can arrive late in the evening. You get none for a request you declined, or for a service that was cancelled.
+Reminders are emailed once a night. Each request still waiting for you, and each position you are scheduled in soon, can get its own reminder, so you may receive more than one. A reminder email opens "Worship". They can arrive late in the evening. You get none for a request you declined, or for a service that was cancelled.
 
 ## Dates I can't serve
 

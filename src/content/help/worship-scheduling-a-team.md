@@ -14,11 +14,11 @@ Open "Worship", choose your team, then "Schedule this team" beside a service. So
 2. A line under a name warns you if the person has saved that date as one they can't serve, is already scheduled that day, overlaps another service, or said they can't serve this service. You can still choose "Add anyway".
 3. The person is added as "Not sent yet". Nobody is told yet.
 
-For someone who is not on record, such as a visiting preacher, choose "Add a guest" and type just a name in "Guest name". A guest is "Confirmed" at once and is not emailed. Contact details are not kept here.
+For someone who is not on record, such as a visiting preacher, choose "Add a guest" and type just a name in "Guest name". A guest counts as filled at once, shows a "Guest" label, and is not emailed. Contact details are not kept here.
 
 ## Send the requests
 
-When the schedule is ready, choose "Send requests". The dialog shows how many requests you are about to send and, if some people cannot be emailed, how many and why. Each person gets one email listing their positions and dates. Choose "Send requests" again to confirm. A position then reads "Waiting for an answer" until the person answers.
+When the schedule is ready, choose "Send requests". The dialog shows how many requests you are about to send and, if some people cannot be emailed, how many and why. Each person gets one email listing their positions and dates. Choose "Send requests" again to confirm. A position then reads "Waiting for an answer" until the person answers, and then "Confirmed" or "Declined".
 
 Some people cannot be emailed. Their line says why, for example "No email sent: may be under 18. Ask a parent or guardian, then record their answer." Two other lines you may see are "No email sent: no email address on file." and "No email sent: marked do not contact." For them, ask them yourself and then choose "Record answer", "Accepted" or "Declined". The answer is saved with your name on it.
 
@@ -33,4 +33,4 @@ A person can only answer after signing in. If someone cannot sign in, record the
 
 ## Good to know
 
-The email shows "Request emailed." because PresbyPortal sent it. It cannot tell whether it was read. Scheduling email goes to a person's Work address if that is the one they have on file, and they can mark an address do not contact. A record with no birth date and no child marking is treated as an adult and is emailed.
+The schedule shows "Request emailed." under a name once PresbyPortal has sent the email. It cannot tell whether it was read. Scheduling email goes to a person's Work address if that is the one they have on file, and they can mark an address do not contact. A record with no birth date and no child marking is treated as an adult and is emailed.

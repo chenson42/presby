@@ -323,7 +323,7 @@ export const HELP_PAGES = [
       "This request is no longer open",
       "Go to my schedule",
     ],
-    verifiedIn: "0.54.5",
+    verifiedIn: "0.55.0",
   },
   {
     slug: "worship-scheduling-a-team",
@@ -349,6 +349,7 @@ export const HELP_PAGES = [
       "Waiting for an answer",
       "Confirmed",
       "Declined",
+      "Guest",
       "Send requests",
       "Record answer",
       "Accepted",
@@ -359,7 +360,7 @@ export const HELP_PAGES = [
       "No email sent: marked do not contact.",
       "Schedule this team",
     ],
-    verifiedIn: "0.54.5",
+    verifiedIn: "0.55.0",
   },
   {
     slug: "worship-setting-up",
@@ -404,7 +405,7 @@ export const HELP_PAGES = [
       "Or adopt a template",
       "Adopt template",
     ],
-    verifiedIn: "0.54.5",
+    verifiedIn: "0.55.0",
   },
   {
     slug: "reimbursements",
@@ -529,7 +530,7 @@ export const HELP_PAGES = [
       "You don't have permission to manage branding",
       "Website domain",
     ],
-    verifiedIn: "0.50.0",
+    verifiedIn: "0.55.0",
     limitationUntil: "founder-events-branding",
   },
   {

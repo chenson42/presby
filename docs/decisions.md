@@ -4,6 +4,110 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-329 — A team-less service is readable by any worship key; a decline reason is shown only to the team's schedulers (F435, F436).**
+
+**Status:** Resolved (tech-lead Phase 3 amendment 3); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-05 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+(a) A worship service with no serving team is readable by a holder of any worship key (empty team list); it is not an error state, and creating, generating or editing a service never requires a team. (b) A decline reason is shown on the board only to a viewer who can schedule that team (`worship.schedule` or a live chair or leader seat on it); a `worship.manage` or `worship.plan` holder sees "Declined" without it. Reasons: (a) the empty state was already designed and was unreachable because the read refused; (b) the member copy promises schedulers only, and the key that plans does not schedule. Rejected: requiring a team at creation (moves the dead end to a founder's first service, and does not cover removing the last team); rewording the member promise to include planners (widens who sees something about a member to fix a sentence).
+
+---
+
+**DECISION-328 — Worship reads grant and membership dates on the later of the organization day and the UTC day (F434).**
+
+**Status:** Resolved (tech-lead Phase 3 amendment 2); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-05 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+Worship compares membership and grant dates against `greatest(organization day, UTC day)` (`presby_worship_in_effect_day`) and its own events, blockouts and reminders against the organization day. Reason: the platform stamps and reads grants on the UTC day everywhere else; worship alone read them on the organization day and refused a just-minted founder on a US evening (and kept a just-revoked grant alive). Rejected: re-stamping grants and group rows on the organization day (released definers in 0059 to 0065, a column default and a resolver default for one reader's clock); using `current_date` alone (wrong east of UTC for rows worship stamps on the organization day).
+
+---
+
+**DECISION-327 — Blockouts are end-dated ranges with a closed reason list.**
+
+**Status:** Resolved (tech-lead Phase 3); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+A person's "dates I can't serve" are rows in `worship_blockouts` (`starts_on`, `ends_on`, optional reason from `away`, `work`, `family`, `other`). There is no free-text column (R12, F425): free text about absence invites medical and pastoral content. Adding a range ends every live range that overlaps or touches it and inserts the union, so history is kept and nothing is deleted. A range wholly in the past, over 366 days, or past the 50-live-range cap is refused. The picker shows a blockout only to people who may schedule the team. A blockout never cancels an assignment; the store returns the person's own requested or confirmed assignments in the range so the page can say so. The actor is the session's person (no person parameter) and, like the assignment actor, is enforced in the store (`paper`).
+
+---
+
+**DECISION-326 — Event writes worship needs are extracted; the cancel and update hooks are one path.**
+
+**Status:** Resolved (architect, Phase 2 addendum, 2026-11-04; amended by C1 to C5); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+`createEvent` and `cancelEvent` gate on `events.manage`, which a worship planner does not hold (F427). `events/insert.ts` holds the in-transaction insert and series math; `events/mutate.ts` holds the field update (never `is_public`, `website_listed`, `allows_checkin`, the type, `recurrence_*` or `parent_event_id`) and the cancel, with no permission check (each caller gates on its own key) and no column or schema change (DECISION-113 is about the shape of the columns, not about values never changing); `events/hooks.ts` holds **both** the cancel fan-out and the update fan-out (`runEventCancelledHooks`, `runEventUpdatedHooks`, each returning `{queueIds}`). `events.ts` gates and delegates; `events.ts#cancelEvent` delegates to `cancelEventInTx`, so there is one cancel writer, and `events.ts#updateEvent` keeps its own statement for the wider column set but takes the same lock and calls the update hooks. The worship handler lives in **`worship/event-hooks.ts`**, not `store.ts`: consumers import none of `events.ts`, `events/{mutate,hooks,insert}.ts` or `worship/store.ts` (type imports excepted), directly or transitively; `hooks.ts` imports consumers; the worship-table writer allow-list is exactly `store.ts` and `event-hooks.ts`. Both `updateEventFieldsInTx` and `cancelEventInTx` (and `updateEvent`) lock the event row `FOR NO KEY UPDATE` as their first read, so Send, a service edit, sign-ups and a cancel serialize on it (Send locks several in `(starts_at, id)` order). **A worship write to an event requires a `worship_services` row**, checked under that lock in `store.ts` (the join-under-lock; no row is `not_found`); `mutate.ts`'s only importers are `events.ts` and `worship/store.ts`. The worship hook runs in the cancel's transaction; if it cannot write its queue rows the cancel rolls back. Sign-ups' DECISION-309 clause "`events.ts` may import `event-signups`" becomes "`hooks.ts` imports sign-ups' hook file".
+
+---
+
+**DECISION-325 — Reminders are a claim made by an owner-only definer in the nightly maintenance step.**
+
+**Status:** Resolved (tech-lead Phase 3); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+`presby_worship_claim_reminders(p_batch)` is a cross-org writer, `revoke`d from `presby_app`, called from `sweep.ts` on `getPlatformDb()` as an isolated step of `/api/cron/maintenance` (no fifth cron). It selects, with `FOR UPDATE SKIP LOCKED`, assignments that are due, stamps `unanswered_reminded_at` or `reminded_at`, and returns the rows with a deliverable `role` address resolved in SQL through `presby_person_email`. Due means: toggle on (`presby_worship_enabled`), service uncancelled and starting within 72 hours (status `requested`, request older than 24 hours) or 48 hours (status `confirmed`) of the organization's local now; person unmerged, living, membership active, not presumed minor (`presby_photo_subject_is_minor`); never `declined`, `withdrawn` or a guest. Each assignment is reminded at most once per kind. The queue rows are written in the same transaction as the stamps, so a failed insert un-claims. Up to 500 per run. Reminders therefore arrive with the nightly run (F429).
+
+---
+
+**DECISION-324 — The assignment is a state machine with an explicit Send; guests are confirmed at placement.**
+
+**Status:** Resolved (tech-lead Phase 3; operator addendum 2); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+States `draft`, `requested`, `confirmed`, `declined`, `withdrawn` (terminal). A leader's placement is a draft the assignee cannot see; Send moves drafts to `requested` and queues one email per person (operator, addendum 2). A person, or a leader on their behalf (attributed, `response_source`), moves `requested`, `confirmed` and `declined` among themselves until the service starts; a re-answer is a normal transition and the last write wins under a row lock. A guest has no one to ask, so the row is born `confirmed`, recorded on the leader's behalf, and never emailed. Removing is `withdrawn`; cancelling a service withdraws drafts and open requests and keeps confirmed and declined rows. The trigger and `states.ts` are pinned together by a test. `notice_outcome` records at Send what happened (`emailed`, `guardian`, `no_address`, `do_not_contact`) so the board can say why someone was not emailed.
+
+---
+
+**DECISION-323 — Worship content direction (architect, Phase 2 R14 to R16).**
+
+**Status:** Resolved (architect, Phase 2 R14 to R16; direction only); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+Tenant-scoped song library with no shared catalog or dedup; the platform never holds SongSelect credentials or scrapes SongSelect; ChordPro is in-house, rendered as text nodes, with no copyleft dependency; hosted files go to a private object store behind the storage adapter (per-view short-lived signed reads, signed direct upload with server finalize, purge to a tombstone), provider chosen at Increment 5's Phase 2; bulletins are print HTML with no dependency. Nothing in Increment 1 implements this.
+
+---
+
+**DECISION-322 — Minors and public naming in worship.**
+
+**Status:** Resolved (architect R9; tech-lead specifics); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+One presumed-minor predicate: worship calls the shipped `presby_photo_subject_is_minor(org, person)` directly from SQL and never defines a second (a thin rename to a generic name is a follow-up for when sign-ups reconciles its TypeScript fragment, DECISION-308). A presumed minor receives no notice of any kind (request, reminder, cancel); the leader sees "ask a parent or guardian" and records the answer; a presumed minor is never named on a public surface (none exists yet; Increment 3 requires `public_listed` consent too). Residual, `paper`: a child with no birth date and no `child` household role is presumed an adult.
+
+---
+
+**DECISION-321 — The emailed response link is a DECISION-147 credential (Increment 1b).**
+
+**Status:** Resolved for design (architect R11); built in Increment 1b; QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+Names assignments, never "all of a person's requests"; stored as a hash; issued by a definer that addresses it in SQL through `presby_person_email`; answered by two definers that derive everything from the link row and compose the toggle through `presby_worship_enabled`; each named assignment answered once, until that service's org-local start; GET shows a page, POST records the answer, with the DECISION-313 lock, a rate limit and one uniform response; un-brandable `(respond)` group with exact public paths and no proxy import; bodies redacted after sending; shared `credential-token.ts`. Residual: a forwarded email can answer once. Increment 1 leaves `response_source = 'link'` valid in the vocabulary and refused by the guard.
+
+---
+
+**DECISION-320 — Worship notices.**
+
+**Status:** Resolved (architect R10); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+`person:role`, one audience per template key, queued in the causing transaction with `insertQueueRowInTx`, Send is explicit, plain GET links with no query string, never to a presumed minor, a decliner, a withdrawn assignment, a cancelled service, or when the toggle is off. Increment 1 sends four kinds (request, reminder, cancelled, declined-to-leader); 1b's credential-bearing mail uses new keys. **Residual (F428):** the rendered body (position, team, date, organization name; no person's name, no free text) is retained in `email_queue`.
+
+---
+
+**DECISION-319 — Worship keys, template and toggle.**
+
+**Status:** Resolved (amends operator Q9 as re-ruled 2026-11-04); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+`worship.manage`, `worship.plan`, `worship.schedule`, all tier 1, join the founding-administrator bundle for congregations and new worshiping communities (the toggle's own applicability list), with a backfill; without them nobody holds the keys and the `worship_leader` template (custom, universal scope) could never be adopted or granted (F111, F421). `org_portal.worship` becomes toggle-only, provisioned off, self-service; its global flag row is deleted (the 0055 precedent). Later keys are created with their increments. Accepted residual: the founding administrator can schedule and plan worship; all three keys are tier 1, so no tier is raised.
+
+---
+
+**DECISION-318 — Scheduling authority is `worship.schedule` or a live leader seat on that team.**
+
+**Status:** Resolved (architect R6, R7); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+Seats are appointed under `groups.manage`, which already decides a seat that now also confers reimbursement approval (DECISION-268); help and Copy say so. Checked in the store and again by the assignment trigger. `worship.manage` adds or ends only `member` rows, and only on a team group with no live role grant; worship writes rosters only through the `groups.ts` primitives. Residual, `paper`: the actor id comes from the application; mitigated by the sole-writer scan and the session-derived actor.
+
+---
+
+**DECISION-317 — Worship is a module on extension tables.**
+
+**Status:** Resolved (architect R2, R5; S2 residual from addendum); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-04 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)
+
+A service is an `events` row plus `worship_services`; a team is a managed group plus `worship_teams`; positions, qualifications, serving teams, assignments, blockouts and service types are new tables beside `groups`. Composite FKs including two three-column keys; NO ACTION to `events` and `groups`; FORCE RLS; no DELETE grant; `group_memberships` and `events` are not altered. `src/lib/worship/store.ts` (with `worship/event-hooks.ts` for the cancel handler, DECISION-326) writes under `withOrgContext()`. No tables shared with sign-ups. **Residual (S2, `paper`):** a worship service is only ever a newly created event (adopting an existing event is out of scope), but the database does not enforce it: a `BEFORE INSERT` trigger requiring `events.created_at = now()` was weighed and not adopted (it would refuse every fixture and seed that inserts the event and the service in separate transactions, including `seed-dev-worship.sql` run by `psql` in autocommit, for a hole reachable only by changing `store.ts`, the sole inserter, and already bounded by the C2 join-under-lock). Held by the `insert(worshipServices)` source scan in `boundaries.test.ts` and by review; revisit when adoption is designed, where the right control is a key check on `events.manage` **and** `worship.plan`, not a trigger.
+
+---
+
 **DECISION-316 — A members-only event is hidden from visitors; the member-side read path asks the 0066 standing classifier (F418).**
 
 **Status:** Resolved (tech-lead Phase 3; operator rulings Q1 and Q2, 2026-11-02; QA PASS, Phase 6 SHIP WITH NOTES) · **Date:** 2026-11-02 · **Feature:** `2026-11-02-members-only-events` (v0.54.5); amends operator ruling 4 in `src/lib/calendar.ts` ("`is_public` is not a member filter")

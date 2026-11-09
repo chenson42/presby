@@ -2007,3 +2007,11 @@ commit;
 -- to 0066's backfill-calendar-viewer block; idempotent.
 -- scripts/membership-standing/test-rls-66.sql needs it.
 \ir membership-standing/seed-dev-membership-standing.sql
+
+-- Worship Increment 1 fixture (drizzle/0085). Its own file and transaction,
+-- after every include above (it creates no organization; it uses Alder
+-- Creek's people and their membership rows). Two teams, a service type, the
+-- next two Sundays' services and one assignment in each state, for the
+-- browser walk; the org_portal.worship toggle stays OFF. Idempotent.
+-- scripts/worship/test-rls-85.sql does NOT need it.
+\ir worship/seed-dev-worship.sql

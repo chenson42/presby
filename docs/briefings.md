@@ -25,6 +25,10 @@ is checked.*
 
 ---
 
+## 2026-11-09
+
+- [ ] **`decision` · Worship scheduling is built and stays off until a congregation turns it on (0.55.0; DECISION-317 to DECISION-329).** Teams with positions, services on the calendar, drafts a leader Sends, confirm or decline by the person, dates I can't serve, nightly reminders. **Every founding administrator at a congregation or new worshiping community, existing and new, now holds three worship keys** (all tier 1). The global `org_portal.worship` flag row is deleted; the per-org toggle replaces it. **Accepted:** notice bodies (position, team, date, no names) stay in the mail queue (F428); reminders arrive about 10 to 11 pm Eastern with the nightly run (F429); removing someone or moving a service sends no message until 1b (F430). **Your calls:** is it fine that planners see "Declined" without the reason (F436)? Keep or drop the blockout reason, which nobody but the person can see? Settle Track F mail before a real pilot. **Order:** 0085 and F362 both rewrite the founding bundle; the second to merge re-reads the first.
+
 ## 2026-10-31
 
 - [ ] **`decision` · Photos of people are built and stay off until you turn them on (0.52.0; DECISION-285 to DECISION-289 and DECISION-312).** Staff who manage people add up to ten photos to an adult and choose one for the directory and one for the public website; one SQL definition decides whether a photo shows. **Before any toggle:** apply 0078 to production after 0073 and 0074 (`docs/deployment.md` runbook; never re-apply 0072 afterwards), prove one real upload on a Vercel build, and do your real-iPhone check at 360px. **Accepted:** no birth date counts as an adult, nobody can yet set "hide my photo", the website tick is a staff statement, photo bytes sit in Postgres under a size watch. **DECISION-312:** `sharp` now has two allowed importers, receipts and photos; a third means a planned extraction. **Still open:** your call on the first customer's leadership pages (Q5), and 0079 in a later release.

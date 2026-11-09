@@ -211,6 +211,16 @@ export const MODULES: Record<string, string> = {
   reimbursement_payments: "U. Reimbursements",
   reimbursement_events: "U. Reimbursements",
   job_postings: "T. Careers",
+  // Worship Increment 1 (drizzle/0085, src/lib/db/domain/worship.ts).
+  worship_teams: "V. Worship",
+  worship_positions: "V. Worship",
+  worship_position_qualifications: "V. Worship",
+  worship_service_types: "V. Worship",
+  worship_service_type_teams: "V. Worship",
+  worship_services: "V. Worship",
+  worship_service_teams: "V. Worship",
+  worship_assignments: "V. Worship",
+  worship_blockouts: "V. Worship",
 };
 
 /**

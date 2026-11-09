@@ -65,6 +65,15 @@ export const EMAIL_AUDIENCE: Readonly<Record<string, Audience>> = {
   "reimbursement.notice.needs_treasurer": "person:role",
   "reimbursement.notice.ready_to_pay": "person:role",
   "reimbursement.notice.requester_update": "person:role",
+  // person:role - worship Increment 1 (DECISION-320): a volunteer is often staff or a
+  // visitor with only a work address, a team leader is reached at the same address in
+  // the decline notice, and none of the four is a credential (the 1b response link
+  // gets its own keys). A presumed minor, a decliner, a cancelled service and a
+  // switched-off toggle get no mail. No person's name and no free text in any body.
+  "worship.notice.request": "person:role",
+  "worship.notice.reminder": "person:role",
+  "worship.notice.cancelled": "person:role",
+  "worship.notice.declined": "person:role",
 };
 
 export function audienceFor(templateKey: string): Audience | null {

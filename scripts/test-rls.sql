@@ -7929,7 +7929,7 @@ begin;
     1, 'DECISION-152: and that permission is statistics.publish — the same authority that files a return retracts it (no statistics.withdraw)');
   select assert_eq(
     (select count(*) from app_roles where organization_id is null),
-    8, 'DECISION-152: there are now EIGHT template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), treasurer + giving_recorder (drizzle/0055), hiring_committee (drizzle/0071, DECISION-265), and reimbursement_clerk (drizzle/0074, F322)');
+    9, 'DECISION-152: there are now NINE template roles — committee_chair, presbytery_stated_clerk, personnel_admin, congregation_stated_clerk (0052 added exactly one), treasurer + giving_recorder (drizzle/0055), hiring_committee (drizzle/0071, DECISION-265), reimbursement_clerk (drizzle/0074, F322), and worship_leader (drizzle/0085, DECISION-319)');
   select assert_eq(
     (select count(*) from app_role_permissions rp
        join app_roles r on r.id = rp.role_id
@@ -8783,3 +8783,15 @@ rollback;
 --     production.
 -- ===========================================================================
 \ir membership-standing/test-rls-66.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/worship-inc1 (integration).
+-- 85. Worship, Increment 1: teams, positions and the Sunday schedule
+--     (drizzle/0085_presby_worship.sql; DECISION-317 to 327). Its own file,
+--     as 46, 47, 59 to 83 above; \ir resolves relative to this script. It
+--     needs the test helpers and the stock seed's Alder Creek, Fernwood and
+--     Northern Reach people, NOT scripts/worship/seed-dev-worship.sql (every
+--     block builds its own rows and rolls back), so it is never run against
+--     production.
+-- ===========================================================================
+\ir worship/test-rls-85.sql

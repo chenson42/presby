@@ -91,7 +91,6 @@ insert into _seed_flags (key, enabled) values
     ('org_portal.feature_categories', false),
     ('org_portal.staff', false),
     ('platform.merged_home', true),
-    ('org_portal.worship', true),
     ('org_portal.committees', true),
     ('org_portal.communications', true);
 -- END seed flags

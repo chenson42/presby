@@ -2191,6 +2191,29 @@ Pipeline `2026-10-22-founding-admin-directory-inc3` (v0.54.0; migration 0066; DE
 
 *Accepted residuals (`paper`), DECISION-232 to 237:* a `people.manage` holder can mark a person a regular attender and so list them, which can make them eligible for auto-connect (detected by the audit chain `tenant.person.engagement_changed`, then `tenant.person.sign_in_connected`; not prevented; the F232 class); an `INSERT` with engagement `staff` is not distinguishable from the sanctioned anchor path; archive's standing and position conditions are application-enforced because `presby_app` can already write `ended_on`; a tenant can create a derived group in an organization that lacks one (S16); owner-level access still writes derived rosters (the guard is for the application's own database access); the first-visit follow-up chain does not exist until 3b.
 
+## 2ap. Worship, Increment 1 (teams and scheduling) — findings (F421–F436)
+
+Pipeline `2026-11-04-worship` (parent; Phases 1 and 2) and `2026-11-04-worship-inc1` (v0.55.0; migration 0085; DECISION-317 to 329). Phase 6 verdict SHIP WITH NOTES. Migration 0085 adds nine extension tables beside `events` and `groups` (teams, positions, qualifications, service types and their default teams, services, serving teams, assignments, blockouts), all FORCE RLS with composite keys and no DELETE grant; three tier-1 keys join the founding-administrator bundle with a backfill; the `org_portal.worship` flag row is deleted in favour of the per-org toggle.
+
+- **F421 (closed by DECISION-319) — Q9 "template only" left the Worship Leader template ungrantable at every organization**, because nobody held the keys (F111). The operator re-ruled: the founding bundle gains `worship.manage`, `worship.plan` and `worship.schedule`, scoped to congregations and new worshiping communities.
+- **F422 (closed by DECISION-318) — `worship.manage` roster writes would have been an escalation path into role-bearing groups**, and the leader seat also confers reimbursement approval. `worship.manage` adds or ends only `member` rows on a team group with no live role grant; seats stay under `groups.manage`.
+- **F423 (closed by DECISION-322) — three presumed-minor definitions** (photos SQL, sign-ups TypeScript, worship). Worship calls `presby_photo_subject_is_minor` directly; sign-ups reconciles at its integration (`docs/TODO.md`).
+- **F424 (closed, deferred) — Phase 1's "next service" card on `/home` would break `(member)`'s no-tenant-data rule.** Out of Increment 1.
+- **F425 (closed by DECISION-327) — free-text blockout reasons and decline notes invite tier-3 data.** Blockout reasons are a closed list; a decline reason is shown only to the team's schedulers (DECISION-329).
+- **F426 (closed by DECISION-321) — "single-use" and "reusable until start" disagreed for the response link.** One answer per named assignment, until that service starts; built in 1b.
+- **F427 (closed by DECISION-326) — `createEvent` gates on `events.manage`, and worship plus `events.ts` would form an import cycle.** Insert, update and cancel were extracted to `events/{insert,mutate,hooks}.ts`, with one cancel writer and a transitive import scan.
+- **F428 (accepted, `paper`) — `email_queue` keeps the rendered body of worship notices.** Tier 1 only: position, team, date, organization name, no person's name or free text. Revisit with Track F (DECISION-320).
+- **F429 (accepted) — reminders ride the 03:00 UTC maintenance run**, so they arrive about 10 to 11 pm US Eastern (DECISION-325).
+- **F430 (accepted for Increment 1) — removing a person or moving a service's time sends no message.** Stated in the dialog and help; recommended for 1b.
+- **F431 (accepted) — a merged person's assignments are not re-pointed to the survivor**, as with group memberships today; reminders and pickers skip merged people.
+- **F432 (accepted, `paper`) — `worship.manage` sees all current members' names when adding to a team**, as `groups.manage` does.
+- **F433 (known constraint, kept) — the actor guards answer only inside `app.current_org_id`**, so an owner-connection script that writes assignments must set the org context or is refused with 42501. Fail closed; one test pins it.
+- **F434 (closed by DECISION-328) — a just-minted founder was refused at the worship actor trigger on a US evening**, because grants are stamped on the UTC day and worship read the organization day. Worship now reads grant and membership dates on `greatest(org day, UTC day)`. Residual (`paper`): day-boundary hygiene platform-wide (`docs/TODO.md`).
+- **F435 (closed by DECISION-329 a) — a service with no serving team was readable by nobody**, so a founder's first service dead-ended.
+- **F436 (closed by DECISION-329 b; operator to confirm) — decline reasons were shown to planners who cannot schedule.** Now only a viewer who can schedule that team sees the reason; planners and managers see "Declined".
+
+*Accepted residuals (`paper`), DECISION-317 to 329:* a service is only ever a newly created event, held by a source scan rather than a trigger (S2); the scheduling actor id comes from the application, mitigated by the sole-writer scan; a child with no birth date and no `child` household role is presumed an adult; F428, F429, F431, F432 above.
+
 ## 3. Section M — Organization lifecycle *(new — shape revised in round 3)*
 
 Answers F30 / D10.

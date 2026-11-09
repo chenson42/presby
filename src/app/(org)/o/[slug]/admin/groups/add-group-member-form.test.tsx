@@ -49,8 +49,8 @@ describe("AddGroupMemberForm — zero-people state", () => {
   });
 });
 
-describe("AddGroupMemberForm — role is descriptive-only copy", () => {
-  it("names that the role grants no software access", () => {
+describe("AddGroupMemberForm — what the role is and is not", () => {
+  it("says the role is a part, and that a group's own role goes to everyone in it", () => {
     render(
       <AddGroupMemberForm
         slug="alder-creek"
@@ -59,8 +59,17 @@ describe("AddGroupMemberForm — role is descriptive-only copy", () => {
       />,
     );
     expect(
-      screen.getByText(/does not grant software access/i),
+      screen.getByText(/describe a person's part in the group. If the group has been given a role, everyone in it gets that role/i),
     ).toBeTruthy();
+  });
+});
+
+describe("AddGroupMemberForm — the worship helper line (worship Copy G3)", () => {
+  it("says a chair or leader can also schedule a worship team and approve reimbursement requests, from copy.ts", () => {
+    render(<AddGroupMemberForm slug="alder-creek" groupId="group-2" people={PEOPLE} />);
+    expect(screen.getByTestId("group-role-worship-helper").textContent).toBe(
+      "A chair or leader can also schedule people when this group is a worship team, and can approve this group's reimbursement requests when your treasurer allows requests for it.",
+    );
   });
 });
 

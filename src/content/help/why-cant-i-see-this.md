@@ -59,6 +59,12 @@ For how an administrator turns features on and off, see [Turning features on and
 
 A few tiles open a page that only describes an idea and has nothing to use. They are not features you can turn on.
 
+### A worship page says it isn't available
+
+- "Worship isn't turned on for" your congregation: an administrator has not turned on "Worship". Ask whoever manages your congregation's features. See [Serving on a worship team](/help/worship-serving-on-a-team).
+- "This request is no longer open": the service was cancelled or has started, or the leader took the request back. Choose "Go to my schedule".
+- A team or request that is not found: you are not on that team, or the link is for someone else.
+
 ## A congregation says you do not have access
 
 If you open a congregation you do not belong to, you see "You don't have access to" and its name. The message is the same whether or not the congregation uses PresbyPortal, so it tells you nothing about that.

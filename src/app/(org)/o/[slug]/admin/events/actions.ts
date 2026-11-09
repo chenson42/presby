@@ -223,7 +223,12 @@ export async function cancelEventAction(
   const identity = await resolveActingIdentity(slug);
   if (!identity.ok) return { ok: false, error: identity.error };
 
-  const result = await cancelEvent(identity.personId, identity.organizationId, eventId);
+  const result = await cancelEvent(
+    identity.personId,
+    identity.organizationId,
+    eventId,
+    identity.actor,
+  );
 
   if (result.kind !== "ok") {
     return mapForbiddenOrInvalid(result);

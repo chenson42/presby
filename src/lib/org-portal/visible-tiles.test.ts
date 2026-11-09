@@ -225,12 +225,28 @@ describe("visiblePortalTiles(category, organizationType, viewer) — category, t
     expect(presbyteryAdmin.map((t) => t.key)).not.toContain("giving-admin");
   });
 
-  it("worship tile is independent — org_portal.worship on, everything else off (operate)", async () => {
-    isFlagEnabled.mockImplementation(
-      async (key: string) => key === "org_portal.worship",
-    );
-    const tiles = await visiblePortalTiles("operate", "congregation", VIEWER);
-    expect(tiles.map((t) => t.key)).toEqual(["worship"]);
+  it("worship tiles follow the per-org toggle alone (no platform flag): on shows 'worship' (operate) and 'worship-admin' (administer) at a congregation and a new worshiping community, never at a presbytery", async () => {
+    isFlagEnabled.mockResolvedValue(false);
+    toggleOn("org_portal.worship");
+    const operate = await visiblePortalTiles("operate", "congregation", VIEWER);
+    expect(operate.map((t) => t.key)).toEqual(["worship"]);
+    const administer = await visiblePortalTiles("administer", "congregation", VIEWER);
+    expect(administer.map((t) => t.key)).toEqual(["worship-admin"]);
+    const nwc = await visiblePortalTiles("operate", "new_worshiping_community", VIEWER);
+    expect(nwc.map((t) => t.key)).toEqual(["worship"]);
+    const presbytery = await visiblePortalTiles("operate", "presbytery", VIEWER);
+    expect(presbytery.map((t) => t.key)).not.toContain("worship");
+    const presbyteryAdmin = await visiblePortalTiles("administer", "presbytery", VIEWER);
+    expect(presbyteryAdmin.map((t) => t.key)).not.toContain("worship-admin");
+  });
+
+  it("worship tiles are hidden when the toggle is off", async () => {
+    isFlagEnabled.mockResolvedValue(false);
+    isOrgFeatureEnabled.mockResolvedValue(false);
+    const operate = await visiblePortalTiles("operate", "congregation", VIEWER);
+    expect(operate.map((t) => t.key)).not.toContain("worship");
+    const administer = await visiblePortalTiles("administer", "congregation", VIEWER);
+    expect(administer.map((t) => t.key)).not.toContain("worship-admin");
   });
 
   it("insights tile is independent — org_portal.insights on, everything else off (operate)", async () => {
@@ -444,6 +460,7 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
       "org_portal.domains",
       "org_portal.giving",
       "org_portal.reimbursement",
+      "org_portal.worship",
     ]);
     isOrgFeatureEnabled.mockClear();
     // ...and an operate call does, once each, for the three toggle-gated tiles.
@@ -453,6 +470,7 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
       "org_portal.careers",
       "org_portal.giving",
       "org_portal.reimbursement",
+      "org_portal.worship",
     ]);
     isOrgFeatureEnabled.mockClear();
     // A presbytery's operate call never reads the giving toggle: orgTypeScope
@@ -498,6 +516,8 @@ describe("visiblePortalTiles — the per-org toggle gate (member-calendar R1, F1
       "org_portal.giving",
       "org_portal.reimbursement",
       "org_portal.reimbursement",
+      "org_portal.worship",
+      "org_portal.worship",
     ]);
   });
 

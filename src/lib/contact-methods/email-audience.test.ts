@@ -54,6 +54,13 @@ const NAMED: Readonly<Record<string, string | readonly string[]>> = {
     "reimbursement.notice.ready_to_pay",
     "reimbursement.notice.requester_update",
   ],
+  // src/lib/worship/{notify,sweep}.ts: every message comes from messages.ts, which returns one of the four keys
+  "worshipMessage.templateKey": [
+    "worship.notice.request",
+    "worship.notice.reminder",
+    "worship.notice.cancelled",
+    "worship.notice.declined",
+  ],
 };
 
 const SENDERS: Record<string, number> = { enqueueEmail: 0, insertQueueRowInTx: 1 };
@@ -173,10 +180,15 @@ describe("the audience registry is closed and complete (ER14)", () => {
       "reimbursement.notice.needs_treasurer": "person:role",
       "reimbursement.notice.ready_to_pay": "person:role",
       "reimbursement.notice.requester_update": "person:role",
+      // Worship Increment 1, DECISION-320: request, reminder, cancelled and declined notices
+      "worship.notice.request": "person:role",
+      "worship.notice.reminder": "person:role",
+      "worship.notice.cancelled": "person:role",
+      "worship.notice.declined": "person:role",
     });
   });
 
-  it("the senders that address a person's contact email are the congregation's sign-in invitation (person:credential) and the four reimbursement notices (person:role); giving is not wired, D7", () => {
+  it("the senders that address a person's contact email are the congregation's sign-in invitation (person:credential), the four reimbursement notices and the four worship notices (person:role); giving is not wired, D7", () => {
     const personKeys = Object.entries(EMAIL_AUDIENCE).filter(([, a]) => a.startsWith("person:"));
     expect(personKeys.sort(([a], [b]) => a.localeCompare(b))).toEqual([
       ["account_sign_in_invitation", "person:credential"],
@@ -184,12 +196,25 @@ describe("the audience registry is closed and complete (ER14)", () => {
       ["reimbursement.notice.needs_treasurer", "person:role"],
       ["reimbursement.notice.ready_to_pay", "person:role"],
       ["reimbursement.notice.requester_update", "person:role"],
+      ["worship.notice.cancelled", "person:role"],
+      ["worship.notice.declined", "person:role"],
+      ["worship.notice.reminder", "person:role"],
+      ["worship.notice.request", "person:role"],
     ]);
   });
 
   it("the sign-in invitation is sent by org-invite.ts alone, through the definer-chosen address (the registry entry and the sender land together)", () => {
     const senders = FOUND.filter((f) => f.key === "account_sign_in_invitation");
     expect(senders.map((f) => f.file)).toEqual(["src/lib/onboarding/org-invite.ts"]);
+  });
+
+  it("the four worship notices are sent from notify.ts and sweep.ts through the worshipMessage variable, never a credential key", () => {
+    const worship = FOUND.filter((f) => f.expression === "worshipMessage.templateKey");
+    expect([...new Set(worship.map((f) => f.file))].sort()).toEqual(["src/lib/worship/notify.ts", "src/lib/worship/sweep.ts"]);
+    for (const key of ["worship.notice.request", "worship.notice.reminder", "worship.notice.cancelled", "worship.notice.declined"]) {
+      expect(audienceFor(key), key).toBe("person:role");
+      expect(worship.map((f) => f.key), key).toContain(key);
+    }
   });
 
   it("audienceFor is exact: inherited object keys are not classified", () => {

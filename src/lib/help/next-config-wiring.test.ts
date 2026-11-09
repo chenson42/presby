@@ -10,7 +10,8 @@ describe("next.config.ts help redirects", () => {
     expect(config).toMatch(/import \{ helpRedirects \} from "\.\/src\/lib\/help\/select"/);
     expect(config).toMatch(/\.\.\.helpRedirects\(PLATFORM_HOST\)/);
   });
-  it("yields none at first release", () => {
-    expect(helpRedirects("(?:example\\.test)")).toEqual([]);
+  it("yields exactly the redirects of the placeholders a published page replaced", () => {
+    // worship Increment 1: /help/worship-setting-up replaces the planned worship-planning placeholder.
+    expect(helpRedirects("(?:example\\.test)").map((r) => r.source)).toEqual(["/help/planned/worship-planning"]);
   });
 });

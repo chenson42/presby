@@ -2,6 +2,7 @@ import {
   BarChart3,
   BookOpen,
   Briefcase,
+  CalendarCheck,
   CalendarCog,
   CalendarDays,
   FileBarChart,
@@ -55,6 +56,9 @@ export const TILE_ICONS: Record<string, LucideIcon> = {
   reimbursements: Receipt,
   "reimbursements-admin": ReceiptText,
   worship: Music,
+  // worship Increment 1: the member tile and the planners' tile get distinct
+  // glyphs, same reasoning as calendar/events and giving/giving-admin.
+  "worship-admin": CalendarCheck,
   committees: Gavel,
   oversight: ShieldCheck,
   reports: FileBarChart,

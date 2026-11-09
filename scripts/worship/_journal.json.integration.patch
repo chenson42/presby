@@ -1,0 +1,18 @@
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+index 0a00be36..b385f7b9 100644
+--- a/drizzle/meta/_journal.json
++++ b/drizzle/meta/_journal.json
+@@ -533,6 +533,13 @@
+       "when": 1793479500000,
+       "tag": "0083_presby_help_contact",
+       "breakpoints": true
++    },
++    {
++      "idx": 85,
++      "version": "7",
++      "when": 1793652300000,
++      "tag": "0085_presby_worship",
++      "breakpoints": true
+     }
+   ]
+ }

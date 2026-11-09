@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db, getPlatformDb } from "@/lib/db";
 import { hostClass } from "@/lib/domains/host";
 import { runCareersSweep } from "@/lib/careers/sweep";
+import { runWorshipReminderSweep } from "@/lib/worship/sweep";
 
 // Vercel cron invokes via GET. See vercel.json for the schedule (0 3 * * *).
 // Runs daily at 03:00 UTC to prune expired tokens from three tables:
@@ -9,7 +10,8 @@ import { runCareersSweep } from "@/lib/careers/sweep";
 //   - email_verification_tokens (24-h TTL; one row per user max)
 //   - user_totp_pending_enrollments (10-min TTL; one row per user max)
 // Then, as isolated steps after the roll reconcile: the careers sweep (closes
-// published job postings past their closing date; src/lib/careers/sweep.ts).
+// published job postings past their closing date; src/lib/careers/sweep.ts) and
+// the worship reminder step (queues the nightly reminders; src/lib/worship/sweep.ts).
 // POST is intentionally omitted — no admin "run now" surface exists yet.
 export async function GET(req: Request) {
   // Guard: CRON_SECRET must be set for the worker to run.
@@ -116,12 +118,31 @@ export async function GET(req: Request) {
     console.error("[cron/maintenance] careers sweep failed");
   }
 
+  // Worship (docs/work-log/2026-11-04-worship-inc1.md, Phase 3 "Cron"; DECISION-325): queue the
+  // nightly reminders (a request unanswered after 24 hours with the service within 72, a confirmed
+  // assignment with the service within 48; never to a decliner, a presumed minor, a cancelled
+  // service or an organization with Worship off). ISOLATED exactly like the careers step: it runs
+  // after everything above has committed, a failure (the migration not yet applied, a database
+  // blip, a failed queue insert - which rolls the claim back so the next run retries) is logged as
+  // a fixed label with no error text and never changes the response or stops anything else. No
+  // fifth cron: this rides the 03:00 UTC run (about 10 to 11 pm US Eastern, F429, accepted). The
+  // step skips itself, claiming nothing, when platformOrigin() is null. Runs on the platform
+  // connection inside runWorshipReminderSweep() because presby_worship_claim_reminders() is a
+  // cross-org writer executable by the owner alone.
+  let worshipRemindersQueued = 0;
+  try {
+    worshipRemindersQueued = await runWorshipReminderSweep();
+  } catch {
+    console.error("[cron/maintenance] worship reminders failed");
+  }
+
   const summary = {
     deletedPwdReset: pwdResetResult.rows.length,
     deletedEmailVerify: emailVerifyResult.rows.length,
     deletedTotpPending: totpPendingResult.rows.length,
     rollCacheRolledForward: rolledForward,
     careersPostingsClosed,
+    worshipRemindersQueued,
   };
 
   // Structured log for ops observability (Vercel Function logs / Datadog).

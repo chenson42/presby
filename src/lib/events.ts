@@ -13,6 +13,19 @@ import {
   parsePattern,
   seriesTotalWithinCap,
 } from "@/lib/events/recurrence";
+import { runEventUpdatedHooks } from "@/lib/events/hooks";
+import {
+  EVENT_TYPE_UNAVAILABLE,
+  SWITCH_INVALID,
+  eventTypeUsable,
+  insertEventsInTx,
+  switchesAreBooleans,
+  validateFieldLengths,
+  type CreateEventInput,
+  type EventActor,
+  type EventsResult,
+} from "@/lib/events/insert";
+import { cancelEventInTx } from "@/lib/events/mutate";
 import { formatWallClock, parseWallClock } from "@/lib/events/wall-clock";
 import {
   deriveListed,
@@ -38,6 +51,14 @@ import { isUuidShaped } from "@/lib/shared/uuid";
  * `events.manage` gate checked FIRST inside every one of them via the private
  * `hasEventsManage` helper, typed `EventsResult` variants instead of thrown
  * exceptions for every expected/denied outcome.
+ *
+ * GATE HERE, WRITE ELSEWHERE (DECISION-326, worship Increment 1 Batch 0).
+ * `createEvent` and `cancelEvent` check `events.manage` and delegate to
+ * `events/insert.ts#insertEventsInTx` and `events/mutate.ts#cancelEventInTx`,
+ * which check no permission - the worship store calls the same two after its
+ * own `worship.plan` gate, so there is ONE insert body and ONE cancel writer.
+ * `updateEvent` keeps its own wider-column statement but takes the same
+ * event-row lock first and calls the same update hooks (`events/hooks.ts`).
  *
  * WALL-CLOCK TIMESTAMPS, TYPED DIGITS IN THE UTC FIELDS (DECISION-113 ruling
  * 3, corrected by F134). `startsAt`/`endsAt` are `timestamp` columns with NO
@@ -107,10 +128,6 @@ type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const EVENTS_MANAGE = "events.manage";
 
-const TITLE_MAX = 200;
-const DESCRIPTION_MAX = 2000;
-const LOCATION_MAX = 200;
-
 /**
  * The single-permission gate every exported function in this module checks
  * FIRST — not exported, same discipline `hasGroupsManage`/`hasOfficersManage`
@@ -138,17 +155,11 @@ async function hasEventsManage(
 // Shared result / entry types
 // ---------------------------------------------------------------------------
 
-export type EventsResult<T> =
-  | { kind: "ok"; data: T }
-  | { kind: "forbidden" }
-  | { kind: "invalid_target" }
-  | { kind: "invalid_input"; message: string };
-
-/** Who is acting, for the audit row (`actor_user_id`, `actor_email`). */
-export interface EventActor {
-  userId: string;
-  email: string | null;
-}
+// The result/actor/input types and the field validators moved to
+// `events/insert.ts` with the insert body (worship Increment 1, Batch 0); they
+// are re-exported so no importer of this module changes.
+export type { CreateEventInput, EventActor, EventsResult };
+export { EVENT_TYPE_UNAVAILABLE };
 
 export interface EventListEntry {
   eventId: string;
@@ -266,55 +277,6 @@ const EVENT_COLUMNS = {
   recurrenceCount: events.recurrenceCount,
   eventTypeId: events.eventTypeId,
 } as const;
-
-/**
- * Server-side length limits, checked here regardless of what any zod shape
- * in the UI layer also enforces (Phase 1's Adversarial Pass — this exact gap
- * shipped client-only once before). Returns the `invalid_input` message, or
- * `null` when every field is within bounds.
- */
-function validateFieldLengths(input: {
-  title: string;
-  description?: string;
-  location?: string;
-}): string | null {
-  if (input.title.trim().length === 0) {
-    return "Title is required.";
-  }
-  if (input.title.length > TITLE_MAX) {
-    return `Title must be ${TITLE_MAX} characters or fewer.`;
-  }
-  if (input.description && input.description.length > DESCRIPTION_MAX) {
-    return `Description must be ${DESCRIPTION_MAX} characters or fewer.`;
-  }
-  if (input.location && input.location.length > LOCATION_MAX) {
-    return `Location must be ${LOCATION_MAX} characters or fewer.`;
-  }
-  return null;
-}
-
-export const EVENT_TYPE_UNAVAILABLE = "That event type isn't available. Choose another.";
-
-/**
- * Whether `typeId` may be written onto an event of this org. A UUID-shaped
- * string naming a type of THIS org that is active - or that the event already
- * carries (a retired type already on this event stays selectable, so editing
- * an old event does not force a re-type).
- */
-async function eventTypeUsable(
-  tx: OrgTx,
-  organizationId: string,
-  typeId: string,
-  currentTypeId: string | null,
-): Promise<boolean> {
-  if (!isUuidShaped(typeId)) return false; // a garbage id must not reach Postgres as a 22P02
-  const [row] = await tx
-    .select({ id: eventTypes.id, isActive: eventTypes.isActive })
-    .from(eventTypes)
-    .where(and(eq(eventTypes.id, typeId), eq(eventTypes.organizationId, organizationId)))
-    .limit(1);
-  return !!row && (row.isActive || row.id === currentTypeId);
-}
 
 // ---------------------------------------------------------------------------
 // listEvents
@@ -464,48 +426,11 @@ export async function getEvent(
 // createEvent
 // ---------------------------------------------------------------------------
 
-export interface CreateEventInput {
-  title: string;
-  description?: string;
-  location?: string;
-  /** 'YYYY-MM-DDTHH:mm', wall-clock. */
-  startsAt: string;
-  endsAt?: string;
-  /** Open to everyone (true) or members only (false). */
-  isPublic: boolean;
-  /**
-   * REQUIRED, not optional (DECISION-133: no "undefined means unchanged"
-   * FormData ambiguity). Only a wish: the stored value is
-   * `deriveListed(websiteListed, isPublic)`.
-   */
-  websiteListed: boolean;
-  allowsCheckin: boolean;
-  /** Present only when creating a repeating series. */
-  recurrence?: { pattern: string; count: number };
-  /** Optional event type (DECISION-161); null/absent = untyped. Copied to every generated child. */
-  eventTypeId?: string | null;
-}
-
 /**
- * The two switches the listing derives from must be real booleans. A server
- * action is a public entry point: the TypeScript types do not survive the
- * wire, and `undefined`/`"false"` would otherwise pick a branch by truthiness
- * (a false audit row, or a CHECK violation). Phase 5 FAIL-2.
- */
-const SWITCH_INVALID = "Choose whether this event is open to everyone and whether it appears on the website.";
-function switchesAreBooleans(input: { isPublic: unknown; websiteListed: unknown }): boolean {
-  return typeof input.isPublic === "boolean" && typeof input.websiteListed === "boolean";
-}
-
-/**
- * Inserts one row. When `input.recurrence` is present, inserts the first
- * occurrence, then generates `count - 1` further discrete rows via the
- * ported recurrence math, each carrying `parentEventId` = the first row's
- * own id and `organizationId` copied from the SAME just-inserted parent
- * inside the SAME transaction — the same-org property is structurally
- * guaranteed by construction, never a separate check.
- * `recurrencePattern`/`recurrenceCount` are stored ONLY on the first (parent)
- * row, never on the generated children.
+ * Gates on `events.manage`, then inserts through `insertEventsInTx`
+ * (`events/insert.ts`): one row, or a first occurrence plus its generated
+ * children when `input.recurrence` is present. See that function for the
+ * series rules and the website-listing audit row.
  */
 export async function createEvent(
   viewerPersonId: string,
@@ -518,124 +443,7 @@ export async function createEvent(
       return { kind: "forbidden" };
     }
 
-    if (!switchesAreBooleans(input)) {
-      return { kind: "invalid_input", message: SWITCH_INVALID };
-    }
-
-    const lengthError = validateFieldLengths(input);
-    if (lengthError) {
-      return { kind: "invalid_input", message: lengthError };
-    }
-
-    const startsAt = parseWallClock(input.startsAt);
-    const endsAt = input.endsAt ? parseWallClock(input.endsAt) : null;
-    if (endsAt && endsAt < startsAt) {
-      return {
-        kind: "invalid_input",
-        message: "The end time can't be before the start time.",
-      };
-    }
-
-    if (
-      input.eventTypeId &&
-      !(await eventTypeUsable(tx, organizationId, input.eventTypeId, null))
-    ) {
-      return { kind: "invalid_input", message: EVENT_TYPE_UNAVAILABLE };
-    }
-
-    let pattern: string | undefined;
-    if (input.recurrence) {
-      if (!seriesTotalWithinCap(input.recurrence.count)) {
-        return {
-          kind: "invalid_input",
-          message: `A series can have at most ${MAX_SERIES_TOTAL} occurrences in total.`,
-        };
-      }
-      try {
-        parsePattern(input.recurrence.pattern);
-      } catch {
-        return {
-          kind: "invalid_input",
-          message: "Choose a valid repeat pattern.",
-        };
-      }
-      pattern = input.recurrence.pattern;
-    }
-
-    const listed = deriveListed(input.websiteListed, input.isPublic);
-
-    const [parent] = await tx
-      .insert(events)
-      .values({
-        organizationId,
-        title: input.title.trim(),
-        description: input.description?.trim() || null,
-        location: input.location?.trim() || null,
-        startsAt,
-        endsAt,
-        isPublic: input.isPublic,
-        websiteListed: listed,
-        allowsCheckin: input.allowsCheckin,
-        eventTypeId: input.eventTypeId ?? null,
-        parentEventId: null,
-        recurrencePattern: pattern ?? null,
-        recurrenceCount: input.recurrence?.count ?? null,
-        createdBy: actor.userId,
-      })
-      .returning({ id: events.id });
-
-    const occurrenceIds = [parent!.id];
-
-    if (input.recurrence && input.recurrence.count > 1) {
-      const durationMs = endsAt ? endsAt.getTime() - startsAt.getTime() : null;
-      const dates = generateRecurringDates(
-        startsAt,
-        input.recurrence.pattern,
-        input.recurrence.count,
-      ).slice(1);
-
-      for (const date of dates) {
-        const childEndsAt =
-          durationMs !== null ? new Date(date.getTime() + durationMs) : null;
-        const [child] = await tx
-          .insert(events)
-          .values({
-            organizationId,
-            title: input.title.trim(),
-            description: input.description?.trim() || null,
-            location: input.location?.trim() || null,
-            startsAt: date,
-            endsAt: childEndsAt,
-            isPublic: input.isPublic,
-            websiteListed: listed,
-            allowsCheckin: input.allowsCheckin,
-            eventTypeId: input.eventTypeId ?? null,
-            parentEventId: parent!.id,
-            recurrencePattern: null,
-            recurrenceCount: null,
-            createdBy: actor.userId,
-          })
-          .returning({ id: events.id });
-        occurrenceIds.push(child!.id);
-      }
-    }
-
-    if (listed) {
-      await insertAuditRow(tx, {
-        action: AUDIT_ACTIONS.EVENT_LISTED_ON_WEBSITE,
-        actor,
-        resourceType: "event",
-        resourceId: parent!.id,
-        metadata: {
-          organizationId,
-          via: "create",
-          changed: occurrenceIds.length,
-          rootEventId: parent!.id,
-        },
-      });
-    }
-
-    return { kind: "ok", data: { eventId: parent!.id, occurrenceIds } };
+    return insertEventsInTx(tx, organizationId, actor, input);
   });
 }
 
@@ -681,16 +489,23 @@ export async function updateEvent(
       return { kind: "invalid_input", message: SWITCH_INVALID };
     }
 
+    // The event row is locked FIRST (C3), before the cancelled check: this
+    // edit, a cancel and a worship Send serialize on one lock, and an edit
+    // that loses the race to a cancel sees `cancelled_at` and refuses.
     const [existing] = await tx
       .select({
         id: events.id,
         cancelledAt: events.cancelledAt,
         eventTypeId: events.eventTypeId,
         websiteListed: events.websiteListed,
+        startsAt: events.startsAt,
+        endsAt: events.endsAt,
+        location: events.location,
       })
       .from(events)
       .where(and(eq(events.id, input.eventId), eq(events.organizationId, organizationId)))
-      .limit(1);
+      .limit(1)
+      .for("no key update");
     if (!existing || existing.cancelledAt !== null) {
       return { kind: "invalid_target" };
     }
@@ -761,6 +576,23 @@ export async function updateEvent(
         },
       });
     }
+
+    // The update fan-out (C4): the same hooks a worship board edit reaches.
+    // Empty in Batch 0; a consumer that throws rolls this edit back.
+    await runEventUpdatedHooks(tx, {
+      organizationId,
+      eventId: input.eventId,
+      before: {
+        startsAt: existing.startsAt,
+        endsAt: existing.endsAt,
+        location: existing.location,
+      },
+      after: {
+        startsAt,
+        endsAt,
+        location: input.location?.trim() || null,
+      },
+    });
 
     return { kind: "ok", data: { eventId: input.eventId } };
   });
@@ -1035,40 +867,31 @@ export async function setSeriesWebsiteListing(
 // ---------------------------------------------------------------------------
 
 /**
+ * Gates on `events.manage`, then cancels through `cancelEventInTx`
+ * (`events/mutate.ts`) - the one cancel writer, shared with the worship board.
  * Sets `cancelled_at = now()` on ONE occurrence. Never a delete, never
  * cascades to siblings (cancelling a series parent does not cancel its
- * children — an explicit v1 non-goal). `invalid_target` if the event doesn't
- * exist at this org; if already cancelled, this is an idempotent no-op —
+ * children - an explicit v1 non-goal). `invalid_target` if the event doesn't
+ * exist at this org; if already cancelled, this is an idempotent no-op -
  * `ok` again, not `invalid_input` (re-cancelling an already-cancelled row is
- * not a user mistake worth surfacing as one).
+ * not a user mistake worth surfacing as one) - and no hook runs.
+ *
+ * `actor` is optional and only feeds the cancel hooks (who to attribute an
+ * audit row to); the cancel itself is unaudited (DECISION-240).
  */
 export async function cancelEvent(
   viewerPersonId: string,
   organizationId: string,
   eventId: string,
+  actor: EventActor | null = null,
 ): Promise<EventsResult<{ eventId: string }>> {
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasEventsManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
     }
 
-    const [existing] = await tx
-      .select({ id: events.id, cancelledAt: events.cancelledAt })
-      .from(events)
-      .where(and(eq(events.id, eventId), eq(events.organizationId, organizationId)))
-      .limit(1);
-    if (!existing) {
-      return { kind: "invalid_target" };
-    }
-    if (existing.cancelledAt !== null) {
-      return { kind: "ok", data: { eventId } };
-    }
-
-    await tx
-      .update(events)
-      .set({ cancelledAt: new Date() })
-      .where(eq(events.id, eventId));
-
+    const result = await cancelEventInTx(tx, organizationId, eventId, actor);
+    if (result.kind !== "ok") return result;
     return { kind: "ok", data: { eventId } };
   });
 }

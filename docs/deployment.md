@@ -1728,6 +1728,17 @@ founding-administrator invitation.
 
 **5. Dev and e2e.** Cloudflare's public test keys (`docs/testing.md`) go in a gitignored `.env.local` or a Playwright server's environment, never in a Vercel scope.
 
+## Worship (0085)
+
+**Not yet applied to production** (v0.55.0; `docs/work-log/2026-11-04-worship-inc1.md`; DECISION-317 to 329). Additive: nine `worship_*` tables (FORCE RLS, no DELETE grant), the worship definers, three tier-1 keys added to the founding-administrator bundle with a backfill for existing founders, and the deletion of the global `org_portal.worship` flag row (the per-org toggle replaces it, provisioned off).
+
+1. **Snapshot production.**
+2. **Read the live body of `presby_founding_administrator_permission_keys` first.** F362 also re-creates it; whichever of the two merges second must carry the other's keys. Apply in merge order.
+3. Confirm `org_portal.features` and `org_portal.admin_hub` are on, or no administrator can flip the Worship toggle. `org_portal.worship` is currently **on** in production; 0085 deletes the row, so the "coming soon" tile disappears until a congregation turns Worship on.
+4. Apply through the endpoint-host swap: `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f drizzle/0085_presby_worship.sql`. The migration prints how many founding roles the backfill topped up; note it.
+5. Merge and deploy. Reminders start with the next 03:00 UTC maintenance run, only for organizations that turned Worship on.
+6. Smoke: turn Worship on for a test congregation, create a team and a service, place and Send one draft to a fixture address, and see the request email queued once.
+
 ## Membership standing (0066)
 
 Added by Community Increment 3a (DECISION-232 to 237; F240 to F247). Migration

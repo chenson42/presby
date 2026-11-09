@@ -1,70 +1,58 @@
-import { notFound, redirect } from "next/navigation";
-import { cachedAuth } from "@/lib/auth/cached-auth";
-import { assertOrgAccess, resolveOrgContext } from "@/lib/authz";
-import { isFlagEnabled } from "@/lib/flags";
-import { ComingSoon, PlaceholderFlagOff } from "@/components/org-portal/coming-soon";
-import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
-
-const WORSHIP_FLAG = "org_portal.worship";
-const AREA = "Worship & Service Planning";
-const DESCRIPTION =
-  "Service templates, liturgical role scheduling, external participants, and attendance — planned but not yet built.";
+import Link from "next/link";
+import { CalendarCheck, ChevronRight, Layers, Users } from "lucide-react";
+import { gateWorshipPage } from "@/app/(org)/o/[slug]/worship/worship-gate";
+import { HUB_COPY, TILE_COPY } from "@/lib/worship/copy";
 
 /**
- * `/o/<slug>/admin/worship` — one of the 7 product-IA placeholder routes,
- * docs/work-log/2026-08-27-product-ia-scaffold.md (Phase 3 §3, DECISION-117).
- * An inert "coming soon" stub: no data read, no mutation.
+ * `/o/<slug>/admin/worship` - "Plan worship", the hub (Copy G3). Replaces the
+ * "coming soon" stub. Cards only for what the viewer's keys allow: Services for a
+ * holder of any worship key, Teams and Service types for `worship.manage`. A
+ * leader with only a team seat has no key and reaches their board from "Worship"
+ * (the member page), not from here.
  *
- * Repeats the `(org)` auth pattern in full (DECISION-040), same as every
- * other page under `(org)` — see `admin/credentials/page.tsx`'s header for
- * the fuller rationale on why the auth check lives in the page rather than
- * the layout. THE FLAG CHECK RUNS AFTER `assertOrgAccess()`, same ordering
- * every other flag-gated page in this tree uses.
- *
- * Universal tile (no `orgTypeScope`) — only the flag is checked. Check-in/
- * kiosk is deliberately NOT folded in here — it stays roadmap prose against
- * the built Events feature (Phase 3 §1's collapse decision), not a second
- * placeholder route.
+ * Gate: signed in, the org miss, applicability, the per-organization toggle (no
+ * platform flag), then ANY worship key. No `loading.tsx` under `admin/worship/**`.
  */
-export default async function WorshipPage({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
+export default async function PlanWorshipHubPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const gate = await gateWorshipPage({
+    slug,
+    path: `/o/${slug}/admin/worship`,
+    anyOf: ["manage", "plan", "schedule"],
+    heading: HUB_COPY.heading,
+  });
+  if (!gate.ok) return gate.node;
+  const { has } = gate.identity;
 
-  const session = await cachedAuth();
-  if (!session?.user) {
-    redirect(`/signin?callbackUrl=${encodeURIComponent(`/o/${slug}/admin/worship`)}`);
-  }
+  const cards = [
+    { show: true, href: `/o/${slug}/admin/worship/services`, Icon: CalendarCheck, ...HUB_COPY.cards.services },
+    { show: has.manage, href: `/o/${slug}/admin/worship/teams`, Icon: Users, ...HUB_COPY.cards.teams },
+    { show: has.manage, href: `/o/${slug}/admin/worship/service-types`, Icon: Layers, ...HUB_COPY.cards.serviceTypes },
+  ].filter((card) => card.show);
 
-  const resolved = await resolveOrgContext(session.user.id, slug);
-
-  switch (resolved.kind) {
-    case "not-found":
-      notFound();
-    case "forbidden":
-      return (
-        <OrgAccessDenied
-          name={resolved.name}
-          organizationType={resolved.organizationType}
-          slug={slug}
-        />
-      );
-    case "ended":
-      return (
-        <OrgAccessEnded name={resolved.name} endedOn={resolved.endedOn} slug={slug} />
-      );
-    case "ok":
-      break;
-  }
-
-  await assertOrgAccess(resolved.org.personId, resolved.org.organizationId);
-
-  const worshipEnabled = await isFlagEnabled(WORSHIP_FLAG);
-  if (!worshipEnabled) {
-    return <PlaceholderFlagOff area={AREA} orgName={resolved.org.name} />;
-  }
-
-  return <ComingSoon area={AREA} description={DESCRIPTION} slug={slug} />;
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold">{HUB_COPY.heading}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{TILE_COPY.admin.description}</p>
+      </div>
+      <ul className="grid gap-3 sm:grid-cols-2" data-testid="worship-hub">
+        {cards.map((card) => (
+          <li key={card.href}>
+            <Link
+              href={card.href}
+              className="flex h-full min-h-11 items-start gap-3 rounded-xl border border-border bg-card p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <card.Icon className="mt-1 size-5 shrink-0 text-primary" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block text-lg font-semibold">{card.title}</span>
+                <span className="mt-1 block text-sm text-muted-foreground">{card.description}</span>
+              </span>
+              <ChevronRight className="mt-1 size-5 shrink-0 text-muted-foreground" aria-hidden />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }

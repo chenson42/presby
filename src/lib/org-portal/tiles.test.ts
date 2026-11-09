@@ -72,7 +72,6 @@ const KNOWN_SEEDED_ORG_PORTAL_FLAG_KEYS = new Set([
   "org_portal.groups",
   "org_portal.events",
   "org_portal.credentials",
-  "org_portal.worship",
   "org_portal.committees",
   "org_portal.oversight",
   "org_portal.reports",
@@ -176,6 +175,25 @@ describe("PORTAL_TILES — flag-key shape", () => {
     ]);
   });
 
+  it("the two worship tiles carry the ruled Copy byte for byte, are toggle-only (no flagKey, not comingSoon) and gate on org_portal.worship (worship Inc 1, Copy G1)", () => {
+    const byKey = Object.fromEntries(PORTAL_TILES.map((t) => [t.key, t]));
+    expect([byKey.worship.label, byKey.worship.description]).toEqual([
+      "Worship",
+      "See when you're asked to serve, answer requests, and set dates you can't serve.",
+    ]);
+    expect([byKey["worship-admin"].label, byKey["worship-admin"].description]).toEqual([
+      "Plan worship",
+      "For the people who plan worship. Set up teams and positions, plan services, and schedule people.",
+    ]);
+    expect(byKey.worship.href("alder-creek")).toBe("/o/alder-creek/worship");
+    expect(byKey["worship-admin"].href("alder-creek")).toBe("/o/alder-creek/admin/worship");
+    for (const key of ["worship", "worship-admin"]) {
+      expect(byKey[key].orgFeatureKey, key).toBe("org_portal.worship");
+      expect(byKey[key].flagKey, key).toBeUndefined();
+      expect(byKey[key].comingSoon, key).toBeUndefined();
+    }
+  });
+
   it("every tile has a non-empty key, label, description, and href builder", () => {
     for (const tile of PORTAL_TILES) {
       expect(tile.key.length).toBeGreaterThan(0);
@@ -202,15 +220,15 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("PORTAL_TILES has exactly 25 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains + 1 careers + 2 reimbursements)", () => {
-    expect(PORTAL_TILES.length).toBe(25);
+  it("PORTAL_TILES has exactly 26 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains + 1 careers + 2 reimbursements + 1 worship-admin)", () => {
+    expect(PORTAL_TILES.length).toBe(26);
   });
 
   it("no tile is keyed 'feedback' — removed entirely, re-surfaces as an avatar-menu item + prompt card (commit 2)", () => {
     expect(PORTAL_TILES.map((t) => t.key)).not.toContain("feedback");
   });
 
-  it("mirrors the full 25-tile universe by key (2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains + 2026-10-25 careers + 2026-10-25 reimbursements)", () => {
+  it("mirrors the full 26-tile universe by key (2026-11-04 worship Increment 1 + 2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains + 2026-10-25 careers + 2026-10-25 reimbursements)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
@@ -238,6 +256,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
         "staff",
         "tickets",
         "worship",
+        "worship-admin",
       ].sort(),
     );
   });
@@ -324,7 +343,16 @@ describe("PORTAL_TILES — flag-key shape", () => {
       orgTypeScope: ["congregation", "new_worshiping_community"],
     },
     domains: { domain: "communications", category: "administer" },
-    worship: { domain: "worship", category: "operate" },
+    worship: {
+      domain: "worship",
+      category: "operate",
+      orgTypeScope: ["congregation", "new_worshiping_community"],
+    },
+    "worship-admin": {
+      domain: "worship",
+      category: "administer",
+      orgTypeScope: ["congregation", "new_worshiping_community"],
+    },
     committees: {
       domain: "governance",
       category: "operate",
@@ -402,6 +430,8 @@ describe("PORTAL_TILES — flag-key shape", () => {
       "giving-admin",
       "reimbursements",
       "reimbursements-admin",
+      "worship",
+      "worship-admin",
     ]);
     for (const tile of PORTAL_TILES) {
       if (presbyteryOnly.has(tile.key)) {

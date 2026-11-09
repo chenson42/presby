@@ -10,7 +10,7 @@ The picture shows the top of the page on a phone, with the tiles under "Communit
 
 ![The top of a congregation's page on a phone: tiles under Community, then Worship and Events.](shot:portal-tiles)
 
-Every tile is shown whatever your role. A tile you cannot use opens a page that says you don't have permission. [Why can't I see this?](/help/why-cant-i-see-this) explains each case. Three tiles open a page that only describes an idea, and nothing on them works: "Worship & Service Planning", "Insights & Analytics" and "Communications".
+Every tile is shown whatever your role. A tile you cannot use opens a page that says you don't have permission. [Why can't I see this?](/help/why-cant-i-see-this) explains each case. Two tiles open a page that only describes an idea, and nothing on them works: "Insights & Analytics" and "Communications".
 
 ## The Administration area
 
@@ -32,6 +32,7 @@ You can use these:
 - "Officers": record officers and the Session. See [Officers and the Session](/help/officers-and-the-session).
 - "Roles": give roles and take them away. See [Roles: who can do what](/help/roles-who-can-do-what).
 - "Groups": committees, small groups, choirs and teams.
+- "Plan worship": set up teams and schedule people. Turn on "Worship" first, and the tile then appears. See [Setting up worship planning](/help/worship-setting-up).
 - "Staff": paid, non-ordained staff positions.
 - "Directory": search for people. See [Using the directory](/help/using-the-directory).
 - "Calendar": read the congregation's events. It is on from the start.

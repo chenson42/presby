@@ -768,13 +768,14 @@ async function seedFlags() {
     // ORG_FEATURE_CATALOG (provisioned OFF). drizzle/0055 deletes the old
     // feature_flags row; re-seeding it here would resurrect a flag nothing
     // reads (scripts/giving/test-rls-46.sql 46m asserts it is absent).
+    //
+    // org_portal.worship LEFT this block the same way (docs/work-log/
+    // 2026-11-04-worship-inc1.md, DECISION-319): worship has NO platform flag.
+    // The per-org `org_portal.worship` toggle in ORG_FEATURE_CATALOG
+    // (provisioned OFF) is the whole off switch; drizzle/0085 deletes the old
+    // feature_flags row, and re-seeding it here would resurrect a flag nothing
+    // reads (scripts/worship/test-rls-85.sql 85b asserts it is absent).
     // ============================================================
-    {
-      key: "org_portal.worship",
-      description:
-        "Worship & service-planning placeholder area in (org). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
-      enabled: true, // GO-LIVE: false
-    },
     {
       key: "org_portal.committees",
       description:

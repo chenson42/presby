@@ -41,4 +41,8 @@ export const SLUG_HISTORY: readonly string[] = [
   "reimbursements-for-treasurers",
   // 2026-10-31, person photos (0.52.0).
   "photos-of-people",
+  // 2026-11-04, worship Increment 1: the three pages (worship-planning, above, is replaced by worship-setting-up).
+  "worship-serving-on-a-team",
+  "worship-scheduling-a-team",
+  "worship-setting-up",
 ];

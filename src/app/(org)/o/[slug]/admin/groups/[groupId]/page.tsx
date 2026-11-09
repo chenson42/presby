@@ -250,10 +250,6 @@ export default async function GroupDetailPage({
 
       <div className="max-w-md space-y-4">
         <h2 className="text-xl font-semibold">Add a member</h2>
-        <p className="text-sm text-muted-foreground">
-          This is descriptive only — granting software access (Administration
-          → Roles) is done separately.
-        </p>
         <AddGroupMemberForm slug={slug} groupId={groupId} people={people} />
       </div>
     </section>

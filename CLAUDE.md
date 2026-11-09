@@ -161,6 +161,16 @@ src/lib/careers/       — job postings (Track L): the pure description validato
                          definer-only
 src/components/careers/ — the posting description, list and meta pieces shared by
                          the public tree and the staff preview
+src/lib/worship/       — worship scheduling (DECISION-317 to 329): store.ts and
+                         event-hooks.ts (the cancel handler) are the ONLY writers of
+                         the worship_* tables, under withOrgContext(); reads.ts, authority.ts,
+                         notify.ts, sweep.ts (the nightly reminder claim,
+                         owner-only definer on getPlatformDb()); boundaries.test.ts
+                         pins the writer list and the event-hook import rule
+src/lib/events/        — insert.ts, mutate.ts and hooks.ts (the cancel and update
+                         fan-out) extracted from events.ts (DECISION-326); a hook
+                         consumer imports none of them, transitively
+src/components/worship/ — the team, service board and serving pages' pieces
 src/lib/site-urls.ts   — SiteUrls: the only place a same-host public URL is
                          built (a source-scan test bans hand-built /site/${…}
                          elsewhere); pure, safe for the proxy and next.config.ts

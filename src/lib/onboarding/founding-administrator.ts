@@ -133,14 +133,30 @@ export function foundingAdministratorPlan(
     "careers.manage",
     "careers.applicants",
   ];
+  // Worship Increment 1 (docs/work-log/2026-11-04-worship-inc1.md, DECISION-319,
+  // operator re-ruling of Q9, 2026-11-04): the three worship keys, for the two
+  // organization types the `org_portal.worship` toggle serves and no others
+  // (a presbytery or synod has no worship page). Same F111 reason as
+  // domains.manage and the careers keys: under assertPermissionSubset() a key
+  // nobody at the org holds can never be granted, so without these the
+  // `worship_leader` template could never be adopted or delegated. All three
+  // are tier 1 with no 2FA column. Unconstitutional (no PC(USA) office's duty
+  // is scheduling worship), so no stated_clerk binding. drizzle/0085
+  // re-creates the SQL function in the same order and backfills founding roles
+  // already designated. ORDER IS PINNED to the SQL array: base, worship,
+  // oversight (invitations.db.test.ts compares them for every organization type).
+  const worship =
+    organizationType === "congregation" ||
+    organizationType === "new_worshiping_community"
+      ? ["worship.manage", "worship.plan", "worship.schedule"]
+      : [];
+  const oversight =
+    organizationType === "presbytery" ? ["congregation_oversight.manage"] : [];
   return {
     administration: {
       key: "founding_administrator",
       name: "Founding Administrator",
-      permissionKeys:
-        organizationType === "presbytery"
-          ? [...base, "congregation_oversight.manage"]
-          : base,
+      permissionKeys: [...base, ...worship, ...oversight],
     },
     officeTemplateKey:
       organizationType === "presbytery"

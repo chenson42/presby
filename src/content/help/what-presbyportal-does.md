@@ -12,6 +12,7 @@ These are things an administrator or a member can do now. Each one needs the rig
 - **Record staff.** An administrator records paid, non-ordained staff positions.
 - **Show a calendar.** Members can read the congregation's calendar.
 - **Post job openings.** An administrator writes and manages job openings for the congregation's website.
+- **Practice spotting scams.** Anyone can run a short practice of made-up scam emails, texts and voicemails. An administrator turns it on.
 - **Set the congregation's look.** Someone with the right role chooses the colour, type pairing and logo.
 - **Ask for help.** Church administrators file tickets and anyone can send feedback. See [Getting help](/help/getting-help).
 

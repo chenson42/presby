@@ -540,6 +540,13 @@
       "when": 1793652300000,
       "tag": "0085_presby_worship",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1793738700000,
+      "tag": "0087_presby_learn",
+      "breakpoints": true
     }
   ]
 }

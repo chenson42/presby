@@ -171,6 +171,16 @@ src/lib/events/        — insert.ts, mutate.ts and hooks.ts (the cancel and upd
                          fan-out) extracted from events.ts (DECISION-326); a hook
                          consumer imports none of them, transitively
 src/components/worship/ — the team, service board and serving pages' pieces
+src/lib/learn/         — the Learn layer (DECISION-330 to 336): contract.ts (pure: slot name,
+                         toggle key, page path), spot-the-scam/content.ts and copy.ts (pure
+                         data, VERSION and LAST_REVIEWED, no imports), public.ts (the one
+                         anonymous read, readPublicLearn, on `db`), access.ts and
+                         leader-link.ts (the (org) page's reads). boundaries.test.ts pins
+                         the sealed island and bars getPlatformDb
+src/components/learn/  — the trainer island (the ONE 'use client' file: no request, storage,
+                         cookie, server action, next/link or anchor), the static rules card,
+                         and the frame shared by the public route, the live slot and the
+                         (org) page
 src/lib/site-urls.ts   — SiteUrls: the only place a same-host public URL is
                          built (a source-scan test bans hand-built /site/${…}
                          elsewhere); pure, safe for the proxy and next.config.ts

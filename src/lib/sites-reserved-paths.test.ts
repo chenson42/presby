@@ -41,6 +41,17 @@ describe("reservedSitePath", () => {
     },
   );
 
+  describe("learn: nothing is reserved (learn Increment 1a, DECISION-332, Phase 2 Note 1)", () => {
+    // The bundle wins at exactly /learn/spot-the-scam, and /learn and every other
+    // /learn/... path stay bundle territory (the synod-site recreation authors them).
+    it.each(["/learn", "/learn/", "/learn/spot-the-scam", "/Learn/Spot-The-Scam", "/learn/other", "/learn/spot-the-scam/extra", "/%6cearn/spot-the-scam", "/about/learn/spot-the-scam"])(
+      "%j is not reserved",
+      (path) => {
+        expect(reservedSitePath(path)).toEqual({ reserved: false });
+      },
+    );
+  });
+
   describe("careers: descendants only (careers Increment 1, DECISION-264)", () => {
     it.each(["/careers/x", "/CAREERS/x", "/%63areers/x", "/careers%2Fx", "\\careers\\x", "//careers//x", "careers/x", " /careers/x ", "/careers/./x", "/careers/a/b/c", "/Careers/Music-Director"])(
       "%j is reserved as careers",

@@ -88,8 +88,8 @@ import type { OrgFeatureKey } from "@/lib/org-features";
 export type PortalTileCategory = "operate" | "administer";
 
 /**
- * The seven-domain taxonomy (DECISION-117) every `PortalTile` is bucketed
- * into for presentation — which labeled `<section>` it renders under on the
+ * The eight-domain taxonomy (DECISION-117; `learn` added by DECISION-330) every
+ * `PortalTile` is bucketed into for presentation — which labeled `<section>` it renders under on the
  * home page (`DomainTileSections`) and the admin hub, and which menu entry
  * it contributes to (`buildPortalMenu()` in `portal-menu.ts`, which the nav
  * row and the footer site map both render). Closed union, not a free string —
@@ -117,6 +117,7 @@ export type PortalDomain =
   | "governance" // Governance & Courts
   | "reports" // Reports & Insights
   | "communications" // Communications
+  | "learn" // Learn
   | "administration"; // Administration
 
 export const DOMAIN_LABELS: Record<PortalDomain, string> = {
@@ -126,6 +127,7 @@ export const DOMAIN_LABELS: Record<PortalDomain, string> = {
   governance: "Governance & Courts",
   reports: "Reports & Insights",
   communications: "Communications",
+  learn: "Learn",
   administration: "Administration",
 };
 
@@ -136,6 +138,7 @@ export const DOMAIN_ORDER: readonly PortalDomain[] = [
   "governance",
   "reports",
   "communications",
+  "learn",
   "administration",
 ];
 
@@ -318,6 +321,23 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     orgFeatureKey: "org_portal.careers",
     category: "operate",
     domain: "people",
+  },
+  // Spot the scam (docs/work-log/2026-11-10-learn-inc1a.md, Phase 3 "Tile"; Copy G2;
+  // DECISION-330/334). TOGGLE-ONLY (no `flagKey`): the per-org
+  // `org_portal.spot_the_scam` toggle is the whole gate. Permission-blind like every
+  // tile (DECISION-162): the destination renders its own honest feature-off state, so
+  // the description names no permission and gives no instruction (every member reads
+  // it). `operate`, in the Learn domain: any member may run the practice. No
+  // `orgTypeScope`: the catalog entry's `orgTypes` is null.
+  {
+    key: "spot-the-scam",
+    label: "Spot the scam",
+    description:
+      "Practice spotting scam emails, texts and voicemails. Your answers are never sent or saved.",
+    href: (slug) => `/o/${slug}/learn/spot-the-scam`,
+    orgFeatureKey: "org_portal.spot_the_scam",
+    category: "operate",
+    domain: "learn",
   },
   {
     key: "features",

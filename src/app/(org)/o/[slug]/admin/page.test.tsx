@@ -69,6 +69,7 @@ vi.mock("@/lib/org-portal/tiles", () => ({
     governance: "Governance & Courts",
     reports: "Reports & Insights",
     communications: "Communications",
+    learn: "Learn",
     administration: "Administration",
   },
   DOMAIN_ORDER: [
@@ -78,6 +79,7 @@ vi.mock("@/lib/org-portal/tiles", () => ({
     "governance",
     "reports",
     "communications",
+    "learn",
     "administration",
   ],
 }));

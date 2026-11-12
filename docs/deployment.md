@@ -1739,6 +1739,23 @@ founding-administrator invitation.
 5. Merge and deploy. Reminders start with the next 03:00 UTC maintenance run, only for organizations that turned Worship on.
 6. Smoke: turn Worship on for a test congregation, create a team and a service, place and Send one draft to a fixture address, and see the request email queued once.
 
+## Learn (0087)
+
+**Not yet applied to production** (v0.56.0; `docs/work-log/2026-11-10-learn-inc1a.md`; DECISION-330 to 336). Additive and idempotent: no table and no column. It widens the `organization_feature_categories` category CHECK to admit `learn`, and adds `presby_learn_enabled(uuid, text)` (owner-only, no `presby_app` grant) and `presby_public_learn(text, text)` (definer, `presby_app` execute). No backfill, no toggle row and no flag row: Spot the scam stays off for every organization until an administrator turns it on.
+
+**Apply 0087 to production BEFORE the code deploys.** Code first is not harmless: `readPublicLearn` fails on the missing function, so every live site's `/learn/spot-the-scam` (and the slot, where a bundle places it) shows the 200 "isn't available right now" notice instead of the neutral 404, and saving the Learn category row from the Features page is refused by the old CHECK.
+
+1. **Snapshot production.**
+2. Apply through the endpoint-host swap, on the **direct** endpoint, as owner: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0087_presby_learn.sql`. It is idempotent (a second apply is a no-op), so a half-finished run can simply be repeated.
+3. Catalog proof, read-only: `presby_learn_enabled(uuid, text)` has no `presby_app`, `presby_platform` or PUBLIC EXECUTE and `prosecdef = f`; `presby_public_learn(text, text)` has `presby_app` EXECUTE only and `prosecdef = t`; the constraint `organization_feature_categories_category_check` admits `learn`.
+4. Merge and deploy.
+5. Read production's `org_portal.features`, `org_portal.feature_categories`, `org_portal.home_v2` and `org_portal.chrome_v2` against `/help/spot-the-scam` (the "Turn it on under Features" link, the Learn switch, the tile and the menu entry each need one). These are seeded off; their production state is the operator's to confirm (`docs/TODO.md`).
+6. Smoke: turn Spot the scam on for a test congregation under Features, open `/o/<slug>/learn/spot-the-scam` and the public `/learn/spot-the-scam`, run one message, and confirm that with the toggle off the public path is the site's own 404.
+
+**On `development`:** apply 0087 the same way, then run `scripts/learn/test-rls-87.sql` **standalone as `presby_app`** (for example `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/learn/test-rls-87.sql`). Do not rely on the full `scripts/test-rls.sql` there: it halts at line 219 on the known presbytery-count drift (`docs/TODO.md`), so section 87 at the end of it is never reached. It needs the stock seed's Alder Creek and `scripts/careers/seed-dev-careers.sql`'s Fernwood live site (the dependency section 71 already has), builds its own toggle, category and axis state in each block and rolls back, so it never touches production.
+
+**Rollback.** There is no global switch. The toggle is the per-organization off switch and deletes nothing (nothing is stored). Pulling the feature from every organization at once takes a deploy (revert and redeploy); an owner-connection `update organization_feature_toggles set enabled = false where feature_key = 'org_portal.spot_the_scam'` is break-glass, writes no audit row, and is not a product feature (DECISION-334).
+
 ## Membership standing (0066)
 
 Added by Community Increment 3a (DECISION-232 to 237; F240 to F247). Migration

@@ -55,6 +55,14 @@ export interface SiteUrls {
   careers(): string;
   /** One job opening, as a path (`/careers/<posting-slug>`); the slug is percent-encoded. */
   careersPosting(postingSlug: string): string;
+  /**
+   * The platform-owned Spot the scam page, as a path (`/learn/spot-the-scam`). A bundle
+   * page at exactly this path wins over it; every other `/learn/...` path stays bundle
+   * territory. Learn Increment 1a, DECISION-332. This module stays pure: the path is
+   * pinned equal to `SPOT_THE_SCAM_PAGE_PATH` in `src/lib/learn/contract.ts` by
+   * `contract.test.ts`, not imported from it.
+   */
+  spotTheScam(): string;
   /** Where Stripe sends a donor back, as a path (the origin is `donorOrigin()`'s business). */
   giveReturn(sessionId: string): string;
   /** `origin` + `page(bundlePath)`: the absolute, canonical URL of a page. */
@@ -129,6 +137,7 @@ export function buildSiteUrls(input: SiteUrlsInput): SiteUrls {
       give: () => "/give",
       careers: () => "/careers",
       careersPosting: (postingSlug) => `/careers/${encodeURIComponent(postingSlug)}`,
+      spotTheScam: () => "/learn/spot-the-scam",
       giveReturn: (sessionId) => `/give/return?session_id=${encodeURIComponent(sessionId)}`,
       canonical: (bundlePath) => `${origin}${page(bundlePath)}`,
       portal,
@@ -147,6 +156,7 @@ export function buildSiteUrls(input: SiteUrlsInput): SiteUrls {
     give: () => `${slugSitePath(slug)}/give`,
     careers: () => page("/careers"),
     careersPosting: (postingSlug) => page(`/careers/${encodeURIComponent(postingSlug)}`),
+    spotTheScam: () => page("/learn/spot-the-scam"),
     giveReturn: (sessionId) => `${slugSitePath(slug)}/give/return?session_id=${encodeURIComponent(sessionId)}`,
     canonical: (bundlePath) => `${platformOrigin}${page(bundlePath)}`,
     portal,

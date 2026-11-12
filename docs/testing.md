@@ -315,6 +315,12 @@ to `:3000`, start the server with `AUTH_URL=http://localhost:3480` as well.
 checkout running anything). The giving and custom-domain recipes below list the
 extra variables those specs need.
 
+A pipeline's own QA server also needs the `STRIPE_WEBHOOK_SECRET` literal in the block
+above **and** `NEXT_PUBLIC_APP_URL=http://localhost:<port>` (the server's own
+port). Without them the giving and reimbursement e2e specs fail
+for a reason unrelated to the change under test (found in Learn Increment 1a's QA
+run 1); check both before reading a giving or reimbursement failure as a regression.
+
 ---
 
 ## Custom domains: real hosts without real domains (Track F)

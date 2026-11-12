@@ -80,6 +80,12 @@
 //      set height/padding/gap — so all three inherit the new 16px/600 from
 //      `base` unchanged; no proportional bump was needed because there was
 //      no existing per-size override to reconcile.
+//   8. Added a `touch` size variant, not part of the stock registry output
+//      (docs/work-log/2026-11-10-learn-inc1a.md, F438, DECISION-336): `h-11`
+//      (44px, the minimum touch target the older-reader Learn trainer is
+//      held to), where the tallest stock size, `lg`, stops at `h-10` (40px).
+//      Added to the primitive rather than as a call-site `min-h-11`, per
+//      Component Rule 5. Same horizontal padding as `lg`.
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import * as Slot from "@radix-ui/react-slot"
@@ -107,6 +113,7 @@ const buttonVariants = cva(
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
         sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
         lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
+        touch: "h-11 rounded-md px-6 has-[>svg]:px-4",
         icon: "size-9",
       },
     },

@@ -29,12 +29,17 @@ import { users } from "../schema";
  * per-feature toggle state.
  *
  * CHECK CONSTRAINT, unlike feature_key (schema-layer-open, resolver-validated
- * only): category is a genuinely closed, six-value business taxonomy
+ * only): category is a genuinely closed, seven-value business taxonomy
  * (PortalDomain minus "administration"), not an open catalog mirroring
  * external flag-key strings. A CHECK is defense-in-depth specifically against
  * Phase 1 Gap 2 ("administration" must never become a selectable category) —
  * worth the schema-layer constraint here in a way it wasn't worth for
  * feature_key's intentionally open catalog. See DECISION-130.
+ *
+ * SEVEN values since drizzle/0087_presby_learn.sql section 1 (DECISION-330,
+ * Learn Increment 1a): `learn` joined the six. The CHECK below MIRRORS that
+ * migration, which is the ground truth (it drops and re-adds the constraint by
+ * its live name in one statement); Drizzle Kit does not apply it.
  */
 export const organizationFeatureCategories = pgTable(
   "organization_feature_categories",
@@ -42,7 +47,7 @@ export const organizationFeatureCategories = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    // Closed six-value taxonomy (PortalDomain minus "administration"),
+    // Closed seven-value taxonomy (PortalDomain minus "administration"),
     // enforced by the CHECK constraint below AND by isCategoryKey() at the
     // resolver layer (src/lib/org-feature-categories.ts) — defense in depth.
     category: text("category").notNull(),
@@ -63,9 +68,11 @@ export const organizationFeatureCategories = pgTable(
   (t) => [
     primaryKey({ columns: [t.organizationId, t.category] }),
     index("organization_feature_categories_org_idx").on(t.organizationId),
+    // Enforced by drizzle/0087_presby_learn.sql section 1 (widened from
+    // drizzle/0040's six values to admit `learn`, DECISION-330).
     check(
       "organization_feature_categories_category_check",
-      sql`${t.category} in ('people','worship','giving','governance','reports','communications')`,
+      sql`${t.category} in ('people','worship','giving','governance','reports','communications','learn')`,
     ),
   ],
 );

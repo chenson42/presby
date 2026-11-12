@@ -4,6 +4,62 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-336 — The trainer's accessibility floor.**
+
+**Status:** Resolved (tech-lead Phase 3; amended in Phase 4 Batch 5 by F-QA-1); QA PASS (run 2), Phase 6 SHIP WITH NOTES · **Date:** 2026-11-11 · **Feature:** `2026-11-10-learn-inc1a` (v0.56.0)
+
+No text below the `text-lg` role (1.125rem, 18px) inside the Learn components. This is the architect's "17px computed" bar expressed in the type scale, because `docs/ui-standards.md` bans raw px and arbitrary values so that a future large-print root multiplier reaches every size (F441); a boundaries scan bars `text-sm`, `text-xs` and `text-[` under `src/components/learn/`. Controls use a `touch` size on the `Button` primitive (`h-11`, 44px), recorded as divergence #8 in the file's header (F438). Focus is moved to the verdict, the next message's heading or the result heading after every step, because the pressed button unmounts. State is word plus icon plus border style (solid for "Right.", dashed for "Not quite."), never colour alone. The island is `print:hidden`; the rules card prints. **Region names use `aria-label`, not ids (F-QA-1):** the frame's "Practice" region and the rules card's "The six rules to keep" region are named by `aria-label` carrying the heading's own text, with no `id` or `aria-labelledby`, so a bundle that places the live slot twice on one page never produces a duplicate id (the first design used ids and `useId()` only in the island; QA found both ids twice in a browser). A unit test asserts no id appears twice in the rendered output and the e2e two-slot step asserts it in the DOM. Rejected: `useId()` in the frame and card (a hook and generated-id characters in an `aria-labelledby` for no gain).
+
+---
+
+**DECISION-335 — Learn content conventions.**
+
+**Status:** Resolved (tech-lead Phase 3; operator approved the scenarios 2026-11-11); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-11 · **Feature:** `2026-11-10-learn-inc1a` (v0.56.0)
+
+Scenario content is one fictional world: a made-up church (Thistledown Presbyterian Church, `thistledownpres.invalid`), `.invalid` domains only, look-alikes made by a hyphen or one-character swap of the fictional domain, invented people and companies, grouped bank and account numbers that are invalid by construction, no phone-shaped strings (F439), no live text (`http(s)://`, `tel:`, `mailto:`, markup), no named council, and no dates or times (an iOS data detector would link them). UI strings live in `copy.ts` and scenarios in `content.ts`, each pure with no imports; `content.ts` carries `VERSION` and `LAST_REVIEWED`, and a `docs/TODO.md` line owns the review cadence (every six months, next due 2027-05-11; operator reads the text). A test closes the domain set and bytes-pins the operator-approved voicemail text and the sixth rule. Content is platform-owned and ships to every organization at once; per-organization scenarios and a "who to call" line are deferred (analyst A8, operator-confirmed).
+
+---
+
+**DECISION-334 — Spot the scam: names and surfaces; the public page is indexed.**
+
+**Status:** Resolved (tech-lead Phase 3; amended by the operator, 2026-11-11, on indexing); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-11 · **Feature:** `2026-11-10-learn-inc1a` (v0.56.0)
+
+The toggle is `org_portal.spot_the_scam` (catalog name "Spot the scam", category `learn`, every organization type, no global flag). The live slot is `spotTheScam`; the tile is `spot-the-scam` (operate, domain `learn`, label "Learn"); the public page is `/learn/spot-the-scam` with `SiteUrls.spotTheScam()`; the portal page is `/o/<slug>/learn/spot-the-scam`. The `(org)` leader panel decides "is the public link live" with the public route's own two steps, `resolveSiteOrganization` then `readPublicLearn` (F442). No permission key, no audit event (the toggle's own `tenant.org_feature.toggled` row already exists), no flag. **Indexing (operator ruling 2026-11-11, amending the design):** the public page is indexed (`robots` has no `noindex`, as `/careers`); the 200 "isn't available right now" notice (a failed read) and the `(org)` page stay `noindex`. Reason: harmless public teaching that a council wants found, and the toggle state of a public trainer is public by nature (the Phase 2 timing residual already says so). T8 and the e2e assert it. **Rollback residual, accepted:** there is no global switch (the operator's no-new-platform-flags-pre-live rule). The toggle is the whole off switch, per organization; pulling the feature from every organization at once takes a deploy, or an owner-connection `update organization_feature_toggles set enabled = false where feature_key = 'org_portal.spot_the_scam'` as break-glass, which writes no audit row and is not offered as a design. The ceiling of harm is low: static, read-only content with nothing stored.
+
+---
+
+**DECISION-333 — Learn content is pure data, and the trainer is a sealed island.**
+
+**Status:** Resolved (architect Phase 2); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-10 · **Feature:** `2026-11-10-learn-inc1a` (v0.56.0)
+
+Content modules live under `src/lib/learn/<page>/` with `version` and `lastReviewed` and no imports. The one client island in `src/components/learn/` makes no request and uses no storage, cookie, server action, `next/link` or anchor (F437: a viewport `<Link>` prefetches after load, on a church's own domain). Scenario text carries no URL, `tel:` or `mailto:`. A source-scan test (`src/lib/learn/boundaries.test.ts`) pins all of it, also forbids `new Image`, an assignment to `.src` and `document.createElement` as resource-load beacons, and bars `getPlatformDb` from both directories. Third-party text, if a later increment needs it, goes in one provenance-headed file plus a repo NOTICE; 1a creates none. **Residual:** `setAttribute("src", …)`, `new Audio(url)` and a JSX `<img src>` in the island still pass the scan and the jsdom spies; only the e2e zero-request specs catch them (Phase 5 O5; follow-up in `docs/TODO.md`).
+
+---
+
+**DECISION-332 — Platform-owned Learn pages live at `/learn/<page>` in the public site tree.**
+
+**Status:** Resolved (architect Phase 2); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-10 · **Feature:** `2026-11-10-learn-inc1a` (v0.56.0)
+
+One static segment per page; the bundle's own page wins at the exact path; there is no ingest reservation, so `/learn` and every other `/learn/*` path stay bundle territory (the synod-site recreation will author some). One `SiteUrls` method per page. The route, the live slot and the `(org)` leader panel's "is the link live" all use one read, `readPublicLearn`. The slot closes over the database-returned slug and `urls` only, never the key, a request, headers, cookies or `searchParams` (DECISION-132). Route states follow `/careers`: `unavailable` is the segment's neutral 404 (byte-identical for toggle off, category off, site not live and unknown key; the residual read-count difference between "toggle off on a live site" and "no site" is not a tenancy oracle, as on `/careers`, DECISION-154); `failed` is a 200 `noindex` notice. No `loading.tsx` on either `learn/**` segment. **Residual (Phase 6 O3):** when a bundle authors its own page at exactly `/learn/spot-the-scam`, the bundle's page is served and the leader panel still says the trainer is live; tracked in `docs/TODO.md`.
+
+---
+
+**DECISION-331 — Anonymous Learn reads go through one owner-only predicate and one generic static-page definer.**
+
+**Status:** Resolved (architect Phase 2); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-10 · **Feature:** `2026-11-10-learn-inc1a` (v0.56.0, migration 0087)
+
+`organization_feature_toggles` and `organization_feature_categories` are FORCE RLS on `organization_id = presby_current_org()`, so an anonymous `presby_app` read with no GUC sees nothing; the precedents (`presby_public_careers`, `presby_public_events_calendar`) are `SECURITY DEFINER` functions owned by `neondb_owner`. `presby_learn_enabled(p_org, p_key)` is invoker, `stable`, `search_path` pinned, with execute revoked from `public`, `presby_app` and `presby_platform`: it is callable only from inside a definer. It composes the organization-type allow-list, then the category axis (off when its flag row is missing), then the category row (a missing row is ON, DECISION-130), then the toggle (a missing row is OFF), over a closed `CASE` of Learn keys whose literals are pinned to `ORG_FEATURE_CATALOG`; an unknown key is false, so an anonymous caller can never ask about a non-Learn toggle. `presby_public_learn(p_slug, p_key)` is a definer granted to `presby_app` only; it always returns exactly one row, `available` or `unavailable`, after the organization-active and site-live gates, and returns no name or id. A data-bearing Learn feature (1b's public policy) gets its own definer that calls the predicate. Each new key extends the predicate with `create or replace` in its own migration; a test reads the latest definition so a later replace cannot silently break the pin. Tests: the literal-pin test (`learn-toggle.test.ts`), a matrix test against `orgFeatureEnabledInTx` (`public.db.test.ts`), and `scripts/learn/test-rls-87.sql` (section 87 of `scripts/test-rls.sql`).
+
+---
+
+**DECISION-330 — Learn is a portal domain and a feature category.**
+
+**Status:** Resolved (architect Phase 2; the operator confirmed the label "Learn", 2026-11-11); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-10 · **Feature:** `2026-11-10-learn-inc1a` (v0.56.0, migration 0087)
+
+`PortalDomain` gains `learn` (label "Learn", ordered after `communications` and before `administration`), with icons in `TILE_ICONS` and `NAV_DOMAIN_ICONS`. 0087 widens `organization_feature_categories_category_check` (the unnamed CHECK from 0040) to admit `learn`, with no backfill: a missing category row is on (DECISION-130), so no existing organization's Features page or tile changes state beyond a seventh switch. Every Learn surface (the trainer, 1b's AI policy, Increment 2's pages) defaults to this domain, so an organization can hide the whole learning area with one category switch. Reason: not `communications`, because three to four more Learn surfaces follow and the category axis lets an organization hide them together; the CHECK change rides a migration this increment needs anyway. The label is copy; the key `learn` is stable.
+
+---
+
 **DECISION-329 — A team-less service is readable by any worship key; a decline reason is shown only to the team's schedulers (F435, F436).**
 
 **Status:** Resolved (tech-lead Phase 3 amendment 3); QA PASS, Phase 6 SHIP WITH NOTES · **Date:** 2026-11-05 · **Feature:** `2026-11-04-worship-inc1` (v0.55.0)

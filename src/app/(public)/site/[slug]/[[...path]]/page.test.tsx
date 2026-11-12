@@ -59,6 +59,8 @@ vi.mock("@/lib/giving/public-config", () => ({ readPublicGivingConfig: vi.fn() }
 vi.mock("@/lib/public-calendar", () => ({ readPublicCalendar: vi.fn() }));
 // The `careers` slot's reader is database-backed and server-only; only its closure is exercised here.
 vi.mock("@/lib/careers/public", () => ({ readPublicCareers: vi.fn() }));
+// The `spotTheScam` slot's reader (learn Increment 1a) is database-backed and server-only too.
+vi.mock("@/lib/learn/public", () => ({ readPublicLearn: vi.fn() }));
 
 // resolveLogoUrl()'s dynamically-imported getPlatformDb() chain — mocked
 // the same way @/lib/sites is mocked above, and for the identical reason:
@@ -97,6 +99,7 @@ import { PublicCommitteeDirectory } from "../committee-directory";
 import { PublicGivingSlot } from "../public-giving-slot";
 import { PublicEventsCalendarSlot } from "../public-events-calendar-slot";
 import { PublicCareersSlot } from "../careers-slot";
+import { PublicSpotTheScamSlot } from "../spot-the-scam-slot";
 
 afterEach(() => {
   cleanup();
@@ -654,7 +657,7 @@ describe("PublicSitePage — the ok path", () => {
     });
   });
 
-  it("exposes exactly careers, staffDirectory, committeeDirectory, giving and eventsCalendar — no other named slot", async () => {
+  it("exposes exactly careers, staffDirectory, committeeDirectory, giving, eventsCalendar and spotTheScam — no other named slot", async () => {
     mockSite({ kind: "ok", site: SITE });
     renderSiteBundle.mockReturnValue(<div />);
 
@@ -668,6 +671,7 @@ describe("PublicSitePage — the ok path", () => {
       "committeeDirectory",
       "eventsCalendar",
       "giving",
+      "spotTheScam",
       "staffDirectory",
     ]);
   });
@@ -870,6 +874,24 @@ describe("PublicSitePage - host mode: clean URLs, the DB slug, nothing the visit
     expect(resolved.props.slug).toBe(DB_SLUG);
     // Host mode: the card links are clean paths.
     expect((resolved.props.urls as { careersPosting: (s: string) => string }).careersPosting("custodian")).toBe("/careers/custodian");
+  });
+
+  it("closes the spotTheScam slot over the DATABASE slug and the urls ONLY - never the host key, a request or the marker's filter (DECISION-132)", async () => {
+    mockHostSite();
+    renderSiteBundle.mockReturnValue(<div />);
+
+    await renderPage({ params: makeParams(HOST) });
+
+    const call = renderSiteBundle.mock.calls[0][0] as {
+      liveSlots: Record<string, (filter: Record<string, unknown>) => { type: unknown; props: Record<string, unknown> }>;
+    };
+    // An author-supplied filter is ignored: the resolver is called with it and the element carries none.
+    const resolved = call.liveSlots.spotTheScam!({ slug: "attacker", evil: true });
+    expect(resolved.type).toBe(PublicSpotTheScamSlot);
+    expect(Object.keys(resolved.props).sort()).toEqual(["slug", "urls"]);
+    expect(resolved.props.slug).toBe(DB_SLUG);
+    // Host mode: the urls are the church's own host's (a clean path).
+    expect((resolved.props.urls as { spotTheScam: () => string }).spotTheScam()).toBe("/learn/spot-the-scam");
   });
 
   it("binds the contact form's action to the SITE KEY on the server (the client __slug field is gone)", async () => {

@@ -12,12 +12,12 @@ If you see "You don't have permission to manage features", your role does not in
 
 The page is headed "Features". It has two parts.
 
-- "Ministry areas": one switch for each of Community, Worship & Events, Giving & Finance, Governance & Courts, Reports & Insights and Communications. All of them are on at first. Turn one off if it does not apply to your congregation.
+- "Ministry areas": one switch for each ministry area, such as Community, Worship & Events, Giving & Finance and Learn. All of them are on at first. Turn one off if it does not apply to your congregation.
 - Below it, a card for each feature, with its name, a sentence about what it does and a switch.
 
 When a ministry area is off, the features in it say, for example, "Turn on Worship & Events above to enable this." and their switches are disabled.
 
-The congregation in this picture has already turned on its features. A new congregation sees most of the cards switched off.
+The congregation in this picture has already turned on its features. A new congregation sees most of the cards switched off. The picture was taken before "Learn" was added, so it does not show that switch.
 
 ![The Features page on a phone: the ministry area switches, then a card with a switch for each feature.](shot:features-list)
 
@@ -35,6 +35,7 @@ This table lists the features a new congregation sees. Your Features page may li
 | Member calendar | Shows the congregation's events to every member who has calendar access. | On | Any organization |
 | Public events calendar | Shows the events your team has marked for the website on your public website. Whoever maintains your website must also place the calendar on a page. | Off | Any organization |
 | Job openings | Lets your congregation post job openings on its public website. Whoever maintains your website can also place the openings on a page. | Off | Any organization |
+| Spot the scam | A short practice in spotting scam emails, texts and voicemails, with six rules to keep. See [Spot the scam](/help/spot-the-scam). | Off | Any organization |
 | Giving | Online giving for the congregation. The card on the Features page describes it, and this help does not cover giving. | Off | Congregations and new worshiping communities |
 | Reimbursements | Lets members ask for reimbursement or a vendor payment, lets the chairs and leaders of a group approve it, and lets the treasurer record the payment. It doesn't send money. See [Asking to be reimbursed](/help/reimbursements). | Off | Congregations and new worshiping communities |
 | Parish management | Deacon districts for the congregation. | Off | Congregations |
@@ -44,7 +45,7 @@ This table lists the features a new congregation sees. Your Features page may li
 
 Turning a feature on or off changes what you see in two ways.
 
-- Some features show their tile only while they are on. The "Calendar", "Job openings", "Reimbursements" and "Worship" tiles are examples. Open "Administration" or your congregation's page and the tile appears or disappears.
+- Some features show their tile only while they are on. The "Calendar", "Job openings", "Reimbursements", "Spot the scam" and "Worship" tiles are examples. Open "Administration" or your congregation's page and the tile appears or disappears.
 - Others keep their tile and open a page that says the feature is off. For example, "Community" says "Member management isn't turned on" for your congregation until you turn on "Community: add people and record roll actions".
 
 ## Features the PresbyPortal team turns on for you

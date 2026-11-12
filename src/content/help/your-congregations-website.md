@@ -5,11 +5,12 @@ A congregation can have a public website on PresbyPortal. Some of what it shows 
 - Colour, type pairing and logo: under "Branding". This needs a role the team sets up, and a Founding Administrator does not have it at first.
 - Job openings: under "Job openings". A Founding Administrator can do this after turning on "Job openings" in "Features".
 - Events on the public calendar: the event form, and "Public events calendar" in "Features". You turn the switch on, and adding events needs a role the team sets up. See [Events and the calendar](/help/events-and-the-calendar).
+- Spot the scam: "Spot the scam" in "Features". You turn the switch on, and it has its own page on your website with nothing else to set up. See [Spot the scam](/help/spot-the-scam).
 - Which people are named on the website: "Public listing" on "Officers", "Staff" and each group's roster. A Founding Administrator can do this.
 
 ## What whoever maintains your website changes
 
-The text of your pages, their images and the website's menus are not edited in PresbyPortal. Neither is where the public calendar, the job openings and the list of people appear on a page. To change any of them, send a support ticket. See [Getting help](/help/getting-help).
+The text of your pages, their images and the website's menus are not edited in PresbyPortal. Neither is where the public calendar, the job openings, Spot the scam and the list of people appear on a page. To change any of them, send a support ticket. See [Getting help](/help/getting-help).
 
 This is why a setting in PresbyPortal can be on and nothing shows on your website: the website has to have a place for it.
 

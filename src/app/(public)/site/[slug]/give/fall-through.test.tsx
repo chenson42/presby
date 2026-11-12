@@ -18,6 +18,8 @@ vi.mock("@/lib/giving/public-config", () => ({ readPublicGivingConfig: (...a: un
 vi.mock("@/lib/public-calendar", () => ({ readPublicCalendar: vi.fn() }));
 // So does the careers slot (same render path); it never runs here.
 vi.mock("@/lib/careers/public", () => ({ readPublicCareers: vi.fn() }));
+// And the spotTheScam slot (learn Increment 1a, same render path); it never runs here either.
+vi.mock("@/lib/learn/public", () => ({ readPublicLearn: vi.fn() }));
 vi.mock("./actions", () => ({ createPublicGiveSessionAction: Object.assign(vi.fn(), { bind: vi.fn(() => vi.fn()) }) }));
 
 // `getPublishedSite` stays the test's one stub of "what the site read found" (keyed by the slug);

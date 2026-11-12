@@ -23,6 +23,7 @@ vi.mock("@/lib/audit", () => ({
 // (see events.schema.test.ts), so load it first in the canonical order.
 import "@/lib/db/schema";
 import { ORG_FEATURE_CATALOG, orgTypeAdmitted } from "./org-features";
+import { SPOT_THE_SCAM_FEATURE_KEY } from "./learn/contract";
 import { PORTAL_TILES } from "./org-portal/tiles";
 
 const SRC_ROOT = path.resolve(__dirname, "..");
@@ -62,7 +63,7 @@ describe("ORG_FEATURE_CATALOG", () => {
     }
   });
 
-  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.person_photos, org_portal.public_calendar, org_portal.reimbursement, org_portal.sign_in_connect, org_portal.worship and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
+  it("makes org_portal.calendar, org_portal.careers, org_portal.giving, org_portal.parishes, org_portal.person_photos, org_portal.public_calendar, org_portal.reimbursement, org_portal.sign_in_connect, org_portal.spot_the_scam, org_portal.worship and the two operator-enabled domain toggles the toggle-only (flag: null) entries, and calendar and sign_in_connect the two provisioned-on entries", () => {
     const toggleOnly = ORG_FEATURE_CATALOG.filter((e) => e.flag === null);
     expect(toggleOnly.map((e) => e.key).sort()).toEqual([
       "org_portal.calendar",
@@ -75,6 +76,7 @@ describe("ORG_FEATURE_CATALOG", () => {
       "org_portal.public_calendar",
       "org_portal.reimbursement",
       "org_portal.sign_in_connect",
+      "org_portal.spot_the_scam",
       "org_portal.worship",
     ]);
 
@@ -223,6 +225,22 @@ describe("ORG_FEATURE_CATALOG", () => {
     expect(entry!.operatorEnabled).toBe(false);
     expect(entry!.orgTypes).toBeNull();
     expect(entry!.category).toBe("people");
+  });
+
+  it("org_portal.spot_the_scam is toggle-only, provisioned OFF, SELF-SERVICE, learn category, unscoped by organization type, with the approved name and description (the SQL predicate repeats exactly these)", () => {
+    const entry = ORG_FEATURE_CATALOG.find((e) => e.key === "org_portal.spot_the_scam");
+    expect(entry).toBeDefined();
+    expect(entry!.name).toBe("Spot the scam");
+    expect(entry!.description).toBe(
+      "A short practice in spotting scam emails, texts and voicemails, with six rules to keep. It appears in your portal and, once your public website is published, at its own address there. Whoever maintains your website can also place it on a page. Answers are never sent or saved. Turning this off hides it everywhere.",
+    );
+    expect(entry!.flag).toBeNull();
+    expect(entry!.provisionedOn).toBe(false);
+    expect(entry!.operatorEnabled).toBe(false);
+    expect(entry!.orgTypes).toBeNull();
+    expect(entry!.category).toBe("learn");
+    // The catalog key and the contract constant are one string.
+    expect(entry!.key).toBe(SPOT_THE_SCAM_FEATURE_KEY);
   });
 
   it("orgTypeAdmitted is an ALLOW-LIST: null admits everything, a list admits only its members, an unknown organization is never admitted by a list", () => {

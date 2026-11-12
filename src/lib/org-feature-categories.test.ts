@@ -297,7 +297,20 @@ describe.skipIf(!hasDb)(
           "governance",
           "reports",
           "communications",
+          "learn",
         ]);
+      });
+
+      it("offers the Learn category to every organization type (the spot-the-scam tile has no orgTypeScope, DECISION-330)", () => {
+        for (const type of [
+          "congregation",
+          "presbytery",
+          "synod",
+          "general_assembly",
+          "new_worshiping_community",
+        ] as const) {
+          expect(offeredCategories(type), type).toContain("learn");
+        }
       });
 
       it("is never empty for any organization type (Phase 3 Component Plan: no empty-state to design for)", () => {

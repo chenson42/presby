@@ -8795,3 +8795,16 @@ rollback;
 --     production.
 -- ===========================================================================
 \ir worship/test-rls-85.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/learn (integration).
+-- 87. Learn, Increment 1a: Spot the scam - the anonymous toggle read
+--     (drizzle/0087_presby_learn.sql; DECISION-330/331). Its own file, as 46,
+--     47, 59 to 85 above; \ir resolves relative to this script. It needs the
+--     test helpers, the stock seed's Alder Creek (provisioning site) and
+--     scripts/careers/seed-dev-careers.sql's Fernwood live site row - the same
+--     dependency section 71 already has. Every block builds its own toggle,
+--     category and axis state and rolls back, so it is never run against
+--     production.
+-- ===========================================================================
+\ir learn/test-rls-87.sql

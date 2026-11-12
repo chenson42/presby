@@ -37,6 +37,7 @@ You can use these:
 - "Directory": search for people. See [Using the directory](/help/using-the-directory).
 - "Calendar": read the congregation's events. It is on from the start.
 - "Job openings": write and publish job openings for your website. Turn on "Job openings" first. See [Your congregation's website](/help/your-congregations-website).
+- "Spot the scam": a short practice in spotting scam messages, for anyone in your congregation. Turn on "Spot the scam" first. See [Spot the scam](/help/spot-the-scam).
 - "Tickets": ask the PresbyPortal team for help. See [Getting help](/help/getting-help).
 
 You cannot use these yet:

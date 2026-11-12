@@ -48,8 +48,8 @@ const ORG_FEATURES_MANAGE = "org_features.manage";
 const CATEGORY_AXIS_FLAG = "org_portal.feature_categories";
 
 /**
- * The closed, six-value selectable catalog — `PortalDomain` minus
- * `"administration"` (Phase 1 Gap 2: administration must never be
+ * The closed, seven-value selectable catalog (six until `learn`, DECISION-330):
+ * `PortalDomain` minus `"administration"` (Phase 1 Gap 2: administration must never be
  * selectable as a ministry category; enforced independently, and more
  * strongly, by the schema-layer CHECK constraint on
  * `organization_feature_categories.category`).

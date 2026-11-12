@@ -36,6 +36,22 @@ describe("slug mode: today's /site/<slug>/... shapes on the platform origin", ()
   });
 });
 
+describe("spotTheScam URL (learn Increment 1a, DECISION-332)", () => {
+  it("is the clean path on a church's own domain and page('/learn/spot-the-scam') on the platform host, with no query string", () => {
+    expect(hostUrls().spotTheScam()).toBe("/learn/spot-the-scam");
+    expect(slugUrls().spotTheScam()).toBe("/site/alder-creek/learn/spot-the-scam");
+    for (const u of [slugUrls(), hostUrls()]) {
+      expect(u.spotTheScam()).toBe(u.page("/learn/spot-the-scam"));
+      expect(u.spotTheScam()).not.toContain("?");
+    }
+  });
+
+  it("canonical() composes with it on the church host and on the platform host", () => {
+    expect(hostUrls().origin + hostUrls().spotTheScam()).toBe("https://www.church-one.invalid/learn/spot-the-scam");
+    expect(slugUrls().origin + slugUrls().spotTheScam()).toBe(`${PLATFORM}/site/alder-creek/learn/spot-the-scam`);
+  });
+});
+
 describe("careers URLs (careers Increment 1)", () => {
   it("encode the posting slug in both modes, and carry no query string", () => {
     for (const u of [slugUrls(), hostUrls()]) {

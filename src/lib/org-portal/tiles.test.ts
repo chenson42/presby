@@ -214,21 +214,21 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 
-  it("every tile's domain is one of the seven DOMAIN_ORDER values", () => {
+  it("every tile's domain is one of the eight DOMAIN_ORDER values", () => {
     for (const tile of PORTAL_TILES) {
       expect(DOMAIN_ORDER).toContain(tile.domain);
     }
   });
 
-  it("PORTAL_TILES has exactly 26 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains + 1 careers + 2 reimbursements + 1 worship-admin)", () => {
-    expect(PORTAL_TILES.length).toBe(26);
+  it("PORTAL_TILES has exactly 27 entries (10 existing + 7 product-IA placeholders + 1 staff + 1 filings + 1 calendar + 1 giving-admin + 1 domains + 1 careers + 2 reimbursements + 1 worship-admin + 1 spot-the-scam)", () => {
+    expect(PORTAL_TILES.length).toBe(27);
   });
 
   it("no tile is keyed 'feedback' — removed entirely, re-surfaces as an avatar-menu item + prompt card (commit 2)", () => {
     expect(PORTAL_TILES.map((t) => t.key)).not.toContain("feedback");
   });
 
-  it("mirrors the full 26-tile universe by key (2026-11-04 worship Increment 1 + 2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains + 2026-10-25 careers + 2026-10-25 reimbursements)", () => {
+  it("mirrors the full 27-tile universe by key (2026-11-10 learn spot-the-scam + 2026-11-04 worship Increment 1 + 2026-08-27 product-IA scaffold + staff-and-personnel + 2026-09-26 withdraw-publication + 2026-10-14 member-calendar + 2026-10-15 online-giving + 2026-10-19 custom-domains + 2026-10-25 careers + 2026-10-25 reimbursements)", () => {
     expect(PORTAL_TILES.map((t) => t.key).sort()).toEqual(
       [
         "branding",
@@ -253,6 +253,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
         "reimbursements-admin",
         "reports",
         "roles",
+        "spot-the-scam",
         "staff",
         "tickets",
         "worship",
@@ -317,6 +318,7 @@ describe("PORTAL_TILES — flag-key shape", () => {
     },
     calendar: { domain: "worship", category: "operate" },
     careers: { domain: "people", category: "operate" },
+    "spot-the-scam": { domain: "learn", category: "operate" },
     events: { domain: "worship", category: "administer" },
     roles: { domain: "administration", category: "administer" },
     features: { domain: "administration", category: "administer" },
@@ -409,9 +411,34 @@ describe("PORTAL_TILES — flag-key shape", () => {
     expect(tile!.description).not.toMatch(/permission|ask |contact/i);
   });
 
-  it("DOMAIN_ORDER has exactly 7 unique entries matching DOMAIN_LABELS' keys", () => {
-    expect(new Set(DOMAIN_ORDER).size).toBe(7);
-    expect(DOMAIN_ORDER.length).toBe(7);
+  it("the spot-the-scam tile is toggle-only (no flagKey), gated by org_portal.spot_the_scam, in the Learn domain, with Copy G2 and the portal page as its destination", () => {
+    const tile = PORTAL_TILES.find((t) => t.key === "spot-the-scam");
+    expect(tile).toBeDefined();
+    expect(tile!.label).toBe("Spot the scam");
+    expect(tile!.description).toBe(
+      "Practice spotting scam emails, texts and voicemails. Your answers are never sent or saved.",
+    );
+    expect(tile!.href("alder-creek")).toBe("/o/alder-creek/learn/spot-the-scam");
+    expect(tile!.flagKey).toBeUndefined();
+    expect(tile!.orgFeatureKey).toBe("org_portal.spot_the_scam");
+    expect(tile!.orgTypeScope).toBeUndefined();
+    expect(tile!.comingSoon).toBeUndefined();
+    expect(tile!.domain).toBe("learn");
+    expect(tile!.category).toBe("operate");
+    // Every member reads this description on Home: it names no permission and gives no instruction.
+    expect(tile!.description).not.toMatch(/permission|ask |contact/i);
+  });
+
+  it("the Learn domain is labelled 'Learn' and sits after Communications and before Administration (DECISION-330)", () => {
+    expect(DOMAIN_LABELS.learn).toBe("Learn");
+    const order = [...DOMAIN_ORDER];
+    expect(order.indexOf("learn")).toBe(order.indexOf("communications") + 1);
+    expect(order.indexOf("learn")).toBe(order.indexOf("administration") - 1);
+  });
+
+  it("DOMAIN_ORDER has exactly 8 unique entries matching DOMAIN_LABELS' keys", () => {
+    expect(new Set(DOMAIN_ORDER).size).toBe(8);
+    expect(DOMAIN_ORDER.length).toBe(8);
     expect([...DOMAIN_ORDER].sort()).toEqual(
       Object.keys(DOMAIN_LABELS).sort(),
     );

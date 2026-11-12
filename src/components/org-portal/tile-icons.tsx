@@ -7,6 +7,7 @@ import {
   CalendarDays,
   FileBarChart,
   Gavel,
+  GraduationCap,
   HandCoins,
   Landmark,
   Megaphone,
@@ -15,6 +16,7 @@ import {
   Receipt,
   ReceiptText,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
   Ticket,
@@ -71,6 +73,8 @@ export const TILE_ICONS: Record<string, LucideIcon> = {
   events: CalendarCog,
   // docs/work-log/2026-10-25-careers-inc1.md (Copy T1): job openings.
   careers: Briefcase,
+  // docs/work-log/2026-11-10-learn-inc1a.md (Copy G2): the Learn domain's first tile.
+  "spot-the-scam": ShieldAlert,
 };
 
 /**
@@ -95,6 +99,11 @@ export const TILE_ICONS: Record<string, LucideIcon> = {
  *                        BarChart3 — "Reports & Insights" names Reports
  *                        first)
  *   - communications  -> `communications`'s own Megaphone
+ *   - learn           -> GraduationCap (DECISION-330: the first Learn tile is
+ *                        `spot-the-scam`'s ShieldAlert, a warning glyph that would
+ *                        read as an alert in a nav row, so the domain gets its own
+ *                        "learning" glyph, the same exception `administration`
+ *                        takes)
  *   - administration  -> `roles`' Settings (the nav's own hardcoded
  *                        "Administration" entry has no single tile of its
  *                        own to borrow from; Settings is the generic
@@ -112,5 +121,6 @@ export const NAV_DOMAIN_ICONS: Record<PortalDomain, LucideIcon> = {
   governance: Landmark,
   reports: FileBarChart,
   communications: Megaphone,
+  learn: GraduationCap,
   administration: Settings,
 };

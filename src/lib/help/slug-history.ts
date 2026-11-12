@@ -45,4 +45,6 @@ export const SLUG_HISTORY: readonly string[] = [
   "worship-serving-on-a-team",
   "worship-scheduling-a-team",
   "worship-setting-up",
+  // 2026-11-11, learn Increment 1a: Spot the scam.
+  "spot-the-scam",
 ];

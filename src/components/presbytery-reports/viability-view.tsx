@@ -72,7 +72,7 @@ export function ViabilityView({ data, slug }: { data: ViabilityData; slug: strin
           <TableBody>
             {data.rows.map((row) => (
               <TableRow key={row.organizationId}>
-                <TableCell className="font-medium">{row.name}</TableCell>
+                <TableCell className="max-w-xs whitespace-normal break-words font-medium">{row.name}</TableCell>
                 <TableCell>
                   <ViabilityBadge row={row} />
                 </TableCell>

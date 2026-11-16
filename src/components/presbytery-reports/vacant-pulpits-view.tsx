@@ -89,7 +89,7 @@ export function VacantPulpitsView({ data, slug }: { data: VacantPulpitsData; slu
           <TableBody>
             {data.rows.map((row) => (
               <TableRow key={row.organizationId}>
-                <TableCell className="font-medium">{row.name}</TableCell>
+                <TableCell className="max-w-xs whitespace-normal break-words font-medium">{row.name}</TableCell>
                 <TableCell>
                   <Since row={row} />
                 </TableCell>

@@ -116,7 +116,7 @@ export function PerCapitaView({ data, slug, billingYear }: { data: PerCapitaData
           <TableBody>
             {data.rows.map((row) => (
               <TableRow key={row.organizationId}>
-                <TableCell className="font-medium whitespace-normal">
+                <TableCell className="max-w-xs break-words font-medium whitespace-normal">
                   {row.name}
                   <Departed row={row} />
                 </TableCell>

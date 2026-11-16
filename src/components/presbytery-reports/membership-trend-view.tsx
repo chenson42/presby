@@ -67,8 +67,8 @@ export function MembershipTrendView({ data, slug }: { data: MembershipTrendData;
               <div key={year} className="flex justify-between gap-3">
                 <dt className="text-muted-foreground">{year}</dt>
                 <dd className="text-right">
-                  <span className="font-medium">{data.footer[i].total}</span>{" "}
-                  <span className="text-muted-foreground">
+                  <span className="font-medium">{data.footer[i].total}</span>
+                  <span className="block text-xs text-muted-foreground">
                     {TREND_COPY.reporting(data.footer[i].reporting, data.footer[i].members)}
                   </span>
                 </dd>
@@ -93,7 +93,7 @@ export function MembershipTrendView({ data, slug }: { data: MembershipTrendData;
           <TableBody>
             {data.rows.map((row) => (
               <TableRow key={row.organizationId}>
-                <TableCell className="font-medium">{row.name}</TableCell>
+                <TableCell className="max-w-xs whitespace-normal break-words font-medium">{row.name}</TableCell>
                 {row.cells.map((cell, i) => (
                   <TableCell key={data.years[i]} className="text-right">
                     <TrendCellText cell={cell} />

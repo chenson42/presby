@@ -2,7 +2,7 @@ A presbytery that has turned on "Per-Capita, SASR & Imports" can read four repor
 
 ## Open the reports
 
-Choose the "Per-Capita, SASR & Imports" tile under "Reports & Insights" on "Administration". The page opens with a section headed "Reports and exports", with one card for each report. Choose a card to open the report.
+Open "Administration", then choose the "Per-Capita, SASR & Imports" tile under "Reports & Insights". The page opens with a section headed "Reports and exports", with one card for each report. Choose a card to open the report.
 
 Each report needs its own permission, and having one does not open another. A card you cannot open says "Locked" and what it needs. An administrator can give the permission under "Roles". See [Roles: who can do what](/help/roles-who-can-do-what).
 

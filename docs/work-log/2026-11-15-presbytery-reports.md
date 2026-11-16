@@ -28,8 +28,8 @@ Existing: `/o/<slug>/admin/reports` (statistics table and form, per-capita rate,
 | 2 — Architectural review | architect | Done | Approved with suggestions | 2026-11-15 |
 | 3 — Technical design | tech-lead | Done | Design complete | 2026-11-15 |
 | 4 — Implementation | full-stack-developer | Done (awaiting Phase 5) | — | 2026-11-15 |
-| 5 — Verification | qa | Run 1 FAIL → fixed `fbf9c721`; run 2 pending | FAIL | 2026-11-15 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Done (run 2; run 1 FAIL fixed `fbf9c721`) | PASS | 2026-11-15 |
+| 6 — Shipped vs intent | analyst | In progress | — | — |
 
 ---
 
@@ -1432,6 +1432,42 @@ The (org) tenant axis is gated by the live in-transaction `presby_has_permission
 
 Commit `fbf9c721`. (1) `readers.db.test.ts`: the cross-tenant trend test now checks that no cell is a value of 999 instead of searching the serialized payload (it matched random UUIDs); run twice, 27/27 both times. (2) Help page line 1 now reads "Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read four reports…" (QA's suggested wording; the orchestrator confirms it in place of the tech-lead, since it only removes the false toggle claim the same page already contradicts at "switched on by the PresbyPortal team"), with an exact-text test (`src/lib/presbytery-reports/help-page.test.ts`). The downloads paragraph adds "apart from anything written in the redevelopment notes" (QA advisory). check:help, typecheck, lint and the unit suite (889 files, 14,349 tests) pass.
 
+## Run 2
+
+**Date:** 2026-11-15
+**Verified by:** qa
+**Worktree:** `/Users/cshenso/git/presby-platform/presby-reports`, branch `pipeline/presbytery-reports` at `928e0895`. The fix is `fbf9c721`. The tree was clean before and after, and I edited no file.
+**Database:** every connection in `.env.local` is on `ep-rapid-thunder-axjm1eom`, checked by host only (no value printed). Production and development were not touched.
+**Scope:** the narrow re-check named in run 1. `fbf9c721` changes only the help page, a new test file and one assertion in the DB test. Every other run 1 result still stands: typecheck, lint, all ten tripwires, build, the 80/80 e2e run, the runtime probe, the 360px and 1280px walk, and the feature-gate audit. None of them was re-run.
+
+### Item 1: the flaky test at `readers.db.test.ts:582`
+
+The run 1 FAIL is fixed.
+- **What changed:** the test used to search the whole serialized payload for "999", which also matched random IDs. It now checks that no cell holds the value 999. The line above it still checks that B's congregation is not a row. If B's data leaked into A's trend, a 999 cell would appear and this would fail, so it still guards the property.
+- **Results:** `npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/presbytery-reports/readers.db.test.ts` ran twice in a row against the pipeline branch. Run A passed 27/27, and run B passed 27/27.
+
+### Item 2: the help sentence (`copy truthfulness`)
+
+The run 1 FAIL is fixed.
+- **New text** at `src/content/help/presbytery-reports.md:1`: "Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read four reports…". It no longer says a presbytery turns the reports on, and it agrees with line 49 ("switched on by the PresbyPortal team for the whole platform").
+- **New test** (`src/lib/presbytery-reports/help-page.test.ts`): it checks the exact wording, and it fails on the old text. I ran it in the scratchpad against the page from `1ce15488`. "does not say a presbytery turns the reports on" failed, and the platform-team case passed. It passes on HEAD.
+- **Advisory from run 1, now applied:** the download paragraph adds "apart from anything written in the redevelopment notes".
+- **On screen:** my own `next dev -p 3103`, stopped by PID (22766/22767), and port 3103 is free. `/help/presbytery-reports` returns 200 at 360px with no horizontal scroll. The new first sentence, the changed download sentence and the "switched on by the PresbyPortal team" line all render as committed.
+- **Roles:** the instruction-to-role tracing from run 1 is unchanged, because neither edit adds an instruction.
+
+### Other gates
+
+- `npm run check:help`: **PASS** (33 entries, 29 published, 29 content files, 7 images).
+- Unit suite (`npm test`, no `DATABASE_URL`): Total 18,507 | Passed 14,349 | Failed 0 | Skipped 4,158 | 889 files passed, 156 skipped | Duration 40s. The skipped files are the DB-backed suites, which skip without a database; the one this fix touches was run twice above.
+
+### Verdict
+
+**PASS.** Both run 1 items are fixed and re-verified, with a test that fails on the old text. Nothing in this diff touches `src/auth.ts`, `src/proxy.ts`, `src/lib/auth/` or `src/app/(auth)/`, so the stricter auth-touching gate does not apply.
+
+These run 1 notes for the operator and orchestrator still apply:
+- Keep `scripts/presbytery-reports/seed-demo.sql` off `development`. It breaks the counts in `scripts/test-rls.sql`, starting at line 219.
+- `org_portal.admin_hub` has to be on for the demo, as well as `.reports`, `.credentials` and `.oversight`.
+- Confirm at the demo that vacancy excludes interim and supply, and that viability uses 1 = at risk.
 
 ---
 

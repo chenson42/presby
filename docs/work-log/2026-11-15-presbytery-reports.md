@@ -27,7 +27,7 @@ Existing: `/o/<slug>/admin/reports` (statistics table and form, per-capita rate,
 | 1 — Functional refinement | analyst | Done | READY WITH NOTES | 2026-11-15 |
 | 2 — Architectural review | architect | Done | Approved with suggestions | 2026-11-15 |
 | 3 — Technical design | tech-lead | Done | Design complete | 2026-11-15 |
-| 4 — Implementation | full-stack-developer | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Done (awaiting Phase 5) | — | 2026-11-15 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -1153,7 +1153,79 @@ Files read for this phase (all in `/Users/cshenso/git/presby-platform/presby-rep
 
 # Phase 4 — Implementation
 
-(pending)
+**Implementer:** full-stack-developer · **Branch:** `pipeline/presbytery-reports` (worktree `/Users/cshenso/git/presby-platform/presby-reports`) · **Neon:** pipeline branch only (host `ep-rapid-thunder-axjm1eom` checked before every write). Nothing pushed, nothing amended, no `--no-verify`, no stash.
+
+## Commits (in order)
+
+| # | Commit | Content |
+|---|---|---|
+| 1 | `refactor(org-portal): move the (org) session check and permission helper out of treasury` | DECISION-338. `src/lib/org-portal/session-check.ts` (pure) and `permission-check.ts` (`server-only`); `treasury/session.ts` and `keys.ts` are aliases (same function objects, pinned); T1 zone gains exactly the two paths + test. No file under `giving/`, `reimbursement/`, `admin/giving/**` or `src/lib/auth/` touched. |
+| 2 | `feat(presbytery-reports): contract, params, derive, csv and the export audit key` | `contract.ts`, `params.ts`, `derive.ts`, `csv.ts` (BOM, `csvTextCell`, `csvIntegerCell`, `centsToDecimal`), `copy.ts`; `csvIntegerCell` in `src/lib/csv.ts`; `PRESBYTERY_REPORT_EXPORTED` in `audit.ts` + `audit.test.ts`. |
+| 3 | `feat(presbytery-reports): the roster, four readers and fetchStatisticsForYears` | `roster.ts`, `vacant-pulpits.ts`, `membership-trend.ts`, `viability.ts`, `per-capita.ts`, `hub.ts`, `audit.ts`; `fetchStatisticsForYears` in `presbytery.ts` (single-year function delegates); `readers.db.test.ts`. |
+| 4 | `docs(help): presbytery reports and downloads` | Landed ahead of the pages so their `helpHref` links typecheck (see Deviations). |
+| 5 | `feat(presbytery-reports): the gate, four report pages and four export routes` | `gate.ts`, `src/components/presbytery-reports/*`, four `page.tsx`, four `export/route.ts`, `report-gate-state.tsx`, gate/route/page/view/boundaries tests. |
+| 6 | `feat(presbytery-reports): the reports hub and the two-factor recheck on /admin/reports` | `reports-hub.tsx`; `page.tsx` uses `assertOrgSession`; `page.test.tsx` extended. |
+| 7 | `fix(reports): return 404 for a malformed congregation id and parse years strictly` | F446 + F447, failing-first tests (11 failed before, pass after). Trailers `Caught-By: agent-review`, `Discovered-In: Phase-2`. |
+| 8 | `chore(scripts): demo data for the presbytery reports` | `scripts/presbytery-reports/seed-demo.sql`. |
+| 9 | `style(presbytery-reports): wrap long congregation names in the tables and stack the trend total` | Found in the 1280px walk (80-character demo name clipped the newest trend year). |
+| 10 | `test(e2e): presbytery report exports` | `e2e/presbytery-report-exports.spec.ts`. |
+| 11 | `docs(help): presbytery reports page re-walked against the screens` | Path wording corrected to match the portal. |
+
+## What was built
+
+- **Module `src/lib/presbytery-reports/`:** `contract.ts`, `params.ts`, `derive.ts`, `csv.ts`, `copy.ts` (pure); `roster.ts`, `audit.ts`, `gate.ts`, `hub.ts` and the four readers (`server-only`). Each reader: `readX(tx, viewer, ...)` checks its key with `holdsPermissions` first, then the roster; `getX` is the page entry; `exportX` does the read, builds the CSV, then `auditReportExport` (`insertAuditRow` in the same transaction) and fails closed. No `getPlatformDb()` anywhere.
+- **Routes** (all `GET`, `force-dynamic`), under `src/app/(org)/o/[slug]/admin/reports/`: pages `vacant-pulpits`, `membership-trend[?from&to]`, `viability`, `per-capita[?billingYear]`; exports `<segment>/export` (per-capita also `?allYears=1`). Gate order and statuses exactly as Phase 3 "API Contract" (307 /signin, 307 /totp with the request's own path, 404, one 403 body for no relationship / ended / OrgAccessError / flag off / wrong type / missing key, 503 gate, 400 after the org-level gates, 409 vacant-only, 503 on any export throw incl. a failed audit insert). Auth/feature gates: session + `assertOrgSession` + `org_portal.reports` (bare `isFlagEnabled`) + organization type presbytery + the report's own existing key inside the reader transaction (`credentials.manage`, `statistics.manage`, `congregation_oversight.manage`, `per_capita.manage`).
+- **UI:** server components only. Card list below `sm` (`lg` for the trend), table above, same rows. Export is a plain `<a download>` in `Button asChild` (never `next/link`). Hub section on `/admin/reports`: whole-card link when held, "Locked" card with reason when not; inline error when the lock read fails. `[aboutOrgId]` 404s a non-UUID (F446); the old page parses years strictly (F447).
+- **Audit:** one key, `tenant.presbytery_report.exported`, metadata `{ organizationId, report, rowCount }` plus one of `{fromYear,toYear}` / `{billingYear}` / `{allYears:true}`. Verified in the DB: no name, note or amount.
+- **Help:** `src/content/help/presbytery-reports.md` + registry entry (`covers: ["tile:reports"]`), `slug-history.ts`, allowlist entry removed and pin 15 to 14 (comment and header count updated, `tile:reports` dropped from the "still lists" test), `presbytery-tools` `today` clause (`confirmedOn` untouched), tile description updated. Page text re-walked against the screens at 360px and 1280px; one correction (the path wording). No screenshots.
+- **No** migration, new permission key, new flag, dependency, proxy change, or `src/lib/auth/` change (so no login smoke was required).
+
+## Test results
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint` | clean (`--max-warnings=0`) |
+| `npm run check` (all ten tripwires) | all pass (help check: 33 entries, 29 published) |
+| `npm test` | 888 files passed / 156 skipped (DB-backed, no `DATABASE_URL`), 14,347 tests passed |
+| DB-backed (`npx dotenv -e .env.local -- vitest run --no-file-parallelism`) | `presbytery-reports/readers.db.test.ts` (27), `presbytery.test.ts` (delegation), `treasury/team.db.test.ts`, `fixture-deletable.test.ts`: 108 passed |
+| `npm run build` | passes; all 8 new routes listed as dynamic |
+| e2e (own server, port 3102, `E2E_BASE_URL`) | `presbytery-report-exports.spec.ts` 8/8, `presbytery-reports.spec.ts` 10/10, `filings-round-trip.spec.ts` 12/12 (30 passed in one run) |
+
+New tests: `contract`, `params`, `derive`, `csv` (headers verbatim, BOM bytes `EF BB BF` on all four, giving and reimbursement files BOM-free, formula-guard on `= + - @ TAB CR`, quoting, `-12.00` not prefixed), `copy` (no two-factor wording, no "don't have permission to manage", no banned phrases), `gate`, `routes` (table-driven over the four), `boundaries` (every rule has a failing sample), view and page tests, `org-portal/session-check`, `org-portal/permission-check`, and `readers.db.test.ts` with two presbyteries (cross-tenant: nothing of B in any A report; a congregation moved A to B keeps A's appointment row and is on no A report; each key opens only its own report; page and CSV agree via `exportX().csv === buildXCsv(getX().data)`; per-capita file rows sum to the page totals; trend cells equal the existing single-year rollup; sub-cent `100.005` and `1e3` round the same on page and file; audit row written in the export transaction, none on a refusal, and a non-user actor fails the export and leaves no row; lifecycle filter proven in the DB with a `dissolved` congregation whose `parent_id` is still A).
+
+**Lifecycle filter: verified at database level** (the owner connection can set `lifecycle_status` directly; the filter drops it).
+
+## Browser verification (own server, port 3102, stopped by PID)
+
+Signed in as `presbytery.clerk.fixture@example.invalid` on the demo data; every new page at 360px and 1280px, no horizontal scroll (`scrollWidth <= innerWidth`) on any. Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/reports-{hub,vacant,trend,viability,percapita}-{360,1280}.png` (read for real data: all invented). Each CSV downloaded through the API context and read byte for byte: `EF BB BF` first, CRLF, `text/csv; charset=utf-8`, `attachment; filename="<base>-northern-reach-<date>.csv"`, `no-store`; quoted notes with comma, double quote and LF are intact; `-12.50` and `Credit` for the overpayment; `100.005` shows `100.01`; the clicked "Export CSV" link downloads `viability-northern-reach-<date>.csv`; anonymous export is a 307 to `/signin?callbackUrl=<own path>`; `/admin/reports/not-a-uuid` is a 404; 400 for a bad year and for `allYears=1&billingYear=`. The locked-card view was exercised by the e2e (`presbytery-nogrant`), not screenshotted.
+
+## Deviations from the design (all small; none changes a ruling)
+
+1. **Help landed as commit 4, before the pages**, because `helpHref("presbytery-reports", ...)` is typed against the registry; the text was re-walked afterwards and corrected once.
+2. **`docs/product/functionality-map.md` edited** (a reports clause on the oversight and statistics bullet): `check:help` rule H15 fails without a mention of `/help/presbytery-reports`. It is not a Rule 16 file; the orchestrator may reword it at integration.
+3. **`verifiedIn: "0.56.1"`**, not 0.57.0: rule H13 rejects a version later than `package.json`. The orchestrator moves it to the release when the version bumps, after re-reading the page.
+4. **Audit helper:** each `exportX` calls `auditReportExport` (`presbytery-reports/audit.ts`, which calls `insertAuditRow(tx, ...)` with the key and a metadata type that has no name field) rather than inlining `insertAuditRow`. `boundaries.test.ts` pins both halves (every `export*` calls the helper; the helper uses `insertAuditRow(tx` and the one key; nothing calls `recordAudit`).
+5. **Signatures:** `getVacantPulpits`, `getViability` and their `read`/`export` forms take no `params` argument (they have none); `getVacantPulpits(viewer, now?)`.
+6. **Names:** the response helper is `respondWithExport` (an `exportResponse` name would be mistaken by the scan for a module export function). `defaultTrendWindow` and `rawParam` added to `params.ts`.
+7. **Co-location:** the whole-page gate-state renderer is `reports/report-gate-state.tsx` (it imports the app-tree `org-states`); the views, frame, export button, year nav and states are in `src/components/presbytery-reports/` (P3-4 as designed).
+8. **Wording:** vacancy length and per-capita copy use singular forms ("1 month", "1 year, 1 month") where the table said "{n} months". The trend card footer stacks "n of m reporting" under the total.
+9. **Pipeline-branch data, not code:** the demo script was applied to the pipeline Neon branch only; `org_portal.credentials` and `org_portal.oversight` were switched on in that branch's `feature_flags` for the walk (`org_portal.reports` was already on). Production and development were never touched.
+10. **F446 root cause** is by reading (the uuid cast in `resolveMemberCongregation`) plus the failing-first test; the pre-fix runtime 200 was not observed in a browser.
+11. **Not done here, by design:** the Phase 6 walk as a freshly designated founding administrator (which of the four cards render for that person).
+
+## Orchestrator's integration list (Rule 16 shared files and housekeeping, none edited here)
+
+- `docs/decisions.md`: DECISION-337, 338, 339 (drafts are at the end of Phase 3, status line to finalize).
+- `docs/TODO.md`: split "Presbytery Increment 5" (reports to Done, imports open); add the Phase 3 "Tracked follow-ups" (F445 ruling, converge `worship/authority.ts` and `presbytery.ts` onto `org-portal/permission-check.ts`, giving export `recordAudit()` divergence, F448, F449, Excel export); a line for the demo script and flag state (`org_portal.reports`, `.credentials`, `.oversight` confirmed on in the demo environment). No `[help:...]` token needed (the page ships published).
+- `docs/STATE.md`; `docs/product/functionality-map.md` (my clause is a starting point; the Index line if the area shifts); release notes `docs/release-notes/v0.57.0.md` and the version bump; `src/lib/help/registry.ts` `verifiedIn` to the release after a re-read; CLAUDE.md Project Layout lines for `src/lib/presbytery-reports/` and `src/components/presbytery-reports/` and the `org-portal/session-check.ts` / `permission-check.ts` note.
+- `docs/testing.md`: one line on `scripts/presbytery-reports/seed-demo.sql` (apply after `seed-dev.sql`, never production). Optionally decide whether to merge it into `seed-dev.sql` (P3-7 allows an override) and whether `scripts/test-rls.sql` needs a re-run after merge (nothing here changed the schema or the RLS suite).
+- `scripts/seed-dev.sql`, `scripts/test-rls.sql`, `src/lib/db/domain/index.ts`, `drizzle/meta/_journal.json`, `e2e/support/*`: no change needed.
+- Operator-facing at the demo: vacancy now excludes interim and supply (higher count than the prototype), the viability scale is 1 = at risk, and the three flags must be on in production.
+
+## Handoff
+
+**To qa (Phase 5).** Read each `exportX` and `audit.ts` (the scan carries the property; QA reads it as for giving). Re-run `npm run check`, the unit suite, the DB suites above with `--no-file-parallelism`, and the three e2e specs against your own server and port. Watch for: the one-403-body rule across no relationship, ended, flag off, wrong type and missing key; the BOM on all four and its absence on giving and reimbursement; the failing-first evidence for F446 and F447 (commit 7); the copy-truthfulness check over the help diff (`presbytery-reports.md`, the `presbytery-tools` clause, the tile description) at 360px; and `[aboutOrgId]`'s UUID guard. Note the e2e dev lane needs a server started with `RATE_LIMIT_DISABLED=true`, `CRON_SECRET`, `DOMAINS_*` fakes and `E2E_ALLOW_SHARED_DB=true` (the config's own `webServer` starts `npm run dev` on :3000 and cannot be used from this worktree).
 
 ---
 

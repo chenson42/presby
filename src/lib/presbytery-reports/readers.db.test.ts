@@ -579,7 +579,10 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
     it("never includes B's congregation, nor B's 999", async () => {
       const d = await data();
       expect(d.rows.map((r) => r.organizationId)).not.toContain(bCong);
-      expect(JSON.stringify(d)).not.toContain("999");
+      // Not a substring search: the payload carries random UUIDs, and "999"
+      // turns up inside them often enough to redden a run (Phase 5 run 1).
+      const cells = d.rows.flatMap((r) => r.cells);
+      expect(cells.some((x) => x.kind === "value" && x.endingActive === 999)).toBe(false);
     });
 
     it("parity: every cell equals the figure the existing single-year rollup returns for that year", async () => {

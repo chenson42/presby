@@ -1,4 +1,4 @@
-A presbytery that has turned on "Per-Capita, SASR & Imports" can read four reports about its member congregations. Each report is a page on screen and a file you can download and open in a spreadsheet. The reports cover the congregations that are members of your presbytery today. New worshiping communities are not included, and neither is a congregation that has left.
+Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read four reports about its member congregations. Each report is a page on screen and a file you can download and open in a spreadsheet. The reports cover the congregations that are members of your presbytery today. New worshiping communities are not included, and neither is a congregation that has left.
 
 ## Open the reports
 
@@ -41,7 +41,7 @@ Choose a year with the arrows. Each row shows what the congregation was billed, 
 
 ## Downloading a report
 
-Choose "Export CSV". The file is the table as shown: one row for each congregation, or for each congregation and year in the membership trend. It holds no email addresses, street addresses, coordinates or people's names. If a text cell begins with =, +, - or @, the file adds a leading apostrophe so a spreadsheet shows it as text and does not run it as a formula. The file is UTF-8 with a byte-order mark, so Excel shows accented letters correctly. Every export is recorded in the audit trail with which report, who exported it and how many rows, and never the names or notes in it.
+Choose "Export CSV". The file is the table as shown: one row for each congregation, or for each congregation and year in the membership trend. It holds no email addresses, street addresses, coordinates or people's names, apart from anything written in the redevelopment notes. If a text cell begins with =, +, - or @, the file adds a leading apostrophe so a spreadsheet shows it as text and does not run it as a formula. The file is UTF-8 with a byte-order mark, so Excel shows accented letters correctly. Every export is recorded in the audit trail with which report, who exported it and how many rows, and never the names or notes in it.
 
 ## If a report is locked or missing
 

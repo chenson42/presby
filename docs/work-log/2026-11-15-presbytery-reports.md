@@ -14,7 +14,7 @@
 
 Operator, 2026-11-15: "after you are done pushing site changes then maybe organize the work to push the presby over the finish line. do what you can and then save things that might need some functional and architectural guidance as designs and share them with me", then "keep going on the stuff you can for the presby functionality taking it all the way to production to get me a good working demo."
 
-The gap review of the operator's prototype (`../../psvonline-portal`, a presbytery portal built for the Presbytery of Scioto Valley) against PresbyPortal found the presbytery's data model largely present and its reports missing. The prototype has `(app)/reports/{membership,per-capita,viability,buildings,vacant,map}`, each with "Export CSV" (`src/lib/csv.ts`). The operator's design page ("Presbytery finish line", shared 2026-11-15) lists "Reports v1 with CSV export" as the first item that needs no ruling from the operator: vacant pulpits, membership trend, viability list, per-capita report, each exportable, on the giving export's pattern (`admin/giving/gifts/export/route.ts`). Excel export is deferred (open question F on that page); the map is the dashboard pipeline's.
+The gap review of the operator's prototype (`../../psvonline-portal`, a presbytery portal built for the first presbytery customer) against PresbyPortal found the presbytery's data model largely present and its reports missing. The prototype has `(app)/reports/{membership,per-capita,viability,buildings,vacant,map}`, each with "Export CSV" (`src/lib/csv.ts`). The operator's design page ("Presbytery finish line", shared 2026-11-15) lists "Reports v1 with CSV export" as the first item that needs no ruling from the operator: vacant pulpits, membership trend, viability list, per-capita report, each exportable, on the giving export's pattern (`admin/giving/gifts/export/route.ts`). Excel export is deferred (open question F on that page); the map is the dashboard pipeline's.
 
 Existing: `/o/<slug>/admin/reports` (statistics table and form, per-capita rate, records, payments, grants) over `src/lib/presbytery.ts` (`getCongregationStatisticsRollup`, `getCongregationFilingHistory`, `getPerCapitaOverview`, `getCongregationOversightList`); appointments on the credentials page (`src/lib/db/domain/officers.ts` `appointments`). TODO: "Presbytery Increment 5 — imports and reports" (this pipeline takes the reports half; imports stay with the executor pipeline).
 
@@ -29,7 +29,7 @@ Existing: `/o/<slug>/admin/reports` (statistics table and form, per-capita rate,
 | 3 — Technical design | tech-lead | Done | Design complete | 2026-11-15 |
 | 4 — Implementation | full-stack-developer | Done (awaiting Phase 5) | — | 2026-11-15 |
 | 5 — Verification | qa | Done (run 2; run 1 FAIL fixed `fbf9c721`) | PASS | 2026-11-15 |
-| 6 — Shipped vs intent | analyst | In progress | — | — |
+| 6 — Shipped vs intent | analyst | Done | SHIP WITH NOTES | 2026-11-15 |
 
 ---
 
@@ -1473,4 +1473,153 @@ These run 1 notes for the operator and orchestrator still apply:
 
 # Phase 6 — Shipped vs Intent (analyst)
 
-(pending)
+## VERDICT
+
+**SHIP WITH NOTES.** No contradiction between the help page and the build, no wrong gate, and no figure on a page that disagrees with its file. Each note below becomes a TODO line.
+
+## ONE-LINE TAKE
+
+> A freshly designated presbytery founding administrator can open the hub, read all four reports on a phone, and download four honest, audited CSVs. The things that can still embarrass a demo are flag state, entering ministers without imports, and a trend window that hides the current year.
+
+## How the walk was done
+
+The database was the pipeline branch (`ep-rapid-thunder-axjm1eom`) only. I ran my own `next dev -p 3104`.
+
+1. **Created the presbytery through the app.** As the e2e platform admin, I created a presbytery at `/admin/organizations/new`. I then created three congregations under it with the real parent picker. One of them has an 80-character name.
+2. **Designated the administrator through the app.** I used the real "Send invitation" and confirm dialog on `/admin/organizations/[id]`. Deviation: this dev server has no `RESEND_API_KEY`, so the mail is a no-op and the queue row is redacted after "delivery". The one-time link is unrecoverable. I revoked that invitation and inserted an invitation row with a known token. That is the same insert as `seedInvitation` in `e2e/support/invitation-fixture.ts`.
+3. **Accepted as the new person.** At 360×780 I used the real `/invite` page, created the account, and signed in. The role forced two-factor enrolment at `/account/2fa`, and I enrolled with a generated code. The login then landed on `/o/<slug>`. This was a new account and a newly created person, not a seeded fixture.
+4. **Entered the data through the real forms.**
+   - Statistics: 2026 figures for two of the three congregations.
+   - Per capita: a rate with basis year 2026, then Generate, then two payments (one partial, one an overpayment).
+   - Viability: assessments for two congregations. One note contained a comma, quotes and an LF.
+   - Credentials: three appointments (installed, installed then ended, interim), then "End appointment" through its dialog.
+5. **Walked all pages.** I read the hub and the four reports at 360px, and the hub, trend, vacant and per-capita at 1280px. I downloaded all four CSVs plus "Export all years". I also downloaded one by clicking the real link. I read the audit rows afterwards.
+
+**What I did not re-walk.** A non-founding user with locked cards, mid-enrolment redirects, and the 503 copy. QA run 1 and run 2 covered these with e2e and route tests, and I did not repeat them.
+
+**What I walked instead for vacancy.** A fresh presbytery has no ministers. The only person in the appointment picker is the founding administrator, so I recorded the appointments against her. This is the realistic demo gap (see follow-up 4).
+
+## What's Working
+
+- **Phase 1's open question is answered.** The founding administrator sees all four cards unlocked, and all four pages and exports return 200. The Stated Clerk office in the founding bundle carries the keys.
+- **360px holds.** `scrollWidth == innerWidth` on every page. Cards show below the breakpoint and tables above it. Export buttons are full width. The 80-character name wraps. The hub sits above the long statistics form, so a phone user finds it first.
+- **Page and file agree on every figure.**
+
+| Report | Page | CSV |
+|---|---|---|
+| Per capita | Billed 4,207.50, paid 2,200.00, owed 2,007.50. Overpayment shown as "$52.50 credit". | `-52.50`, note `Credit`, no apostrophe on the number |
+| Vacant | Stonebridge "2 years, 2 months" | 806 days, vacant since 2024-08-31, interim supply shown |
+| Trend | "2 of 3 reporting" | Three rows, `no_data` for Willow Run |
+| Viability | At risk, Healthy, Not yet assessed in that order | Quoted note (comma, doubled quotes, LF) intact |
+
+- **The honest empty states work.**
+  - Vacant: "No pastoral appointments are recorded yet", no list, no export.
+  - Trend: a window with no data gets a "Record statistics" link and no export.
+  - Per capita: no bills for a year gets its own empty state.
+  - A congregation with no statistics shows "Not billed – No statistics on file for 2026".
+- **Downloads behave.**
+  - Every file starts `EF BB BF`, with CRLF line ends and `text/csv; charset=utf-8`.
+  - Each has an `attachment` filename and `no-store`.
+  - The clicked link downloads `viability-<slug>-<date>.csv`.
+  - Signed out gives a 307 to `/signin` carrying the export's own path.
+  - An 11-year window gives a 400 with the contracted wording.
+- **Audit works.** Six `tenant.presbytery_report.exported` rows, one per download. The metadata is report, rowCount, year or window and organizationId, with no name or note.
+- **No two-factor claim anywhere** (F445).
+
+## Intent-vs-Shipped Diff
+
+- Phase 1 said: four reports (vacant, trend, viability, per capita), each a page plus CSV, built from data already entered, on the giving export's pattern. Shipped: same, plus "Export all years". Verdict: **matches**.
+- Operator intent: a working presbytery demo, with reports and CSV like the prototype. The prototype has membership, per-capita, viability, vacant, buildings and map. Shipped covers four. Buildings, the map and Excel are deliberate non-goals named in Phase 1, so this is acceptable drift. The demo works once the flags and data are in place (see notes 1 and 4). Names are not copied.
+- Phase 1 said: the walk is done as a freshly designated founding administrator. Done, as described above.
+- Phase 1 said: vacancy excludes interim and supply, and viability reads 1 = at risk. Shipped and stated on the page and the CSV header. **Both are still for the operator to confirm at the demo** (Phase 1 left them as open questions).
+- Phase 1 said: strict year parsing, a 10-year cap, and `[aboutOrgId]` 404s a non-UUID. Matches (QA failing-first, 11 tests).
+
+## Edge Cases
+
+- **Empty state:** pass, with the drift in note 2.
+- **Failure microcopy:** pass. I walked the 400, the 307 and the 404. The 503 and 409 bodies were pinned by QA's route tests and not re-walked.
+- **Permission gate:** pass. All four keys resolve for the founding administrator. The Locked cards were walked by QA as the no-grant user.
+- **Audit event:** pass, observed in the DB per export.
+- **Mobile (360px):** pass. Cosmetic issue in note 6.
+- **Help pages read as their reader (`presbytery-reports`):** pass with wording notes (note 3). The page was read at 360px (200, no horizontal scroll). Its path, section name, every card name, every empty-state sentence, the "Vacant since" and "No earlier pastor on record" wording, the dash, "No data" and "Not reported" meanings, "Total reported", the credit wording, the "Not billed" reasons and "Export all years" all matched the screens. The `presbytery-tools` clause is a one-line edit I checked against `registry.ts` via QA. `/help/presbytery-tools` returns 404 on this server because it is a `planned` page. That is not part of this change.
+- **`verifiedIn`:** the page says 0.56.1 because `check:help` rule H13 requires it to match `package.json`. Moving it to 0.57.0 is mine by this walk. I confirm the walk, so the orchestrator may set it at the version bump.
+- **`limitationUntil`:** none named. Nothing is removed.
+
+## Follow-Ups (TODO-ready lines)
+
+New from the walk:
+
+1. **Demo flag list.** Confirm in production: `org_portal.reports`, `.credentials`, `.oversight`, `.admin_hub`, **and `.chrome_v2` or `.chrome_v3`**, **and `.roles`**. Without `chrome_v2` or `chrome_v3` the landing page has no link to Administration, and the help route in is a dead end. With `chrome_v2` on, "Administration" appeared. `.roles` is off on this branch, so the Locked card's "give it under Roles" points to a Roles tile that is not there. Confirm it is on in production, or reword the lock text.
+2. **Trend window hides the current year.** The default window ends last calendar year, so a presbytery that has just entered 2026 figures sees "No statistics recorded for 2021 to 2025" and must press "Later years". Either end the window at the latest year with data, or have the empty state point to the later window. Phase 1 chose the old default, so this is new information from the walk.
+3. **Help wording.** "The file is the table as shown" is loose. The per-capita file has no totals row, years a congregation was not a member have no trend row, and "Export all years" omits "Not billed" rows. Add a sentence saying so.
+4. **Ministers without imports.** A fresh presbytery has no ministers to record appointments against, so vacant pulpits only works after people are added by hand or imported. Tie this to the imports half of Increment 5, and add a line to the demo runbook.
+5. **Cosmetic.** At 360px the trend's "Later years ›" wraps to its own line. The CSV filename date is UTC, while the page date is the organization's zone (my file read `2026-11-16` against a page date of 11/15), which can differ in the evening.
+6. **Signed-out redirect drops the query string.** The proxy does this and predates the change. QA noted it, and I confirmed. A TODO only if the operator cares.
+
+Carried from Phases 2 and 3:
+
+7. **F445 operator ruling.** Should `per_capita.manage` and `statistics.manage` require a second factor? It needs a migration and a help edit.
+8. **Helper convergence.** Move `worship/authority.ts` and `presbytery.ts`'s private `hasPermission` onto `org-portal/permission-check.ts`.
+9. **Giving audit divergence.** Move the giving gifts export from `recordAudit()` to an in-transaction `insertAuditRow` (DECISION-339).
+10. **F448, security review.** DELETE grants on `appointments`, `congregation_oversight`, `per_capita_rates`, `per_capita_records`, and DELETE with no INSERT or UPDATE on `congregation_statistics`.
+11. **F449.** Per-capita money columns are unconstrained `numeric`. The write paths accept `100.005` and `1e3`, which the reports round at read.
+12. **Increment 5 split.** Move reports to Done, with imports open.
+13. **Excel export.** Wait for the operator's ruling on open question F.
+14. **Monthly documentation review.** Ask whether `presbytery-tools` is still planned.
+
+## Integration housekeeping for the orchestrator
+
+- **Decisions.** Record DECISION-337, 338 and 339 in `docs/decisions.md`. The drafts are at the end of Phase 3. Fix up the status lines.
+- **Fixed findings.** F446 and F447 are fixed in this change. F445, F448 and F449 stay open, as the TODO lines above.
+- **TODO.** Apply follow-ups 1 to 14. Move "Presbytery Increment 5 — imports and reports" so reports are Done. No `[help:]` token is needed, since the page shipped `published`.
+- **STATE.** Update `docs/STATE.md`.
+- **Release notes and version.** Write `docs/release-notes/v0.57.0.md` and bump the version. Write it for a non-engineer, and keep the vacancy rule and viability scale visible. Then set the `verifiedIn` for `presbytery-reports` to `0.57.0` in the same commit. I walked it.
+- **Functionality map.** Phase 4 added a clause to `docs/product/functionality-map.md` because `check:help` H15 requires it. Re-read it and the Index line.
+- **CLAUDE.md Project Layout.** Add lines for `src/lib/presbytery-reports/`, `src/components/presbytery-reports/`, and `org-portal/session-check.ts` and `permission-check.ts` (DECISION-338, now inside T1's no-owner-connection zone).
+- **`docs/testing.md`.** Add one line: `scripts/presbytery-reports/seed-demo.sql` is applied after `seed-dev.sql` on a pipeline or demo branch, **never to `development` or production**. It adds three memberships and breaks `scripts/test-rls.sql` from line 219. After each merge, re-run `test-rls.sql` against merged `development` (Rule 16).
+- **Architecture.** `docs/architecture.md` needs no change under Rule 15. DECISION-339 is a pattern, not a subsystem.
+- **Rules 12 and 13.** The source was an operator request, not a feedback row, so there is nothing to mark `done`. The operator's standing instruction is no what's-new entry, so none.
+- **Shared files.** `scripts/seed-dev.sql`, `scripts/test-rls.sql`, `src/lib/db/domain/index.ts`, `drizzle/meta/_journal.json` and `e2e/support/*` are unchanged. No migration was added.
+- **Demo to-dos for the operator.**
+  - Flags: the list in follow-up 1, a flip and not a code change.
+  - Confirm the vacancy and viability rulings.
+  - Expect a higher vacancy count than the prototype.
+
+## Pipeline-branch residue
+
+Branch `br-mute-tree-axpmuezq` only.
+
+- My script chose the wrong parent for the first set of congregations, so three orphan congregations sit under the first presbytery.
+- Fixtures created:
+  - Two presbyteries named "Walkthrough Presbytery of the Pine Hills …".
+  - Six congregations.
+  - Two `p6walk-*@example.invalid` accounts, one of which is enrolled with a lost secret.
+  - A revoked invitation and an accepted one.
+  - Audit rows.
+  - Appointments, statistics, bills and oversight rows.
+- `org_portal.chrome_v2` was switched on for the walk and restored to `false`.
+- Organizations are permanent, so the Neon branch is simply deleted at integration cleanup.
+- Scratchpad (screenshots, scripts, secrets for the throwaway account): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/p6/`. Every name in them is invented. The screenshots I read, including the hub, trend and per-capita pages, held no real data.
+
+## Per-Phase Status row
+
+| 6 — Shipped vs intent | analyst | Done | SHIP WITH NOTES | 2026-11-15 |
+
+## Handoff
+
+To the **orchestrator**, for the integration cluster above: decisions, TODO lines, STATE, release notes and version bump with `verifiedIn`, functionality map, CLAUDE.md layout, `docs/testing.md`.
+
+Separately, the operator needs the production flag confirmations in follow-up 1 before the demo. The pipeline closes on SHIP WITH NOTES once the follow-ups land in `docs/TODO.md` (Rule 10). Per CLAUDE.md, only SHIP IT "closes the pipeline", so the entry stays open until those lines are recorded. Nothing here goes back to Phase 3 or 4.
+
+Files read, all in `/Users/cshenso/git/presby-platform/presby-reports` unless noted:
+- `docs/work-log/2026-11-15-presbytery-reports.md` (whole log), `docs/work-log/_template.md`
+- `e2e/support/{invitation-fixture,invitation-observer,invitation-ui,users}.ts`
+- `e2e/admin-organizations-create.spec.ts`, `e2e/invitation-new-account.spec.ts`
+- `src/lib/onboarding/{issue,invitation-token}.ts`
+- `src/lib/email/send.ts`
+- `src/lib/org-portal/{tiles,visible-tiles}.ts`
+- `src/app/(org)/o/[slug]/layout.tsx`
+- `src/app/(org)/o/[slug]/admin/credentials/{record-appointment-form,end-appointment-dialog}.tsx`
+- `src/app/(org)/o/[slug]/admin/oversight/[aboutOrgId]/edit-form.tsx`
+- `src/app/(org)/o/[slug]/admin/reports/{statistics-form,per-capita-rate-form,record-payment-form}.tsx`
+- `/Users/cshenso/git/psvonline-portal/src/app/(app)/reports/*` (prototype, headings only)

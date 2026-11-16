@@ -1,7 +1,7 @@
 # Functionality Map
 
 A scannable inventory of everything built, so a session
-knows what exists without re-reconning. **Version `0.56.1` · surveyed 2026-11-15.**
+knows what exists without re-reconning. **Version `0.57.0` · surveyed 2026-11-15.**
 
 This is a MAP, not documentation — one line per capability, with the primary file as
 a jump-off point. When it drifts from reality, fix it (Workflow Rule 14). Entries

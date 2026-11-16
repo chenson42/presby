@@ -4,6 +4,30 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-339 — An export that audits writes its row in the read's transaction.**
+
+**Status:** Resolved (architect Phase 2; tech-lead Phase 3); QA PASS (run 2), Phase 6 SHIP WITH NOTES · **Date:** 2026-11-15 · **Feature:** `2026-11-15-presbytery-reports` (v0.57.0)
+
+A route-handler export of tenant data writes its `audit_events` row with `insertAuditRow` inside the same `withOrgContext` transaction as the read, and fails closed: if the audit insert fails, the route answers 503 and sends no file. `recordAudit()` is not used for exports, because it opens its own connection and swallows failures, so a tier-2 file could leave the system with no row. Phase 3 refines it: the export function also builds the CSV text inside that transaction, before the audit insert, so neither a failed build nor a failed audit leaves the other half behind. `check:audit` sees only `actions.ts` files, so the module's `boundaries.test.ts` is the guard (each `route.ts` calls an `export*` function; each `export*` calls `insertAuditRow` with `PRESBYTERY_REPORT_EXPORTED`; nothing in the module calls `recordAudit`), the same way `reimbursement/audit-coverage.test.ts` is for DECISION-271. The metadata is the report key, the row count and the year or window, never a name, note or amount. Precedent: DECISION-271. Known divergence, tracked in `docs/TODO.md`: the giving gifts export still uses `recordAudit()`.
+
+---
+
+**DECISION-338 — Shared (org) gate helpers live in `src/lib/org-portal/`.**
+
+**Status:** Resolved (architect Phase 2; tech-lead Phase 3); QA PASS (run 2), Phase 6 SHIP WITH NOTES · **Date:** 2026-11-15 · **Feature:** `2026-11-15-presbytery-reports` (v0.57.0)
+
+The (org) surface's Node-side session and second-factor check (`session-check.ts`, pure, `assertOrgSession` and `orgTotpRedirectUrl`) and the in-transaction `presby_has_permission` helper (`permission-check.ts`, `server-only`, `holdsPermissions`) live in `src/lib/org-portal/`, so a presbytery or worship surface does not import from `treasury` (worship's boundaries test bars it, which is why `worship/authority.ts` and `presbytery.ts` each grew a private copy). The bodies moved byte for byte; `src/lib/treasury/session.ts` and `keys.ts` re-export them under their old names, as `giving/access-pure.ts` already re-exports from `treasury/session.ts`, so no file under `src/lib/giving/`, `src/lib/reimbursement/` or `admin/giving/**` changes and every giving byte pin and test is untouched. The two new files join `check:treasury-boundaries` T1's no-owner-connection zone by explicit path, because leaving `src/lib/treasury/` would otherwise take them out of it. They stay out of `src/lib/auth/` so the running-server login smoke is not triggered. The move ships as its own `refactor:` commit ahead of the feature commits. Converging worship's and `presbytery.ts`'s copies is a tracked follow-up.
+
+---
+
+**DECISION-337 — Presbytery reports: placement and module shape.**
+
+**Status:** Resolved (architect Phase 2; tech-lead Phase 3); QA PASS (run 2), Phase 6 SHIP WITH NOTES · **Date:** 2026-11-15 · **Feature:** `2026-11-15-presbytery-reports` (v0.57.0)
+
+Four static segments (`vacant-pulpits`, `membership-trend`, `viability`, `per-capita`) sit beside `admin/reports/[aboutOrgId]`, each with an `export/route.ts`; `[aboutOrgId]` 404s a non-UUID before any read (F446). A new module `src/lib/presbytery-reports/` holds a pure contract, params, derive, CSV and copy, a `server-only` gate (page skin and route skin) and roster, and one reader per report. Each reader has one transaction-level read, checked against the report's own existing key inside the transaction, that serves both the page and the export, so they cannot diverge; the export builds its CSV and writes its audit row in that same transaction (DECISION-339). The roster is one read (`parent_id` cache, type `congregation`, lifecycle `active`), and the statistics coalesce has one definition, `fetchStatisticsForYears`, exported from `presbytery.ts` (the single-year function delegates to it). Money is integer cents read with `round(x * 100)` in SQL; the UTF-8 BOM is applied only in these four builders; numbers go through `csvIntegerCell`, never the text guard. Pages render a card list below `sm` (`lg` for the trend) and a table above, from the same rows, with `src/components/presbytery-reports/` for the views. Vacancy is "no installed or designated pastor in force today", with supply shown separately and a zero-appointment presbytery shown an honest empty state. No migration, no new permission key, no new flag and no new cross-council read. Excel, the map, buildings and imports are out of scope.
+
+---
+
 **DECISION-336 — The trainer's accessibility floor.**
 
 **Status:** Resolved (tech-lead Phase 3; amended in Phase 4 Batch 5 by F-QA-1); QA PASS (run 2), Phase 6 SHIP WITH NOTES · **Date:** 2026-11-11 · **Feature:** `2026-11-10-learn-inc1a` (v0.56.0)

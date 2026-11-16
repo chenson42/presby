@@ -7,7 +7,13 @@ Updated 2026-10-31: `main` is at 0.51.0 (treasury Increment 1, reimbursements, m
 
 ---
 
-## RESUME HERE — 2026-10-25 (latest): 0.43.0 is merged; the public events calendar is integrating as v0.44.0; apply 0067 to production BEFORE merging
+## RESUME HERE — 2026-11-15: 0.57.0, presbytery reports; 0.56.1 (site footer and kit v4.4.2) is live
+
+`main` carries **0.56.1** (public site footer at the bottom of the window; `presby-site-kit` v4.4.2 with hideMenu, tile colour, icon tiles, a logo row and centred prose) and **0.57.0** (presbytery reports: vacant pulpits, membership trend, viability, per capita, each a page and an audited CSV; DECISION-337 to 339; no migration). The first presbytery customer's front door is live on its own domain. Operator decisions for the rest of the presbytery work are on the shared "Presbytery finish line" design page (congregation model, committees, presbytery officers, mission giving, directory export, import formats, a map key). Open: F445 (two tier-2 keys without forced 2FA), F448, F449; Learn 1b still held. The memory files under `~/.claude/projects/` carry the session-level detail; this block is the in-repo pointer.
+
+---
+
+## Previous handoff — 2026-10-25 (latest): 0.43.0 is merged; the public events calendar is integrating as v0.44.0; apply 0067 to production BEFORE merging
 
 `main` is at `2a25584`: v0.42.5 plus **v0.43.0** (platform admin redesign Increment 1, PR #55: the `/admin` dashboard, grouped nav, phone menu,
 `error.tsx`, no `loading.tsx` under `(admin)`; DECISION-251/252/253/255; F274-F276 and F281 in `docs/schema-design-2.md` section 2aa; no

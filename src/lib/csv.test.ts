@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsToDecimal, csvTextCell, joinCsvLines } from "./csv";
+import { centsToDecimal, csvIntegerCell, csvTextCell, joinCsvLines } from "./csv";
 
 describe("csvTextCell", () => {
   it("is empty for null, undefined and the empty string", () => {
@@ -46,5 +46,27 @@ describe("joinCsvLines", () => {
   it("terminates every line, the last included, with CRLF", () => {
     expect(joinCsvLines(["a", "b"], ["1,2", "3,4"])).toBe("a,b\r\n1,2\r\n3,4\r\n");
     expect(joinCsvLines(["a"], [])).toBe("a\r\n");
+  });
+});
+
+describe("csvIntegerCell", () => {
+  it("writes a safe integer bare, negative and zero included (never text-guarded)", () => {
+    expect(csvIntegerCell(0)).toBe("0");
+    expect(csvIntegerCell(2025)).toBe("2025");
+    expect(csvIntegerCell(-12)).toBe("-12");
+    expect(csvIntegerCell(Number.MAX_SAFE_INTEGER)).toBe(String(Number.MAX_SAFE_INTEGER));
+  });
+
+  it("is empty for null and undefined", () => {
+    expect(csvIntegerCell(null)).toBe("");
+    expect(csvIntegerCell(undefined)).toBe("");
+  });
+
+  it("throws on a float, NaN, Infinity, an unsafe integer and a string", () => {
+    expect(() => csvIntegerCell(1.5)).toThrow(RangeError);
+    expect(() => csvIntegerCell(Number.NaN)).toThrow(RangeError);
+    expect(() => csvIntegerCell(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+    expect(() => csvIntegerCell(2 ** 53)).toThrow(RangeError);
+    expect(() => csvIntegerCell("12" as unknown as number)).toThrow(RangeError);
   });
 });

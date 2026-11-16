@@ -47,4 +47,6 @@ export const SLUG_HISTORY: readonly string[] = [
   "worship-setting-up",
   // 2026-11-11, learn Increment 1a: Spot the scam.
   "spot-the-scam",
+  // 2026-11-15, presbytery reports: the four reports and their downloads.
+  "presbytery-reports",
 ];

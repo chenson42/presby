@@ -14,6 +14,8 @@ The text of your pages, their images and the website's menus are not edited in P
 
 This is why a setting in PresbyPortal can be on and nothing shows on your website: the website has to have a place for it.
 
+The footer at the bottom of every page is the same. The address and phone number in it are set by the PresbyPortal team, and an address can have several lines, as on an envelope. A line naming your congregation's denomination, footer links such as "Contact us", your name in the copyright line, and the details search engines read (such as your EIN, which is not shown on the page but can be read in its source) are added by whoever maintains your website. To change any of them, send a support ticket.
+
 ## Colour, type pairing and logo
 
 The "Branding" page sets your congregation's colour, a type pairing ("Classic", "Modern", "Warm" or "Contemporary"), an optional logo (PNG, JPEG or WEBP, up to 2 MB) and "Light mode only". Choose "Save brand" and the message is "Brand saved." The colour is used in the portal and on your public website.

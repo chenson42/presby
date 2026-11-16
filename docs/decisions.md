@@ -4,6 +4,22 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-341 — One narrow exception to the kit's no-`dangerouslySetInnerHTML` rule: the organization JSON-LD element.**
+
+**Status:** Resolved (tech-lead Phase 3; shipped with operator-approved shortcuts) · **Date:** 2026-11-16 · **Feature:** `2026-11-16-site-footer-contact` (v0.58.0, presby-site-kit v4.5.0)
+
+presby-site-kit forbids `dangerouslySetInnerHTML` because a content repo is a lower trust tier than the kit. React entity-escapes a `<script>`'s children, so JSON-LD cannot be emitted any other way. Exactly one element, in `src/components/StructuredData.tsx`, may use it: the object is built field by field from validated values (never a spread of content); URLs are absolute `https:`; strings and arrays are capped; the EIN is validated and normalized or dropped; the text is `JSON.stringify` output with `<`, `>`, `&`, U+2028 and U+2029 escaped as `\uXXXX`; it is emitted on the home page only. A `</script><script>` payload test pins the escaping. The JSON-LD does not claim to satisfy any search engine's nonprofit verification; a person reads the visible footer. Any second use needs a new decision. Follow-up in `docs/TODO.md`: a kit source-scan test pinning "exactly one file".
+
+---
+
+**DECISION-340 — Site-wide footer and identity content is a `site` object in the home page's frontMatter, opt-in, read by the kit; organization addresses are multi-line.**
+
+**Status:** Resolved (analyst Phase 1; tech-lead Phase 3; shipped with operator-approved shortcuts) · **Date:** 2026-11-16 · **Feature:** `2026-11-16-site-footer-contact` (v0.58.0, presby-site-kit v4.5.0)
+
+A site is a list of pages with no site-level file, and adding one would change the ingest contract and storage. The kit therefore reads one `site` object from the frontMatter of the page whose `path` is `/` and applies it to every page's footer: `footerLine`, up to four `footerLinks` (absolute `https`, `mailto:` or `tel:` only), `copyrightHolder` (`true` uses the portal's organization name, a string overrides it) and `organization` (JSON-LD, DECISION-341). Every key is opt-in; a site without them renders byte-for-byte as before (checked against all four existing content repos). The JSON-LD `name`, `url`, `address` and `telephone` come only from the portal name, the caller's origin and the profile, never from content; `nonprofitStatus` has no default and is allowlisted to schema.org's `USNonprofitType` names. The organization profile address is entered in a textarea and stored LF-only after `normalizeAddress` (`src/lib/site-address.ts`: line breaks unified, control characters removed, lines trimmed, blank lines dropped, at most 6 lines and 500 characters after normalizing, refused rather than truncated). Both footers show one line per line; the "Get directions" link joins lines with commas. Nothing parses the address into fields. Footer content is edited in the private content repo; a footer-content editor in presby is out of scope.
+
+---
+
 **DECISION-339 — An export that audits writes its row in the read's transaction.**
 
 **Status:** Resolved (architect Phase 2; tech-lead Phase 3); QA PASS (run 2), Phase 6 SHIP WITH NOTES · **Date:** 2026-11-15 · **Feature:** `2026-11-15-presbytery-reports` (v0.57.0)

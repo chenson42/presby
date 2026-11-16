@@ -326,7 +326,7 @@ export const organizationNameHistory = pgTable(
     name: text("name").notNull(),
     /**
      * Null on every backfilled row, permanently and on purpose:
-     * `organizationProfiles.address` is one free-text line with no structured
+     * `organizationProfiles.address` is free text (one or more lines, DECISION-340) with no structured
      * city, and city is exactly the disambiguator F33 relies on. There is
      * deliberately no "canonical requires city" CHECK.
      */

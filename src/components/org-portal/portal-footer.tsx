@@ -114,7 +114,7 @@ export async function PortalFooter({
           <div className="space-y-1">
             <p className="font-medium text-foreground">{organizationName}</p>
             {profile?.address && (
-              <p className="text-base">{profile.address}</p>
+              <p className="whitespace-pre-line break-words text-base">{profile.address}</p>
             )}
             {profile?.phone && (
               <a

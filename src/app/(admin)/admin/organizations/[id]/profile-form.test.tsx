@@ -63,7 +63,7 @@ function renderForm(overrides: Partial<ComponentProps<typeof ProfileForm>> = {})
 describe("ProfileForm — initial render", () => {
   it("renders every field, all empty when no profile exists yet", () => {
     renderForm();
-    expect((screen.getByLabelText(/^address$/i) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(/^address$/i) as HTMLTextAreaElement).value).toBe("");
     expect((screen.getByLabelText(/^phone$/i) as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(/facebook/i) as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(/instagram/i) as HTMLInputElement).value).toBe("");
@@ -82,7 +82,7 @@ describe("ProfileForm — initial render", () => {
       initialYoutubeUrl: "https://youtube.com/fixture",
       initialOtherUrl: "https://fixture.example.invalid",
     });
-    expect((screen.getByLabelText(/^address$/i) as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText(/^address$/i) as HTMLTextAreaElement).value).toBe(
       "123 Fixture Ln",
     );
     expect((screen.getByLabelText(/facebook/i) as HTMLInputElement).value).toBe(

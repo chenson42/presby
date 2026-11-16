@@ -25,6 +25,10 @@ is checked.*
 
 ---
 
+## 2026-11-16
+
+- [ ] **`decision` · Website footers can name the organization, link to its contact page and carry its EIN for search engines (0.58.0, presby-site-kit v4.5.0; DECISION-340, DECISION-341).** Addresses are now multi-line in the organization profile, shown line by line in both footers. The new footer line, links, © name and organization metadata come from a `site` object on the website's home page, opt-in; all four existing sites render byte-for-byte as before. **Accepted:** the EIN is invisible on the page but readable in its source; the kit's one `dangerouslySetInnerHTML` is the escaped JSON-LD element. **Shortcuts you approved:** no separate implementer, QA or Phase 6 agents, and no preview before publishing; you review in production. **Your step:** enter the first presbytery's address on two lines on its organization page. **Deferred:** phone shown as typed, PO Box directions, a structured address for JSON-LD, the one-file scan test (TODO).
+
 ## 2026-11-15
 
 - [ ] **`decision` · Presbytery reports are live for presbyteries where Reports is on (0.57.0; DECISION-337 to DECISION-339).** Vacant pulpits, membership trend, viability and per capita, each a page and a CSV download, under Administration → Per-Capita, SASR & Imports. No migration, no new key or flag. **Rulings to confirm at your demo:** "vacant" means no installed or designated pastor today, so interim and stated supply do not fill the pulpit (the count will be higher than the prototype's); viability is 1 = at risk, 3 = healthy (the prototype was reversed). **Every download writes its audit row in the same transaction as the read and fails closed (DECISION-339);** giving's export does not yet (TODO). **Your calls:** F445, whether `per_capita.manage` and `statistics.manage` should force a second factor (giving's tier-2 key does); Excel (open question F). **Found:** F448, the app role holds DELETE on five presbytery tables, against the soft-delete rule; for the security review.

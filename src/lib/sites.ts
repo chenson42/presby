@@ -19,6 +19,7 @@ import { TYPE_PAIRINGS, type TypePairingKey } from "@/lib/brand/contract";
 import { hasTicketsFile } from "@/lib/tickets";
 import { isPlatformHost, parseSiteKey, platformOrigin, requestHost } from "@/lib/domains/host";
 import { buildSiteUrls, slugSitePath, type SiteUrls } from "@/lib/site-urls";
+import { normalizeAddress } from "@/lib/site-address";
 import type { OfficerOffice } from "@/lib/officers";
 
 /**
@@ -1142,7 +1143,6 @@ export const getOrgProfileForFooter = cache(
 // App-level bounds only — no DB CHECK on these text columns (Phase 3 Data
 // Model, matching site_contact_messages.body's own precedent: international
 // address/phone formats vary too widely for a format CHECK to earn its keep).
-const MAX_ADDRESS_LEN = 500;
 const MAX_PHONE_LEN = 50;
 
 const SOCIAL_URL_FIELDS = [
@@ -1209,13 +1209,13 @@ export async function setOrganizationProfile(
   },
   actorUserId: string,
 ): Promise<SetOrganizationProfileResult> {
-  const address = input.address.trim();
-  if (address.length > MAX_ADDRESS_LEN) {
-    return {
-      kind: "invalid_input",
-      error: `Address is too long (up to ${MAX_ADDRESS_LEN} characters).`,
-    };
+  // Multi-line (DECISION-340): line breaks normalized to LF, blank lines
+  // dropped, at most MAX_ADDRESS_LINES lines and MAX_ADDRESS_LEN characters.
+  const normalized = normalizeAddress(input.address);
+  if (!normalized.ok) {
+    return { kind: "invalid_input", error: normalized.error };
   }
+  const address = normalized.value;
   const phone = input.phone.trim();
   if (phone.length > MAX_PHONE_LEN) {
     return {

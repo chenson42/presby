@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { setOrganizationProfileAction, type PolicyResult } from "./actions";
 
 /**
@@ -89,18 +90,19 @@ export function ProfileForm({
 
       <div>
         <Label htmlFor="address">Address</Label>
-        <Input
+        <Textarea
           id="address"
           name="address"
-          type="text"
+          rows={3}
           value={address}
           onChange={(e) => setAddress(e.target.value)}
-          placeholder="123 Main St, Anytown, ST 00000"
+          placeholder={"123 Main St, Suite B\nAnytown, ST 00000"}
           aria-describedby="addressHelp"
         />
         <p id="addressHelp" className="mt-1.5 text-xs text-muted-foreground">
-          Shown as a &quot;Get Directions&quot; link on the public site. Leave
-          blank to omit it entirely.
+          Enter it as it would appear on an envelope, one line per line, up to
+          six lines. Shown in the website and portal footers with a &quot;Get
+          directions&quot; link. Leave blank to omit it entirely.
         </p>
       </div>
 

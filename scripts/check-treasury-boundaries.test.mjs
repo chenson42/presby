@@ -77,6 +77,20 @@ describe("T1 - no owner connection under reimbursement, treasury or either route
   });
 });
 
+describe("T1 - the shared (org) gate helpers that left src/lib/treasury/ stay in the zone (DECISION-338)", () => {
+  it("names exactly the two moved files by path", () => {
+    expect(isNoOwnerConnectionZone("src/lib/org-portal/session-check.ts")).toBe(true);
+    expect(isNoOwnerConnectionZone("src/lib/org-portal/permission-check.ts")).toBe(true);
+    expect(isNoOwnerConnectionZone("src/lib/org-portal/tiles.ts")).toBe(false);
+  });
+
+  it("flags an owner connection in a moved helper", () => {
+    const v = checkTreasuryBoundaries([f("src/lib/org-portal/permission-check.ts", "const db = getPlatformDb();")]);
+    expect(rules(v)).toEqual(["T1"]);
+    expect(checkTreasuryBoundaries([f("src/lib/org-portal/tiles.ts", "const db = getPlatformDb();")])).toEqual([]);
+  });
+});
+
 // ── T2 - only src/lib/reimbursement/ and the mirror name the tables ─────────
 
 describe("T2 - only src/lib/reimbursement/ and the Drizzle mirror name a reimbursement table or definer", () => {

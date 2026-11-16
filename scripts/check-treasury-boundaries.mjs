@@ -98,6 +98,9 @@ export function isNoOwnerConnectionZone(rel) {
   if (rel.startsWith("src/lib/reimbursement/")) return true;
   if (rel.startsWith("src/lib/treasury/")) return true;
   if (rel.startsWith("src/components/treasury/")) return true;
+  // The shared (org) gate helpers moved out of treasury (DECISION-338): leaving
+  // src/lib/treasury/ must not take them out of this zone, so by explicit path.
+  if (rel === "src/lib/org-portal/session-check.ts" || rel === "src/lib/org-portal/permission-check.ts") return true;
   if (rel.startsWith(`${ORG_TREE}reimbursements/`)) return true;
   if (rel.startsWith(`${ORG_TREE}admin/reimbursements/`)) return true;
   if (rel.startsWith("src/app/api/") && /reimbursement/i.test(rel)) return true;

@@ -85,3 +85,20 @@ export interface ReportAuditMetadata {
   billingYear?: number;
   allYears?: true;
 }
+
+/** Who is reading: the signed-in user and the person row they are at this presbytery. */
+export interface ReportViewer {
+  userId: string;
+  email: string | null;
+  personId: string;
+  organizationId: string;
+}
+
+/** A reader's outcome: the data, or a refusal for a missing key. Never a thrown permission error. */
+export type ReportRead<T> = { kind: "ok"; data: T } | { kind: "forbidden" };
+
+/** An export's outcome (the route turns each into a status). */
+export type ReportExport =
+  | { kind: "ok"; csv: string; rowCount: number; filenameBase: string }
+  | { kind: "forbidden" }
+  | { kind: "nothing_to_export" };

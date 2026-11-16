@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { withOrgContext, type OrgTx } from "@/lib/authz";
 import { organizations } from "@/lib/db/domain/org";
 import {
@@ -685,25 +685,32 @@ export interface StatisticsRollupRow extends SasrAggregateInput {
  *  `published_by_congregation` row must never be a CANDIDATE for "current,"
  *  not merely lose a tie-break it could otherwise still win as the only row
  *  on file. */
-async function fetchStatisticsForYear(
+export async function fetchStatisticsForYears(
   tx: OrgTx,
   organizationId: string,
-  year: number,
-): Promise<Map<string, typeof congregationStatistics.$inferSelect>> {
+  fromYear: number,
+  toYear: number,
+): Promise<Map<number, Map<string, typeof congregationStatistics.$inferSelect>>> {
   const rows = await tx
     .select()
     .from(congregationStatistics)
     .where(
       and(
         eq(congregationStatistics.organizationId, organizationId),
-        eq(congregationStatistics.year, year),
+        gte(congregationStatistics.year, fromYear),
+        lte(congregationStatistics.year, toYear),
         isNull(congregationStatistics.withdrawnAt),
       ),
     )
     .orderBy(desc(congregationStatistics.publishedAt));
 
-  const byAboutOrg = new Map<string, typeof congregationStatistics.$inferSelect>();
+  const byYear = new Map<number, Map<string, typeof congregationStatistics.$inferSelect>>();
   for (const row of rows) {
+    let byAboutOrg = byYear.get(row.year);
+    if (!byAboutOrg) {
+      byAboutOrg = new Map();
+      byYear.set(row.year, byAboutOrg);
+    }
     const existing = byAboutOrg.get(row.aboutOrgId);
     if (!existing) {
       byAboutOrg.set(row.aboutOrgId, row);
@@ -722,7 +729,20 @@ async function fetchStatisticsForYear(
       byAboutOrg.set(row.aboutOrgId, row);
     }
   }
-  return byAboutOrg;
+  return byYear;
+}
+
+/** The single-year view of `fetchStatisticsForYears` — the ONE definition of
+ *  the coalesce (presbytery reports, DECISION-337): the multi-year trend and
+ *  this function run the same query and the same pick. */
+async function fetchStatisticsForYear(
+  tx: OrgTx,
+  organizationId: string,
+  year: number,
+): Promise<Map<string, typeof congregationStatistics.$inferSelect>> {
+  return (
+    (await fetchStatisticsForYears(tx, organizationId, year, year)).get(year) ?? new Map()
+  );
 }
 
 function toRollupRow(

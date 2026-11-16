@@ -89,7 +89,9 @@ const OK_RESOLVED = {
   },
 };
 
-function makeParams(slug = "northern-reach", aboutOrgId = "cong-1") {
+const CONG_ID = "11111111-2222-4333-8444-666666666666";
+
+function makeParams(slug = "northern-reach", aboutOrgId = CONG_ID) {
   return Promise.resolve({ slug, aboutOrgId });
 }
 
@@ -100,7 +102,7 @@ describe("CongregationFilingHistoryPage — the ordering/error-handling contract
     await expect(
       CongregationFilingHistoryPage({ params: makeParams() }),
     ).rejects.toThrow(
-      "REDIRECT:/signin?callbackUrl=%2Fo%2Fnorthern-reach%2Fadmin%2Freports%2Fcong-1",
+      `REDIRECT:/signin?callbackUrl=${encodeURIComponent(`/o/northern-reach/admin/reports/${CONG_ID}`)}`,
     );
   });
 
@@ -238,5 +240,36 @@ describe("CongregationFilingHistoryPage — the ordering/error-handling contract
     expect(screen.getByText("Withdrawn")).toBeTruthy();
     expect(screen.getByText("Session, 2026-02-28, item 5")).toBeTruthy();
     expect(screen.getByText("Tobias Renwick (Stated Clerk)")).toBeTruthy();
+  });
+});
+
+describe("CongregationFilingHistoryPage — regression for a malformed congregation id (F446)", () => {
+  // The route was `/admin/reports/<anything>`: a non-UUID reached the uuid comparison in the
+  // reader, which raised, and the page showed a load error at HTTP 200. With four report
+  // segments beside it, a mistyped report URL lands here, so it must be a 404.
+  it("calls notFound() for a non-UUID id BEFORE the session, the organization or any read — regression for the 200 load error", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+
+    for (const id of ["not-a-uuid", "vacant-pulpit", "membership-trends", "", "12345", "../admin"]) {
+      notFoundMock.mockClear();
+      await expect(CongregationFilingHistoryPage({ params: makeParams("northern-reach", id) })).rejects.toThrow("NOT_FOUND");
+    }
+    expect(cachedAuth).not.toHaveBeenCalled();
+    expect(resolveOrgContext).not.toHaveBeenCalled();
+    expect(getCongregationFilingHistory).not.toHaveBeenCalled();
+  });
+
+  it("still serves a real UUID", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationFilingHistory.mockResolvedValue({
+      kind: "ok",
+      data: { congregationName: "Alder Creek Presbyterian Church", rows: [] },
+    });
+    await CongregationFilingHistoryPage({ params: makeParams("northern-reach", "11111111-2222-4333-8444-555555555555") });
+    expect(getCongregationFilingHistory).toHaveBeenCalledWith("person-1", "org-1", "11111111-2222-4333-8444-555555555555");
   });
 });

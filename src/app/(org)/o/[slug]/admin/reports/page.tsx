@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { cachedAuth } from "@/lib/auth/cached-auth";
 import { assertOrgSession, orgTotpRedirectUrl } from "@/lib/org-portal/session-check";
+import { parseBillingYear, parseYear } from "@/lib/presbytery-reports/params";
 import {
   assertOrgAccess,
   OrgAccessError,
@@ -66,7 +67,7 @@ export default async function ReportsPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ year?: string; billingYear?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
@@ -116,14 +117,13 @@ export default async function ReportsPage({
     return <PlaceholderNotAvailable area={AREA} orgName={resolved.org.name} />;
   }
 
+  // Strict years (F447): a blank, malformed, repeated or out-of-range value falls back to
+  // the default instead of becoming 1900 (`Number("")` is 0, finite, then clamped).
   const now = new Date();
-  const clampYear = (value: number) => Math.min(2100, Math.max(1900, Math.trunc(value)));
-  const statsYear = Number.isFinite(Number(query.year))
-    ? clampYear(Number(query.year))
-    : now.getFullYear() - 1;
-  const billingYear = Number.isFinite(Number(query.billingYear))
-    ? clampYear(Number(query.billingYear))
-    : now.getFullYear();
+  const parsedStatsYear = parseYear(query.year);
+  const statsYear = parsedStatsYear.ok ? parsedStatsYear.value : now.getUTCFullYear() - 1;
+  const parsedBillingYear = parseBillingYear(query.billingYear, now);
+  const billingYear = parsedBillingYear.ok ? parsedBillingYear.value : now.getUTCFullYear();
 
   // The "Reports and exports" hub (the four reports, locked cards shown not
   // hidden): also a plain value computed before the return, for the same reason.

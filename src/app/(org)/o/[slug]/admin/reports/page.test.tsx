@@ -530,3 +530,50 @@ describe("ReportsPage — the Node-side second-factor recheck (DECISION-338, P3-
     expect(resolveOrgContext).toHaveBeenCalled();
   });
 });
+
+describe("ReportsPage — regression for lenient year parsing (F447)", () => {
+  // `?year=` was `Number("")` = 0, which is finite, then clamped to 1900; `?year=1899` and
+  // `?year=3000` clamped silently to a year nobody asked for. A bad value now falls back to the
+  // default, as the new report pages and exports do (Phase 1 "Query-parameter handling").
+  const year = new Date().getUTCFullYear();
+
+  async function readsFor(query: { year?: string; billingYear?: string }) {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationStatisticsRollup.mockResolvedValue(EMPTY_STATS);
+    getPerCapitaOverview.mockResolvedValue(EMPTY_PER_CAPITA);
+    await ReportsPage({ params: makeParams(), searchParams: makeSearchParams(query) });
+    return {
+      statsYear: getCongregationStatisticsRollup.mock.calls[0][2],
+      billingYear: getPerCapitaOverview.mock.calls[0][2],
+    };
+  }
+
+  it.each(["", "abc", "1e3", "0x7e4", " 2023", "-5", "2023.0"])(
+    "a malformed ?year=%j falls back to last year (not 1900), and ?billingYear to this year",
+    async (bad) => {
+      const reads = await readsFor({ year: bad, billingYear: bad });
+      expect(reads).toEqual({ statsYear: year - 1, billingYear: year });
+    },
+  );
+
+  it.each(["1899", "2101", "3000", "0"])("an out-of-range ?year=%s falls back instead of clamping", async (bad) => {
+    const reads = await readsFor({ year: bad, billingYear: bad });
+    expect(reads).toEqual({ statsYear: year - 1, billingYear: year });
+  });
+
+  it("a valid year at each bound is kept", async () => {
+    expect(await readsFor({ year: "1900", billingYear: "2100" })).toEqual({ statsYear: 1900, billingYear: 2100 });
+  });
+
+  it("an array value (a repeated key) falls back", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationStatisticsRollup.mockResolvedValue(EMPTY_STATS);
+    getPerCapitaOverview.mockResolvedValue(EMPTY_PER_CAPITA);
+    await ReportsPage({ params: makeParams(), searchParams: Promise.resolve({ year: ["2020", "2021"] } as never) });
+    expect(getCongregationStatisticsRollup.mock.calls[0][2]).toBe(year - 1);
+  });
+});

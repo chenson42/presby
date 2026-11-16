@@ -55,6 +55,12 @@ export function parseBillingYear(raw: RawParam, now: Date): Parsed<number> {
   return year === null ? bad() : good(year);
 }
 
+/** The default trend window: the five statistical years ending last calendar year. */
+export function defaultTrendWindow(now: Date): { from: number; to: number } {
+  const to = now.getUTCFullYear() - 1;
+  return { from: to - (TREND_DEFAULT_SPAN - 1), to };
+}
+
 /**
  * The trend window. Both absent: `to` is last year and `from` is four years
  * earlier. Only `to`: `from = to - 4`. Only `from`: `to = from + 4`. `from`
@@ -74,8 +80,7 @@ export function parseTrendWindow(
   let end: number;
   const back = TREND_DEFAULT_SPAN - 1;
   if (from === undefined && to === undefined) {
-    end = now.getUTCFullYear() - 1;
-    start = end - back;
+    ({ from: start, to: end } = defaultTrendWindow(now));
   } else if (from === undefined) {
     end = to as number;
     start = end - back;
@@ -96,4 +101,15 @@ export function parseTrendWindow(
 export function parseAllYears(raw: RawParam): Parsed<boolean> {
   if (raw === undefined || raw === null) return good(false);
   return raw === "1" ? good(true) : bad();
+}
+
+/**
+ * One query parameter from a `URLSearchParams`, in the shape the parsers take:
+ * absent is `undefined`, one value is a string, a repeated key is an array
+ * (which every parser then rejects).
+ */
+export function rawParam(search: URLSearchParams, name: string): RawParam {
+  const all = search.getAll(name);
+  if (all.length === 0) return undefined;
+  return all.length === 1 ? all[0] : all;
 }

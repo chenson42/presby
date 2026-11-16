@@ -28,7 +28,7 @@ Existing: `/o/<slug>/admin/reports` (statistics table and form, per-capita rate,
 | 2 — Architectural review | architect | Done | Approved with suggestions | 2026-11-15 |
 | 3 — Technical design | tech-lead | Done | Design complete | 2026-11-15 |
 | 4 — Implementation | full-stack-developer | Done (awaiting Phase 5) | — | 2026-11-15 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 FAIL → fixed `fbf9c721`; run 2 pending | FAIL | 2026-11-15 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -1231,7 +1231,207 @@ Signed in as `presbytery.clerk.fixture@example.invalid` on the demo data; every 
 
 # Phase 5 — Verification (qa)
 
-(pending)
+## Run 1 — FAIL
+
+**Date:** 2026-11-15
+**Verified by:** qa
+**Worktree / branch:** `/Users/cshenso/git/presby-platform/presby-reports`, `pipeline/presbytery-reports` at `1ce15488` (clean before and after; I changed no file).
+**Database:** every connection in `.env.local` was checked by host only (no value printed). All point at `ep-rapid-thunder-axjm1eom` (Neon branch `br-mute-tree-axpmuezq`). Production and development were not touched.
+**Disk:** `df -h /System/Volumes/Data` showed 551 GiB free.
+
+**Scope run:**
+- In full: typecheck, lint, `npm run check`, the unit suite, `npm run build`.
+- DB-backed: the new readers suite plus a blast-radius sample.
+- `test-rls.sql`: as `presby_app`.
+- e2e: 6 spec files against my own server on :3103, at desktop and 360px.
+- Browser: my own walk at 360px and 1280px.
+- Not re-run: the full DB-backed set and the full e2e suite. The diff touches no migration, no `authz.ts`, no `src/lib/db/`, no `src/proxy.ts` or `src/auth.ts`, no layout, no `e2e/support/` and no shared component. The PR's CI covers the rest.
+
+**Flags:** before e2e I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, with `pipeline_branch=1` and a host guard). That turned off `org_portal.admin_hub`, `.credentials`, `.features` and `.oversight`. After the run I set those four back on, and the flag table now matches my pre-QA snapshot exactly.
+
+## Type Check
+
+`npm run typecheck`: **PASS** (exit 0).
+`npm run lint` (`--max-warnings=0`): **PASS**.
+`npm run check`: **PASS**, all ten tripwires. `check:help`: 33 entries, 29 published.
+`npm run build`: **PASS**, and all 8 new routes are listed as dynamic.
+
+## Unit Tests
+
+Total: 18,505 | Passed: 14,347 | Failed: 0 | Skipped: 4,158 | Duration: 44s.
+The 156 skipped files are the DB-backed suites, which skip without `DATABASE_URL`. The relevant ones were run below.
+
+**DB-backed** (`npx dotenv -e .env.local -- vitest run --no-file-parallelism`):
+- **Files:** `presbytery-reports/readers.db.test.ts`, `presbytery.test.ts`, `treasury/team.db.test.ts`, `giving/team.db.test.ts`, `giving/gifts.db.test.ts`, `reimbursement/{csv-export,reads,role-bundle}.db.test.ts`, `fixture-deletable.test.ts`.
+- **Run 1:** 192 tests, 191 passed, **1 failed**:
+  - `src/lib/presbytery-reports/readers.db.test.ts:582` (`never includes B's congregation, nor B's 999`).
+  - Assertion: `expected '{"from":2022,…' not to contain '999'`.
+  - The matched "999" is inside a random fixture UUID (`66d49235-0d77-4cce-ae54-999e27a438b5`, Fixture Dunmore), not B's statistic. B's congregation and figure were absent.
+- **Run 2** of that file: 27/27 passed.
+- The product behaves correctly. The **test is nondeterministic**: `JSON.stringify(d)` includes random UUIDs, and "999" appears in them often enough to redden a CI DB shard now and then. See the failures under Verdict.
+
+**Failing-first check for F446 and F447 (commit `dc7fe01c`):**
+- Method: I extracted `dc7fe01c^` into the scratchpad, laid the fix commit's two test files on top, and ran them.
+- **11 failed before the fix**, matching Phase 4, each for the stated reason:
+  - F447: `{ statsYear: 1900, billingYear: 1900 }` for `""`, `2020` for `1e3`, and `2100`/`2023` from the clamp or truncation.
+  - F446: the page went past the guard, with no `NOT_FOUND`.
+- All pass on HEAD.
+- At runtime `/o/<slug>/admin/reports/not-a-uuid` is a **404**. The pre-fix runtime 200 was still not observed in a browser (as Phase 4 noted); the test evidence is from reading the code plus the failing-first test.
+
+**`scripts/test-rls.sql` as `presby_app`:**
+- Confirmed `current_user = presby_app`, `rolbypassrls = f`, and `assert_eq` installed.
+- **It stops at line 219:** `presbytery: sees only its own members — expected 2, got 6`.
+- Cause: data on this branch, not code. The diff touches no migration, policy, `test-rls.sql` or `seed-dev.sql`.
+- Northern Reach has 6 memberships: 3 from `scripts/presbytery-reports/seed-demo.sql` (the d41… ministers, applied in Phase 4) and 3 from `seed-dev`, which includes the known drift row described in the comment above line 219.
+- `presby_app` saw exactly those 6, so isolation held.
+- Diagnostic: a scratch copy of `scripts/` with only that one count set to 6 then failed at line 222 (memberships, same cause). The suite assumes a database seeded from `seed-dev.sql` alone.
+- **The remaining ~8,600 lines were not reached on this branch.** That suite is not in this diff's required scope; CI's `db.yml` runs it on a fresh database for the PR.
+- See the operator notes on keeping the demo script off `development`.
+
+## End-to-End Tests
+
+Run against my own `next dev -p 3103` (`E2E_BASE_URL=http://localhost:3103`, `E2E_ALLOW_SHARED_DB=true`, test-only `DOMAINS_*` fakes and `CRON_SECRET`, `RATE_LIMIT_DISABLED` from `.env.local`). Test output went to the scratchpad. The server was stopped by PID (13983/13982) and port 3103 is free.
+
+Total: 80 | Passed: 80 | Failed: 0 | Skipped: 0 | Flaky: 0 | Duration: 1.6m.
+Specs: `presbytery-report-exports.spec.ts` (8), `presbytery-reports.spec.ts` (10), `filings-round-trip.spec.ts` (12), `help.spec.ts`, `help-gates.spec.ts`, `help-404.spec.ts`.
+Not run: `public-sites` specs (not touched).
+
+**Runtime probe (my own, signed in through the real form):**
+- **The Northern Reach clerk, against its own exports:**
+  - All four exports and `allYears=1` return **200**: body starts `ef bb bf`, `text/csv; charset=utf-8`, `attachment; filename="<base>-northern-reach-2026-11-16.csv"` (UTC date, per design), `no-store`, `nosniff`.
+  - Headers are exactly the Phase 3 constants.
+  - **400** with the contracted bodies for `allYears=1&billingYear=2025`, an 11-year window and `from=2020.0`.
+  - **404** `Not found` for a missing slug.
+  - **307** to `/signin` when signed out.
+- **Cross-tenant:** `presbytery-clerk` holds all four keys at the e2e presbytery, but gets **403 `You don't have permission to export this report.`** on every Northern Reach export, bad-year variants included. The organization gate runs before the 400.
+- **File bytes:**
+  - Per capita 2025 matches the page row for row.
+  - The overpayment is `-12.50` with no apostrophe, and the note is `Credit`.
+  - The stored `100.005` is `100.01`.
+  - The departed congregation is `No longer a member`.
+  - The page totals equal the sums of the file's rows: $26,145.00 billed, $10,168.76 paid, $15,976.24 still owed.
+  - A viability note containing a comma, a double quote and an LF is RFC-quoted.
+  - The vacant-pulpits file carries no names and no person columns.
+- **Minor, outside this diff:** the signed-out 307 drops the query (`?x=1`) from `callbackUrl`. The proxy redirects before the route runs, and the proxy is unchanged.
+
+**Browser walk (360×780 and 1280×900):**
+- **Users and data:** `presbytery.clerk.fixture` on the Northern Reach demo data; `presbytery-clerk` and `presbytery-nogrant` on `e2e-presbytery` for the empty states and locked cards. Screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa/walk/`.
+- **Layout at 360px:** on every page `scrollWidth <= innerWidth`. Cards are shown and the table hidden; at 1280px the reverse. Export buttons are 44px high and full width (312px) at 360px. The year and window links are 44px high.
+- **Content verified on screen:**
+  - Vacancy lengths agree with the dates (2y 2m, 1y 1m).
+  - Glenmoor shows a dash for 2021–2023.
+  - "Not reported" and "No data" look different.
+  - The 80-character name wraps.
+  - The per-capita credit, departed badge and not-billed reasons are correct.
+- **Empty states**, each with no export button:
+  - Zero appointments: "No pastoral appointments are recorded yet".
+  - Trend window with no data.
+  - Per capita for 2090: "No per-capita bills for 2090".
+- **Locked hub (nogrant):** four "Locked" cards, each with its reason, and none is a link.
+- **Malformed parameters on pages** (`billingYear=`, `from>to`) fall back to the defaults.
+
+## Regression Tests Added
+
+- `calls notFound() for a non-UUID id BEFORE the session, the organization or any read — regression for the 200 load error`, in `src/app/(org)/o/[slug]/admin/reports/[aboutOrgId]/page.test.tsx`. Guards F446. **Watched failing before the fix and passing after.**
+- `ReportsPage — regression for lenient year parsing (F447)`, 10 cases, in `src/app/(org)/o/[slug]/admin/reports/page.test.tsx`. Guards against a malformed or out-of-range `?year=`/`?billingYear=` becoming 1900 or clamping. **Watched failing before the fix and passing after.**
+- Property-level guards that cover their whole class, not one literal:
+  - `boundaries.test.ts`: no owner connection; every page and route calls the gate; each export audits via `insertAuditRow(tx`; no `recordAudit`; no `next/link` to `/export`; no `loading.tsx` under `admin/reports/**`; segment set equals the registry; no `Number(` on query values; no `callbackUrl`/`next` read; read-only. Every rule has a failing sample.
+  - `params.test.ts`: the strict-year table.
+  - `csv.test.ts`: BOM present on all four files and absent from the giving and reimbursement files.
+
+## Coverage on Critical Modules
+
+`permissions.ts`, `two-factor.ts` and `flags.ts` are untouched by this diff, and no coverage run was made. Coverage on the new pure modules is shown by test, not by a percentage: each rule in `derive.ts` (the vacancy matrix, trend cells, sorts, cents), `params.ts`, `csv.ts` and `copy.ts` has a named case.
+
+## Feature-Gate Audit
+
+The (org) tenant axis is gated by the live in-transaction `presby_has_permission` (`holdsPermissions`), not by `hasFeature(session.user.features)`. `hasFeature` is the platform axis and correctly does not appear. I verified this by reading `gate.ts`, the four `page.tsx`, the four `route.ts`, the four readers, `hub.ts`, `audit.ts` and the hub host page.
+
+| Route or action | Auth + 2FA recheck | Org resolution (404 / single 403) | Flag + org type | Key (inside reader tx) |
+|---|---|---|---|---|
+| GET `/o/[slug]/admin/reports` (hub host, modified) | yes (`cachedAuth` + `assertOrgSession` → `/signin` / `orgTotpRedirectUrl`) | yes (existing denied/ended/404) | yes (existing) | existing section keys. The hub only reads lock state, never data |
+| GET `…/reports/vacant-pulpits` | yes (`gateReportPage`) | yes; page shows `OrgAccessDenied`/`OrgAccessEnded`/`notFound` | yes (`org_portal.reports`, presbytery) | `credentials.manage` |
+| GET `…/reports/membership-trend` | yes | yes | yes | `statistics.manage` |
+| GET `…/reports/viability` | yes | yes | yes | `congregation_oversight.manage` |
+| GET `…/reports/per-capita` | yes | yes | yes | `per_capita.manage` |
+| GET `…/vacant-pulpits/export` | yes (`gateReportRoute`, `auth()`, own path as callback, no `callbackUrl` read) | yes: 404 `Not found`; one 403 body for no relationship, ended, `OrgAccessError`, flag off, wrong type and missing key | yes | `credentials.manage`; plus 409 when there are zero appointments |
+| GET `…/membership-trend/export` | yes | yes | yes | `statistics.manage`; 400 only after the org gate |
+| GET `…/viability/export` | yes | yes | yes | `congregation_oversight.manage` |
+| GET `…/per-capita/export` | yes | yes | yes | `per_capita.manage`; 400 only after the org gate |
+| GET `…/reports/[aboutOrgId]` (modified) | unchanged | `isUuid` → `notFound()` before any read (F446) | unchanged | unchanged |
+
+**Audit in the transaction (DECISION-339):**
+- Each `exportX` runs, in one `withOrgContext`, `readX`, then the build, then `auditReportExport`, which calls `insertAuditRow(tx, …)`.
+- The audit metadata type has no name, note or amount, and the DB test confirmed the stored JSON.
+- Fail-closed is proven for the right reason: `audit_events_actor_user_id_users_id_fk` exists in the live catalog. A non-user actor makes the export reject with no row, and the route maps that to 503.
+- One audit row per export was observed in e2e.
+
+**DECISION-338 move:** the bodies are identical to `origin/main`, renamed only, and the treasury files are aliases. Zero files under `src/lib/giving/`, `src/lib/reimbursement/` or `admin/giving/**` changed, and nothing under `src/lib/auth/` changed. So the auth-touching gate does not apply.
+
+**Result: no missing or wrong gate.**
+
+## Copy Truthfulness
+
+- [x] Every added or changed string is in the design's Copy table. All strings live in `copy.ts`, `derive.ts` (vacancy-length wording, viability labels) and `contract.ts` (permission phrases). The views hard-code none. The deviation 8 singular forms are recorded.
+- [x] I opened the query behind each claim:
+  - "vacant" uses only this presbytery's appointments for roster congregations.
+  - "members of {org} today" is `parent_id` plus type plus `lifecycle_status='active'`.
+  - "No longer a member" means not on the roster.
+  - "Last updated" is `updated_at` in the organization's zone.
+  - What each does not read: person columns, buildings, insurance, coordinates.
+- [x] Each instruction traced to a role that can do it:
+  - "An administrator can give it under Roles": a `roles.manage` holder can create a custom role carrying keys they hold (escalation ceiling) and grant it. A presbytery founding administrator holds all four keys, including `congregation_oversight.manage` directly (bundle in `0059`), so it is doable for every card.
+  - "Open Credentials", "Record statistics" (the h3 at `reports/page.tsx:240`, seen on screen) and "Open Per-Capita, SASR & Imports" go to pages the same key holder can use.
+- [x] Neighbouring strings grepped:
+  - The tile description, the `presbytery-tools` `today` clause and the functionality map are updated.
+  - The existing e2e regexes match exactly one element each (e2e green).
+  - No string mentions two-factor (F445).
+- [x] Help diff covered:
+  - Every `labels` entry was seen on screen in the walk. "Reports & Insights" and "Administration" depend on `org_portal.admin_hub`, as five existing published pages already do.
+  - No images were added (no committed image to open).
+  - The page was read as its reader against the screens at 360px.
+
+**copy truthfulness: FAIL.** `src/content/help/presbytery-reports.md:1`: "A presbytery that has turned on "Per-Capita, SASR & Imports" can read four reports…"
+- Viewer's role: presbytery staff and founding administrator.
+- The tile has only the global `flagKey` `org_portal.reports` and no per-organization toggle (`src/lib/org-portal/tiles.ts`, the `reports` entry). No presbytery can turn it on.
+- The same page says so at line 49: "switched on by the PresbyPortal team for the whole platform, not by an administrator".
+- A founding administrator who reads line 1 will look for a switch on "Turning features on and off" that does not exist.
+- The sentence comes verbatim from the Phase 3 draft.
+- Suggested fix (tech-lead to confirm): "Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read four reports…". Add an exact-text test that fails on the old wording.
+
+**Advisory (not a FAIL):** line 44, "It holds no … people's names", is true of every structured column. But `redevelopment_notes` is free text the presbytery writes and could contain a name. Consider "apart from anything written in the redevelopment notes".
+
+## Verdict
+
+**FAIL.** Everything else is green: gates, audit, CSV bytes, BOM scope, cross-tenant, F446 and F447 failing-first, 80/80 e2e, and 360px and 1280px. Two items go back to the implementer (full-stack-developer); both are small:
+
+1. **Flaky test:** `src/lib/presbytery-reports/readers.db.test.ts:582`. `expect(JSON.stringify(d)).not.toContain("999")` matches random UUIDs; it failed run 1 and passed run 2. Assert on the property instead: no row is B's congregation, and no cell has `endingActive === 999`.
+2. **copy truthfulness: FAIL:** `src/content/help/presbytery-reports.md:1`, as above. It traces to the Phase 3 Copy draft, so tech-lead should confirm the replacement sentence. The implementer edits the page and adds an exact-text test.
+
+**Re-verification scope after the fix:**
+- Re-run `readers.db.test.ts` (twice) and `npm run check:help`.
+- Run the unit suite.
+- Read the new sentence on screen.
+- Nothing else needs repeating unless the fix touches more files.
+
+**Operator notes:**
+- **Do not apply `scripts/presbytery-reports/seed-demo.sql` to `development`.** It adds three memberships at Northern Reach and breaks `scripts/test-rls.sql`'s counts (line 219, then 222, and onward). That is the database integration re-runs this suite against after each merge (Rule 16). Keep it on pipeline or demo branches only, or give the suite its own reconciliation first.
+- **The demo flag list needs `org_portal.admin_hub` as well.** Phases 1 to 4 name `org_portal.reports`, `.credentials` and `.oversight`. Without `admin_hub`, the help page's route in ("Administration", then the tile under "Reports & Insights") does not exist.
+- **Still to confirm at the demo** (Phase 1): vacancy now excludes interim and supply, so the count will be higher than the prototype's; viability is 1 = at risk.
+- The signed-out redirect from an export drops the query string from `callbackUrl`. That is proxy behaviour that predates this diff; it is worth a TODO line only if the operator cares.
+
+---
+
+**Per-Phase Status row:**
+
+| 5 — Verification | qa | Done | FAIL | 2026-11-15 |
+
+**Handoff:** to **full-stack-developer** (Phase 4) for the two items, citing `src/lib/presbytery-reports/readers.db.test.ts:582` and `src/content/help/presbytery-reports.md:1`. Tech-lead should confirm the replacement help sentence, since it came from the Phase 3 Copy draft. Then back to qa for the narrow re-run above.
+
+## Phase 4 loop-back (from Phase 5 run 1) — orchestrator
+
+Commit `fbf9c721`. (1) `readers.db.test.ts`: the cross-tenant trend test now checks that no cell is a value of 999 instead of searching the serialized payload (it matched random UUIDs); run twice, 27/27 both times. (2) Help page line 1 now reads "Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read four reports…" (QA's suggested wording; the orchestrator confirms it in place of the tech-lead, since it only removes the false toggle claim the same page already contradicts at "switched on by the PresbyPortal team"), with an exact-text test (`src/lib/presbytery-reports/help-page.test.ts`). The downloads paragraph adds "apart from anything written in the redevelopment notes" (QA advisory). check:help, typecheck, lint and the unit suite (889 files, 14,349 tests) pass.
+
 
 ---
 

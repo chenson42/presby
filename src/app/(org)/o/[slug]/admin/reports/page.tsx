@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { cachedAuth } from "@/lib/auth/cached-auth";
+import { assertOrgSession, orgTotpRedirectUrl } from "@/lib/org-portal/session-check";
+import { parseBillingYear, parseYear } from "@/lib/presbytery-reports/params";
 import {
   assertOrgAccess,
   OrgAccessError,
@@ -20,6 +22,7 @@ import {
 } from "@/components/org-portal/coming-soon";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import { ReportsSectionForbidden, ReportsSectionLoadError } from "./reports-states";
+import { renderReportsHub } from "./reports-hub";
 import { StatisticsTable } from "./statistics-table";
 import { StatisticsForm } from "./statistics-form";
 import { PerCapitaRateForm } from "./per-capita-rate-form";
@@ -64,17 +67,25 @@ export default async function ReportsPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ year?: string; billingYear?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
 
+  // The Node-side second-factor recheck (DECISION-338): the Edge reads a claim that
+  // refreshes only when the session is re-derived, so this page refuses the same stale
+  // case its exports refuse. The hub's report pages run it through their own gate.
+  const selfPath = `/o/${slug}/admin/reports`;
   const session = await cachedAuth();
-  if (!session?.user) {
-    redirect(`/signin?callbackUrl=${encodeURIComponent(`/o/${slug}/admin/reports`)}`);
+  const check = assertOrgSession(session);
+  if (check.kind === "unauthenticated") {
+    redirect(`/signin?callbackUrl=${encodeURIComponent(selfPath)}`);
+  }
+  if (check.kind === "two_factor_required") {
+    redirect(orgTotpRedirectUrl(selfPath));
   }
 
-  const resolved = await resolveOrgContext(session.user.id, slug);
+  const resolved = await resolveOrgContext(check.userId, slug);
 
   switch (resolved.kind) {
     case "not-found":
@@ -106,14 +117,26 @@ export default async function ReportsPage({
     return <PlaceholderNotAvailable area={AREA} orgName={resolved.org.name} />;
   }
 
+  // Strict years (F447): a blank, malformed, repeated or out-of-range value falls back to
+  // the default instead of becoming 1900 (`Number("")` is 0, finite, then clamped).
   const now = new Date();
-  const clampYear = (value: number) => Math.min(2100, Math.max(1900, Math.trunc(value)));
-  const statsYear = Number.isFinite(Number(query.year))
-    ? clampYear(Number(query.year))
-    : now.getFullYear() - 1;
-  const billingYear = Number.isFinite(Number(query.billingYear))
-    ? clampYear(Number(query.billingYear))
-    : now.getFullYear();
+  const parsedStatsYear = parseYear(query.year);
+  const statsYear = parsedStatsYear.ok ? parsedStatsYear.value : now.getUTCFullYear() - 1;
+  const parsedBillingYear = parseBillingYear(query.billingYear, now);
+  const billingYear = parsedBillingYear.ok ? parsedBillingYear.value : now.getUTCFullYear();
+
+  // The "Reports and exports" hub (the four reports, locked cards shown not
+  // hidden): also a plain value computed before the return, for the same reason.
+  const hubSection = await renderReportsHub({
+    slug,
+    viewer: {
+      userId: check.userId,
+      email: session?.user?.email ?? null,
+      personId: resolved.org.personId,
+      organizationId: resolved.org.organizationId,
+    },
+    orgName: resolved.org.name,
+  });
 
   // BOTH SECTIONS' JSX IS COMPUTED HERE, BEFORE THE RETURN — never as a
   // nested async component. React's client renderer (and this file's own
@@ -155,6 +178,7 @@ export default async function ReportsPage({
         <p className="mt-1 text-sm text-muted-foreground">{resolved.org.name}</p>
       </div>
 
+      {hubSection}
       {statisticsSection}
       {perCapitaSection}
       {submissionGrantsSection}

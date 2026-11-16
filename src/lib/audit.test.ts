@@ -310,6 +310,7 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   WORSHIP_RESPONSE_RECORDED: "tenant.worship.response_recorded",
   WORSHIP_REQUESTS_SENT: "tenant.worship.requests_sent",
   WORSHIP_SERVICE_CANCELLED: "tenant.worship.service_cancelled",
+  PRESBYTERY_REPORT_EXPORTED: "tenant.presbytery_report.exported",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

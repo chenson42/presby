@@ -27,6 +27,21 @@ export function csvTextCell(value: string | null | undefined): string {
   return text;
 }
 
+/**
+ * A NUMERIC integer cell (a count, a year, a number of days): never through the
+ * text guard, which would turn a negative into `'-12` and make it text.
+ * Accepts a safe integer or null/undefined (empty cell); throws on anything
+ * else, so a float, NaN, an unsafe integer or a string can never be written as
+ * a number by accident. Additive (presbytery reports, DECISION-337).
+ */
+export function csvIntegerCell(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw new RangeError("csvIntegerCell: value must be a safe integer, null or undefined");
+  }
+  return String(value);
+}
+
 /** Integer cents -> "12.34" (no currency symbol, no grouping). null -> "". */
 export function centsToDecimal(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return "";

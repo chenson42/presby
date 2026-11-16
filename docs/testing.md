@@ -123,6 +123,8 @@ Creek carries the officer-term history that F22 broke, and Quillhaven is the D9
 case of a congregation the presbytery holds records about without it being a
 tenant.
 
+`scripts/presbytery-reports/seed-demo.sql` adds demo data for the presbytery reports (appointments, statistics, viability, per capita) on top of `seed-dev.sql`. Apply it to a pipeline or demo branch only, **never to `development` or production**: it adds memberships at Northern Reach and breaks `scripts/test-rls.sql`'s counts from line 219.
+
 **Nothing is inside an organization yet.** `/o/<slug>` is a deliberate landing
 stub: P0 built the routing, P1 builds the portal.
 

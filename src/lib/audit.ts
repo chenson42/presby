@@ -719,6 +719,17 @@ export const AUDIT_ACTIONS = {
   WORSHIP_REQUESTS_SENT: "tenant.worship.requests_sent",
   WORSHIP_SERVICE_CANCELLED: "tenant.worship.service_cancelled",
   // ---------------------------------------------------------------------------
+  // Presbytery reports (docs/work-log/2026-11-15-presbytery-reports.md,
+  // DECISION-337 to 339). One key for all four CSV exports, written by
+  // `insertAuditRow` INSIDE the export's read transaction (DECISION-339), from
+  // src/lib/presbytery-reports/*.ts, which `check:audit` (actions.ts only)
+  // cannot see; the module's boundaries.test.ts is the guard.
+  //   - PRESBYTERY_REPORT_EXPORTED: resourceType "presbytery_report", resourceId
+  //     the presbytery's organization id; metadata { organizationId, report,
+  //     rowCount } plus exactly one of { fromYear, toYear } | { billingYear } |
+  //     { allYears: true } (or none for vacant pulpits and viability). Never a
+  //     congregation name, a note or an amount.
+  PRESBYTERY_REPORT_EXPORTED: "tenant.presbytery_report.exported",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { cachedAuth } from "@/lib/auth/cached-auth";
+import { isUuid } from "@/lib/is-uuid";
 import {
   assertOrgAccess,
   OrgAccessError,
@@ -55,6 +56,11 @@ export default async function CongregationFilingHistoryPage({
   params: Promise<{ slug: string; aboutOrgId: string }>;
 }) {
   const { slug, aboutOrgId } = await params;
+
+  // F446: this segment sits beside the four static report segments, so a mistyped report
+  // URL lands here. A non-UUID used to reach the uuid comparison in the reader, which threw,
+  // and the page rendered a load error at HTTP 200. It is a 404, before the session and any read.
+  if (!isUuid(aboutOrgId)) notFound();
 
   const session = await cachedAuth();
   if (!session?.user) {

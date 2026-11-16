@@ -563,7 +563,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     key: "reports",
     label: "Per-Capita, SASR & Imports",
     description:
-      "Per-capita/SASR rollup and data-import housekeeping for a presbytery.",
+      "Per-capita and statistics entry, four reports with CSV export, and data-import housekeeping for a presbytery.",
     href: (slug) => `/o/${slug}/admin/reports`,
     flagKey: "org_portal.reports",
     // docs/work-log/2026-08-27-product-ia-scaffold.md, Phase 3: presbytery

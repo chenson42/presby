@@ -181,6 +181,15 @@ src/components/learn/  — the trainer island (the ONE 'use client' file: no req
                          cookie, server action, next/link or anchor), the static rules card,
                          and the frame shared by the public route, the live slot and the
                          (org) page
+src/lib/presbytery-reports/ — presbytery reports (DECISION-337 to 339): contract.ts, params.ts,
+                         derive.ts, csv.ts and copy.ts (pure); roster.ts, gate.ts and one reader per
+                         report (vacant pulpits, membership trend, viability, per capita), each serving
+                         both its page and its CSV export, which audits in the read's transaction.
+                         boundaries.test.ts pins the gate, the audit and no getPlatformDb
+src/components/presbytery-reports/ — the reports' views (cards below sm, a table above)
+src/lib/org-portal/session-check.ts, permission-check.ts — the (org) Node-side session/2FA
+                         check (pure) and the in-transaction permission helper (DECISION-338);
+                         treasury/session.ts and keys.ts re-export them; in check:treasury-boundaries T1
 src/lib/site-urls.ts   — SiteUrls: the only place a same-host public URL is
                          built (a source-scan test bans hand-built /site/${…}
                          elsewhere); pure, safe for the proxy and next.config.ts

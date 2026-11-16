@@ -12,7 +12,7 @@
  * (`reports-states.tsx`'s own header).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 
 const cachedAuth = vi.fn();
 vi.mock("@/lib/auth/cached-auth", () => ({
@@ -52,6 +52,15 @@ vi.mock("@/lib/presbytery", () => ({
 // `server-only`-marked (real `submitStatisticsGrant()` pulls the Neon pool
 // in); mocked here for the same reason `@/lib/presbytery` above is, so this
 // suite can render `page.tsx` in jsdom without a live database.
+const getReportsHub = vi.fn();
+vi.mock("@/lib/presbytery-reports/hub", () => ({
+  getReportsHub: (...args: unknown[]) => getReportsHub(...args),
+}));
+
+const ALL_HELD = {
+  held: { vacant_pulpits: true, membership_trend: true, viability: true, per_capita: true },
+};
+
 const listStatisticsGrants = vi.fn();
 vi.mock("@/lib/statistics-grants", () => ({
   listStatisticsGrants: (...args: unknown[]) => listStatisticsGrants(...args),
@@ -83,6 +92,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 import ReportsPage from "./page";
+
+getReportsHub.mockResolvedValue(ALL_HELD);
 import { OrgAccessError } from "@/lib/authz";
 
 afterEach(() => {
@@ -100,6 +111,7 @@ afterEach(() => {
   // un-mocked call rather than requiring every pre-existing test to know
   // about a section it isn't testing.
   listStatisticsGrants.mockReset().mockResolvedValue({ kind: "ok", data: [] });
+  getReportsHub.mockReset().mockResolvedValue(ALL_HELD);
   redirectMock.mockClear();
   notFoundMock.mockClear();
 });
@@ -402,5 +414,166 @@ describe("ReportsPage — result branches", () => {
 
     expect(getCongregationStatisticsRollup).toHaveBeenCalledWith("person-1", "org-1", 2023);
     expect(getPerCapitaOverview).toHaveBeenCalledWith("person-1", "org-1", 2027);
+  });
+});
+
+describe("ReportsPage — the reports hub (docs/work-log/2026-11-15-presbytery-reports.md)", () => {
+  async function renderOk(held = ALL_HELD) {
+    cachedAuth.mockResolvedValue({ user: { id: "u1", email: "clerk@example.invalid" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationStatisticsRollup.mockResolvedValue(EMPTY_STATS);
+    getPerCapitaOverview.mockResolvedValue(EMPTY_PER_CAPITA);
+    getReportsHub.mockResolvedValue(held);
+    const el = await ReportsPage({ params: makeParams(), searchParams: makeSearchParams() });
+    render(el);
+  }
+
+  it("shows four cards, each a whole-card link to its report when the key is held", async () => {
+    await renderOk();
+    const hub = within(screen.getByTestId("reports-hub"));
+    expect(hub.getByRole("heading", { name: "Reports and exports" })).toBeTruthy();
+    const hrefs = hub.getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual([
+      "/o/northern-reach/admin/reports/vacant-pulpits",
+      "/o/northern-reach/admin/reports/membership-trend",
+      "/o/northern-reach/admin/reports/viability",
+      "/o/northern-reach/admin/reports/per-capita",
+      "/help/presbytery-reports",
+    ]);
+    expect(hub.getByText(/members of Presbytery of the Northern Reach today/)).toBeTruthy();
+    expect(hub.queryByText("Locked")).toBeNull();
+  });
+
+  it("a locked card is shown, says why, and is not a link", async () => {
+    await renderOk({ held: { vacant_pulpits: false, membership_trend: true, viability: false, per_capita: true } });
+    const hub = within(screen.getByTestId("reports-hub"));
+    expect(hub.getAllByText("Locked")).toHaveLength(2);
+    expect(hub.getByText("You need permission to manage credentials. An administrator can give it under Roles.")).toBeTruthy();
+    expect(hub.getByText("You need permission to manage congregation oversight. An administrator can give it under Roles.")).toBeTruthy();
+    const hrefs = hub.getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).not.toContain("/o/northern-reach/admin/reports/vacant-pulpits");
+    expect(hrefs).not.toContain("/o/northern-reach/admin/reports/viability");
+    expect(hrefs).toContain("/o/northern-reach/admin/reports/membership-trend");
+  });
+
+  it("has no table and no heading containing the hyphenated 'Per-Capita' (the existing page and e2e match on it)", async () => {
+    await renderOk();
+    const hub = screen.getByTestId("reports-hub");
+    expect(hub.querySelector("table")).toBeNull();
+    for (const h of within(hub).getAllByRole("heading")) expect(h.textContent).not.toMatch(/per-capita/i);
+  });
+
+  it("no hub string contains 'don't have permission to manage' (the existing e2e cases match exactly one element)", async () => {
+    await renderOk({ held: { vacant_pulpits: false, membership_trend: false, viability: false, per_capita: false } });
+    expect(screen.getByTestId("reports-hub").textContent).not.toMatch(/don.t have permission to manage/i);
+  });
+
+  it("a failed lock read shows an inline error and leaves the rest of the page rendering", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationStatisticsRollup.mockResolvedValue(EMPTY_STATS);
+    getPerCapitaOverview.mockResolvedValue(EMPTY_PER_CAPITA);
+    getReportsHub.mockRejectedValue(new Error("db down"));
+    render(await ReportsPage({ params: makeParams(), searchParams: makeSearchParams() }));
+    const hub = within(screen.getByTestId("reports-hub"));
+    expect(hub.getByText("We couldn't check which reports you can open. Try again in a moment.")).toBeTruthy();
+    expect(hub.getByRole("link", { name: "Try again" }).getAttribute("href")).toBe("/o/northern-reach/admin/reports");
+    expect(screen.getByRole("heading", { name: "Congregation Statistics" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Per-Capita" })).toBeTruthy();
+  });
+
+  it("an OrgAccessError from the lock read goes to the error boundary", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationStatisticsRollup.mockResolvedValue(EMPTY_STATS);
+    getPerCapitaOverview.mockResolvedValue(EMPTY_PER_CAPITA);
+    getReportsHub.mockRejectedValue(new OrgAccessError("person-1", "org-1"));
+    await expect(ReportsPage({ params: makeParams(), searchParams: makeSearchParams() })).rejects.toThrow("mock: no active membership");
+  });
+
+  it("reads the lock state for the signed-in viewer at this presbytery", async () => {
+    await renderOk();
+    expect(getReportsHub).toHaveBeenCalledWith({
+      userId: "u1",
+      email: "clerk@example.invalid",
+      personId: "person-1",
+      organizationId: "org-1",
+    });
+  });
+
+  it("is not read when the flag is off or the organization is not a presbytery", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(false);
+    await ReportsPage({ params: makeParams(), searchParams: makeSearchParams() });
+    expect(getReportsHub).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReportsPage — the Node-side second-factor recheck (DECISION-338, P3-5)", () => {
+  it("a required, unverified second factor redirects to /totp with the page's own path, before the organization is read", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1", twoFactorRequired: true, twoFactorVerified: false } });
+    await expect(ReportsPage({ params: makeParams(), searchParams: makeSearchParams() })).rejects.toThrow(
+      "REDIRECT:/totp?callbackUrl=%2Fo%2Fnorthern-reach%2Fadmin%2Freports",
+    );
+    expect(resolveOrgContext).not.toHaveBeenCalled();
+  });
+
+  it("a verified second factor passes", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1", twoFactorRequired: true, twoFactorVerified: true } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(false);
+    await ReportsPage({ params: makeParams(), searchParams: makeSearchParams() });
+    expect(resolveOrgContext).toHaveBeenCalled();
+  });
+});
+
+describe("ReportsPage — regression for lenient year parsing (F447)", () => {
+  // `?year=` was `Number("")` = 0, which is finite, then clamped to 1900; `?year=1899` and
+  // `?year=3000` clamped silently to a year nobody asked for. A bad value now falls back to the
+  // default, as the new report pages and exports do (Phase 1 "Query-parameter handling").
+  const year = new Date().getUTCFullYear();
+
+  async function readsFor(query: { year?: string; billingYear?: string }) {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationStatisticsRollup.mockResolvedValue(EMPTY_STATS);
+    getPerCapitaOverview.mockResolvedValue(EMPTY_PER_CAPITA);
+    await ReportsPage({ params: makeParams(), searchParams: makeSearchParams(query) });
+    return {
+      statsYear: getCongregationStatisticsRollup.mock.calls[0][2],
+      billingYear: getPerCapitaOverview.mock.calls[0][2],
+    };
+  }
+
+  it.each(["", "abc", "1e3", "0x7e4", " 2023", "-5", "2023.0"])(
+    "a malformed ?year=%j falls back to last year (not 1900), and ?billingYear to this year",
+    async (bad) => {
+      const reads = await readsFor({ year: bad, billingYear: bad });
+      expect(reads).toEqual({ statsYear: year - 1, billingYear: year });
+    },
+  );
+
+  it.each(["1899", "2101", "3000", "0"])("an out-of-range ?year=%s falls back instead of clamping", async (bad) => {
+    const reads = await readsFor({ year: bad, billingYear: bad });
+    expect(reads).toEqual({ statsYear: year - 1, billingYear: year });
+  });
+
+  it("a valid year at each bound is kept", async () => {
+    expect(await readsFor({ year: "1900", billingYear: "2100" })).toEqual({ statsYear: 1900, billingYear: 2100 });
+  });
+
+  it("an array value (a repeated key) falls back", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationStatisticsRollup.mockResolvedValue(EMPTY_STATS);
+    getPerCapitaOverview.mockResolvedValue(EMPTY_PER_CAPITA);
+    await ReportsPage({ params: makeParams(), searchParams: Promise.resolve({ year: ["2020", "2021"] } as never) });
+    expect(getCongregationStatisticsRollup.mock.calls[0][2]).toBe(year - 1);
   });
 });

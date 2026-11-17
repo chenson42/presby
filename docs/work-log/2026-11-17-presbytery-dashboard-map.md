@@ -19,7 +19,7 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer: full-stack-developer | 2026-11-17 |
-| 4 — Implementation | full-stack-developer | Pending | — | — |
+| 4 — Implementation | full-stack-developer | Complete | Gates green; ready for QA | 2026-11-17 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -878,26 +878,58 @@ Confirmed from Phase 1 and unchanged: geocoding from an address and any "find on
 
 ## Files Created
 
-- `path/to/file` — purpose
+- `src/lib/coordinates.ts` (+ test): the one import-free coordinate rule (`parseCoordinateField`, `mappablePair`, `validateCoordinatePair`, `splitPastedPair`, `COORDINATE_MESSAGES`).
+- `src/lib/presbytery-reports/map-config.ts`, `map-derive.ts`, `viability-map.ts` (+ a test each; `map-config.test.ts` also pins the CSP `img-src`).
+- `src/lib/presbytery.coordinates.test.ts`: the write's gate with no database (refusals return before `withOrgContext`).
+- `src/components/presbytery-reports/dashboard-map.tsx` (+ test): the server section (every state).
+- `src/app/(org)/o/[slug]/admin/insights/map-loader.tsx`, `map.tsx`, `map-support.ts`, `map.css` (+ `map-support.test.ts`, `map.test.tsx` with a fake leaflet, `map-loader.test.tsx`).
+- `src/app/(org)/o/[slug]/admin/oversight/[aboutOrgId]/edit-form.test.tsx`.
+- `scripts/check-deps-drift.test.mjs` (57 cases).
+- `e2e/presbytery-map/map.spec.ts` (the `PW_MAP` lane, 7 cases).
 
 ## Files Modified
 
-- `path/to/file` — what changed
+- `package.json`, `package-lock.json`: `leaflet@~1.9.4`, dev `@types/leaflet@~1.9.22`, script `test:e2e:map`.
+- `src/lib/presbytery.ts`: `setCongregationOversight` validates through `validateCoordinatePair` before `withOrgContext`.
+- `src/lib/presbytery-reports/dashboard.ts` (sixth `allSettled` entry, `MapResult`, `options.map`), `copy.ts` (`MAP_COPY`), `boundaries.test.ts`, `dashboard.test.ts`, `copy.test.ts`, `help-page.test.ts`, `readers.db.test.ts` (existing fixture set a latitude with no longitude, which the write now refuses: gave it a longitude; added map-reader DB cases).
+- `src/components/presbytery-reports/dashboard-cards.tsx` (`mapSlot`, `DashboardMap`), `dashboard-views.test.tsx`.
+- `insights/page.tsx` (+ `page.test.tsx`): calls `mapTileConfig()`, builds the slot.
+- `oversight/[aboutOrgId]/page.tsx`, `edit-form.tsx`, `oversight-schema.ts` (+ golden and page tests): Map location group, paste-split, pair rules, `mapOn` toast.
+- `next.config.ts` (one `img-src` host), `.env.example` (`NEXT_PUBLIC_MAPTILER_KEY=`), `scripts/check-deps-drift.mjs` (refactored into pure functions; rules 4 to 6), `playwright.config.ts` (`PW_MAP` lane), `.github/workflows/e2e.yml` (one step, shard 4), `e2e/presbytery-oversight.spec.ts` (cases 7 to 9).
+- `src/content/help/presbytery-reports.md`, `privacy-policy.md`, `src/lib/help/registry.ts`. `verifiedIn` untouched (Phase 6 moves it).
+- Not edited (orchestrator at integration): `docs/TODO.md`, `docs/STATE.md`, release notes, the package version, `scripts/seed-dev.sql`, `scripts/test-rls.sql`, `e2e/support/*`.
 
 ## Schema Changes
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- None. No migration (0089 stays free), no CHECK, no seed change.
+- Applied via: n/a
 
 ## Audit Events
 
-- [Action key written when the security-sensitive mutation fires]
+- None added. The map read is read-only with no export. The coordinate write keeps `tenant.congregation_oversight.set` with `viabilityScore` only; e2e case 9 pins that no coordinate reaches the row.
 
 ## Implementer Notes
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+**Build smoke (step 0).** `import L from "leaflet"` types and bundles cleanly under Turbopack (`esModuleInterop`); `next build` passes. Lazy chunk 148 KB raw, 42.8 KB gzip; Leaflet CSS about 2.7 KB gzip in its own CSS chunk. `npm audit` on the new tree: 19 vulnerabilities (2 low, 15 moderate, 2 high), none in `leaflet`, `@types/leaflet` or `@types/geojson` (all in existing dev tooling, `next`, `undici`, `mermaid` and the like); `node scripts/ci/audit-prod.mjs`: no unaccepted high or critical production advisories.
 
-Strings added or changed: [file:line each, or "none"]
+**Deviations from the design (small).**
+- Pin colours: "Fair" uses `--secondary` fill with a `--secondary-foreground` border (not a `--border` ring) because the design's light fill on a light basemap was close to invisible; shape still carries the rating, and every pin has a white halo and a dark outer ring.
+- The design's "phone menu over the map" check: the (org) admin pages have no hamburger menu (it exists only on the portal home), so the overlay a phone has here is the account menu (Radix, z-50). e2e case 6 opens that, pulls the map under it with `position: relative; top`, and asks `elementFromPoint`. Because an open Radix menu sets `pointer-events: none` on the body (which makes `elementFromPoint` vacuous), the case gives the map's elements pointer events back so only paint order decides. Mutation-checked: removing `isolation: isolate` fails the case.
+- Design's unverified item resolved: CDP `Input.synthesizeScrollGesture` with `gestureSourceType: "touch"` reliably drives a one-finger swipe; mutation-checked (`dragging: true` on touch fails case 6).
+- `boundaries.test.ts` scans `map-support.ts` as a third browser file (bans apply), and its "only coordinate-naming files" rule strips string literals (the copy names "latitude" in prose).
+- `check-deps-drift.mjs` rule 4 also fails when `leaflet` is imported but undeclared and when the lockfile root disagrees with package.json; rule 5 also fails for any installed `react-leaflet` in the lockfile (a transitive pull); test files are excluded from the rule 5/6 import scans (they only mock by name).
+- The write's no-DB unit test is a new file (`presbytery.coordinates.test.ts`) rather than cases inside the DB-backed `presbytery.test.ts`, which CI skips; a stored round-trip case was added to the DB-backed file too.
+- Popup close button gets room (`margin-right: 40px`) after the walk showed a long name running under it.
+
+**Gates.** `npm run typecheck` clean; `npm run lint` zero warnings; `npm run check` all ten pass (including `check:secrets`: the fake lane key and the unit-test key carry `// leak-ok`); `next build` passes. Unit: the whole suite with `.env.local` and `--no-file-parallelism`: 1060 files, 18921 passed, 1 skipped. e2e on my own :3101 server: `PW_MAP` lane 7/7; `presbytery-dashboard.spec.ts` 7/7 both with the real key in `.env.local` (shared server) and with `NEXT_PUBLIC_MAPTILER_KEY=` blank; `presbytery-oversight.spec.ts` 9/9 (cases 7 to 9 new). Next 16.4.3 prints a "security vulnerability, upgrade" notice and exits on roughly every second dev-server or build start; re-running works (so the lane can fail once with `ERR_CONNECTION_REFUSED` locally). Not acted on.
+
+**Browser walk** (production build, `next start` on :3101, real key, localhost, Chromium emulating a 360px touch phone; fixture accounts `presbytery-clerk` (holds `congregation_oversight.manage`) and `org-multi` (statistics only: Viability "Locked"); invented congregation names and city-centre coordinates; rows and flags staged by the script and restored afterwards). Zero pins: prompt with the link, no Leaflet, no overflow. One pin: centred at zoom 10, real tiles, 0 failed tile responses, tap opens the popup with name, "Viability: Fair" and "Open oversight page". Three pins: fit-bounds, three distinct shapes, "3 of 3 congregations have a location." and no "Not on the map" list. Desktop light and dark: popup readable, legend and attribution (links and logo) legible, grab cursor. Locked viewer: three Locked cards, no map heading, no tile request, page source has no coordinates and no "maptiler". Zero horizontal overflow everywhere. Cold production load showed no unstyled flash.
+
+**Could not verify.** A real iPhone (the decimal keypad and two-finger gestures were emulated; the CDP one-finger swipe is real compositor input but not a physical device). Real quota or plan-terms behaviour. Preview and production origins (the key is localhost-restricted here; production walk is the tracked follow-up). The antimeridian frame and the one-load roster race (both named in Edge Cases). Dev-mode dev-server CSS ordering (only the production build was walked).
+
+Strings added or changed: `src/lib/presbytery-reports/copy.ts` (`MAP_COPY`), `src/lib/coordinates.ts` (`COORDINATE_MESSAGES`), `oversight/[aboutOrgId]/edit-form.tsx` (legend "Map location", the optional line, both hints, the paste note, the toast description), `src/content/help/presbytery-reports.md` (two new sections), `privacy-policy.md` (MapTiler bullet, date).
+
+**Handoff to QA (Phase 5).** Run: `npm run typecheck`, `npm run lint`, `npm run check`, `npx dotenv -e .env.local -- npx vitest run --no-file-parallelism`, `next build`; e2e on your own port: `E2E_BASE_URL=... npm run test:e2e:map` (its own server), plus `presbytery-dashboard.spec.ts` and `presbytery-oversight.spec.ts` on a shared dev server started with the Rule 16 env (`CRON_SECRET`, `DOMAINS_*`, `RATE_LIMIT_DISABLED`), once keyed and once with `NEXT_PUBLIC_MAPTILER_KEY=`. Read the help diff against the screens (copy truthfulness) and the 360px layout. Rows staged by specs are restored in `afterAll`.
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

@@ -975,7 +975,7 @@ export const HELP_PAGES = [
       "Not billed",
       "Total reported",
     ],
-    verifiedIn: "0.58.0",
+    verifiedIn: "0.59.0",
   },
   // ---- Treasurers ---------------------------------------------------------------------------
   {

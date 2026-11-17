@@ -18,8 +18,8 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-11-16 |
 | 3 — Technical design | tech-lead | Complete | Design complete; three items open for the user (Carry-forward, last row) | 2026-11-16 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green; ready for QA | 2026-11-16 |
-| 5 — Verification | qa | Run 1 complete | FAIL (F-A; F-B to tech-lead) | 2026-11-16 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete (run 2) | PASS | 2026-11-16 |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-11-16 |
 
 ---
 
@@ -891,37 +891,176 @@ The tech-lead's options: hide the sentence along with its link, reword it, or ac
 
 ---
 
+# Phase 5 — Verification (qa), run 2
+
+*Recorded verbatim from QA's return, 2026-11-16.*
+
+**Date:** 2026-11-16
+**Verified by:** qa
+**Commit verified:** `5c46e422` (fix pass 1 on top of `3805b84c`), worktree `/Users/cshenso/git/presby-platform/presby-dashboard`
+
+**What I ran, and what I didn't:**
+- **Run:** the checks the coordinator listed, plus `coverage.test.ts` and `insights/page.test.tsx` for the help page and the page itself.
+- **Not re-run, because the fix pass did not touch them:** the database-backed suites, the three nearby e2e specs, the feature-gate audit and the coverage numbers. The fix changes only two components, `copy.ts`, the help markdown and tests. No gate, reader, route or flag read changed.
+- **Before the e2e run** I reset the global flags to the CI baseline with `scripts/ci/e2e-reset-flags.sql` (38 flags set to their seed values). I ran it again at the end.
+- **Dev server:** my own, port 3101, PID 72882, stopped by that PID; nothing is left listening on 3101. The first start exited, as in run 1, and the second came up.
+- **Disk:** 550 GiB free.
+
+## Type Check
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS (0 warnings)
+- `npm run check`: PASS, all ten tripwires. `check:help` reports 33 entries, 29 published.
+
+## Unit Tests
+- **The three named suites** (`help-page.test.ts`, `dashboard-views.test.tsx`, `copy.test.ts`): 3 of 3 files, 55 of 55 tests passed.
+- **With `coverage.test.ts` and `insights/page.test.tsx` added:** 5 of 5 files, 90 of 90 tests passed.
+- Skipped: 0. Failures: none.
+
+## End-to-End Tests
+`e2e/presbytery-dashboard.spec.ts` with `E2E_BASE_URL=http://localhost:3101`: 7 of 7 passed, 19.7s, 0 skipped. The spec's staged appointment is gone afterwards (0 rows).
+
+## Regression Tests Added
+I checked by reading each test against the code before the fix that it would have failed there.
+- **F-A, help sentence:** `src/lib/presbytery-reports/help-page.test.ts:35` checks the new sentence is present and the old one is absent, so it fails on the old text.
+- **F-B, instructions follow their link's flag:**
+  - credentials off: `dashboard-views.test.tsx:279`
+  - reports off, both per-capita "none" states and the trend card: `:290`
+  - reports on: `:314`
+  - oversight off, the fifth case: `:351`
+  - oversight on, the sentence and the link: `:369`
+  - the plain strings give no instruction: `copy.test.ts:82`
+  - Before the fix, each "off" test would have found the instruction sentence the old code always rendered.
+- **Roster error:** `dashboard-views.test.tsx:103` checks for the error alert and a "Try again" link to the page's own path. The old members card had neither.
+
+## Coverage on Critical Modules
+Not re-run; the fix touches none of these modules. From run 1: `permissions.ts` 100%, `two-factor.ts` 91.11%, `flags.ts` 100%.
+
+## Feature-Gate Audit
+Not re-run. The fix changes no gate, reader, route, action or flag read; the run 1 table stands.
+
+## Copy Truthfulness
+- [x] **Every added or changed string is in the design's Copy table.** The three new strings (`notRecordedNoLink`, `noRatePlain`, `rateSetPlain`) and the help sentence match Phase 3 amendment 1 exactly.
+- [x] **Each claim traced to its query:**
+  - "No rate is set for {year}." holds when no rate row exists for the year. `basis_year` is NOT NULL in the live catalog, so a null `rateBasisYear` means exactly that.
+  - "A rate is set for {year}. The bills have not been generated." holds when a rate row exists and no row is billed for the year.
+  - "So vacancies can't be worked out." holds when no appointment is recorded for the current roster (`appointmentsRecorded` is false).
+- [x] **Each instruction traced to the role that sees it.**
+  - **Flags off, on screen as the clerk at 360px:**
+    - The trend card shows only "No statistics recorded for 2021 to 2025".
+    - The vacant card shows "No pastoral appointments are recorded yet" and "So vacancies can't be worked out."
+    - The per-capita card shows "No per-capita bills for 2026" and "No rate is set for 2026."
+    - The viability list shows plain names and "Not yet assessed" badges, with no "Assess" sentence.
+    - No card has a link, and nothing tells the reader to use a page that is turned off.
+  - **Flags on:** each full instruction appears with its 44px link.
+  - **Roster-error "Try again":** checked by the render test only. I did not break the roster read on the live server to see it on screen.
+- [x] **Older strings checked.** I grepped for "Credentials", "Per-Capita section", "Congregation Statistics", "Congregation Oversight" and "Record" in the dashboard components. No other dashboard-reachable instruction exists.
+- [x] **Help diff.**
+  - On screen, `/help/presbytery-reports` at 360px shows the new sentence: 'The "Ending active members" and "Per capita" cards name the year they show. "Member congregations", "Vacant pulpits" and "Viability" show how things stand today.' That matches the cards: "Per capita, 2026" names a year, the trend card names its window, and the other three show current state.
+  - Horizontal overflow is 0.
+  - The paragraph's other sentences are unchanged and still true.
+  - No images were added.
+
+**F-A: resolved. F-B: resolved,** including the viability list.
+
+**Advisory, not blocking.** With the reports flag off, the page subtitle still says "…The reports have the full tables." (`DASHBOARD_COPY.subtitle`, `copy.ts`). It is a statement, not an instruction, so the amendment's rule doesn't cover it. A reader with reports off may still read it as a pointer to pages that are turned off. I'm leaving it for Phase 6 to weigh.
+
+**Carried forward from the amendment:** the existing vacant-pulpits report shows "Open Credentials" even with the credentials flag off (`vacant-pulpits-view.tsx:39`). It predates this pipeline and is a TODO line for the orchestrator to add at integration.
+
+**360px walk** (clerk, my own server): horizontal overflow 0 with the flags off, 0 with them on, and 0 on the help page. Every dashboard link is 44px tall; the 20px "Back to portal" link is existing layout, not this diff. After the walk I set the flags back to the CI baseline: `org_portal.insights`, `org_portal.oversight` and `org_portal.credentials` off, `org_portal.reports` on.
+
+## Verdict
+**PASS**
+
+**Handoff:** analyst (Phase 6). Read `presbytery-reports` at 360px as its reader, and walk the dashboard as `presbytery-clerk`, `org-multi` and `presbytery-nogrant`. Weigh the subtitle advisory. Integration still needs two TODO lines from the orchestrator: the map increment and the vacant-pulpits report's "Open Credentials" papercut.
+
+
+---
+
 # Phase 6 — Shipped vs Intent (analyst)
+
+*Recorded verbatim from the analyst's return. Walked 2026-11-16 on `5c46e422` (fix pass 1 on top of `3805b84c`), slice one only. The map is split out by ruling.*
 
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES**
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A presbytery clerk opens "Insights & Analytics" from the home page and gets four honest summary cards plus a viability list. Each is gated by its own report key and links only to pages that are switched on. It works at 360px, and the map, coordinate help and tile-provider disclosure are deliberately not here yet.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **Cards match their reports and never show a bare zero.**
+  - I staged one congregation with a 2025 statistic of 120, another with 45, one per-capita bill of $1,200 and one "At risk" rating (all removed afterwards). The trend card read "165 / 2025: 2 of 3 reporting / Congregations that did not report a figure are not in the total."
+  - The per-capita card read "$1,200.00 Billed / Paid $0.00 / Still owed $1,200.00 / 1 of 3 congregations billed", and the at-risk fixture congregation moved to the top with an "At risk" badge.
+  - With nothing staged, every figure card showed a dash plus a sentence. That covers all three states Phase 1 named: no statistics for 2021 to 2025, no appointments recorded, and no per-capita bill (with whether a rate is set).
+- **Permission gate.**
+  - `presbytery-clerk` saw all four cards and the viability list.
+  - `org-multi`, who holds the statistics permission only, saw the member count and the trend card. Vacant pulpits, per capita and viability each showed "Locked" with "You need permission to manage …".
+  - `presbytery-nogrant` saw one forbidden state naming the four permissions and no data.
+  - The congregation clerk's `/o/e2e-alpha/admin/insights` is still the unchanged "Coming soon" stub.
+- **Tile.** On the clerk's home page, Insights is a live tile, while Committees and Communications keep their "Coming soon" pill. On the congregation's home, Insights still shows "Coming soon".
+- **Every link resolves.** I followed each one as the clerk: the trend (`?from=2021&to=2025`), per capita (`?billingYear=2026`), Credentials, the three oversight rows, Congregation Oversight and the viability report. All returned 200 with the right heading.
+- **Flags control links and instructions.**
+  - With reports off, the trend, per-capita and viability-report links disappeared and the neutral sentences replaced the "Per-Capita section" instructions.
+  - Credentials and oversight were checked the same way by Phase 4 and QA, and the unit pins cover them.
+  - No dashboard card sends anyone to a dead page.
+- **Independent cards.** Card-level load errors, the roster-error retry and the one-transaction-per-reader design are pinned by tests and QA's code read. I did not break a reader on screen.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: permissions are per card, using each report's own key, with no new key. Shipped: exactly that. The roster count shows only to a holder of at least one key. Verdict: **matches**.
+- Phase 1 said: reuse `org_portal.insights` and add no flag. Shipped: it reuses it through `gateInsightsPage`. `gateReportPage` is unchanged. Links follow their own flags. Verdict: **matches**.
+- Phase 1 said: show the year and the denominator on the card face, and never a misleading zero. Shipped: the year and "N of M reporting" or "N of M billed" are on the face, as walked above. Verdict: **matches**.
+- Phase 1 said: no year selector or query parameter. Shipped: none, and cards pass an explicit year to their reports. Verdict: **matches**.
+- Phase 1 said: the Insights tile must not say "Coming soon" for a presbytery. Shipped: `liveFor`, walked on both homes. Verdict: **matches**.
+- Phase 1 said: a viability list with a badge and an oversight link. Shipped: at-risk-first ordering, text badges (not colour alone), and links only with the oversight flag on. Verdict: **matches**.
+- Phase 1 said: it is reachable from "Administration". Shipped: it is on the home page under "Reports & Insights", and the help says so. Verdict: **acceptable drift**, since the help is correct for the build.
+- Phase 1 said: the viability map, the tile-provider disclosure and the coordinate-entry help ship together. Shipped: none of them. This was the lead's ruling to split the map out. Verdict: **acceptable drift**, tracked below.
+- Phase 1 said: a no-audit, read-only page. Shipped: no audit and no export, pinned by boundary tests. Verdict: **matches**.
+- Phase 1 said: nothing mentions a map while there is no key. Shipped: nothing does. Verdict: **matches**.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
-- Help pages read as their reader (each page named in Help impact): [pass | fail | no help impact]
+- Empty state: **pass.**
+  - Words plus a dash, as walked.
+  - Zero congregations gives the single empty state, plus a retry on a failed roster read. That is covered by tests only.
+- Failure microcopy: **pass.** "We couldn't load this card. Try again in a moment." with a retry link and per-card isolation. I verified it through the tests and QA's read. I did not break a reader on screen.
+- Permission gate: **pass.** Walked as all three fixtures and as a congregation clerk. The gate order and the four-way miss are reused.
+- Audit event: **not applicable.** Read-only, with no export (the architect's ruling and the boundary pins).
+- Mobile (360px): **pass.**
+  - Overflow is 0 for the clerk, `org-multi`, `presbytery-nogrant`, the congregation stub, the presbytery home and the help page.
+  - Cards stack in one column and the viability list is cards.
+  - Dashboard links are tall tap targets, apart from the shell's existing 20px "Back to portal" link.
+  - I walked it with JavaScript disabled, because the dev server's HMR reloaded the page in a loop under my script. That checks the server-rendered content, which is all this slice renders, but it is not a hydration check. The e2e lane covered that.
+- Help pages read as their reader (`presbytery-reports`): **pass, with one note.**
+  - I read it at 360px as the clerk against what shipped.
+  - The "Insights and analytics" section matches the screens: the tile location (home page, under "Reports & Insights"), every card title, the permissions per card, the year sentence, "newest of the five years ending last year", "includes a congregation that has left", and "opens its report only where it is turned on".
+  - No `limitationUntil` needed removing, and no image was added.
+  - The page's `verifiedIn: 0.58.0` is truthful for the unchanged sections but the new section postdates that release. The release cut should set it to the shipping version. This walk is the one that justifies moving it.
+  - The other pages named in Phase 1 needed no edits (`roles-who-can-do-what`, `presbytery-tools`, `turning-features-on-and-off`, `privacy-policy` for the map).
+  - The help calls the viability list a "card". On screen it is a section. That is a minor wording point, not a contradiction.
+
+### The subtitle advisory
+
+- **I confirmed it on screen.** With `org_portal.reports` off, the clerk still reads "The reports have the full tables." The page does hide every report link, so the sentence points nowhere.
+- **Weighed.** It is a statement, not an instruction, so the amendment's rule doesn't cover it. Reports are on in the CI baseline and probably in production. The reader is still sent to pages that are off, which is the same class of fault QA's F-B fixed.
+- **Ruling:** not blocking, and it becomes a follow-up. The fix is one line plus one test: show the sentence only when `reportsOn` is true, and otherwise end the subtitle after the first sentence.
 
 ## Follow-Ups (if SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+- [ ] **Insights subtitle points at reports that are switched off.** With `org_portal.reports` off, `DASHBOARD_COPY.subtitle` still ends "The reports have the full tables." Drop that sentence when `reportsOn` is false, and pin it in `dashboard-views.test.tsx`.
+- [ ] **Presbytery dashboard map (slice two).** Needs `leaflet` (`~1.9.4` or an explicit 2.x choice, DECISION-122), a keyed tile provider (`NEXT_PUBLIC_MAPTILER_KEY`) and one `img-src` host in `next.config.ts`. It also needs the single-file tripwire, the coordinate-reader gate (`congregation_oversight.manage`, valid pairs only, 0/0 and half-set rows treated as no location), and text-only popups. In `privacy-policy`, add a tile-provider entry effective once the key is set. Coordinate-entry help goes on the oversight page (decimal degrees, latitude first, negative longitude for US congregations). Verify with a fake key and intercepted tiles, and walk real tiles after the operator provisions a key. Phase 6 for that increment is capped at SHIP WITH NOTES until then.
+- [ ] **Move `presbytery-reports` `verifiedIn` to the shipping release** at the release cut (it is 0.58.0 today). It was walked at 360px on `5c46e422` during this Phase 6. `npm run check:help` rejects a version later than `package.json`, so bump the two together.
+- [ ] **Vacant-pulpits report shows "Open Credentials" with the credentials flag off** (`vacant-pulpits-view.tsx:39`). Gate the link and its sentence the way the dashboard now does.
+- [ ] **Functionality map and release notes (Rules 14 and 10).** Add a line for the presbytery dashboard under Insights & Analytics, and move the Increment 4b line in `docs/TODO.md` to Done for slice one, keeping the map as the open remainder. Rule 15 needs no `architecture.md` change.
+- [ ] **Operator, for the demo.** `org_portal.insights` must be on, and the demo clerk needs `congregation_oversight.manage` (the founding-administrator bundle holds it, and a stated clerk does not) or the viability section reads "Locked". `org_portal.reports`, `org_portal.credentials` and `org_portal.oversight` control which links appear. Walk the demo as both a founding administrator and a stated clerk.
+
+Rule 12: no originating feedback row. Rule 13 (draft only, per the operator's standing note): "Presbyteries now have an Insights & Analytics page on the home screen: member congregations, ending active members, vacant pulpits, per-capita billing for the year, and each congregation's viability rating, each in one glance and each shown only to staff who hold the matching permission."
 
 ## Red Flags (if NEEDS REWORK)
 
-- [Specific. What has to change before this ships.]
+- None.
+
+**Environment left clean** (analyst): own `next dev` on 3101, port free again; staged rows deleted; flags reset to the CI baseline. The analyst also noted that `psql` echoed the pipeline branch's platform connection string once in an error message; the operator was told.
+

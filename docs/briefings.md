@@ -25,6 +25,10 @@ is checked.*
 
 ---
 
+## 2026-11-17
+
+- [ ] **`decision` · Presbyteries get a dashboard on the Insights tile (0.59.0; DECISION-342).** Four cards (member congregations, ending active members, vacant pulpits, per capita) and the viability list, built from the 0.57.0 report readers. Each card shows only to holders of its report's key; a card with no data says so instead of showing zero; links and "record it here" lines appear only where their page is switched on. No migration, dependency, key or flag. **Split out:** the map, which waits on your MapTiler key. **Your steps for the demo:** turn `org_portal.insights` on, and walk it as a founding administrator and as a stated clerk (a stated clerk sees Viability locked). **QA** failed once on wording (a false help sentence, instructions to switched-off pages), fixed and passed. **Follow-ups (TODO):** the subtitle still mentions the reports when Reports is off; the vacant-pulpits report's "Open Credentials" link ignores its flag.
+
 ## 2026-11-16
 
 - [ ] **`decision` · Website footers can name the organization, link to its contact page and carry its EIN for search engines (0.58.0, presby-site-kit v4.5.0; DECISION-340, DECISION-341).** Addresses are now multi-line in the organization profile, shown line by line in both footers. The new footer line, links, © name and organization metadata come from a `site` object on the website's home page, opt-in; all four existing sites render byte-for-byte as before. **Accepted:** the EIN is invisible on the page but readable in its source; the kit's one `dangerouslySetInnerHTML` is the escaped JSON-LD element. **Shortcuts you approved:** no separate implementer, QA or Phase 6 agents, and no preview before publishing; you review in production. **Your step:** enter the first presbytery's address on two lines on its organization page. **Deferred:** phone shown as typed, PO Box directions, a structured address for JSON-LD, the one-file scan test (TODO).

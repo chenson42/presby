@@ -41,7 +41,7 @@ Each pin is a member congregation that has a location, and its shape shows its r
 
 Choose a pin to see the congregation's name and rating. Where "Congregation Oversight" is turned on, the pin also has an "Open oversight page" link. On a computer, drag the map to move it and use the + and - buttons to zoom. On a phone or tablet, one finger scrolls the page past the map; use two fingers to move or zoom the map, or use the + and - buttons. The viability list below the map names every congregation with the same ratings, so you can read the page without the map.
 
-Congregations with no usable location are listed under "Not on the map". If none has a location, the section says so instead of showing a map. If the map cannot load, the section says "The map could not load" and the list below still works.
+Congregations with no usable location are listed under "Not on the map". If none has a location, the section says so instead of showing a map. If the map cannot load, the section says either "The map could not load" or "We couldn't load the map" in one line, and the list below still works. Reloading the page tries again.
 
 The map pictures come from MapTiler and are credited to MapTiler and OpenStreetMap contributors under the map. Your browser asks MapTiler for them directly while the map is showing. See the [Privacy policy](/help/privacy-policy).
 
@@ -71,7 +71,7 @@ Each congregation shows the rating the presbytery recorded on "Congregation Over
 
 ## Putting a congregation on the map
 
-A congregation appears on the map when it has a location on "Congregation Oversight". You need the permission to manage congregation oversight.
+A congregation appears on the map when it has a location on "Congregation Oversight". "Congregation Oversight" must be turned on for your presbytery, and you need the permission to manage congregation oversight.
 
 1. Open "Congregation Oversight", then choose the congregation.
 2. Under "Map location", enter the "Latitude" first. It is a decimal number between -90 and 90, for example 39.9612.

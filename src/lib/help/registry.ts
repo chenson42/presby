@@ -969,6 +969,7 @@ export const HELP_PAGES = [
       "Fair",
       "Healthy",
       "The map could not load",
+      "We couldn't load the map",
       "Per capita",
       "Export CSV",
       "Export all years",

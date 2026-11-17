@@ -1,6 +1,7 @@
 import "server-only";
 import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { withOrgContext, type OrgTx } from "@/lib/authz";
+import { validateCoordinatePair } from "@/lib/coordinates";
 import { organizations } from "@/lib/db/domain/org";
 import {
   congregationOversight,
@@ -533,19 +534,13 @@ export async function setCongregationOversight(
       message: `Insurance carrier must be ${SHORT_TEXT_MAX} characters or fewer.`,
     };
   }
-  if (
-    input.latitude !== undefined &&
-    input.latitude !== null &&
-    (input.latitude < -90 || input.latitude > 90)
-  ) {
-    return { kind: "invalid_input", message: "Latitude must be between -90 and 90." };
-  }
-  if (
-    input.longitude !== undefined &&
-    input.longitude !== null &&
-    (input.longitude < -180 || input.longitude > 180)
-  ) {
-    return { kind: "invalid_input", message: "Longitude must be between -180 and 180." };
+  // The one coordinate rule (src/lib/coordinates.ts, DECISION-343): a server
+  // action receives whatever the client sends, so `typeof` and `Number.isFinite`
+  // are the gate, not the form's. A failure returns BEFORE `withOrgContext`, so a
+  // bad value never opens a transaction.
+  const coordinates = validateCoordinatePair(input.latitude, input.longitude);
+  if (!coordinates.ok) {
+    return { kind: "invalid_input", message: coordinates.message };
   }
 
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
@@ -562,14 +557,8 @@ export async function setCongregationOversight(
       buildingsNotes: input.buildingsNotes ?? null,
       insuranceCarrier: input.insuranceCarrier ?? null,
       insuranceExpiresOn: input.insuranceExpiresOn ?? null,
-      latitude:
-        input.latitude === undefined || input.latitude === null
-          ? null
-          : String(input.latitude),
-      longitude:
-        input.longitude === undefined || input.longitude === null
-          ? null
-          : String(input.longitude),
+      latitude: coordinates.value ? String(coordinates.value.lat) : null,
+      longitude: coordinates.value ? String(coordinates.value.lng) : null,
       updatedBy: actingUserId,
     };
 

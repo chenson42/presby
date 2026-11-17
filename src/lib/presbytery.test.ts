@@ -835,6 +835,46 @@ describe.skipIf(!hasDb)(
         expect(detail.data.buildingsNotes).toBe("Fellowship hall leak");
       });
 
+      it("stores a valid coordinate pair, refuses a half-set or NaN pair without touching it, and clears on two blanks", async () => {
+        const saved = await setCongregationOversight(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congA,
+          { viabilityScore: 2, latitude: 39.9612, longitude: -82.9988 },
+        );
+        expect(saved.kind).toBe("ok");
+        const read = async () => {
+          const d = await getCongregationOversightDetail(clerkPerson, presbyteryA, congA);
+          if (d.kind !== "ok") throw new Error("expected ok");
+          return [Number(d.data.latitude), Number(d.data.longitude)];
+        };
+        expect(await read()).toEqual([39.9612, -82.9988]);
+
+        for (const input of [
+          { latitude: 39.9, longitude: null },
+          { latitude: Number.NaN, longitude: -82 },
+          { latitude: 0, longitude: 0 },
+        ]) {
+          const refused = await setCongregationOversight(clerkPerson, presbyteryA, grantingUserId, congA, input);
+          expect(refused.kind).toBe("invalid_input");
+        }
+        expect(await read()).toEqual([39.9612, -82.9988]);
+
+        const cleared = await setCongregationOversight(
+          clerkPerson,
+          presbyteryA,
+          grantingUserId,
+          congA,
+          { viabilityScore: 2, latitude: null, longitude: null },
+        );
+        expect(cleared.kind).toBe("ok");
+        const d = await getCongregationOversightDetail(clerkPerson, presbyteryA, congA);
+        if (d.kind !== "ok") throw new Error("expected ok");
+        expect(d.data.latitude).toBeNull();
+        expect(d.data.longitude).toBeNull();
+      });
+
       it("getCongregationOversightList includes a congregation with NO oversight row on file (hasData: false)", async () => {
         const result = await getCongregationOversightList(clerkPerson, presbyteryA);
         if (result.kind !== "ok") throw new Error("expected ok");

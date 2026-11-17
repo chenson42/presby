@@ -53,9 +53,17 @@ vi.mock("next/navigation", () => ({
   notFound: () => notFoundMock(),
 }));
 
+// The client island (the lazy Leaflet chunk) is not under test here; a stub records what the page hands it.
+vi.mock("./map-loader", () => ({
+  ViabilityMapLoader: (props: { tileUrl: string; pins: unknown[] }) => (
+    <div data-testid="map-loader-stub" data-tile-url={props.tileUrl} data-pins={JSON.stringify(props.pins)} />
+  ),
+}));
+
 import InsightsPage from "./page";
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   cleanup();
   cachedAuth.mockReset();
   resolveOrgContext.mockReset();
@@ -105,10 +113,11 @@ const cards = (over: Record<string, unknown> = {}) => ({
   },
   ...over,
 });
-const okDashboard = (over: Record<string, unknown> = {}) => ({
+const okDashboard = (over: Record<string, unknown> = {}, map: unknown = { kind: "off" }) => ({
   kind: "ok",
   roster: { kind: "ok", count: 12 },
   cards: cards(over),
+  map,
 });
 
 describe("InsightsPage - the shared four-way miss response", () => {
@@ -299,17 +308,125 @@ describe("InsightsPage - the presbytery dashboard", () => {
   });
 
   it("roster count 0 renders one empty state and no cards", async () => {
-    await renderDashboard({ kind: "ok", roster: { kind: "ok", count: 0 }, cards: cards() });
+    await renderDashboard({ kind: "ok", roster: { kind: "ok", count: 0 }, cards: cards(), map: { kind: "off" } });
 
     expect(screen.getByText("No member congregations yet")).toBeTruthy();
     expect(screen.queryByTestId("dashboard-cards")).toBeNull();
   });
 
   it("a failed roster read renders the members card as an error and never the empty state", async () => {
-    await renderDashboard({ kind: "ok", roster: { kind: "error" }, cards: cards() });
+    await renderDashboard({ kind: "ok", roster: { kind: "error" }, cards: cards(), map: { kind: "off" } });
 
     expect(screen.queryByText("No member congregations yet")).toBeNull();
     expect(screen.getByText(/couldn't count the member congregations/)).toBeTruthy();
     expect(screen.getByText("4,321")).toBeTruthy();
+  });
+});
+
+describe("InsightsPage - the congregation map (DECISION-343)", () => {
+  const KEY = "fake-key-value_123"; // leak-ok: a made-up value shaped like a map key
+  const ID = "00000000-0000-4000-8000-00000000000a";
+  const pin = { id: ID, name: "Alder Creek", lat: 39.9612, lng: -82.9988, score: 1 as const, label: "At risk" };
+  const mapOk = (pins = [pin], unplaced: { id: string; name: string }[] = [], total = 12) => ({
+    kind: "ok",
+    data: { total, pins, unplaced },
+  });
+
+  const run = async (dashboard: unknown, opts: { key?: string; off?: string[] } = {}) => {
+    vi.stubEnv("NEXT_PUBLIC_MAPTILER_KEY", opts.key ?? KEY);
+    cachedAuth.mockResolvedValue(signedIn);
+    resolveOrgContext.mockResolvedValue(OK_PRESBYTERY);
+    flagsOnExcept(...(opts.off ?? []));
+    mocks.getPresbyteryDashboard.mockResolvedValue(dashboard);
+    const el = await InsightsPage({ params: makeParams("northern") });
+    render(el);
+    return el;
+  };
+
+  it("with no key set: the map is not asked for, nothing mentions a map, and there is no loader element", async () => {
+    await run(okDashboard(), { key: "" });
+    expect(mocks.getPresbyteryDashboard.mock.calls[0]![2]).toEqual({ map: false });
+    expect(screen.queryByTestId("dashboard-map")).toBeNull();
+    expect(screen.queryByTestId("map-loader-stub")).toBeNull();
+    expect(document.body.textContent ?? "").not.toMatch(/map\b|latitude|longitude/i);
+  });
+
+  it("with a malformed key the map is treated as unset", async () => {
+    await run(okDashboard(), { key: "short" });
+    expect(mocks.getPresbyteryDashboard.mock.calls[0]![2]).toEqual({ map: false });
+  });
+
+  it("with a key set the map IS asked for", async () => {
+    await run(okDashboard({}, mapOk()));
+    expect(mocks.getPresbyteryDashboard.mock.calls[0]![2]).toEqual({ map: true });
+  });
+
+  it("a pin renders the heading, the loader with the tile URL and the pins, and the caption", async () => {
+    await run(okDashboard({}, mapOk()));
+    expect(screen.getByRole("heading", { level: 2, name: "Congregation map" })).toBeTruthy();
+    const stub = screen.getByTestId("map-loader-stub");
+    expect(stub.getAttribute("data-tile-url")).toBe(`https://api.maptiler.com/maps/streets-v4/256/{z}/{x}/{y}.png?key=${KEY}`);
+    const pins = JSON.parse(stub.getAttribute("data-pins")!);
+    expect(pins).toEqual([{ ...pin, href: `/o/northern/admin/oversight/${ID}` }]);
+    expect(Object.keys(pins[0]).sort()).toEqual(["href", "id", "label", "lat", "lng", "name", "score"]);
+    expect(screen.getByTestId("dashboard-map-caption").textContent).toBe("1 of 12 congregations has a location.");
+  });
+
+  it("with the oversight flag off the pin has no href", async () => {
+    await run(okDashboard({}, mapOk()), { off: ["org_portal.oversight"] });
+    const pins = JSON.parse(screen.getByTestId("map-loader-stub").getAttribute("data-pins")!);
+    expect(pins[0].href).toBeNull();
+  });
+
+  it("zero pins: the prompt, with no loader element and no tile URL or key anywhere in the page", async () => {
+    await run(okDashboard({}, mapOk([], [{ id: ID, name: "Alder Creek" }], 12)));
+    expect(screen.getByText("No congregation has a usable location yet.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Congregation Oversight" }).getAttribute("href")).toBe("/o/northern/admin/oversight");
+    expect(screen.queryByTestId("map-loader-stub")).toBeNull();
+    expect(document.body.innerHTML).not.toContain(KEY);
+    expect(document.body.innerHTML).not.toContain("maptiler");
+  });
+
+  it("zero pins with the oversight flag off: the fact, with no link", async () => {
+    await run(okDashboard({}, mapOk([], [], 12)), { off: ["org_portal.oversight"] });
+    expect(screen.getByText(/isn't turned on for Northern Reach Presbytery yet/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open Congregation Oversight" })).toBeNull();
+  });
+
+  it("a locked or off map renders nothing and never puts the key in the page (the stated clerk)", async () => {
+    for (const map of [{ kind: "locked" }, { kind: "off" }]) {
+      await run(okDashboard({ viability: { kind: "locked" } }, map));
+      expect(screen.queryByTestId("dashboard-map")).toBeNull();
+      expect(screen.queryByTestId("map-loader-stub")).toBeNull();
+      expect(document.body.innerHTML).not.toContain(KEY);
+      cleanup();
+    }
+  });
+
+  it("a failed list hides the map section and its loader (the fallback copy promises the list below)", async () => {
+    await run(okDashboard({ viability: { kind: "error" } }, mapOk()));
+    expect(screen.queryByTestId("dashboard-map")).toBeNull();
+    expect(screen.queryByTestId("map-loader-stub")).toBeNull();
+    expect(document.body.innerHTML).not.toContain(KEY);
+  });
+
+  it("a failed map read says it could not load, with a retry link, and never the empty prompt", async () => {
+    await run(okDashboard({}, { kind: "error" }));
+    expect(screen.getByText("We couldn't load the map. The list below has every congregation.")).toBeTruthy();
+    expect(screen.queryByText(/No congregation has a usable location/)).toBeNull();
+    expect(screen.getAllByRole("link", { name: "Try again" })[0]!.getAttribute("href")).toBe("/o/northern/admin/insights");
+    expect(screen.queryByTestId("map-loader-stub")).toBeNull();
+    // the list still renders
+    expect(screen.getAllByText("Birch Hollow").length).toBeGreaterThan(0);
+  });
+
+  it("the map section sits between the cards and the viability list, and is not inside the list's section", async () => {
+    await run(okDashboard({}, mapOk()));
+    const cardsEl = screen.getByTestId("dashboard-cards");
+    const mapEl = screen.getByTestId("dashboard-map");
+    const listEl = screen.getByTestId("dashboard-viability");
+    expect(cardsEl.compareDocumentPosition(mapEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mapEl.compareDocumentPosition(listEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(listEl.contains(mapEl)).toBe(false);
   });
 });

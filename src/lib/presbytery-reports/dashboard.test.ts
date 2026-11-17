@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   getVacantPulpits: vi.fn(),
   getPerCapita: vi.fn(),
   getViability: vi.fn(),
+  getViabilityMap: vi.fn(),
 }));
 
 vi.mock("@/lib/authz", () => ({
@@ -30,8 +31,10 @@ vi.mock("./membership-trend", () => ({ getMembershipTrend: mocks.getMembershipTr
 vi.mock("./vacant-pulpits", () => ({ getVacantPulpits: mocks.getVacantPulpits }));
 vi.mock("./per-capita", () => ({ getPerCapita: mocks.getPerCapita }));
 vi.mock("./viability", () => ({ getViability: mocks.getViability }));
+vi.mock("./viability-map", () => ({ getViabilityMap: mocks.getViabilityMap }));
 
 import { getPresbyteryDashboard, getRosterCount } from "./dashboard";
+import { deriveViabilityMap } from "./map-derive";
 import { deriveMembershipTrend, derivePerCapita, deriveVacantPulpits, deriveViability } from "./derive";
 
 const VIEWER = { userId: "u1", email: null, personId: "p1", organizationId: "o1" };
@@ -54,6 +57,7 @@ function wireHappyReaders() {
     ok(derivePerCapita({ roster: ROSTER, records: [], billingYear: 2026, rateBasisYear: null, basisFigureOrgIds: new Set(), anyBillsAnyYear: false })),
   );
   mocks.getViability.mockResolvedValue(ok(deriveViability(ROSTER, [])));
+  mocks.getViabilityMap.mockResolvedValue(ok(deriveViabilityMap(ROSTER, [])));
 }
 
 beforeEach(() => {
@@ -200,6 +204,92 @@ describe("getPresbyteryDashboard", () => {
     expect(mocks.getMembershipTrend).toHaveBeenCalledWith(VIEWER, { from: 2021, to: 2025 });
     if (result.kind !== "ok") throw new Error("expected ok");
     expect(result.cards.per_capita).toEqual({ kind: "ok", data: { kind: "none", billingYear: 2026, rateSet: true } });
+  });
+});
+
+const WITH_MAP = { map: true } as const;
+
+describe("getPresbyteryDashboard: the map read (DECISION-343)", () => {
+  it("never reads the map unless the caller asks (no tile key): map is off and nothing is read", async () => {
+    for (const options of [undefined, {}, { map: false }]) {
+      const result = await getPresbyteryDashboard(VIEWER, NOW, options);
+      if (result.kind !== "ok") throw new Error("expected ok");
+      expect(result.map).toEqual({ kind: "off" });
+    }
+    expect(mocks.getViabilityMap).not.toHaveBeenCalled();
+  });
+
+  it("never reads the map when the viability key is not held at the hub, even when asked", async () => {
+    mocks.getReportsHub.mockResolvedValue({ held: { ...ALL_HELD.held, viability: false } });
+    const result = await getPresbyteryDashboard(VIEWER, NOW, WITH_MAP);
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.map).toEqual({ kind: "off" });
+    expect(result.cards.viability).toEqual({ kind: "locked" });
+    expect(mocks.getViabilityMap).not.toHaveBeenCalled();
+  });
+
+  it("never reads the map for a viewer who holds no key at all", async () => {
+    mocks.getReportsHub.mockResolvedValue(NONE_HELD);
+    expect(await getPresbyteryDashboard(VIEWER, NOW, WITH_MAP)).toEqual({ kind: "forbidden" });
+    expect(mocks.getViabilityMap).not.toHaveBeenCalled();
+  });
+
+  it("returns the pins beside the cards (not inside them) when held and asked", async () => {
+    mocks.getViabilityMap.mockResolvedValue(
+      ok(deriveViabilityMap(ROSTER, [{ aboutOrgId: "a", viabilityScore: 2, latitude: "39.9", longitude: "-82.9" }])),
+    );
+    const result = await getPresbyteryDashboard(VIEWER, NOW, WITH_MAP);
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(mocks.getViabilityMap).toHaveBeenCalledWith(VIEWER);
+    expect(result.map).toMatchObject({ kind: "ok", data: { total: 2, pins: [{ id: "a", label: "Fair" }], unplaced: [{ id: "b" }] } });
+    expect(Object.keys(result.cards).sort()).toEqual(["membership_trend", "per_capita", "vacant_pulpits", "viability"]);
+  });
+
+  it("the reader's own forbidden (key revoked after the hub read) is locked", async () => {
+    mocks.getViabilityMap.mockResolvedValue({ kind: "forbidden" });
+    const result = await getPresbyteryDashboard(VIEWER, NOW, WITH_MAP);
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.map).toEqual({ kind: "locked" });
+  });
+
+  it("a rejected map read is error while every card and the roster still render", async () => {
+    mocks.getViabilityMap.mockRejectedValue(new Error("statement aborted"));
+    const result = await getPresbyteryDashboard(VIEWER, NOW, WITH_MAP);
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.map).toEqual({ kind: "error" });
+    expect(result.cards.viability.kind).toBe("ok");
+    expect(result.cards.membership_trend.kind).toBe("ok");
+    expect(result.roster).toEqual({ kind: "ok", count: 2 });
+  });
+
+  it("a failed viability list does not stop the map read, and a failed map read does not touch the list", async () => {
+    mocks.getViability.mockRejectedValue(new Error("boom"));
+    const result = await getPresbyteryDashboard(VIEWER, NOW, WITH_MAP);
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.cards.viability).toEqual({ kind: "error" });
+    expect(result.map.kind).toBe("ok");
+  });
+
+  it("starts the map read together with the others, before any settles", async () => {
+    let release: () => void = () => {};
+    mocks.getViabilityMap.mockReturnValue(
+      new Promise((resolve) => {
+        release = () => resolve(ok(deriveViabilityMap(ROSTER, [])));
+      }),
+    );
+    const pending = getPresbyteryDashboard(VIEWER, NOW, WITH_MAP);
+    await vi.waitFor(() => {
+      expect(mocks.getViabilityMap).toHaveBeenCalledTimes(1);
+      expect(mocks.getViability).toHaveBeenCalledTimes(1);
+      expect(mocks.getMembershipTrend).toHaveBeenCalledTimes(1);
+    });
+    release();
+    expect((await pending).kind).toBe("ok");
+  });
+
+  it("an OrgAccessError from the map read is rethrown and never a map error", async () => {
+    mocks.getViabilityMap.mockRejectedValueOnce(new mocks.FakeOrgAccessError("ended"));
+    await expect(getPresbyteryDashboard(VIEWER, NOW, WITH_MAP)).rejects.toBeInstanceOf(mocks.FakeOrgAccessError);
   });
 });
 

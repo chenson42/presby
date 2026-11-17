@@ -41,6 +41,13 @@ vi.mock("@/lib/authz", () => {
   };
 });
 
+vi.mock("server-only", () => ({}));
+
+const mapTileConfig = vi.fn();
+vi.mock("@/lib/presbytery-reports/map-config", () => ({
+  mapTileConfig: () => mapTileConfig(),
+}));
+
 const isFlagEnabled = vi.fn();
 vi.mock("@/lib/flags", () => ({
   isFlagEnabled: (...args: unknown[]) => isFlagEnabled(...args),
@@ -81,6 +88,7 @@ afterEach(() => {
   resolveOrgContext.mockReset();
   assertOrgAccess.mockReset().mockResolvedValue(undefined);
   isFlagEnabled.mockReset();
+  mapTileConfig.mockReset().mockReturnValue(null);
   getCongregationOversightDetail.mockReset();
   redirectMock.mockClear();
   notFoundMock.mockClear();
@@ -206,5 +214,44 @@ describe("OversightDetailPage — the ordering/error-handling contract", () => {
       screen.getByRole("heading", { name: "Alder Creek Presbyterian Church" }),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: /^save$/i })).toBeTruthy();
+  });
+
+  it("renders the 'Map location' group (not the old 'future viability map' legend) with both hints", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightDetail.mockResolvedValue({ kind: "ok", data: DETAIL_ROW });
+
+    render(await OversightDetailPage({ params: makeParams() }));
+
+    expect(screen.getByText("Map location")).toBeTruthy();
+    expect(screen.queryByText(/future viability map/i)).toBeNull();
+    expect(screen.getByText(/between -90 and 90, for example 39\.9612\. Enter this first\./)).toBeTruthy();
+    expect(screen.getByText(/negative\s+longitude, for example -82\.9988\./)).toBeTruthy();
+  });
+
+  it("reads the Insights flag and the tile key only after every gate, and only to word the toast", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(false); // oversight off: the page stops at the placeholder
+    render(await OversightDetailPage({ params: makeParams() }));
+    expect(isFlagEnabled).not.toHaveBeenCalledWith("org_portal.insights");
+    expect(mapTileConfig).not.toHaveBeenCalled();
+  });
+
+  it("asks for the tile key only when Insights is on (a flag off short-circuits), on the ok path", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    getCongregationOversightDetail.mockResolvedValue({ kind: "ok", data: DETAIL_ROW });
+
+    isFlagEnabled.mockImplementation(async (key: string) => key === "org_portal.oversight");
+    render(await OversightDetailPage({ params: makeParams() }));
+    expect(isFlagEnabled).toHaveBeenCalledWith("org_portal.insights");
+    expect(mapTileConfig).not.toHaveBeenCalled();
+    cleanup();
+
+    isFlagEnabled.mockResolvedValue(true);
+    render(await OversightDetailPage({ params: makeParams() }));
+    expect(mapTileConfig).toHaveBeenCalledTimes(1);
   });
 });

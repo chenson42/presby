@@ -70,4 +70,37 @@ describe("oversightSchema", () => {
   it("fails (path only: enum with no message is tamper-only) on an unknown score", async () => {
     expect(Object.keys(await errorsOf({ viabilityScore: "9" }))).toEqual(["viabilityScore"]);
   });
+
+  it('says "Must be a number" for scientific notation, a comma decimal, NaN and Infinity', async () => {
+    for (const latitude of ["1e5", "39,9", "NaN", "Infinity", "0x1"]) {
+      expect(await errorsOf({ latitude, longitude: "-82" })).toEqual({ latitude: "Must be a number" });
+    }
+  });
+
+  it("refuses a half-set pair on the blank field, with the server's sentence", async () => {
+    expect(await errorsOf({ latitude: "39.9612", longitude: "" })).toEqual({
+      longitude: "Enter both latitude and longitude, or leave both blank.",
+    });
+    expect(await errorsOf({ latitude: "", longitude: "-82.9988" })).toEqual({
+      latitude: "Enter both latitude and longitude, or leave both blank.",
+    });
+    expect(await errorsOf({ latitude: "  ", longitude: "-82.9988" })).toEqual({
+      latitude: "Enter both latitude and longitude, or leave both blank.",
+    });
+  });
+
+  it("refuses exactly 0 and 0, on latitude, and accepts 0 on one axis and a blank pair", async () => {
+    expect(await errorsOf({ latitude: "0", longitude: "0" })).toEqual({
+      latitude:
+        "0 and 0 is a point in the ocean, not a congregation. Enter its real latitude and longitude, or leave both blank.",
+    });
+    expect(await errorsOf({ latitude: "-0.0", longitude: "0.00" })).toHaveProperty("latitude");
+    expect(await errorsOf({ latitude: "0", longitude: "-82" })).toEqual({});
+    expect(await errorsOf({ latitude: "", longitude: "" })).toEqual({});
+  });
+
+  it("leaves a field's own error alone rather than stacking a pair error on it", async () => {
+    expect(await errorsOf({ latitude: "north", longitude: "" })).toEqual({ latitude: "Must be a number" });
+    expect(await errorsOf({ latitude: "95", longitude: "" })).toEqual({ latitude: "Must be between -90 and 90" });
+  });
 });

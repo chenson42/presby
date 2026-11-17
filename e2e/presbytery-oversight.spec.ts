@@ -186,4 +186,124 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
 
     await context.close();
   });
+
+  // -------------------------------------------------------------------
+  // Map location (DECISION-343, docs/work-log/2026-11-17-presbytery-dashboard-map.md). No tile key is needed:
+  // these are the form and the write, not the map. Each case that saves puts the alpha row's coordinates back.
+  // -------------------------------------------------------------------
+
+  const ALPHA_ROW = (id: string) => ({ org: E2E_ORGS.presbytery.id, about: id });
+
+  async function readCoordinates(aboutId: string) {
+    const { org, about } = ALPHA_ROW(aboutId);
+    const rows = (await sql`
+      select latitude::text as latitude, longitude::text as longitude
+        from congregation_oversight where organization_id = ${org}::uuid and about_org_id = ${about}::uuid
+    `) as { latitude: string | null; longitude: string | null }[];
+    return rows[0] ?? null;
+  }
+
+  async function restoreCoordinates(aboutId: string, prior: { latitude: string | null; longitude: string | null } | null) {
+    const { org, about } = ALPHA_ROW(aboutId);
+    await sql`
+      update congregation_oversight
+         set latitude = ${prior?.latitude ?? null}::numeric, longitude = ${prior?.longitude ?? null}::numeric
+       where organization_id = ${org}::uuid and about_org_id = ${about}::uuid
+    `;
+  }
+
+  test("7. the Map location group names itself, hints each box, and refuses a half-set pair or 0 and 0 inline", async ({ browser }) => {
+    const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
+    const page = await context.newPage();
+    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
+    const lat = page.locator("#oversight-latitude");
+    const lng = page.locator("#oversight-longitude");
+    await expect(lat).toBeEnabled();
+
+    await expect(page.getByText("Map location")).toBeVisible();
+    await expect(page.getByText(/future viability map/i)).toHaveCount(0);
+    await expect(page.getByText(/Decimal degrees between -90 and 90, for example 39\.9612\. Enter this first\./)).toBeVisible();
+    await expect(page.getByText(/Congregations in the United States have a negative\s+longitude/)).toBeVisible();
+
+    // Latitude alone is refused with the half-set sentence, on the blank field, and nothing is saved.
+    await lat.fill("39.9612");
+    await lng.fill("");
+    await page.getByRole("button", { name: /^save$/i }).click();
+    await expect(page.getByText("Enter both latitude and longitude, or leave both blank.")).toBeVisible();
+    await expect(page.getByText(/oversight record saved/i)).toHaveCount(0);
+
+    // 0 and 0 is refused with its own sentence.
+    await lat.fill("0");
+    await lng.fill("0");
+    await page.getByRole("button", { name: /^save$/i }).click();
+    await expect(page.getByText(/^0 and 0 is a point in the ocean/)).toBeVisible();
+    await expect(page.getByText(/oversight record saved/i)).toHaveCount(0);
+
+    // A non-decimal value is refused too.
+    await lat.fill("1e5");
+    await lng.fill("-82");
+    await page.getByRole("button", { name: /^save$/i }).click();
+    await expect(page.getByText("Must be a number")).toBeVisible();
+    await context.close();
+  });
+
+  test("8. pasting a pair into either box splits it into both, and says so", async ({ browser }) => {
+    const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
+    const page = await context.newPage();
+    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
+    const lat = page.locator("#oversight-latitude");
+    const lng = page.locator("#oversight-longitude");
+    await expect(lat).toBeEnabled();
+
+    await lat.evaluate((el) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "39.9612, -82.9988");
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await expect(lat).toHaveValue("39.9612");
+    await expect(lng).toHaveValue("-82.9988");
+    await expect(page.getByText("Filled latitude and longitude from the pasted pair. Check them before you save.")).toBeVisible();
+
+    // An ordinary paste is left alone: a single number is not split.
+    await lat.fill("");
+    await lng.fill("");
+    await lat.evaluate((el) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "41.5");
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await expect(lng).toHaveValue("");
+    await context.close();
+  });
+
+  test("9. a valid pair is stored, the toast keeps its title, and no coordinate reaches the audit row", async ({ browser }) => {
+    const prior = await readCoordinates(E2E_ORGS.alpha.id);
+    const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
+    const page = await context.newPage();
+    try {
+      await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
+      await expect(page.locator("#oversight-latitude")).toBeEnabled();
+      await page.locator("#oversight-latitude").fill("39.9612");
+      await page.locator("#oversight-longitude").fill("-82.9988");
+      await page.getByRole("button", { name: /^save$/i }).click();
+      await expect(page.getByText(/oversight record saved/i)).toBeVisible({ timeout: 10_000 });
+
+      const stored = await readCoordinates(E2E_ORGS.alpha.id);
+      expect(Number(stored?.latitude)).toBe(39.9612);
+      expect(Number(stored?.longitude)).toBe(-82.9988);
+
+      const audit = (await sql`
+        select metadata from audit_events
+         where action = 'tenant.congregation_oversight.set'
+           and metadata->>'aboutOrgId' = ${E2E_ORGS.alpha.id}
+         order by created_at desc limit 1
+      `) as { metadata: Record<string, unknown> }[];
+      expect(Object.keys(audit[0].metadata)).not.toContain("latitude");
+      expect(Object.keys(audit[0].metadata)).not.toContain("longitude");
+      expect(JSON.stringify(audit[0].metadata)).not.toContain("39.9612");
+    } finally {
+      await restoreCoordinates(E2E_ORGS.alpha.id, prior);
+      await context.close();
+    }
+  });
 });

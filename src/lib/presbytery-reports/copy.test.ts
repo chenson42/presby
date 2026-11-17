@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { CALL_TYPE_LABELS } from "@/app/(org)/o/[slug]/admin/credentials/credential-labels";
 import { REPORTS } from "./contract";
+import { VIABILITY_LABELS, VIABILITY_NOT_ASSESSED } from "./derive";
 import {
   DASHBOARD_COPY,
   HUB_COPY,
+  MAP_COPY,
   PER_CAPITA_COPY,
   ROUTE_COPY,
   SUPPLY_CALL_TYPE_LABELS,
@@ -141,5 +143,61 @@ describe("formatDollars", () => {
     expect(PER_CAPITA_COPY.status).toEqual({ unpaid: "Unpaid", partly_paid: "Partly paid", paid: "Paid", not_billed: "Not billed" });
     expect(PER_CAPITA_COPY.notBilled.no_statistics(2023)).toBe("No statistics on file for 2023");
     expect(PER_CAPITA_COPY.notBilled.not_generated).toBe("Not generated yet");
+  });
+});
+
+describe("map copy (DECISION-343)", () => {
+  it("is in the swept set (so the two-factor, permission and future-tense bans cover it)", () => {
+    expect(strings).toContain(MAP_COPY.title);
+    expect(strings).toContain(MAP_COPY.tilesError);
+    expect(strings).toContain(MAP_COPY.caption(3, 9));
+    expect(strings).toContain(MAP_COPY.popup.rating("Northern Reach"));
+  });
+
+  it("the caption reads as drafted for one, several and a single-congregation presbytery", () => {
+    expect(MAP_COPY.caption(1, 12)).toBe("1 of 12 congregations has a location.");
+    expect(MAP_COPY.caption(2, 12)).toBe("2 of 12 congregations have a location.");
+    expect(MAP_COPY.caption(1, 1)).toBe("1 of 1 congregation has a location.");
+  });
+
+  it("the legend labels equal the list's labels, one per score plus 'not yet assessed', each with its own shape", () => {
+    const labels = MAP_COPY.legend.items.map((i) => i.label);
+    expect(labels).toEqual([VIABILITY_LABELS[1], VIABILITY_LABELS[2], VIABILITY_LABELS[3], VIABILITY_NOT_ASSESSED]);
+    expect(new Set(MAP_COPY.legend.items.map((i) => i.shape)).size).toBe(4);
+  });
+
+  it("no heading contains a phrase the dashboard's other headings are found by (the e2e matches substrings)", () => {
+    const headings = [MAP_COPY.title, MAP_COPY.unplaced.heading, MAP_COPY.legend.heading];
+    for (const h of headings) {
+      expect(h).not.toMatch(/member congregations|viability|vacant pulpits|ending active members|per capita|insights & analytics/i);
+    }
+  });
+
+  it("the oversight-off sentence states the fact and gives no instruction to use the page", () => {
+    expect(MAP_COPY.oversightOff("Northern Reach")).toBe(
+      "Locations are entered on Congregation Oversight, which isn't turned on for Northern Reach yet.",
+    );
+    expect(MAP_COPY.oversightOff("Northern Reach")).not.toMatch(/Open |Add |Enter /);
+  });
+
+  it("a failed read and a failed tile never read as an empty state, and both point at the list", () => {
+    for (const s of [MAP_COPY.readError, MAP_COPY.tilesError]) {
+      expect(s).toMatch(/list below has every congregation/);
+      expect(s).not.toMatch(/no congregation|usable location|has a location/i);
+    }
+  });
+
+  it("is import-free (the client files import it)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./copy.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/^import /m);
+  });
+
+  it("attribution links are the providers' own pages on https", () => {
+    const a = MAP_COPY.attribution;
+    expect(a.maptilerHref).toBe("https://www.maptiler.com/copyright/");
+    expect(a.osmHref).toBe("https://www.openstreetmap.org/copyright");
+    expect(a.logoHref).toBe("https://www.maptiler.com/");
+    expect(a.logoSrc).toBe("https://api.maptiler.com/resources/logo.svg");
   });
 });

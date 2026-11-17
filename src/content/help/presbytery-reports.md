@@ -33,6 +33,20 @@ A card opens its report only where the reports are turned on, and a congregation
 
 If the page says Insights & Analytics "isn't turned on" for your presbytery, the PresbyPortal team switches it on for the whole platform. [Contact the team](/help/contact) if you need it.
 
+## The viability map
+
+Above the viability list, a section headed "Congregation map" shows your member congregations as pins. You need the permission to manage congregation oversight to see it. Without that permission the Viability section says "Locked" and there is no map.
+
+Each pin is a member congregation that has a location, and its shape shows its rating: a diamond for "At risk", a square for "Fair", a circle for "Healthy" and a hollow circle for "Not yet assessed". The key under the map lists the shapes in words. A line below the map says how many congregations have a location, for example "2 of 12 congregations have a location."
+
+Choose a pin to see the congregation's name and rating. Where "Congregation Oversight" is turned on, the pin also has an "Open oversight page" link. On a computer, drag the map to move it and use the + and - buttons to zoom. On a phone or tablet, one finger scrolls the page past the map; use two fingers to move or zoom the map, or use the + and - buttons. The viability list below the map names every congregation with the same ratings, so you can read the page without the map.
+
+Congregations with no usable location are listed under "Not on the map". If none has a location, the section says so instead of showing a map. If the map cannot load, the section says "The map could not load", or "We couldn't load the map" with a "Try again" link, and the list below still works. Reloading the page tries again.
+
+The map pictures come from MapTiler and are credited to MapTiler and OpenStreetMap contributors under the map. Your browser asks MapTiler for them directly while the map is showing. See the [Privacy policy](/help/privacy-policy).
+
+If you can open the Viability section, it shows no error, and there is no map section above it, the map is not switched on for PresbyPortal. [Contact the team](/help/contact) if you need it.
+
 ## Vacant pulpits
 
 A congregation is listed when it has no installed pastor and no designated pastor recorded as serving today. Stated supply, interim pastor and temporary supply do not fill the pulpit here; the most recent one shows under "Supply". A parish associate does not fill the pulpit either, and does not make it vacant. A call that starts on a later date does not fill the pulpit until that date, and a call with an end date still fills it until that day.
@@ -54,6 +68,19 @@ Under each year, "Total reported" adds the numbers shown and says how many congr
 ## Viability
 
 Each congregation shows the rating the presbytery recorded on "Congregation Oversight": "At risk", "Fair" or "Healthy", with the redevelopment notes and the date it was last updated. A congregation with no rating says "Not yet assessed". The scale is 1 for at risk and 3 for healthy. A file from an older system may use the opposite scale, so check before comparing the two.
+
+## Putting a congregation on the map
+
+A congregation appears on the map when it has a location on "Congregation Oversight". "Congregation Oversight" must be turned on (the PresbyPortal team switches it on for the whole platform), and you need the permission to manage congregation oversight.
+
+1. Open "Congregation Oversight", then choose the congregation.
+2. Under "Map location", enter the "Latitude" first. It is a decimal number between -90 and 90, for example 39.9612.
+3. Enter the "Longitude". It is a decimal number between -180 and 180. A congregation in the United States has a negative longitude, for example -82.9988.
+4. Choose "Save".
+
+Enter both numbers or neither. To copy them from a maps application, copy the pair of numbers it shows, for example 39.9612, -82.9988, and paste it into either box: both boxes fill themselves, and you should check them before you save. A latitude and longitude of 0 and 0 is refused, because it is a point in the ocean. If a pin lands in the wrong place, check the signs. To take a congregation off the map, clear both boxes and choose "Save".
+
+Where the map is turned on, open "Insights & Analytics" after you save to see the pin. A congregation that has left your presbytery or closed is not on the map, even with a location.
 
 ## Per capita
 

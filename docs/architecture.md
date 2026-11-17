@@ -30,7 +30,7 @@ This is deliberately a *functional* summary, not an implementation one — for t
 
 **Online giving** is built, with one honest limit: per-congregation giving through Stripe, an offline gift desk for the treasurer, members' own giving history, and year-end contribution statements all work against recorded Stripe fixtures but have never run against a live Stripe account, and the statements are switched off in production until an accountant has reviewed their wording (section 8a).
 
-**Not yet built**, named honestly rather than glossed over: fund accounting (the ledger behind giving), worship and service planning, event check-in, a public event calendar, presbytery committee and commission tracking, and a presbytery-wide rollup dashboard (a viability map across every member congregation). Each has a real, working "coming soon" placeholder in the product today rather than a dead link.
+**Not yet built**, named honestly rather than glossed over: fund accounting (the ledger behind giving), worship and service planning, event check-in, a public event calendar, and presbytery committee and commission tracking. Each has a real, working "coming soon" placeholder in the product today rather than a dead link.
 
 ---
 

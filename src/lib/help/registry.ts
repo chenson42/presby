@@ -207,7 +207,7 @@ export const HELP_PAGES = [
     audience: "everyone",
     covers: [],
     labels: [],
-    verifiedIn: "0.53.0",
+    verifiedIn: "0.60.0",
   },
   // ---- Written against in-flight pipelines: a pending page is not rendered until its [help:<token>] line is Done.
   //      accepting-your-invitation, setting-up-two-factor, who-is-asked-for-a-code and sign-in-invitations published at 0.50.0 -----
@@ -937,7 +937,7 @@ export const HELP_PAGES = [
     slug: "presbytery-reports",
     title: "Presbytery reports and downloads",
     summary:
-      "Four reports for a presbytery, each a page and a spreadsheet download: vacant pulpits, membership trend, viability and per capita, and a summary page.",
+      "Four reports for a presbytery, each a page and a spreadsheet download: vacant pulpits, membership trend, viability and per capita, and a summary page with a map.",
     order: 80,
     status: "published",
     audience: "administrator",
@@ -946,7 +946,7 @@ export const HELP_PAGES = [
       appliesTo: "presbyteries",
     },
     covers: ["tile:reports", "tile:insights"],
-    anchors: ["insights-and-analytics", "vacant-pulpits", "membership-trend", "viability", "per-capita"],
+    anchors: ["insights-and-analytics", "the-viability-map", "vacant-pulpits", "membership-trend", "viability", "putting-a-congregation-on-the-map", "per-capita"],
     labels: [
       "Per-Capita, SASR & Imports",
       "Reports & Insights",
@@ -958,6 +958,18 @@ export const HELP_PAGES = [
       "Vacant pulpits",
       "Membership trend",
       "Viability",
+      "Congregation map",
+      "Not on the map",
+      "Open oversight page",
+      "Map location",
+      "Latitude",
+      "Longitude",
+      "Save",
+      "At risk",
+      "Fair",
+      "Healthy",
+      "The map could not load",
+      "We couldn't load the map",
       "Per capita",
       "Export CSV",
       "Export all years",
@@ -975,7 +987,7 @@ export const HELP_PAGES = [
       "Not billed",
       "Total reported",
     ],
-    verifiedIn: "0.59.0",
+    verifiedIn: "0.60.0",
   },
   // ---- Treasurers ---------------------------------------------------------------------------
   {

@@ -10,6 +10,8 @@ import {
 } from "@/lib/authz";
 import { getCongregationOversightDetail } from "@/lib/presbytery";
 import { isFlagEnabled } from "@/lib/flags";
+import { INSIGHTS_FLAG } from "@/lib/presbytery-reports/contract";
+import { mapTileConfig } from "@/lib/presbytery-reports/map-config";
 import {
   PlaceholderFlagOff,
   PlaceholderNotAvailable,
@@ -104,6 +106,11 @@ export default async function OversightDetailPage({
     return <OversightLoadError slug={slug} />;
   }
 
+  // Whether the save toast may promise a place to see the pin (copy truthfulness,
+  // DECISION-343): the Insights page is on AND a tile key is configured. Read only
+  // after every gate above, and only to word a toast; it gates nothing.
+  const mapOn = (await isFlagEnabled(INSIGHTS_FLAG)) && mapTileConfig() !== null;
+
   return (
     <section className="space-y-6">
       <div>
@@ -119,7 +126,7 @@ export default async function OversightDetailPage({
           {resolved.org.name}&apos;s own oversight record for this congregation.
         </p>
       </div>
-      <OversightEditForm slug={slug} aboutOrgId={aboutOrgId} row={result.data} />
+      <OversightEditForm slug={slug} aboutOrgId={aboutOrgId} row={result.data} mapOn={mapOn} />
     </section>
   );
 }

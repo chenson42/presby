@@ -207,7 +207,7 @@ export const HELP_PAGES = [
     audience: "everyone",
     covers: [],
     labels: [],
-    verifiedIn: "0.53.0",
+    verifiedIn: "0.60.0",
   },
   // ---- Written against in-flight pipelines: a pending page is not rendered until its [help:<token>] line is Done.
   //      accepting-your-invitation, setting-up-two-factor, who-is-asked-for-a-code and sign-in-invitations published at 0.50.0 -----
@@ -987,7 +987,7 @@ export const HELP_PAGES = [
       "Not billed",
       "Total reported",
     ],
-    verifiedIn: "0.59.0",
+    verifiedIn: "0.60.0",
   },
   // ---- Treasurers ---------------------------------------------------------------------------
   {

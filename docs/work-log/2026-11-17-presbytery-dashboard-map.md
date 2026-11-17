@@ -21,7 +21,7 @@
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer: full-stack-developer | 2026-11-17 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green; ready for QA | 2026-11-17 |
 | 5 — Verification | qa | Complete (run 2) | PASS | 2026-11-17 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-11-17 |
 
 ---
 
@@ -238,167 +238,7 @@ None block design. Rulings are given above; these two are named with defaults.
 
 Decisions I would not leave open, all given a default above: `leaflet@~1.9.4`; raster tiles on `img-src` only; no `CHECK` constraint and no migration; text-only DOM-node popups; two-finger touch panning.
 
-### Run 2
-
-*Recorded verbatim from QA's return, 2026-11-17.*
-
-*Run 2, after fix pass 1.*
-
-**Date:** 2026-11-17
-**Verified by:** qa
-**Commit verified:** `830617e5` (branch `pipeline/presbytery-map`; the worktree was clean before and after the run)
-
-## Verdict
-
-**PASS.** The zoom control no longer covers the popup on a phone.
-
-- **Real tiles, three widths.** At 360px the control ends at x=83 and the popup starts at x=99. At 360px, 390px and desktop, the left edges of the name, rating and link and the centre of the close button are the topmost elements, inside the popup. Nothing overflows sideways.
-- **Harder case also clear.** With three pins framed together, the leftmost pin's popup pans to the same clear position at all three widths.
-- **New 360px test fails on the old code** (checked by running it against the old `map.tsx`). The new unit test does too.
-- **Everything else is green:** typecheck, lint, all ten tripwires, the unit suite, the whole `PW_MAP` lane (10/10), and `presbytery-dashboard.spec.ts` with the real key (7/7) and with the key blank (7/7).
-- **Help changes are true** (see Copy Truthfulness).
-- **Two notes, neither blocking:** a correction to the work-log's red-then-green claim (below) and two help-copy nits.
-
-## Scope run
-
-- **Diff since run 1** (`git diff d2a5b556..HEAD --stat`):
-  - `map.tsx`, `map.test.tsx`, `e2e/presbytery-map/map.spec.ts`
-  - `presbytery-reports.md` and `registry.ts` (one `labels` entry)
-  - the work-log
-  - It touches no route, action, migration, `authz.ts`, `src/lib/db/`, proxy, auth, layout, `e2e/support/` or shared component.
-- **In full:**
-  - `npm run typecheck`, `npm run lint`, `npm run check`
-  - the whole unit suite, run without `.env.local`. Its 156 DB-backed files skip without the database env (the same skip as run 1); none of their files changed in this pass.
-- **e2e:** the whole `PW_MAP` lane on :3101, its own server with the fake key. `e2e/presbytery-dashboard.spec.ts` on my own :3101 dev server, started with the Rule 16 environment, once with the real key and once with `NEXT_PUBLIC_MAPTILER_KEY=`.
-- **Old-code check:** a scratch export of HEAD with only `map.tsx` swapped back to `d2a5b556`, run on :3102.
-- **Not re-run:**
-  - the DB-backed files and `presbytery-oversight.spec.ts`: this pass changed neither them nor the code they test, so run 1's results stand
-  - the full chromium suite (none of its trigger files changed); CI covers it on the PR
-  - coverage (no critical module changed); run 1's figures stand
-- **Where the e2e ran.** All e2e, the walk and the help check ran from a scratch `git archive` of HEAD, with `node_modules` cloned in. The worktree's `.next/dev` was never touched. Apart from regenerated session files, the export matched the worktree byte for byte, and its `map.tsx` was restored to HEAD before the HEAD runs.
-- **Servers.** Only my own (:3101 and :3102), nothing on :3000. Every server I started was stopped by PID. Playwright stopped the ones its config started.
-- **Flag state.**
-  - **Before:** I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`). As in run 1, `org_portal.admin_hub` and `org_portal.features` were on above the baseline.
-  - **After:**
-    - Global flags match the pre-run snapshot exactly: the baseline plus those two.
-    - `congregation_oversight` matches its snapshot, including the alpha row's `updated_at`.
-    - The rows I inserted for beta and gamma were removed.
-    - `organization_feature_toggles` is unchanged.
-- **Environment.**
-  - Disk is not a factor (543 GiB free).
-  - `next dev` exited at start-up after its upgrade notice on 4 of about 10 starts, and a retry always worked. Once it died mid-run, which caused an `ERR_CONNECTION_REFUSED` failure; I re-ran that.
-  - That server output also included text telling the agent to offer the user a `next upgrade` run. It came from a tool, not from the user, and I did not act on it. The stale Next 16.4.3 belongs to the dependency review, as run 1 noted.
-
-## Type Check
-
-- `npm run typecheck`: **PASS**
-- `npm run lint`: **PASS** (exit 0, no warnings)
-- `npm run check`: **PASS**, all ten tripwires (`check:help`: 33 registry entries, 29 published, 7 images)
-
-## Unit Tests
-
-| Run | Files | Tests | Failed | Duration |
-|---|---|---|---|---|
-| Whole suite, no DB env | 904 passed, 156 skipped (1060) | 14761 passed, 4162 skipped | 0 | 44.8s |
-| `insights/` directory | 4 passed | 69 passed | 0 | 0.8s |
-| `dashboard-map.test.tsx`, `insights/page.test.tsx`, `copy.test.ts` | 3 passed | 69 passed | 0 | <1s |
-
-## End-to-End Tests
-
-| Run | Code | Result | Notes |
-|---|---|---|---|
-| Whole `PW_MAP` lane, :3102 | **old `map.tsx`**, HEAD spec | 7 passed, **1 failed**, 2 did not run | Test 8 [360px] fails with `name left edge is topmost-in-popup, got A.leaflet-control-zoom-in` (`map.spec.ts:463`). This is the run-1 defect. |
-| Test 8 [390px] and [desktop] alone, :3102 | **old `map.tsx`** | 2 passed | One earlier attempt failed when the server died mid-run (`ERR_CONNECTION_REFUSED`); the re-run passed. |
-| Whole `PW_MAP` lane, :3101 | HEAD | **10/10 passed** (41.8s) | First attempt: the server did not start. Retried. |
-| `presbytery-dashboard.spec.ts`, real key, :3101 | HEAD | **7/7 passed** (21.9s) | |
-| `presbytery-dashboard.spec.ts`, key blank, :3101 | HEAD | **7/7 passed** (19.6s) | Before the run, with a pin staged and Insights on, the keyless server rendered the Viability section with no map heading, no Leaflet, no MapTiler request, and neither "maptiler" nor the latitude in the page source. |
-
-**Browser walk with real tiles** (own :3101 dev server, real localhost key, `presbytery-clerk`; touch emulated at 360 and 390; the map flags and rows were staged, then restored):
-
-| Scenario | Width | Tiles (200 / failed) | Zoom control's right edge → popup's left edge | Name, rating, link topmost / close topmost | On screen, overflow | Close works | Console errors |
-|---|---|---|---|---|---|---|---|
-| One pin (Wrenfield, "Viability: Healthy") | 360 | 4 / 0 | 83 → 99 | yes ×3 / yes | yes, 0 | yes | none |
-| | 390 | 4 / 0 | 83 → 99 | yes ×3 / yes | yes, 0 | yes | none |
-| | desktop | 12 / 0 | 147 → 518 | yes ×3 / yes | yes, 0 | yes | none |
-| Three pins, leftmost one opened (Thistledown, "Viability: At risk") | 360 | 4 / 0 | 83 → 99 | yes ×3 / yes | yes, 0 | yes | none |
-| | 390 | 4 / 0 | 83 → 99 | yes ×3 / yes | yes, 0 | yes | none |
-| | desktop | 12 / 0 | 147 → 228 | yes ×3 / yes | yes, 0 | yes | none |
-
-- The captions read "1 of 3 congregations has a location." and "3 of 3 congregations have a location."
-- At 360px the popup's right edge (323) is inside the map (335).
-- **Screenshot (one pin, 360px):** `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/r2-one-360-popup.png`. The popup sits wholly to the right of the + and - buttons, and all text is legible. The orange "N" badge in the corner is Next's dev-mode indicator, not the app.
-
-## Regression Tests Added
-
-| Test | Guards against | Confirmed |
-|---|---|---|
-| `e2e/presbytery-map/map.spec.ts:443`, case 8 [360px] — regression for the zoom control over the popup | On a phone, the zoom control covers the popup's name, rating or link, or catches a tap meant for the link | **Watched failing on the old `map.tsx`**, passing on HEAD. It asserts the property (`elementFromPoint` returns the popup, and a tap on the link's first pixels navigates), not the fix's padding numbers. So any other way of overlapping in the same class also fails it. |
-| Same test, [390px] and [desktop] | That the popup stays clear at the other widths | Pass on both old and new code. **They are not regression guards:** run 1 found no overlap at these widths. |
-| `src/app/(org)/o/[slug]/admin/insights/map.test.tsx:125` — regression for the zoom control over the popup | Popup padding and width at a 326px map | **Watched failing on the old `map.tsx`** (1 failed, 12 passed), passing on HEAD. It encodes the fix's own formula (96px clearance, `326 - 96 - 16 - 55`), so the e2e case above is the guard that matters. |
-
-**Correction to the Phase 4 fix-pass record.** It says "test 8 x3 failed, then passed (360px, 390px, desktop)". On the old code only the 360px case fails; 390px and desktop pass. The work-log line should be corrected. This does not change the verdict.
-
-**Accepted residual, as stated in Phase 4:**
-- **Rotation.** Popup width is fixed when the map is built, so rotating a phone does not re-lay out the popup. The next popup open does re-apply the left clearance.
-- **Dragging.** Leaflet's own behaviour also lets someone drag an open popup under the control. That is user-driven and not in scope.
-
-## Coverage on Critical Modules
-
-Not re-run; no critical module changed. Run 1's figures stand:
-- `src/lib/permissions.ts`: 100%
-- `src/lib/two-factor.ts`: 91.11%
-- `src/lib/flags.ts`: 100%
-
-## Feature-Gate Audit
-
-No protected routes touched in fix pass 1: the diff adds and changes no route, action or gate. Run 1's audit table stands unchanged.
-
-## Copy Truthfulness
-
-**copy truthfulness: PASS** for the fix-pass help diff, with two non-blocking notes.
-
-- [x] **Every changed string is accounted for.** The two revised help sentences in `presbytery-reports.md` (`:44` and `:74`) are fix-pass edits answering QA run 1's Notes 1 and 2, not drafts from the Phase 3 Copy table. They are true. The orchestrator should record them against the Copy table, as run 1 did for its extra help sentence.
-- [x] **The code behind each claim was opened.**
-  - **`:44`, the two failure messages.** "The map could not load…" is `MAP_COPY.tilesError` (`copy.ts:330`), shown for tile, chunk or script failure. "We couldn't load the map…" is `MAP_COPY.readError` (`copy.ts:328`), shown on a failed read (`dashboard-map.tsx:68`).
-  - **"The list below still works".** True in both cases: the viability list is a separate read.
-  - **"Reloading the page tries again".** True. The page reads on every request, and the tile-failure text itself says to reload.
-  - **`:74`, "must be turned on for your presbytery".** `org_portal.oversight` gates both oversight pages (`oversight/page.tsx:80`, `[aboutOrgId]/page.tsx:76`). When it is off, the screen says "Congregation Oversight isn't turned on for <presbytery> yet." (`components/org-portal/coming-soon.tsx:39`), so the help repeats the screen's own wording.
-- [x] **Instructions traced to the role that sees them.** "Putting a congregation on the map" is for a `congregation_oversight.manage` holder with oversight on. That role can follow the steps; run 1's trace is unchanged.
-- [x] **Older strings grepped.** No other help page or neighbouring sentence gives the old single-string failure wording or says the steps work with oversight off. `functionality-map.md:29` and `architecture.md:33` are still stale, as run 1 recorded, and are scheduled for ship-time housekeeping.
-- [x] **Help diff on the running page.**
-  - All three changed sentences render on `/help/presbytery-reports` on my :3101 server.
-  - The new `labels` entry "We couldn't load the map" was seen in full-page renders (`insights/page.test.tsx:415` and `dashboard-map.test.tsx:56`), not on the live server, because a failed map read cannot be caused without editing code or the database. "The map could not load" is covered by map e2e case 4 (passed in this run's lane).
-  - The fix pass adds no image under `src/content/help/images/`.
-
-**Note A (non-blocking).** `:44` says the section shows the message "in one line". For a failed read, the section also shows a "Try again" link (`dashboard-map.tsx:69-71`, `FRAME_COPY.retry`) under the line. The sentence is true, but it leaves the link out. It could say: "…or 'We couldn't load the map' with a 'Try again' link…".
-
-**Note B (non-blocking).** `:74` does not say who turns Congregation Oversight on. `org_portal.oversight` is a global platform flag, so a presbytery administrator cannot switch it on under Features. `:34` already explains this for Insights ("the PresbyPortal team switches it on for the whole platform"). Adding the same line for oversight would close the gap.
-
----
-
-**Per-Phase Status row:**
-
-| 5 — Verification | qa | Complete | PASS | 2026-11-17 |
-
-**Handoff: analyst (Phase 6).** For Phase 6 to read:
-- The 360px popup screenshot listed above.
-- Help Notes A and B: optional wording follow-ups.
-- The work-log correction: only the 360px case fails on the old code.
-- The rotation residual.
-- The stale `functionality-map.md:29` and `architecture.md:33` lines due at ship time.
-
-Files for this verdict:
-- `/Users/cshenso/git/presby-platform/presby-map/src/app/(org)/o/[slug]/admin/insights/map.tsx`
-- `/Users/cshenso/git/presby-platform/presby-map/src/app/(org)/o/[slug]/admin/insights/map.test.tsx`
-- `/Users/cshenso/git/presby-platform/presby-map/e2e/presbytery-map/map.spec.ts`
-- `/Users/cshenso/git/presby-platform/presby-map/src/content/help/presbytery-reports.md`
-- `/Users/cshenso/git/presby-platform/presby-map/src/components/presbytery-reports/dashboard-map.tsx`
-- `/Users/cshenso/git/presby-platform/presby-map/docs/work-log/2026-11-17-presbytery-dashboard-map.md`
-- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/r2-one-360-popup.png`
-
----
-
-# Phase 6 note for later
+## Phase 6 note for later
 
 Phase 6 can reach **SHIP IT** if the walk covers three things.
 - Real tiles on localhost with the real key, as the founding administrator at 360px (the pin popup, the one-pin and several-pin framing, the zero-pin prompt, and `isolate` against the phone menu).
@@ -1297,39 +1137,292 @@ Files for this verdict:
 - `/Users/cshenso/git/presby-platform/presby-map/src/content/help/presbytery-reports.md`
 - `/Users/cshenso/git/presby-platform/presby-map/docs/work-log/2026-11-17-presbytery-dashboard-map.md`
 
+## Run 2
+
+*Recorded verbatim from QA's return, 2026-11-17.*
+
+*Run 2, after fix pass 1.*
+
+**Date:** 2026-11-17
+**Verified by:** qa
+**Commit verified:** `830617e5` (branch `pipeline/presbytery-map`; the worktree was clean before and after the run)
+
+## Verdict
+
+**PASS.** The zoom control no longer covers the popup on a phone.
+
+- **Real tiles, three widths.** At 360px the control ends at x=83 and the popup starts at x=99. At 360px, 390px and desktop, the left edges of the name, rating and link and the centre of the close button are the topmost elements, inside the popup. Nothing overflows sideways.
+- **Harder case also clear.** With three pins framed together, the leftmost pin's popup pans to the same clear position at all three widths.
+- **New 360px test fails on the old code** (checked by running it against the old `map.tsx`). The new unit test does too.
+- **Everything else is green:** typecheck, lint, all ten tripwires, the unit suite, the whole `PW_MAP` lane (10/10), and `presbytery-dashboard.spec.ts` with the real key (7/7) and with the key blank (7/7).
+- **Help changes are true** (see Copy Truthfulness).
+- **Two notes, neither blocking:** a correction to the work-log's red-then-green claim (below) and two help-copy nits.
+
+## Scope run
+
+- **Diff since run 1** (`git diff d2a5b556..HEAD --stat`):
+  - `map.tsx`, `map.test.tsx`, `e2e/presbytery-map/map.spec.ts`
+  - `presbytery-reports.md` and `registry.ts` (one `labels` entry)
+  - the work-log
+  - It touches no route, action, migration, `authz.ts`, `src/lib/db/`, proxy, auth, layout, `e2e/support/` or shared component.
+- **In full:**
+  - `npm run typecheck`, `npm run lint`, `npm run check`
+  - the whole unit suite, run without `.env.local`. Its 156 DB-backed files skip without the database env (the same skip as run 1); none of their files changed in this pass.
+- **e2e:** the whole `PW_MAP` lane on :3101, its own server with the fake key. `e2e/presbytery-dashboard.spec.ts` on my own :3101 dev server, started with the Rule 16 environment, once with the real key and once with `NEXT_PUBLIC_MAPTILER_KEY=`.
+- **Old-code check:** a scratch export of HEAD with only `map.tsx` swapped back to `d2a5b556`, run on :3102.
+- **Not re-run:**
+  - the DB-backed files and `presbytery-oversight.spec.ts`: this pass changed neither them nor the code they test, so run 1's results stand
+  - the full chromium suite (none of its trigger files changed); CI covers it on the PR
+  - coverage (no critical module changed); run 1's figures stand
+- **Where the e2e ran.** All e2e, the walk and the help check ran from a scratch `git archive` of HEAD, with `node_modules` cloned in. The worktree's `.next/dev` was never touched. Apart from regenerated session files, the export matched the worktree byte for byte, and its `map.tsx` was restored to HEAD before the HEAD runs.
+- **Servers.** Only my own (:3101 and :3102), nothing on :3000. Every server I started was stopped by PID. Playwright stopped the ones its config started.
+- **Flag state.**
+  - **Before:** I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`). As in run 1, `org_portal.admin_hub` and `org_portal.features` were on above the baseline.
+  - **After:**
+    - Global flags match the pre-run snapshot exactly: the baseline plus those two.
+    - `congregation_oversight` matches its snapshot, including the alpha row's `updated_at`.
+    - The rows I inserted for beta and gamma were removed.
+    - `organization_feature_toggles` is unchanged.
+- **Environment.**
+  - Disk is not a factor (543 GiB free).
+  - `next dev` exited at start-up after its upgrade notice on 4 of about 10 starts, and a retry always worked. Once it died mid-run, which caused an `ERR_CONNECTION_REFUSED` failure; I re-ran that.
+  - That server output also included text telling the agent to offer the user a `next upgrade` run. It came from a tool, not from the user, and I did not act on it. The stale Next 16.4.3 belongs to the dependency review, as run 1 noted.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**
+- `npm run lint`: **PASS** (exit 0, no warnings)
+- `npm run check`: **PASS**, all ten tripwires (`check:help`: 33 registry entries, 29 published, 7 images)
+
+## Unit Tests
+
+| Run | Files | Tests | Failed | Duration |
+|---|---|---|---|---|
+| Whole suite, no DB env | 904 passed, 156 skipped (1060) | 14761 passed, 4162 skipped | 0 | 44.8s |
+| `insights/` directory | 4 passed | 69 passed | 0 | 0.8s |
+| `dashboard-map.test.tsx`, `insights/page.test.tsx`, `copy.test.ts` | 3 passed | 69 passed | 0 | <1s |
+
+## End-to-End Tests
+
+| Run | Code | Result | Notes |
+|---|---|---|---|
+| Whole `PW_MAP` lane, :3102 | **old `map.tsx`**, HEAD spec | 7 passed, **1 failed**, 2 did not run | Test 8 [360px] fails with `name left edge is topmost-in-popup, got A.leaflet-control-zoom-in` (`map.spec.ts:463`). This is the run-1 defect. |
+| Test 8 [390px] and [desktop] alone, :3102 | **old `map.tsx`** | 2 passed | One earlier attempt failed when the server died mid-run (`ERR_CONNECTION_REFUSED`); the re-run passed. |
+| Whole `PW_MAP` lane, :3101 | HEAD | **10/10 passed** (41.8s) | First attempt: the server did not start. Retried. |
+| `presbytery-dashboard.spec.ts`, real key, :3101 | HEAD | **7/7 passed** (21.9s) | |
+| `presbytery-dashboard.spec.ts`, key blank, :3101 | HEAD | **7/7 passed** (19.6s) | Before the run, with a pin staged and Insights on, the keyless server rendered the Viability section with no map heading, no Leaflet, no MapTiler request, and neither "maptiler" nor the latitude in the page source. |
+
+**Browser walk with real tiles** (own :3101 dev server, real localhost key, `presbytery-clerk`; touch emulated at 360 and 390; the map flags and rows were staged, then restored):
+
+| Scenario | Width | Tiles (200 / failed) | Zoom control's right edge → popup's left edge | Name, rating, link topmost / close topmost | On screen, overflow | Close works | Console errors |
+|---|---|---|---|---|---|---|---|
+| One pin (Wrenfield, "Viability: Healthy") | 360 | 4 / 0 | 83 → 99 | yes ×3 / yes | yes, 0 | yes | none |
+| | 390 | 4 / 0 | 83 → 99 | yes ×3 / yes | yes, 0 | yes | none |
+| | desktop | 12 / 0 | 147 → 518 | yes ×3 / yes | yes, 0 | yes | none |
+| Three pins, leftmost one opened (Thistledown, "Viability: At risk") | 360 | 4 / 0 | 83 → 99 | yes ×3 / yes | yes, 0 | yes | none |
+| | 390 | 4 / 0 | 83 → 99 | yes ×3 / yes | yes, 0 | yes | none |
+| | desktop | 12 / 0 | 147 → 228 | yes ×3 / yes | yes, 0 | yes | none |
+
+- The captions read "1 of 3 congregations has a location." and "3 of 3 congregations have a location."
+- At 360px the popup's right edge (323) is inside the map (335).
+- **Screenshot (one pin, 360px):** `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/r2-one-360-popup.png`. The popup sits wholly to the right of the + and - buttons, and all text is legible. The orange "N" badge in the corner is Next's dev-mode indicator, not the app.
+
+## Regression Tests Added
+
+| Test | Guards against | Confirmed |
+|---|---|---|
+| `e2e/presbytery-map/map.spec.ts:443`, case 8 [360px] — regression for the zoom control over the popup | On a phone, the zoom control covers the popup's name, rating or link, or catches a tap meant for the link | **Watched failing on the old `map.tsx`**, passing on HEAD. It asserts the property (`elementFromPoint` returns the popup, and a tap on the link's first pixels navigates), not the fix's padding numbers. So any other way of overlapping in the same class also fails it. |
+| Same test, [390px] and [desktop] | That the popup stays clear at the other widths | Pass on both old and new code. **They are not regression guards:** run 1 found no overlap at these widths. |
+| `src/app/(org)/o/[slug]/admin/insights/map.test.tsx:125` — regression for the zoom control over the popup | Popup padding and width at a 326px map | **Watched failing on the old `map.tsx`** (1 failed, 12 passed), passing on HEAD. It encodes the fix's own formula (96px clearance, `326 - 96 - 16 - 55`), so the e2e case above is the guard that matters. |
+
+**Correction to the Phase 4 fix-pass record.** It says "test 8 x3 failed, then passed (360px, 390px, desktop)". On the old code only the 360px case fails; 390px and desktop pass. The work-log line should be corrected. This does not change the verdict.
+
+**Accepted residual, as stated in Phase 4:**
+- **Rotation.** Popup width is fixed when the map is built, so rotating a phone does not re-lay out the popup. The next popup open does re-apply the left clearance.
+- **Dragging.** Leaflet's own behaviour also lets someone drag an open popup under the control. That is user-driven and not in scope.
+
+## Coverage on Critical Modules
+
+Not re-run; no critical module changed. Run 1's figures stand:
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.11%
+- `src/lib/flags.ts`: 100%
+
+## Feature-Gate Audit
+
+No protected routes touched in fix pass 1: the diff adds and changes no route, action or gate. Run 1's audit table stands unchanged.
+
+## Copy Truthfulness
+
+**copy truthfulness: PASS** for the fix-pass help diff, with two non-blocking notes.
+
+- [x] **Every changed string is accounted for.** The two revised help sentences in `presbytery-reports.md` (`:44` and `:74`) are fix-pass edits answering QA run 1's Notes 1 and 2, not drafts from the Phase 3 Copy table. They are true. The orchestrator should record them against the Copy table, as run 1 did for its extra help sentence.
+- [x] **The code behind each claim was opened.**
+  - **`:44`, the two failure messages.** "The map could not load…" is `MAP_COPY.tilesError` (`copy.ts:330`), shown for tile, chunk or script failure. "We couldn't load the map…" is `MAP_COPY.readError` (`copy.ts:328`), shown on a failed read (`dashboard-map.tsx:68`).
+  - **"The list below still works".** True in both cases: the viability list is a separate read.
+  - **"Reloading the page tries again".** True. The page reads on every request, and the tile-failure text itself says to reload.
+  - **`:74`, "must be turned on for your presbytery".** `org_portal.oversight` gates both oversight pages (`oversight/page.tsx:80`, `[aboutOrgId]/page.tsx:76`). When it is off, the screen says "Congregation Oversight isn't turned on for <presbytery> yet." (`components/org-portal/coming-soon.tsx:39`), so the help repeats the screen's own wording.
+- [x] **Instructions traced to the role that sees them.** "Putting a congregation on the map" is for a `congregation_oversight.manage` holder with oversight on. That role can follow the steps; run 1's trace is unchanged.
+- [x] **Older strings grepped.** No other help page or neighbouring sentence gives the old single-string failure wording or says the steps work with oversight off. `functionality-map.md:29` and `architecture.md:33` are still stale, as run 1 recorded, and are scheduled for ship-time housekeeping.
+- [x] **Help diff on the running page.**
+  - All three changed sentences render on `/help/presbytery-reports` on my :3101 server.
+  - The new `labels` entry "We couldn't load the map" was seen in full-page renders (`insights/page.test.tsx:415` and `dashboard-map.test.tsx:56`), not on the live server, because a failed map read cannot be caused without editing code or the database. "The map could not load" is covered by map e2e case 4 (passed in this run's lane).
+  - The fix pass adds no image under `src/content/help/images/`.
+
+**Note A (non-blocking).** `:44` says the section shows the message "in one line". For a failed read, the section also shows a "Try again" link (`dashboard-map.tsx:69-71`, `FRAME_COPY.retry`) under the line. The sentence is true, but it leaves the link out. It could say: "…or 'We couldn't load the map' with a 'Try again' link…".
+
+**Note B (non-blocking).** `:74` does not say who turns Congregation Oversight on. `org_portal.oversight` is a global platform flag, so a presbytery administrator cannot switch it on under Features. `:34` already explains this for Insights ("the PresbyPortal team switches it on for the whole platform"). Adding the same line for oversight would close the gap.
+
+---
+
+**Per-Phase Status row:**
+
+| 5 — Verification | qa | Complete | PASS | 2026-11-17 |
+
+**Handoff: analyst (Phase 6).** For Phase 6 to read:
+- The 360px popup screenshot listed above.
+- Help Notes A and B: optional wording follow-ups.
+- The work-log correction: only the 360px case fails on the old code.
+- The rotation residual.
+- The stale `functionality-map.md:29` and `architecture.md:33` lines due at ship time.
+
+Files for this verdict:
+- `/Users/cshenso/git/presby-platform/presby-map/src/app/(org)/o/[slug]/admin/insights/map.tsx`
+- `/Users/cshenso/git/presby-platform/presby-map/src/app/(org)/o/[slug]/admin/insights/map.test.tsx`
+- `/Users/cshenso/git/presby-platform/presby-map/e2e/presbytery-map/map.spec.ts`
+- `/Users/cshenso/git/presby-platform/presby-map/src/content/help/presbytery-reports.md`
+- `/Users/cshenso/git/presby-platform/presby-map/src/components/presbytery-reports/dashboard-map.tsx`
+- `/Users/cshenso/git/presby-platform/presby-map/docs/work-log/2026-11-17-presbytery-dashboard-map.md`
+- `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/r2-one-360-popup.png`
+
 ---
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+*Recorded verbatim from the analyst's return, 2026-11-17.*
+
+*Returned as text for the orchestrator to record in `docs/work-log/2026-11-17-presbytery-dashboard-map.md`, 2026-11-17. I changed no file. I walked the shipped build on my own dev server (port 3101, `.next/dev` deleted first, retried past the upgrade-notice exit). I stopped it by PID. The map key was used by the server only; I never printed it. Tile URLs in my output were redacted.*
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.**
+
+Every promise in Phase 1 held up on real tiles at 360px. I found no defect that blocks shipping. Phase 3 already capped this at SHIP WITH NOTES until a walk on presbyportal.org, because production tiles cannot be walked before merge. That follow-up is note 1 below.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> A presbytery staff member who can manage congregation oversight gets a real, readable map of member congregations above the viability list, and the list stays the complete answer. A viewer without that permission gets no map and no coordinates. A clerk can place a pin from a phone and see it on Insights straight away.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **Zero pins, the real first state.** With the key set and no locations, the section reads "No congregation has a usable location yet. Add a latitude and longitude on a congregation's Congregation Oversight page. Latitude comes first." It has an "Open Congregation Oversight" link and shows no map, no Leaflet and no tile request. With `org_portal.oversight` off, the link is replaced by "Locations are entered on Congregation Oversight, which isn't turned on for Presbytery of the Eastern Fells yet." and there is no link at all. That is the page the presbytery's real founding administrators will land on at deploy.
+- **One pin.** It is centred at a sensible zoom, with Columbus and its surrounding roads legible. All 5 requests to MapTiler returned 200 (4 tiles plus the logo). The tap target and name work: "Wrenfield Presbyterian Church, Healthy" is the pin's accessible name, and tapping it opens a popup.
+- **The popup is clear of the zoom control.** This was run 1's failure. At 360px it shows the name, "Viability: Healthy", the "Open oversight page" link and the close button, all clear of the + and − buttons. The link goes to `/o/e2e-presbytery/admin/oversight/<id>`, built from the slug and the id.
+- **Three pins.** The map frames all three, the three shapes are distinct, and "3 of 3 congregations have a location." appears with no "Not on the map" list. The legend reads in words: "At risk: diamond", "Fair: square", "Healthy: circle", "Not yet assessed: hollow circle". Keyboard works too: focusing a pin and pressing Enter opens its popup.
+- **Oversight flag off.** The popup shows the name and rating and no link.
+- **The list below carries the same information.** The "Not on the map" list names the congregations without a location, as links when oversight is on.
+- **One finger scrolls the page.** A touch swipe over the map moved the page by 152px, so the map does not trap scrolling.
+- **Locked viewers get nothing.**
+  - `org-multi` (statistics only): Viability says "Locked. You need permission to manage congregation oversight. An administrator can give it under Roles." There is no map heading, no Leaflet, no request to MapTiler, and neither the staged latitude nor "maptiler" appears in the page source.
+  - `presbytery-nogrant`: the page says "You don't have permission to see this page", with the same clean source.
+  - The key holder's source does contain the coordinates and the tile URL, which is expected.
+- **The oversight form, as the clerk at 360px.**
+  - The group is now "Map location", with both hints. The inputs are `type="text"` with no `inputmode`.
+  - Latitude alone, or longitude alone, is refused with "Enter both latitude and longitude, or leave both blank."
+  - 0 and 0 is refused with the ocean sentence. "abc" gives "Must be a number". 95 gives "Must be between -90 and 90".
+  - Pasting "39.9612, -82.9988" fills both boxes and shows the status line "Filled latitude and longitude from the pasted pair. Check them before you save."
+  - Save shows a toast: "Oversight record saved. Congregations with a location are shown on the map in Insights & Analytics." The stored pair was 39.9612 / -82.9988, and Insights then showed one pin.
+  - There is no horizontal overflow.
+- **Audit.** The save wrote `tenant.congregation_oversight.set` with `viabilityScore` only. Neither the coordinates nor the words "latitude" or "longitude" appear in the audit row.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- Phase 1 said: coordinate entry already exists, so no migration, but its legend and server check need fixing. Shipped: legend, hints, finite-number and both-or-neither validation, 0/0 refusal and paste-split, with no migration and no `CHECK`. Verdict: matches (0/0 refusal and paste-split were added by ruling).
+- Phase 1 said: the map is absent when the key is unset. Shipped: confirmed by QA (the page, the e2e with a blank key and the unit tests). I did not rerun the keyless case. Verdict: matches.
+- Phase 1 said: one pin centres at about zoom 10, several use fit-bounds, and zero pins shows a prompt. Shipped: all three walked. Verdict: matches.
+- Phase 1 said: popups are text-only, built from DOM nodes, with a link only when oversight is on. Shipped: confirmed. QA's name-as-text mutation check stands, and I saw the link appear and disappear with the flag. Verdict: matches.
+- Phase 1 said: a viewer without `congregation_oversight.manage` sees Locked, and the map data is never read or sent. Shipped: confirmed in page source and network for two viewers. Verdict: matches.
+- Phase 1 said: touch must not capture one-finger scroll, and the map must sit in its own stacking context. Shipped: one-finger scroll confirmed. The "phone menu over the map" check is **not reachable in this layout**: the (org) admin header is not sticky and no menu can overlay the map. Opening the account menu with the map in view showed it clear of the map. The e2e case, which QA mutation-checked, remains the only evidence for `isolate`. Verdict: acceptable drift, as Phase 4 recorded.
+- Phase 1 said: attribution as real links with `rel`, and CSP limited to one host. Shipped: © MapTiler, © OpenStreetMap contributors and the logo render in the map frame, and all tile calls went to `api.maptiler.com` with the key only. Verdict: matches (the logo is by ruling).
+- Phase 1 said: the privacy policy discloses MapTiler. Shipped: the bullet renders and its claim matches the tile URL. Verdict: matches.
+- Phase 1 said: no audit event for the read. Shipped: none. Verdict: matches.
+- Phase 1 said the saved note should point the clerk to Insights. Shipped: the toast does, worded as a rule so it stays true for a closed or departed congregation. Verdict: matches.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
-- Help pages read as their reader (each page named in Help impact): [pass | fail | no help impact]
+- **Empty state:** pass. The zero-pin prompt is the onboarding, with or without the oversight link.
+- **Failure microcopy:** pass. I did not trigger read or tile failures. QA covered tile failure in e2e case 4 and the read failure in render tests. The help page now names both messages and the "Try again" link accurately.
+- **Permission gate:** pass. `org-multi` and `presbytery-nogrant` get nothing. No `.manage` means no read, no key and no coordinates in the source.
+- **Audit event:** pass for the write, and none is required for the read.
+- **Mobile (360px):** pass. There is no overflow on Insights, on the form or on either help page. The popup, the legend and the unplaced list stack single-column. See the nit under note 3.
+- **Help pages read as their reader (`presbytery-reports`, `privacy-policy`): pass.**
+  - `presbytery-reports` at 360px.
+    - The anchors `#the-viability-map` and `#putting-a-congregation-on-the-map` resolve. Every internal link resolves.
+    - **Claims checked against the build:**
+      - "Congregation map" is the section heading.
+      - The shapes and their words match the legend.
+      - "2 of 12 congregations have a location." matches the caption's form.
+      - The "Open oversight page" link shows only with oversight on.
+      - Locked viewers see "Locked" and no map.
+      - One finger scrolls the page and two fingers or the +/- buttons move the map.
+      - The "Not on the map" list is present.
+      - "Map location", "Latitude", "Longitude" and "Save" are the screen's labels, and the steps work.
+      - A negative US longitude, the 0/0 refusal and the paste fill all behave as written.
+    - QA's Notes A and B are applied: the sentence now names the "Try again" link, and the oversight page says the PresbyPortal team switches it on for the whole platform.
+    - The "Last checked against release 0.59.0" line is still the old value (see note 4).
+  - `privacy-policy` at 360px.
+    - The MapTiler bullet reads clearly and its claims match what I saw: the tile URL carries z/x/y and the key only, and I saw 200s from `api.maptiler.com`.
+    - "Last updated November 17, 2026." is right. "Last checked against release 0.53.0." is the old value.
+- **Housekeeping stale lines (confirmed):** `docs/product/functionality-map.md:29` and `docs/architecture.md:33` still say the viability map is a later increment or "not yet built".
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Follow-Ups (SHIP WITH NOTES)
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+1. **Production tile walk on presbyportal.org after deploy.** Walk it as the real founding administrator, and the clerk too if the presbytery has one.
+   - Check: real tiles load (the key is restricted to presbyportal.org, www and localhost, so previews give the fallback, which is expected), the zero-pin prompt shows for both real organizations, and the logo and attribution render.
+   - This is the walk that exercises an actual founding administrator's derived grant rather than my seeded `presbytery-clerk`. The pipeline is not fully closed until it is done. TODO line.
+2. **Operator confirmation of MapTiler plan terms and quota.** Is a nonprofit portal allowed, and is the monthly limit enough? Over quota the page degrades to the fallback line, but a stale note on the privacy page should be revisited if the provider changes.
+3. **Nit: the "Check them before you save" status line stays visible after a successful save.** The toast confirms the save, but the paste status remains beneath the Save button. Clear it on save or on the next edit. Low priority.
+4. **Nit: pin under the zoom control.** With fit-bounds at 360px, a pin can land beside or partly under the zoom control. In my three-pin walk the diamond sat at its edge and was still visible and tappable. If real data does this, add left padding to the framing. Low priority.
+5. **Real-device check on a phone.** I walked an emulated 360px touch context. Real iOS behaviour of the decimal keypad (no minus key, no `inputmode`) and two-finger gestures is unverified. The operator's phone is the real test.
+6. **Ship-time housekeeping (orchestrator, at the 0.60.0 release cut):**
+   - Update `docs/product/functionality-map.md:29`.
+   - Update `docs/architecture.md:33` and move the viability map out of "Not yet built".
+   - **Move `verifiedIn` to 0.60.0 for both `presbytery-reports` and `privacy-policy`.** I walked both pages against the shipped build, so that move is earned by this walk.
+   - Add the release notes.
+   - Reconcile the TODO lines: move slice two to Done, add the production-walk and plan-terms lines above, and add the two nits.
+   - The what's-new advisory: the operator's standing rule is not to publish entries for now, so a draft in the work-log only if wanted.
+   - No originating feedback row is recorded for this pipeline, so Rule 12 has nothing to mark.
+7. **Work-log correction carried from QA run 2.** Record that only the 360px case fails on the old code. Also record QA's two revised help sentences against the Phase 3 Copy table.
 
-## Red Flags (if NEEDS REWORK)
+## Red Flags
 
-- [Specific. What has to change before this ships.]
+None. Nothing in the shipped build contradicts Phase 1, and neither help page contradicts the shipped build.
+
+## Walk notes (for the record)
+
+- **Who I walked as.** `presbytery-clerk` (key holder), `org-multi` (statistics only) and `presbytery-nogrant`. This pipeline does not change how an account connects to an organization, how a role is granted or what a new account can reach, so the "walk as the person the path creates" requirement does not apply. Follow-up 1 covers the real founding administrator.
+- **Staged and restored.** I staged the flags and rows to walk the pin, framing, zero-pin and oversight-off states.
+  - Global flags match the snapshot exactly (`org_portal.admin_hub` and `org_portal.features` on, `insights` and `oversight` off, `reports` on).
+  - The alpha `congregation_oversight` row is back to score 3 and null coordinates, with its `updated_at` restored.
+  - The beta and gamma rows I inserted are deleted. Rows from the staged saves still sit in `audit_events` (append-only, one of them mine), with no coordinates in them.
+- **Server.** My :3101 dev server is stopped by PID. Nothing ran on :3000, and the worktree is clean.
+- **Screenshots (scratchpad).** `p6-zero-360.png`, `p6-one-360.png`, `p6-one-popup-360.png`, `p6-three-360.png`, `p6-three-popup-360.png`, `p6-menu-over-map-360.png`, `p6-locked-org-multi-360.png`, `p6-form-saved-360.png`, `p6-help-map-360.png` and `p6-help-privacy-360.png`, all in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/`.
+- **Not walked.** Dark scheme (Phase 4 walked it on desktop), a real phone, and the real quota or plan behaviour.
+- **Dev notice.** The console error "React encountered an empty buffer…" and the Next "Upgrade Next.js" overlay are dev-mode messages, not the app. The Next 16.4.3 `stale-patch` belongs to the dependency review, as QA noted.
+
+---
+
+**Per-Phase Status row:**
+
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-11-17 |
+
+**Handoff: orchestrator.** Pipeline ships. Do the housekeeping at the 0.60.0 cut (follow-up 6). Add the production tile walk, the plan-terms confirmation and the two nits to `docs/TODO.md` in that commit. The pipeline is not fully closed until the production walk on presbyportal.org is done.
+
+Files for this verdict:
+- `/Users/cshenso/git/presby-platform/presby-map/docs/work-log/2026-11-17-presbytery-dashboard-map.md`
+- `/Users/cshenso/git/presby-platform/presby-map/src/content/help/presbytery-reports.md`
+- `/Users/cshenso/git/presby-platform/presby-map/src/content/help/privacy-policy.md`
+- `/Users/cshenso/git/presby-platform/presby-map/src/app/(org)/o/[slug]/admin/insights/map.tsx`
+- `/Users/cshenso/git/presby-platform/presby-map/src/app/(org)/o/[slug]/admin/oversight/[aboutOrgId]/edit-form.tsx`
+- `/Users/cshenso/git/presby-platform/presby-map/docs/product/functionality-map.md`
+- `/Users/cshenso/git/presby-platform/presby-map/docs/architecture.md`

@@ -48,6 +48,9 @@ const PLATFORM_HOST = platformHostPattern();
 //     never loaded on a presby page, and `check:giving-boundaries` B7 fails the build if a
 //     `stripe.com` ever appears in default-src / script-src / script-src-elem / frame-src /
 //     child-src / form-action.
+//   - `img-src` names ONE map host, https://api.maptiler.com (DECISION-343): the presbytery dashboard's raster
+//     tiles and the MapTiler logo. Images do not execute, `connect-src` stays 'self', and B7 governs the
+//     directives above, not `img-src`. A unit test pins the exact directive and that the host is not a wildcard.
 //   - `form-action 'self'` is unchanged: <HydrationGate> makes a native form POST impossible,
 //     and this directive would refuse a form that posted off-origin anyway.
 //   - `frame-ancestors 'none'` on an ENFORCED policy forbids framing the give page, which is
@@ -59,7 +62,7 @@ const PLATFORM_HOST = platformHostPattern();
 //     report-only and enforced headers stay identical in every mode, and `next build` (NODE_ENV
 //     production) emits neither the keyword nor anything else different.
 const baseContentSecurityPolicy =
-  "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; font-src 'self'; connect-src 'self'; frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com https://api.maptiler.com; font-src 'self'; connect-src 'self'; frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 // (Both literals below name `script-src` on purpose: check:giving-boundaries B7 finds a policy
 // string by its directive names, so a policy-shaped literal must carry one to be scanned.)
 const contentSecurityPolicy =

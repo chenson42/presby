@@ -78,6 +78,28 @@ const isHelpContactRun = process.env.PW_HELP_CONTACT === "1";
 if (isHelpContactRun && (isVisualRun || isHelpShotsRun)) {
   throw new Error("PW_HELP_CONTACT=1 is mutually exclusive with PW_VISUAL=1 and PW_HELP_SHOTS=1.");
 }
+
+/**
+ * True only when `npm run test:e2e:map` sets `PW_MAP=1` (the presbytery dashboard map, DECISION-343;
+ * docs/work-log/2026-11-17-presbytery-dashboard-map.md, Phase 3 "New e2e"). Environment variable, NOT argv,
+ * for the reason `isVisualRun` gives.
+ *
+ * WHY ITS OWN LANE. The map exists only when `NEXT_PUBLIC_MAPTILER_KEY` is set, and setting a key on the
+ * shared e2e server would turn the map on for every spec; a reused keyless server could never prove it. So
+ * the map specs get a server of their own (this config starts it: `reuseExistingServer: false`) with a FAKE
+ * key, which overrides any real one in `.env.local` (a value already in the process environment wins), and
+ * the specs intercept `https://api.maptiler.com/**` so no request ever reaches the provider. The standard
+ * globalSetup signs the users in (no Turnstile key is set, so the credentials form works). The `map` project
+ * is included ONLY on this flag, and the `chromium` project ignores `e2e/presbytery-map/`.
+ */
+const isMapRun = process.env.PW_MAP === "1";
+if (isMapRun && (isVisualRun || isHelpShotsRun || isHelpContactRun || isProdBuildRun)) {
+  throw new Error("PW_MAP=1 is mutually exclusive with PW_VISUAL, PW_HELP_SHOTS, PW_HELP_CONTACT and PW_PROD_BUILD.");
+}
+/** A made-up value shaped like a key (the config's own check accepts 8 to 128 of letters, digits, _ and -). */
+const MAP_TEST_ENV = {
+  NEXT_PUBLIC_MAPTILER_KEY: "e2e-fake-map-key-0001", // leak-ok: a made-up value, never a real key
+};
 const PROD_PORT = Number(process.env.PW_PROD_PORT ?? 3800);
 const PROD_BASE_URL = `http://localhost:${PROD_PORT}`;
 
@@ -210,6 +232,18 @@ export default defineConfig({
           ...(isHelpContactRun ? CONTACT_TEST_ENV : {}),
         },
       }
+    : isMapRun
+      ? {
+          // Its own dev server on the port of E2E_BASE_URL, started with the FAKE key (see `isMapRun`).
+          command: `npx next dev -p ${contactDevPort}`,
+          url: `${baseURL}/api/auth/csrf`,
+          // ALWAYS a fresh server: a keyless (or real-keyed) server would make every spec misleading.
+          reuseExistingServer: false,
+          timeout: 120_000,
+          stdout: "pipe",
+          stderr: "pipe",
+          env: { RATE_LIMIT_DISABLED: "true", ...DOMAINS_TEST_ENV, ...MAP_TEST_ENV },
+        }
     : isHelpContactRun
       ? {
           // Its own dev server on the port of E2E_BASE_URL (`npm run dev` would bind :3000).
@@ -290,7 +324,7 @@ export default defineConfig({
           // The visual project owns visual-parity.spec.ts's per-route viewport /
           // colorScheme matrix via test.use(); running it here too would collide
           // with that spec's own storageState/viewport overrides for no benefit.
-          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//, /help-shots\//, /[\\/]e2e[\\/]help-contact[\\/]/],
+          testIgnore: [/visual-parity\.spec\.ts$/, /custom-domains\//, /help-shots\//, /[\\/]e2e[\\/]help-contact[\\/]/, /[\\/]e2e[\\/]presbytery-map[\\/]/],
         },
         // Custom domains (see HOST_RESOLVER_ARGS above). The first test of the first spec is a
         // CANARY proving the `*.invalid` mapping works, so every later failure is real.
@@ -305,6 +339,15 @@ export default defineConfig({
                 name: "contact",
                 use: { ...devices["Desktop Chrome"] },
                 testMatch: /e2e[\\/]help-contact[\\/]form\.spec\.ts$/,
+              },
+            ]
+          : []),
+        ...(isMapRun
+          ? [
+              {
+                name: "map",
+                use: { ...devices["Desktop Chrome"] },
+                testMatch: /e2e[\\/]presbytery-map[\\/].*\.spec\.ts$/,
               },
             ]
           : []),

@@ -188,6 +188,17 @@ jobs:
           CI: "true"
           PW_OUTPUT_DIR: test-results-contact
 
+      # The presbytery dashboard map (DECISION-343): its own lane, because the map exists only when a tile key
+      # is set and a key on the shared server would turn it on for every spec. The config starts a server of
+      # its own with a FAKE key (playwright.config.ts, `isMapRun`); the specs intercept api.maptiler.com, so
+      # nothing reaches the provider. Shard 4 only, like the contact lane.
+      - name: Run the presbytery map lane (dev server, fake key, tiles intercepted)
+        if: matrix.lane == 'dev' && matrix.shard == 4
+        run: npm run test:e2e:map
+        env:
+          CI: "true"
+          PW_OUTPUT_DIR: test-results-map
+
       # DECISION-159: the pre-hydration regression against a production build
       # (next build && next start, port 3800, never a reused server). Traces go
       # to test-results-prod/.
@@ -219,6 +230,7 @@ jobs:
             test-results-prod/
             test-results-contact/
             test-results-contact-prod/
+            test-results-map/
           retention-days: 7
           if-no-files-found: ignore
 

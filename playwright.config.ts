@@ -235,7 +235,9 @@ export default defineConfig({
     : isMapRun
       ? {
           // Its own dev server on the port of E2E_BASE_URL, started with the FAKE key (see `isMapRun`).
-          command: `npx next dev -p ${contactDevPort}`,
+          // The dev cache is cleared first: a warm restart over a `.next/dev` left by an earlier lane in the
+          // same job sends "HMR hash mismatch" reloads, and the page reloads in a loop (PR #89's first CI run).
+          command: `node -e "require('fs').rmSync('.next/dev',{recursive:true,force:true})" && npx next dev -p ${contactDevPort}`,
           url: `${baseURL}/api/auth/csrf`,
           // ALWAYS a fresh server: a keyless (or real-keyed) server would make every spec misleading.
           reuseExistingServer: false,

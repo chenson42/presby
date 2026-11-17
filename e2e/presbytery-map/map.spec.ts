@@ -369,20 +369,25 @@ test.describe.serial("Presbytery dashboard map (2026-11-17-presbytery-dashboard-
     await expect(page.getByTestId("dashboard-map-unplaced")).toBeVisible();
     expect(await overflow(page)).toBeLessThanOrEqual(0);
 
-    // One finger: a vertical swipe that STARTS on the map scrolls the page (Chromium's own touch gesture).
-    await canvas.scrollIntoViewIfNeeded();
-    await page.evaluate(() => window.scrollBy(0, -120));
-    const box = (await canvas.boundingBox())!;
-    const before = await page.evaluate(() => window.scrollY);
-    const cdp = await context.newCDPSession(page);
-    await cdp.send("Input.synthesizeScrollGesture", {
-      x: Math.round(box.x + box.width / 2),
-      y: Math.round(box.y + box.height / 2),
-      yDistance: -220,
-      speed: 600,
-      gestureSourceType: "touch",
+    // One finger scrolls the page, not the map. With dragging off on a coarse pointer, Leaflet gives the
+    // container `touch-action: pan-x pan-y` (its `leaflet-touch-zoom` rule, without `leaflet-touch-drag`),
+    // so the browser keeps one-finger pans for the page and only a pinch reaches the map. Asserted on the
+    // computed style rather than with a synthesized swipe: CDP's touch scroll gesture did not scroll at all
+    // on CI's headless Chromium (PR #89), on either the old or the fixed code, so it proved nothing there.
+    // `dragging: true` turns this into `none` (Leaflet's `leaflet-touch-drag` rule), which fails here.
+    const touch = await page.evaluate(() => {
+      const el = document.querySelector(".presby-map__canvas .leaflet-container, .presby-map__canvas.leaflet-container") as HTMLElement;
+      const chain: string[] = [];
+      for (let n: HTMLElement | null = el?.parentElement ?? null; n; n = n.parentElement) {
+        const ta = getComputedStyle(n).touchAction;
+        if (ta !== "auto") chain.push(ta);
+      }
+      return { found: !!el, own: el ? getComputedStyle(el).touchAction : "", drag: !!el?.classList.contains("leaflet-touch-drag"), ancestors: chain };
     });
-    await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5000 }).toBeGreaterThan(before + 100);
+    expect(touch.found).toBe(true);
+    expect(touch.drag).toBe(false);
+    expect(touch.own).toBe("pan-x pan-y");
+    expect(touch.ancestors).toEqual([]);
 
     // The account menu (the one overlay a phone has on this page) draws ABOVE the map. Pull the map up under
     // the open menu (positioned, with no stacking context of its own on the way, so the map's own isolation is

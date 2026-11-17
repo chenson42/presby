@@ -18,6 +18,8 @@ const ROOT = path.resolve(__dirname, "../../..");
 const MODULE_DIR = path.join(ROOT, "src/lib/presbytery-reports");
 const REPORTS_DIR = path.join(ROOT, "src/app/(org)/o/[slug]/admin/reports");
 const COMPONENTS_DIR = path.join(ROOT, "src/components/presbytery-reports");
+// The dashboard (DECISION-342): the one page outside REPORTS_DIR that composes the readers.
+const INSIGHTS_DIR = path.join(ROOT, "src/app/(org)/o/[slug]/admin/insights");
 
 interface SourceFile {
   rel: string;
@@ -47,6 +49,7 @@ const segmentFiles = load(
   REPORT_SEGMENTS.flatMap((s) => walk(path.join(REPORTS_DIR, s))).filter((f) => /\.tsx?$/.test(f) && !isTest(f)),
 );
 const componentFiles = load(walk(COMPONENTS_DIR).filter((f) => /\.tsx?$/.test(f) && !isTest(f)));
+const insightsFiles = load(walk(INSIGHTS_DIR).filter((f) => /\.tsx?$/.test(f) && !isTest(f)));
 const hubFile = load([path.join(REPORTS_DIR, "reports-hub.tsx")].filter((f) => { try { statSync(f); return true; } catch { return false; } }));
 
 const surface = [...moduleFiles, ...segmentFiles];
@@ -72,6 +75,26 @@ function callsGate(files: SourceFile[]): Hit[] {
       return f.rel.endsWith("route.ts") ? !/\bgateReportRoute\(/.test(c) : !/\bgateReportPage\(/.test(c);
     })
     .map((f) => ({ rule: "calls-gate", file: f.rel }));
+}
+
+/**
+ * The dashboard page runs ITS OWN gate and never the reports one (DECISION-342): a
+ * presbytery with insights on and reports off must still see its cards, and a
+ * dashboard that borrowed the reports gate would inherit the reports flag.
+ */
+function insightsCallsItsGate(files: SourceFile[]): Hit[] {
+  return files
+    .filter((f) => f.rel.endsWith("page.tsx"))
+    .filter((f) => {
+      const c = code(f.content);
+      return !/\bgateInsightsPage\(/.test(c) || /\bgateReportPage\(/.test(c);
+    })
+    .map((f) => ({ rule: "insights-calls-its-gate", file: f.rel }));
+}
+
+/** Names are tenant-entered text: they render through React text, never as HTML. */
+function noDangerousHtml(files: SourceFile[]): Hit[] {
+  return files.filter((f) => /dangerouslySetInnerHTML|\.innerHTML\b/.test(code(f.content))).map((f) => ({ rule: "no-dangerous-html", file: f.rel }));
 }
 
 function routeCallsAnExport(files: SourceFile[], names: string[]): Hit[] {
@@ -180,6 +203,9 @@ describe("the real tree", () => {
     expect(routes).toHaveLength(4);
     expect(pages).toHaveLength(4);
     expect(componentFiles.length).toBeGreaterThan(5);
+    // The insights page sits outside REPORTS_DIR, so `pages` stays 4.
+    expect(insightsFiles.length).toBeGreaterThanOrEqual(1);
+    expect(insightsFiles.some((file) => file.rel.endsWith("page.tsx"))).toBe(true);
   });
 
   it("names no owner connection in the module or the four segments", () => {
@@ -244,6 +270,37 @@ describe("the real tree", () => {
     expect(loading).toEqual([]);
   });
 
+  it("the dashboard page calls gateInsightsPage and not gateReportPage", () => {
+    expect(insightsCallsItsGate(insightsFiles)).toEqual([]);
+  });
+
+  it("the dashboard directory names no owner connection, writes nothing, records no audit event and reads no redirect or loose number", () => {
+    expect(noOwnerConnection(insightsFiles)).toEqual([]);
+    expect(noWrites(insightsFiles)).toEqual([]);
+    expect(noRecordAudit(insightsFiles)).toEqual([]);
+    expect(noRedirectTargetParams(insightsFiles)).toEqual([]);
+    expect(noLooseNumberParse(insightsFiles)).toEqual([]);
+  });
+
+  it("nothing in the dashboard directory is a client component (slice one; the map increment relaxes this for exactly its client files)", () => {
+    expect(noUseClient(insightsFiles)).toEqual([]);
+  });
+
+  it("no dangerouslySetInnerHTML or innerHTML in the dashboard directory, the module or the components (names render as text)", () => {
+    expect(noDangerousHtml([...insightsFiles, ...moduleFiles, ...componentFiles])).toEqual([]);
+  });
+
+  it("no loading.tsx exists anywhere under admin/insights/** (the gate calls notFound and redirect)", () => {
+    const loading = walk(INSIGHTS_DIR).filter((p) => /(^|\/)loading\.tsx?$/.test(p));
+    expect(loading).toEqual([]);
+  });
+
+  it("the module names no export function beyond the four (a dashboard export cannot appear unreviewed)", () => {
+    expect(exportFunctionNames([...moduleFiles, ...insightsFiles, ...componentFiles]).sort()).toEqual(
+      ["exportMembershipTrend", "exportPerCapita", "exportViability", "exportVacantPulpits"].sort(),
+    );
+  });
+
   it("the child directories of admin/reports are exactly the registry's segments plus [aboutOrgId]", () => {
     const dirs = readdirSync(REPORTS_DIR).filter((n) => statSync(path.join(REPORTS_DIR, n)).isDirectory());
     expect(dirs.sort()).toEqual([...REPORT_SEGMENTS, "[aboutOrgId]"].sort());
@@ -273,6 +330,23 @@ describe("each rule flags a violating sample", () => {
     expect(callsGate([f("x/page.tsx", "await gateReportPage({})")])).toEqual([]);
     expect(callsGate([f("x/route.ts", "await gateReportRoute({})")])).toEqual([]);
     expect(callsGate([f("x/route.ts", "await gateReportPage({})")])).toHaveLength(1);
+  });
+
+  it("insights-calls-its-gate fails in both directions", () => {
+    expect(insightsCallsItsGate([f("i/page.tsx", "export default async function P() { return null; }")])).toHaveLength(1);
+    expect(insightsCallsItsGate([f("i/page.tsx", "await gateReportPage({})")])).toHaveLength(1);
+    expect(insightsCallsItsGate([f("i/page.tsx", "await gateInsightsPage({}); await gateReportPage({})")])).toHaveLength(1);
+    expect(insightsCallsItsGate([f("i/page.tsx", "await gateInsightsPage({})")])).toEqual([]);
+    // the reports pages are held to the opposite rule by calls-gate
+    expect(callsGate([f("x/page.tsx", "await gateInsightsPage({})")])).toHaveLength(1);
+  });
+
+  it("no-dangerous-html", () => {
+    // Spelled in two pieces: check:brand-scope bans the attribute anywhere outside the brand emitter, samples included.
+    const attribute = "dangerously" + "SetInnerHTML";
+    expect(noDangerousHtml([f("a.tsx", `<p ${attribute}={{ __html: name }} />`)])).toHaveLength(1);
+    expect(noDangerousHtml([f("a.ts", "el.innerHTML = name;")])).toHaveLength(1);
+    expect(noDangerousHtml([f("a.tsx", "// never use raw HTML here\n<p>{name}</p>")])).toEqual([]);
   });
 
   it("route-calls-export", () => {

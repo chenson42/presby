@@ -476,3 +476,30 @@ describe("PORTAL_TILES — flag-key shape", () => {
     }
   });
 });
+
+describe("PORTAL_TILES — liveFor (DECISION-342)", () => {
+  it("liveFor is set only where comingSoon is true", () => {
+    for (const tile of PORTAL_TILES) {
+      if (tile.liveFor === undefined) continue;
+      expect(tile.comingSoon, `tile "${tile.key}" sets liveFor without comingSoon`).toBe(true);
+    }
+  });
+
+  it("liveFor is a subset of orgTypeScope when scope is set", () => {
+    for (const tile of PORTAL_TILES) {
+      if (tile.liveFor === undefined || tile.orgTypeScope === undefined) continue;
+      for (const type of tile.liveFor) {
+        expect(tile.orgTypeScope, `tile "${tile.key}" is live for ${type}, outside its scope`).toContain(type);
+      }
+    }
+  });
+
+  it("the insights tile is live for a presbytery only, and its description is not roadmap text that names a permission", () => {
+    const tile = PORTAL_TILES.find((t) => t.key === "insights");
+    expect(tile).toBeDefined();
+    expect(tile!.comingSoon).toBe(true);
+    expect(tile!.liveFor).toEqual(["presbytery"]);
+    expect(tile!.description).toBe("Dashboards, trends, and per-capita/membership insights.");
+    expect(tile!.description).not.toMatch(/permission|ask |contact/i);
+  });
+});

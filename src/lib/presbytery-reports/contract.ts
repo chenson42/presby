@@ -10,6 +10,21 @@
 /** The existing global flag every report page and export sits behind (a toggle; bare isFlagEnabled). */
 export const REPORTS_FLAG = "org_portal.reports";
 
+/**
+ * The flag the presbytery dashboard (`/o/<slug>/admin/insights`) sits behind
+ * (DECISION-342). A toggle, never a gate on a card's data: each card's authority
+ * is its report's own key, read live inside the reader's own transaction.
+ */
+export const INSIGHTS_FLAG = "org_portal.insights";
+
+/**
+ * Two more existing global flags, read by the dashboard page ONLY to decide whether
+ * a card or a row is a link or plain text (a click must not land on "isn't turned
+ * on"). Presentational: they gate nothing (DECISION-003).
+ */
+export const OVERSIGHT_FLAG = "org_portal.oversight";
+export const CREDENTIALS_FLAG = "org_portal.credentials";
+
 /** Reports are for presbyteries only. */
 export const REPORT_ORG_TYPES = ["presbytery"] as const;
 

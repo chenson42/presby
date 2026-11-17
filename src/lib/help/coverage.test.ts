@@ -36,7 +36,8 @@ import type { HelpContentEntry, HelpEntry } from "./types";
 /** Shrink-only (P3-16): this number may be lowered, never raised. Batch 5a and 5b delete the
  * "written later in this increment" entries as the pages that cover them publish. */
 // 15 - 1: the presbytery reports page documents tile:reports, so it leaves the list.
-const ALLOWLIST_PIN = 14;
+// 14 - 1: the same page documents tile:insights (the presbytery dashboard, DECISION-342).
+const ALLOWLIST_PIN = 13;
 
 const ROOT = path.resolve(__dirname, "../../..");
 
@@ -199,7 +200,7 @@ describe("the shrink-only allowlist", () => {
       "org_portal.giving", "tile:giving", "tile:giving-admin", "org_portal.mail_domain",
       "org_portal.sensitive_info", "org_portal.parishes", "tile:groups", "tile:staff",
       "tile:credentials", "tile:oversight", "tile:filings", "tile:committees",
-      "tile:insights", "tile:communications",
+      "tile:communications",
     ]) expect(keys.has(k), k).toBe(true);
   });
 });

@@ -463,6 +463,9 @@ describe.skipIf(!hasDb)("worship/reads.ts scheduling reads (Postgres-backed)", (
 
     it("warns, never blocks: blocked out that day, already scheduled that day, overlapping another service, declined this service; the minor note is info", async () => {
       const w = await t.build("p2");
+      // The world dates Sunday "now + 7 days", so after 11pm local the overlapping service an hour later
+      // falls on the next day and the leader's same-day warning disappears. Pin Sunday to 10:00 that day.
+      await t.q(sql`update events set starts_at = date_trunc('day', starts_at) + interval '10 hours' where id = ${w.sunday}`);
       const sundayDay = String((await t.one(sql`select to_char(starts_at, 'YYYY-MM-DD') as d from events where id = ${w.sunday}`)).d);
       // Alice: saved the date as one she can't serve.
       await store.addBlockout(v(w.alice, w), { startsOn: sundayDay, endsOn: sundayDay });

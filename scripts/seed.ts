@@ -638,13 +638,14 @@ async function seedFlags() {
     },
     {
       key: "org_portal.insights",
-      // ON: /o/<slug>/admin/insights (presbytery rollup dashboard) is
-      // reachable at all. GRADUATED OUT of the placeholder block below —
-      // Increment 4b builds the `presbytery` branch on top of this same
-      // schema commit; every other org type keeps rendering ComingSoon
+      // ON: /o/<slug>/admin/insights is reachable at all. GRADUATED OUT of the
+      // placeholder block below. A presbytery gets its read-only dashboard
+      // (Increment 4b slice one, DECISION-342): four summary cards over the
+      // presbytery reports and the viability list, each card behind its own
+      // report's permission. Every other org type keeps rendering ComingSoon
       // unchanged regardless of this flag. Seeded OFF.
       description:
-        "Insights & analytics dashboards page in (org). OFF = /o/<slug>/admin/insights renders 'isn't turned on yet'. ON with the presbytery branch unbuilt = 'coming soon' stub for every non-presbytery org type.",
+        "Insights & analytics page in (org). OFF = /o/<slug>/admin/insights renders 'isn't turned on yet'. ON = a presbytery sees its read-only dashboard (summary cards and the viability list); every other org type sees the 'coming soon' stub.",
       enabled: false,
     },
     {

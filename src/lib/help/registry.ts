@@ -937,7 +937,7 @@ export const HELP_PAGES = [
     slug: "presbytery-reports",
     title: "Presbytery reports and downloads",
     summary:
-      "Four reports for a presbytery, each a page and a spreadsheet download: vacant pulpits, membership trend, viability and per capita.",
+      "Four reports for a presbytery, each a page and a spreadsheet download: vacant pulpits, membership trend, viability and per capita, and a summary page.",
     order: 80,
     status: "published",
     audience: "administrator",
@@ -945,12 +945,16 @@ export const HELP_PAGES = [
       who: "Presbytery staff. Each report needs its own permission, which an administrator gives under Roles.",
       appliesTo: "presbyteries",
     },
-    covers: ["tile:reports"],
-    anchors: ["vacant-pulpits", "membership-trend", "viability", "per-capita"],
+    covers: ["tile:reports", "tile:insights"],
+    anchors: ["insights-and-analytics", "vacant-pulpits", "membership-trend", "viability", "per-capita"],
     labels: [
       "Per-Capita, SASR & Imports",
       "Reports & Insights",
       "Reports and exports",
+      "Insights & Analytics",
+      "Member congregations",
+      "Ending active members",
+      "Try again",
       "Vacant pulpits",
       "Membership trend",
       "Viability",
@@ -971,7 +975,7 @@ export const HELP_PAGES = [
       "Not billed",
       "Total reported",
     ],
-    verifiedIn: "0.57.0",
+    verifiedIn: "0.59.0",
   },
   // ---- Treasurers ---------------------------------------------------------------------------
   {

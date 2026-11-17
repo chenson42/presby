@@ -588,3 +588,34 @@ describe("getPortalMenu(slug, organizationType, viewer) — the loader behind th
     expect(menu.map((e) => e.key)).toEqual(["home"]);
   });
 });
+
+describe("visiblePortalTiles — liveFor resolves comingSoon per organization type (DECISION-342)", () => {
+  it("insights is not coming soon for a presbytery and is for a congregation", async () => {
+    isFlagEnabled.mockResolvedValue(true);
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    const presbytery = await visiblePortalTiles("operate", "presbytery", VIEWER);
+    const congregation = await visiblePortalTiles("operate", "congregation", VIEWER);
+    expect(presbytery.find((t) => t.key === "insights")?.comingSoon).toBe(false);
+    expect(congregation.find((t) => t.key === "insights")?.comingSoon).toBe(true);
+  });
+
+  it("a tile with liveFor naming the type resolves comingSoon to false on a copy, never mutating the registry", async () => {
+    isFlagEnabled.mockResolvedValue(true);
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    const registryTile = PORTAL_TILES.find((t) => t.key === "insights");
+    const [resolved] = (await visiblePortalTiles("operate", "presbytery", VIEWER)).filter((t) => t.key === "insights");
+    expect(resolved).not.toBe(registryTile);
+    expect(resolved.href("alder-creek")).toBe(registryTile!.href("alder-creek"));
+    expect(registryTile!.comingSoon).toBe(true);
+  });
+
+  it("every other tile is returned as the same object", async () => {
+    isFlagEnabled.mockResolvedValue(true);
+    isOrgFeatureEnabled.mockResolvedValue(true);
+    const tiles = await visiblePortalTiles("operate", "presbytery", VIEWER);
+    for (const tile of tiles) {
+      if (tile.key === "insights") continue;
+      expect(tile, tile.key).toBe(PORTAL_TILES.find((t) => t.key === tile.key));
+    }
+  });
+});

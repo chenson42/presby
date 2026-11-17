@@ -35,7 +35,14 @@ vi.mock("@/lib/authz", () => ({
 vi.mock("@/lib/flags", () => ({ isFlagEnabled: mocks.isFlagEnabled }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
 
-import { csvResponse, respondWithExport, gateReportPage, gateReportRoute, runReportRead } from "./gate";
+import {
+  csvResponse,
+  respondWithExport,
+  gateInsightsPage,
+  gateReportPage,
+  gateReportRoute,
+  runReportRead,
+} from "./gate";
 import { ROUTE_COPY } from "./copy";
 
 const ORG = {
@@ -116,6 +123,62 @@ describe("gateReportPage", () => {
   it("an OrgAccessError (membership ended mid-request) is rethrown to the error boundary", async () => {
     mocks.assertOrgAccess.mockRejectedValue(new mocks.FakeOrgAccessError("ended"));
     await expect(gateReportPage({ slug: "northern", path: PATH })).rejects.toBeInstanceOf(mocks.FakeOrgAccessError);
+  });
+});
+
+describe("gateInsightsPage (DECISION-342)", () => {
+  const INSIGHTS_PATH = "/o/northern/admin/insights";
+
+  it("gateInsightsPage checks org_portal.insights and never org_portal.reports", async () => {
+    const gate = await gateInsightsPage({ slug: "northern", path: INSIGHTS_PATH });
+    expect(gate.ok).toBe(true);
+    expect(mocks.isFlagEnabled).toHaveBeenCalledWith("org_portal.insights");
+    expect(mocks.isFlagEnabled).not.toHaveBeenCalledWith("org_portal.reports");
+  });
+
+  it("gateReportPage checks org_portal.reports and never org_portal.insights", async () => {
+    await gateReportPage({ slug: "northern", path: PATH });
+    expect(mocks.isFlagEnabled).toHaveBeenCalledWith("org_portal.reports");
+    expect(mocks.isFlagEnabled).not.toHaveBeenCalledWith("org_portal.insights");
+  });
+
+  it("gateInsightsPage: flag off is flag_off, even with the reports flag on", async () => {
+    mocks.isFlagEnabled.mockImplementation(async (key: string) => key !== "org_portal.insights");
+    expect(await gateInsightsPage({ slug: "northern", path: INSIGHTS_PATH })).toEqual({
+      ok: false,
+      state: { kind: "flag_off", name: "Northern Reach" },
+    });
+  });
+
+  it("gateInsightsPage: a congregation with the flag on is not_applicable", async () => {
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "ok", org: { ...ORG, organizationType: "congregation" } });
+    expect(await gateInsightsPage({ slug: "northern", path: INSIGHTS_PATH })).toEqual({
+      ok: false,
+      state: { kind: "not_applicable", name: "Northern Reach" },
+    });
+  });
+
+  it("a stale second factor redirects to /totp with the page's own path, for any organization type", async () => {
+    mocks.cachedAuth.mockResolvedValue(stale2fa);
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "ok", org: { ...ORG, organizationType: "congregation" } });
+    await expect(gateInsightsPage({ slug: "northern", path: INSIGHTS_PATH })).rejects.toThrow(
+      `REDIRECT:/totp?callbackUrl=${encodeURIComponent(INSIGHTS_PATH)}`,
+    );
+    expect(mocks.resolveOrgContext).not.toHaveBeenCalled();
+  });
+
+  it("signed out redirects to /signin with the dashboard's own path", async () => {
+    mocks.cachedAuth.mockResolvedValue(null);
+    await expect(gateInsightsPage({ slug: "northern", path: INSIGHTS_PATH })).rejects.toThrow(
+      `REDIRECT:/signin?callbackUrl=${encodeURIComponent(INSIGHTS_PATH)}`,
+    );
+  });
+
+  it("an OrgAccessError is rethrown to the error boundary", async () => {
+    mocks.assertOrgAccess.mockRejectedValue(new mocks.FakeOrgAccessError("ended"));
+    await expect(gateInsightsPage({ slug: "northern", path: INSIGHTS_PATH })).rejects.toBeInstanceOf(
+      mocks.FakeOrgAccessError,
+    );
   });
 });
 

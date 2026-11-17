@@ -199,6 +199,16 @@ interface PortalTileBase {
    * never disagree.
    */
   comingSoon?: boolean;
+  /**
+   * An allow-list of organization types for which a `comingSoon` tile is
+   * actually live (DECISION-342). Valid ONLY where `comingSoon` is true; every
+   * type not listed keeps the roadmap treatment. Resolved in
+   * `visiblePortalTiles` and nowhere else, which hands every consumer a copy
+   * with `comingSoon` already settled for the viewer's organization type; the
+   * frozen registry is never mutated. Presentational, never a gate: the
+   * destination route still decides what a click does.
+   */
+  liveFor?: readonly OrganizationType[];
 }
 
 /**
@@ -606,7 +616,10 @@ export const PORTAL_TILES: readonly PortalTile[] = [
     flagKey: "org_portal.insights",
     category: "operate",
     domain: "reports",
+    // The presbytery's dashboard is built (DECISION-342); every other type
+    // still opens the roadmap stub, so the pill stays for them.
     comingSoon: true,
+    liveFor: ["presbytery"],
   },
   {
     key: "communications",

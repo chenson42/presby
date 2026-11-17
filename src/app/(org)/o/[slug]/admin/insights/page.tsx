@@ -1,70 +1,99 @@
-import { notFound, redirect } from "next/navigation";
-import { cachedAuth } from "@/lib/auth/cached-auth";
-import { assertOrgAccess, resolveOrgContext } from "@/lib/authz";
-import { isFlagEnabled } from "@/lib/flags";
+import Link from "next/link";
 import { ComingSoon, PlaceholderFlagOff } from "@/components/org-portal/coming-soon";
+import { DashboardView } from "@/components/presbytery-reports/dashboard-cards";
+import { isFlagEnabled } from "@/lib/flags";
+import { helpHref } from "@/lib/help/urls";
+import { CREDENTIALS_FLAG, OVERSIGHT_FLAG, REPORTS_FLAG } from "@/lib/presbytery-reports/contract";
+import { DASHBOARD_COPY } from "@/lib/presbytery-reports/copy";
+import { getPresbyteryDashboard } from "@/lib/presbytery-reports/dashboard";
+import { gateInsightsPage } from "@/lib/presbytery-reports/gate";
+import { defaultBillingYear } from "@/lib/presbytery-reports/params";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 
-const INSIGHTS_FLAG = "org_portal.insights";
 const AREA = "Insights & Analytics";
 const DESCRIPTION =
   "Dashboards, trends, and per-capita/membership insights — universal across every organization type, planned but not yet built.";
 
 /**
- * `/o/<slug>/admin/insights` — one of the 7 product-IA placeholder routes,
- * docs/work-log/2026-08-27-product-ia-scaffold.md (Phase 3 §3, DECISION-117).
- * An inert "coming soon" stub: no data read, no mutation.
+ * `/o/<slug>/admin/insights` - a presbytery's read-only dashboard (Increment 4b,
+ * slice one, DECISION-342, docs/work-log/2026-11-17-presbytery-dashboard.md):
+ * four summary cards over the shipped presbytery reports and the viability list.
+ * Every other organization type keeps the inert "coming soon" stub
+ * (DECISION-117) with no data read.
  *
- * Repeats the `(org)` auth pattern in full (DECISION-040), same as every
- * other page under `(org)` — see `admin/credentials/page.tsx`'s header for
- * the fuller rationale on why the auth check lives in the page rather than
- * the layout. THE FLAG CHECK RUNS AFTER `assertOrgAccess()`, same ordering
- * every other flag-gated page in this tree uses.
+ * THE GATE is `gateInsightsPage` (and never `gateReportPage`; `boundaries.test.ts`
+ * pins both directions): signed in, the Node-side second-factor recheck, the
+ * four-way org miss (DECISION-040), `assertOrgAccess`, the global
+ * `org_portal.insights` flag (checked BEFORE the type, so a congregation with
+ * insights off still sees "isn't turned on"), then the presbytery type. Each
+ * card's authority is its own report's key, checked live inside its own reader's
+ * transaction by `getPresbyteryDashboard`; this page decides nothing about keys.
  *
- * Universal tile (no `orgTypeScope`), deliberately kept separate from
- * `reports` (Phase 3 §1): `insights` is for every organization type, while
- * `reports` is presbytery-only back-office compliance filing — different
- * audiences, different `orgTypeScope`, must not share a tile or a route.
+ * Read-only: no form, no action, no export, no audit event (DECISION-339 audits
+ * exports only). No query parameter is read: the years are the reports' own
+ * defaults, printed on each card and carried explicitly in each link. The
+ * reports, oversight and credentials flags are read with the bare
+ * `isFlagEnabled` ONLY to decide whether a card or a row is a link; they gate
+ * nothing (DECISION-003). No `loading.tsx` may exist under this segment: the
+ * gate calls `notFound()` and `redirect()`.
+ *
+ * The dashboard is computed as a plain value BEFORE the `return`, never as a
+ * nested async component (the reports hub's rule), so a Testing Library render
+ * sees the same tree a request does. An `OrgAccessError` propagates to
+ * `[slug]/error.tsx`.
  */
-export default async function InsightsPage({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
+export default async function InsightsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const path = `/o/${slug}/admin/insights`;
 
-  const session = await cachedAuth();
-  if (!session?.user) {
-    redirect(`/signin?callbackUrl=${encodeURIComponent(`/o/${slug}/admin/insights`)}`);
+  const gate = await gateInsightsPage({ slug, path });
+  if (!gate.ok) {
+    const { state } = gate;
+    switch (state.kind) {
+      case "org_forbidden":
+        return <OrgAccessDenied name={state.name} organizationType={state.organizationType} slug={slug} />;
+      case "org_ended":
+        return <OrgAccessEnded name={state.name} endedOn={state.endedOn} slug={slug} />;
+      case "flag_off":
+        return <PlaceholderFlagOff area={AREA} orgName={state.name} />;
+      case "not_applicable":
+        return <ComingSoon area={AREA} description={DESCRIPTION} slug={slug} />;
+    }
   }
+  const { identity } = gate;
 
-  const resolved = await resolveOrgContext(session.user.id, slug);
+  const now = new Date();
+  const [dashboard, reportsOn, oversightOn, credentialsOn] = await Promise.all([
+    getPresbyteryDashboard(identity, now),
+    isFlagEnabled(REPORTS_FLAG),
+    isFlagEnabled(OVERSIGHT_FLAG),
+    isFlagEnabled(CREDENTIALS_FLAG),
+  ]);
 
-  switch (resolved.kind) {
-    case "not-found":
-      notFound();
-    case "forbidden":
-      return (
-        <OrgAccessDenied
-          name={resolved.name}
-          organizationType={resolved.organizationType}
-          slug={slug}
-        />
-      );
-    case "ended":
-      return (
-        <OrgAccessEnded name={resolved.name} endedOn={resolved.endedOn} slug={slug} />
-      );
-    case "ok":
-      break;
-  }
+  return (
+    <section className="space-y-6">
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold">{DASHBOARD_COPY.title}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{DASHBOARD_COPY.subtitle(identity.organizationName)}</p>
+      </div>
 
-  await assertOrgAccess(resolved.org.personId, resolved.org.organizationId);
+      <DashboardView
+        dashboard={dashboard}
+        org={identity.organizationName}
+        slug={slug}
+        flags={{ reportsOn, oversightOn, credentialsOn }}
+        retryHref={path}
+        billingYear={defaultBillingYear(now)}
+      />
 
-  const insightsEnabled = await isFlagEnabled(INSIGHTS_FLAG);
-  if (!insightsEnabled) {
-    return <PlaceholderFlagOff area={AREA} orgName={resolved.org.name} />;
-  }
-
-  return <ComingSoon area={AREA} description={DESCRIPTION} slug={slug} />;
+      <p className="text-sm">
+        <Link
+          href={helpHref("presbytery-reports", "insights-and-analytics")}
+          className="inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline"
+        >
+          {DASHBOARD_COPY.helpLink}
+        </Link>
+      </p>
+    </section>
+  );
 }

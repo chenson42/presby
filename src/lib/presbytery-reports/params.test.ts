@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAllYears, parseBillingYear, parseTrendWindow, parseYear } from "./params";
+import { defaultBillingYear, parseAllYears, parseBillingYear, parseTrendWindow, parseYear } from "./params";
 
 const NOW = new Date("2026-11-15T12:00:00Z");
 
@@ -81,5 +81,18 @@ describe("parseAllYears", () => {
     for (const raw of ["", "0", "true", "yes", "11", "1 ", ["1"], ["1", "1"]]) {
       expect(parseAllYears(raw as never)).toEqual({ ok: false });
     }
+  });
+});
+
+describe("defaultBillingYear", () => {
+  it("is the UTC year of now, which near New Year leads an Ohio calendar", () => {
+    expect(defaultBillingYear(new Date("2026-01-01T03:00:00Z"))).toBe(2026);
+    expect(defaultBillingYear(new Date("2026-11-16T15:00:00Z"))).toBe(2026);
+  });
+
+  it("agrees with an absent billingYear", () => {
+    const now = new Date("2027-06-01T00:00:00Z");
+    const parsed = parseBillingYear(undefined, now);
+    expect(parsed.ok && parsed.value).toBe(defaultBillingYear(now));
   });
 });

@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { CALL_TYPE_LABELS } from "@/app/(org)/o/[slug]/admin/credentials/credential-labels";
 import { REPORTS } from "./contract";
 import {
+  DASHBOARD_COPY,
+  HUB_COPY,
   PER_CAPITA_COPY,
   ROUTE_COPY,
   SUPPLY_CALL_TYPE_LABELS,
   allCopyStrings,
+  formatCount,
   formatDollars,
 } from "./copy";
 
@@ -50,6 +53,74 @@ describe("copy", () => {
     expect(ROUTE_COPY.forbidden).toBe("You don't have permission to export this report.");
     expect(ROUTE_COPY.exportFailed).toBe("We can't prepare that file right now. Try again in a moment.");
     expect(ROUTE_COPY.nothingToExport).toBe("There is nothing to export yet. No pastoral appointments are recorded.");
+  });
+});
+
+describe("dashboard copy (DECISION-342)", () => {
+  it("the forbidden body names every report's permission phrase", () => {
+    for (const r of REPORTS) expect(DASHBOARD_COPY.forbidden.body).toContain(r.permissionPhrase);
+    expect(DASHBOARD_COPY.forbidden.body).toMatch(/Roles/);
+  });
+
+  it("the locked reason the cards reuse names each phrase (the hub's wording, not a second copy)", () => {
+    for (const r of REPORTS) expect(HUB_COPY.lockedReason(r.permissionPhrase)).toContain(r.permissionPhrase);
+  });
+
+  it("the members note says what is excluded", () => {
+    const note = DASHBOARD_COPY.members.note("Northern Reach");
+    expect(note).toContain("Northern Reach");
+    expect(note).toMatch(/New worshiping communities/);
+    expect(note).toMatch(/left or closed/);
+  });
+
+  it("the dashboard strings are in the swept set, with the year, fraction and count templates sampled", () => {
+    expect(strings).toContain(DASHBOARD_COPY.pageError);
+    expect(strings).toContain(DASHBOARD_COPY.trend.yearLine(2025, 9, 12));
+    expect(strings).toContain(DASHBOARD_COPY.perCapita.title(2025));
+  });
+
+  it("the plain dashboard strings name no section and give no instruction", () => {
+    const plain = [
+      DASHBOARD_COPY.perCapita.noRatePlain(2026),
+      DASHBOARD_COPY.perCapita.rateSetPlain(2026),
+      DASHBOARD_COPY.vacant.notRecordedNoLink,
+    ];
+    expect(plain).toEqual([
+      "No rate is set for 2026.",
+      "A rate is set for 2026. The bills have not been generated.",
+      "So vacancies can't be worked out.",
+    ]);
+    for (const s of plain) expect(s).not.toMatch(/Credentials|Per-Capita section|Congregation Statistics|Oversight|Open |Set one|Record|Generate the/);
+    // allCopyStrings samples year templates with 2025
+    expect(strings).toContain(DASHBOARD_COPY.perCapita.noRatePlain(2025));
+    expect(strings).toContain(DASHBOARD_COPY.perCapita.rateSetPlain(2025));
+    expect(strings).toContain(DASHBOARD_COPY.vacant.notRecordedNoLink);
+  });
+
+  it("the templates read as drafted", () => {
+    expect(DASHBOARD_COPY.trend.yearLine(2025, 9, 12)).toBe("2025: 9 of 12 reporting");
+    expect(DASHBOARD_COPY.perCapita.countLine(1, 1)).toBe("1 of 1 congregation billed");
+    expect(DASHBOARD_COPY.perCapita.countLine(8, 12)).toBe("8 of 12 congregations billed");
+    expect(DASHBOARD_COPY.perCapita.departed(1)).toBe("Includes 1 congregation that is no longer a member.");
+    expect(DASHBOARD_COPY.perCapita.departed(2)).toBe("Includes 2 congregations that are no longer members.");
+    expect(DASHBOARD_COPY.perCapita.title(2026)).toBe("Per capita, 2026");
+    expect(DASHBOARD_COPY.empty.body).toMatch(/PresbyPortal team/);
+  });
+
+  it("never prints a dollar zero where a figure is missing: no card string is a dollar amount", () => {
+    for (const s of Object.values(DASHBOARD_COPY.perCapita)) {
+      if (typeof s === "string") expect(s).not.toMatch(/\$0\.00/);
+    }
+  });
+});
+
+describe("formatCount", () => {
+  it("groups thousands and refuses a non-integer", () => {
+    expect(formatCount(0)).toBe("0");
+    expect(formatCount(999)).toBe("999");
+    expect(formatCount(1234567)).toBe("1,234,567");
+    expect(formatCount(-4200)).toBe("-4,200");
+    expect(() => formatCount(1.5)).toThrow(RangeError);
   });
 });
 

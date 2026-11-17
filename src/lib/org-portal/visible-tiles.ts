@@ -85,6 +85,19 @@ const tileGateOpen = cache(
   },
 );
 
+/**
+ * The ONE place `liveFor` is read (DECISION-342): a coming-soon tile that is
+ * live for this organization type comes back as a copy with `comingSoon: false`.
+ * Any other tile is returned as the same object, and the registry is never
+ * mutated.
+ */
+function resolveComingSoon(tile: PortalTile, organizationType: OrganizationType): PortalTile {
+  if (tile.comingSoon === true && tile.liveFor?.includes(organizationType)) {
+    return { ...tile, comingSoon: false };
+  }
+  return tile;
+}
+
 export async function visiblePortalTiles(
   category: PortalTileCategory,
   organizationType: OrganizationType,
@@ -106,7 +119,7 @@ export async function visiblePortalTiles(
       ),
     })),
   );
-  return checks.filter((c) => c.enabled).map((c) => c.tile);
+  return checks.filter((c) => c.enabled).map((c) => resolveComingSoon(c.tile, organizationType));
 }
 
 /**

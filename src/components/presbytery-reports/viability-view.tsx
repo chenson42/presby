@@ -6,8 +6,11 @@ import { FRAME_COPY, VIABILITY_COPY } from "@/lib/presbytery-reports/copy";
 import type { ViabilityData, ViabilityRow } from "@/lib/presbytery-reports/derive";
 import { ReportEmpty } from "./report-states";
 
-/** Same variants as the oversight list: at risk is the one status never to read as routine. */
-function ViabilityBadge({ row }: { row: ViabilityRow }) {
+/**
+ * Same variants as the oversight list: at risk is the one status never to read as routine.
+ * Exported for the dashboard's list (DECISION-342); the text carries the status, not colour alone.
+ */
+export function ViabilityBadge({ row }: { row: Pick<ViabilityRow, "score" | "label"> }) {
   const variant = row.score === null ? "outline" : row.score === 1 ? "destructive" : row.score === 2 ? "secondary" : "default";
   return <Badge variant={variant}>{row.label}</Badge>;
 }

@@ -55,6 +55,16 @@ export function parseBillingYear(raw: RawParam, now: Date): Parsed<number> {
   return year === null ? bad() : good(year);
 }
 
+/**
+ * The billing year every per-capita default uses: `now`'s UTC year (what an absent
+ * `billingYear` parses to), or the bare UTC year when that is outside 1900 to 2100.
+ * The dashboard prints it and links to it explicitly, so the card and the report agree.
+ */
+export function defaultBillingYear(now: Date): number {
+  const parsed = parseBillingYear(undefined, now);
+  return parsed.ok ? parsed.value : now.getUTCFullYear();
+}
+
 /** The default trend window: the five statistical years ending last calendar year. */
 export function defaultTrendWindow(now: Date): { from: number; to: number } {
   const to = now.getUTCFullYear() - 1;

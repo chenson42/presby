@@ -13,6 +13,26 @@ Each report needs its own permission, and having one does not open another. A ca
 | "Viability" | How the presbytery rates each congregation | "Congregation Oversight" | Manage congregation oversight |
 | "Per capita" | What each congregation was billed for a year, has paid and still owes | The rate and the bills in the Per-Capita section of "Per-Capita, SASR & Imports" | Manage per-capita billing |
 
+## Insights and analytics
+
+On your presbytery's home page, choose "Insights & Analytics" under "Reports & Insights". The page is a summary of your member congregations. It is read-only: nothing on it can be changed, and it has no download.
+
+Each card comes from one report and needs that report's permission. A card you cannot open says "Locked" and what it needs. If you have none of the four permissions, the page says you don't have permission and names them. An administrator can give a permission under "Roles". See [Roles: who can do what](/help/roles-who-can-do-what).
+
+| Card | What it shows | Permission you need |
+|---|---|---|
+| "Member congregations" | How many congregations are members of your presbytery today | Any one of the four permissions in this table |
+| "Ending active members" | The total for the newest of the five years ending last year that has statistics, and how many congregations reported | Manage statistics |
+| "Vacant pulpits" | How many congregations have no installed or designated pastor today | Manage credentials |
+| "Per capita" | What was billed, paid and still owed for this year | Manage per-capita billing |
+| "Viability" | Every member congregation with the rating the presbytery recorded, at risk first | Manage congregation oversight |
+
+The "Ending active members" and "Per capita" cards name the year they show. "Member congregations", "Vacant pulpits" and "Viability" show how things stand today. When nothing is recorded, the card says so in words and does not show a zero. "Ending active members" says how many congregations reported, and its total leaves out any that did not report a figure. "Vacant pulpits" has the same limit as the report: a congregation whose appointment was never recorded counts as vacant. "Per capita" shows the current year's totals, which include a congregation that has left but still has a bill.
+
+A card opens its report only where the reports are turned on, and a congregation's name opens its page on "Congregation Oversight" only where that is turned on. Otherwise the figure or name shows without a link. A card that says "We couldn't load this card" has a "Try again" link; the other cards are not affected.
+
+If the page says Insights & Analytics "isn't turned on" for your presbytery, the PresbyPortal team switches it on for the whole platform. [Contact the team](/help/contact) if you need it.
+
 ## Vacant pulpits
 
 A congregation is listed when it has no installed pastor and no designated pastor recorded as serving today. Stated supply, interim pastor and temporary supply do not fill the pulpit here; the most recent one shows under "Supply". A parish associate does not fill the pulpit either, and does not make it vacant. A call that starts on a later date does not fill the pulpit until that date, and a call with an end date still fills it until that day.

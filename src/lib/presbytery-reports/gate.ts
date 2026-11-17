@@ -6,7 +6,7 @@ import { cachedAuth } from "@/lib/auth/cached-auth";
 import { assertOrgAccess, OrgAccessError, resolveOrgContext, type OrganizationType } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { assertOrgSession, orgTotpRedirectUrl } from "@/lib/org-portal/session-check";
-import { REPORT_ORG_TYPES, REPORTS_FLAG, type ReportExport, type ReportRead, type ReportViewer } from "./contract";
+import { INSIGHTS_FLAG, REPORT_ORG_TYPES, REPORTS_FLAG, type ReportExport, type ReportRead, type ReportViewer } from "./contract";
 import { ROUTE_COPY } from "./copy";
 
 /**
@@ -20,8 +20,9 @@ import { ROUTE_COPY } from "./copy";
  *      never shows data its export would refuse,
  *   3. the four-way org miss (`resolveOrgContext`, DECISION-040) and
  *      `assertOrgAccess`,
- *   4. the global `org_portal.reports` flag (the BARE `isFlagEnabled`: it is a
- *      toggle, so DECISION-026's fail-open wrappers do not apply),
+ *   4. the page's own global flag (`org_portal.reports` for a report page,
+ *      `org_portal.insights` for the dashboard; the BARE `isFlagEnabled`: it is
+ *      a toggle, so DECISION-026's fail-open wrappers do not apply),
  *   5. the organization type (presbytery).
  * The report's own KEY is not checked here: each reader checks it inside its
  * own transaction (`presby_has_permission`, live), so no caller can skip it.
@@ -32,6 +33,11 @@ import { ROUTE_COPY } from "./copy";
  * nothing is lost by collapsing them and a prober learns nothing from the
  * difference. `boundaries.test.ts` pins that every `page.tsx` and `route.ts`
  * under the four segments calls this file.
+ *
+ * The page skin is one private core, `gatePresbyteryPage`, with a closed flag
+ * union and no default, and two named exports over it (DECISION-342): no call
+ * site passes a flag, so none can pass the wrong one, and `boundaries.test.ts`
+ * pins each page to its own name.
  *
  * No `callbackUrl` or `next` is ever READ: the only redirects carry the
  * request's own path and query.
@@ -55,12 +61,27 @@ export type ReportPageGate =
   | { ok: true; identity: ReportIdentity }
   | { ok: false; state: ReportGateState };
 
-export async function gateReportPage(options: {
+/** The flags a presbytery page gate may check: a closed union, never a free string. */
+type PresbyteryPageFlag = typeof REPORTS_FLAG | typeof INSIGHTS_FLAG;
+
+interface PageGateOptions {
   slug: string;
   /** This page's own path and query, for the sign-in and challenge callbacks. */
   path: string;
-}): Promise<ReportPageGate> {
-  const { slug, path } = options;
+}
+
+/** A presbytery report page's gate: the `org_portal.reports` flag. */
+export function gateReportPage(options: PageGateOptions): Promise<ReportPageGate> {
+  return gatePresbyteryPage({ ...options, flag: REPORTS_FLAG });
+}
+
+/** The dashboard's gate (`/admin/insights`): the `org_portal.insights` flag, same order and result. */
+export function gateInsightsPage(options: PageGateOptions): Promise<ReportPageGate> {
+  return gatePresbyteryPage({ ...options, flag: INSIGHTS_FLAG });
+}
+
+async function gatePresbyteryPage(options: PageGateOptions & { flag: PresbyteryPageFlag }): Promise<ReportPageGate> {
+  const { slug, path, flag } = options;
 
   const session = await cachedAuth();
   const check = assertOrgSession(session);
@@ -85,7 +106,7 @@ export async function gateReportPage(options: {
   await assertOrgAccess(resolved.org.personId, resolved.org.organizationId);
 
   const name = resolved.org.name;
-  if (!(await isFlagEnabled(REPORTS_FLAG))) return { ok: false, state: { kind: "flag_off", name } };
+  if (!(await isFlagEnabled(flag))) return { ok: false, state: { kind: "flag_off", name } };
   if (!(REPORT_ORG_TYPES as readonly string[]).includes(resolved.org.organizationType)) {
     return { ok: false, state: { kind: "not_applicable", name } };
   }

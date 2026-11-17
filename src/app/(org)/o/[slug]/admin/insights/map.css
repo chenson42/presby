@@ -111,7 +111,8 @@
   border: 1px solid var(--border);
 }
 .presby-map .leaflet-popup-content {
-  margin: 12px 14px;
+  /* room on the right for the 36px close button, so a long name never runs under it */
+  margin: 12px 40px 12px 14px;
   font-size: 0.875rem;
   line-height: 1.4;
 }

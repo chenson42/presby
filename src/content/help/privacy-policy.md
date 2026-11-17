@@ -1,4 +1,4 @@
-Last updated October 31, 2026.
+Last updated November 17, 2026.
 
 PresbyPortal is a service that helps Presbyterian congregations, presbyteries and synods keep their records and do their work. This page says what information we hold, who else handles it, how long it is kept, and what you can ask us to do. In this policy, "we" means PresbyPortal.
 
@@ -67,6 +67,7 @@ We use these companies to run PresbyPortal, and share information with them only
 - **Resend** sends our emails, so it handles the address and content of each one.
 - **Stripe** takes online gifts for congregations that use giving. You leave PresbyPortal for a page hosted by Stripe, and Stripe's own policy applies there. We do not receive or store your card number.
 - **Cloudflare Turnstile** checks that a person, not a bot, is using a form, where we turn it on. Cloudflare receives your IP address and browser details when it does. It runs on the contact form.
+- **MapTiler** supplies the map pictures on the "Insights & Analytics" page of a presbytery, for people who can manage congregation oversight. While the map is showing, your browser asks MapTiler for the pictures directly, so MapTiler receives your IP address, browser details, the web address of the PresbyPortal site and the part of the map you are looking at. We send it no names, scores or records. The map credits OpenStreetMap contributors for its underlying map data.
 - **Upstash** keeps the short-lived request counts for abuse protection, where we use it.
 - **Google** handles your sign-in, only if you choose Google.
 

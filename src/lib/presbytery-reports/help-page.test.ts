@@ -39,4 +39,28 @@ describe("presbytery-reports help page", () => {
     );
     expect(section).not.toContain("Each card says which year it shows");
   });
+
+  it("documents the map (DECISION-343): where, who, the pin shapes, the phone gesture, and the oversight permission", () => {
+    const start = page.indexOf("## The viability map");
+    const section = page.slice(start, page.indexOf("## Vacant pulpits"));
+    expect(start).toBeGreaterThan(page.indexOf("## Insights and analytics"));
+    const oversight = REPORTS.find((r) => r.key === "viability")!.permissionPhrase;
+    expect(section).toContain(`permission to ${oversight}`);
+    for (const word of ["diamond", "square", "circle", "hollow circle", "Not on the map", "Open oversight page", "two fingers", "The map could not load", "/help/privacy-policy"]) {
+      expect(section, word).toContain(word);
+    }
+  });
+
+  it("documents entering a location: Map location, latitude first, a negative US longitude, both or neither, 0 and 0", () => {
+    const start = page.indexOf("## Putting a congregation on the map");
+    const section = page.slice(start, page.indexOf("## Per capita"));
+    expect(start).toBeGreaterThan(page.indexOf("## Viability"));
+    for (const text of ["Map location", "Latitude", "Longitude", "negative longitude", "Enter both numbers or neither", "0 and 0", "paste it into either box"]) {
+      expect(section, text).toContain(text);
+    }
+  });
+
+  it("still says the CSV holds no coordinates (the viability read for the file never reads them)", () => {
+    expect(page).toMatch(/holds no email addresses, street addresses, coordinates or people's names/);
+  });
 });

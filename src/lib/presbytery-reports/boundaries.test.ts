@@ -50,6 +50,8 @@ const segmentFiles = load(
 );
 const componentFiles = load(walk(COMPONENTS_DIR).filter((f) => /\.tsx?$/.test(f) && !isTest(f)));
 const insightsFiles = load(walk(INSIGHTS_DIR).filter((f) => /\.tsx?$/.test(f) && !isTest(f)));
+// Every non-test source file in the repo's src/ (the map's "nowhere else" rules read the whole tree).
+const allSrcFiles = load(walk(path.join(ROOT, "src")).filter((f) => /\.tsx?$/.test(f) && !isTest(f)));
 const hubFile = load([path.join(REPORTS_DIR, "reports-hub.tsx")].filter((f) => { try { statSync(f); return true; } catch { return false; } }));
 
 const surface = [...moduleFiles, ...segmentFiles];
@@ -181,6 +183,100 @@ function noUseClient(files: SourceFile[]): Hit[] {
   return files.filter((f) => /^\s*["']use client["']/m.test(f.content)).map((f) => ({ rule: "no-use-client", file: f.rel }));
 }
 
+// ── The map's containment (DECISION-343) ───────────────────────────────────
+
+/** The only two client files in the dashboard directory; `map-support.ts` is a plain helper with no directive. */
+const CLIENT_FILES = ["map-loader.tsx", "map.tsx"];
+const MAP_BROWSER_FILES = ["map-loader.tsx", "map.tsx", "map-support.ts"];
+const isFile = (rel: string, name: string) => rel.endsWith(`/${name}`);
+
+/** The `'use client'` files, by base name. */
+function clientFileNames(files: SourceFile[]): string[] {
+  return files.filter((file) => /^\s*["']use client["']/m.test(file.content)).map((file) => file.rel.split("/").pop()!);
+}
+
+/** `next/dynamic` appears only in the loader, and the loader says `ssr: false`. */
+function dynamicOnlyInLoader(files: SourceFile[]): Hit[] {
+  const hits: Hit[] = [];
+  for (const file of files) {
+    const c = code(file.content);
+    const loader = isFile(file.rel, "map-loader.tsx");
+    if (/next\/dynamic/.test(c) && !loader) hits.push({ rule: "dynamic-only-in-loader", file: file.rel });
+    if (loader && (!/next\/dynamic/.test(c) || !/\bssr:\s*false\b/.test(c))) hits.push({ rule: "loader-ssr-false", file: file.rel });
+  }
+  return hits;
+}
+
+/** Nothing imports the map module statically: only `import("./map")`, inside the loader. */
+function mapImportedOnlyDynamically(files: SourceFile[]): Hit[] {
+  const hits: Hit[] = [];
+  for (const file of files) {
+    const c = code(file.content);
+    if (/\bfrom\s*["'](?:\.\/map|[^"']*insights\/map)["']/.test(c) || /\bimport\s*["'](?:\.\/map|[^"']*insights\/map)["']/.test(c)) {
+      hits.push({ rule: "map-static-import", file: file.rel });
+    }
+    const dynamicRefs = [...c.matchAll(/\bimport\(\s*["']([^"']*\/map)["']\s*\)/g)];
+    if (dynamicRefs.length > 0 && !isFile(file.rel, "map-loader.tsx")) hits.push({ rule: "map-dynamic-outside-loader", file: file.rel });
+  }
+  return hits;
+}
+
+const BROWSER_BANS: Array<[string, RegExp]> = [
+  ["process.env", /\bprocess\.env\b/],
+  ["MAPTILER", /MAPTILER/],
+  ["fetch(", /\bfetch\(/],
+  ["XMLHttpRequest", /\bXMLHttpRequest\b/],
+  ["@/lib/db", /@\/lib\/db\b/],
+  ["@/auth", /@\/auth\b/],
+  ["next/headers", /next\/headers/],
+  ["an actions import", /\bfrom\s*["'][^"']*actions["']|\bimport\s*["'][^"']*actions["']/],
+  [".innerHTML", /\.innerHTML\b/],
+  ["insertAdjacentHTML", /\binsertAdjacentHTML\b/],
+  ["bindTooltip", /\bbindTooltip\b/],
+  ["circleMarker", /\bcircleMarker\b/],
+  ["L.icon(", /\bL\.icon\(/],
+  ["iconUrl", /\biconUrl\b/],
+  ["an attribution option", /\battribution\s*:/],
+];
+
+/** The map's browser files read no environment, call no server, touch no database, and build no HTML. */
+function browserFileBans(files: SourceFile[]): Hit[] {
+  return files.flatMap((file) =>
+    BROWSER_BANS.filter(([, re]) => re.test(code(file.content))).map(([name]) => ({ rule: `browser-ban:${name}`, file: file.rel })),
+  );
+}
+
+/** `bindPopup(` takes only a DOM-node builder, and a divIcon's `html:` only the pin builder. */
+function nodeBuildersOnly(files: SourceFile[]): Hit[] {
+  const hits: Hit[] = [];
+  for (const file of files) {
+    const c = code(file.content);
+    for (const m of c.matchAll(/\bbindPopup\(\s*(?=\S)(?!popupNode\()/g)) hits.push({ rule: "bindPopup-node-only", file: `${file.rel}@${m.index}` });
+    for (const m of c.matchAll(/\bhtml\s*:\s*(?=\S)(?!pinNode\()/g)) hits.push({ rule: "icon-html-node-only", file: `${file.rel}@${m.index}` });
+  }
+  return hits;
+}
+
+/** String and template literal contents blanked, so prose that says "latitude" is not a column access. */
+function withoutStrings(content: string): string {
+  return code(content).replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
+}
+
+/** Among the module's files only the map reader and its derive name a coordinate column. */
+function onlyMapFilesNameCoordinates(files: SourceFile[]): Hit[] {
+  return files
+    .filter((file) => !isFile(file.rel, "viability-map.ts") && !isFile(file.rel, "map-derive.ts"))
+    .filter((file) => /\b(latitude|longitude)\b/i.test(withoutStrings(file.content)))
+    .map((file) => ({ rule: "coordinates-only-in-map-files", file: file.rel }));
+}
+
+/** MAPTILER is named by exactly one source file: map-config.ts. */
+function onlyConfigNamesMaptiler(files: SourceFile[]): Hit[] {
+  return files
+    .filter((file) => !file.rel.endsWith("presbytery-reports/map-config.ts") && /MAPTILER/.test(code(file.content)))
+    .map((file) => ({ rule: "maptiler-only-in-config", file: file.rel }));
+}
+
 function rosterFiltersLifecycle(files: SourceFile[]): Hit[] {
   const roster = files.find((f) => f.rel.endsWith("presbytery-reports/roster.ts"));
   const c = roster ? code(roster.content) : "";
@@ -282,8 +378,46 @@ describe("the real tree", () => {
     expect(noLooseNumberParse(insightsFiles)).toEqual([]);
   });
 
-  it("nothing in the dashboard directory is a client component (slice one; the map increment relaxes this for exactly its client files)", () => {
-    expect(noUseClient(insightsFiles)).toEqual([]);
+  it("the only client components in the dashboard directory are the map loader and the map (the module and the components stay server-side)", () => {
+    expect(clientFileNames(insightsFiles).sort()).toEqual([...CLIENT_FILES].sort());
+    expect(noUseClient(moduleFiles)).toEqual([]);
+    expect(noUseClient(componentFiles)).toEqual([]);
+  });
+
+  it("next/dynamic appears only in the loader, which says ssr: false, and nothing imports the map statically", () => {
+    expect(dynamicOnlyInLoader([...insightsFiles, ...moduleFiles, ...componentFiles])).toEqual([]);
+    expect(mapImportedOnlyDynamically([...allSrcFiles])).toEqual([]);
+    const loader = insightsFiles.find((file) => isFile(file.rel, "map-loader.tsx"))!;
+    expect(code(loader.content)).toMatch(/import\(\s*["']\.\/map["']\s*\)/);
+  });
+
+  it("the map's browser files read no environment, call no server, touch no database and build no HTML", () => {
+    const browser = insightsFiles.filter((file) => MAP_BROWSER_FILES.some((name) => isFile(file.rel, name)));
+    expect(browser.map((file) => file.rel.split("/").pop()).sort()).toEqual([...MAP_BROWSER_FILES].sort());
+    expect(browserFileBans(browser)).toEqual([]);
+  });
+
+  it("bindPopup takes only the popup node builder and a divIcon's html only the pin node builder; the wheel never zooms", () => {
+    const map = insightsFiles.find((file) => isFile(file.rel, "map.tsx"))!;
+    expect(nodeBuildersOnly(insightsFiles)).toEqual([]);
+    expect(code(map.content)).toMatch(/\bbindPopup\(\s*popupNode\(/);
+    expect(code(map.content)).toMatch(/\bhtml:\s*pinNode\(/);
+    expect(code(map.content)).toMatch(/\bscrollWheelZoom:\s*false\b/);
+    expect(code(map.content)).toMatch(/\battributionControl:\s*false\b/);
+  });
+
+  it("only the map reader and its derive name a coordinate column; the viability read, the CSV and the audit never do", () => {
+    expect(onlyMapFilesNameCoordinates(moduleFiles)).toEqual([]);
+    const named = moduleFiles.filter((file) => /\b(latitude|longitude)\b/i.test(withoutStrings(file.content))).map((file) => file.rel.split("/").pop());
+    expect(named.sort()).toEqual(["map-derive.ts", "viability-map.ts"]);
+    for (const quiet of ["viability.ts", "csv.ts", "audit.ts"]) {
+      expect(moduleFiles.some((file) => isFile(file.rel, quiet))).toBe(true);
+    }
+  });
+
+  it("only map-config.ts names MAPTILER anywhere in src", () => {
+    expect(onlyConfigNamesMaptiler(allSrcFiles)).toEqual([]);
+    expect(allSrcFiles.some((file) => file.rel.endsWith("presbytery-reports/map-config.ts"))).toBe(true);
   });
 
   it("no dangerouslySetInnerHTML or innerHTML in the dashboard directory, the module or the components (names render as text)", () => {
@@ -427,5 +561,66 @@ describe("each rule flags a violating sample", () => {
     expect(rosterFiltersLifecycle([f("src/lib/presbytery-reports/roster.ts", "where parentId = x")])).toHaveLength(1);
     expect(rosterFiltersLifecycle([f("src/lib/presbytery-reports/roster.ts", 'eq(organizations.lifecycleStatus, "active")')])).toEqual([]);
     expect(noUseClient([f("a.tsx", '"use client";\nexport const a = 1;')])).toHaveLength(1);
+  });
+
+  it("the map's containment rules (DECISION-343)", () => {
+    // client files, by name
+    expect(clientFileNames([f("i/a.tsx", '"use client";\nexport const a = 1;'), f("i/b.ts", "export const b = 1;")])).toEqual(["a.tsx"]);
+
+    // next/dynamic only in the loader, with ssr: false
+    expect(dynamicOnlyInLoader([f("i/page.tsx", 'import dynamic from "next/dynamic";')])).toHaveLength(1);
+    expect(dynamicOnlyInLoader([f("i/map-loader.tsx", 'import dynamic from "next/dynamic"; dynamic(() => import("./map"), { ssr: true })')])).toHaveLength(1);
+    expect(dynamicOnlyInLoader([f("i/map-loader.tsx", "export const x = 1;")])).toHaveLength(1);
+    expect(dynamicOnlyInLoader([f("i/map-loader.tsx", 'import dynamic from "next/dynamic"; dynamic(() => import("./map"), { ssr: false })')])).toEqual([]);
+    expect(dynamicOnlyInLoader([f("i/page.tsx", '// next/dynamic would be wrong here\nexport const a = 1;')])).toEqual([]);
+
+    // the map is never imported statically
+    expect(mapImportedOnlyDynamically([f("i/page.tsx", 'import Map from "./map";')])).toHaveLength(1);
+    expect(mapImportedOnlyDynamically([f("i/page.tsx", 'import { x } from "../insights/map";')])).toHaveLength(1);
+    expect(mapImportedOnlyDynamically([f("c/a.tsx", 'import Map from "@/app/(org)/o/[slug]/admin/insights/map";')])).toHaveLength(1);
+    expect(mapImportedOnlyDynamically([f("i/page.tsx", 'const M = await import("./map");')])).toHaveLength(1);
+    expect(mapImportedOnlyDynamically([f("i/map-loader.tsx", 'dynamic(() => import("./map"), { ssr: false })')])).toEqual([]);
+    expect(mapImportedOnlyDynamically([f("i/page.tsx", 'import { ViabilityMapLoader } from "./map-loader";\nimport { x } from "./map-support";\nimport "./map.css";')])).toEqual([]);
+
+    // browser-file bans
+    for (const [bad, name] of [
+      ["const k = process.env.X;", "process.env"],
+      ['const k = "MAPTILER";', "MAPTILER"],
+      ["await fetch(url);", "fetch("],
+      ["new XMLHttpRequest();", "XMLHttpRequest"],
+      ['import { db } from "@/lib/db";', "@/lib/db"],
+      ['import { auth } from "@/auth";', "@/auth"],
+      ['import { cookies } from "next/headers";', "next/headers"],
+      ['import { go } from "./actions";', "an actions import"],
+      ["el.innerHTML = x;", ".innerHTML"],
+      ["el.insertAdjacentHTML('beforeend', x);", "insertAdjacentHTML"],
+      ["marker.bindTooltip(name);", "bindTooltip"],
+      ["L.circleMarker(p);", "circleMarker"],
+      ["L.icon({ iconUrl: x });", "L.icon("],
+      ["const o = { iconUrl: x };", "iconUrl"],
+      ["L.tileLayer(u, { attribution: x });", "an attribution option"],
+    ] as const) {
+      expect(browserFileBans([f("i/map.tsx", bad)]).map((h) => h.rule), bad).toContain(`browser-ban:${name}`);
+    }
+    expect(browserFileBans([f("i/map.tsx", "// never process.env here\nconst o = { attributionControl: false };")])).toEqual([]);
+    expect(browserFileBans([f("i/map.tsx", "const a = MAP_COPY.attribution;")])).toEqual([]);
+
+    // DOM-node builders only
+    expect(nodeBuildersOnly([f("i/map.tsx", "m.bindPopup(`<b>${name}</b>`);")])).toHaveLength(1);
+    expect(nodeBuildersOnly([f("i/map.tsx", "m.bindPopup(name);")])).toHaveLength(1);
+    expect(nodeBuildersOnly([f("i/map.tsx", "m.bindPopup(popupNode(pin), {});")])).toEqual([]);
+    expect(nodeBuildersOnly([f("i/map.tsx", "L.divIcon({ html: `<span>${n}</span>` });")])).toHaveLength(1);
+    expect(nodeBuildersOnly([f("i/map.tsx", "L.divIcon({ html: pinNode(pin) });")])).toEqual([]);
+
+    // coordinate columns
+    expect(onlyMapFilesNameCoordinates([f("src/lib/presbytery-reports/viability.ts", "select({ latitude: t.latitude })")])).toHaveLength(1);
+    expect(onlyMapFilesNameCoordinates([f("src/lib/presbytery-reports/csv.ts", "row.longitude")])).toHaveLength(1);
+    expect(onlyMapFilesNameCoordinates([f("src/lib/presbytery-reports/viability-map.ts", "select({ latitude: t.latitude })")])).toEqual([]);
+    expect(onlyMapFilesNameCoordinates([f("src/lib/presbytery-reports/map-derive.ts", "fact.longitude")])).toEqual([]);
+    expect(onlyMapFilesNameCoordinates([f("src/lib/presbytery-reports/copy.ts", 'const a = "Add a latitude and longitude";\nconst b = `Longitude ${n}`;\n// latitude')])).toEqual([]);
+
+    // MAPTILER
+    expect(onlyConfigNamesMaptiler([f("src/lib/other.ts", "env.NEXT_PUBLIC_MAPTILER_KEY")])).toHaveLength(1);
+    expect(onlyConfigNamesMaptiler([f("src/lib/presbytery-reports/map-config.ts", "env.NEXT_PUBLIC_MAPTILER_KEY")])).toEqual([]);
   });
 });

@@ -4,11 +4,13 @@ import { reportByKey } from "@/lib/presbytery-reports/contract";
 import { DASHBOARD_COPY, PER_CAPITA_COPY, TREND_COPY, VACANT_COPY, formatCount, formatDollars } from "@/lib/presbytery-reports/copy";
 import type { CardResult, PresbyteryDashboard } from "@/lib/presbytery-reports/dashboard";
 import type { PerCapitaSummary, TrendSummary, VacantSummary } from "@/lib/presbytery-reports/dashboard-derive";
+import { DashboardMap } from "./dashboard-map";
 import { DashboardViabilitySection } from "./dashboard-viability";
 import { CardError, CardLocked, DashboardEmpty, DashboardForbidden, DashboardPageError } from "./dashboard-states";
 
 /**
- * The dashboard body (DECISION-342): four summary cards and the viability list.
+ * The dashboard body (DECISION-342): four summary cards, the congregation map (DECISION-343,
+ * absent unless the page passes one) and the viability list.
  * All Server Components. Every card is in exactly one of four states: a figure,
  * "nothing recorded yet" (in words, never a zero), locked, or a load error, and
  * a card never renders another card's state. A link to a report, to Credentials
@@ -232,6 +234,7 @@ export function DashboardView({
   flags,
   retryHref,
   billingYear,
+  mapSlot = null,
 }: {
   dashboard: PresbyteryDashboard;
   org: string;
@@ -240,6 +243,8 @@ export function DashboardView({
   retryHref: string;
   /** The year the per-capita card prints when it is locked or failed (the card has no data to name it). */
   billingYear: number;
+  /** The client map element (`insights/map-loader.tsx`), built by the page only when it should exist (DECISION-343). */
+  mapSlot?: ReactNode;
 }) {
   if (dashboard.kind === "forbidden") return <DashboardForbidden />;
   if (dashboard.kind === "error") return <DashboardPageError retryHref={retryHref} />;
@@ -273,6 +278,16 @@ export function DashboardView({
           </Keyed>
         </Card>
       </div>
+
+      <DashboardMap
+        map={dashboard.map}
+        viabilityOk={cards.viability.kind === "ok"}
+        org={org}
+        slug={slug}
+        oversightOn={oversightOn}
+        retryHref={retryHref}
+        slot={mapSlot}
+      />
 
       <DashboardViabilitySection
         state={cards.viability}

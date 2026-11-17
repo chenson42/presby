@@ -279,6 +279,68 @@ export const DASHBOARD_COPY = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// The congregation map (DECISION-343, docs/work-log/2026-11-17-presbytery-dashboard-map.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * The map's words. IMPORT-FREE (this file stays so), because the two client
+ * files in `src/app/(org)/o/[slug]/admin/insights/` import it. No heading here may
+ * contain a phrase another dashboard heading is matched by ("member
+ * congregations", "viability", "vacant pulpits", "ending active members", "per
+ * capita", "insights & analytics"): the e2e suite finds headings by substring.
+ * The legend labels equal `VIABILITY_LABELS` and `VIABILITY_NOT_ASSESSED` in
+ * `derive.ts` (a test pins that), so the legend and the list cannot drift.
+ */
+export const MAP_COPY = {
+  title: "Congregation map",
+  intro: (org: string) =>
+    `Each pin is a member congregation of ${org} that has a location. Its shape shows its viability rating. The viability list below names every congregation.`,
+  regionLabel: "Map of congregations that have a location. The viability list below gives the same ratings as text.",
+  /** Noun by the total, verb by the count placed: "1 of 12 congregations has a location." */
+  caption: (placed: number, total: number) =>
+    `${placed} of ${total} ${plural(total, "congregation", "congregations")} ${plural(placed, "has", "have")} a location.`,
+  legend: {
+    heading: "Pin shapes",
+    items: [
+      { score: 1, label: "At risk", shape: "diamond" },
+      { score: 2, label: "Fair", shape: "square" },
+      { score: 3, label: "Healthy", shape: "circle" },
+      { score: null, label: "Not yet assessed", shape: "hollow circle" },
+    ],
+  },
+  popup: {
+    rating: (label: string) => `Viability: ${label}`,
+    open: "Open oversight page",
+  },
+  unplaced: {
+    heading: "Not on the map",
+    intro: "These congregations have no usable location.",
+    entry: "Open a congregation to enter its latitude and longitude. Latitude comes first.",
+  },
+  /** The oversight flag is off: the fact, without an instruction to use a page that is not turned on. */
+  oversightOff: (org: string) => `Locations are entered on Congregation Oversight, which isn't turned on for ${org} yet.`,
+  empty: {
+    title: "No congregation has a usable location yet.",
+    entry: "Add a latitude and longitude on a congregation's Congregation Oversight page. Latitude comes first.",
+    link: VIABILITY_COPY.assessLink,
+  },
+  /** The map read failed (with the retry link). Never worded as "no location". */
+  readError: "We couldn't load the map. The list below has every congregation.",
+  /** Tiles, the script chunk or Leaflet failed in the browser (no retry control). */
+  tilesError: "The map could not load. The list below has every congregation. Reload the page to try again.",
+  loading: "Loading the map…",
+  attribution: {
+    maptiler: "© MapTiler",
+    maptilerHref: "https://www.maptiler.com/copyright/",
+    osm: "© OpenStreetMap contributors",
+    osmHref: "https://www.openstreetmap.org/copyright",
+    logoAlt: "MapTiler logo",
+    logoSrc: "https://api.maptiler.com/resources/logo.svg",
+    logoHref: "https://www.maptiler.com/",
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
 // Export routes (plain-text bodies)
 // ---------------------------------------------------------------------------
 
@@ -313,7 +375,7 @@ export function allCopyStrings(): string[] {
       for (const v of Object.values(value)) walk(v);
     }
   };
-  for (const group of [HUB_COPY, FRAME_COPY, VACANT_COPY, TREND_COPY, VIABILITY_COPY, PER_CAPITA_COPY, DASHBOARD_COPY, ROUTE_COPY]) {
+  for (const group of [HUB_COPY, FRAME_COPY, VACANT_COPY, TREND_COPY, VIABILITY_COPY, PER_CAPITA_COPY, DASHBOARD_COPY, MAP_COPY, ROUTE_COPY]) {
     walk(group);
   }
   return out;

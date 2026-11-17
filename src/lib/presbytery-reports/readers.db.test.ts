@@ -36,6 +36,7 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
     vacant: typeof import("./vacant-pulpits");
     trend: typeof import("./membership-trend");
     viability: typeof import("./viability");
+    viabilityMap: typeof import("./viability-map");
     perCapita: typeof import("./per-capita");
     hub: typeof import("./hub");
     csv: typeof import("./csv");
@@ -104,15 +105,16 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
   const roleIds: string[] = [];
 
   beforeAll(async () => {
-    const [vacant, trend, viability, perCapita, hub, csv] = await Promise.all([
+    const [vacant, trend, viability, viabilityMap, perCapita, hub, csv] = await Promise.all([
       import("./vacant-pulpits"),
       import("./membership-trend"),
       import("./viability"),
+      import("./viability-map"),
       import("./per-capita"),
       import("./hub"),
       import("./csv"),
     ]);
-    readers = { vacant, trend, viability, perCapita, hub, csv };
+    readers = { vacant, trend, viability, viabilityMap, perCapita, hub, csv };
     presbytery = await import("@/lib/presbytery");
     ({ withOrgContext } = await import("@/lib/authz"));
     ({ getPlatformDb } = await import("@/lib/db"));
@@ -341,11 +343,11 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
     if (bStat.kind !== "ok") throw new Error("B stat fixture failed");
 
     // Oversight.
-    const over = async (org: string, input: { viabilityScore?: number | null; redevelopmentNotes?: string | null; buildingsNotes?: string | null; insuranceCarrier?: string | null; latitude?: number | null }) => {
+    const over = async (org: string, input: { viabilityScore?: number | null; redevelopmentNotes?: string | null; buildingsNotes?: string | null; insuranceCarrier?: string | null; latitude?: number | null; longitude?: number | null }) => {
       const r = await presbytery.setCongregationOversight(clerk, A, userId, org, input);
       if (r.kind !== "ok") throw new Error(`oversight fixture failed: ${JSON.stringify(r)}`);
     };
-    await over(c.installed, { viabilityScore: 3, redevelopmentNotes: "Steady", buildingsNotes: "SECRET-BUILDINGS", insuranceCarrier: "SECRET-CARRIER", latitude: 12.5 });
+    await over(c.installed, { viabilityScore: 3, redevelopmentNotes: "Steady", buildingsNotes: "SECRET-BUILDINGS", insuranceCarrier: "SECRET-CARRIER", latitude: 12.5, longitude: -45.25 });
     await over(c.ended, { viabilityScore: 1, redevelopmentNotes: 'Roof, "urgent"\nand boiler' });
     await over(c.none, { viabilityScore: null, redevelopmentNotes: "Watching closely" });
     await over(c.supply, { viabilityScore: 2 });
@@ -617,10 +619,53 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
       expect(labels.slice(3).every((l) => l === "Not yet assessed")).toBe(true);
       expect(r.data.rows[0].notes).toBe('Roof, "urgent"\nand boiler');
       const text = JSON.stringify(r.data);
-      for (const secret of ["SECRET-BUILDINGS", "SECRET-CARRIER", "12.5", "B-ONLY-NOTE"]) expect(text).not.toContain(secret);
+      for (const secret of ["SECRET-BUILDINGS", "SECRET-CARRIER", "12.5", "-45.25", "B-ONLY-NOTE"]) expect(text).not.toContain(secret);
       expect(r.data.rosterCount).toBe(8);
       expect(r.data.rows.map((x) => x.organizationId)).not.toContain(bCong);
       expect(r.data.rows.find((x) => x.organizationId === c.installed)!.lastUpdated).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
+
+  describe("viability map (DECISION-343)", () => {
+    it("places only the congregation with a usable pair, roster first, and carries the four fields and nothing else", async () => {
+      const r = await readers.viabilityMap.getViabilityMap(viewerFor(holder.viability));
+      if (r.kind !== "ok") throw new Error("expected ok");
+      expect(r.data.total).toBe(8);
+      expect(r.data.pins).toHaveLength(1);
+      expect(r.data.pins[0]).toMatchObject({ id: c.installed, lat: 12.5, lng: -45.25, score: 3, label: "Healthy" });
+      expect(r.data.unplaced).toHaveLength(7);
+      expect(r.data.unplaced.map((u) => u.id)).not.toContain(c.installed);
+      const ids = [...r.data.pins.map((p) => p.id), ...r.data.unplaced.map((u) => u.id)];
+      expect(ids).not.toContain(bCong);
+      expect(ids).not.toContain(nwcA);
+      const text = JSON.stringify(r.data);
+      for (const secret of ["SECRET-BUILDINGS", "SECRET-CARRIER", "B-ONLY-NOTE", "Steady", "urgent"]) expect(text).not.toContain(secret);
+    });
+
+    it("is refused for every other key and for a person with no membership, live in its own transaction", async () => {
+      for (const who of ["vacant", "trend", "perCapita", "none"] as const) {
+        expect(await readers.viabilityMap.getViabilityMap(viewerFor(holder[who]))).toEqual({ kind: "forbidden" });
+      }
+      await expect(readers.viabilityMap.getViabilityMap(viewerFor(bHolder))).rejects.toThrow();
+    });
+
+    it("treats a stored 'NaN' (the unconstrained numeric column accepts it) as no location, not a pin", async () => {
+      const platform = getPlatformDb();
+      await platform
+        .update(schema.oversight)
+        .set({ latitude: "NaN", longitude: "NaN" })
+        .where(and(eq(schema.oversight.organizationId, A), eq(schema.oversight.aboutOrgId, c.installed)));
+      try {
+        const r = await readers.viabilityMap.getViabilityMap(viewerFor(holder.viability));
+        if (r.kind !== "ok") throw new Error("expected ok");
+        expect(r.data.pins).toEqual([]);
+        expect(r.data.unplaced.map((u) => u.id)).toContain(c.installed);
+      } finally {
+        await platform
+          .update(schema.oversight)
+          .set({ latitude: "12.5", longitude: "-45.25" })
+          .where(and(eq(schema.oversight.organizationId, A), eq(schema.oversight.aboutOrgId, c.installed)));
+      }
     });
   });
 

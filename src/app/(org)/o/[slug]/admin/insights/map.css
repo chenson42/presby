@@ -1,1 +1,157 @@
-.presby-map { position: relative; }
+/*
+ * The congregation map's styles (DECISION-343). Route-local plain CSS, imported only by
+ * map.tsx (the developer.css precedent); nothing goes into globals.css. Every selector
+ * is rooted at `.presby-map`, so its two-class specificity beats leaflet.css whatever
+ * order the two load in. Colours are the platform theme tokens the Viability badge
+ * uses, so a popup and a pin follow the current colour scheme and any brand cascade;
+ * shape, not colour, carries the rating.
+ */
+
+.presby-map .presby-map__canvas {
+  /* Leaflet panes use z-index up to ~1000; this keeps them inside the map. */
+  isolation: isolate;
+  background: var(--secondary);
+  font: inherit;
+}
+
+/* Zoom buttons: a 44px target (leaflet's default is 30px). */
+.presby-map .leaflet-bar a,
+.presby-map .leaflet-bar a:hover {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+  color: var(--foreground);
+  background-color: var(--background);
+  border-bottom-color: var(--border);
+}
+.presby-map .leaflet-bar a:hover {
+  background-color: var(--secondary);
+}
+.presby-map .leaflet-touch .leaflet-bar a {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+}
+.presby-map .leaflet-touch .leaflet-bar {
+  border: 2px solid var(--border);
+}
+
+/* Pins: a 44px focusable target around a 22px shape. */
+.presby-map .presby-pin {
+  background: transparent;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.presby-map .presby-pin:focus-visible {
+  outline: none;
+}
+.presby-map .presby-pin:focus-visible .presby-pin-shape {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+}
+.presby-map .presby-pin-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.presby-map .presby-pin-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.presby-map .presby-pin-shape {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border: 2px solid var(--background);
+  box-shadow:
+    0 0 0 1px var(--foreground),
+    0 1px 4px rgb(0 0 0 / 0.45);
+}
+/* At risk: diamond */
+.presby-map .presby-pin-shape--s1 {
+  background: var(--destructive);
+  transform: rotate(45deg) scale(0.85);
+}
+/* Fair: square */
+.presby-map .presby-pin-shape--s2 {
+  background: var(--secondary);
+  border-color: var(--secondary-foreground);
+}
+/* Healthy: circle */
+.presby-map .presby-pin-shape--s3 {
+  background: var(--primary);
+  border-radius: 50%;
+}
+/* Not yet assessed: hollow circle */
+.presby-map .presby-pin-shape--s0 {
+  background: var(--background);
+  border: 2px dashed var(--foreground);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.45);
+}
+
+/* Popups: theme tokens, so they read in the current colour scheme. */
+.presby-map .leaflet-popup-content-wrapper,
+.presby-map .leaflet-popup-tip {
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+.presby-map .leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+.presby-map .leaflet-popup-content p {
+  margin: 0;
+}
+.presby-map .presby-popup-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.presby-map .presby-popup-rating {
+  color: var(--muted-foreground);
+}
+.presby-map .presby-popup-link,
+.presby-map .presby-popup-link:visited {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.presby-map a.leaflet-popup-close-button {
+  top: 2px;
+  right: 2px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 36px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+.presby-map a.leaflet-popup-close-button:hover {
+  color: var(--foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presby-map .leaflet-zoom-anim .leaflet-zoom-animated,
+  .presby-map .leaflet-fade-anim .leaflet-popup {
+    transition: none;
+  }
+}

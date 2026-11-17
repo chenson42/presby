@@ -61,6 +61,7 @@ function view(
     kind: "ok",
     roster: { kind: "ok", count: 12 },
     cards: cards(options.cards),
+    map: { kind: "off" },
   };
   return render(
     <DashboardView
@@ -94,14 +95,14 @@ describe("DashboardView — states", () => {
   });
 
   it("roster count 0 renders one empty state and no cards", () => {
-    view({ dashboard: { kind: "ok", roster: { kind: "ok", count: 0 }, cards: cards() } });
+    view({ dashboard: { kind: "ok", roster: { kind: "ok", count: 0 }, cards: cards(), map: { kind: "off" } } });
     expect(screen.getByText("No member congregations yet")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Contact the PresbyPortal team" }).getAttribute("href")).toBe("/help/contact");
     expect(screen.queryByTestId("dashboard-cards")).toBeNull();
   });
 
   it("a failed roster read renders the members card as an error with a retry link and never the empty state", () => {
-    view({ dashboard: { kind: "ok", roster: { kind: "error" }, cards: cards() } });
+    view({ dashboard: { kind: "ok", roster: { kind: "error" }, cards: cards(), map: { kind: "off" } } });
     expect(screen.queryByText("No member congregations yet")).toBeNull();
     const members = card("dashboard-card-members");
     expect(members.getByText(/couldn't count the member congregations/)).toBeTruthy();

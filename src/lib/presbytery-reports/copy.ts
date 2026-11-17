@@ -248,6 +248,8 @@ export const DASHBOARD_COPY = {
   vacant: {
     title: "Vacant pulpits",
     link: "Open vacant pulpits",
+    /** The credentials flag is off: the fact without the instruction to use a page that is not turned on. */
+    notRecordedNoLink: "So vacancies can't be worked out.",
   },
   perCapita: {
     title: (year: number) => `Per capita, ${year}`,
@@ -261,6 +263,9 @@ export const DASHBOARD_COPY = {
         ? "Includes 1 congregation that is no longer a member."
         : `Includes ${n} congregations that are no longer members.`,
     link: (year: number) => `Open per capita for ${year}`,
+    /** The reports flag is off: the fact without the instruction to use a section that is not turned on. */
+    noRatePlain: (year: number) => `No rate is set for ${year}.`,
+    rateSetPlain: (year: number) => `A rate is set for ${year}. The bills have not been generated.`,
     noRate: (year: number) =>
       `No rate is set for ${year}. Set one and generate the bills in the Per-Capita section of Per-Capita, SASR & Imports.`,
     rateSet: (year: number) =>

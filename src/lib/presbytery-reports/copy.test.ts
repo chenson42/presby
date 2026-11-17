@@ -79,6 +79,24 @@ describe("dashboard copy (DECISION-342)", () => {
     expect(strings).toContain(DASHBOARD_COPY.perCapita.title(2025));
   });
 
+  it("the plain dashboard strings name no section and give no instruction", () => {
+    const plain = [
+      DASHBOARD_COPY.perCapita.noRatePlain(2026),
+      DASHBOARD_COPY.perCapita.rateSetPlain(2026),
+      DASHBOARD_COPY.vacant.notRecordedNoLink,
+    ];
+    expect(plain).toEqual([
+      "No rate is set for 2026.",
+      "A rate is set for 2026. The bills have not been generated.",
+      "So vacancies can't be worked out.",
+    ]);
+    for (const s of plain) expect(s).not.toMatch(/Credentials|Per-Capita section|Congregation Statistics|Oversight|Open |Set one|Record|Generate the/);
+    // allCopyStrings samples year templates with 2025
+    expect(strings).toContain(DASHBOARD_COPY.perCapita.noRatePlain(2025));
+    expect(strings).toContain(DASHBOARD_COPY.perCapita.rateSetPlain(2025));
+    expect(strings).toContain(DASHBOARD_COPY.vacant.notRecordedNoLink);
+  });
+
   it("the templates read as drafted", () => {
     expect(DASHBOARD_COPY.trend.yearLine(2025, 9, 12)).toBe("2025: 9 of 12 reporting");
     expect(DASHBOARD_COPY.perCapita.countLine(1, 1)).toBe("1 of 1 congregation billed");

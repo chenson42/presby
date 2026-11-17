@@ -100,10 +100,13 @@ describe("DashboardView — states", () => {
     expect(screen.queryByTestId("dashboard-cards")).toBeNull();
   });
 
-  it("a failed roster read renders the members card as an error and never the empty state", () => {
+  it("a failed roster read renders the members card as an error with a retry link and never the empty state", () => {
     view({ dashboard: { kind: "ok", roster: { kind: "error" }, cards: cards() } });
     expect(screen.queryByText("No member congregations yet")).toBeNull();
-    expect(card("dashboard-card-members").getByText(/couldn't count the member congregations/)).toBeTruthy();
+    const members = card("dashboard-card-members");
+    expect(members.getByText(/couldn't count the member congregations/)).toBeTruthy();
+    expect(members.getByRole("alert")).toBeTruthy();
+    expect(members.getByRole("link", { name: "Try again" }).getAttribute("href")).toBe(RETRY);
     expect(screen.getByTestId("dashboard-card-trend")).toBeTruthy();
   });
 
@@ -156,6 +159,7 @@ describe("DashboardView — the honest zero", () => {
     view({ cards: { membership_trend: { kind: "ok", data: { kind: "none", from: 2021, to: 2025 } } } });
     const trend = card("dashboard-card-trend");
     expect(trend.getByText("No statistics recorded for 2021 to 2025")).toBeTruthy();
+    expect(trend.getByText("Enter statistics for a congregation and year in the Congregation Statistics section.")).toBeTruthy();
     expect(trend.getByRole("link", { name: "Record statistics" }).getAttribute("href")).toBe("/o/northern/admin/reports");
     expect(trend.queryByText("0")).toBeNull();
   });
@@ -179,6 +183,7 @@ describe("DashboardView — the honest zero", () => {
     expect(vacant.getByText("No pastoral appointments are recorded yet")).toBeTruthy();
     expect(vacant.queryByText(/vacant of/)).toBeNull();
     expect(vacant.queryByText(/None vacant|No vacant pulpits/)).toBeNull();
+    expect(vacant.getByText("So vacancies can't be worked out. Record appointments on Credentials.")).toBeTruthy();
     expect(vacant.getByRole("link", { name: "Open Credentials" }).getAttribute("href")).toBe("/o/northern/admin/credentials");
   });
 
@@ -271,6 +276,53 @@ describe("DashboardView — links", () => {
     expect(screen.getByText("No pastoral appointments are recorded yet")).toBeTruthy();
   });
 
+  it("with the credentials flag off the vacant card says only that vacancies cannot be worked out", () => {
+    view({
+      flags: { credentialsOn: false },
+      cards: { vacant_pulpits: { kind: "ok", data: { kind: "not_recorded" } } },
+    });
+    const vacant = card("dashboard-card-vacant");
+    expect(vacant.getByText("So vacancies can't be worked out.")).toBeTruthy();
+    expect(vacant.queryByText(/Record appointments on Credentials/)).toBeNull();
+    expect(vacant.queryByRole("link")).toBeNull();
+  });
+
+  it("with the reports flag off the trend and per-capita instruction sentences are absent and the neutral sentence shows", () => {
+    for (const rateSet of [false, true]) {
+      view({
+        flags: { reportsOn: false },
+        cards: {
+          membership_trend: { kind: "ok", data: { kind: "none", from: 2021, to: 2025 } },
+          per_capita: { kind: "ok", data: { kind: "none", billingYear: 2026, rateSet } },
+        },
+      });
+      const trend = card("dashboard-card-trend");
+      expect(trend.getByText("No statistics recorded for 2021 to 2025")).toBeTruthy();
+      expect(trend.queryByText(/Congregation Statistics section/)).toBeNull();
+      expect(trend.queryByRole("link")).toBeNull();
+
+      const perCapita = card("dashboard-card-per-capita");
+      expect(perCapita.queryByText(/Per-Capita section/)).toBeNull();
+      expect(perCapita.queryByRole("link")).toBeNull();
+      expect(
+        perCapita.getByText(rateSet ? "A rate is set for 2026. The bills have not been generated." : "No rate is set for 2026."),
+      ).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it("with the reports flag on the per-capita instruction and its link render for both none states", () => {
+    for (const rateSet of [false, true]) {
+      view({ cards: { per_capita: { kind: "ok", data: { kind: "none", billingYear: 2026, rateSet } } } });
+      const perCapita = card("dashboard-card-per-capita");
+      expect(perCapita.getByText(/enerate the bills in the Per-Capita section of Per-Capita, SASR & Imports\./)).toBeTruthy();
+      expect(perCapita.getByRole("link", { name: "Open Per-Capita, SASR & Imports" }).getAttribute("href")).toBe(
+        "/o/northern/admin/reports?billingYear=2026",
+      );
+      cleanup();
+    }
+  });
+
   it("the viability section links the report only with the reports flag on", () => {
     view();
     expect(card("dashboard-viability").getByRole("link", { name: "Open the viability report" }).getAttribute("href")).toBe(
@@ -296,6 +348,14 @@ describe("DashboardView — the viability list", () => {
     expect(screen.queryByRole("link", { name: "Open Congregation Oversight" })).toBeNull();
   });
 
+  it("with the oversight flag off the viability list has no assess sentence even when a row is not assessed", () => {
+    view({ flags: { oversightOn: false } });
+    expect(VIABILITY.anyNotAssessed).toBe(true);
+    expect(screen.queryByText(/Assess a congregation/)).toBeNull();
+    // the badge still says it
+    expect(within(screen.getByTestId("dashboard-viability-cards")).getByText("Not yet assessed")).toBeTruthy();
+  });
+
   it("the badge text is the label, in the order given (at risk first), so colour is never the only signal", () => {
     view();
     const items = within(screen.getByTestId("dashboard-viability-cards")).getAllByRole("listitem");
@@ -306,8 +366,9 @@ describe("DashboardView — the viability list", () => {
     ]);
   });
 
-  it("points an unassessed list to Congregation Oversight when it is on", () => {
+  it("points an unassessed list to Congregation Oversight, sentence and link, when it is on", () => {
     view();
+    expect(screen.getByText("Assess a congregation on Congregation Oversight.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open Congregation Oversight" }).getAttribute("href")).toBe("/o/northern/admin/oversight");
   });
 

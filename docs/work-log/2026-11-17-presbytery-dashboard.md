@@ -18,7 +18,7 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-11-16 |
 | 3 — Technical design | tech-lead | Complete | Design complete; three items open for the user (Carry-forward, last row) | 2026-11-16 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green; ready for QA | 2026-11-16 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Run 1 complete | FAIL (F-A; F-B to tech-lead) | 2026-11-16 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -613,6 +613,51 @@ Every string below goes in `copy.ts` as `DASHBOARD_COPY` (so `allCopyStrings()` 
 
 **Orchestrator rulings on Phase 3's three confirm items (2026-11-16):** accepted as designed. The roster empty state links to the contact form. The per-capita "none" state names only whether a rate is set. The trend card uses the newest year with any statistics row.
 
+## Phase 3 amendment 1 (QA run 1 loop-back)
+
+*2026-11-16. Phase 5 run 1 returned FAIL on F-A and F-B and one advisory. This amendment supersedes the Phase 3 Copy rows it names; everything else in Phase 3 stands. Implementer: full-stack-developer, same worktree and port. No schema, key, flag, route or dependency is added.*
+
+### 1. Ruling on F-B: each instruction sentence follows its link's flag
+
+**Ruling.** Adopted as the coordinator leans: an instruction that names a target page is shown only when that target's flag is on, by the same boolean that shows its link. Where the sentence also carries a fact the viewer needs, the fact stays as a short neutral sentence with no instruction. Rejected: accepting a residual (the page would tell a key holder to use a section that renders only "isn't turned on", and the surrounding code already has the flag in hand) and rewording alone (a reworded instruction still points at a dead page). `org_portal.insights` is ON in production, so this is reachable. The same class of defect was found in one more place QA did not list, the viability list's "Assess a congregation on Congregation Oversight." (`dashboard-viability.tsx:76`, its link already gated on `oversightOn`); it is fixed here by the same rule.
+
+| Where | Flag | Flag on (unchanged) | Flag off (new) |
+|---|---|---|---|
+| Trend card, `none` (`dashboard-cards.tsx:88`) | `reportsOn` | `TREND_COPY.nothing.title`, then `TREND_COPY.nothing.body` (Enter statistics for a congregation and year in the Congregation Statistics section.), then the "Record statistics" link | `TREND_COPY.nothing.title` only (No statistics recorded for {from} to {to}). The body is not rendered. No new string. |
+| Vacant card, `not_recorded` (`:134`) | `credentialsOn` | `VACANT_COPY.zeroAppointments.body` (So vacancies can't be worked out. Record appointments on Credentials.), then the "Open Credentials" link | New `DASHBOARD_COPY.vacant.notRecordedNoLink`: **So vacancies can't be worked out.** |
+| Per capita card, `none`, no rate (`:171`) | `reportsOn` | `DASHBOARD_COPY.perCapita.noRate(year)` (No rate is set for {year}. Set one and generate the bills in the Per-Capita section of Per-Capita, SASR & Imports.) | New `DASHBOARD_COPY.perCapita.noRatePlain(year)`: **No rate is set for {year}.** |
+| Per capita card, `none`, rate set (`:171`) | `reportsOn` | `DASHBOARD_COPY.perCapita.rateSet(year)` (A rate is set for {year}. Generate the bills in the Per-Capita section of Per-Capita, SASR & Imports.) | New `DASHBOARD_COPY.perCapita.rateSetPlain(year)`: **A rate is set for {year}. The bills have not been generated.** |
+| Viability list, any row not assessed (`dashboard-viability.tsx:76`) | `oversightOn` | `VIABILITY_COPY.assessNote` (Assess a congregation on Congregation Oversight.) and its link | Neither is rendered; the "Not yet assessed" badges still show. No new string. |
+
+The four new strings join `DASHBOARD_COPY`, so `allCopyStrings()` covers them. The `report` pages' own strings (`VACANT_COPY.zeroAppointments`, `TREND_COPY.nothing`, `PER_CAPITA_COPY.empty`) are not changed; they sit on pages that are reachable only with the reports flag on.
+
+**Four checks on the new strings.** (1) *Residuals:* none denies one; the neutral sentences are statements. (2) *Source of truth:* "No rate is set" is a missing `per_capita_rates` row for the year (`rateBasisYear === null`); "A rate is set ... The bills have not been generated" is a rate row and no billed row (`PerCapitaSummary.none`, which `summarizePerCapita` returns when no row is billed; `derivePerCapita` adds `not_billed` rows only when at least one record exists, so the two never coexist); "So vacancies can't be worked out" is `appointmentsRecorded === false`, the report's own claim. (3) *Audience:* the neutral sentences give no instruction, so there is nothing for any role to be unable to do; the full instructions remain visible only to a holder of that card's key and only where the target page renders. (4) *Neighbours:* grepped `Credentials`, `Per-Capita section`, `Congregation Statistics`, `Congregation Oversight` and `Record appointments` in `src/components/presbytery-reports/` and `src/lib/presbytery-reports/copy.ts`: the only dashboard-reachable instruction sentences are the five rows above. The 0.57.0 vacant-pulpits report view still shows "Open Credentials" with no flag check (`vacant-pulpits-view.tsx:39`); that is pre-existing, outside this pipeline, and recorded as a TODO line below.
+
+**Pins** (all in `dashboard-views.test.tsx` unless named):
+- "with the reports flag off the trend and per-capita instruction sentences are absent and the neutral sentence shows" (asserts `queryByText(/Congregation Statistics section/)` and `queryByText(/Per-Capita section/)` are null, the `noRatePlain` / `rateSetPlain` text is present, and no link renders).
+- "with the credentials flag off the vacant card says only that vacancies cannot be worked out" (`queryByText(/Record appointments on Credentials/)` null).
+- "with the oversight flag off the viability list has no assess sentence" (`queryByText(/Assess a congregation/)` null even when a row is not assessed).
+- "with each flag on the full instruction and its link render" (the three existing flag-on cases, tightened to assert the sentence as well as the link).
+- `copy.test.ts` › "the plain dashboard strings name no section and give no instruction" (`noRatePlain`, `rateSetPlain`, `notRecordedNoLink` match none of `/Credentials|Per-Capita section|Congregation Statistics|Oversight|Open |Set one|Record|Generate the/`).
+
+**TODO line** (for `docs/TODO.md` at integration, Papercuts): `- [ ] **Presbytery vacant-pulpits report: "Open Credentials" shows with the credentials flag off.** vacant-pulpits-view.tsx:39 links to /admin/credentials, which renders only "isn't turned on" while org_portal.credentials is off. Gate the link and the "Record appointments on Credentials." sentence on the flag, as the dashboard now does. — docs/work-log/2026-11-17-presbytery-dashboard.md Phase 3 amendment 1`
+
+### 2. F-A: the replacement sentence for `src/content/help/presbytery-reports.md:30`
+
+Replace exactly "Each card says which year it shows." with:
+
+> The "Ending active members" and "Per capita" cards name the year they show. "Member congregations", "Vacant pulpits" and "Viability" show how things stand today.
+
+Every other sentence in that paragraph stays. Source of truth: the trend card prints `{year}: N of M reporting` (or the window in its none state), the per-capita card's heading is "Per capita, {year}", and the other three print no year and read current state (roster today, appointments in force today, the recorded rating). Audience: any presbytery staff reader; no instruction. Pin: `help-page.test.ts` › "names the year on the trend and per-capita cards only" asserts the section contains that exact sentence and does not contain "Each card says which year it shows". Phase 5 re-walks the page at 360px.
+
+### 3. The advisory: fixed in this loop
+
+Yes. When the roster read fails, the "Member congregations" card keeps its message (`DASHBOARD_COPY.members.error`, We couldn't count the member congregations. Try again in a moment.) and gains the same "Try again" link the other card errors have, to the page's own path: `MembersCard` takes `retryHref` and renders `CardError` with `message={DASHBOARD_COPY.members.error}`, which also gives it the `role="alert"` the other errors carry. No new string. Pin: `dashboard-views.test.tsx` › "a failed roster read renders the members card as an error with a retry link and never the empty state" (the existing roster-error case, extended to assert `getByRole("link", { name: "Try again" })` has `href` equal to the retry path).
+
+### Re-run scope for QA
+
+Copy truthfulness (the six strings above and the help sentence), `help-page.test.ts`, `dashboard-views.test.tsx`, `copy.test.ts`, `npm run check:help`, and the 360px walk of `/help/presbytery-reports`. Run the dashboard once with `org_portal.reports`, `org_portal.credentials` and `org_portal.oversight` off as the clerk, to read the neutral states on screen. The rest of run 1 stands.
+
 ---
 
 # Phase 4 — Implementation
@@ -677,58 +722,172 @@ Strings added or changed: `src/lib/presbytery-reports/copy.ts` (`DASHBOARD_COPY`
 
 ---
 
+## Phase 4 fix pass 1 (Phase 3 amendment 1)
+
+*full-stack-developer, 2026-11-16. Same worktree and port; no schema, key, flag, route or dependency.*
+
+- **F-A:** `src/content/help/presbytery-reports.md` now has the amendment's exact sentence in place of "Each card says which year it shows." Pin: `help-page.test.ts` › "names the year on the trend and per-capita cards only" (exact sentence present, old sentence absent).
+- **F-B:** each instruction sentence follows its link's flag, in `dashboard-cards.tsx` and `dashboard-viability.tsx`. Trend `none` shows the body only with `reportsOn`; vacant `not_recorded` shows the Credentials sentence with `credentialsOn` and the new `DASHBOARD_COPY.vacant.notRecordedNoLink` otherwise; per-capita `none` uses `noRate`/`rateSet` with `reportsOn` and the new `noRatePlain`/`rateSetPlain` otherwise; the viability "Assess a congregation" sentence and its link both need `oversightOn` (the fifth instance). Pins in `dashboard-views.test.tsx` (flag-off cases for reports, credentials and oversight; the flag-on cases now assert the sentence as well as the link) and `copy.test.ts` › "the plain dashboard strings name no section and give no instruction".
+- **Advisory:** `MembersCard` takes `retryHref` and renders `CardError` with `DASHBOARD_COPY.members.error`, so a failed roster read has the same "Try again" link and `role="alert"` as the other card errors. Pin: the roster-error case in `dashboard-views.test.tsx` now asserts the link and its href.
+- **Gates:** `npm run typecheck`, `npm run lint`, `npm run check` (all ten) pass. Vitest `--no-file-parallelism` with `.env.local` over `src/lib/presbytery-reports`, `src/lib/org-portal`, `src/lib/help`, `src/components` and `src/app/(org)/o/[slug]/admin`: 345 files, 4,828 tests, all passed.
+- **Browser, 360px, own server on port 3101:** as `presbytery-clerk` with `org_portal.reports`, `org_portal.credentials` and `org_portal.oversight` off, no horizontal overflow; the trend card shows only "No statistics recorded for 2021 to 2025", the vacant card "No pastoral appointments are recorded yet" and "So vacancies can't be worked out.", the per-capita card "No rate is set for 2026.", the viability list shows plain names and "Not yet assessed" badges with no assess sentence, and no card has a link. Flags restored by `captureFlags` (verified by SELECT to the values they had before), server stopped by PID, 3101 free.
+
+---
+
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+*Run 1, recorded verbatim from QA's return, 2026-11-16.*
+
+**Date:** 2026-11-16
 **Verified by:** qa
+**Commit verified:** `3805b84c` on `pipeline/presbytery-dashboard` (`/Users/cshenso/git/presby-platform/presby-dashboard`)
+
+**What I ran, and what I didn't:**
+- **Run in full:** typecheck, lint, `npm run check` and the unit suite.
+- **Database-backed suites:** I ran these for the changed and nearby folders only: `src/lib/presbytery-reports`, `src/lib/org-portal`, `src/lib/help`, `src/components/presbytery-reports`, `admin/insights` and `admin/reports`. I did not run the whole database-backed set, because the diff touches no migration, `authz.ts`, `src/lib/db/` or shared fixture.
+- **e2e:** the new spec, plus three specs near the change: `presbytery-reports`, `presbytery-report-exports` and `portal-footer-sitemap`. I did not run the full chromium suite. The diff touches no proxy, auth, layout, `e2e/support`, Playwright config or shared component, so the PR's CI run covers the rest.
+- **Not run:** `test-rls.sql` (no schema change) and the production-build lane (no form added).
+- **Before the e2e run** I reset the global flags to the CI baseline with `scripts/ci/e2e-reset-flags.sql` (38 flags set to their seed values). I first confirmed that the database host differs from the main checkout's, without printing either value. I ran the reset again after my walk.
+- **Dev server:** my own, port 3101, PID 70272, stopped by that PID. The first start exited after printing a Next.js upgrade notice addressed to agents; I ignored it and restarted.
+- **Disk:** 550 GiB free.
 
 ## Type Check
-
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: PASS
+`npm run lint`: PASS (0 warnings)
+`npm run check`: PASS, all ten tripwires. `check:help` reports 33 registry entries, 29 published.
 
 ## Unit Tests
+- **Full suite:** 893 of 1,049 test files passed and 156 were skipped; 14,454 tests passed and 4,158 were skipped; 40.1s. The skipped files are the database-backed ones, which skip without `.env.local`.
+- **Database-backed run** (`dotenv -e .env.local -- vitest run --no-file-parallelism` over the folders above): 59 of 59 files, 1,052 of 1,052 tests, **0 skipped**, 80.2s. This includes `readers.db.test.ts`, which checks every reader the dashboard uses against the real columns. `dashboard.ts` adds no SQL of its own.
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+Failures: none.
 
 ## End-to-End Tests
+- `e2e/presbytery-dashboard.spec.ts` with `E2E_BASE_URL=http://localhost:3101`: 7 of 7 passed, 19.8s, 0 skipped. Its 360px case passed.
+- The three nearby specs, desktop only: 25 of 25 passed, 1.3m, 0 skipped.
+- The spec's staged appointment is gone afterwards (0 rows left).
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+Failures: none.
 
 ## Regression Tests Added
+This is a feature, so fail-before-fix does not apply. Each item the design carried has a test:
 
-- [test name — file:line — guards against: brief description]
+**Phase 1 gaps**
+- **G2, no keyless peek:** `src/lib/presbytery-reports/dashboard.test.ts:69`
+- **G3, no misleading zeros:**
+  - `dashboard-derive.test.ts:33, :49, :59, :80, :90, :116, :123`
+  - `dashboard-views.test.tsx:147, :176, :195, :216`
+- **G4, explicit years:** `dashboard.test.ts:186, :193`; `dashboard-views.test.tsx:241`; `params.test.ts` (`defaultBillingYear`)
+- **G6, the tile's per-type "Coming soon":**
+  - `tiles.test.ts:481, :488, :497`
+  - `visible-tiles.test.ts:593, :602, :612`
+  - e2e `:155`
+- **G8, 360px:** `dashboard-views.test.tsx:314, :322, :333`; e2e `:173`
+- **G9, cards fail independently:** `dashboard.test.ts:114, :125, :143`
+- **G10, second-factor redirect for every org type:** `gate.test.ts:161`; `page.test.tsx:124`
+- **G11, no audit or export:** `boundaries.test.ts:280`, plus the export-name pin at `:299`
+
+**Phase 1 flows and adversarial pass**
+- **One forbidden state:** `dashboard-views.test.tsx:80`; `copy.test.ts:60`; `page.test.tsx:286`; e2e `:108`
+- **Card error with retry:** `dashboard-views.test.tsx:110`
+- **Empty roster and failed roster read:** `dashboard-views.test.tsx:96, :103`; `page.test.tsx:301, :308`
+- **Viability list:** `dashboard-derive.test.ts:156`; `dashboard-views.test.tsx:283, :299`
+- **Links only where the target's flag is on:**
+  - `dashboard-views.test.tsx:254, :265, :274, :291`
+  - `page.test.tsx:262, :271`
+  - e2e `:120`
+- **Gate split:** `gate.test.ts:132, :139, :145, :153`
+- **Stored XSS through congregation names:** `boundaries.test.ts:289, :344`; `dashboard-views.test.tsx:340`
+- **No redevelopment notes on the page:** `dashboard-derive.test.ts:171`; `dashboard-views.test.tsx:358`
+
+**Phase 2 notes**
+- **Note 1, `boundaries.test.ts`:**
+  - insights directory scans `:274–286`
+  - insights page must call its own gate `:335`, with a failing sample each way
+  - no `loading.tsx` under insights `:293`
+- **Note 2:** the `gate.test.ts` cases above.
+- **Note 3, a rejected reader degrades only its card:** `dashboard.test.ts:114`
+- **Note 4, roster empty vs error:** as above.
+- **`OrgAccessError` is rethrown, never a card error:** `dashboard.test.ts:170`; `page.test.tsx:168`
+- **A reader's own "forbidden" shows as locked:** `dashboard.test.ts:106`
+
+**Not tested (all accepted at design):** a long congregation name wrapping at 360px (only the CSS classes are asserted), five parallel transactions under load, and the key-revocation race on the roster count.
 
 ## Coverage on Critical Modules
-
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.11% statements (target 90%+)
+- `src/lib/flags.ts`: 100%
+- New code:
+  - `dashboard-derive.ts`: 100%
+  - `visible-tiles.ts`: 100%
+  - `dashboard.ts`: 100% statements, 91.3% branches (lines 94–95)
 
 ## Feature-Gate Audit
+No `route.ts` and no server action were added or changed. I read the page's gate and how each card reads its data:
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+| Route or action | `auth()` present? | Permission check present? | Correct key or flag? |
+|---|---|---|---|
+| GET `/o/[slug]/admin/insights` (page.tsx:50 → `gateInsightsPage`) | yes: `cachedAuth` and `assertOrgSession`, then the four-way miss and `assertOrgAccess` (gate.ts:83–106) | Tenant axis, not `hasFeature`. Each card's key is checked live inside its own reader's transaction; the hub read only sequences the work (dashboard.ts:76–103). | Flag `org_portal.insights` only (gate.ts:79, :109). `org_portal.reports` is never used as a gate; the page reads it at :68 only to choose link or plain text. |
 
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+- **Per-card keys:** a key not held shows as locked and its reader is never called (dashboard.ts:89–98). On screen, `org-multi` saw one live card and three locked; `presbytery-nogrant` saw the single forbidden state.
+- **A congregation:** sees `ComingSoon` with flag on (page.test.tsx:214, and my walk as `org-single`). With flag off it sees `PlaceholderFlagOff` (page.test.tsx:204; flag is checked before type).
+- **`liveFor`:** read only at `visible-tiles.ts:95`. No consumer reads `comingSoon` from the raw registry.
+- **No `getPlatformDb` and no `loading.tsx`** under `admin/insights`, `admin` or `[slug]`.
+- **Schema/RLS audit:** not applicable (no schema change).
+- **Auth-touching gate:** not triggered; the diff touches none of `src/auth.ts`, `(auth)`, `api/auth` or `src/lib/auth`.
 
 ## Copy Truthfulness
+- [x] **Every added or changed string is in the design's Copy table.** That covers every `DASHBOARD_COPY` string. The other strings are reused by name. The seed description is operator-facing and was named in the design.
+- [x] **Each claim traced to its query:**
+  - "No rate is set for {year}" means no `per_capita_rates` row for that billing year. `basis_year` is NOT NULL in the live catalog, so a null `rateBasisYear` means exactly that.
+  - The members note's exclusions are exactly `readRoster`'s filters.
+  - "Not yet assessed" means a null score.
+- [ ] **Each instruction is doable by the role that sees it.** Fails in flag-off states. **Finding F-B below.**
+- [x] **Older strings checked.**
+  - `first-day-as-administrator.md:13` is addressed to a congregation, so it is still true.
+  - `why-cant-i-see-this.md:60` ("A few tiles…") is still true.
+  - The `ComingSoon` description is still true for the type that sees it.
+  - **`turning-features-on-and-off` never mentions Insights,** here or on main, so the premise "still says Insights is platform-managed" does not hold. It also does not list Insights as a per-congregation toggle, which is the property that matters. The new section at `presbytery-reports.md:34` now says the PresbyPortal team switches it on.
+- [ ] **Help diff:**
+  - All four `labels` strings are in the UI. "Try again" shows only in error states; I confirmed it through the render test at `dashboard-views.test.tsx:110`, not on screen.
+  - I walked `/help/presbytery-reports` at 360px: overflow 0.
+  - No images were added.
+  - The trend and per-capita figure states were checked through render tests and the implementer's staged walk, not by my own on-screen walk.
+  - **Finding F-A below.**
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
+**F-A — copy truthfulness: FAIL (Phase 4 to fix)**
+- **Where:** `src/content/help/presbytery-reports.md:30`, read by any presbytery staff member.
+- **Claim:** "Each card says which year it shows."
+- **Screen:** "Vacant pulpits" prints no year or date in its "some" or "not recorded" states (`dashboard-cards.tsx:130–160`). "Member congregations" and the Viability list print no year either; they show today's state.
+- **Fix:** reword the sentence, for example: the trend and per-capita cards name their year; the others show today. Add an exact-text test in `help-page.test.ts` that fails on the old sentence.
+- This sentence came from the Phase 3 draft. The implementer was told the screen wins over the draft.
 
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
-- [ ] Help diff covered: every labels string is on screen, every claim walked at 360px, every committed image opened
+**F-B — copy truthfulness, a design gap (tech-lead to rule)**
+The page hides the card links when a target flag is off, but keeps the instruction sentences beside them:
+- `dashboard-cards.tsx:88` (`TREND_COPY.nothing.body`, "…in the Congregation Statistics section")
+- `:171` (per-capita `noRate`/`rateSet`, "…in the Per-Capita section of Per-Capita, SASR & Imports")
+- `:134` ("Record appointments on Credentials")
+
+With `org_portal.reports` off, `/admin/reports` renders only "isn't turned on" (`reports/page.tsx:111–113`). `org_portal.credentials` is seeded off and is off in the CI baseline.
+
+Who sees it: a holder of `statistics.manage`, `per_capita.manage` or `credentials.manage`, on a presbytery where insights is on and the target flag is off. That is reachable, since insights is ON in production (`docs/TODO.md:290`). Phase 3's audience check covered keys, not flags.
+
+The tech-lead's options: hide the sentence along with its link, reword it, or accept it as a residual that matches the shipped report. The 0.57.0 vacant report already shows "Open Credentials" without any flag check, at `vacant-pulpits-view.tsx:39`; that is pre-existing and not this pipeline's.
+
+**Advisory, not blocking:** when the roster count fails, the "Member congregations" card says "Try again in a moment" but offers no "Try again" link (`dashboard-cards.tsx:75`). The other cards and the viability section do offer one.
+
+**360px walk** (my own, against the server on :3101):
+- `presbytery-clerk`, `org-multi` and `presbytery-nogrant` at 360px; the clerk at 1280px; the presbytery home at 360px; a congregation's stub as `org-single`; and the help page anonymously.
+- Horizontal overflow was 0 in all seven views. Cards stack in one column at 360px. The viability list is cards at 360px and a table at 1280px.
+- All dashboard links are at least 44px tall. The 20px "Back to portal" link is existing layout, not this diff.
+- The presbytery home shows the Insights tile without "Coming soon"; the congregation stub shows "Coming soon".
+- I turned on the insights, oversight and credentials flags for the walk and restored the baseline afterwards.
 
 ## Verdict
+**FAIL** — copy truthfulness, F-A (`src/content/help/presbytery-reports.md:30`). F-B needs a Phase 3 ruling before the fix. Every other required check is green.
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**Handoff:** **tech-lead (Phase 3)** first, for a short ruling on F-B: hide the sentence with its link, reword it, or accept the residual. Then **full-stack-developer (Phase 4)** fixes F-A, with an exact-text test that fails on the old sentence, plus whatever F-B's ruling requires. QA then re-runs only the copy check, `help-page.test.ts`, `dashboard-views.test.tsx` and the 360px help walk; the rest of this run stands.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
 
 ---
 

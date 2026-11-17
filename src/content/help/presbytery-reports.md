@@ -27,7 +27,7 @@ Each card comes from one report and needs that report's permission. A card you c
 | "Per capita" | What was billed, paid and still owed for this year | Manage per-capita billing |
 | "Viability" | Every member congregation with the rating the presbytery recorded, at risk first | Manage congregation oversight |
 
-Each card says which year it shows. When nothing is recorded, the card says so in words and does not show a zero. "Ending active members" says how many congregations reported, and its total leaves out any that did not report a figure. "Vacant pulpits" has the same limit as the report: a congregation whose appointment was never recorded counts as vacant. "Per capita" shows the current year's totals, which include a congregation that has left but still has a bill.
+The "Ending active members" and "Per capita" cards name the year they show. "Member congregations", "Vacant pulpits" and "Viability" show how things stand today. When nothing is recorded, the card says so in words and does not show a zero. "Ending active members" says how many congregations reported, and its total leaves out any that did not report a figure. "Vacant pulpits" has the same limit as the report: a congregation whose appointment was never recorded counts as vacant. "Per capita" shows the current year's totals, which include a congregation that has left but still has a bill.
 
 A card opens its report only where the reports are turned on, and a congregation's name opens its page on "Congregation Oversight" only where that is turned on. Otherwise the figure or name shows without a link. A card that says "We couldn't load this card" has a "Try again" link; the other cards are not affected.
 

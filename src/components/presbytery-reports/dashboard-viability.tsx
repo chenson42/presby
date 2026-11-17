@@ -71,14 +71,12 @@ function ViabilityListBody({
         </Table>
       </div>
 
-      {list.anyNotAssessed ? (
+      {list.anyNotAssessed && oversightOn ? (
         <div className="text-sm">
           <p className="text-muted-foreground">{VIABILITY_COPY.assessNote}</p>
-          {oversightOn ? (
-            <Link href={`/o/${slug}/admin/oversight`} className={BLOCK_LINK}>
-              {VIABILITY_COPY.assessLink}
-            </Link>
-          ) : null}
+          <Link href={`/o/${slug}/admin/oversight`} className={BLOCK_LINK}>
+            {VIABILITY_COPY.assessLink}
+          </Link>
         </div>
       ) : null}
 

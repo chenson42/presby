@@ -60,9 +60,11 @@ function lockedPhrase(key: Parameters<typeof reportByKey>[0]): string {
 export function MembersCard({
   roster,
   org,
+  retryHref,
 }: {
   roster: { kind: "ok"; count: number } | { kind: "error" };
   org: string;
+  retryHref: string;
 }) {
   return (
     <Card title={DASHBOARD_COPY.members.title} testId="dashboard-card-members">
@@ -72,7 +74,7 @@ export function MembersCard({
           <Line>{DASHBOARD_COPY.members.note(org)}</Line>
         </>
       ) : (
-        <Line>{DASHBOARD_COPY.members.error}</Line>
+        <CardError retryHref={retryHref} message={DASHBOARD_COPY.members.error} />
       )}
     </Card>
   );
@@ -85,7 +87,7 @@ function TrendBody({ summary, slug, reportsOn }: { summary: TrendSummary; slug: 
       <>
         <Headline>{TREND_COPY.dash}</Headline>
         <Line>{TREND_COPY.nothing.title(summary.from, summary.to)}</Line>
-        <Line>{TREND_COPY.nothing.body}</Line>
+        {reportsOn ? <Line>{TREND_COPY.nothing.body}</Line> : null}
         <Action href={`/o/${slug}/admin/reports`} show={reportsOn}>
           {TREND_COPY.nothing.action}
         </Action>
@@ -131,7 +133,7 @@ function VacantBody({
       <>
         <Headline>{TREND_COPY.dash}</Headline>
         <Line>{VACANT_COPY.zeroAppointments.title}</Line>
-        <Line>{VACANT_COPY.zeroAppointments.body}</Line>
+        <Line>{credentialsOn ? VACANT_COPY.zeroAppointments.body : DASHBOARD_COPY.vacant.notRecordedNoLink}</Line>
         <Action href={`/o/${slug}/admin/credentials`} show={credentialsOn}>
           {VACANT_COPY.zeroAppointments.action}
         </Action>
@@ -168,7 +170,15 @@ function PerCapitaBody({ summary, slug, reportsOn }: { summary: PerCapitaSummary
       <>
         <Headline>{TREND_COPY.dash}</Headline>
         <Line>{PER_CAPITA_COPY.empty.title(year)}</Line>
-        <Line>{summary.rateSet ? DASHBOARD_COPY.perCapita.rateSet(year) : DASHBOARD_COPY.perCapita.noRate(year)}</Line>
+        <Line>
+          {summary.rateSet
+            ? reportsOn
+              ? DASHBOARD_COPY.perCapita.rateSet(year)
+              : DASHBOARD_COPY.perCapita.rateSetPlain(year)
+            : reportsOn
+              ? DASHBOARD_COPY.perCapita.noRate(year)
+              : DASHBOARD_COPY.perCapita.noRatePlain(year)}
+        </Line>
         <Action href={`/o/${slug}/admin/reports?billingYear=${year}`} show={reportsOn}>
           {PER_CAPITA_COPY.empty.action}
         </Action>
@@ -240,7 +250,7 @@ export function DashboardView({
   return (
     <div className="space-y-8">
       <div data-testid="dashboard-cards" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <MembersCard roster={roster} org={org} />
+        <MembersCard roster={roster} org={org} retryHref={retryHref} />
 
         <Card title={DASHBOARD_COPY.trend.title} testId="dashboard-card-trend">
           <Keyed result={cards.membership_trend} phrase={lockedPhrase("membership_trend")} retryHref={retryHref}>

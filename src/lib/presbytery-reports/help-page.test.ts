@@ -31,4 +31,12 @@ describe("presbytery-reports help page", () => {
       expect(section, r.permissionPhrase).toContain(phrase);
     }
   });
+
+  it("names the year on the trend and per-capita cards only", () => {
+    const section = page.slice(page.indexOf("## Insights and analytics"), page.indexOf("## Vacant pulpits"));
+    expect(section).toContain(
+      'The "Ending active members" and "Per capita" cards name the year they show. "Member congregations", "Vacant pulpits" and "Viability" show how things stand today.',
+    );
+    expect(section).not.toContain("Each card says which year it shows");
+  });
 });

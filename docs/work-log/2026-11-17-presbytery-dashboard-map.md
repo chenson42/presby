@@ -20,7 +20,7 @@
 | 2 — Architectural review | architect | Complete | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete | Design complete; implementer: full-stack-developer | 2026-11-17 |
 | 4 — Implementation | full-stack-developer | Complete | Gates green; ready for QA | 2026-11-17 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1) | FAIL | 2026-11-17 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -940,56 +940,190 @@ architect, qa) is still recorded verbatim.*
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+*Run 1, recorded verbatim from QA's return, 2026-11-17.*
+
+**Date:** 2026-11-17
 **Verified by:** qa
-
-## Type Check
-
-`npm run typecheck`: PASS / FAIL
-
-## Unit Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
-
-## End-to-End Tests
-
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
-
-## Regression Tests Added
-
-- [test name — file:line — guards against: brief description]
-
-## Coverage on Critical Modules
-
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
-
-## Feature-Gate Audit
-
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
-
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
-
-## Copy Truthfulness
-
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
-
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
-- [ ] Help diff covered: every labels string is on screen, every claim walked at 360px, every committed image opened
+**Commit verified:** `f76c2a07` (branch `pipeline/presbytery-map`, worktree clean)
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL.** The 360px browser check fails: on a phone the map's zoom buttons cover the left edge of a pin's popup. Every other required check is green: typecheck, lint, all ten tripwires, the unit and DB suites, all three e2e specs, the feature-gate audit and the regression coverage. The fix is small and needs no design change, so this goes back to **full-stack-developer** (Phase 4), not tech-lead.
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+**What fails and where:**
+- **The defect.** At 360px, Leaflet's zoom control (z-index 800) is drawn over the pin popup (z-index 700).
+  - **Where it is set:** the map is built in `src/app/(org)/o/[slug]/admin/insights/map.tsx` (the `L.map(...)` options and the `bindPopup(popupNode(pin), { maxWidth: 260, autoPanPadding: [16, 16] })` call). `map.css` widens the zoom buttons to 44px, which makes the overlap larger.
+  - **What a person sees:** with the one-pin layout (the common first state) and the fixture name "Wrenfield Presbyterian Church", the first 9px of the name, the rating and the "Open oversight page" link are covered. The popup reads "/renfield Presbyterian Church", "iability: Healthy" and "pen oversight page".
+  - **The tap target:** `document.elementFromPoint` at the left edge of each of the three elements returns the zoom control. A tap on the start of the link hits zoom-out.
+  - **Other widths:** at 390px and at 1280px nothing overlaps. A longer name widens the popup (up to `maxWidth: 260`) and covers more.
+  - **Screenshot:** `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/walk-360-popup.png`
+  - **Fix direction (implementer's choice):** for example `autoPanPaddingTopLeft` wide enough to clear the zoom control, or moving the zoom control away from the top-left.
+- **Missing test (FAIL with a named gap):** nothing exercises a popup at 360px. Case 6 of `e2e/presbytery-map/map.spec.ts` does not open one, and case 2 runs at desktop width. Needed: a 360px touch case that opens the single-pin popup and asserts that `elementFromPoint` at the left edge of the name, rating and link returns the popup, not the zoom control. It must be watched failing on the current code first.
+
+**The close-button margin fix itself works** (the implementer had not re-checked it). At 360px the name runs to x=258 and the close button starts at x=263, so nothing overlaps it, and tapping it closes the popup.
+
+## Scope run
+
+- **In full:** `npm run typecheck`, `npm run lint`, `npm run check` (all ten tripwires), and the whole unit suite.
+- **DB-backed, run with `.env.local` and `--no-file-parallelism`:**
+  - `src/lib/presbytery-reports/` (includes `readers.db.test.ts`)
+  - `src/lib/presbytery.test.ts` and `src/lib/presbytery.coordinates.test.ts`
+  - `src/lib/coordinates.test.ts`
+  - the oversight `[aboutOrgId]` tests and the insights tests
+  - `src/components/presbytery-reports/`
+  - `src/lib/help/`
+  - `scripts/check-deps-drift.test.mjs` and `scripts/e2e-reset-flags.test.mjs`
+- **e2e:**
+  - the `PW_MAP` lane (its own server, the fake key)
+  - `e2e/presbytery-dashboard.spec.ts` and `e2e/presbytery-oversight.spec.ts`, once with the real key and once with `NEXT_PUBLIC_MAPTILER_KEY=` blank
+  - all servers on my own port 3101 (one comparison server on 3199, explained below), nothing on :3000, every server stopped by PID
+- **Not re-run:** the full DB-backed set (no migration, `authz.ts`, `src/lib/db/` or shared fixture changed) and the full chromium e2e suite (no proxy, auth, layout, `e2e/support/` or shared component changed). Those rest on the implementer's run (18921 passed, 1 skipped) and on CI.
+
+**Where the e2e ran.** The worktree's own dev server goes into a reload loop on every page, `/help` included (Environment finding below). So the e2e specs, the browser walk and the help walk ran from a `git archive` export of HEAD `f76c2a07`. That export is byte-identical to the worktree: `git status` was clean.
+
+## Type Check
+
+`npm run typecheck`: **PASS**. `npm run lint`: **PASS** (no warnings). `npm run check`: **PASS**, all ten tripwires, including `check:secrets`, `check:deps-drift` and `check:help` (33 registry entries, 29 published).
+
+## Unit Tests
+
+| Run | Files | Tests | Failed | Skipped | Duration |
+|---|---|---|---|---|---|
+| Whole suite, no DB env | 904 of 1060 passed | 14760 passed | 0 | 156 files / 4162 tests (the DB-backed ones; no env loaded) | 40.9s |
+| Affected scope, with DB env, serial | 58 of 58 passed | 1197 passed | 0 | 0 | 87.4s |
+
+Coverage (statements):
+- `src/lib/coordinates.ts`, `map-derive.ts`, `map-config.ts`, `insights/map-support.ts`: 100% each, branches also 100%.
+
+## End-to-End Tests
+
+**Flag state.** Before the e2e run I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`). The branch was not at baseline: `org_portal.admin_hub` and `org_portal.features` were on. Afterwards I reset to baseline again, then put those two back on, so the branch is exactly as I found it:
+- Global flags match the pre-run snapshot exactly.
+- `congregation_oversight` rows match the pre-run snapshot exactly, including the alpha row's `updated_at`, which the specs' saves had moved.
+
+**`PW_MAP` lane (`npm run test:e2e:map`):**
+
+| Attempt | Where | Result |
+|---|---|---|
+| 1 | worktree | server exited on the Next 16.4.3 upgrade notice, so ERR_CONNECTION_REFUSED |
+| 2 | worktree | case 1 failed: the map region never appeared (reload loop) |
+| 3 | worktree, re-run per the timeout rule | same failure |
+| 4 | clean export, cache already warmed | same failure |
+| 5 | clean export | same failure |
+| 6 | clean export | **7/7 passed** (30.5s) |
+
+I treat the lane as passing on the code. Every failure was the dev-server reload loop described below, and on the passing run case 1's own assertions hold.
+
+**Shared lane, my own 3101 server with the Rule 16 environment:**
+
+| Run | Total | Passed | Failed | Duration |
+|---|---|---|---|---|
+| Real key from `.env.local` | 16 | 16 | 0 | 42.1s |
+| Key blank | 16 | 16 | 0 | 42.3s |
+
+I confirmed the keyless server was really keyless: with a pin staged and insights on, the page had no map section.
+
+**Environment finding: pre-existing, not a regression of this pipeline.**
+- The dev server sends `{"type":"reloadPage","data":"HMR hash mismatch"}` after a Turbopack `restart` message, so every page reloads in a loop.
+- **On main it happens the same way.** A scratch export of main at `1f5fed82` loops on the first page after a warm restart (198 navigations in 8 seconds). The branch's export behaves identically.
+- **Cold starts never loop**, on main or the branch, map page first or not.
+- **The worktree's `.next/dev` cache (329 MB) loops on every page on every start.** Recommendation: delete `.next/dev` in the worktree before the next local e2e run. I did not delete it, since I am read-only.
+- **CI should not be affected:** `e2e.yml` caches npm only, not `.next`, and cold starts do not loop.
+- The dev server also reports Next 16.4.3 as `stale-patch` (16.4.6 expected). That belongs to the dependency review.
+
+**360px and desktop browser walk** (real key on localhost, `presbytery-clerk`, alpha staged with one pin, the insights and oversight flags on, all restored afterwards):
+- Real tiles load: 4 responses with status 200, none failed.
+- No horizontal overflow on Insights or on the oversight form.
+- Caption reads "1 of 3 congregations has a location."
+- The "Not on the map" list names the other two congregations, as links.
+- The popup shows the name, "Viability: Healthy" and "Open oversight page".
+- The close button is clear of the text and closes the popup.
+- **The zoom control covers the popup's left 9px at 360px (the FAIL above).**
+- The oversight form at 360px: the "Map location" group, both hints, `type="text"` and no `inputmode`, all as designed.
+- `org-multi` (statistics only) gets no map section, no request to MapTiler, and neither "maptiler" nor the staged latitude appears in the page source.
+- No console errors at 360px, 390px or desktop.
+
+## Regression Tests Added
+
+Every Phase 1 gap the orchestrator named has a test that fails without the fix. I confirmed the two highest-risk ones by mutation, in scratch copies only.
+
+| Gap | Test | How confirmed |
+|---|---|---|
+| NaN, Infinity, a string, half-set and 0/0 refused by the write before any transaction | `src/lib/presbytery.coordinates.test.ts:35-50` | **Watched failing:** run against main's `presbytery.ts`, 8 refusal cases fail and the 2 range cases pass (main already had range checks). Stored round trip: `src/lib/presbytery.test.ts:838` (DB) |
+| The reader never trusts the column | `src/lib/presbytery-reports/readers.db.test.ts:652` (a stored `'NaN'` is unplaced); key refused live in its own transaction at `readers.db.test.ts:645` | DB test passes |
+| A congregation name is text, never HTML (pin and popup) | `src/app/(org)/o/[slug]/admin/insights/map-support.test.ts:28` and `:75` | **Watched failing:** swapping `textContent` for `innerHTML` fails both cases; the file was restored |
+| Client pin payload is exactly seven keys | `src/lib/presbytery-reports/map-derive.test.ts:96` | Exact key-set equality |
+| Tripwire rules 4 to 6 | `scripts/check-deps-drift.test.mjs:86`, `:139`, `:173` | Failing samples for each rule; `:253` plants a violation in the real tree and expects rule 6 to fire |
+| CSP `img-src` names exactly one map host, no wildcard, `connect-src` unchanged | `src/lib/presbytery-reports/map-config.test.ts:74` and `:98` | Reads the real `next.config.ts` `headers()` |
+| Form refuses half-set and 0/0 inline, paste splits, no coordinate reaches the audit row | `e2e/presbytery-oversight.spec.ts:215`, `:250`, `:279` | All passed |
+| Popup readable at 360px | none | **Gap, see Verdict** |
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.11% (statements; branches 100%)
+- `src/lib/flags.ts`: 100%
+
+## Feature-Gate Audit
+
+The diff adds no API route and no server action, so no new `auth()` + `hasFeature()` pair applies. The map's authority is on the tenant axis: `congregation_oversight.manage` checked by `holdsPermissions` inside the reader's own transaction. I read each body directly.
+
+| Route or action | Signed-in check present? | Permission check present? | Correct key? |
+|---|---|---|---|
+| Page `/o/<slug>/admin/insights` (modified) | yes, through `gateInsightsPage` (unchanged): signed in, second-factor recheck, four-way miss, `assertOrgAccess`, `org_portal.insights`, presbytery type | yes: `readViabilityMap` checks the key first in its own `withOrgContext` transaction (`viability-map.ts`) and returns `forbidden` before the roster or coordinates are read. `dashboard.ts` only calls the reader when `held.viability && options.map`, so nothing is read without both the key and a tile key | `congregation_oversight.manage` (`contract.ts:67`) |
+| Page `/o/<slug>/admin/oversight/<aboutOrgId>` (modified) | yes, gates unchanged; `mapOn` is computed after every gate and only words a toast | yes, unchanged (`getCongregationOversightDetail`) | `congregation_oversight.manage` |
+| Action `setCongregationOversightAction` (`actions.ts` unchanged; its write changed) | yes, `auth()` and `resolveOrgContext` in the action body | yes, unchanged inside `setCongregationOversight`; the new coordinate validation returns `invalid_input` before `withOrgContext` | `congregation_oversight.manage` |
+
+**Flags:**
+- `org_portal.insights` gates the page.
+- `org_portal.oversight` only decides whether a link (`href`, the empty-state link, the unplaced names) is shown; it gates nothing (DECISION-003).
+- The environment key is configuration, read only on the server in `map-config.ts`.
+
+**Schema and RLS:** no schema change, no migration, no grant, no definer, so the live-catalog audit is not triggered. The new reader runs as `presby_app` on `db`, and `readers.db.test.ts` asserts another organization's congregations never appear.
+
+## Copy Truthfulness
+
+**copy truthfulness: PASS for strings**, with two non-blocking notes. The 360px visual defect is reported above, not here.
+
+- [x] **Every added or changed string is in the design's Copy table.** That covers `MAP_COPY`, `COORDINATE_MESSAGES`, the edit-form legend, the "Optional…" line, both hints, the paste status line and the toast description. One help sentence was added beyond the draft, "The key under the map lists the shapes in words.", and it is true.
+- [x] **The queries behind each claim were opened.**
+  - "N of M … have a location" and "Not on the map" come from one `readViabilityMap` read. M is the roster: parent presbytery, type congregation, lifecycle active. A pin needs a `mappablePair` the reader accepts, which is why the copy says "usable location".
+  - "The viability list below names every congregation" holds: `deriveViability` and `toViabilityList` keep every roster row and truncate nothing.
+  - The read does not look at lifecycle at write time. The toast is worded as a rule for that reason ("Congregations with a location are shown…").
+- [x] **Each instruction traced to the role that sees it.** Every map string, link and instruction is rendered only for a `congregation_oversight.manage` holder, and that same key opens and saves the oversight form. The "Open…" instructions and links show only with `org_portal.oversight` on; with it off, the text says the page is not turned on.
+- [x] **Older strings grepped.**
+  - "Map coordinates (for a future viability map)" and the "nothing yet renders a map" comment are gone.
+  - Still stale, as Phase 3 already scheduled for the ship-time housekeeping: `docs/product/functionality-map.md:29` ("The viability map is a later increment.") and `docs/architecture.md:33` (the viability map under "Not yet built").
+  - `presbytery-reports.md:91` ("holds no … coordinates") stays true, because the CSV reads no coordinates.
+- [x] **Help diff covered**, walked at 360px against the running build.
+  - `presbytery-reports`: the anchors `#the-viability-map` and `#putting-a-congregation-on-the-map` resolve, with no overflow.
+  - Every `labels` string was seen on screen: "Congregation map", "Not on the map", "Open oversight page", "Map location", "Latitude", "Longitude", "Save" (the form button), "At risk", "Fair", "Healthy". "The map could not load" was confirmed by map e2e case 4.
+  - Each step ("Congregation Oversight", then the congregation, then "Map location", then "Save") can be done by the `.manage` holder named in the section.
+  - `privacy-policy`: the MapTiler bullet and "Last updated November 17, 2026." render. Its claim (IP address, browser details, site address, the map area; no names, scores or records) matches the tile URL, which carries z/x/y and the key only (pinned in `map-config.test.ts`), and the unchanged `strict-origin-when-cross-origin`.
+  - The diff adds no image under `src/content/help/images/`.
+- **Note 1 (non-blocking):** `presbytery-reports.md` says "If the map cannot load, the section says 'The map could not load'". That is true for tile, chunk or script failure. A failed map *read* shows `MAP_COPY.readError` instead ("We couldn't load the map. The list below has every congregation."). Same meaning, different words.
+- **Note 2 (non-blocking):** "Putting a congregation on the map" does not say that Congregation Oversight must be turned on, though the map section above it does ("Where 'Congregation Oversight' is turned on…").
+
+---
+
+**Per-Phase Status row:**
+
+| 5 — Verification | qa | Complete | FAIL | 2026-11-17 |
+
+**Handoff: full-stack-developer (Phase 4).**
+1. Fix the 360px popup and zoom-control overlap (`insights/map.tsx` popup options, or where the zoom control sits).
+2. Add the named 360px test and watch it fail before the fix.
+3. Optionally, align the help sentence with the read-error string (Note 1).
+4. Before re-running e2e locally, delete the worktree's `.next/dev`.
+
+QA re-runs the map lane, the 360px walk and the new test. Nothing else needs repeating unless the fix touches more than `map.tsx` and `map.css`.
+
+Files for this verdict:
+- `/Users/cshenso/git/presby-platform/presby-map/src/app/(org)/o/[slug]/admin/insights/map.tsx`
+- `/Users/cshenso/git/presby-platform/presby-map/src/app/(org)/o/[slug]/admin/insights/map.css`
+- `/Users/cshenso/git/presby-platform/presby-map/e2e/presbytery-map/map.spec.ts`
+- `/Users/cshenso/git/presby-platform/presby-map/src/content/help/presbytery-reports.md`
+- `/Users/cshenso/git/presby-platform/presby-map/docs/work-log/2026-11-17-presbytery-dashboard-map.md`
 
 ---
 

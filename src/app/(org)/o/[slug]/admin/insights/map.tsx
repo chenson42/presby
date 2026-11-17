@@ -23,6 +23,12 @@ import { MAP_COPY } from "@/lib/presbytery-reports/copy";
 import type { ClientPin } from "@/lib/presbytery-reports/map-derive";
 import { MAX_ZOOM, MIN_ZOOM, TILE_WAIT_MS, frameFor, pinNode, popupNode, shapeClass, shouldCollapse } from "./map-support";
 
+const POPUP_GAP = 16;
+const POPUP_CHROME = 55; // the popup content's left (14) and right (40) margins, plus its border
+const MAX_POPUP_WIDTH = 260;
+const MIN_POPUP_WIDTH = 120;
+const FALLBACK_CLEAR_LEFT = 66; // the 44px zoom buttons, their 2px border and Leaflet's 10px margin, and a gap
+
 export default function ViabilityMap({ tileUrl, pins }: { tileUrl: string; pins: ClientPin[] }) {
   const canvas = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
@@ -74,12 +80,24 @@ export default function ViabilityMap({ tileUrl, pins }: { tileUrl: string; pins:
     tiles.addTo(map);
     timer = setTimeout(() => check(true), TILE_WAIT_MS);
 
+    // The zoom control (z-index 800) draws over the popup pane (700) and the two cannot be re-ordered (the map
+    // pane is its own stacking context), so a popup must not overlap it at all. Measure where the control ends
+    // and keep every popup to the right of that line: autopan pads the left edge by it, and the popup is
+    // narrowed so it still fits beside the control on a phone. The 55px is the popup content's own margins.
+    const zoom = map.zoomControl.getContainer();
+    const clearLeft = zoom ? Math.ceil(zoom.getBoundingClientRect().right - el.getBoundingClientRect().left) + POPUP_GAP : FALLBACK_CLEAR_LEFT;
+    const popupWidth = Math.max(MIN_POPUP_WIDTH, Math.min(MAX_POPUP_WIDTH, el.clientWidth - clearLeft - POPUP_GAP - POPUP_CHROME));
+
     for (const pin of pins) {
       L.marker([pin.lat, pin.lng], {
         icon: L.divIcon({ html: pinNode(pin), iconSize: [44, 44], iconAnchor: [22, 22], className: "presby-pin" }),
         keyboard: true,
       })
-        .bindPopup(popupNode(pin), { maxWidth: 260, autoPanPadding: [16, 16] })
+        .bindPopup(popupNode(pin), {
+          maxWidth: popupWidth,
+          autoPanPaddingTopLeft: [clearLeft, POPUP_GAP],
+          autoPanPaddingBottomRight: [POPUP_GAP, POPUP_GAP],
+        })
         .addTo(map);
     }
 

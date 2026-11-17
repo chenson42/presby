@@ -71,6 +71,57 @@ async function overflow(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }
 
+
+/**
+ * Opens the one pin's popup and asks, by `elementFromPoint` at the LEFT EDGE of each part, what is topmost there.
+ * Anything but the popup's own element (Leaflet's zoom control is z-index 800, the popup pane 700) means a tap on
+ * the start of that part lands on the wrong control. Also asks that the popup sits whole inside the viewport and
+ * that its close button is the topmost thing at its own centre. Polled: the pan that brings the popup into view
+ * animates.
+ */
+async function openSinglePinPopup(page: Page, touch: boolean) {
+  const pin = page.getByRole("button", { name: `${ALPHA.name}, ${ALPHA.label}` });
+  await expect(pin).toHaveCount(1);
+  if (touch) await pin.tap();
+  else await pin.click();
+  await expect(page.locator(".leaflet-popup")).toBeVisible();
+  // Let the autopan finish: the popup's box stops moving.
+  await expect
+    .poll(async () => {
+      const a = await page.locator(".leaflet-popup").boundingBox();
+      await page.waitForTimeout(350);
+      const b = await page.locator(".leaflet-popup").boundingBox();
+      return !!a && !!b && a.x === b.x && a.y === b.y;
+    })
+    .toBe(true);
+}
+
+async function popupClearance(page: Page) {
+  return page.evaluate(() => {
+    const topmostIsPopup = (el: Element, label: string) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + 2, r.top + r.height / 2);
+      return { label, ok: !!hit && !!hit.closest(".leaflet-popup"), hit: hit ? `${hit.tagName}.${hit.className}` : "none" };
+    };
+    const popup = document.querySelector(".leaflet-popup") as HTMLElement;
+    const parts = [
+      topmostIsPopup(popup.querySelector(".presby-popup-name")!, "name"),
+      topmostIsPopup(popup.querySelector(".presby-popup-rating")!, "rating"),
+      topmostIsPopup(popup.querySelector(".presby-popup-link")!, "link"),
+    ];
+    const close = popup.querySelector(".leaflet-popup-close-button") as HTMLElement;
+    const cr = close.getBoundingClientRect();
+    const closeHit = document.elementFromPoint(cr.left + cr.width / 2, cr.top + cr.height / 2);
+    const pr = popup.querySelector(".leaflet-popup-content-wrapper")!.getBoundingClientRect();
+    return {
+      parts,
+      closeIsTopmost: !!closeHit && close.contains(closeHit),
+      onScreen: pr.left >= 0 && pr.right <= window.innerWidth,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+}
+
 test.describe.configure({ timeout: 90_000 });
 
 test.describe.serial("Presbytery dashboard map (2026-11-17-presbytery-dashboard-map)", () => {
@@ -384,4 +435,47 @@ test.describe.serial("Presbytery dashboard map (2026-11-17-presbytery-dashboard-
     await expect(page.getByTestId("dashboard-map-unplaced")).toHaveCount(rosterCount === 3 ? 0 : 1);
     await context.close();
   });
+  for (const vp of [
+    { label: "360px", width: 360, height: 740, touch: true },
+    { label: "390px", width: 390, height: 844, touch: true },
+    { label: "desktop", width: 1280, height: 800, touch: false },
+  ]) {
+    test(`8. [${vp.label}] the single-pin popup is not covered by a map control: name, rating, link and close all take their own taps — regression for the zoom control over the popup`, async ({ browser }) => {
+      // One pin only (the common first state): beta (and gamma, which the loop case above placed) are unplaced.
+      await stage(BETA.id, BETA.score, null, null);
+      await clearGamma();
+      try {
+        const context = await browser.newContext({
+          storageState: storageStatePath("presbytery-clerk"),
+          viewport: { width: vp.width, height: vp.height },
+          deviceScaleFactor: 2,
+          hasTouch: vp.touch,
+          isMobile: vp.touch,
+        });
+        const page = await context.newPage();
+        await mockProvider(page);
+        await page.goto(PAGE);
+        await expect(page.locator(".leaflet-container")).toBeVisible();
+        await expect(page.locator(".leaflet-marker-icon")).toHaveCount(1);
+
+        await openSinglePinPopup(page, vp.touch);
+        const r = await popupClearance(page);
+        for (const part of r.parts) expect(part.ok, `${part.label} left edge is topmost-in-popup, got ${part.hit}`).toBe(true);
+        expect(r.closeIsTopmost, "the close button takes its own tap").toBe(true);
+        expect(r.onScreen, "the popup is inside the viewport").toBe(true);
+        expect(r.overflow).toBeLessThanOrEqual(0);
+
+        // A tap on the link's first pixels follows the link (it does not zoom out).
+        const link = page.locator(".leaflet-popup .presby-popup-link");
+        const box = (await link.boundingBox())!;
+        await Promise.all([
+          page.waitForURL(`**/admin/oversight/${ALPHA.id}`),
+          vp.touch ? page.touchscreen.tap(box.x + 2, box.y + box.height / 2) : page.mouse.click(box.x + 2, box.y + box.height / 2),
+        ]);
+        await context.close();
+      } finally {
+        await stageAlphaBeta();
+      }
+    });
+  }
 });

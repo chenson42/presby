@@ -22,6 +22,8 @@ const h = vi.hoisted(() => {
   };
   const chain = () => {
     const api = {
+      // The zoom control ends 80px from the left of the (jsdom, zero-origin) map element.
+      zoomControl: { getContainer: () => ({ getBoundingClientRect: () => ({ right: 80 }) }) },
       setView: (...a: unknown[]) => (state.views.push(a), api),
       fitBounds: (...a: unknown[]) => (state.fits.push(a), api),
       remove: () => {
@@ -118,6 +120,19 @@ describe("ViabilityMap", () => {
       zoomAnimation: true,
       markerZoomAnimation: true,
     });
+  });
+
+  it("keeps every popup to the right of the zoom control and narrow enough to fit beside it — regression for the zoom control over the popup", () => {
+    // A phone-width map: 326px wide in the page.
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(326);
+    render(<ViabilityMap tileUrl={TILE_URL} pins={[PIN]} />);
+    const options = h.state.markers[0].popupOptions as { maxWidth: number; autoPanPaddingTopLeft: [number, number] };
+    // 80px of control plus a 16px gap: the popup never starts under the control.
+    expect(options.autoPanPaddingTopLeft[0]).toBe(96);
+    // clientWidth - left clearance (96) - right gap (16) - the content's own 55px of margin and border.
+    expect(options.maxWidth).toBe(326 - 96 - 16 - 55);
+    expect(96 + options.maxWidth + 55 + 16).toBeLessThanOrEqual(326);
+    vi.restoreAllMocks();
   });
 
   it("turns one-finger dragging off on a coarse pointer (the page scrolls; two fingers move the map)", () => {

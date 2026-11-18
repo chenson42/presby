@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
-| 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | In progress (B1 complete; next B2) | — | 2026-11-18 |
+| 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | In progress (B1 and B2 complete; next B3) | — | 2026-11-18 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -149,6 +149,98 @@ Deviations and things the next phases need:
 Handoff to **api-developer (B2)**: import `@/lib/db/domain/oversight` directly (re-exported from `index.ts` only at integration). Local apply: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0089_presby_oversight_records.sql`, then `psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/oversight/seed-dev-oversight.sql`. test-rls sections added: 89 (new file), 44a (one assertion, in the patch), the presbytery member count (in the patch), 46j, 72b. Orchestrator rulings on this report (2026-11-18): (1) teardown order accepted as B4's contract; (2), (3), (4) accepted; (5) provenance reserved, done (note 6); (6) noted.
 
 Strings added or changed: none user-facing (the permission description is the design's verbatim Roles-screen label, `drizzle/0089_presby_oversight_records.sql` section 1).
+
+## B2 — Server (api-developer, 2026-11-18)
+
+### Files Created
+
+- `src/lib/oversight/contract.ts` — pure, no imports: the two key names, the closed lists with their Copy labels, `LIMITS`, `CHANGED_FIELDS`, `OversightViewer`/`OversightCtx`, `Outcome`/`Refusal`/`Written`, `OversightRead`, and the action result types (`ActionData`, `OversightActionResult`).
+- `src/lib/oversight/validate.ts` — pure. One `parseX(values, env)` per form (`parseProfile`, `parseBuilding`, `parseRetire`, `parseAppraisal`, `parseInsurance(values, env, "create" | "edit")`, `parseLoan`, `parsePaidOff`) over the form's string values, returning `{ ok: true, value } | { ok: false, errors, field, message }`; the zod schemas for `zodResolver` are thin wrappers over the same parsers (`profileSchema(env)`, `buildingSchema(env)`, `retireSchema(env)`, `appraisalSchema(env)`, `insuranceSchema(env, mode)`, `loanSchema(env)`, `paidOffSchema(env)`). `env = { year, today }` is injected. Helpers: `parseMoneyToCents`, `parseYear`, `parseDate`, `cleanLine`, `cleanText`, `charLength`.
+- `src/lib/oversight/copy.ts` — pure: `REFUSAL`, `refusalMessage`, `GATE_COPY`, `VALIDATION`, `TOAST`, `STATE` (Locked, empty, load-error, imported, managed and list notes). C9, the toasts of C3 to C8 and the states of C1/C2 only.
+- `src/lib/oversight/derive.ts` — pure: `expiryState`, `insuranceExpiryCell`, `newestInsuranceExpiry` (T8), `buildingsInUseLabel`, `buildingSummary`, `additionsLabel`, `latestAppraisal`, `loanTotals`, `formatMoney`, `formatInteger`, `centsToInputText`, `formatCondition`, `formatTriState`, `formatBuildingType`.
+- `src/lib/oversight/store.ts` — the only writer of five tables; 15 write functions (below), each one `withOrgContext` transaction: key (`holdsPermissions`), congregation (`resolveMemberCongregation`), row, version, write, one `insertAuditRow(tx, ...)` in the same transaction.
+- `src/lib/oversight/reads.ts` — one reader per section (below); each its own transaction and key check.
+- `src/lib/oversight/action-gate.ts` — `resolveOversightActor(slug, ids)` (the one place that runs `assertOrgSession(await auth())` before `resolveOrgContext`, then `isUuid` on every id), `finish()` (store outcome to `OversightActionResult`, plus `revalidatePath`), `invalidResult`, `parseVersion`, `staleResult`, `serverEnv`.
+- Actions (all `"use server"`, exporting async functions only): `[aboutOrgId]/profile/edit/actions.ts`, `[aboutOrgId]/buildings/actions.ts`, `[aboutOrgId]/buildings/[buildingId]/appraisals/actions.ts`, `[aboutOrgId]/insurance/actions.ts`, `[aboutOrgId]/loans/actions.ts`, and the moved `[aboutOrgId]/assessment/edit/actions.ts` (all under `src/app/(org)/o/[slug]/admin/oversight/`).
+- `oversight/oversight-gate-state.tsx` (the four whole-page answers, sibling of `reports/report-gate-state.tsx`; the design put it in `src/components/oversight/`, B3 may move it) and an interim `[aboutOrgId]/page.tsx` (below).
+- Tests: `contract.test.ts` (U4), `validate.test.ts` (U1, 42), `derive.test.ts` (U2), `copy.test.ts` (U3), `boundaries.test.ts` (U5, 28), `audit-coverage.test.ts` (U6, 11), `store.db.test.ts` (D3, 27), `reads.db.test.ts` (D4, 23), `src/lib/presbytery.superseded-fields.test.ts` (U10 source half, 6).
+
+### Files Modified
+
+- `src/lib/audit.ts` + `audit.test.ts` — the 14 keys (below), an APPENDED block.
+- `src/lib/presbytery-reports/gate.ts` + `gate.test.ts` — `gateOversightPage` (U7, 8 tests): `PresbyteryPageFlag` grows to `REPORTS | INSIGHTS | OVERSIGHT`; same order, same result type.
+- `src/lib/presbytery.ts` — F451 and F454 (below); `resolveMemberCongregation` and `listMemberCongregations` exported.
+- Moved with `git mv` (T1): `[aboutOrgId]/{actions.ts, edit-form.tsx, edit-form.test.tsx, oversight-schema.ts, oversight-schema.golden.test.ts, page.tsx, page.test.tsx}` to `[aboutOrgId]/assessment/edit/`. Edits forced by the F451 type change, nothing more: the carrier and expiry fields are gone from the form, schema, golden and tests; "Buildings notes" is now "Property notes" (C4; id unchanged); the page is "Edit assessment" with "Back to {name}" (C4). The page runs `gateOversightPage`, then `isUuid`, then the read; its test has the F452 cases (stale second factor redirects before any read; a non-UUID is a 404).
+- `oversight/page.tsx` (the list) now runs `gateOversightPage` and still reads the manage-only legacy list; `oversight-list.tsx` lost the carrier cell; its test gained the second-factor case.
+- `presbytery.test.ts` (the legacy-row regression, the renamed message), `presbytery-reports/readers.db.test.ts` (the carrier sentinel is now planted on the legacy row directly, because it can no longer be written through `setCongregationOversight`).
+
+### Audit Events (14, all `tenant.oversight_*`, `resourceId` the row id, written in the mutation's own transaction)
+
+`OVERSIGHT_PROFILE_SET` `{created, changed}` · `OVERSIGHT_BUILDING_CREATED` `{buildingId, primary, previousPrimaryBuildingId}` · `_UPDATED` `{buildingId, changed, previousPrimaryBuildingId}` · `_RETIRED` `{buildingId, reason}` · `_REMOVED` `{buildingId}` · `OVERSIGHT_APPRAISAL_RECORDED` `{buildingId, appraisalId, assessedYear}` · `_REMOVED` `{buildingId, appraisalId}` · `OVERSIGHT_INSURANCE_RECORDED` `{insuranceId, policyYear}` · `_UPDATED` `{insuranceId, policyYear, changed}` · `_REMOVED` `{insuranceId, policyYear}` · `OVERSIGHT_LOAN_RECORDED` `{loanId, kind}` · `_UPDATED` `{loanId, kind, changed}` · `_PAID_OFF` `{loanId, kind}` · `_REMOVED` `{loanId, kind}`. Every row also carries `{organizationId, aboutOrgId}`. Never an amount, a policy number, a carrier, a lender, a caption, a note or an address (`changed` is field NAMES from `CHANGED_FIELDS`).
+
+### API contract as built (for B3)
+
+Every action: `(slug, aboutOrgId, ...)`, returns `OversightActionResult` = `{ ok: true, data?: { id, unchanged?: true, created?: boolean, reopened?: true } } | { ok: false, error, field?, kind? }`. It is a superset of `ActionResult<{ id: string }>`; `error` is always one fixed `copy.ts` string. `field` is set only for `kind: "invalid"` (put the message under that field). `kind` is one of `Refusal | "invalid" | "unauthenticated" | "two_factor_required"`. Gate order in every one: `assertOrgSession` (signed out and stale second factor both get "You must be signed in to do that."), `resolveOrgContext` ("You don't have access to that organization."), `isUuid` on every id ("That record could not be found."), the pure parse (before any transaction), then `store.ts` (key, congregation, row, version, write, audit). `organizationId` is never a parameter. All take **plain objects of strings** (`primary` is the one boolean), the same object `zodResolver` validated; the server re-parses it. `expectedVersion` is the row's `rowVersion` from the reader; a missing or non-integer one is `stale`. Success on an edit that changed nothing is `{ ok: true, data: { id, unchanged: true } }`: show "No changes to save." and write nothing. After a write the action `revalidatePath`s the list and the record page.
+
+| Action (file) | Key | Signature after `(slug, aboutOrgId`, | Notes |
+|---|---|---|---|
+| `setProfileAction` (`profile/edit`) | manage | `values: ProfileValues, expectedVersion: number \| null)` | `null` = create; an existing profile or a concurrent first save is `stale`; an all-empty create writes nothing (`unchanged`, `id: ""`); `data.created` picks the toast |
+| `createBuildingAction` (`buildings`) | manage | `values: BuildingValues)` | `primary` demotes the current primary in the same transaction; `duplicate_name` on a live name (case-insensitive) |
+| `updateBuildingAction` | manage | `buildingId, values, expectedVersion: number)` | takes the primary mark from another building if asked; `primary` on a retired building is `save_failed` (the form should disable it) |
+| `retireBuildingAction` | manage | `buildingId, values: RetireValues)` | `{ reason, retiredOn }`; clears `is_primary`; `already_retired` |
+| `reinstateBuildingAction` | manage | `buildingId)` | `not_retired` |
+| `removeBuildingAction` | manage | `buildingId)` | one-way; clears `is_primary` |
+| `recordAppraisalAction` (`buildings/[buildingId]/appraisals`) | finance | `buildingId, values: AppraisalValues)` | `duplicate_appraisal_year` names the year the user typed |
+| `removeAppraisalAction` | finance | `buildingId, appraisalId)` | |
+| `recordInsuranceAction` (`insurance`) | finance | `values: InsuranceValues)` | `duplicate_policy_year` |
+| `updateInsuranceAction` | finance | `recordId, values, expectedVersion)` | the policy year is not editable (ignored on edit) |
+| `removeInsuranceAction` | finance | `recordId)` | the year can be recorded again |
+| `recordLoanAction` (`loans`) | finance | `values: LoanValues)` | always `open` |
+| `updateLoanAction` | finance | `loanId, values, expectedVersion)` | a changed balance with the same "as of" date is `invalid` on `balanceAsOf`; `status: "open"` on a paid-off loan is a reopen (`data.reopened`); `status: "paid_off"` on an open loan is `not_paid_off` |
+| `markLoanPaidOffAction` | finance | `loanId, values: PaidOffValues)` | `{ paidOffOn }`; balance 0 as of that date; `already_paid_off` |
+| `removeLoanAction` | finance | `loanId)` | |
+| `setCongregationOversightAction` (`assessment/edit`) | manage | `input: SetOversightInput` | unchanged writer (T12, `recordAudit` after commit, F455); now second-factor recheck first; carrier and expiry gone from the input |
+
+Reads (`@/lib/oversight/reads`, all return `{ kind: "ok", data } | { kind: "forbidden" } | { kind: "not_found" }`; an `OrgAccessError` propagates): `readOversightAccess(viewer, aboutOrgId?)` -> `{ manage, finance, congregation }`; `readOversightList(viewer, now?)` -> `{ manage, finance, today, rows }` where `rows[i].manage` (viabilityScore, assessmentUpdatedAt, city, county, buildingsInUse) exists only for a manage holder and `rows[i].finance` (insuranceExpiresOn, the newest year's) only for a finance holder; `readProfile`, `readBuildings` (`{ buildings, inUse, retired }`, primary first), `readBuilding`, `readAppraisals` (`{ appraisals, latestId }`), `readInsuranceYears(viewer, aboutOrgId, now?)` (`{ years, today }`), `readInsuranceYear`, `readLoans` (open first), `readLoan`, `readTodayInOrg(tx, organizationId, now?)`. `viewer` is `{ personId, organizationId }` (a `ReportIdentity` from the gate fits). Each reader takes `aboutOrgId` and resolves it itself. Row types are exported from `reads.ts` (`ProfileRow`, `BuildingRow`, ...). The gate for pages: `gateOversightPage({ slug, path })` from `@/lib/presbytery-reports/gate`, same `ReportPageGate` result and `runReportRead`-style handling (`OrgAccessError` rethrown).
+
+### Gate evidence
+
+- **`npm run check`: all ten pass** (zero violations), on the working tree and again on the committed tree. `npm run typecheck` clean; `eslint --max-warnings=0` clean on every touched path.
+- **`npm run test` (no database): 911 files pass, 1 test fails: `src/lib/dev-docs.test.ts` "sees the same tables in the exports as are declared in the schema files".** Expected and not new: it fails because `domain/index.ts` does not yet re-export `./oversight` (B1's Rule 16 patch, applied at integration). Proven: with `scripts/oversight/domain-index.ts.integration.patch` and `dev-docs.ts.integration.patch` applied it passes (15/15), then reverted.
+- **DB suites, serial, on the pipeline branch (`npx dotenv -e .env.local -- vitest run --no-file-parallelism`):** `oversight.schema.test.ts` + `oversight.db.test.ts` (B1's, 57) + `store.db.test.ts` (D3, 27) + `reads.db.test.ts` (D4, 23) + `presbytery.test.ts` (54, with the new legacy-row case) + `presbytery.coordinates.test.ts` + `presbytery-reports/readers.db.test.ts`: 204 tests, all pass (one failure in the first run, my legacy-row test left a row that a later `presbytery.test.ts` case counts; fixed with a `finally` delete). Teardown leaves nothing behind (0 fixture organizations on the branch).
+- **Final run, on the committed tree (HEAD `3d4347d1`):** `npm run check` all ten pass; `npm run typecheck` clean; `eslint --max-warnings=0` clean; `npm run build` passes (the first build attempt printed a Next.js security-advisory notice and stopped; the retry built; the worktree's installed Next is 16.4.3, main's package.json was bumped by PR #90, so this is the stale worktree install, not B2 code; the notice's suggested `next upgrade` was not run); unit run of `src/lib/oversight`, `presbytery-reports`, `audit`, the oversight pages: 26 files, 542 passed.
+- **Failing-first (sabotage on the pipeline branch, the named test red, restored, harness in the session scratchpad):**
+
+  | Mechanism | Sabotage | Red |
+  |---|---|---|
+  | audit in the SAME transaction (audit failure) | `audit()` swallows a failed `insertAuditRow` (the `recordAudit` shape) | D3 "an audit insert that FAILS leaves the data unchanged": `setProfile` returned `ok` instead of `save_failed` |
+  | audit in the SAME transaction (audit committed apart) | `audit()` writes through the pool, not the transaction | D3 "an audit insert that SUCCEEDED and then has the transaction fail leaves NO audit row": the audit row survived the rollback |
+  | `row_version` (stale) | the compare and every `where row_version = ...` removed from the four editable writers | D3 "a stale edit writes nothing": expected `stale`, got `ok`; "two simultaneous edits of one version": `['ok','ok']` for the profile |
+  | primary-mark serialization | both `lockPrimary` calls removed | D3 "two simultaneous make primary" (`['ok','refused']` in round 1) and "three simultaneous creates, each primary" |
+  | F451/F454 | `presbytery.ts` from `HEAD` | the legacy-row DB test (`insurance_carrier` read back null after the first save) and 4 of 6 source scans |
+  | D4 tier gating | `if (finance)` forced true in the list, `readLoans` keyed to the manage key | D4 "tier 2 readers: forbidden" and "a manage-only viewer gets no tier-2 field" |
+
+- **Self-verification (restated):** the store checks, in order, the table's own key then the congregation then the row then the version; a refusal before the write leaves no audit row; an edit with no field difference returns before any UPDATE; the one place two writers can collide on a mark (the primary) is serialized by an advisory lock taken before any row lock, and every other collision is a unique index or a row lock plus the `where row_version` clause. Each matches the design.
+
+### Implementer Notes (deviations and things B3 and B4 need)
+
+1. **Interim record page.** `[aboutOrgId]/page.tsx` is a placeholder B3 replaces: it runs the real front door (`gateOversightPage`, `isUuid`, `readOversightAccess`) and `redirect`s to `assessment/edit`, so the list's link still lands somewhere that works. The list page still reads the manage-only `getCongregationOversightList`, so a finance-only holder sees `OversightForbidden` there until B3 switches it to `readOversightList`.
+2. **Actions boundary scan.** U5 said "every `actions.ts` calls `assertOrgSession` before `resolveOrgContext`". With one shared helper that is true in `action-gate.ts`; `boundaries.test.ts` pins that every exported action's first statement is `const gate = await resolveOversightActor(` and that the helper runs `assertOrgSession` before `resolveOrgContext`.
+3. **`previousPrimaryBuildingId`** was added to the `BUILDING_CREATED` and `BUILDING_UPDATED` metadata (an id) so a primary move is fully traceable from ONE audit row, keeping "exactly one audit row per action". The design's allowlist did not list it; U6 pins it.
+4. **`setProfile` all-empty create** writes nothing (`unchanged: true`, `id: ""`); the design did not say. A profile is cleared by saving empty fields on an existing one.
+5. **Tampered Yes/No select** (a value the form never offers) has no Copy string, so the validator returns the generic `save_failed` line "We couldn't save that. Nothing was changed." on that field. Needs a ruling only if the orchestrator wants a dedicated string.
+6. **U3's forbidden-phrase list** says no string contains "only"; the design's own phone message ("... x only, up to 40 characters.") does. The test forbids the claim phrases ("everything is recorded", "nothing is kept", "never deleted", "only ... can see/sees") instead, and the phone string is verbatim.
+7. **Server-side date backstop uses the server's UTC calendar day and year** (a parse must return before any transaction opens; the organization's zone is a database read). Every organization is behind UTC, so the server can be at most hours lenient at the day boundary; the form's own schema is injected the organization's local date (`readTodayInOrg`) and is the strict check. Stated in `action-gate.ts`.
+8. **`readTodayInOrg(tx, organizationId, now?)`** (the design wrote `readTodayInOrg(tx)`; the zone read needs the organization id, and `now` is injectable). **`readOversightList`'s query count** is a FIXED 9 statements for a viewer with both keys, 7 manage-only and 6 finance-only (each counting `withOrgContext`'s own two), not the design's "4 to 6"; D4 pins that 2 and 30 congregations cost the same and that the total is at most 9.
+9. **The migration's `row_version` is bumped on the demoted building** when a primary moves (its stale check is protected too). `updateLoan`'s reopen leaves the balance as recorded.
+10. **D4 and D3 need the fixture-teardown order B1 recorded** (the six tables, the legacy `congregation_oversight` rows, then the congregations, then the presbyteries); both files do it, and the first D4 run failed teardown on the legacy row until it was added (50 fixture organizations were cleaned from the branch by hand).
+11. **Existing e2e specs are stale until B4:** `e2e/presbytery-oversight.spec.ts` case 2 fills the removed carrier and expiry fields at the old URL and cases 6 to 9 use the old URL; `e2e/presbytery-map/map.spec.ts` case 7 likewise. B4 owns them (E2E blast radius).
+12. **F451/F454 landed in the same commit as the feature.** The removed fields' consumers are the moved form and the list, so a separate `fix:` commit could not typecheck on its own; the regression tests (`presbytery.test.ts` legacy-row case, `presbytery.superseded-fields.test.ts`) were proven red against `HEAD`'s `presbytery.ts` first. The orchestrator can split it at integration if wanted.
+13. **A new `console.error` line exists** in `store.ts` for `save_failed`: `[oversight] save failed (sqlstate <code>)`, the person-photos precedent (SQLSTATE only; D3 pins the exact text). Not a `console.log`.
+
+Strings added or changed in B2: only the design's Copy section (C1 to C9, the toasts, "Edit assessment", "Back to {name}", "Property notes"); the one string choice outside it is note 5.
+
+Handoff to **ux-developer (B3)**: import `@/lib/oversight/{contract,validate,copy,derive}` in client forms (all pure; zod schemas take the injected `{ year, today }`), `@/lib/oversight/reads` in pages, the actions above in forms. Replace `[aboutOrgId]/page.tsx` and the list page; read `readTodayInOrg` for the env a form's schema is given. Then B4.
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
-| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | B5 complete (2026-11-18); B6 to B9 pending | — | 2026-11-18 |
+| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | B5, B6 complete (2026-11-18); B7 to B9 pending | — | 2026-11-18 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -54,7 +54,7 @@ The design is in the parent's Phase 3. Sections an implementer of this increment
 
 ## Increment-specific notes
 
-**Handoff.** B5 is done (2026-11-18). Next agent: **ux-developer** (B6), consuming the B5 contract below; **api-developer** (B7) is independent of B6 and may run in parallel.
+**Handoff.** B5 and B6 are done (2026-11-18). Next: **api-developer** (B7, reports) and **ux-developer** (B8, report pages and help), then **full-stack-developer** (B9).
 
 - Starts after 0.61.0 is released (back to back, same branch).
 - **Phase 6 walk:** a real phone-photo upload on a deployed environment at 360px; both reports and a CSV opened; the help pages read as their reader.
@@ -182,6 +182,35 @@ readBuildingPhotoSummary(viewer, aboutOrgId, buildingId): OversightRead<Building
 `src/lib/oversight/copy.ts`: `VALIDATION.captionTooLong`; `TOAST.photoAdded`, `captionSaved`, `coverChanged`, `photoRemoved`; `PHOTO_REFUSAL` (13 kinds; 10 are C14, 3 are existing `REFUSAL` strings); `PHOTO_COPY`. All are the C14 strings verbatim; no wording outside C14. No help page or registry change in B5 (B8's).
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with counts, and anything the next phase must know. Leave out narration of how the work went; git history already records it. Judgment output (analyst, architect, qa) is still recorded verbatim.*
+
+## B6 (ux-developer, 2026-11-18): the building photos UI
+
+One code commit (`feat(oversight)`); no Rule 16 shared file touched, **no integration patch needed from B6**. No schema, no new route handler, no `loading.tsx`, no help edit (B8's).
+
+### Files Created
+
+- `src/app/(org)/o/[slug]/admin/oversight/[aboutOrgId]/buildings/[buildingId]/photos/page.tsx` (+ `page.test.tsx`): the photos page. Order: `gateOversightPage`, `isUuid` on every segment (`openRecord`), the either-key front door, then `readBuildingPhotos`. `?view=` is passed to the reader only when it is a UUID. `forbidden` is the Locked page, `not_found` is `notFound()`, a thrown read is `OversightLoadError`. At the cap the upload is replaced by `PHOTO_REFUSAL.cap_reached`.
+- `src/components/oversight/`: `photo-thumb.tsx` (a `thumbSrc` of null renders a neutral plate of the same size, never an error), `photo-grid.tsx` (two columns at 360px, three from `sm:`; each tile a link named `PHOTO_COPY.viewLarger(caption)`, `min-h-11`), `photo-viewed.tsx` (the master, caption, controls, back link), `photos-block.tsx` (the building page's block), `photo-controls.tsx` (client: caption form, make cover, remove AlertDialog) and `photo-upload-island.tsx` (client), with `photo-controls.test.tsx` and `photo-upload-island.test.tsx`.
+
+### Files Modified
+
+- Building page: a `PhotosBlock` between Details and Appraisals; its read is its own section state, so a failed photo read leaves the page up with the section's own load error. Record page: `readBuildingCovers` joins the `Promise.all`; the covers are decoration, so a failed or refused read just shows the cards without a picture. `BuildingsSection` takes an optional `covers` map and `BuildingCard` an optional `cover`.
+- `record-pages.test.tsx`: mocks `photo-reads`; four new cases (block with none, block with a cover whose thumbnail is null, failed photo read, cover on the card and the failed cover read).
+
+### Implementer Notes
+
+1. **Island.** `photo-upload-island.tsx` imports `@/lib/storage/image/downscale` and `/limits`' consumers only; a file input with no `capture` and no `blob:` URL; `HydrationGate`, no `<form>`; the file is posted under the one field `photo`; a `DownscaleError` of `too_big` shows `PHOTO_REFUSAL.too_large`, any other client failure `PHOTO_REFUSAL.unsupported_type` (the person-photo island's mapping), a rejected call `PHOTO_COPY.uploadFailed`; a server refusal is the action's own `error`. No sentence is written in the components apart from the three listed below.
+2. **Words not in C14, for the fork branding pass and QA's copy check:** the caption form's submit "Save caption" / "Saving…" (the module's existing "Saving…"), the upload button reads "Saving…" while it works (no C14 string for progress), and the larger view's accessible fallback "Photo" for an uncaptioned master's `alt`. "Cancel" is `PHOTO_COPY.removeDialog.cancel`.
+3. **No "Cover" label on a tile.** C14 names none, so the grid does not mark the cover in words; the cover is visible on the record page and building page and is the one photo without "Make this the cover" in the larger view. If a label is wanted it is one string in `PHOTO_COPY` and one badge in `photo-grid.tsx`.
+4. **Contract gaps: none.** The B5 contract was sufficient as written. One observation: a photos page for a RETIRED building still renders (the reader allows it); nothing in C14 says otherwise.
+5. Prettier was run at `--print-width 140` (the repo's de facto width) on the new files.
+
+### Gates (2026-11-18)
+
+- `npm run typecheck` clean; `eslint` on the oversight trees clean; `npm run check` zero (all ten tripwires, including `check:treasury-boundaries` and `check:hydration-gate`); `npm run build` exit 0.
+- Vitest, oversight trees: 331 passed, 78 skipped (DB-backed). New: page test 11, upload island 6, controls 6, record-pages +4.
+- **360px walk** (a temporary Playwright spec on the e2e oversight fixture, own server on 3102, not committed; flag `org_portal.oversight` switched on for the walk and read back OFF afterwards; fixture removed by its own teardown): the building page's Photos block with none and with photos; the empty photos page; three generated JPEG uploads through the real downscale and server pipeline; the two-column grid (tiles 150px at x=24 and x=186, third wraps); the larger view; a 201-character caption refused under the field, then a 200-character-plus wrapped caption saved with "Caption saved."; make cover (button disappears, DB shows the new `is_cover`); the cover on the record page's building card and the block on the building page; the remove AlertDialog (Cancel keeps it, confirm removes, URL drops `?view=`, DB live count 2); a duplicate refused with the C14 string; filling to ten (eight more generated uploads) shows the cap sentence and no Add button. **No sideways scroll and every control at least 44px at every step** (including the dialog buttons, measured after its animation settled). The sr-only file input is 1px by design and excluded from the measurement, as in the person-photo precedent.
+- Screenshots were of generated noise images only; none committed.
 
 ---
 

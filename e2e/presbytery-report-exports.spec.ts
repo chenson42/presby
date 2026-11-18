@@ -1,6 +1,6 @@
 /**
- * presbytery-report-exports.spec.ts - the four presbytery reports and their CSV
- * exports (docs/work-log/2026-11-15-presbytery-reports.md, Phase 3 Test Plan,
+ * presbytery-report-exports.spec.ts - the presbytery reports and their CSV
+ * exports (six since Congregation profile Increment 2: Buildings and Insurance and loans) (docs/work-log/2026-11-15-presbytery-reports.md, Phase 3 Test Plan,
  * DECISION-337 to 339).
  *
  * Runs against its OWN dev server (port 3102, `E2E_BASE_URL=http://localhost:3102`).
@@ -23,7 +23,9 @@ import { captureFlags, setFlag, type FlagCapture } from "./support/flags";
 const REPORTS_FLAG = "org_portal.reports";
 const SLUG = E2E_ORGS.presbytery.slug;
 const BASE = `/o/${SLUG}/admin/reports`;
-const SEGMENTS = ["vacant-pulpits", "membership-trend", "viability", "per-capita"] as const;
+const SEGMENTS = ["vacant-pulpits", "membership-trend", "viability", "per-capita", "buildings", "insurance-and-loans"] as const;
+/** The clerk fixture holds four keys and the manage key serves Buildings too; it holds no finance key, so Insurance and loans is Locked for it. */
+const CLERK_OPEN = ["vacant-pulpits", "membership-trend", "viability", "per-capita", "buildings"] as const;
 const STAGED_MINUTE = "e2e presbytery-report-exports staged";
 
 test.describe.serial("Presbytery reports and exports (2026-11-15-presbytery-reports)", () => {
@@ -58,25 +60,26 @@ test.describe.serial("Presbytery reports and exports (2026-11-15-presbytery-repo
     await flags.restore();
   });
 
-  test("the hub shows four report links to a holder of all four keys", async ({ browser }) => {
+  test("the hub shows five report links and one Locked card (Insurance and loans needs a key this member lacks) to the clerk", async ({ browser }) => {
     const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
     const page = await context.newPage();
     await page.goto(BASE);
     const hub = page.getByTestId("reports-hub");
     await expect(hub.getByRole("heading", { name: "Reports and exports" })).toBeVisible();
     for (const segment of SEGMENTS) {
-      await expect(hub.locator(`a[href="${BASE}/${segment}"]`)).toBeVisible();
+      await expect(hub.locator(`a[href="${BASE}/${segment}"]`), segment).toHaveCount((CLERK_OPEN as readonly string[]).includes(segment) ? 1 : 0);
     }
-    await expect(hub.getByText("Locked")).toHaveCount(0);
+    await expect(hub.getByText("Locked", { exact: true })).toHaveCount(1);
+    await expect(hub.getByText("You need permission to manage congregation property finances.")).toBeVisible();
     await context.close();
   });
 
-  test("the hub shows four locked cards, and no report link, to a member with no key", async ({ browser }) => {
+  test("the hub shows six locked cards, and no report link, to a member with no key", async ({ browser }) => {
     const context = await browser.newContext({ storageState: storageStatePath("presbytery-nogrant") });
     const page = await context.newPage();
     await page.goto(BASE);
     const hub = page.getByTestId("reports-hub");
-    await expect(hub.getByText("Locked")).toHaveCount(4);
+    await expect(hub.getByText("Locked", { exact: true })).toHaveCount(6);
     for (const segment of SEGMENTS) {
       await expect(hub.locator(`a[href="${BASE}/${segment}"]`)).toHaveCount(0);
     }
@@ -118,13 +121,15 @@ test.describe.serial("Presbytery reports and exports (2026-11-15-presbytery-repo
     await context.close();
   });
 
-  test("the other three pages load for the holder of all four keys", async ({ browser }) => {
+  test("the other pages load for the holder of the four keys, and Buildings loads while Insurance and loans says what is missing", async ({ browser }) => {
     const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
     const page = await context.newPage();
     for (const [segment, heading] of [
       ["membership-trend", "Membership trend"],
       ["viability", "Viability"],
       ["per-capita", "Per capita"],
+      ["buildings", "Buildings"],
+      ["insurance-and-loans", "Insurance and loans"],
     ] as const) {
       const res = await page.goto(`${BASE}/${segment}`);
       expect(res?.status()).toBe(200);
@@ -133,6 +138,12 @@ test.describe.serial("Presbytery reports and exports (2026-11-15-presbytery-repo
     // Viability lists every member congregation, assessed or not.
     await page.goto(`${BASE}/viability`);
     await expect(page.getByTestId("report-table").getByText(E2E_ORGS.alpha.name)).toBeVisible();
+    // The clerk holds no finance key: the page is a permission line (not a table) and its export is the one 403.
+    await page.goto(`${BASE}/insurance-and-loans`);
+    await expect(page.getByText(/You don't have permission to manage congregation property finances at /)).toBeVisible();
+    await expect(page.getByTestId("report-table")).toHaveCount(0);
+    expect((await context.request.get(`${BASE}/insurance-and-loans/export`)).status()).toBe(403);
+    expect((await context.request.get(`${BASE}/buildings/export`)).status()).toBe(200);
     await context.close();
   });
 
@@ -178,7 +189,7 @@ test.describe.serial("Presbytery reports and exports (2026-11-15-presbytery-repo
     await context.close();
   });
 
-  test("at 360px the hub and the four pages have no horizontal scroll, show the card list and hide the table, with a 44px export control", async ({ browser }) => {
+  test("at 360px the hub and the six pages have no horizontal scroll, show the card list and hide the table, with a 44px export control", async ({ browser }) => {
     const context = await browser.newContext({
       storageState: storageStatePath("presbytery-clerk"),
       viewport: { width: 360, height: 800 },

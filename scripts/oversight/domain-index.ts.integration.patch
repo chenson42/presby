@@ -1,0 +1,9 @@
+diff --git a/src/lib/db/domain/index.ts b/src/lib/db/domain/index.ts
+index 16da28e0..9d5b84b2 100644
+--- a/src/lib/db/domain/index.ts
++++ b/src/lib/db/domain/index.ts
+@@ -38,3 +38,4 @@ export * from "./reimbursement";
+ export * from "./careers";
+ export * from "./help-contact";
+ export * from "./worship";
++export * from "./oversight";

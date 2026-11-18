@@ -191,11 +191,12 @@ describe.skipIf(!hasDb)(
         expect(plan.officeTemplateKey).toBe("congregation_stated_clerk");
       });
 
-      it("presbytery: base eleven PLUS congregation_oversight.manage (12 total), presbytery_stated_clerk office", () => {
+      it("presbytery: base eleven PLUS congregation_oversight.manage and congregation_oversight.finance (13 total; DECISION-345, F450), presbytery_stated_clerk office", () => {
         const plan = foundingAdministratorPlan("presbytery");
         expect(plan.administration.permissionKeys.sort()).toEqual(
-          [...BASE, "congregation_oversight.manage"].sort(),
+          [...BASE, "congregation_oversight.manage", "congregation_oversight.finance"].sort(),
         );
+        expect(plan.administration.permissionKeys).toHaveLength(13);
         expect(plan.officeTemplateKey).toBe("presbytery_stated_clerk");
       });
 
@@ -222,8 +223,21 @@ describe.skipIf(!hasDb)(
         const congregation = foundingAdministratorPlan("congregation").administration.permissionKeys;
         expect(congregation).toEqual([...BASE, ...WORSHIP]);
         const presbytery = foundingAdministratorPlan("presbytery").administration.permissionKeys;
-        expect(presbytery).toEqual([...BASE, "congregation_oversight.manage"]);
+        expect(presbytery).toEqual([
+          ...BASE,
+          "congregation_oversight.manage",
+          "congregation_oversight.finance",
+        ]);
       });
+
+      it.each(["congregation", "synod", "general_assembly", "new_worshiping_community"] as const)(
+        "%s: never carries congregation_oversight.finance (the presbytery arm only; DECISION-345)",
+        (organizationType) => {
+          expect(foundingAdministratorPlan(organizationType).administration.permissionKeys).not.toContain(
+            "congregation_oversight.finance",
+          );
+        },
+      );
 
       it("never carries an excluded tier-2 or tier-3 key (F111's enumerated-not-wildcard ceiling; staff.manage is CARRIED as of F118 and careers.applicants, tier 3, as of F292 / DECISION-265, so both are deliberately absent from this list)", () => {
         const excluded = [

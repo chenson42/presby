@@ -847,10 +847,13 @@ describe.skipIf(!hasDb)("drizzle/0059 account_invitations (Postgres-backed)", ()
       const r1 = await fx.accept(pr.token, newAccount());
       expect(r1.office_role_key).toBe("presbytery_stated_clerk");
       expect(r1.permission_keys as string[]).toContain("congregation_oversight.manage");
+      // DECISION-345 (drizzle/0089): the presbytery arm also carries the tier-2 finance key.
+      expect(r1.permission_keys as string[]).toContain("congregation_oversight.finance");
       const sy = await faScene({ type: "synod" });
       const r2 = await fx.accept(sy.token, newAccount());
       expect(r2).toMatchObject({ outcome: "accepted", office_role_key: null });
       expect(r2.permission_keys as string[]).not.toContain("congregation_oversight.manage");
+      expect(r2.permission_keys as string[]).not.toContain("congregation_oversight.finance");
     });
 
     it("self-acceptance is permitted and reported (operator's R9 reversal): inviter_is_invitee = true", async () => {

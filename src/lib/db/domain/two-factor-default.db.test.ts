@@ -9,8 +9,10 @@
  *   - the NextAuth adapter's `createUser` (the Google first sign-in path,
  *     src/auth.ts) stores false, through the same `db` connection src/auth.ts
  *     hands the adapter;
- *   - exactly six permissions carry `requires_two_factor`: the three giving keys
- *     (0055) and roles.manage, role_grants.manage, domains.manage (0080).
+ *   - exactly ten permissions carry `requires_two_factor`: the three giving keys
+ *     (0055), roles.manage, role_grants.manage, domains.manage (0080), the
+ *     three reimbursement keys (0074) and congregation_oversight.finance
+ *     (0089, DECISION-345).
  *
  * Run (serial, per docs/testing.md):
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/db/domain/two-factor-default.db.test.ts
@@ -78,10 +80,11 @@ describe.skipIf(!hasDb)("two-factor default (0080, Postgres-backed)", () => {
     expect(u!.two_factor_required).toBe(false);
   });
 
-  it("exactly nine permissions are flagged: giving.view/record/manage (module giving, tier 2), reimbursement.view/pay/manage (module reimbursement, tier 2; drizzle/0074) and roles.manage, role_grants.manage, domains.manage", async () => {
+  it("exactly ten permissions are flagged: congregation_oversight.finance (module presbytery, tier 2; drizzle/0089, DECISION-345), giving.view/record/manage (module giving, tier 2), reimbursement.view/pay/manage (module reimbursement, tier 2; drizzle/0074) and roles.manage, role_grants.manage, domains.manage", async () => {
     const rows = await q(sql`
       select key, module, sensitivity_tier from permissions where requires_two_factor order by key`);
     expect(rows).toEqual([
+      { key: "congregation_oversight.finance", module: "presbytery", sensitivity_tier: 2 },
       { key: "domains.manage", module: "domains", sensitivity_tier: 1 },
       { key: "giving.manage", module: "giving", sensitivity_tier: 2 },
       { key: "giving.record", module: "giving", sensitivity_tier: 2 },

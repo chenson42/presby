@@ -1,7 +1,7 @@
 /**
- * The four export routes, one table-driven file (docs/work-log/2026-11-15-
+ * The six export routes, one table-driven file (docs/work-log/2026-11-15-
  * presbytery-reports.md, Phase 3 Test Plan). The REAL gate runs (session, org
- * resolver and flag mocked); the four `export*` readers are mocked so this file
+ * resolver and flag mocked); the six `export*` readers are mocked so this file
  * pins what each route does with what they return: the status, the headers, the
  * BOM, the filename, the 400/409/503 bodies and that a refused organization-level
  * gate wins over a bad year. The readers' own behaviour is `readers.db.test.ts`.
@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   exportMembershipTrend: vi.fn(),
   exportViability: vi.fn(),
   exportPerCapita: vi.fn(),
+  exportBuildingsReport: vi.fn(),
+  exportInsuranceLoans: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
@@ -35,11 +37,15 @@ vi.mock("./vacant-pulpits", () => ({ exportVacantPulpits: mocks.exportVacantPulp
 vi.mock("./membership-trend", () => ({ exportMembershipTrend: mocks.exportMembershipTrend }));
 vi.mock("./viability", () => ({ exportViability: mocks.exportViability }));
 vi.mock("./per-capita", () => ({ exportPerCapita: mocks.exportPerCapita }));
+vi.mock("./buildings", () => ({ exportBuildingsReport: mocks.exportBuildingsReport }));
+vi.mock("./insurance-loans", () => ({ exportInsuranceLoans: mocks.exportInsuranceLoans }));
 
 import { GET as vacantGET } from "@/app/(org)/o/[slug]/admin/reports/vacant-pulpits/export/route";
 import { GET as trendGET } from "@/app/(org)/o/[slug]/admin/reports/membership-trend/export/route";
 import { GET as viabilityGET } from "@/app/(org)/o/[slug]/admin/reports/viability/export/route";
 import { GET as perCapitaGET } from "@/app/(org)/o/[slug]/admin/reports/per-capita/export/route";
+import { GET as buildingsGET } from "@/app/(org)/o/[slug]/admin/reports/buildings/export/route";
+import { GET as insuranceLoansGET } from "@/app/(org)/o/[slug]/admin/reports/insurance-and-loans/export/route";
 import { ROUTE_COPY } from "./copy";
 
 const ORG = { organizationId: "org-1", personId: "person-1", name: "Northern Reach", organizationType: "presbytery", slug: "northern" };
@@ -59,6 +65,15 @@ const CASES: Case[] = [
   { name: "membership trend", segment: "membership-trend", get: trendGET, mock: mocks.exportMembershipTrend, base: "membership-trend", query: "?from=2022&to=2025" },
   { name: "viability", segment: "viability", get: viabilityGET, mock: mocks.exportViability, base: "viability", query: "" },
   { name: "per capita", segment: "per-capita", get: perCapitaGET, mock: mocks.exportPerCapita, base: "per-capita", query: "?billingYear=2025" },
+  { name: "buildings", segment: "buildings", get: buildingsGET, mock: mocks.exportBuildingsReport, base: "buildings", query: "" },
+  {
+    name: "insurance and loans",
+    segment: "insurance-and-loans",
+    get: insuranceLoansGET,
+    mock: mocks.exportInsuranceLoans,
+    base: "insurance-and-loans",
+    query: "",
+  },
 ];
 
 const call = (c: Case, query = c.query, slug = "northern") =>
@@ -157,6 +172,15 @@ describe.each(CASES)("the $name export route", (c) => {
   it("passes the gate's identity to the export, never anything from the query", async () => {
     await call(c);
     expect(c.mock.mock.calls[0][0]).toMatchObject({ userId: "user-1", personId: "person-1", organizationId: "org-1" });
+  });
+});
+
+describe("the two oversight exports take no query value (DECISION-348)", () => {
+  it.each([CASES[4], CASES[5]])("$name ignores every parameter: the export is called with the gate's identity alone", async (c) => {
+    const res = await call(c, "?year=2020&billingYear=abc&callbackUrl=https://evil.example&organizationId=other");
+    expect(res.status).toBe(200);
+    expect(c.mock.mock.calls[0]).toHaveLength(1);
+    expect(c.mock.mock.calls[0][0]).toMatchObject({ organizationId: "org-1", personId: "person-1" });
   });
 });
 

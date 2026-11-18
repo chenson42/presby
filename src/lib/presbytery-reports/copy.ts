@@ -38,6 +38,14 @@ export const HUB_COPY = {
       description: "What each congregation was billed for a year, has paid and still owes.",
       source: "From the rate and the bills in the Per-Capita section below.",
     },
+    buildings: {
+      description: "Every building recorded for your member congregations, with its year, size, condition and safety systems.",
+      source: "From Congregation Oversight.",
+    },
+    insurance_and_loans: {
+      description: "Each congregation's newest insurance, its open loans and its appraised value.",
+      source: "From Congregation Oversight.",
+    },
   },
   lockedBadge: "Locked",
   lockedReason: (permissionPhrase: string) =>

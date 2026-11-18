@@ -1,6 +1,6 @@
 import "server-only";
 import { OrgAccessError, withOrgContext } from "@/lib/authz";
-import type { ReportKey, ReportRead, ReportViewer } from "./contract";
+import { DASHBOARD_REPORT_KEYS, type ReportKey, type ReportRead, type ReportViewer } from "./contract";
 import {
   summarizePerCapita,
   summarizeTrend,
@@ -108,7 +108,8 @@ export async function getPresbyteryDashboard(
     if (err instanceof OrgAccessError) throw err;
     return { kind: "error" };
   }
-  if (!Object.values(held).some(Boolean)) return { kind: "forbidden" };
+  // The four dashboard keys only: Buildings shares the viability key, and the finance key has no card here.
+  if (!DASHBOARD_REPORT_KEYS.some((key) => held[key])) return { kind: "forbidden" };
 
   const window = defaultTrendWindow(now);
   const billingYear = defaultBillingYear(now);

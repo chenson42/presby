@@ -312,6 +312,18 @@ function photoUploadOrder(file: SourceFile | undefined): Hit[] {
   return checkOrder && addOrder && decodes === 1 ? [] : [{ rule: "photo-upload-order", file: file?.rel ?? "photo-store.ts" }];
 }
 
+/**
+ * The two presbytery reports' row reads (DECISION-348) never select a street address, a policy number,
+ * a lender, a phone, a caption or a free-text `notes` column: the report's CSV omits them, and a column
+ * that is never read cannot be added to a file by accident. (`guaranteeNote` is the one free-text column
+ * a report reads, by ruling R7; it is not named `notes`.)
+ */
+const REPORT_FORBIDDEN_COLUMN = /\b(streetAddress|street_address|policyNumber|policy_number|lender|phone|caption|notes|retiredReason)\b/;
+function reportRowsReadNoPrivateColumn(file: SourceFile | undefined): Hit[] {
+  if (!file) return [{ rule: "report-rows-found", file: "report-rows.ts" }];
+  return REPORT_FORBIDDEN_COLUMN.test(code(file.content)) ? [{ rule: "report-rows-no-private-column", file: file.rel }] : [];
+}
+
 // ── The real tree ──────────────────────────────────────────────────────────
 
 describe("congregation records: source boundaries (U5)", () => {
@@ -385,6 +397,13 @@ describe("congregation records: source boundaries (U5)", () => {
   it("every photo write checks the manage key first, and the upload's refusal order is key, toggle, type, building, cap, then decode, then store, then the locked recheck", () => {
     expect(photoStoreChecksTheKey(moduleFiles.find((f) => base(f.rel) === "photo-store.ts"))).toEqual([]);
     expect(photoUploadOrder(moduleFiles.find((f) => base(f.rel) === "photo-store.ts"))).toEqual([]);
+  });
+
+  it("report-rows.ts selects no street address, policy number, lender, phone, caption or notes column, and is read-only", () => {
+    const rows = moduleFiles.find((f) => base(f.rel) === "report-rows.ts");
+    expect(rows, "report-rows.ts exists").toBeDefined();
+    expect(reportRowsReadNoPrivateColumn(rows)).toEqual([]);
+    expect(readersDoNotWrite(moduleFiles.filter((f) => base(f.rel) === "report-rows.ts"))).toEqual([]);
   });
 
   it("every photo reader checks the key in its own transaction (readUnder), and photo-reads.ts reads the blob table through the store only", () => {
@@ -500,6 +519,16 @@ describe("each rule fails on a sample that breaks it", () => {
     expect(photoStoreChecksTheKey(sample("photo-store.ts", upload(goodBody) + writes.replace("return 1;", "await gate(tx, ctx, aboutOrgId);")))).toHaveLength(0);
     // checkUpload that does something before the key
     expect(photoStoreChecksTheKey(sample("photo-store.ts", upload("preflightPhoto(file);\nawait requireKey(tx, ctx);") + writes.replace("return 1;", "await gate(tx, ctx, aboutOrgId);"))).map((h) => h.file)).toEqual(["photo-store.ts#checkUpload"]);
+  });
+
+  it("report-rows-no-private-column", () => {
+    for (const column of ["streetAddress", "policyNumber", "lender", "phone", "caption", "notes", "retiredReason", "policy_number"]) {
+      expect(reportRowsReadNoPrivateColumn(sample("report-rows.ts", `select({ x: oversightLoans.${column} })`)), column).toHaveLength(1);
+    }
+    expect(reportRowsReadNoPrivateColumn(sample("report-rows.ts", "select({ g: oversightLoans.guaranteeNote, c: oversightLoans.currentBalanceCents })"))).toHaveLength(0);
+    // a column named only in a comment is not a read
+    expect(reportRowsReadNoPrivateColumn(sample("report-rows.ts", "/* never the notes */ select({})"))).toHaveLength(0);
+    expect(reportRowsReadNoPrivateColumn(undefined)).toHaveLength(1);
   });
 
   it("store-checks-its-key and reader-checks-key", () => {

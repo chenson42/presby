@@ -1,5 +1,5 @@
 /**
- * The four presbytery report CSV writers - docs/work-log/2026-11-15-presbytery-reports.md
+ * The six presbytery report CSV writers - docs/work-log/2026-11-15-presbytery-reports.md
  * (Phase 3 "CSV headers, exactly"). PURE. Every builder takes the same `data`
  * its reader hands the page, so the file is the table as shown.
  *
@@ -12,7 +12,7 @@
  *   - money is integer cents rendered by `centsToDecimal`, so an overpayment is
  *     `-12.00`, not text;
  *   - the whole file is assembled with `joinCsvLines` (CRLF, every line);
- *   - a UTF-8 byte-order mark is prepended HERE, for these four files only, so
+ *   - a UTF-8 byte-order mark is prepended HERE, for these six files only, so
  *     Excel shows accented names; `joinCsvLines` and the giving and
  *     reimbursement writers are untouched and carry no BOM.
  * Nothing is concatenated by hand: no `.join(",")` appears outside this file.
@@ -21,6 +21,9 @@
 import { centsToDecimal, csvIntegerCell, csvTextCell, joinCsvLines } from "@/lib/csv";
 import { PER_CAPITA_COPY, SUPPLY_CALL_TYPE_LABELS } from "./copy";
 import type { MembershipTrendData, PerCapitaData, ViabilityData, VacantPulpitsData } from "./derive";
+import type { Condition } from "@/lib/oversight/contract";
+import { formatBuildingType, formatCondition } from "@/lib/oversight/derive";
+import type { BuildingsData, InsuranceLoansData } from "./oversight-derive";
 
 export const CSV_BOM = "﻿";
 
@@ -55,6 +58,55 @@ export const PER_CAPITA_HEADER = [
   "payment_status",
   "paid_on",
   "note",
+] as const;
+
+/**
+ * Buildings (DECISION-348): one line per in-use building, and one line with only the
+ * congregation (and its city and county) for a congregation with none. NEVER in this
+ * file: a street address or a note.
+ */
+export const BUILDINGS_HEADER = [
+  "congregation",
+  "city",
+  "county",
+  "building",
+  "building_type",
+  "year_built",
+  "first_addition_year",
+  "second_addition_year",
+  "square_feet",
+  "roof_condition",
+  "plumbing_condition",
+  "hvac_condition",
+  "boiler_condition",
+  "sprinklers",
+  "fire_alarm",
+  "security_system",
+  "primary",
+] as const;
+
+/**
+ * Insurance and loans (DECISION-348): one line per active member congregation. Amounts are
+ * decimal dollars; a sum that leaves unrecorded figures out says how many it left out
+ * (`balance_unrecorded_loans`). NEVER in this file: a policy number, a lender, a street
+ * address or a note. `guarantee` is the loans' guarantee text (the one free-text column the
+ * design admits, R7), through the formula guard.
+ */
+export const INSURANCE_LOANS_HEADER = [
+  "congregation",
+  "carrier",
+  "policy_year",
+  "policy_expires_on",
+  "recent_claims",
+  "pool_interest",
+  "open_loans",
+  "original_amount",
+  "balance",
+  "balance_unrecorded_loans",
+  "grants",
+  "guarantee",
+  "appraised_value",
+  "buildings_without_appraisal",
 ] as const;
 
 function line(cells: readonly string[]): string {
@@ -114,6 +166,64 @@ export function buildViabilityCsv(data: ViabilityData): string {
     ]),
   );
   return file(VIABILITY_HEADER, lines);
+}
+
+/** Yes / No, and an empty cell for "not recorded" (a file never says "Not recorded" in a column). */
+function yesNo(value: boolean | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  return value ? "Yes" : "No";
+}
+
+export function buildBuildingsCsv(data: BuildingsData): string {
+  const lines = data.rows.map((row) => {
+    const b = row.building;
+    return line([
+      csvTextCell(row.name),
+      csvTextCell(row.city),
+      csvTextCell(row.county),
+      csvTextCell(b?.name ?? null),
+      csvTextCell(b ? formatBuildingType(b.buildingType) : null),
+      csvIntegerCell(b?.yearBuilt ?? null),
+      csvIntegerCell(b?.firstAdditionYear ?? null),
+      csvIntegerCell(b?.secondAdditionYear ?? null),
+      csvIntegerCell(b?.squareFeet ?? null),
+      csvTextCell(conditionText(b?.roofCondition)),
+      csvTextCell(conditionText(b?.plumbingCondition)),
+      csvTextCell(conditionText(b?.hvacCondition)),
+      csvTextCell(conditionText(b?.boilerCondition)),
+      csvTextCell(yesNo(b?.hasSprinklers)),
+      csvTextCell(yesNo(b?.hasFireAlarm)),
+      csvTextCell(yesNo(b?.hasSecuritySystem)),
+      csvTextCell(b ? yesNo(b.isPrimary) : null),
+    ]);
+  });
+  return file(BUILDINGS_HEADER, lines);
+}
+
+function conditionText(condition: Condition | null | undefined): string | null {
+  return condition === null || condition === undefined ? null : formatCondition(condition);
+}
+
+export function buildInsuranceLoansCsv(data: InsuranceLoansData): string {
+  const lines = data.rows.map((row) =>
+    line([
+      csvTextCell(row.name),
+      csvTextCell(row.insurance?.carrier ?? null),
+      csvIntegerCell(row.insurance?.policyYear ?? null),
+      csvTextCell(row.insurance?.policyExpiresOn ?? null),
+      csvTextCell(yesNo(row.insurance?.recentClaims)),
+      csvTextCell(yesNo(row.insurance?.poolInterest)),
+      csvIntegerCell(row.openLoans),
+      centsToDecimal(row.originalCents),
+      centsToDecimal(row.balanceCents),
+      csvIntegerCell(row.balanceUnrecorded),
+      centsToDecimal(row.grantsCents),
+      csvTextCell(row.guarantees.length === 0 ? null : row.guarantees.join("; ")),
+      centsToDecimal(row.appraisedCents),
+      csvIntegerCell(row.buildingsWithoutAppraisal),
+    ]),
+  );
+  return file(INSURANCE_LOANS_HEADER, lines);
 }
 
 const RATE_TEXT = /^\d+(\.\d+)?$/;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CALL_TYPE_LABELS } from "@/app/(org)/o/[slug]/admin/credentials/credential-labels";
-import { REPORTS } from "./contract";
+import { DASHBOARD_REPORT_KEYS, REPORTS } from "./contract";
 import { VIABILITY_LABELS, VIABILITY_NOT_ASSESSED } from "./derive";
 import {
   DASHBOARD_COPY,
@@ -60,7 +60,7 @@ describe("copy", () => {
 
 describe("dashboard copy (DECISION-342)", () => {
   it("the forbidden body names every report's permission phrase", () => {
-    for (const r of REPORTS) expect(DASHBOARD_COPY.forbidden.body).toContain(r.permissionPhrase);
+    for (const r of REPORTS.filter((x) => DASHBOARD_REPORT_KEYS.some((k) => k === x.key))) expect(DASHBOARD_COPY.forbidden.body).toContain(r.permissionPhrase);
     expect(DASHBOARD_COPY.forbidden.body).toMatch(/Roles/);
   });
 

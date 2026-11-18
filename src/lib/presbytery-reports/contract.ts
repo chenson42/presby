@@ -3,8 +3,10 @@
  * (DECISION-337). PURE: no imports, so a page, a route, a test and the
  * boundaries scan can all read it. The registry is the one place a report is
  * named: its segment under `admin/reports/`, its existing permission key, its
- * title and its CSV filename base. A fifth report has to be registered here,
- * and `contract.test.ts` pins that the route tree matches.
+ * title and its CSV filename base. A seventh report has to be registered here,
+ * and `contract.test.ts` pins that the route tree matches. Six reports since
+ * DECISION-348: Buildings and Insurance and loans (Congregation Oversight) join
+ * the four; the dashboard still has four cards and keeps `DASHBOARD_REPORT_KEYS`.
  */
 
 /** The existing global flag every report page and export sits behind (a toggle; bare isFlagEnabled). */
@@ -28,7 +30,14 @@ export const CREDENTIALS_FLAG = "org_portal.credentials";
 /** Reports are for presbyteries only. */
 export const REPORT_ORG_TYPES = ["presbytery"] as const;
 
-export const REPORT_KEYS = ["vacant_pulpits", "membership_trend", "viability", "per_capita"] as const;
+export const REPORT_KEYS = [
+  "vacant_pulpits",
+  "membership_trend",
+  "viability",
+  "per_capita",
+  "buildings",
+  "insurance_and_loans",
+] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
 export interface ReportDef {
@@ -36,7 +45,10 @@ export interface ReportDef {
   /** The directory under `admin/reports/`; never a UUID (the sibling is `[aboutOrgId]`). */
   readonly segment: string;
   readonly title: string;
-  /** One existing permission key per report; an export uses its page's key. */
+  /**
+   * One existing permission key per report; an export uses its page's key. Two reports
+   * may share a key (Viability and Buildings are both `congregation_oversight.manage`).
+   */
   readonly permission: string;
   /** Plain-language "you need to ..." for the locked card and the forbidden state. */
   readonly permissionPhrase: string;
@@ -76,7 +88,32 @@ export const REPORTS: readonly ReportDef[] = [
     permissionPhrase: "manage per-capita billing",
     filenameBase: "per-capita",
   },
+  {
+    key: "buildings",
+    segment: "buildings",
+    title: "Buildings",
+    permission: "congregation_oversight.manage",
+    permissionPhrase: "manage congregation oversight",
+    filenameBase: "buildings",
+  },
+  {
+    // Tier 2 (DECISION-345): the finance key also requires two-factor at sign-in.
+    key: "insurance_and_loans",
+    segment: "insurance-and-loans",
+    title: "Insurance and loans",
+    permission: "congregation_oversight.finance",
+    permissionPhrase: "manage congregation property finances",
+    filenameBase: "insurance-and-loans",
+  },
 ] as const;
+
+/**
+ * The four reports the dashboard (`/o/<slug>/admin/insights`) has a card for. The
+ * dashboard's "no key held is forbidden" rule reads THESE keys only, so a holder
+ * of the finance key alone (who has no dashboard card) still gets `forbidden`
+ * there, before the unkeyed roster count is reachable (DECISION-342).
+ */
+export const DASHBOARD_REPORT_KEYS = ["vacant_pulpits", "membership_trend", "viability", "per_capita"] as const;
 
 export const REPORT_SEGMENTS: readonly string[] = REPORTS.map((r) => r.segment);
 
@@ -94,7 +131,7 @@ export interface ReportAuditMetadata {
   organizationId: string;
   report: ReportKey;
   rowCount: number;
-  /** Exactly one of these groups is present, or none (vacant pulpits, viability). */
+  /** Exactly one of these groups is present, or none (vacant pulpits, viability, buildings, insurance and loans). */
   fromYear?: number;
   toYear?: number;
   billingYear?: number;

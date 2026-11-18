@@ -42,8 +42,12 @@ const ROSTER = [
   { id: "a", name: "Alder Creek" },
   { id: "b", name: "Birch Hollow" },
 ];
-const ALL_HELD = { held: { vacant_pulpits: true, membership_trend: true, viability: true, per_capita: true } };
-const NONE_HELD = { held: { vacant_pulpits: false, membership_trend: false, viability: false, per_capita: false } };
+const ALL_HELD = {
+  held: { vacant_pulpits: true, membership_trend: true, viability: true, per_capita: true, buildings: true, insurance_and_loans: true },
+};
+const NONE_HELD = {
+  held: { vacant_pulpits: false, membership_trend: false, viability: false, per_capita: false, buildings: false, insurance_and_loans: false },
+};
 const NOW = new Date("2026-11-16T15:00:00Z");
 
 const ok = <T>(data: T) => ({ kind: "ok" as const, data });
@@ -78,6 +82,17 @@ describe("getPresbyteryDashboard", () => {
     for (const reader of [mocks.getMembershipTrend, mocks.getVacantPulpits, mocks.getPerCapita, mocks.getViability]) {
       expect(reader).not.toHaveBeenCalled();
     }
+  });
+
+  it("holding only the two oversight reports' keys (the finance key alone) is forbidden: they have no card here (DECISION-348 — regression for the finance-only viewer reaching the roster count)", async () => {
+    mocks.getReportsHub.mockResolvedValue({ held: { ...NONE_HELD.held, insurance_and_loans: true } });
+    expect(await getPresbyteryDashboard(VIEWER, NOW)).toEqual({ kind: "forbidden" });
+    expect(mocks.readRoster).not.toHaveBeenCalled();
+    expect(mocks.withOrgContext).not.toHaveBeenCalled();
+    // A "buildings" flag with no viability flag cannot occur (one key), but must not open the page either.
+    mocks.getReportsHub.mockResolvedValue({ held: { ...NONE_HELD.held, buildings: true, insurance_and_loans: true } });
+    expect(await getPresbyteryDashboard(VIEWER, NOW)).toEqual({ kind: "forbidden" });
+    expect(mocks.readRoster).not.toHaveBeenCalled();
   });
 
   it("a failed hub read is error, never forbidden", async () => {

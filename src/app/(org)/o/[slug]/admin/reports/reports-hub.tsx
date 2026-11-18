@@ -18,6 +18,10 @@ function cardText(key: ReportKey, orgName: string): { description: string; sourc
       return { description: HUB_COPY.cards.viability.description(orgName), source: HUB_COPY.cards.viability.source };
     case "per_capita":
       return HUB_COPY.cards.per_capita;
+    case "buildings":
+      return HUB_COPY.cards.buildings;
+    case "insurance_and_loans":
+      return HUB_COPY.cards.insurance_and_loans;
   }
 }
 

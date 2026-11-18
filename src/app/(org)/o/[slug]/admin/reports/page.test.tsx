@@ -58,7 +58,7 @@ vi.mock("@/lib/presbytery-reports/hub", () => ({
 }));
 
 const ALL_HELD = {
-  held: { vacant_pulpits: true, membership_trend: true, viability: true, per_capita: true },
+  held: { vacant_pulpits: true, membership_trend: true, viability: true, per_capita: true, buildings: true, insurance_and_loans: true },
 };
 
 const listStatisticsGrants = vi.fn();
@@ -429,7 +429,7 @@ describe("ReportsPage — the reports hub (docs/work-log/2026-11-15-presbytery-r
     render(el);
   }
 
-  it("shows four cards, each a whole-card link to its report when the key is held", async () => {
+  it("shows six cards, each a whole-card link to its report when the key is held", async () => {
     await renderOk();
     const hub = within(screen.getByTestId("reports-hub"));
     expect(hub.getByRole("heading", { name: "Reports and exports" })).toBeTruthy();
@@ -439,6 +439,8 @@ describe("ReportsPage — the reports hub (docs/work-log/2026-11-15-presbytery-r
       "/o/northern-reach/admin/reports/membership-trend",
       "/o/northern-reach/admin/reports/viability",
       "/o/northern-reach/admin/reports/per-capita",
+      "/o/northern-reach/admin/reports/buildings",
+      "/o/northern-reach/admin/reports/insurance-and-loans",
       "/help/presbytery-reports",
     ]);
     expect(hub.getByText(/members of Presbytery of the Northern Reach today/)).toBeTruthy();
@@ -446,7 +448,7 @@ describe("ReportsPage — the reports hub (docs/work-log/2026-11-15-presbytery-r
   });
 
   it("a locked card is shown, says why, and is not a link", async () => {
-    await renderOk({ held: { vacant_pulpits: false, membership_trend: true, viability: false, per_capita: true } });
+    await renderOk({ held: { vacant_pulpits: false, membership_trend: true, viability: false, per_capita: true, buildings: true, insurance_and_loans: true } });
     const hub = within(screen.getByTestId("reports-hub"));
     expect(hub.getAllByText("Locked")).toHaveLength(2);
     expect(hub.getByText("You need permission to manage credentials. An administrator can give it under Roles.")).toBeTruthy();
@@ -465,7 +467,7 @@ describe("ReportsPage — the reports hub (docs/work-log/2026-11-15-presbytery-r
   });
 
   it("no hub string contains 'don't have permission to manage' (the existing e2e cases match exactly one element)", async () => {
-    await renderOk({ held: { vacant_pulpits: false, membership_trend: false, viability: false, per_capita: false } });
+    await renderOk({ held: { vacant_pulpits: false, membership_trend: false, viability: false, per_capita: false, buildings: false, insurance_and_loans: false } });
     expect(screen.getByTestId("reports-hub").textContent).not.toMatch(/don.t have permission to manage/i);
   });
 

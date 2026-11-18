@@ -221,6 +221,14 @@ export const MODULES: Record<string, string> = {
   worship_service_teams: "V. Worship",
   worship_assignments: "V. Worship",
   worship_blockouts: "V. Worship",
+  // Congregation records, Increment 1 (drizzle/0089, src/lib/db/domain/oversight.ts):
+  // the presbytery's own records about each member congregation (DECISION-344).
+  oversight_profiles: "M. Presbytery oversight",
+  oversight_buildings: "M. Presbytery oversight",
+  oversight_building_photos: "M. Presbytery oversight",
+  oversight_building_appraisals: "M. Presbytery oversight",
+  oversight_insurance_years: "M. Presbytery oversight",
+  oversight_loans: "M. Presbytery oversight",
 };
 
 /**

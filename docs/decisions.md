@@ -4,6 +4,126 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-351 — Import contract and deploy order.**
+
+**Status:** Resolved (tech-lead Phase 3) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile` (both increments; full text and T-rulings in the parent work-log's Phase 3)
+
+No importer is committed (T11). Migration 0089 is applied to an environment *before* the code that reads it. The import contract below is the operator's session's whole interface.
+
+---
+
+**DECISION-350 — Oversight surface structure.**
+
+**Status:** Resolved (tech-lead Phase 3) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile` (both increments; full text and T-rulings in the parent work-log's Phase 3)
+
+The record page is a sections page; the assessment form has its own route (T1); the list and record open for either key and each section reads under its own key in its own transaction (T7); sections are computed before the page's return with `Promise.all`, never as nested async components; no `loading.tsx` and no `route.ts` under the tree.
+
+---
+
+**DECISION-349 — Congregation-record shapes.**
+
+**Status:** Resolved (tech-lead Phase 3) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile` (both increments; full text and T-rulings in the parent work-log's Phase 3)
+
+Closed lists and tri-state booleans (T2); identity columns not null (T3); appraisals immutable (T4); `row_version` optimistic check on the four editable tables (T5); money is `bigint` cents capped at $1,000,000,000 (100,000,000,000 cents); every row carries `provenance` (`presbytery_entered` or `imported`), immutable after insert; photos' `is_cover` and caption are the only photo columns that change, plus the removal pair.
+
+---
+
+**DECISION-348 — Two presbytery reports join the registry: Buildings (`congregation_oversight.manage`) and Insurance and loans (`congregation_oversight.finance`).**
+**Status:** Resolved (architect Phase 2; Phase 3 carried it) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile` (Increment 2)
+
+- **Shape.** Registry entries, segments `buildings` and `insurance-and-loans`, and readers in `src/lib/presbytery-reports/`, following DECISION-337/339 unchanged:
+  - one transaction serves the page and the export;
+  - the key is checked live inside it;
+  - the CSV and the audit row are produced in that transaction.
+- **Rows** come from `src/lib/oversight/report-rows.ts`.
+- **Roster.** Active-lifecycle members only (`roster.ts`).
+- **Exports** omit street addresses, policy numbers and free-text notes. Text goes through the formula guard and cents through `csvIntegerCell`.
+- **No dashboard card.**
+
+---
+
+**DECISION-347 — Oversight pages pass the presbytery gate; either key opens the record; each section reads under its own key; the superseded row fields go dormant and stop being written.**
+**Status:** Resolved (architect Phase 2; Phase 3 carried it) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile`
+
+- **The gate.**
+  - `gateOversightPage` is a third named export over `gatePresbyteryPage`, with the flag union `REPORTS_FLAG | INSIGHTS_FLAG | OVERSIGHT_FLAG`.
+  - Every oversight page calls it, which adds the Node-side second-factor recheck the shipped pages lacked (F452).
+  - Every oversight action calls `assertOrgSession` and checks keys with `holdsPermissions`.
+  - Every id segment 404s on a non-UUID before any read, and every child id resolves only under its congregation and presbytery.
+- **Access.**
+  - A holder of either key opens the list and the record; neither key gives the forbidden state.
+  - Each section is a separate reader with its own key check and transaction; a locked section is denied in that transaction, not just hidden.
+- **The superseded fields.**
+  - `insurance_carrier` and `insurance_expires_on` on `congregation_oversight` are no longer read or written by any reader or writer. Writing them as `?? null` would have erased production values (F451).
+  - The columns stay, and any legacy values convert only in the operator's import session.
+  - `buildings_notes` continues as "Property notes".
+
+---
+
+**DECISION-346 — Building photos use the person-photo refusal order through an extracted `src/lib/storage/image/` (DECISION-312's revisit clause); the `sharp` list stays at two files.**
+**Status:** Resolved (architect Phase 2; Phase 3 carried it) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile` (Increment 2)
+
+- **The extraction.** A `refactor:` commit moves `person-photos/image.ts` to `storage/image/photo.ts`, the image limits and `ImageRefusal` to `storage/image/limits.ts`, and the client `downscale.ts` to `storage/image/downscale.ts`.
+  - `processPhoto` takes a required thumbnail gravity: `top` for people, `centre` for buildings.
+  - Person-photo output is unchanged byte for byte, and the moved tests pass unchanged.
+- **The closed list.** `SHARP_FILES` becomes `src/lib/storage/image/photo.ts` and `src/lib/storage/image-sanitize.ts`, updated in all three places that assert it.
+- **Building photos.**
+  - Identical caps: 1,000,000-byte upload, 16 MP, 6,000 px, master 1,200 px and 400,000 bytes, 160 px WebP thumbnail.
+  - 10 live per building, counted under a row lock.
+  - Private audience, with `organization_id` the presbytery.
+  - A Server Action at 1 MB with a mandatory client downscale, and every check before decoding.
+  - Served as inline `data:` URIs: thumbnails, plus one master via `?view=`. No route.
+- **Residuals.** Orphaned blobs on a failed final transaction, and `bytea` growth.
+- **Revisit if** a consumer needs a different refusal order. That would be a third importer, and its own Phase 2.
+
+---
+
+**DECISION-345 — `congregation_oversight.finance` (tier 2, two-factor) reaches a presbytery through its founding-administrator bundle. Supersedes the mechanism of orchestrator ruling 1 (F450).**
+**Status:** Resolved (architect Phase 2; orchestrator confirmed option A 2026-11-17, Phase 3 carried it) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile`
+
+- **The defect.** `assertPermissionSubset()` runs on role creation, template adoption, role edits and grants, so a key no one at an organization holds can never be granted there (F450; the F150/F292 precedent, and the open F362).
+- **The key.** Module `presbytery`, tier 2, `requires_two_factor = true`. It covers appraisals, insurance years and loans and their report and export.
+- **How it reaches a presbytery.** It joins the presbytery arm of `presby_founding_administrator_permission_keys`.
+  - Existing presbytery `founding_administrator` roles are backfilled, with an apply-time count.
+  - The TypeScript mirror, the parity golden and the parity test move with it.
+  - The founding administrator delegates it through a custom role.
+- **Rejected.**
+  - The `presbytery_stated_clerk` template: DECISION-119 found that buildings and insurance fail DECISION-078's test for the clerk.
+  - An operator SQL grant: platform-position authority with no sanctioned path, against Two Hierarchies.
+- **Commission and delegation.** Not barred from those arms; DECISION-175's reason is per-member giving privacy.
+- **Known violation.** CLAUDE.md records it under No Role Carries a Wildcard (`paper`; writes audited, reads not).
+- **Coordination.** F362 redefines the same function. The second migration to land carries both bodies.
+
+---
+
+**DECISION-344 — Congregation records are the presbytery's own `oversight_*` tables: one table, one key, children pinned to their building's congregation by composite key, soft removal only, one module with named writers.**
+**Status:** Resolved (architect Phase 2; Phase 3 carried it) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile`
+
+- **Tables.** Profile, buildings, building photos, appraisals, insurance years and loans are six tables in migration 0089.
+  - `organization_id` is the presbytery. They are never the congregation's own record (DECISION-119/120).
+  - They are tiered by table, never by column:
+    - tier 1, `congregation_oversight.manage`: profile, buildings, photos;
+    - tier 2, `congregation_oversight.finance`: appraisals, insurance years, loans.
+  - The profile is its own table, not columns on `congregation_oversight`, whose writer is a full-row upsert.
+- **Keys.** Every table declares `unique (id, organization_id)`. Buildings also declare `unique (id, organization_id, about_org_id)`, which photos, appraisals and a loan's optional building reference. A child cannot name another congregation's building.
+- **About-org trigger.** Top-level tables carry the 0045 trigger as of the current date.
+- **Grants and removal.**
+  - `presby_app` holds SELECT, INSERT and UPDATE (column-limited on photos), never DELETE. `presby_platform` holds nothing.
+  - Removal is a one-way `removed_at`/`removed_by` pair guarded on every connection.
+- **Values.**
+  - Money is `bigint` integer cents with range CHECKs.
+  - Every fact column is nullable for the one-time import.
+  - `provenance` is `presbytery_entered` or `imported`.
+- **Module.** `src/lib/oversight/` owns the tables.
+  - `store.ts` is the only writer of five tables and `photo-store.ts` of the sixth.
+  - Reads are `reads.ts` and `report-rows.ts`.
+  - Audit is in-transaction via `insertAuditRow`.
+  - `boundaries.test.ts` pins the name list, the writers, the absence of an owner connection, the absence of a route handler and a `loading.tsx` under the oversight tree, and the private blob audience.
+  - `src/lib/presbytery.ts` names none of the new tables.
+- **Revisit if** a congregation-owned property record arrives (that is a separate, congregation-owned table with publication upward), or a second policy per year is needed.
+
+---
+
 **DECISION-343 — The presbytery dashboard map is a sibling coordinate reader behind `congregation_oversight.manage`, one pure coordinate rule shared by the write, the form and the reader, and a Leaflet island contained in two client files.**
 
 **Status:** Resolved (architect Phase 2; tech-lead Phase 3) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-presbytery-dashboard-map` (Increment 4b, slice two: the pin map above the viability list; builds on DECISION-122 and DECISION-342)

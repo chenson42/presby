@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below); amendment A after QA run 1 | Design complete | 2026-11-18 |
 | 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | Complete (B1 to B4; next Phase 5, qa) | — | 2026-11-18 |
-| 5 — Verification | qa | Complete (run 1) | FAIL | 2026-11-18 |
+| 5 — Verification | qa | Complete (run 2; run 1 FAIL above it) | PASS | 2026-11-18 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -662,6 +662,195 @@ Everything else passed: typecheck, lint, build, all ten tripwires, every e2e run
 **Handoff:** **tech-lead** (Phase 3 loop-back) for amended C1, C10 and C12 strings, covering items 2 to 4. It should also ratify the off-table strings and rule on the F455 audit sentence. Then **database-admin** (items 1, 3 and 5, with 0089 corrected in place because it is unreleased) and **ux-developer** (items 2 and 4). Then QA run 2, which re-runs `blob-audience.db.test.ts`, D6, `npm run check`, the help walk and the specs touching the changed strings.
 
 Logs, scripts and walk screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa5/`.
+
+---
+
+## Run 2 (qa)
+
+**Date:** 2026-11-18
+**Verified by:** qa
+**Tree:** `pipeline/congregation-profile` at `8fe22fbf` in `/Users/cshenso/git/presby-platform/presby-profile`. I did not modify it, did not use `git stash`, and printed no credentials (env vars checked by presence only). `git status` was clean after every run. One note: running D6 writes a temporary `scripts/.seed-dev-pre0089.<pid>.sql` and deletes it on exit; I confirmed nothing was left behind.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**.
+- `npm run lint` (`--max-warnings=0`): **PASS**.
+- `npm run check`: **PASS**, all ten tripwires. Help check: 34 entries, 30 published, 30 content files, 7 images.
+- `npm run build`: **PASS**. A full `next build` ran inside the production lane: compile, TypeScript, 86 static pages, route table.
+
+## Unit Tests
+
+- **Full unit suite, no database** (`npm test -- --no-file-parallelism`, no database URL in the environment): 915 files passed, 159 skipped. Tests: 14,963 passed, 4,254 skipped, **0 failed**, 316s.
+  - Every skip is gated on the database (plus the one sample test). Compared with run 1 there is one more file (`congregation-records-nav.test.ts`) and one more skipped test (the new `reads.db` case). All of them run in the next item.
+- **Whole database-backed suite, in CI's order, serially, on a fresh `scratch_qa5r2_db`** (pipeline-branch compute):
+  - Steps: `db:migrate`, `check:schema-parity`, `db:seed`, `seed-dev.sql`, `db-baseline.sql`, `install-test-helpers.sql`, then `vitest run --no-file-parallelism`.
+  - **1,074 of 1,074 files passed. 19,216 tests passed, 1 skipped (the sample test), 0 failed.** Took 110.8 minutes.
+  - The scratch database was dropped afterwards; no `scratch_qa5r2*` database remains.
+  - `blob-audience.db.test.ts` (run 1 item 1) now passes in this run.
+- **Isolation suites, all as `presby_app` (`rolbypassrls = f`):**
+  - Full `scripts/test-rls.sql` on a fresh `scratch_qa5r2_rls` (CI's test-rls order): exit 0, 2,158 passes, 0 errors, "Section 89 (congregation records) complete". It includes the new 89b description assertion. Dropped afterwards.
+  - `scripts/oversight/test-rls-89.sql` on that fresh database: exit 0, 172 passes, 0 errors.
+  - `scripts/oversight/test-rls-89.sql` on the pipeline branch: exit 0, 172 passes, 0 errors.
+- **D6 (`scripts/oversight/test-0089-migration.sh`) on a fresh `scratch_qa5r2_d6`: PASS, exit 0.** Dropped afterwards. Step by step:
+  - Step 2: the prerequisite refusal.
+  - Step 3: `seed-dev.sql` with the oversight include deferred.
+  - Step 4: the backfill notice is 1, and the new "manage description no longer claims insurance" check passes.
+  - Step 5: the second apply produces the same fingerprint (`dd3261d4…`), with row digest and counts unchanged.
+  - Step 6: both RLS suites pass.
+  - Step 7: the runner path leaves the fingerprint unchanged.
+
+## End-to-End Tests
+
+- **Flag state:**
+  - Before e2e I reset the global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`). That leaves 38 flags with 9 on: `auth.local_login`, `auth.require_2fa`, `org_portal.committees`, `.communications`, `.home_v2`, `.reports`, `platform.merged_home`, `sites.public_render`, `ui.brand_theming`.
+  - My attempt to record the pre-reset state failed on a quoting error, so I have no record of it. The implementer reported `org_portal.oversight` off.
+  - The specs left the flags at the baseline (diffed after the run).
+  - I switched `org_portal.oversight` on only for my 360px walk and switched it back. **The branch is left at the CI baseline.**
+  - Before resetting, I confirmed `.env.local` points at a different endpoint from the main checkout's (compared host hashes only).
+- **Dev lane:** my own server on 3104 with the brief's environment; `E2E_BASE_URL=http://localhost:3104`, `E2E_ALLOW_SHARED_DB=true`, `--project=chromium`. Stopped by PID (51925 and 51905); 3104 confirmed free.
+  - **73 of 73 passed**, 5.9 minutes, no skips or retries.
+  - By spec: `oversight-records` 9, `oversight-finance` 8, `oversight-founder` 4, `presbytery-oversight` 9, `presbytery-dashboard` 7, `hydration/oversight-forms` 2, `totp-full-login` 1, `admin-organizations` 25, `designation-revoke` 8.
+  - The 360px case now covers the assessment form. The list case asserts "1 building" and then "None in use".
+- **Map lane** (`PW_MAP=1`, its own fresh server on 3104 from the config, `E2E_BASE_URL=http://localhost:3104`): **10 of 10 passed**, 42 seconds. 3104 free afterwards.
+- **Production lane** (`PW_PROD_BUILD=1 PW_PROD_PORT=3105`, `E2E_BASE_URL` unset, `npm run test:e2e:prod`, both projects): **117 of 117 passed**, 6.2 minutes, both `hydration/oversight-forms` cases included. 3105 free afterwards.
+- **Auth-touching gate:** the diff does not touch auth files. `totp-full-login` passed, and the founder spec ran sign-in, `/totp` and forced enrolment with real codes.
+- **Full chromium suite: not run.** The fix pass touches no proxy, auth file, layout, `playwright.config.ts`, `e2e/support` file or shared component (`src/components/oversight/*` is oversight-only). The rest relies on the PR's CI run.
+
+Failures: none.
+
+## Regression Tests Added
+
+I showed each fix-pass test failing first myself. I used a `git archive HEAD` copy at `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa5r2/red/`, with only the source file reverted to `6323d304` and the new tests kept.
+
+| Item | Test (exact text) | Red on old code | Green on HEAD |
+|---|---|---|---|
+| A1 help navigation (run 1 item 2) | `src/lib/help/congregation-records-nav.test.ts`, 2 tests | Expected the body to contain `choose "Congregation Oversight" under…`; labels lacked "Governance & Courts" | yes |
+| A5 audit sentence | same file, "does not claim every change is recorded…" | Body contained "Every change is recorded" | yes |
+| A3 "None in use" (run 1 item 4) | `src/lib/oversight/derive.test.ts`: expected "None in use", got "Not recorded". `oversight/page.test.tsx` "…says None in use, not Not recorded" | both red | yes |
+| A3 reader | `src/lib/oversight/reads.db.test.ts` (pipeline branch), with only `reads.ts` reverted | 3 red: the key list, `{2,1}` and the new retired-only / removed-only case | 24 of 24 |
+| A2 manage description (run 1 item 3) | `scripts/oversight/test-rls-89.sql:366` (89b) | Fresh `scratch_qa5r2_red` built with 0089 minus the `update`: the description read the 0038 text, and the assertion failed ("expected 1, got 0"), exit 3 | After applying HEAD's `update` only: 172 passes, exit 0. Dropped afterwards |
+| A6 back link | `assessment/edit/page.test.tsx` "…a 44px control (min-h-11) — regression for the assessment back link at 360px" | red (old class string) | yes |
+| f4190dd3 touch targets | `assessment/edit/edit-form.test.tsx` "…44px controls (min-h-11) — regression for the assessment form at 360px" | red (old local select class) | yes |
+| Run 1 item 1 | `blob-audience.db.test.ts:404` name pin | red in run 1 | green in this run's database suite |
+| Run 1 item 5 | D6 harness | exited 1 at step 3 in run 1 | PASS above |
+
+Seven unit tests were red together across the five pure files, and 67 of 67 were green on HEAD.
+
+Each copy fix's test asserts the property, not the fix's own wording:
+- The navigation test derives the tile name and heading from `PORTAL_TILES` and `DOMAIN_LABELS`, so it also fails if the tile moves.
+- The description assertion pins the exact string.
+
+**Not re-shown by me:** the e2e versions of "None in use" and the 44px assessment form failing before the fix. The implementer reports both red-then-green; the unit and database tests above pin the same behaviour.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100% (run 1)
+- `src/lib/two-factor.ts`: 91.11% (run 1)
+- `src/lib/flags.ts`: 100% (run 1)
+
+The fix pass touches none of the three, so this rests on run 1.
+
+## Feature-Gate Audit
+
+The fix pass changed no route, server action or gate. I read the bodies of everything it touched:
+
+| Route or action | Signed in + 2FA recheck | Tenant key check present | Correct key |
+|---|---|---|---|
+| `readOversightList` (`reads.ts`, grouped buildings query changed) | unchanged (`gateOversightPage`) | yes. The new query sits inside the `if (manage)` branch, after `holdsPermissions`, and the query count is unchanged (pinned by `reads.db.test.ts`) | manage |
+| Page `assessment/edit/page.tsx` (link swapped to `BackLink`) | unchanged | unchanged (`getCongregationOversightDetail`) | manage |
+| `oversight-list.tsx`, `edit-form.tsx` | render only | n/a | n/a |
+
+- No `route.ts` or `"use server"` action is in the fix-pass diff.
+- No `console.log` and no native dialogs.
+
+**Schema/RLS:** the only schema change is a replay-safe `update permissions` in 0089 section 1. It was probed on the live catalog:
+- The description changed on fresh and branch databases.
+- The second apply matches nothing (D6 fingerprint is identical).
+- 0038 is not edited.
+- Run 1's grant, policy and FORCE audit stands; the six tables' DDL is unchanged.
+
+## Copy Truthfulness
+
+Strings changed by the fix pass: the help navigation sentence and its `labels`, the help audit sentence, the `congregation_oversight.manage` description, and the list cell "None in use". Every one is in amendment A's tables.
+
+- [x] **Every added or changed string is in the design's Copy table.** It is in amendment A (A1, A2, A3, A5). A4 ratified run 1's off-table strings.
+- [x] **The query behind each claim was opened.**
+  - "None in use" is reachable only when the live retired count is above 0 (`reads.ts` grouped `filter`, `removed_at is null`).
+  - The audit sentence:
+    - Every `store.ts` write calls `insertAuditRow` in its own transaction (14 call sites).
+    - Metadata is ids and changed field names only.
+    - The assessment action audits after commit with `viabilityScore` only (F455), which the sentence now states.
+  - The manage description holds for every surface the key opens:
+    - Profile, Assessment and Buildings.
+    - Reads of the assessment through the viability report, its CSV export and the map ("See … viability assessment").
+    - It does not mention insurance.
+- [x] **Each instruction was traced to its role.** The help step "Open your presbytery's page, choose "Congregation Oversight" under "Governance & Courts", then choose "Open"":
+  - The tile is `category: "operate"`, `domain: "governance"` (`tiles.ts:563-570`).
+  - The home page renders `visiblePortalTiles("operate")` through `DomainTileSections` when `org_portal.home_v2` is on, which is its seed default.
+  - Walked as `presbytery-clerk` at 360px: one "Governance & Courts" section containing the "Congregation Oversight" link → list (3 "Open" links) → record with the five sections, in the order the help names.
+  - The Roles checklist shows the key beside each description, so a reader can match the help's permission names.
+- [x] **Older strings about the same subject were grepped.**
+  - "buildings/insurance", "insurance notes" and "Record viability assessments" no longer appear in any user-facing source. They survive only in historical docs, code comments and the 0038 line the `update` overrides.
+  - The help tree no longer says "Administration" about this tile.
+  - No help page names the list cell.
+  - `presbytery-reports.md:76` still holds.
+- [x] **Help diff walked**, at 360px in a real browser (`/help/congregation-records`, light and dark):
+  - The new navigation and audit sentences are present.
+  - "Every change is recorded" and `Open "Administration"` are absent.
+  - No sideways scroll.
+  - "Governance & Courts" (the new label) is on screen on the portal home.
+  - No image under `src/content/help/images/` changed, so there were no pixels to read.
+  - I opened the walk screenshots: invented fixture names only.
+
+**Copy truthfulness: PASS.**
+
+**Observations** (not counted as failures; for the orchestrator or tech-lead):
+1. **Pre-existing, not this pipeline's:**
+   - The shared `admin/layout.tsx` "Back to portal" link is 20px tall at 360px on every `/admin` page. `smallControls` skips it by name with a comment saying so.
+   - The assessment form's viability select draws no `ChevronDown`, while the other oversight selects do. It had none before the fix pass either; the shared class only adds the `pr-8` padding the chevron uses.
+
+   Either is a candidate TODO line.
+2. **A4's loan screen-reader follow-up** is still waiting for the orchestrator to add it to `docs/TODO.md` at integration.
+3. **f4190dd3's trailer** says `Discovered-In: Phase-5`. The implementer found the bug during the Phase 4 fix pass, when it added the page to the 360px list, so `Phase-4` may be the more accurate value for `stats:escape`. This is a judgement call, not a grammar failure.
+
+## Verdict
+
+**PASS**
+
+- All five run 1 items are resolved:
+  1. the blob pin passes;
+  2. the help navigation is true and walked;
+  3. the manage description is corrected in place in 0089 and pinned;
+  4. the list says "None in use";
+  5. D6 passes.
+- Amendment rows 6 (back link, 44px) and 7 (audit sentence) are resolved, and so is f4190dd3 (select and coordinate boxes, 44px, measured at 44 in the browser).
+- Each fix's test was shown red on the old code and green on HEAD.
+
+**Run scope:**
+- **Ran:**
+  - typecheck, lint, `npm run check`, build;
+  - the full unit suite (no database);
+  - the whole database-backed suite on a fresh scratch database in CI's order, serially;
+  - the full `test-rls.sql` and `test-rls-89` on a fresh database and `test-rls-89` on the branch, all as `presby_app`;
+  - D6;
+  - the dev lane (nine specs), the map lane and the production lane;
+  - the 360px walk.
+- **Not re-run:**
+  - the full chromium e2e suite (relies on the PR's CI);
+  - coverage on the three critical modules (untouched; relies on run 1);
+  - the e2e red-first runs (relies on the implementer's report).
+
+---
+
+**Per-Phase Status row**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (run 2) | PASS | 2026-11-18 |
+
+**Handoff:** **analyst (Phase 6).** Read the five help pages as their reader, run the founding-administrator walk, and check every page at 360px as the people each path creates. The global flags are at the CI baseline, so switch `org_portal.oversight` on for the walk.
+
+Logs, scripts, the red copy and the walk screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa5r2/`.
 
 ---
 

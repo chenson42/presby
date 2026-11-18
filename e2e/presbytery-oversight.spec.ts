@@ -48,9 +48,11 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: "Congregation Oversight" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Congregation" })).toBeVisible();
-    await expect(page.getByRole("cell", { name: E2E_ORGS.alpha.name })).toBeVisible();
-    await expect(page.getByRole("cell", { name: E2E_ORGS.beta.name })).toBeVisible();
-    await expect(page.getByRole("cell", { name: E2E_ORGS.gamma.name })).toBeVisible();
+    // `exact`: each row's "Open <name>" link (the sr-only name, congregation profile Increment 1) sits in its own cell,
+    // and a substring match would find two cells per congregation.
+    await expect(page.getByRole("cell", { name: E2E_ORGS.alpha.name, exact: true })).toBeVisible();
+    await expect(page.getByRole("cell", { name: E2E_ORGS.beta.name, exact: true })).toBeVisible();
+    await expect(page.getByRole("cell", { name: E2E_ORGS.gamma.name, exact: true })).toBeVisible();
 
     // Sibling state absent: the "no permission" copy never appears alongside
     // a real, rendered table.
@@ -61,18 +63,19 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
     await context.close();
   });
 
+  // Cases 2 and 6 to 9 open the assessment at its own page, `/oversight/<id>/assessment/edit` (the record page at
+  // `/oversight/<id>` is now the five-section page), and the form no longer has carrier or expiry fields: both moved
+  // to the tier-2 insurance records (congregation profile Increment 1, T1 and R8).
   test("2. presbytery clerk records an assessment; the list reflects it and an audit row is written", async ({
     browser,
   }) => {
     const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
     const page = await context.newPage();
 
-    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
+    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}/assessment/edit`);
     await expect(page.locator("#oversight-viability")).toBeEnabled();
     await page.locator("#oversight-viability").selectOption("2");
     await page.locator("#oversight-buildings").fill("Roof replaced 2026; no outstanding repairs.");
-    await page.locator("#oversight-insurance-carrier").fill("E2E Fixture Mutual");
-    await page.locator("#oversight-insurance-expires").fill("2027-06-30");
     await page.getByRole("button", { name: /^save$/i }).click();
 
     await expect(page.getByText(/oversight record saved/i)).toBeVisible({ timeout: 10_000 });
@@ -178,7 +181,7 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
     });
     const page = await context.newPage();
 
-    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
+    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}/assessment/edit`);
     await expect(page.locator("#oversight-viability")).toBeEnabled();
     await page.locator("#oversight-viability").selectOption("3");
     await page.getByRole("button", { name: /^save$/i }).click();
@@ -215,7 +218,7 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
   test("7. the Map location group names itself, hints each box, and refuses a half-set pair or 0 and 0 inline", async ({ browser }) => {
     const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
     const page = await context.newPage();
-    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
+    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}/assessment/edit`);
     const lat = page.locator("#oversight-latitude");
     const lng = page.locator("#oversight-longitude");
     await expect(lat).toBeEnabled();
@@ -250,7 +253,7 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
   test("8. pasting a pair into either box splits it into both, and says so", async ({ browser }) => {
     const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
     const page = await context.newPage();
-    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
+    await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}/assessment/edit`);
     const lat = page.locator("#oversight-latitude");
     const lng = page.locator("#oversight-longitude");
     await expect(lat).toBeEnabled();
@@ -281,7 +284,7 @@ test.describe("Presbytery oversight (2026-09-28-presbytery-e2e)", () => {
     const context = await browser.newContext({ storageState: storageStatePath("presbytery-clerk") });
     const page = await context.newPage();
     try {
-      await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}`);
+      await page.goto(`/o/${E2E_ORGS.presbytery.slug}/admin/oversight/${E2E_ORGS.alpha.id}/assessment/edit`);
       await expect(page.locator("#oversight-latitude")).toBeEnabled();
       await page.locator("#oversight-latitude").fill("39.9612");
       await page.locator("#oversight-longitude").fill("-82.9988");

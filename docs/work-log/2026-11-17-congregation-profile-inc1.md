@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below); amendment A after QA run 1 | Design complete | 2026-11-18 |
 | 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | Complete (B1 to B4; next Phase 5, qa) | — | 2026-11-18 |
 | 5 — Verification | qa | Complete (run 2; run 1 FAIL above it) | PASS | 2026-11-18 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete (Increment 1) | SHIP WITH NOTES | 2026-11-18 |
 
 ---
 
@@ -856,35 +856,167 @@ Logs, scripts, the red copy and the walk screenshots are in `/private/tmp/claude
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Tree:** `/Users/cshenso/git/presby-platform/presby-profile`, branch `pipeline/congregation-profile`, HEAD `51206e16`. **Date:** 2026-11-18.
+
+I read nothing in the tree except through the browser and read-only queries. I did not use `git stash` and printed no credentials. My throwaway scripts and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/p6/`. I stopped my dev server on port 3104 by PID (72200). The fixture is torn down, with 0 leftover organizations. `org_portal.oversight` and `org_portal.roles` are back to their original state, off, and `git status` is clean.
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.** Nothing blocks the release. Every note below becomes a tracked follow-up, and the first is a required release-time step, not a backlog item.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> On a presbytery, staff now open a congregation from Congregation Oversight and keep the presbytery's own record of it: a profile, the assessment, buildings, and (behind a second, two-factor key) insurance, loans and appraisals. A new founding administrator holds both keys with no extra step and can give the finance key to someone else through Roles.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **The founding-administrator walk matches Phase 1 and Phase 2 R2.**
+  - I ran it as a founder minted through `presby_apply_founding_administrator`, on a new fixture presbytery at 360px. Her only grants were `founding_administrator` and `presbytery_stated_clerk`.
+  - **Day-one empty state.** The portal home shows "Congregation Oversight" under "Governance & Courts". The record opens with all five sections.
+    - Each section has its own button and a human empty line. Examples: "No buildings are recorded for this congregation.", "No insurance is recorded for this congregation." and "No loans are recorded for this congregation."
+    - No zero is shown for something unrecorded.
+  - **The founder does the finance work from the empty state.** I recorded:
+    - a profile;
+    - a building, after an empty submit that showed both messages under their fields ("Enter a name for the building." and "Choose a type.");
+    - an appraisal;
+    - an insurance year (the 2025 expiry showed an "Expired" badge in words);
+    - a loan (the empty submit gave "Choose the kind of loan.").
+  - **Reversible actions behave.**
+    - Mark paid off showed "$0 as of {date}" and "Paid off {date}".
+    - Reopen this loan worked.
+    - Retire showed "Sold on {date}", cleared the Primary mark, and the list then said "None in use".
+- **The role grant and forced enrolment work.**
+  - The founder created "Finance Reader" on Roles. The checklist put the finance key under tier 2 with exactly the description the help quotes.
+  - She granted it to a person who had no role. Before the grant that person saw only the permission refusal: no congregation name, no section.
+  - **I found no stale-session defect.** B4 left one case unwalked: a person already signed in when the key is granted. I tested it. Her next navigation went straight to the "Enroll in two-factor authentication" page, with no finance data shown. After enrolling, "Continue" returned her to the record.
+  - Her record then showed Profile, Assessment and Buildings Locked, and Insurance and Loans open, with Edit, Mark paid off and Remove.
+  - Her list had an Insurance column and a note naming the missing permission.
+- **The manage-only walk is correct.** The clerk sees Profile, Assessment and Buildings open, and Insurance and Loans as Locked cards naming "manage congregation property finances".
+  - A direct visit to `/insurance/new`, `/loans/new` or `appraisals/new` shows a Locked page with no form.
+  - The list has no Insurance column and carries a note.
+- **The finance-only walk is correct.** The finance-only holder opens Insurance and Loans.
+  - The building page, `profile/edit` and `appraisals/new` are Locked pages, and `assessment/edit` shows the permission refusal.
+  - The list shows only "Insurance expires" ("Expired 6/30/2025", "Not recorded") plus a note.
+- **A person with neither key** gets the permission refusal on the list and the record, with no congregation named.
+- **The audit trail behaves as the help says.**
+  - Eight oversight rows were written (profile set, building created, appraisal recorded, insurance recorded, loan recorded, loan paid off, loan updated, building retired).
+  - Metadata is ids and field names only. I searched for the carrier, policy number, lender, guarantee text, amounts, address and phone: none leaked.
+- **The flag-off state matches the help.** With `org_portal.oversight` off, the list and the record both say "Congregation Oversight isn't turned on for … yet." The tile leaves the portal home.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Phase 1 recommended binding the finance key to no role. Shipped: it is in the presbytery founding-administrator bundle (DECISION-345, F450).** Verdict: acceptable drift. My recommendation was wrong, because the subset check makes an unbound key ungrantable. The shipped path is what my walk proved. CLAUDE.md records it as the third known violation (`CLAUDE.md:681`).
+- **Gap 1 (the presbytery's copy stays editable after a congregation joins). Shipped.** The note reads "This congregation is on PresbyPortal and can keep its own profile there. What you enter here is the presbytery's own copy…". It is absent for an unmanaged congregation (pinned in e2e). Matches.
+- **Gap 2 (the congregation sees nothing).** Proven by test-rls-89 sections (d) and (a), which QA ran. Matches.
+- **Gap 3 (a finance-only holder has a front door). Shipped.** Either key opens the list and the record, and each section follows its own key. Matches.
+- **Gap 4 (the superseded carrier and expiry fields). Shipped.** The form drops them and the list column is derived. F451 and F454 have regression tests.
+  - The manage-key description no longer claims insurance. I read it on the Roles screen.
+- **Gap 5 (appraisal housing). Shipped as a per-building record, and appraisals are immutable (T4).** One consequence is a drift I rule acceptable (see note 6): a finance-only holder cannot reach appraisals. It is already in TODO and the help says so.
+- **Gaps 6, 7 and 11 (money in cents, one policy per year, nullable facts).** Shipped as designed. The loan's balance and as-of date are required together, and "Mark paid off" sets $0.
+- **Gap 9 (former members).** Deferred, F453, tracked at `docs/TODO.md:134`. The help states the limit.
+- **Gap 10 (concurrency). Shipped as `row_version`** on the four editable tables. A stale save is refused with a human line.
+- **Gap 12 (cross-congregation children).** Database-enforced by the three-column key. A wrong building, congregation or presbytery id gives the same 404, pinned in e2e.
+- **Photos and the two reports (Flows 4 and 8).** Out of this increment by design. Increment 2 owns them, and nothing in the help or the UI claims them.
+- **Phase 1 asked for "Retire" and "Remove" to be distinct. Shipped.** Retire is reversible ("Bring back into use"). Remove goes through an AlertDialog and is one-way.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
-- Help pages read as their reader (each page named in Help impact): [pass | fail | no help impact]
+- **Empty state:** pass. Each section has its own line and button, there is no bare "No loans.", and nothing shows a zero for unrecorded data.
+- **Failure microcopy:** pass.
+  - Field errors sit under their fields, and the form keeps its contents.
+  - The stale-save line is "This record was changed by someone else after you opened it."
+  - "Try again" is covered by unit tests only. I could not provoke a database failure on a dev server, and that is accepted.
+- **Permission gate:** pass for every path walked. This covers a Locked card, a Locked page with no form, the permission refusal, the flag-off page and the forced enrolment.
+  - 404s on bad ids rest on the specs QA ran (two non-UUIDs, a removed building, another presbytery's congregation and a nonexistent one all give one identical body).
+  - I did not re-run them.
+- **Audit event:** pass. This is the audit I read myself (the list above). The assessment save audits after commit (F455), and the help states that residual.
+- **Mobile (360px):** pass with notes.
+  - Document sideways scroll was 0 on every oversight page I walked, and every oversight control measured at least 44px.
+  - The list is a table that scrolls inside its frame, so the "Open" link sits at the edge. A founder sees only the Viability column at 360px, because Buildings and Insurance appear from `sm`. This is the known accepted limit.
+  - Not oversight's: the Roles screens (Revoke 32px, Edit 17px, selects 42px, "Back to roles" 20px and the create-role inputs at 36px) and the `/account/2fa` "Confirm enrollment" button (36px).
+- **Help pages read as their reader (each page named in Help impact): pass with one note and one required action.**
+  - **`congregation-records`** (360px, no sideways scroll). Every claim matched the build:
+    - the navigation sentence: "Congregation Oversight" under "Governance & Courts", then "Open";
+    - the five section names;
+    - both permission names and the "described as" description, which matches the Roles checklist word for word;
+    - the Founding Administrator having both keys on day one;
+    - forced two-factor setup;
+    - the Locked and column-note behaviour;
+    - Add profile details / Edit profile / Edit assessment / Add a building / Primary building;
+    - Retire this building / Bring back into use / Remove (entered by mistake);
+    - Record an appraisal and "Current";
+    - Record a year, with Expired in words;
+    - Record a loan, Mark paid off and Reopen this loan;
+    - "$0 as of" on paid-off;
+    - "isn't turned on";
+    - the audit sentence, including the assessment residual.
+  - **`presbytery-reports`:** the map steps now run Open, then "Edit assessment", then Latitude, Longitude and Save. I confirmed each on the assessment form.
+  - **`roles-who-can-do-what`:** the new subsection is true. The founder has the key, the role description quoted matches, and the two-factor prompt happens. The prompt actually comes on the next page load, which is sooner than "next sign-in", and that is not false.
+  - **`why-cant-i-see-this`:** the "Locked" subsection matches the card.
+  - **`presbytery-tools`:** the sentence "Oversight includes each congregation's profile, buildings, insurance and loans" renders on `/help/planned` and is true.
+  - **`limitationUntil` sentences:** none were due to be removed.
+  - **Required action:** `congregation-records` still carries `verifiedIn: "0.60.1"` (the implementer left it because `check:help` H13 refuses a release later than `package.json`). I walked it, so set it to `0.61.0` in the version-bump commit.
+  - **Note:** at 360px the help's "Who can see what" table scrolls inside its frame, so the "Permission you need" column is cut off until you swipe. The permissions are named elsewhere on the page and nothing is wrong, but the key information is hidden on a phone.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Rulings on QA run 2's observations
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+| QA observation | Ruling |
+|---|---|
+| Shared `admin/layout.tsx` "Back to portal" is 20px on every `/admin` page | Not a blocker. Pre-existing and not oversight's. Candidate TODO. |
+| The assessment form's viability select has no chevron | Not a blocker. Cosmetic and pre-existing. TODO line. |
+| A4 loan screen-reader suffix ("Edit loan", "Remove loan" can't tell two loans apart) is not yet in `docs/TODO.md` | Not a blocker, but the TODO line is owed (I found it absent). |
+| `f4190dd3`'s `Discovered-In: Phase-5` trailer | Not a blocker. QA's reading (Phase 4) is the more accurate one. `stats:escape` bookkeeping only. |
+| No action checks the `org_portal.oversight` flag | Not a blocker. The permission and the 2FA recheck are enforced, and the shipped assessment action already worked this way. Keep as a low-priority note, because an off flag does not stop a key holder's direct action call. |
 
-## Red Flags (if NEEDS REWORK)
+## Follow-Ups (each is a TODO line; Rule 10)
 
-- [Specific. What has to change before this ships.]
+1. **Required at the release commit, not a TODO:** move `congregation-records` `verifiedIn` to `0.61.0` and bump the version.
+2. **Loan screen-reader names.** Edit and Remove should name the kind (and the lender when recorded) so two loans on one congregation are told apart. This is A4's follow-up. Owner: tech-lead.
+3. **Help table at 360px.** Make the "Who can see what" permission column visible without a sideways swipe, for example by repeating the permission names in prose. Owner: ux-developer. This could also apply to other help tables.
+4. **Viability select chevron on the assessment form.** Cosmetic.
+5. **Three pre-existing small-target items.** The Roles screen controls and "Back to roles", the `/account/2fa` "Confirm enrollment" button (36px), and the admin "Back to portal" link (20px). Extend the existing Roles polish line at `docs/TODO.md:137` rather than add new ones.
+6. **Flag check in oversight actions (low priority).** Decide whether an off `org_portal.oversight` should also stop writes. It is a platform-wide pattern, so it is not specific to this feature.
+7. **Already tracked, unchanged:**
+   - F453 (former members);
+   - F455 (assessment audit after commit);
+   - a finance-only holder cannot record appraisals;
+   - the Save double-click conflict message;
+   - the list as a table at 360px;
+   - F362's coordination note (the second migration carries both bundle bodies);
+   - the operator switch for `org_portal.oversight`.
+
+**Deploy-day items from the runbook (not new findings):**
+- apply 0089 before the code;
+- record the backfill notice count and the "newly required two-factor, not enrolled" counts;
+- switch `org_portal.oversight` on, which is a Rule 17 event;
+- the operator can still reverse DECISION-345 before the merge (option B).
+
+## Housekeeping owed at SHIP (Workflow Rules)
+
+- Rule 12: no feedback row is named in the Source block, so none to mark.
+- Rule 13: the operator said no what's-new for now. The draft below stays in this work-log only.
+- Rule 14: the functionality-map line was already changed (`docs/product/functionality-map.md`, 1 line).
+- Rule 15: no `docs/architecture.md` change. Line 25 already describes this.
+- Rule 17: items 1 and 3 above.
+
+## Draft release-note paragraph (work-log only; not published)
+
+> **Congregation records for presbyteries.** If your presbytery uses Congregation Oversight, you can now keep the presbytery's own record of each member congregation on one page: its address, city, county, year organized and phone; its buildings, with year built, square feet, the condition of the roof, plumbing, heating and boiler, and safety systems; and, with a second permission, its insurance by year, its loans and an appraisal for each building. A presbytery's Founding Administrator has both permissions from the first day and can give the second to a treasurer or stated clerk through Roles. People who receive that permission are asked to set up two-factor sign-in. These records belong to the presbytery. A congregation never sees them, and what you enter does not change what the congregation keeps for itself. Everything is built to work on a phone. Congregation Oversight must be switched on for your presbytery by the PresbyPortal team. See "Congregation records" in Help.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete (Increment 1) | SHIP WITH NOTES | 2026-11-18 |
+
+## Handoff
+
+Next agent: **the orchestrator**, for the release housekeeping.
+- Move the help page's `verifiedIn` to `0.61.0` with the version bump.
+- Add the TODO lines above, and run the `/release-notes` skill.
+- Then proceed to Increment 2 (photos and reports).
+
+The Phase 6 close for Increment 2 will need the phone-photo upload walk that this increment did not require.
+
+---
+

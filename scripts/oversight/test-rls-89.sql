@@ -356,6 +356,14 @@ begin;
     (select count(*) from permissions
       where key = 'congregation_oversight.manage' and sensitivity_tier = 1 and not requires_two_factor),
     1, '89b: congregation_oversight.manage is unchanged (tier 1, no 2FA)');
+  -- QA run 1 item 3 (C10, amendment A2): the 0038 description still said
+  -- "buildings/insurance notes", which is false now that insurance is the
+  -- finance key's. 0089 section 1 corrects it in place (0089 is unreleased).
+  select assert_eq(
+    (select count(*) from permissions
+      where key = 'congregation_oversight.manage'
+        and description = 'See and record a member congregation''s viability assessment, profile and buildings (the presbytery''s own record)'),
+    1, '89b: congregation_oversight.manage carries the corrected Roles-screen description (no insurance)');
   -- The SQL authority. presby_app cannot EXECUTE it (owner only, 0059), but
   -- pg_proc is world-readable.
   select assert_eq(

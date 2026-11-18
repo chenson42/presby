@@ -78,7 +78,7 @@ export function OversightList({ list, slug }: { list: OversightListData; slug: s
             ) : null}
             {list.manage ? (
               <TableCell className="hidden sm:table-cell">
-                {row.manage ? buildingsInUseLabel(row.manage.buildingsInUse) : null}
+                {row.manage ? buildingsInUseLabel(row.manage.buildingsInUse, row.manage.buildingsRetired) : null}
               </TableCell>
             ) : null}
             {list.finance ? (

@@ -133,10 +133,11 @@ describe("labels", () => {
     expect(formatBuildingType("education_building")).toBe("Education building");
     expect(formatBuildingType("vacant_land")).toBe("Vacant land");
   });
-  it("the buildings-in-use cell is a count or Not recorded, never 0", () => {
-    expect(buildingsInUseLabel(0)).toBe("Not recorded");
-    expect(buildingsInUseLabel(1)).toBe("1 building");
-    expect(buildingsInUseLabel(2)).toBe("2 buildings");
+  it("the buildings-in-use cell has three states: a count, None in use (all retired), or Not recorded; never 0", () => {
+    expect(buildingsInUseLabel(0, 0)).toBe("Not recorded");
+    expect(buildingsInUseLabel(0, 2)).toBe("None in use");
+    expect(buildingsInUseLabel(1, 0)).toBe("1 building");
+    expect(buildingsInUseLabel(2, 3)).toBe("2 buildings");
   });
   it("the card's optional lines appear only when recorded", () => {
     expect(buildingSummary({ yearBuilt: null, squareFeet: null })).toEqual([]);

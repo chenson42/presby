@@ -280,7 +280,7 @@ describe.skipIf(!hasDb)("oversight/reads.ts (Postgres-backed)", { timeout: 180_0
       expect(m).toMatchObject({ manage: true, finance: false, today: null });
       for (const row of m.rows) {
         expect(Object.keys(row).sort(), row.name as string).toEqual(["manage", "name", "organizationId", "platformStatus"]);
-        expect(Object.keys(row.manage as object).sort()).toEqual(["assessmentUpdatedAt", "buildingsInUse", "city", "county", "viabilityScore"]);
+        expect(Object.keys(row.manage as object).sort()).toEqual(["assessmentUpdatedAt", "buildingsInUse", "buildingsRetired", "city", "county", "viabilityScore"]);
       }
       expect(JSON.stringify(m)).not.toMatch(/insurance|expir|carrier|policy|loan|apprais/i);
 
@@ -320,12 +320,29 @@ describe.skipIf(!hasDb)("oversight/reads.ts (Postgres-backed)", { timeout: 180_0
                   on conflict (organization_id, about_org_id) do update set viability_score = 2, insurance_carrier = 'LEGACY-SECRET-CARRIER'`);
       const data = await listOf(viewer(who.manage));
       const row = data.rows.find((r) => r.organizationId === C2)!;
-      expect(row.manage).toMatchObject({ buildingsInUse: 2, viabilityScore: 2 });
+      // the removed building is in neither figure: 2 live in use, 1 live retired
+      expect(row.manage).toMatchObject({ buildingsInUse: 2, buildingsRetired: 1, viabilityScore: 2 });
       expect(typeof row.manage?.assessmentUpdatedAt).toBe("string");
       expect(JSON.stringify(data)).not.toContain("LEGACY-SECRET-CARRIER");
       expect(JSON.stringify(data)).not.toContain("2031-01-01");
       // a congregation with no buildings has a count of 0 (the cell renders "Not recorded"); the reader never invents a number
       expect(data.rows.find((r) => r.organizationId === C1)!.manage).toMatchObject({ buildingsInUse: expect.any(Number) });
+    });
+
+    it("a congregation whose only live building is retired is { buildingsInUse: 0, buildingsRetired: 1 }; a removed one beside it counts in neither (QA run 1 item 4)", async () => {
+      const about = await cong("RetiredOnly", P);
+      await building(P, about, `Retired only ${stamp}`, { retiredOn: "2026-01-01" });
+      await building(P, about, `Removed beside it ${stamp}`, { removed: true });
+      await building(P, about, `Removed and retired ${stamp}`, { retiredOn: "2025-01-01", removed: true });
+      const row = (await listOf(viewer(who.manage))).rows.find((r) => r.organizationId === about)!;
+      expect(row.manage).toMatchObject({ buildingsInUse: 0, buildingsRetired: 1 });
+      // nothing recorded at all (removed rows only) is { 0, 0 }: the cell says "Not recorded"
+      const empty = await cong("RemovedOnly", P);
+      await building(P, empty, `Removed only ${stamp}`, { removed: true });
+      expect((await listOf(viewer(who.manage))).rows.find((r) => r.organizationId === empty)!.manage).toMatchObject({
+        buildingsInUse: 0,
+        buildingsRetired: 0,
+      });
     });
 
     it("the insurance cell is the NEWEST policy year's expiry, not the soonest of all years (T8); removed years do not count", async () => {

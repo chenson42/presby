@@ -223,6 +223,8 @@ export interface OversightListRow {
     county: string | null;
     /** Live, not retired. */
     buildingsInUse: number;
+    /** Live and retired (a removed building is in neither figure). Lets the cell say "None in use" rather than "Not recorded". */
+    buildingsRetired: number;
   };
   /** Present only for a viewer holding `congregation_oversight.finance` (tier 2). Absent, not null, otherwise. */
   finance?: {
@@ -257,7 +259,7 @@ export async function readOversightList(viewer: OversightViewer, now: Date = new
 
     const assessments = new Map<string, { viabilityScore: number | null; updatedAt: Date | null }>();
     const profiles = new Map<string, { city: string | null; county: string | null }>();
-    const inUse = new Map<string, number>();
+    const buildingCounts = new Map<string, { inUse: number; retired: number }>();
     if (manage) {
       // Explicit columns (F454): the superseded carrier and expiry are never selected.
       const legacy = await tx
@@ -277,13 +279,15 @@ export async function readOversightList(viewer: OversightViewer, now: Date = new
       for (const row of profileRows) profiles.set(row.aboutOrgId, { city: row.city, county: row.county });
 
       const counts = await tx
-        .select({ aboutOrgId: oversightBuildings.aboutOrgId, n: sql<number>`count(*)::int` })
+        .select({
+          aboutOrgId: oversightBuildings.aboutOrgId,
+          inUse: sql<number>`(count(*) filter (where ${oversightBuildings.retiredOn} is null))::int`,
+          retired: sql<number>`(count(*) filter (where ${oversightBuildings.retiredOn} is not null))::int`,
+        })
         .from(oversightBuildings)
-        .where(
-          and(eq(oversightBuildings.organizationId, org), isNull(oversightBuildings.removedAt), isNull(oversightBuildings.retiredOn)),
-        )
+        .where(and(eq(oversightBuildings.organizationId, org), isNull(oversightBuildings.removedAt)))
         .groupBy(oversightBuildings.aboutOrgId);
-      for (const row of counts) inUse.set(row.aboutOrgId, Number(row.n));
+      for (const row of counts) buildingCounts.set(row.aboutOrgId, { inUse: Number(row.inUse), retired: Number(row.retired) });
     }
 
     const expiries = new Map<string, string | null>();
@@ -311,7 +315,8 @@ export async function readOversightList(viewer: OversightViewer, now: Date = new
           assessmentUpdatedAt: assessment?.updatedAt ? assessment.updatedAt.toISOString() : null,
           city: profile?.city ?? null,
           county: profile?.county ?? null,
-          buildingsInUse: inUse.get(cong.id) ?? 0,
+          buildingsInUse: buildingCounts.get(cong.id)?.inUse ?? 0,
+          buildingsRetired: buildingCounts.get(cong.id)?.retired ?? 0,
         };
       }
       if (finance) row.finance = { insuranceExpiresOn: expiries.get(cong.id) ?? null };

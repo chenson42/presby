@@ -140,6 +140,7 @@ export const STATE = {
   emptyAppraisals: "No appraisal is recorded for this building.",
   imported: "Imported from an earlier record.",
   notRecorded: "Not recorded",
+  noneInUse: "None in use",
   managedNote:
     "This congregation is on PresbyPortal and can keep its own profile there. What you enter here is the presbytery's own copy: it does not change theirs, and theirs does not change it.",
   listNeedsManage:

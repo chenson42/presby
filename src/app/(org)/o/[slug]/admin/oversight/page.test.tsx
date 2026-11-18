@@ -10,7 +10,7 @@
  * `../credentials/page.test.tsx` documents for its own list read.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 
 const cachedAuth = vi.fn();
 vi.mock("server-only", () => ({}));
@@ -291,14 +291,14 @@ describe("OversightPage — result branches", () => {
             organizationId: "cong-1",
             name: "Alder Creek Presbyterian Church",
             platformStatus: "managed",
-            manage: { viabilityScore: 3, assessmentUpdatedAt: "2026-01-01T00:00:00.000Z", city: "Aldermoor", county: "Reach", buildingsInUse: 2 },
+            manage: { viabilityScore: 3, assessmentUpdatedAt: "2026-01-01T00:00:00.000Z", city: "Aldermoor", county: "Reach", buildingsInUse: 2, buildingsRetired: 1 },
             finance: { insuranceExpiresOn: "2026-01-31" },
           },
           {
             organizationId: "cong-2",
             name: "Quillhaven Presbyterian Church",
             platformStatus: "unmanaged",
-            manage: { viabilityScore: null, assessmentUpdatedAt: null, city: null, county: null, buildingsInUse: 0 },
+            manage: { viabilityScore: null, assessmentUpdatedAt: null, city: null, county: null, buildingsInUse: 0, buildingsRetired: 0 },
             finance: { insuranceExpiresOn: null },
           },
         ],
@@ -327,6 +327,40 @@ describe("OversightPage — result branches", () => {
     expect(screen.queryByText(/An administrator can give it under Roles/)).toBeNull();
   });
 
+  it("a congregation whose recorded buildings are all retired says None in use, not Not recorded (QA run 1 item 4)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightList.mockResolvedValue({
+      kind: "ok",
+      data: {
+        manage: true,
+        finance: false,
+        today: null,
+        rows: [
+          {
+            organizationId: "cong-1",
+            name: "Alder Creek Presbyterian Church",
+            platformStatus: "managed",
+            manage: { viabilityScore: 2, assessmentUpdatedAt: null, city: "Aldermoor", county: "Reach", buildingsInUse: 0, buildingsRetired: 2 },
+          },
+          {
+            organizationId: "cong-2",
+            name: "Quillhaven Presbyterian Church",
+            platformStatus: "unmanaged",
+            manage: { viabilityScore: 2, assessmentUpdatedAt: null, city: "Aldermoor", county: "Reach", buildingsInUse: 0, buildingsRetired: 0 },
+          },
+        ],
+      },
+    });
+    render(await OversightPage({ params: makeParams() }));
+    const alder = screen.getByRole("row", { name: /Alder Creek Presbyterian Church/ });
+    expect(within(alder).getByText("None in use")).toBeTruthy();
+    const quill = screen.getByRole("row", { name: /Quillhaven Presbyterian Church/ });
+    expect(within(quill).queryByText("None in use")).toBeNull();
+    expect(within(quill).getAllByText("Not recorded").length).toBeGreaterThan(0);
+  });
+
   it("a manage-only viewer gets no Insurance column and one note naming the finance permission (T7)", async () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
@@ -342,7 +376,7 @@ describe("OversightPage — result branches", () => {
             organizationId: "cong-1",
             name: "Alder Creek Presbyterian Church",
             platformStatus: "managed",
-            manage: { viabilityScore: 2, assessmentUpdatedAt: null, city: null, county: null, buildingsInUse: 1 },
+            manage: { viabilityScore: 2, assessmentUpdatedAt: null, city: null, county: null, buildingsInUse: 1, buildingsRetired: 0 },
           },
         ],
       },

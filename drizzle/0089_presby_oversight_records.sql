@@ -51,7 +51,8 @@
 --
 --   0. guard                  refuse without 0072
 --   1. permission catalog     congregation_oversight.finance (tier 2, 2FA,
---                             module presbytery)
+--                             module presbytery); and the corrected
+--                             description of congregation_oversight.manage
 --   2. founding bundle        presby_founding_administrator_permission_keys()
 --                             re-created from the LIVE body (re-read
 --                             2026-11-17 on pipeline-congregation-profile:
@@ -134,6 +135,19 @@ on conflict (key) do update
       description = excluded.description,
       sensitivity_tier = excluded.sensitivity_tier,
       requires_two_factor = excluded.requires_two_factor;
+
+-- QA run 1 item 3 (C10, amendment A2): 0038 (shipped, not edited) describes
+-- congregation_oversight.manage as "viability assessments and
+-- buildings/insurance notes", which is false now that insurance belongs to the
+-- finance key and the Roles screens show the two descriptions side by side.
+-- Corrected here, in the one section where permission rows change; 0089 is
+-- unreleased, so this is an in-place edit of 0089 (DECISION-298 not needed).
+-- Replay-safe: the second apply matches nothing, and an environment where the
+-- row already reads this way is not written.
+update permissions
+   set description = 'See and record a member congregation''s viability assessment, profile and buildings (the presbytery''s own record)'
+ where key = 'congregation_oversight.manage'
+   and description is distinct from 'See and record a member congregation''s viability assessment, profile and buildings (the presbytery''s own record)';
 
 -- ---------------------------------------------------------------------------
 -- 2. The founding-administrator bundle (R2, DECISION-345, F450).

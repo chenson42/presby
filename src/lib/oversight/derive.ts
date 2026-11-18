@@ -49,10 +49,15 @@ export function newestInsuranceExpiry(rows: ReadonlyArray<{ policyYear: number; 
 // Buildings (C1, C5)
 // ---------------------------------------------------------------------------
 
-/** "{n} building" / "{n} buildings", or "Not recorded" when there are none. */
-export function buildingsInUseLabel(count: number): string {
-  if (count <= 0) return STATE.notRecorded;
-  return count === 1 ? "1 building" : `${count} buildings`;
+/**
+ * The list's "Buildings in use" cell, three states (amendment A3): "{n} building" /
+ * "{n} buildings" when at least one is in use; "None in use" when every recorded
+ * (live) building is retired; "Not recorded" when none is recorded at all. A removed
+ * building is in neither figure.
+ */
+export function buildingsInUseLabel(inUse: number, retired: number): string {
+  if (inUse > 0) return inUse === 1 ? "1 building" : `${inUse} buildings`;
+  return retired > 0 ? STATE.noneInUse : STATE.notRecorded;
 }
 
 /** The card's two optional lines: "Built {year}" and "{n} square feet", each only when recorded. */

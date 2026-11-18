@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { REPORTS } from "@/lib/presbytery-reports/contract";
+import { DASHBOARD_REPORT_KEYS, REPORTS } from "@/lib/presbytery-reports/contract";
 import type { DashboardCards, PresbyteryDashboard } from "@/lib/presbytery-reports/dashboard";
 import type { ViabilityList } from "@/lib/presbytery-reports/dashboard-derive";
 import { DashboardView, type DashboardFlags } from "./dashboard-cards";
@@ -81,7 +81,7 @@ describe("DashboardView — states", () => {
   it("the forbidden state names all four permission phrases and shows no card", () => {
     view({ dashboard: { kind: "forbidden" } });
     const text = document.body.textContent ?? "";
-    for (const r of REPORTS) expect(text).toContain(r.permissionPhrase);
+    for (const r of REPORTS.filter((x) => DASHBOARD_REPORT_KEYS.some((k) => k === x.key))) expect(text).toContain(r.permissionPhrase);
     expect(screen.queryByTestId("dashboard-cards")).toBeNull();
     expect(screen.queryByTestId("dashboard-viability")).toBeNull();
     expect(screen.queryByText("Locked")).toBeNull();

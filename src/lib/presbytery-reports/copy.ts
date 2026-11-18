@@ -38,6 +38,14 @@ export const HUB_COPY = {
       description: "What each congregation was billed for a year, has paid and still owes.",
       source: "From the rate and the bills in the Per-Capita section below.",
     },
+    buildings: {
+      description: "Every building recorded for your member congregations, with its year, size, condition and safety systems.",
+      source: "From Congregation Oversight.",
+    },
+    insurance_and_loans: {
+      description: "Each congregation's newest insurance, its open loans and its appraised value.",
+      source: "From Congregation Oversight.",
+    },
   },
   lockedBadge: "Locked",
   lockedReason: (permissionPhrase: string) =>
@@ -152,6 +160,76 @@ export const VIABILITY_COPY = {
   assessNote: "Assess a congregation on Congregation Oversight.",
   assessLink: "Open Congregation Oversight",
   helpLink: "How to read viability",
+} as const;
+
+// ---------------------------------------------------------------------------
+// Buildings and Insurance and loans (DECISION-348; C15). The two states a congregation
+// with no building in use can show are the oversight list's words, pinned equal to
+// `STATE` in `src/lib/oversight/copy.ts` by `copy.test.ts` (this file stays import-free).
+// ---------------------------------------------------------------------------
+
+export const BUILDINGS_COPY = {
+  title: "Buildings",
+  subtitle: (org: string) => `The congregations that are members of ${org} today.`,
+  rosterNote: "A congregation that is no longer active isn't listed here.",
+  inUseNote: "Only buildings in use are listed. A building that has been retired is not.",
+  fileNote: "The CSV file leaves out street addresses and notes.",
+  count: (buildings: number, congregations: number) =>
+    `${buildings} ${plural(buildings, "building", "buildings")} in ${congregations} ${plural(congregations, "congregation", "congregations")}`,
+  columns: {
+    congregation: "Congregation",
+    city: "City",
+    county: "County",
+    building: "Building",
+    type: "Type",
+    yearBuilt: "Year built",
+    squareFeet: "Square feet",
+    roof: "Roof",
+    plumbing: "Plumbing",
+    hvac: "Heating and cooling (HVAC)",
+    boiler: "Boiler",
+    sprinklers: "Sprinklers",
+    fireAlarm: "Fire alarm",
+    security: "Security system",
+    primary: "Primary",
+  },
+  /** A congregation with every recorded building retired. */
+  noneInUse: "None in use",
+  /** A congregation with no building ever recorded. */
+  notRecorded: "Not recorded",
+  /** A figure or place the record leaves blank. */
+  blank: "—",
+  primaryBadge: "Primary",
+  helpLink: "How to read buildings",
+} as const;
+
+export const INSURANCE_LOANS_COPY = {
+  title: "Insurance and loans",
+  subtitle: (org: string) => `The congregations that are members of ${org} today.`,
+  rosterNote: "A congregation that is no longer active isn't listed here.",
+  newestNote: "Insurance is the newest policy year recorded. Loans are the open ones.",
+  fileNote:
+    "The CSV file leaves out street addresses, policy numbers, lenders and notes. It does include each loan's guarantee.",
+  columns: {
+    congregation: "Congregation",
+    carrier: "Carrier",
+    policyYear: "Policy year",
+    policyExpires: "Policy expires",
+    recentClaims: "Recent claims",
+    poolInterest: "Interested in the insurance pool",
+    openLoans: "Open loans",
+    originalAmount: "Original amount",
+    currentBalance: "Current balance",
+    grants: "Grants",
+    guarantee: "Guarantee",
+    appraisedValue: "Appraised value",
+  },
+  notRecorded: "Not recorded",
+  expired: "Expired",
+  total: "Total",
+  /** Beside a total that leaves unrecorded figures out. */
+  unrecorded: (n: number) => `${n} not recorded`,
+  helpLink: "How to read insurance and loans",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -375,7 +453,7 @@ export function allCopyStrings(): string[] {
       for (const v of Object.values(value)) walk(v);
     }
   };
-  for (const group of [HUB_COPY, FRAME_COPY, VACANT_COPY, TREND_COPY, VIABILITY_COPY, PER_CAPITA_COPY, DASHBOARD_COPY, MAP_COPY, ROUTE_COPY]) {
+  for (const group of [HUB_COPY, FRAME_COPY, VACANT_COPY, TREND_COPY, VIABILITY_COPY, BUILDINGS_COPY, INSURANCE_LOANS_COPY, PER_CAPITA_COPY, DASHBOARD_COPY, MAP_COPY, ROUTE_COPY]) {
     walk(group);
   }
   return out;

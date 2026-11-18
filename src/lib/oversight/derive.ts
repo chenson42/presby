@@ -174,3 +174,17 @@ export function centsToInputText(cents: number | null): string {
   const remainder = cents % 100;
   return remainder === 0 ? String(dollars) : `${dollars}.${String(remainder).padStart(2, "0")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Photo cover (C14)
+// ---------------------------------------------------------------------------
+
+/**
+ * The cover of a building's live photos, given oldest first: the photo carrying
+ * the cover mark, else the oldest ("the first photo is the cover"). A building
+ * whose marked cover was removed therefore still shows a cover, without any
+ * unaudited promotion write. Null when there are no photos.
+ */
+export function pickCover<T extends { isCover: boolean }>(photosOldestFirst: readonly T[]): T | null {
+  return photosOldestFirst.find((p) => p.isCover) ?? photosOldestFirst[0] ?? null;
+}

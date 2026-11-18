@@ -7,7 +7,7 @@ import { personPhotoDesignations, personPhotos } from "@/lib/db/domain/person-ph
 import { pgErrorField } from "@/lib/db/errors";
 import { getBlobStore } from "@/lib/storage/blob-store";
 import { parseBlobKey } from "@/lib/storage/blob-key";
-import { processPhoto } from "./image";
+import { processPhoto } from "@/lib/storage/image/photo";
 import { PHOTO_CAP_PER_PERSON } from "./limits";
 import type { MutationResult, PhotoRefusal, Purpose, Refused } from "./types";
 
@@ -291,7 +291,7 @@ export async function addPhoto(ctx: PhotoCtx, rawPersonId: string, file: Buffer)
   if (first.kind === "refused") return first;
 
   // 2. Decode, strip, re-encode. Outside any transaction.
-  const processed = await processPhoto(file);
+  const processed = await processPhoto(file, { thumbnail: "top" });
   if (processed.kind === "refused") return { kind: "refused", reason: processed.reason };
 
   // 3. Two private blobs, each its own transaction (store() owns it, DECISION-030).

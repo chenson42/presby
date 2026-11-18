@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { REPORTS } from "./contract";
+import { DASHBOARD_REPORT_KEYS, REPORTS } from "./contract";
 
 // The reports' tile has only the global `org_portal.reports` flag, no
 // per-organization toggle, so the help page must not tell a presbytery it
@@ -14,7 +14,7 @@ const page = readFileSync(
 describe("presbytery-reports help page", () => {
   it("does not say a presbytery turns the reports on", () => {
     expect(page).not.toMatch(/presbytery that has turned on/i);
-    expect(page.startsWith('Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read four reports')).toBe(true);
+    expect(page.startsWith('Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read six reports')).toBe(true);
   });
 
   it("says the platform team switches the reports on", () => {
@@ -25,7 +25,8 @@ describe("presbytery-reports help page", () => {
     const section = page.slice(page.indexOf("## Insights and analytics"), page.indexOf("## Vacant pulpits"));
     expect(section.length).toBeGreaterThan(200);
     expect(section).toMatch(/It is read-only: nothing on it can be changed, and it has no download\./);
-    for (const r of REPORTS) {
+    // The dashboard has four cards (DECISION-348: no card for the two oversight reports).
+    for (const r of REPORTS.filter((x) => DASHBOARD_REPORT_KEYS.some((k) => k === x.key))) {
       // the permission column quotes each phrase, capitalised ("Manage statistics")
       const phrase = r.permissionPhrase.charAt(0).toUpperCase() + r.permissionPhrase.slice(1);
       expect(section, r.permissionPhrase).toContain(phrase);

@@ -12,8 +12,8 @@ const mockAdd = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({ addPersonPhotoAction: (...args: unknown[]) => mockAdd(...args) }));
 
 const mockDownscale = vi.hoisted(() => vi.fn());
-vi.mock("./downscale", async () => {
-  const actual = await vi.importActual<typeof import("./downscale")>("./downscale");
+vi.mock("@/lib/storage/image/downscale", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/storage/image/downscale")>("@/lib/storage/image/downscale");
   return { ...actual, downscaleToJpeg: (...args: unknown[]) => mockDownscale(...args) };
 });
 
@@ -21,7 +21,7 @@ const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
 import { UploadIsland } from "./upload-island";
-import { DownscaleError } from "./downscale";
+import { DownscaleError } from "@/lib/storage/image/downscale";
 import { REFUSAL_COPY, UPLOAD_COPY, UPLOAD_REJECTED_COPY } from "@/lib/person-photos/copy";
 
 const PREPARED = new File([new Uint8Array(10)], "photo.jpg", { type: "image/jpeg" });

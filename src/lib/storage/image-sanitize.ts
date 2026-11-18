@@ -7,7 +7,7 @@ import sharp from "sharp";
  * inc1.md, Phase 3 "Receipts and the F289 audience API"; DECISION-270).
  *
  * ONE OF TWO IMPORTERS OF `sharp`: a closed list, this file and
- * `src/lib/person-photos/image.ts` (treasury boundary T5, `npm run
+ * `src/lib/storage/image/photo.ts` (treasury boundary T5, `npm run
  * check:treasury-boundaries`, DECISION-312, amending DECISION-270/271). A third
  * consumer calls one of these two; it does not import the library, and adding a
  * third importer is a new DECISION.

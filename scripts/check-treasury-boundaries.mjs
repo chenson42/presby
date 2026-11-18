@@ -49,7 +49,7 @@
  *        (`src/lib/contact-methods/email-audience.ts`), which holds every module's
  *        template keys and is not notice code.
  *   T5 - `sharp` is imported at RUNTIME by a CLOSED LIST of two files,
- *        `src/lib/person-photos/image.ts` and `src/lib/storage/image-sanitize.ts`
+ *        `src/lib/storage/image-sanitize.ts` and `src/lib/storage/image/photo.ts`
  *        (DECISION-312, amending DECISION-270/271 T5, which named one). The
  *        re-encoders are the guarantee that no EXIF location or embedded payload
  *        survives, so the library has a short, named list of doors. A type-only
@@ -86,7 +86,7 @@ const SRC = path.join(ROOT, "src");
 // ── The zones and allowlists ─────────────────────────────────────────────────
 
 /** The closed list of files that may, and must, import `sharp` at runtime (T5, DECISION-312). */
-export const SHARP_FILES = ["src/lib/person-photos/image.ts", "src/lib/storage/image-sanitize.ts"];
+export const SHARP_FILES = ["src/lib/storage/image-sanitize.ts", "src/lib/storage/image/photo.ts"];
 
 /** The audience registry: holds every module's template keys; not notice code (T4). */
 export const EMAIL_AUDIENCE_FILE = "src/lib/contact-methods/email-audience.ts";

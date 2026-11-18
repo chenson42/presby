@@ -1,7 +1,7 @@
 /**
  * The presbytery reports' source-scan boundaries (docs/work-log/2026-11-15-
  * presbytery-reports.md, Phase 2 notes 4 and 6, DECISION-337 and 339). A
- * database-free scan over this module, the four report segments under
+ * database-free scan over this module, the six report segments under
  * `admin/reports/`, and the components, with a failing sample for every rule so
  * a rule that stops matching fails the suite instead of passing silently.
  *
@@ -53,6 +53,20 @@ const insightsFiles = load(walk(INSIGHTS_DIR).filter((f) => /\.tsx?$/.test(f) &&
 // Every non-test source file in the repo's src/ (the map's "nowhere else" rules read the whole tree).
 const allSrcFiles = load(walk(path.join(ROOT, "src")).filter((f) => /\.tsx?$/.test(f) && !isTest(f)));
 const hubFile = load([path.join(REPORTS_DIR, "reports-hub.tsx")].filter((f) => { try { statSync(f); return true; } catch { return false; } }));
+
+/** An oversight table by its SQL or Drizzle name: only `src/lib/oversight/` may write one. */
+const NAMES_AN_OVERSIGHT_TABLE =
+  /\b(oversight_(profiles|buildings|building_photos|building_appraisals|insurance_years|loans)|oversight(Profiles|Buildings|BuildingPhotos|BuildingAppraisals|InsuranceYears|Loans))\b/;
+
+/** The six export functions, one per report (DECISION-348 added the last two). */
+const SIX_EXPORTS = [
+  "exportBuildingsReport",
+  "exportInsuranceLoans",
+  "exportMembershipTrend",
+  "exportPerCapita",
+  "exportVacantPulpits",
+  "exportViability",
+].sort();
 
 const surface = [...moduleFiles, ...segmentFiles];
 const routes = segmentFiles.filter((f) => f.rel.endsWith("route.ts"));
@@ -296,26 +310,26 @@ const f = (rel: string, content: string): SourceFile => ({ rel, content });
 describe("the real tree", () => {
   it("scans real files (a scan over nothing proves nothing)", () => {
     expect(moduleFiles.length).toBeGreaterThan(10);
-    expect(routes).toHaveLength(4);
-    expect(pages).toHaveLength(4);
+    expect(routes).toHaveLength(6);
+    expect(pages).toHaveLength(REPORT_SEGMENTS.length);
     expect(componentFiles.length).toBeGreaterThan(5);
-    // The insights page sits outside REPORTS_DIR, so `pages` stays 4.
+    // The insights page sits outside REPORTS_DIR, so it is not one of `pages`.
     expect(insightsFiles.length).toBeGreaterThanOrEqual(1);
     expect(insightsFiles.some((file) => file.rel.endsWith("page.tsx"))).toBe(true);
   });
 
-  it("names no owner connection in the module or the four segments", () => {
+  it("names no owner connection in the module or the six segments", () => {
     expect(noOwnerConnection(surface)).toEqual([]);
     expect(noOwnerConnection(componentFiles)).toEqual([]);
   });
 
-  it("every page and route under the four segments calls the gate", () => {
+  it("every page and route under the six segments calls the gate", () => {
     expect(callsGate([...pages, ...routes])).toEqual([]);
   });
 
   it("each route calls one of the module's export functions", () => {
     const names = exportFunctionNames(moduleFiles);
-    expect(names.sort()).toEqual(["exportMembershipTrend", "exportPerCapita", "exportViability", "exportVacantPulpits"].sort());
+    expect(names.sort()).toEqual(SIX_EXPORTS);
     expect(routeCallsAnExport(routes, names)).toEqual([]);
   });
 
@@ -429,9 +443,9 @@ describe("the real tree", () => {
     expect(loading).toEqual([]);
   });
 
-  it("the module names no export function beyond the four (a dashboard export cannot appear unreviewed)", () => {
+  it("the module names no export function beyond the six (a dashboard export cannot appear unreviewed)", () => {
     expect(exportFunctionNames([...moduleFiles, ...insightsFiles, ...componentFiles]).sort()).toEqual(
-      ["exportMembershipTrend", "exportPerCapita", "exportViability", "exportVacantPulpits"].sort(),
+      SIX_EXPORTS,
     );
   });
 
@@ -446,11 +460,45 @@ describe("the real tree", () => {
       expect(files, segment).toEqual(["export/route.ts", "page.tsx"]);
     }
   });
+
+  it("the two oversight reports read their tables only through src/lib/oversight/report-rows.ts, never by name", () => {
+    for (const f of [...moduleFiles, ...segmentFiles, ...componentFiles]) {
+      expect(NAMES_AN_OVERSIGHT_TABLE.test(code(f.content)), f.rel).toBe(false);
+    }
+    const buildings = moduleFiles.find((f) => f.rel.endsWith("presbytery-reports/buildings.ts"))!;
+    const insurance = moduleFiles.find((f) => f.rel.endsWith("presbytery-reports/insurance-loans.ts"))!;
+    expect(code(buildings.content)).toMatch(/from "@\/lib\/oversight\/report-rows"/);
+    expect(code(insurance.content)).toMatch(/from "@\/lib\/oversight\/report-rows"/);
+  });
+
+  it("each oversight report reader checks its own registry key inside its transaction before reading a row", () => {
+    for (const [file, key] of [
+      ["buildings.ts", "buildings"],
+      ["insurance-loans.ts", "insurance_and_loans"],
+    ] as const) {
+      const f = moduleFiles.find((m) => m.rel.endsWith(`presbytery-reports/${file}`))!;
+      const c = code(f.content);
+      expect(c, file).toContain(`reportByKey("${key}")`);
+      const held = c.indexOf("holdsPermissions(tx, viewer, [REPORT.permission])");
+      const facts = c.search(/\b(readBuildingsReportFacts|readInsuranceLoansReportFacts)\(/);
+      const roster = c.indexOf("readRoster(");
+      expect(held, file).toBeGreaterThan(-1);
+      expect(held, file).toBeLessThan(roster);
+      expect(roster, file).toBeLessThan(facts);
+    }
+  });
 });
 
 // ── Each rule fails on a sample (a rule that stops matching must fail here) ─
 
 describe("each rule flags a violating sample", () => {
+  it("names-an-oversight-table matches the SQL and the Drizzle names", () => {
+    for (const name of ["oversight_loans", "oversight_building_appraisals", "oversightInsuranceYears", "oversightBuildings"]) {
+      expect(NAMES_AN_OVERSIGHT_TABLE.test(`from(${name})`), name).toBe(true);
+    }
+    expect(NAMES_AN_OVERSIGHT_TABLE.test("readBuildingsReportFacts(tx)")).toBe(false);
+  });
+
   it("no-owner-connection", () => {
     expect(noOwnerConnection([f("a.ts", "const db = getPlatformDb();")])).toHaveLength(1);
     expect(noOwnerConnection([f("a.ts", "const u = process.env.PLATFORM_DATABASE_URL;")])).toHaveLength(1);

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { CALL_TYPE_LABELS } from "@/app/(org)/o/[slug]/admin/credentials/credential-labels";
-import { REPORTS } from "./contract";
+import { DASHBOARD_REPORT_KEYS, REPORTS } from "./contract";
 import { VIABILITY_LABELS, VIABILITY_NOT_ASSESSED } from "./derive";
+import { STATE } from "@/lib/oversight/copy";
 import {
+  BUILDINGS_COPY,
   DASHBOARD_COPY,
+  INSURANCE_LOANS_COPY,
   HUB_COPY,
   MAP_COPY,
   PER_CAPITA_COPY,
@@ -60,7 +63,7 @@ describe("copy", () => {
 
 describe("dashboard copy (DECISION-342)", () => {
   it("the forbidden body names every report's permission phrase", () => {
-    for (const r of REPORTS) expect(DASHBOARD_COPY.forbidden.body).toContain(r.permissionPhrase);
+    for (const r of REPORTS.filter((x) => DASHBOARD_REPORT_KEYS.some((k) => k === x.key))) expect(DASHBOARD_COPY.forbidden.body).toContain(r.permissionPhrase);
     expect(DASHBOARD_COPY.forbidden.body).toMatch(/Roles/);
   });
 
@@ -199,5 +202,70 @@ describe("map copy (DECISION-343)", () => {
     expect(a.osmHref).toBe("https://www.openstreetmap.org/copyright");
     expect(a.logoHref).toBe("https://www.maptiler.com/");
     expect(a.logoSrc).toBe("https://api.maptiler.com/resources/logo.svg");
+  });
+});
+
+describe("buildings and insurance-and-loans copy (DECISION-348, C15)", () => {
+  it("both are in the swept set, so the two-factor, permission and future-tense bans cover them", () => {
+    expect(strings).toContain(BUILDINGS_COPY.title);
+    expect(strings).toContain(BUILDINGS_COPY.subtitle("Northern Reach"));
+    expect(strings).toContain(INSURANCE_LOANS_COPY.title);
+    expect(strings).toContain(INSURANCE_LOANS_COPY.unrecorded(3));
+  });
+
+  it("the titles and subtitles read as contracted", () => {
+    expect(BUILDINGS_COPY.title).toBe("Buildings");
+    expect(INSURANCE_LOANS_COPY.title).toBe("Insurance and loans");
+    expect(BUILDINGS_COPY.subtitle("Northern Reach")).toBe("The congregations that are members of Northern Reach today.");
+    expect(INSURANCE_LOANS_COPY.subtitle("Northern Reach")).toBe("The congregations that are members of Northern Reach today.");
+    expect(BUILDINGS_COPY.rosterNote).toBe("A congregation that is no longer active isn't listed here.");
+    expect(INSURANCE_LOANS_COPY.rosterNote).toBe(BUILDINGS_COPY.rosterNote);
+  });
+
+  it("the column labels read as contracted", () => {
+    expect(Object.values(BUILDINGS_COPY.columns)).toEqual([
+      "Congregation", "City", "County", "Building", "Type", "Year built", "Square feet", "Roof", "Plumbing",
+      "Heating and cooling (HVAC)", "Boiler", "Sprinklers", "Fire alarm", "Security system", "Primary",
+    ]);
+    expect(Object.values(INSURANCE_LOANS_COPY.columns)).toEqual([
+      "Congregation", "Carrier", "Policy year", "Policy expires", "Recent claims", "Interested in the insurance pool",
+      "Open loans", "Original amount", "Current balance", "Grants", "Guarantee", "Appraised value",
+    ]);
+  });
+
+  it("a congregation with no building in use uses the oversight list's two words, never 'None recorded'", () => {
+    expect(BUILDINGS_COPY.noneInUse).toBe("None in use");
+    expect(BUILDINGS_COPY.notRecorded).toBe("Not recorded");
+    expect(BUILDINGS_COPY.noneInUse).toBe(STATE.noneInUse);
+    expect(BUILDINGS_COPY.notRecorded).toBe(STATE.notRecorded);
+    expect(INSURANCE_LOANS_COPY.notRecorded).toBe(STATE.notRecorded);
+    const own = [...Object.values(BUILDINGS_COPY).filter((v) => typeof v === "string"), ...Object.values(INSURANCE_LOANS_COPY).filter((v) => typeof v === "string")];
+    for (const s of own) expect(s).not.toMatch(/None recorded/);
+  });
+
+  it("the file notes say exactly what the file leaves out, and that guarantees are in it (never 'no notes' for the loans file)", () => {
+    expect(BUILDINGS_COPY.fileNote).toBe("The CSV file leaves out street addresses and notes.");
+    expect(INSURANCE_LOANS_COPY.fileNote).toBe(
+      "The CSV file leaves out street addresses, policy numbers, lenders and notes. It does include each loan's guarantee.",
+    );
+    expect(INSURANCE_LOANS_COPY.fileNote).not.toMatch(/no notes|without notes/i);
+  });
+
+  it("the figure templates read as drafted", () => {
+    expect(INSURANCE_LOANS_COPY.unrecorded(2)).toBe("2 not recorded");
+    expect(BUILDINGS_COPY.count(1, 1)).toBe("1 building in 1 congregation");
+    expect(BUILDINGS_COPY.count(14, 6)).toBe("14 buildings in 6 congregations");
+    expect(INSURANCE_LOANS_COPY.expired).toBe("Expired");
+    expect(BUILDINGS_COPY.primaryBadge).toBe("Primary");
+    expect(INSURANCE_LOANS_COPY.total).toBe("Total");
+  });
+
+  it("the hub cards are the contracted sentences", () => {
+    expect(HUB_COPY.cards.buildings.description).toBe(
+      "Every building recorded for your member congregations, with its year, size, condition and safety systems.",
+    );
+    expect(HUB_COPY.cards.insurance_and_loans.description).toBe("Each congregation's newest insurance, its open loans and its appraised value.");
+    expect(HUB_COPY.cards.buildings.source).toBe("From Congregation Oversight.");
+    expect(HUB_COPY.cards.insurance_and_loans.source).toBe("From Congregation Oversight.");
   });
 });

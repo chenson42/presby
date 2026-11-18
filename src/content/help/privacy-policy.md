@@ -37,6 +37,7 @@ An organization using PresbyPortal may keep:
 - giving records, if the congregation uses giving
 - children's ministry rosters, with guardians and emergency contacts
 - job openings and the content of its public website
+- building photos, which a presbytery's staff may add to its own record of a member congregation. They are stored privately, are never published, and are removed from view, not erased, when staff remove them
 - other records the organization chooses to keep
 
 The organization decides what goes in, who can see it, and what stays on the roll. Messages sent through a congregation's website contact form go to that congregation.

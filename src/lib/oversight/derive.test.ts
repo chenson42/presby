@@ -18,6 +18,7 @@ import {
   latestAppraisal,
   loanTotals,
   newestInsuranceExpiry,
+  pickCover,
 } from "./derive";
 
 describe("expiryState", () => {
@@ -149,5 +150,18 @@ describe("labels", () => {
     expect(additionsLabel(1975, null)).toBe("First addition 1975");
     expect(additionsLabel(1975, 1990)).toBe("First addition 1975; second addition 1990");
     expect(additionsLabel(null, 1990)).toBe("Second addition 1990");
+  });
+});
+
+describe("pickCover (C14)", () => {
+  const p = (id: string, isCover: boolean) => ({ id, isCover });
+  it("is the marked photo, wherever it sits", () => {
+    expect(pickCover([p("a", false), p("b", true), p("c", false)])?.id).toBe("b");
+  });
+  it("is the oldest when none is marked (a removed cover leaves the building with a cover, not a gap)", () => {
+    expect(pickCover([p("a", false), p("b", false)])?.id).toBe("a");
+  });
+  it("is null for no photos", () => {
+    expect(pickCover([])).toBeNull();
   });
 });

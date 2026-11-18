@@ -9,8 +9,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Refusal } from "./contract";
-import { GATE_COPY, REFUSAL, STATE, TOAST, VALIDATION, refusalMessage } from "./copy";
+import { LIMITS, type Refusal } from "./contract";
+import { GATE_COPY, PHOTO_COPY, PHOTO_REFUSAL, REFUSAL, STATE, TOAST, VALIDATION, photoRefusalMessage, refusalMessage } from "./copy";
 
 /** Every string copy.ts can produce, functions called with sample arguments. */
 function catalog(): string[] {
@@ -30,6 +30,8 @@ function catalog(): string[] {
   walk(VALIDATION, "VALIDATION");
   walk(TOAST, "TOAST");
   walk(STATE, "STATE");
+  walk(PHOTO_REFUSAL, "PHOTO_REFUSAL");
+  walk(PHOTO_COPY, "PHOTO_COPY");
   out.push(refusalMessage("duplicate_appraisal_year", { assessedYear: 2024 }));
   return out;
 }
@@ -116,6 +118,69 @@ describe("copy.ts", () => {
   });
 });
 
+describe("C14: building photos", () => {
+  it("every refusal kind has its Copy string, verbatim", () => {
+    expect(PHOTO_REFUSAL.unsupported_type).toBe(
+      "That file isn't a JPEG, PNG or WebP picture. If it's an iPhone photo, pick it from your photo library or convert it to JPEG first.",
+    );
+    expect(PHOTO_REFUSAL.animated).toBe("Animated pictures aren't supported. Choose a still picture.");
+    expect(PHOTO_REFUSAL.too_many_pixels).toBe("That picture is too large to process. Try a smaller one.");
+    expect(PHOTO_REFUSAL.too_large).toBe("That picture is too big to upload. Try a smaller one.");
+    expect(PHOTO_REFUSAL.unreadable).toBe("We couldn't read that picture. Try a different file.");
+    expect(PHOTO_REFUSAL.empty).toBe("That file is empty.");
+    expect(PHOTO_REFUSAL.duplicate).toBe("That picture is already in this building's photos.");
+    expect(PHOTO_REFUSAL.cap_reached).toBe("This building already has 10 photos. Remove one to add another.");
+    expect(PHOTO_REFUSAL.already_removed).toBe("That photo was already removed.");
+    expect(PHOTO_REFUSAL.save_failed).toBe("We couldn't save that photo. Nothing was changed. Try again.");
+    expect(photoRefusalMessage("not_found")).toBe(REFUSAL.not_found);
+    expect(photoRefusalMessage("forbidden")).toBe(REFUSAL.forbidden);
+    expect(photoRefusalMessage("building_removed")).toBe(REFUSAL.building_removed);
+  });
+
+  it("the cap in the cap_reached string is the cap the store enforces", () => {
+    expect(PHOTO_REFUSAL.cap_reached).toContain(` ${LIMITS.photoCap} photos`);
+  });
+
+  it("the page, dialog, toast and caption strings are the design's", () => {
+    expect(PHOTO_COPY.blockHeading).toBe("Photos");
+    expect(PHOTO_COPY.addPhoto).toBe("Add a photo");
+    expect(PHOTO_COPY.allPhotos(3)).toBe("All photos (3)");
+    expect(PHOTO_COPY.pageTitle("Main sanctuary")).toBe("Photos of Main sanctuary");
+    expect(PHOTO_COPY.backToBuilding("Main sanctuary")).toBe("Back to Main sanctuary");
+    expect(PHOTO_COPY.viewLarger(null)).toBe("View larger: photo");
+    expect(PHOTO_COPY.viewLarger("The front steps")).toBe("View larger: The front steps");
+    expect(PHOTO_COPY.editCaption).toBe("Edit caption");
+    expect(PHOTO_COPY.captionLabel).toBe("Caption (optional)");
+    expect(PHOTO_COPY.makeCover).toBe("Make this the cover");
+    expect(PHOTO_COPY.removePhoto).toBe("Remove photo");
+    expect(PHOTO_COPY.coverBadge).toBe("Cover");
+    expect(PHOTO_COPY.saveCaption).toBe("Save caption");
+    expect(PHOTO_COPY.saving).toBe("Saving…");
+    expect(PHOTO_COPY.backToAll).toBe("Back to all photos");
+    expect(PHOTO_COPY.uploadFailed).toBe("That picture couldn't be uploaded. Check your connection, or try a smaller picture.");
+    expect(PHOTO_COPY.removeDialog).toEqual({
+      title: "Remove this photo?",
+      body: "It will no longer be listed here. The picture file itself stays in storage and can't be erased from here.",
+      confirm: "Remove photo",
+      cancel: "Cancel",
+    });
+    expect(VALIDATION.captionTooLong).toBe("Caption must be 200 characters or fewer.");
+    expect(LIMITS.captionMax).toBe(200);
+    expect([TOAST.photoAdded, TOAST.captionSaved, TOAST.coverChanged, TOAST.photoRemoved]).toEqual([
+      "Photo added.",
+      "Caption saved.",
+      "Cover changed.",
+      "Photo removed.",
+    ]);
+  });
+
+  it("the remove dialog states the residual in words: the file stays, it is not erased", () => {
+    expect(PHOTO_COPY.removeDialog.body).toMatch(/stays in storage/);
+    expect(PHOTO_COPY.removeDialog.body).toMatch(/can't be erased/);
+    for (const text of Object.values(PHOTO_REFUSAL)) expect(text).not.toMatch(/deleted|erased permanently/i);
+  });
+});
+
 describe("no sentence of its own outside copy.ts", () => {
   /** A literal that reads as a sentence: a capital, a space, and a terminal period or question mark. */
   const SENTENCE = /(["'`])[A-Z][^"'`\n]*\s[^"'`\n]*[.?]\1/;
@@ -127,7 +192,7 @@ describe("no sentence of its own outside copy.ts", () => {
     expect(SENTENCE.test('const k = "oversight_buildings_live_name_idx";')).toBe(false);
   });
 
-  for (const file of ["validate.ts", "store.ts", "action-gate.ts", "reads.ts", "derive.ts"]) {
+  for (const file of ["validate.ts", "store.ts", "action-gate.ts", "reads.ts", "derive.ts", "photo-store.ts", "photo-reads.ts"]) {
     it(`${file} writes no user-facing sentence (it imports its strings from copy.ts)`, () => {
       const source = stripComments(readFileSync(path.join(__dirname, file), "utf8"));
       const hit = SENTENCE.exec(source);

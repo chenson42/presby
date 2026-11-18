@@ -19,7 +19,7 @@ import {
   fitWithin,
   type DownscaleEnv,
 } from "./downscale";
-import { CLIENT_MAX_EDGE, CLIENT_TARGET_BYTES } from "@/lib/person-photos/limits";
+import { CLIENT_MAX_EDGE, CLIENT_TARGET_BYTES } from "./limits";
 
 const SOURCE = readFileSync(path.resolve(__dirname, "downscale.ts"), "utf8");
 

@@ -12,7 +12,7 @@
  * Nothing here says "everything is recorded", "nothing is kept", or "only X can
  * see"; `copy.test.ts` pins it.
  */
-import type { Refusal } from "./contract";
+import type { PhotoRefusal, Refusal } from "./contract";
 
 // ---------------------------------------------------------------------------
 // C9: refusals (one fixed string per kind, never raw database text)
@@ -97,6 +97,8 @@ export const VALIDATION = {
   balanceDateRequired: "Enter the date the balance is as of.",
   balanceRequiredForDate: "Enter the balance this date applies to, or clear the date.",
   balanceDateStale: 'Update the "as of" date for the new balance.',
+
+  captionTooLong: "Caption must be 200 characters or fewer.",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -120,6 +122,10 @@ export const TOAST = {
   loanPaidOff: "Loan marked paid off.",
   loanReopened: "Loan reopened.",
   loanRemoved: "Loan removed.",
+  photoAdded: "Photo added.",
+  captionSaved: "Caption saved.",
+  coverChanged: "Cover changed.",
+  photoRemoved: "Photo removed.",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -148,3 +154,66 @@ export const STATE = {
   listNeedsFinance:
     "Insurance needs permission to manage congregation property finances. An administrator can give it under Roles.",
 } as const;
+
+// ---------------------------------------------------------------------------
+// C14: building photos (Increment 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One fixed string per photo refusal kind. The picture refusals are the
+ * person-photo strings, worded for a building; `forbidden`, `not_found` and
+ * `building_removed` are the module's own (`REFUSAL`), repeated here by
+ * reference so a photo action has one table to read.
+ *
+ * What the strings do not say: the orphaned blob a failed final transaction can
+ * leave behind is not mentioned (nobody can act on it), and nothing here claims
+ * a removed photo is erased: the remove dialog says the file stays in storage.
+ */
+export const PHOTO_REFUSAL: Record<PhotoRefusal, string> = {
+  unsupported_type:
+    "That file isn't a JPEG, PNG or WebP picture. If it's an iPhone photo, pick it from your photo library or convert it to JPEG first.",
+  animated: "Animated pictures aren't supported. Choose a still picture.",
+  too_many_pixels: "That picture is too large to process. Try a smaller one.",
+  too_large: "That picture is too big to upload. Try a smaller one.",
+  unreadable: "We couldn't read that picture. Try a different file.",
+  empty: "That file is empty.",
+  duplicate: "That picture is already in this building's photos.",
+  cap_reached: "This building already has 10 photos. Remove one to add another.",
+  already_removed: "That photo was already removed.",
+  save_failed: "We couldn't save that photo. Nothing was changed. Try again.",
+  forbidden: REFUSAL.forbidden,
+  not_found: REFUSAL.not_found,
+  building_removed: REFUSAL.building_removed,
+};
+
+/** The strings the photos page, the larger view and the building's Photos block render (the UI imports this). */
+export const PHOTO_COPY = {
+  blockHeading: "Photos",
+  addPhoto: "Add a photo",
+  allPhotos: (count: number) => `All photos (${count})`,
+  pageTitle: (buildingName: string) => `Photos of ${buildingName}`,
+  backToBuilding: (buildingName: string) => `Back to ${buildingName}`,
+  /** The accessible name of a grid tile: its caption, or "photo". */
+  viewLarger: (caption: string | null) => `View larger: ${caption ?? "photo"}`,
+  editCaption: "Edit caption",
+  captionLabel: "Caption (optional)",
+  makeCover: "Make this the cover",
+  /** The word on the grid tile that is the cover (never colour alone). */
+  coverBadge: "Cover",
+  /** The caption form's submit and the progress word on it and on the upload button (ratified in B8). */
+  saveCaption: "Save caption",
+  saving: "Saving…",
+  removePhoto: "Remove photo",
+  backToAll: "Back to all photos",
+  /** The client's own rejection, when the upload fails before the server answers. */
+  uploadFailed: "That picture couldn't be uploaded. Check your connection, or try a smaller picture.",
+  removeDialog: {
+    title: "Remove this photo?",
+    body: "It will no longer be listed here. The picture file itself stays in storage and can't be erased from here.",
+    confirm: "Remove photo",
+    cancel: "Cancel",
+  },
+} as const;
+
+/** A photo write's refusal as a sentence. */
+export const photoRefusalMessage = (reason: PhotoRefusal): string => PHOTO_REFUSAL[reason];

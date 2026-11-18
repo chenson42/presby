@@ -18,6 +18,10 @@ function cardText(key: ReportKey, orgName: string): { description: string; sourc
       return { description: HUB_COPY.cards.viability.description(orgName), source: HUB_COPY.cards.viability.source };
     case "per_capita":
       return HUB_COPY.cards.per_capita;
+    case "buildings":
+      return HUB_COPY.cards.buildings;
+    case "insurance_and_loans":
+      return HUB_COPY.cards.insurance_and_loans;
   }
 }
 
@@ -101,7 +105,7 @@ export async function renderReportsHub({
       )}
 
       <p className="text-sm">
-        <Link href={helpHref("presbytery-reports")} className="text-primary underline-offset-4 hover:underline">
+        <Link href={helpHref("presbytery-reports")} className="inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline">
           {HUB_COPY.helpLink}
         </Link>
       </p>

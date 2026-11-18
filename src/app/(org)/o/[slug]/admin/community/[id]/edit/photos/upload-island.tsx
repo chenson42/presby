@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { HydrationGate } from "@/components/shared/hydration-gate";
 import { REFUSAL_COPY, UPLOAD_COPY, UPLOAD_REJECTED_COPY } from "@/lib/person-photos/copy";
 import { addPersonPhotoAction } from "./actions";
-import { DownscaleError, downscaleToJpeg } from "./downscale";
+import { DownscaleError, downscaleToJpeg } from "@/lib/storage/image/downscale";
 
 type Stage = "idle" | "preparing" | "uploading";
 

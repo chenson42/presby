@@ -326,6 +326,10 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   OVERSIGHT_LOAN_UPDATED: "tenant.oversight_loan.updated",
   OVERSIGHT_LOAN_PAID_OFF: "tenant.oversight_loan.paid_off",
   OVERSIGHT_LOAN_REMOVED: "tenant.oversight_loan.removed",
+  OVERSIGHT_PHOTO_ADDED: "tenant.oversight_photo.added",
+  OVERSIGHT_PHOTO_REMOVED: "tenant.oversight_photo.removed",
+  OVERSIGHT_PHOTO_COVER_SET: "tenant.oversight_photo.cover_set",
+  OVERSIGHT_PHOTO_CAPTION_SET: "tenant.oversight_photo.caption_set",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

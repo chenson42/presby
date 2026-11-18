@@ -7,8 +7,10 @@ import { BuildingActions } from "@/components/oversight/building-actions";
 import { FactList } from "@/components/oversight/fact-list";
 import { ImportedNote } from "@/components/oversight/imported-note";
 import { LockedPage } from "@/components/oversight/locked-page";
+import { PhotosBlock } from "@/components/oversight/photos-block";
 import type { SectionState } from "@/components/oversight/section-state";
 import { additionsLabel, formatBuildingType, formatCondition, formatInteger, formatTriState } from "@/lib/oversight/derive";
+import { readBuildingPhotoSummary, type BuildingCoverView } from "@/lib/oversight/photo-reads";
 import { readAppraisals, readBuilding, readFormEnv, type AppraisalsData, type BuildingRow } from "@/lib/oversight/reads";
 import { gateOversightPage } from "@/lib/presbytery-reports/gate";
 import { OversightGateStateView } from "../../../oversight-gate-state";
@@ -46,10 +48,11 @@ export default async function BuildingPage({
   const recordHref = `/o/${slug}/admin/oversight/${aboutOrgId}`;
   const back = `Back to ${opened.congregation.name}`;
 
-  const [buildingRead, appraisalsRead, envRead] = await Promise.all([
+  const [buildingRead, appraisalsRead, envRead, photosRead] = await Promise.all([
     settle(readBuilding(identity, aboutOrgId, buildingId)),
     opened.finance ? settle(readAppraisals(identity, aboutOrgId, buildingId)) : null,
     settle(readFormEnv(identity)),
+    settle(readBuildingPhotoSummary(identity, aboutOrgId, buildingId)),
   ]);
   if (!buildingRead.ok || !envRead.ok) return <OversightLoadError slug={slug} />;
   if (buildingRead.value.kind === "forbidden") {
@@ -64,6 +67,10 @@ export default async function BuildingPage({
     else if (appraisalsRead.value.kind === "ok") appraisals = { kind: "ok", data: appraisalsRead.value.data };
     else if (appraisalsRead.value.kind === "not_found") notFound();
   }
+
+  // The Photos block: its own state, so a failed photo read never takes the page down.
+  let photos: SectionState<BuildingCoverView | null> = { kind: "error" };
+  if (photosRead.ok && photosRead.value.kind === "ok") photos = { kind: "ok", data: photosRead.value.data };
 
   const retired = building.retiredOn !== null;
   return (
@@ -114,6 +121,8 @@ export default async function BuildingPage({
           env={envRead.value}
         />
       </section>
+
+      <PhotosBlock photosHref={`${pageHref}/photos`} pageHref={pageHref} state={photos} />
 
       <AppraisalsBlock slug={slug} aboutOrgId={aboutOrgId} buildingId={buildingId} state={appraisals} pageHref={pageHref} />
     </div>

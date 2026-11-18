@@ -1,5 +1,5 @@
 /**
- * The four presbytery report readers, against a REAL Postgres (the harness of
+ * The six presbytery report readers, against a REAL Postgres (the harness of
  * `src/lib/presbytery.test.ts`: the `hasDb` skip-guard, dynamic imports in
  * `beforeAll`, a self-contained fixture torn down per file, `vi.mock("server-only")`).
  * Run serially:
@@ -18,6 +18,14 @@
  * export's own transaction (and none on a refusal or a failed insert), trend
  * parity with the existing single-year rollup, and the per-capita sub-cent
  * rounding that `recordPerCapitaPayment` lets through.
+ *
+ * The two oversight reports (DECISION-348, Buildings and Insurance and loans) are
+ * pinned in their own describes at the end, on rows written directly as the owner
+ * (so a failure is never the store's): the tier-1 and tier-2 keys each opening only
+ * their own report, removed and retired rows left out, the newest policy year, open
+ * loans only, the roster fence (another presbytery, a congregation that moved away
+ * and one that is no longer active), the sentinels that must never reach a page or a
+ * file (street address, policy number, notes, lender), and the export's audit row.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -38,6 +46,8 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
     viability: typeof import("./viability");
     viabilityMap: typeof import("./viability-map");
     perCapita: typeof import("./per-capita");
+    buildings: typeof import("./buildings");
+    insuranceLoans: typeof import("./insurance-loans");
     hub: typeof import("./hub");
     csv: typeof import("./csv");
   };
@@ -58,6 +68,11 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
     appointments: typeof import("@/lib/db/domain/officers").appointments;
     stats: typeof import("@/lib/db/domain/presbytery").congregationStatistics;
     oversight: typeof import("@/lib/db/domain/presbytery").congregationOversight;
+    ovProfiles: typeof import("@/lib/db/domain/oversight").oversightProfiles;
+    ovBuildings: typeof import("@/lib/db/domain/oversight").oversightBuildings;
+    ovAppraisals: typeof import("@/lib/db/domain/oversight").oversightBuildingAppraisals;
+    ovInsurance: typeof import("@/lib/db/domain/oversight").oversightInsuranceYears;
+    ovLoans: typeof import("@/lib/db/domain/oversight").oversightLoans;
     rates: typeof import("@/lib/db/domain/presbytery").perCapitaRates;
     records: typeof import("@/lib/db/domain/presbytery").perCapitaRecords;
     users: typeof import("@/lib/db/schema").users;
@@ -74,7 +89,7 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
   // people
   let minister: string;
   let bMinister: string;
-  const holder: Record<"all" | "vacant" | "trend" | "viability" | "perCapita" | "none", string> = {} as never;
+  const holder: Record<"all" | "vacant" | "trend" | "viability" | "perCapita" | "finance" | "none", string> = {} as never;
   let bHolder: string;
   let userId: string;
 
@@ -105,16 +120,18 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
   const roleIds: string[] = [];
 
   beforeAll(async () => {
-    const [vacant, trend, viability, viabilityMap, perCapita, hub, csv] = await Promise.all([
+    const [vacant, trend, viability, viabilityMap, perCapita, buildings, insuranceLoans, hub, csv] = await Promise.all([
       import("./vacant-pulpits"),
       import("./membership-trend"),
       import("./viability"),
       import("./viability-map"),
       import("./per-capita"),
+      import("./buildings"),
+      import("./insurance-loans"),
       import("./hub"),
       import("./csv"),
     ]);
-    readers = { vacant, trend, viability, viabilityMap, perCapita, hub, csv };
+    readers = { vacant, trend, viability, viabilityMap, perCapita, buildings, insuranceLoans, hub, csv };
     presbytery = await import("@/lib/presbytery");
     ({ withOrgContext } = await import("@/lib/authz"));
     ({ getPlatformDb } = await import("@/lib/db"));
@@ -132,6 +149,11 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
       appointments: (await import("@/lib/db/domain/officers")).appointments,
       stats: (await import("@/lib/db/domain/presbytery")).congregationStatistics,
       oversight: (await import("@/lib/db/domain/presbytery")).congregationOversight,
+      ovProfiles: (await import("@/lib/db/domain/oversight")).oversightProfiles,
+      ovBuildings: (await import("@/lib/db/domain/oversight")).oversightBuildings,
+      ovAppraisals: (await import("@/lib/db/domain/oversight")).oversightBuildingAppraisals,
+      ovInsurance: (await import("@/lib/db/domain/oversight")).oversightInsuranceYears,
+      ovLoans: (await import("@/lib/db/domain/oversight")).oversightLoans,
       rates: (await import("@/lib/db/domain/presbytery")).perCapitaRates,
       records: (await import("@/lib/db/domain/presbytery")).perCapitaRecords,
       users: (await import("@/lib/db/schema")).users,
@@ -267,6 +289,7 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
         { key: "statistics.manage", module: "presbytery", description: "Manage statistics", sensitivityTier: 2 },
         { key: "congregation_oversight.manage", module: "presbytery", description: "Manage oversight", sensitivityTier: 1 },
         { key: "per_capita.manage", module: "presbytery", description: "Manage per capita", sensitivityTier: 2 },
+        { key: "congregation_oversight.finance", module: "presbytery", description: "Oversight finance", sensitivityTier: 2 },
       ])
       .onConflictDoNothing();
 
@@ -284,10 +307,11 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
       trend: "statistics.manage",
       viability: "congregation_oversight.manage",
       perCapita: "per_capita.manage",
+      finance: "congregation_oversight.finance",
     } as const;
     holder.all = await person("Perpetua", "Reportstest-All", A);
     await grant(holder.all, A, "all", Object.values(KEYS));
-    for (const k of ["vacant", "trend", "viability", "perCapita"] as const) {
+    for (const k of ["vacant", "trend", "viability", "perCapita", "finance"] as const) {
       holder[k] = await person("Ptolemy", `Reportstest-${k}`, A);
       await grant(holder[k], A, k, [KEYS[k]]);
     }
@@ -382,6 +406,102 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
     ]);
     // B's own bill: never in A.
     await platform.insert(schema.records).values({ organizationId: B, aboutOrgId: bCong, billingYear: 2025, basisYear: 2023, endingActiveBasis: 5, rateApplied: "1.00", amountOwed: "5.00", updatedBy: userId });
+
+    // ── Congregation Oversight rows for the two oversight reports (DECISION-348), written as the owner. ──
+    const by = { createdBy: userId, updatedBy: userId };
+    const removal = { removedAt: new Date("2026-02-01T00:00:00Z"), removedBy: userId };
+    const newBuilding = async (org: string, about: string, name: string, over: Partial<typeof schema.ovBuildings.$inferInsert> = {}) => {
+      const [row] = await platform
+        .insert(schema.ovBuildings)
+        .values({ organizationId: org, aboutOrgId: about, name, buildingType: "sanctuary", ...by, ...over })
+        .returning({ id: schema.ovBuildings.id });
+      return row!.id;
+    };
+    const newAppraisal = (org: string, about: string, buildingId: string, assessedYear: number, amountCents: number, removed = false) =>
+      platform.insert(schema.ovAppraisals).values({ organizationId: org, aboutOrgId: about, buildingId, assessedYear, amountCents, createdBy: userId, ...(removed ? removal : {}) });
+    const newPolicy = (org: string, about: string, policyYear: number, over: Partial<typeof schema.ovInsurance.$inferInsert> = {}) =>
+      platform.insert(schema.ovInsurance).values({ organizationId: org, aboutOrgId: about, policyYear, ...by, ...over });
+    const newLoan = (org: string, about: string, over: Partial<typeof schema.ovLoans.$inferInsert> = {}) =>
+      platform.insert(schema.ovLoans).values({ organizationId: org, aboutOrgId: about, kind: "presbytery_program", ...by, ...over });
+
+    // Alder (installed): every rule on one congregation.
+    await platform.insert(schema.ovProfiles).values({
+      organizationId: A,
+      aboutOrgId: c.installed,
+      streetAddress: "100 SECRET-STREET LANE",
+      city: "Alderton",
+      county: "Marsh",
+      ...by,
+    });
+    const sanctuary = await newBuilding(A, c.installed, "Sanctuary", {
+      isPrimary: true,
+      yearBuilt: 1902,
+      firstAdditionYear: 1950,
+      squareFeet: 12500,
+      roofCondition: "good",
+      plumbingCondition: "fair",
+      hvacCondition: "poor",
+      hasSprinklers: true,
+      hasFireAlarm: false,
+      notes: "SECRET-BUILDING-NOTE",
+    });
+    await newBuilding(A, c.installed, "Fellowship Hall", { buildingType: "fellowship_hall" });
+    const annex = await newBuilding(A, c.installed, "Annex", { buildingType: "annex", retiredOn: "2025-05-01", retiredReason: "sold" });
+    const oldHall = await newBuilding(A, c.installed, "Old Hall", { buildingType: "fellowship_hall" });
+    await newAppraisal(A, c.installed, sanctuary, 2020, 90_000_000);
+    await newAppraisal(A, c.installed, sanctuary, 2024, 95_000_050); // the newest: $950,000.50
+    await newAppraisal(A, c.installed, sanctuary, 2025, 1, true); // removed: not the newest
+    await newAppraisal(A, c.installed, annex, 2024, 77_777_700); // retired building: not counted
+    await newAppraisal(A, c.installed, oldHall, 2024, 66_666_600); // its building is removed next
+    await platform.update(schema.ovBuildings).set(removal).where(eq(schema.ovBuildings.id, oldHall));
+    await newPolicy(A, c.installed, 2023, { carrier: "Old Mutual", policyExpiresOn: "2024-09-01" });
+    await newPolicy(A, c.installed, 2025, {
+      carrier: "Example Mutual",
+      policyNumber: "SECRET-POLICY-NO",
+      policyExpiresOn: "2026-09-01",
+      recentClaims: false,
+      poolInterest: true,
+      notes: "SECRET-INS-NOTE",
+    });
+    await newPolicy(A, c.installed, 2026, { carrier: "REMOVED-MUTUAL", ...removal });
+    await newLoan(A, c.installed, {
+      lender: "SECRET-LENDER",
+      originalAmountCents: 25_000_000,
+      currentBalanceCents: 18_125_050,
+      balanceAsOf: "2026-01-01",
+      grantsAmountCents: 500_000,
+      guaranteeNote: "Guaranteed up to the original amount",
+      notes: "SECRET-LOAN-NOTE",
+    });
+    await newLoan(A, c.installed, { kind: "other" }); // open, nothing recorded
+    await newLoan(A, c.installed, { status: "paid_off", paidOffOn: "2025-12-01", currentBalanceCents: 0, balanceAsOf: "2025-12-01", guaranteeNote: "PAID-OFF-GUARANTEE" });
+    await newLoan(A, c.installed, { guaranteeNote: "REMOVED-GUARANTEE", ...removal });
+
+    // Bramble (ended): a building with nothing recorded but its type.
+    await newBuilding(A, c.ended, "Chapel", { buildingType: "other" });
+    // Dunmore (supply): its only building is retired, so it has none in use.
+    await newBuilding(A, c.supply, "Old Church", { retiredOn: "2024-01-01", retiredReason: "closed" });
+    // Iverson (dissolved, still under A): rows exist, the reports leave it out.
+    await platform.insert(schema.ovProfiles).values({ organizationId: A, aboutOrgId: c.dissolved, city: "DISSOLVED-CITY", ...by });
+    await newBuilding(A, c.dissolved, "DISSOLVED-SANCTUARY");
+    await newPolicy(A, c.dissolved, 2025, { carrier: "DISSOLVED-MUTUAL" });
+    await newLoan(A, c.dissolved, { guaranteeNote: "DISSOLVED-GUARANTEE" });
+    // Larch (moved to B): A keeps its rows from before the move, which the about-org triggers now refuse.
+    await withTriggersOff(
+      platform,
+      ["oversight_buildings:oversight_buildings_about_org", "oversight_insurance_years:oversight_insurance_years_about_org", "oversight_loans:oversight_loans_about_org"],
+      async () => {
+        await newBuilding(A, c.moved, "MOVED-HALL");
+        await newPolicy(A, c.moved, 2025, { carrier: "MOVED-MUTUAL" });
+        await newLoan(A, c.moved, { guaranteeNote: "MOVED-GUARANTEE" });
+      },
+    );
+    // B's own rows: never in A.
+    await platform.insert(schema.ovProfiles).values({ organizationId: B, aboutOrgId: bCong, city: "Bville", county: "Bshire", ...by });
+    const bBuilding = await newBuilding(B, bCong, "B-ONLY-BUILDING", { isPrimary: true });
+    await newAppraisal(B, bCong, bBuilding, 2024, 42_000_000);
+    await newPolicy(B, bCong, 2025, { carrier: "B-ONLY-MUTUAL", policyExpiresOn: "2027-01-01" });
+    await newLoan(B, bCong, { guaranteeNote: "B-ONLY-GUARANTEE", currentBalanceCents: 123_400, balanceAsOf: "2026-01-01" });
   }, 60_000);
 
   afterAll(async () => {
@@ -396,6 +516,12 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
       }
       await platform.delete(schema.records).where(inArray(schema.records.organizationId, [A, B]));
       await platform.delete(schema.rates).where(inArray(schema.rates.organizationId, [A, B]));
+      // The six oversight tables' rows first (about_org_id has no cascade), children before buildings.
+      await platform.delete(schema.ovAppraisals).where(inArray(schema.ovAppraisals.organizationId, [A, B]));
+      await platform.delete(schema.ovLoans).where(inArray(schema.ovLoans.organizationId, [A, B]));
+      await platform.delete(schema.ovInsurance).where(inArray(schema.ovInsurance.organizationId, [A, B]));
+      await platform.delete(schema.ovProfiles).where(inArray(schema.ovProfiles.organizationId, [A, B]));
+      await platform.delete(schema.ovBuildings).where(inArray(schema.ovBuildings.organizationId, [A, B]));
       await platform.delete(schema.oversight).where(inArray(schema.oversight.organizationId, [A, B]));
       await platform.delete(schema.appointments).where(inArray(schema.appointments.organizationId, [A, B]));
       await platform.execute(sql`alter table group_memberships disable trigger group_memberships_reject_derived`);
@@ -452,10 +578,20 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
       expect((await auditRows()).length).toBe(before);
     });
 
-    it("the hub reads the live lock state for all four keys", async () => {
-      expect((await readers.hub.getReportsHub(viewerFor(holder.all))).held).toEqual({ vacant_pulpits: true, membership_trend: true, viability: true, per_capita: true });
-      expect((await readers.hub.getReportsHub(viewerFor(holder.trend))).held).toEqual({ vacant_pulpits: false, membership_trend: true, viability: false, per_capita: false });
-      expect((await readers.hub.getReportsHub(viewerFor(holder.none))).held).toEqual({ vacant_pulpits: false, membership_trend: false, viability: false, per_capita: false });
+    it("the hub reads the live lock state for all six reports (Buildings follows the manage key, Insurance and loans the finance key)", async () => {
+      const none = { vacant_pulpits: false, membership_trend: false, viability: false, per_capita: false, buildings: false, insurance_and_loans: false };
+      expect((await readers.hub.getReportsHub(viewerFor(holder.all))).held).toEqual({
+        vacant_pulpits: true,
+        membership_trend: true,
+        viability: true,
+        per_capita: true,
+        buildings: true,
+        insurance_and_loans: true,
+      });
+      expect((await readers.hub.getReportsHub(viewerFor(holder.trend))).held).toEqual({ ...none, membership_trend: true });
+      expect((await readers.hub.getReportsHub(viewerFor(holder.viability))).held).toEqual({ ...none, viability: true, buildings: true });
+      expect((await readers.hub.getReportsHub(viewerFor(holder.finance))).held).toEqual({ ...none, insurance_and_loans: true });
+      expect((await readers.hub.getReportsHub(viewerFor(holder.none))).held).toEqual(none);
     });
 
     it("a person with no membership at the presbytery cannot even open the transaction", async () => {
@@ -798,6 +934,248 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
     it("a failed audit insert fails the export and leaves no row (the actor is not a real user)", async () => {
       const before = (await auditRows()).length;
       await expect(readers.viability.exportViability(viewerFor(holder.viability, A, randomUUID()))).rejects.toThrow();
+      expect((await auditRows()).length).toBe(before);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // The two oversight reports (DECISION-348)
+  // ---------------------------------------------------------------------------
+
+  /** Everything the fixture writes that must never reach a page or a file. */
+  const NEVER = /SECRET|B-ONLY|DISSOLVED|MOVED|REMOVED-|PAID-OFF|Old Mutual|Old Hall|Annex|Old Church|100 SECRET/;
+
+  describe("the oversight reports: the key is checked inside the transaction", () => {
+    it("Buildings opens for the manage key only; Insurance and loans for the finance key only", async () => {
+      const buildings = (p: string) => readers.buildings.getBuildingsReport(viewerFor(p));
+      const insurance = (p: string) => readers.insuranceLoans.getInsuranceLoans(viewerFor(p), NOW);
+      // the manage key is the viability holder's; "all" holds every key
+      for (const who of ["viability", "all"] as const) expect((await buildings(holder[who])).kind, `${who} reading buildings`).toBe("ok");
+      for (const who of ["finance", "vacant", "trend", "perCapita", "none"] as const) {
+        expect((await buildings(holder[who])).kind, `${who} reading buildings`).toBe("forbidden");
+      }
+      for (const who of ["finance", "all"] as const) expect((await insurance(holder[who])).kind, `${who} reading insurance`).toBe("ok");
+      for (const who of ["viability", "vacant", "trend", "perCapita", "none"] as const) {
+        expect((await insurance(holder[who])).kind, `${who} reading insurance`).toBe("forbidden");
+      }
+    });
+
+    it("a refusal carries no data, and an export refuses the same viewers and writes no audit row", async () => {
+      const before = (await auditRows()).length;
+      expect(await readers.buildings.getBuildingsReport(viewerFor(holder.finance))).toEqual({ kind: "forbidden" });
+      expect(await readers.insuranceLoans.getInsuranceLoans(viewerFor(holder.viability), NOW)).toEqual({ kind: "forbidden" });
+      expect(await readers.buildings.exportBuildingsReport(viewerFor(holder.finance))).toEqual({ kind: "forbidden" });
+      expect(await readers.buildings.exportBuildingsReport(viewerFor(holder.none))).toEqual({ kind: "forbidden" });
+      expect(await readers.insuranceLoans.exportInsuranceLoans(viewerFor(holder.viability), NOW)).toEqual({ kind: "forbidden" });
+      expect(await readers.insuranceLoans.exportInsuranceLoans(viewerFor(holder.none), NOW)).toEqual({ kind: "forbidden" });
+      expect((await auditRows()).length).toBe(before);
+    });
+
+    it("a person with no membership at the presbytery cannot even open the transaction", async () => {
+      await expect(readers.buildings.getBuildingsReport(viewerFor(bHolder))).rejects.toThrow();
+      await expect(readers.insuranceLoans.getInsuranceLoans(viewerFor(bHolder), NOW)).rejects.toThrow();
+    });
+  });
+
+  describe("buildings", () => {
+    const data = async (who = holder.viability, org = A) => {
+      const r = await readers.buildings.getBuildingsReport(viewerFor(who, org));
+      if (r.kind !== "ok") throw new Error("expected ok");
+      return r.data;
+    };
+
+    it("lists the active roster in order, one line per building in use, and a congregation with none as one empty line", async () => {
+      const d = await data();
+      expect(d.rows.map((r) => [r.organizationId, r.building?.name ?? null])).toEqual([
+        [c.installed, "Sanctuary"],
+        [c.installed, "Fellowship Hall"],
+        [c.ended, "Chapel"],
+        [c.none, null],
+        [c.supply, null], // its only building is retired
+        [c.endsToday, null],
+        [c.startsToday, null],
+        [c.startsTomorrow, null],
+        [c.late, null],
+      ]);
+      expect(d.rosterCount).toBe(8);
+      expect(d.withoutBuildings).toBe(6);
+      expect(d.buildingCount).toBe(2 + 1);
+    });
+
+    it("carries the retired count on the empty line: more than 0 where every recorded building is retired, 0 where none ever was", async () => {
+      const d = await data();
+      const empty = (id: string) => d.rows.find((r) => r.organizationId === id && r.building === null)!;
+      expect(empty(c.supply).buildingsRetired).toBe(1); // its only building is retired: "None in use"
+      expect(empty(c.none).buildingsRetired).toBe(0); // none ever recorded: "Not recorded"
+      // a congregation with a building in use and a retired one still carries the count, on its building lines
+      expect(d.rows.find((r) => r.organizationId === c.installed)!.buildingsRetired).toBe(1);
+    });
+
+    it("carries the facts of one building, and the profile's city and county on each line of its congregation", async () => {
+      const d = await data();
+      const [first, second, chapel] = d.rows;
+      expect(first).toMatchObject({ name: "Fixture Alder installed (reports test)", city: "Alderton", county: "Marsh" });
+      expect(first.building).toMatchObject({
+        name: "Sanctuary",
+        buildingType: "sanctuary",
+        yearBuilt: 1902,
+        firstAdditionYear: 1950,
+        secondAdditionYear: null,
+        squareFeet: 12500,
+        roofCondition: "good",
+        plumbingCondition: "fair",
+        hvacCondition: "poor",
+        boilerCondition: null,
+        hasSprinklers: true,
+        hasFireAlarm: false,
+        hasSecuritySystem: null,
+        isPrimary: true,
+      });
+      expect(second).toMatchObject({ city: "Alderton", county: "Marsh" });
+      expect(second.building).toMatchObject({ name: "Fellowship Hall", isPrimary: false });
+      expect(chapel).toMatchObject({ city: null, county: null });
+    });
+
+    it("leaves out a removed building, a retired one, and every row of a congregation off the roster (dissolved, moved away, another presbytery's)", async () => {
+      const text = JSON.stringify(await data());
+      expect(text).not.toMatch(NEVER);
+    });
+
+    it("never selects a street address or a note, so neither can reach the page or the file", async () => {
+      const text = JSON.stringify(await data());
+      expect(text).not.toMatch(/SECRET/);
+      const file = await readers.buildings.exportBuildingsReport(viewerFor(holder.viability));
+      if (file.kind !== "ok") throw new Error("expected ok");
+      expect(file.csv).not.toMatch(NEVER);
+    });
+
+    it("presbytery B reads only its own congregation, and never A's", async () => {
+      const d = await data(bHolder, B);
+      expect(d.rows.map((r) => [r.organizationId, r.building?.name ?? null, r.city])).toEqual([
+        [bCong, "B-ONLY-BUILDING", "Bville"],
+        [c.moved, null, null], // B's roster; A's rows about it are A's, not B's
+      ]);
+      expect(JSON.stringify(d)).not.toMatch(/Sanctuary|Alderton|Chapel|SECRET|MOVED/);
+    });
+  });
+
+  describe("insurance and loans", () => {
+    const data = async (who = holder.finance, org = A) => {
+      const r = await readers.insuranceLoans.getInsuranceLoans(viewerFor(who, org), NOW);
+      if (r.kind !== "ok") throw new Error("expected ok");
+      return r.data;
+    };
+    const rowOf = (d: Awaited<ReturnType<typeof data>>, org: string) => d.rows.find((r) => r.organizationId === org)!;
+
+    it("one row per active member congregation, in roster order, and none for one that is off the roster", async () => {
+      const d = await data();
+      expect(d.rows.map((r) => r.organizationId)).toEqual([c.installed, c.ended, c.none, c.supply, c.endsToday, c.startsToday, c.startsTomorrow, c.late]);
+      expect(d.rosterCount).toBe(8);
+      expect(d.today).toBe("2026-06-15");
+    });
+
+    it("the newest live policy year wins (a removed newer year and an older year do not), with its expiry measured against the organization's day", async () => {
+      const alder = rowOf(await data(), c.installed);
+      expect(alder.insurance).toEqual({
+        policyYear: 2025,
+        carrier: "Example Mutual",
+        policyExpiresOn: "2026-09-01",
+        expiry: "current",
+        recentClaims: false,
+        poolInterest: true,
+      });
+      expect(rowOf(await data(), c.ended).insurance).toBeNull();
+    });
+
+    it("counts the open loans only, sums what is recorded, and says how many are not recorded", async () => {
+      const alder = rowOf(await data(), c.installed);
+      expect(alder).toMatchObject({
+        openLoans: 2, // the paid-off loan and the removed one are not open loans
+        originalCents: 25_000_000,
+        balanceCents: 18_125_050,
+        grantsCents: 500_000,
+        originalUnrecorded: 1,
+        balanceUnrecorded: 1,
+        grantsUnrecorded: 1,
+        guarantees: ["Guaranteed up to the original amount"],
+      });
+      expect(rowOf(await data(), c.ended)).toMatchObject({ openLoans: 0, originalCents: null, balanceCents: null, grantsCents: null, guarantees: [] });
+    });
+
+    it("appraised value is each in-use building's newest live appraisal; a retired or removed building's does not count", async () => {
+      const d = await data();
+      expect(rowOf(d, c.installed)).toMatchObject({ appraisedCents: 95_000_050, buildingsWithoutAppraisal: 1 });
+      expect(rowOf(d, c.ended)).toMatchObject({ appraisedCents: null, buildingsWithoutAppraisal: 1 });
+      expect(rowOf(d, c.supply)).toMatchObject({ appraisedCents: null, buildingsWithoutAppraisal: 0 });
+      expect(d.totals).toMatchObject({ appraisedCents: 95_000_050, buildingsWithoutAppraisal: 2, openLoans: 2 });
+    });
+
+    it("never reads a policy number, a note, a lender or a street address, and leaves out removed, paid-off and other presbyteries' rows", async () => {
+      const text = JSON.stringify(await data());
+      expect(text).not.toMatch(NEVER);
+      const file = await readers.insuranceLoans.exportInsuranceLoans(viewerFor(holder.finance), NOW);
+      if (file.kind !== "ok") throw new Error("expected ok");
+      expect(file.csv).not.toMatch(NEVER);
+    });
+
+    it("presbytery B reads only its own rows", async () => {
+      const d = await data(bHolder, B);
+      const b = rowOf(d, bCong);
+      expect(b).toMatchObject({
+        insurance: { policyYear: 2025, carrier: "B-ONLY-MUTUAL" },
+        openLoans: 1,
+        balanceCents: 123_400,
+        guarantees: ["B-ONLY-GUARANTEE"],
+        appraisedCents: 42_000_000,
+      });
+      expect(JSON.stringify(d)).not.toMatch(/Example Mutual|Alder|SECRET|Guaranteed up to/);
+    });
+  });
+
+  describe("the oversight reports: the page and the file agree, and the export audits", () => {
+    it("buildings: the file is the page's data through the builder, one line per row", async () => {
+      const v = viewerFor(holder.viability);
+      const page = await readers.buildings.getBuildingsReport(v);
+      const file = await readers.buildings.exportBuildingsReport(v);
+      if (page.kind !== "ok" || file.kind !== "ok") throw new Error("expected ok");
+      expect(file.csv).toBe(readers.csv.buildBuildingsCsv(page.data));
+      expect(file.rowCount).toBe(page.data.rows.length);
+      expect(file.csv.split("\r\n").length - 2).toBe(file.rowCount);
+      expect(file.filenameBase).toBe("buildings");
+    });
+
+    it("insurance and loans: the file is the page's data through the builder; its figures are the page's cents as decimals", async () => {
+      const v = viewerFor(holder.finance);
+      const page = await readers.insuranceLoans.getInsuranceLoans(v, NOW);
+      const file = await readers.insuranceLoans.exportInsuranceLoans(v, NOW);
+      if (page.kind !== "ok" || file.kind !== "ok") throw new Error("expected ok");
+      expect(file.csv).toBe(readers.csv.buildInsuranceLoansCsv(page.data));
+      expect(file.rowCount).toBe(page.data.rows.length);
+      expect(file.filenameBase).toBe("insurance-and-loans");
+      const alder = file.csv.slice(1).split("\r\n").find((l) => l.startsWith("Fixture Alder installed"))!;
+      expect(alder).toBe(
+        "Fixture Alder installed (reports test),Example Mutual,2025,2026-09-01,No,Yes,2,250000.00,181250.50,1,5000.00,Guaranteed up to the original amount,950000.50,1",
+      );
+    });
+
+    it("each export writes ONE audit row in its own transaction: the key, the row count, no name, note or amount", async () => {
+      const before = (await auditRows()).length;
+      await readers.buildings.exportBuildingsReport(viewerFor(holder.all));
+      await readers.insuranceLoans.exportInsuranceLoans(viewerFor(holder.all), NOW);
+      const rows = await auditRows();
+      expect(rows.length).toBe(before + 2);
+      const fresh = rows.slice(before).map((r) => r.metadata as Record<string, unknown>);
+      expect(fresh.map((m) => m.report).sort()).toEqual(["buildings", "insurance_and_loans"]);
+      for (const m of fresh) {
+        expect(m).toEqual({ organizationId: A, report: m.report, rowCount: 9 - (m.report === "insurance_and_loans" ? 1 : 0) });
+        expect(JSON.stringify(m)).not.toMatch(/Alder|Fixture|Sanctuary|Example|SECRET/);
+      }
+    });
+
+    it("a failed audit insert fails the export and leaves no row (the actor is not a real user)", async () => {
+      const before = (await auditRows()).length;
+      await expect(readers.buildings.exportBuildingsReport(viewerFor(holder.viability, A, randomUUID()))).rejects.toThrow();
+      await expect(readers.insuranceLoans.exportInsuranceLoans(viewerFor(holder.finance, A, randomUUID()), NOW)).rejects.toThrow();
       expect((await auditRows()).length).toBe(before);
     });
   });

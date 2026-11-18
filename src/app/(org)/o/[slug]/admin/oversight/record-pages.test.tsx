@@ -38,6 +38,12 @@ const r = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/oversight/reads", () => r);
 
+const ph = vi.hoisted(() => ({
+  readBuildingCovers: vi.fn(),
+  readBuildingPhotoSummary: vi.fn(),
+}));
+vi.mock("@/lib/oversight/photo-reads", () => ph);
+
 const detail = vi.fn();
 vi.mock("@/lib/presbytery", () => ({ getCongregationOversightDetail: (...a: unknown[]) => detail(...a) }));
 
@@ -73,6 +79,7 @@ afterEach(() => {
   gate.mockReset();
   notFoundMock.mockClear();
   Object.values(r).forEach((m) => m.mockReset());
+  Object.values(ph).forEach((m) => m.mockReset());
   detail.mockReset();
 });
 
@@ -80,6 +87,8 @@ function setup(keys: { manage: boolean; finance: boolean }) {
   gate.mockResolvedValue({ ok: true, identity: IDENTITY });
   r.readOversightAccess.mockResolvedValue({ kind: "ok", data: { ...keys, congregation: CONG } });
   r.readFormEnv.mockResolvedValue(ENV);
+  ph.readBuildingCovers.mockResolvedValue({ kind: "ok", data: {} });
+  ph.readBuildingPhotoSummary.mockResolvedValue({ kind: "ok", data: null });
 }
 
 const BUILDING = {
@@ -263,6 +272,53 @@ describe("the form pages", () => {
     expect(screen.getByRole("button", { name: "Bring back into use" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Retire this building" })).toBeNull();
     expect(screen.getByText(/^Sold on/)).toBeTruthy();
+  });
+
+  it("the building page's Photos block offers Add a photo when there is none, linking to the photos page", async () => {
+    setup({ manage: true, finance: false });
+    r.readBuilding.mockResolvedValue({ kind: "ok", data: BUILDING });
+    render(await BuildingPage({ params: p({ buildingId: B }) }));
+    const block = screen.getByRole("region", { name: "Photos" });
+    expect(within(block).getByRole("link", { name: "Add a photo" }).getAttribute("href")).toBe(
+      `/o/northern-reach/admin/oversight/${A}/buildings/${B}/photos`,
+    );
+  });
+
+  it("the building page's Photos block shows the cover and All photos (n); a cover without a picture still renders", async () => {
+    setup({ manage: true, finance: false });
+    r.readBuilding.mockResolvedValue({ kind: "ok", data: BUILDING });
+    ph.readBuildingPhotoSummary.mockResolvedValue({ kind: "ok", data: { buildingId: B, photoId: "ph1", caption: null, thumbSrc: null, count: 3 } });
+    render(await BuildingPage({ params: p({ buildingId: B }) }));
+    const block = screen.getByRole("region", { name: "Photos" });
+    expect(within(block).getByRole("link", { name: "All photos (3)" })).toBeTruthy();
+    expect(within(block).queryByRole("link", { name: "Add a photo" })).toBeNull();
+  });
+
+  it("a failed photo read leaves the rest of the building page up, with the section's own error", async () => {
+    setup({ manage: true, finance: false });
+    r.readBuilding.mockResolvedValue({ kind: "ok", data: BUILDING });
+    ph.readBuildingPhotoSummary.mockRejectedValue(new Error("boom"));
+    render(await BuildingPage({ params: p({ buildingId: B }) }));
+    expect(screen.getByRole("heading", { level: 1, name: "Sanctuary" })).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Photos" })).getByText(/couldn.t load this section/i)).toBeTruthy();
+  });
+
+  it("the record page's building card shows the cover when the building has one, and renders without it when the cover read fails", async () => {
+    setup({ manage: true, finance: false });
+    r.readProfile.mockResolvedValue({ kind: "ok", data: { profile: null } });
+    detail.mockResolvedValue({ kind: "ok", data: { viabilityScore: 3, redevelopmentNotes: null, buildingsNotes: null, latitude: null, longitude: null } });
+    r.readBuildings.mockResolvedValue({ kind: "ok", data: { buildings: [BUILDING], inUse: 1, retired: 0 } });
+    ph.readBuildingCovers.mockResolvedValue({
+      kind: "ok",
+      data: { [B]: { buildingId: B, photoId: "ph1", caption: null, thumbSrc: "data:image/webp;base64,AAAA", count: 2 } },
+    });
+    const a = render(await RecordPage({ params: p() }));
+    expect(a.container.querySelector('img[src^="data:image/webp"]')).toBeTruthy();
+    a.unmount();
+    ph.readBuildingCovers.mockRejectedValue(new Error("boom"));
+    const b = render(await RecordPage({ params: p() }));
+    expect(b.container.querySelector("img")).toBeNull();
+    expect(screen.getByRole("link", { name: /^open sanctuary/i })).toBeTruthy();
   });
 
   it("the insurance edit page reads the year, keeps the policy year read-only and says Edit insurance for {year}", async () => {

@@ -2,17 +2,22 @@ import { describe, expect, it } from "vitest";
 import { buildGiftsCsv } from "@/lib/giving/csv";
 import { buildRequestsCsv } from "@/lib/reimbursement/csv-shape";
 import {
+  BUILDINGS_HEADER,
   CSV_BOM,
+  INSURANCE_LOANS_HEADER,
   MEMBERSHIP_TREND_HEADER,
   PER_CAPITA_HEADER,
   VACANT_PULPITS_HEADER,
   VIABILITY_HEADER,
+  buildBuildingsCsv,
+  buildInsuranceLoansCsv,
   buildMembershipTrendCsv,
   buildPerCapitaCsv,
   buildVacantPulpitsCsv,
   buildViabilityCsv,
 } from "./csv";
 import type { MembershipTrendData, PerCapitaData, PerCapitaRow, VacantPulpitsData, ViabilityData } from "./derive";
+import type { BuildingsData, BuildingsRow, InsuranceLoansData, InsuranceLoansRow } from "./oversight-derive";
 
 const BOM_BYTES = [0xef, 0xbb, 0xbf];
 const bytesOf = (s: string) => Array.from(new TextEncoder().encode(s));
@@ -36,6 +41,82 @@ const perCapita = (rows: PerCapitaRow[]): PerCapitaData => ({
   totals: { billedCents: 0, paidCents: 0, outstandingCents: 0 },
   anyBillsAnyYear: true,
 });
+const buildingsData = (rows: BuildingsRow[]): BuildingsData => ({
+  rosterCount: rows.length,
+  rows,
+  withoutBuildings: rows.filter((r) => r.building === null).length,
+  buildingCount: rows.filter((r) => r.building !== null).length,
+});
+const bRow = (over: Partial<BuildingsRow> = {}, building: Partial<NonNullable<BuildingsRow["building"]>> | null = {}): BuildingsRow => ({
+  organizationId: "a",
+  name: "Alder Creek",
+  city: "Alderton",
+  county: "Marsh",
+  buildingsRetired: 0,
+  building:
+    building === null
+      ? null
+      : {
+          id: "b1",
+          aboutOrgId: "a",
+          name: "Sanctuary",
+          buildingType: "sanctuary",
+          yearBuilt: 1902,
+          firstAdditionYear: 1950,
+          secondAdditionYear: null,
+          squareFeet: 12500,
+          roofCondition: "good",
+          plumbingCondition: "fair",
+          hvacCondition: "poor",
+          boilerCondition: null,
+          hasSprinklers: true,
+          hasFireAlarm: false,
+          hasSecuritySystem: null,
+          isPrimary: true,
+          ...building,
+        },
+  ...over,
+});
+const insuranceLoansData = (rows: InsuranceLoansRow[]): InsuranceLoansData => ({
+  today: "2026-06-15",
+  rosterCount: rows.length,
+  rows,
+  totals: {
+    openLoans: 0,
+    originalCents: null,
+    balanceCents: null,
+    grantsCents: null,
+    originalUnrecorded: 0,
+    balanceUnrecorded: 0,
+    grantsUnrecorded: 0,
+    appraisedCents: null,
+    buildingsWithoutAppraisal: 0,
+  },
+});
+const ilRow = (over: Partial<InsuranceLoansRow> = {}): InsuranceLoansRow => ({
+  organizationId: "a",
+  name: "Alder Creek",
+  insurance: {
+    policyYear: 2025,
+    carrier: "Example Mutual",
+    policyExpiresOn: "2026-09-01",
+    expiry: "current",
+    recentClaims: false,
+    poolInterest: true,
+  },
+  openLoans: 1,
+  originalCents: 25000000,
+  balanceCents: 18125050,
+  grantsCents: 500000,
+  originalUnrecorded: 0,
+  balanceUnrecorded: 0,
+  grantsUnrecorded: 0,
+  guarantees: ["Guaranteed up to the original amount"],
+  appraisedCents: 120000000,
+  buildingsWithoutAppraisal: 0,
+  ...over,
+});
+
 const pcRow = (over: Partial<PerCapitaRow>): PerCapitaRow => ({
   billingYear: 2025,
   organizationId: "a",
@@ -70,8 +151,30 @@ describe("the headers, pinned verbatim", () => {
       "billing_year,congregation,membership,basis_year,ending_active_basis,rate_per_member,billed,paid,outstanding,payment_status,paid_on,note",
     );
   });
+  it("buildings (DECISION-348, C15)", () => {
+    expect(BUILDINGS_HEADER.join(",")).toBe(
+      "congregation,city,county,building,building_type,year_built,first_addition_year,second_addition_year,square_feet,roof_condition,plumbing_condition,hvac_condition,boiler_condition,sprinklers,fire_alarm,security_system,primary",
+    );
+  });
+  it("insurance and loans (DECISION-348, C15)", () => {
+    expect(INSURANCE_LOANS_HEADER.join(",")).toBe(
+      "congregation,carrier,policy_year,policy_expires_on,recent_claims,pool_interest,open_loans,original_amount,balance,balance_unrecorded_loans,grants,guarantee,appraised_value,buildings_without_appraisal",
+    );
+  });
+  it("neither oversight header names a street address, policy number, note, lender or photo", () => {
+    for (const h of [...BUILDINGS_HEADER, ...INSURANCE_LOANS_HEADER]) {
+      expect(h).not.toMatch(/street|address|policy_number|note|lender|photo|caption/i);
+    }
+  });
   it("no header names an email, address, phone, coordinate or person", () => {
-    for (const h of [...VACANT_PULPITS_HEADER, ...MEMBERSHIP_TREND_HEADER, ...VIABILITY_HEADER, ...PER_CAPITA_HEADER]) {
+    for (const h of [
+      ...VACANT_PULPITS_HEADER,
+      ...MEMBERSHIP_TREND_HEADER,
+      ...VIABILITY_HEADER,
+      ...PER_CAPITA_HEADER,
+      ...BUILDINGS_HEADER,
+      ...INSURANCE_LOANS_HEADER,
+    ]) {
       expect(h).not.toMatch(/email|address|phone|street|zip|latitude|longitude|coordinate|person|minister|pastor_name/i);
     }
   });
@@ -83,6 +186,8 @@ describe("the byte-order mark", () => {
     trend: buildMembershipTrendCsv(trend([])),
     viability: buildViabilityCsv(viability([])),
     perCapita: buildPerCapitaCsv(perCapita([])),
+    buildings: buildBuildingsCsv(buildingsData([])),
+    insuranceLoans: buildInsuranceLoansCsv(insuranceLoansData([])),
   };
 
   it.each(Object.entries(files))("%s starts with EF BB BF, then the header", (_name, csv) => {
@@ -244,5 +349,116 @@ describe("line terminators", () => {
     const csv = buildViabilityCsv(viability([{ organizationId: "a", name: "A", score: 2, label: "Fair", notes: null, lastUpdated: null }]));
     expect(csv.endsWith("\r\n")).toBe(true);
     expect(csv.slice(1).split("\r\n")).toHaveLength(3);
+  });
+});
+
+describe("buildings file (DECISION-348)", () => {
+  it("writes one line per building, closed values as labels, tri-states as Yes / No / empty, numbers as numbers", () => {
+    const csv = buildBuildingsCsv(buildingsData([bRow()]));
+    expect(csv.slice(1).split("\r\n")).toEqual([
+      BUILDINGS_HEADER.join(","),
+      "Alder Creek,Alderton,Marsh,Sanctuary,Sanctuary,1902,1950,,12500,Good,Fair,Poor,,Yes,No,,Yes",
+      "",
+    ]);
+  });
+
+  it("an education building is written by its label, not its stored value", () => {
+    const csv = buildBuildingsCsv(buildingsData([bRow({}, { buildingType: "education_building", isPrimary: false })]));
+    expect(csv).toContain(",Education building,");
+    expect(csv).not.toContain("education_building");
+    expect(csv.slice(1).split("\r\n")[1].endsWith(",No")).toBe(true);
+  });
+
+  it("a congregation with no building in use is one line: its name, city and county, and nothing else", () => {
+    const csv = buildBuildingsCsv(buildingsData([bRow({ name: "Bramblewood", city: null, county: "Marsh" }, null)]));
+    expect(csv.slice(1).split("\r\n")[1]).toBe("Bramblewood,,Marsh,,,,,,,,,,,,,,");
+    expect(csv.slice(1).split("\r\n")[1].split(",")).toHaveLength(BUILDINGS_HEADER.length);
+  });
+
+  it("every line has exactly as many cells as the header (no stray comma from a value)", () => {
+    const csv = buildBuildingsCsv(buildingsData([bRow(), bRow({}, { name: "Annex", isPrimary: false }), bRow({ name: "Cedar" }, null)]));
+    for (const l of csv.slice(1).split("\r\n").filter(Boolean)) expect(l.split(",")).toHaveLength(BUILDINGS_HEADER.length);
+  });
+
+  it.each(["=1+1", "+1", "-1", "@SUM(A1)", "\tx", "\rx"])(
+    "a congregation, city, county or building name beginning %j is apostrophe-guarded (each field on its own)",
+    (text) => {
+      const variants = [
+        bRow({ name: text }),
+        bRow({ city: text }),
+        bRow({ county: text }),
+        bRow({}, { name: text }),
+      ];
+      for (const row of variants) {
+        const line = buildBuildingsCsv(buildingsData([row])).slice(1);
+        expect(line.includes(`'${text}`) || line.includes(`"'${text}`)).toBe(true);
+        expect(line.includes(`,${text},`) || line.includes(`\r\n${text},`)).toBe(false);
+      }
+    },
+  );
+
+  it("quotes a comma, quote and newline in a building name", () => {
+    const csv = buildBuildingsCsv(buildingsData([bRow({}, { name: 'Hall, "East"\nWing' })]));
+    expect(csv).toContain('"Hall, ""East""\nWing"');
+  });
+});
+
+describe("insurance and loans file (DECISION-348)", () => {
+  it("writes decimal dollars from cents, the counts as numbers, and tri-states as Yes / No", () => {
+    const csv = buildInsuranceLoansCsv(insuranceLoansData([ilRow()]));
+    expect(csv.slice(1).split("\r\n")).toEqual([
+      INSURANCE_LOANS_HEADER.join(","),
+      "Alder Creek,Example Mutual,2025,2026-09-01,No,Yes,1,250000.00,181250.50,0,5000.00,Guaranteed up to the original amount,1200000.00,0",
+      "",
+    ]);
+  });
+
+  it("cents format: 5 cents is 0.05, a recorded zero is 0.00 (not empty), the cap is 1000000000.00, a not-recorded figure is empty", () => {
+    const csv = buildInsuranceLoansCsv(
+      insuranceLoansData([
+        ilRow({ originalCents: 5, balanceCents: 0, grantsCents: 100_000_000_000, appraisedCents: null }),
+        ilRow({ name: "Bramblewood", originalCents: null, balanceCents: null, grantsCents: null, balanceUnrecorded: 2, openLoans: 2 }),
+      ]),
+    );
+    const [, first, second] = csv.slice(1).split("\r\n");
+    expect(first.split(",").slice(7, 11)).toEqual(["0.05", "0.00", "0", "1000000000.00"]);
+    expect(first.split(",")[12]).toBe("");
+    expect(second.split(",").slice(6, 11)).toEqual(["2", "", "", "2", ""]);
+    expect(csv).not.toMatch(/\.\d{3}|e\+|NaN|undefined|null/);
+  });
+
+  it("a congregation with no records is its name and empties, with a zero count of open loans and unappraised buildings", () => {
+    const csv = buildInsuranceLoansCsv(
+      insuranceLoansData([ilRow({ name: "Cedar Hollow", insurance: null, openLoans: 0, originalCents: null, balanceCents: null, grantsCents: null, guarantees: [], appraisedCents: null })]),
+    );
+    expect(csv.slice(1).split("\r\n")[1]).toBe("Cedar Hollow,,,,,,0,,,0,,,,0");
+  });
+
+  it("joins several guarantee texts into one guarded, quoted cell", () => {
+    const csv = buildInsuranceLoansCsv(insuranceLoansData([ilRow({ guarantees: ["First, loan", "Second loan"] })]));
+    expect(csv).toContain('"First, loan; Second loan"');
+  });
+
+  it.each(["=1+1", "+1", "-1", "@SUM(A1)", "\tx", "\rx"])("a name, carrier or guarantee beginning %j is apostrophe-guarded", (text) => {
+    const variants = [
+      ilRow({ name: text }),
+      ilRow({ insurance: { ...ilRow().insurance!, carrier: text } }),
+      ilRow({ guarantees: [text] }),
+    ];
+    for (const row of variants) {
+      const line = buildInsuranceLoansCsv(insuranceLoansData([row])).slice(1);
+      expect(line.includes(`'${text}`) || line.includes(`"'${text}`)).toBe(true);
+      expect(line.includes(`,${text},`) || line.includes(`\r\n${text},`)).toBe(false);
+    }
+  });
+
+  it("a year and a count never pick up the text guard's apostrophe", () => {
+    const csv = buildInsuranceLoansCsv(insuranceLoansData([ilRow({ openLoans: 3, buildingsWithoutAppraisal: 2 })]));
+    expect(csv).not.toContain("'");
+  });
+
+  it("carries no policy number, lender or note even when the facts hold look-alikes (the facts do not have them)", () => {
+    const csv = buildInsuranceLoansCsv(insuranceLoansData([ilRow()])) + buildBuildingsCsv(buildingsData([bRow()]));
+    expect(csv).not.toMatch(/policy_number|lender|street/i);
   });
 });

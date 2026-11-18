@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { REFUSAL_COPY, REUSED_COPY } from "@/lib/person-photos/copy";
-import { UPLOAD_MAX_BYTES } from "@/lib/person-photos/limits";
+import { UPLOAD_MAX_BYTES } from "@/lib/storage/image/limits";
 import type { PhotoRefusal } from "@/lib/person-photos/types";
 
 vi.mock("server-only", () => ({}));

@@ -30,7 +30,7 @@ const f = (path, content) => ({ path, content });
 const rules = (violations) => violations.map((v) => v.rule);
 
 /** The closed list of two sharp importers (T5, DECISION-312), and a clean version of each. */
-const [PHOTO_IMAGE, SANITIZE] = SHARP_FILES;
+const [SANITIZE, PHOTO_IMAGE] = SHARP_FILES;
 const CLEAN = 'import "server-only";\nimport sharp from "sharp";\nexport const x = sharp;';
 const cleanPair = () => SHARP_FILES.map((p) => f(p, CLEAN));
 
@@ -278,7 +278,7 @@ describe("T4 - a file that builds or sends a reimbursement notice names no money
 
 describe("T5 - sharp is imported at runtime only by the closed list of two (DECISION-312)", () => {
   it("the list is the two re-encoders, sorted", () => {
-    expect(SHARP_FILES).toEqual(["src/lib/person-photos/image.ts", "src/lib/storage/image-sanitize.ts"]);
+    expect(SHARP_FILES).toEqual(["src/lib/storage/image-sanitize.ts", "src/lib/storage/image/photo.ts"]);
     expect([...SHARP_FILES].sort()).toEqual(SHARP_FILES);
   });
 
@@ -402,7 +402,7 @@ describe("T5 - sharp is imported at runtime only by the closed list of two (DECI
 // ── The scan itself ─────────────────────────────────────────────────────────
 
 describe("the real repository", () => {
-  it("is clean, and person-photos/image.ts and image-sanitize.ts are the two files importing sharp (T5, DECISION-312)", async () => {
+  it("is clean, and storage/image/photo.ts and image-sanitize.ts are the two files importing sharp (T5, DECISION-312)", async () => {
     const files = await collectFiles();
     expect(checkTreasuryBoundariesTree(files)).toEqual([]);
     for (const listed of SHARP_FILES) expect(files.some((file) => file.path === listed)).toBe(true);

@@ -25,8 +25,9 @@
 #   2. 0089 without 0072 is REFUSED by its first statement and rolls back
 #      whole (no oversight_ table, no permission row);
 #   3. every remaining migration through the last journal entry before 0089;
-#      scripts/seed.ts, scripts/seed-dev.sql, scripts/install-test-helpers.sql
-#      (CI's order); a fixture founding_administrator role at a presbytery;
+#      scripts/seed.ts, scripts/seed-dev.sql WITHOUT its oversight include (that
+#      seed needs 0089's permission row; it runs in step 5),
+#      scripts/install-test-helpers.sql (CI's order); a fixture founding_administrator role at a presbytery;
 #   4. 0089 with psql -1 (apply 1): exit 0, the backfill notice reports 1,
 #      catalog fingerprint FP1;
 #   5. oversight rows seeded (scripts/oversight/seed-dev-oversight.sql), then
@@ -196,8 +197,18 @@ migrate_with_journal 89 '[]'
 (cd "$ROOT" && DATABASE_URL="$APP_URL" PLATFORM_DATABASE_URL="$URL" npx --no-install tsx scripts/seed.ts) > "$TMP/seed-ts.log" 2>&1 \
   || { cat "$TMP/seed-ts.log" >&2; fail "scripts/seed.ts"; }
 pass "scripts/seed.ts"
-"${PSQL[@]}" -f "$ROOT/scripts/seed-dev.sql" > "$TMP/seed.log" 2>&1 || { cat "$TMP/seed.log" >&2; fail "scripts/seed-dev.sql"; }
-pass "scripts/seed-dev.sql"
+# seed-dev.sql now ends with `\ir oversight/seed-dev-oversight.sql`, which
+# inserts the finance key that only 0089 creates (FK on app_role_permissions),
+# so it cannot run before 0089. Apply every OTHER include to the pre-0089 state
+# from a temp copy beside the original (so each remaining `\ir` still resolves
+# relative to scripts/); the oversight seed runs after 0089 (step 5). The copy
+# is removed on exit.
+SEED_PRE="$ROOT/scripts/.seed-dev-pre0089.$$.sql"
+trap 'rm -rf "$TMP" "$SEED_PRE"' EXIT
+grep -v '^\\ir oversight/seed-dev-oversight\.sql' "$ROOT/scripts/seed-dev.sql" > "$SEED_PRE"
+"${PSQL[@]}" -f "$SEED_PRE" > "$TMP/seed.log" 2>&1 || { cat "$TMP/seed.log" >&2; fail "scripts/seed-dev.sql (without the oversight include)"; }
+rm -f "$SEED_PRE"
+pass "scripts/seed-dev.sql (its oversight include deferred until after 0089)"
 "${PSQL[@]}" -f "$ROOT/scripts/install-test-helpers.sql" > /dev/null
 expect_eq "$(q "select count(*) from pg_class where relname like 'oversight\\_%'")" 0 "no oversight_ table before 0089"
 # A presbytery founding_administrator role designated before 0089 (fixture;
@@ -215,6 +226,8 @@ step "4. 0089 (apply 1), psql -1"
 expect_eq "$(notice_count "$TMP/apply1.log")" 1 "apply 1: the backfill topped up the one presbytery founding role"
 FP1="$(q "$FINGERPRINT")"
 pass "0089 applied; fingerprint $FP1"
+expect_eq "$(q "select count(*) from permissions where key = 'congregation_oversight.manage' and description not like '%insurance%'")" 1 \
+  "the manage description no longer claims insurance (0038's text corrected in place, QA run 1 item 3)"
 
 step "5. oversight rows present, then 0089 re-applied WHOLE (apply 2)"
 "${PSQL[@]}" -f "$ROOT/scripts/oversight/seed-dev-oversight.sql" > "$TMP/seed89.log" 2>&1 || { cat "$TMP/seed89.log" >&2; fail "seed-dev-oversight.sql"; }

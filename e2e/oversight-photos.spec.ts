@@ -444,6 +444,47 @@ test.describe.serial("Oversight photos: a building's photos", () => {
     await page.close();
   });
 
+  test("the cover rule — regression for an upload taking the cover after the marked cover was removed: the oldest photo left stays the cover and the new one is not marked", async () => {
+    // A building of its own, so the counts the later tests rely on are untouched.
+    const chapelId = await seedBuilding(sql, fx, "congA", { name: "Chapel", type: "annex" });
+    const chapelPhotos = `${record()}/buildings/${chapelId}/photos`;
+    const rowsOf = async () => (await photoRows(chapelId)).filter((p) => !p.removed);
+    const page = await newPhonePage(clerk);
+    await page.goto(chapelPhotos);
+    await upload(page, 61);
+    await expect(page.getByRole("heading", { level: 2, name: "All photos (1)" })).toBeVisible();
+    await upload(page, 62);
+    await expect(page.getByRole("heading", { level: 2, name: "All photos (2)" })).toBeVisible();
+    const [first, second] = await rowsOf();
+    expect(first!.is_cover, "the first-ever upload takes the mark").toBe(true);
+    expect(second!.is_cover).toBe(false);
+
+    // Remove the marked cover through the dialog.
+    await page.goto(`${chapelPhotos}?view=${first!.id}`);
+    await expect(page.getByRole("button", { name: "Remove photo" })).toBeEnabled({ timeout: 60_000 });
+    await page.getByRole("button", { name: "Remove photo" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Remove photo", exact: true }).click();
+    await expect(page.getByText("Photo removed.")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "All photos (1)" })).toBeVisible();
+    // The oldest one left shows as the cover, with no row marked.
+    await expect(page.locator(`li:has(a[href$="?view=${second!.id}"])`)).toContainText("Cover");
+    expect((await rowsOf()).filter((p) => p.is_cover)).toHaveLength(0);
+
+    // A later upload must not take the cover.
+    await upload(page, 63);
+    await expect(page.getByRole("heading", { level: 2, name: "All photos (2)" })).toBeVisible();
+    const live = await rowsOf();
+    const third = live.find((p) => p.id !== second!.id)!;
+    expect(live.map((p) => p.id)).toEqual([second!.id, third.id]);
+    expect(live.map((p) => p.is_cover)).toEqual([false, false]);
+    await expect(page.getByText("Cover", { exact: true })).toHaveCount(1);
+    await expect(page.locator(`li:has(a[href$="?view=${second!.id}"])`)).toContainText("Cover");
+    await expect(page.locator(`li:has(a[href$="?view=${third.id}"])`)).not.toContainText("Cover");
+    const added = (await photoAudit()).filter((a) => a.action === "tenant.oversight_photo.added" && a.metadata.buildingId === chapelId);
+    expect(added.map((a) => a.metadata.cover)).toEqual([true, false, false]);
+    await page.close();
+  });
+
   test("a finance-only holder sees the Locked state on the photos page, with or without ?view=, and no picture", async () => {
     const page = await newPhonePage(finance);
     for (const path of [photosPath(), `${photosPath()}?view=${UPLOADED[0]}`]) {

@@ -10,10 +10,11 @@ export function BackLink({ href, children }: { href: string; children: React.Rea
   return (
     <Link
       href={href}
-      className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="inline-flex min-h-11 max-w-full items-center text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
-      <ArrowLeft className="mr-1 h-4 w-4" aria-hidden />
-      {children}
+      <ArrowLeft className="mr-1 h-4 w-4 shrink-0" aria-hidden />
+      {/* min-w-0 + break-words: a back link that names a 120-character building must wrap, not scroll the page sideways at 360px. */}
+      <span className="min-w-0 break-words">{children}</span>
     </Link>
   );
 }

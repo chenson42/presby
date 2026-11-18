@@ -49,4 +49,6 @@ export const SLUG_HISTORY: readonly string[] = [
   "spot-the-scam",
   // 2026-11-15, presbytery reports: the four reports and their downloads.
   "presbytery-reports",
+  // 2026-11-18, congregation records Increment 1: profile, buildings, insurance and loans.
+  "congregation-records",
 ];

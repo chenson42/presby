@@ -48,6 +48,11 @@ The page opens and says "You don't have permission to" do something.
 - What it means: your role does not include it. The message names your stated clerk or another administrator as the person to ask.
 - Who can fix it: an administrator can give you a role in "Roles".
 
+### A section on a congregation's record says "Locked"
+
+- What it means: the section needs a permission you do not hold. It names the permission.
+- Who can fix it: an administrator can give you a role that includes it in "Roles".
+
 ### A feature is not in "Features"
 
 You cannot find a feature in "Features", for example "Website domain".

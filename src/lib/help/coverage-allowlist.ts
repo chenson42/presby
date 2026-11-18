@@ -4,10 +4,10 @@
  * adding an entry means editing that number in the same diff; a removal is free. Planned and
  * pending pages never count as coverage.
  *
- * The 13 entries that remain are decisions, each with its reason (Batch 5b deleted the 13 placeholders
+ * The 12 entries that remain are decisions, each with its reason (Batch 5b deleted the 13 placeholders
  * that its pages cover; Worship Increment 1's three temporary entries left with its help pages; the
  * presbytery reports page, docs/work-log/2026-11-15-presbytery-reports.md, covers `tile:reports`; the same page covers `tile:insights`, the presbytery
- * dashboard, DECISION-342).
+ * dashboard, DECISION-342; the congregation records page, docs/work-log/2026-11-17-congregation-profile.md, covers `tile:oversight`).
  */
 export interface CoverageAllowlistEntry {
   key: string;
@@ -25,7 +25,6 @@ export const COVERAGE_ALLOWLIST: readonly CoverageAllowlistEntry[] = [
   { key: "tile:groups", reason: "Shipped, no help page yet; the first follow-up documentation pass writes it and shrinks this list." },
   { key: "tile:staff", reason: "Shipped, no help page yet; the first follow-up documentation pass writes it and shrinks this list." },
   { key: "tile:credentials", reason: "A presbytery surface; help is written for congregations (Phase 1 Q6)." },
-  { key: "tile:oversight", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
   { key: "tile:filings", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
   { key: "tile:committees", reason: "A presbytery surface behind a flag that is off in production (Phase 1 Q6)." },
   { key: "tile:communications", reason: "A coming-soon stub; never documented as a feature." },

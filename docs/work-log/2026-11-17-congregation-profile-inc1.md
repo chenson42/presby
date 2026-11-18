@@ -465,6 +465,34 @@ counts, and anything the next phase must know. Leave out narration of how
 the work went; git history already records it. Judgment output (analyst,
 architect, qa) is still recorded verbatim.*
 
+### Fix pass after QA run 1 (full-stack-developer, 2026-11-18)
+
+Implements the seven rows of Phase 3 amendment A exactly as ruled. Commits on `pipeline/congregation-profile` after `6323d304`: `b297ac6f` (test: name pin), `5f1f7770` (fix: migration description, list reader and label), `d67d922d` (test: D6 harness), `0839d931` (fix: help sentences and back link), `34fd55e6` (test e2e), and one more fix for the assessment form's touch targets (below). No strings outside amendment A.
+
+| # | What changed | Red first | Green |
+|---|---|---|---|
+| 1 | `blob-audience.db.test.ts`: the two `oversight_building_photos_*_fk` names added to both lists (the private-pin object and the exact name list) | "holds for every FK in the catalog": the received list carried the two extra names | 22 / 22 |
+| 2 | `congregation-records.md` line 3 now reads: Open your presbytery's page, choose "Congregation Oversight" under "Governance & Courts", then choose "Open"...; `labels` lose "Administration" and gain "Governance & Courts". New `src/lib/help/congregation-records-nav.test.ts` derives the tile label and heading from `PORTAL_TILES` and `DOMAIN_LABELS` | 3 of 4 red on the old text and labels | 4 / 4; `check:help` passes |
+| 3 | `drizzle/0089` section 1: a replay-safe `update permissions ... where description is distinct from` for `congregation_oversight.manage` (0038 untouched); header comment updated. `test-rls-89.sql` 89b pins the exact description | 89b failed ("expected 1, got 0") against the branch before re-applying | 0089 re-applied to the pipeline branch with `psql -1` (replay-safe: it matches nothing a second time); test-rls-89 as `presby_app`: 172 passes, 0 errors |
+| 4 | `reads.ts` one grouped query returns `buildingsInUse` and `buildingsRetired`; `buildingsInUseLabel(inUse, retired)`; `STATE.noneInUse`; `oversight-list.tsx` passes both. Tests: `derive.test.ts` (four cases), `page.test.tsx` (a retired-only row says "None in use", a nothing-recorded row does not), `reads.db.test.ts` (key list gains `buildingsRetired`; a retired building beside a removed one is `{0, 1}`; removed-only is `{0, 0}`; the existing mixed case is `{2, 1}`) | 5 tests red (derive, page, three DB cases) | all pass |
+| 5 | `test-0089-migration.sh` step 3 applies a temp copy of `seed-dev.sql` without its `\ir oversight/...` line (removed on exit); step 5 already seeds after 0089; one new check that the manage description no longer says "insurance" | the pre-fix script, run against the same tree, exits 1 at step 3 (`seed-dev-oversight.sql:95`, FK on `app_role_permissions`) | `D6 PASS` on a scratch database, exit 0, identical fingerprint after the second apply, `test-rls.sql` integrated, runner path agrees |
+| 6 | `help` audit paragraph replaced with the ruled text (in `congregation-records-nav.test.ts`: not "Every change is recorded"; contains the "Assessment" sentence and "Looking at a record is not recorded.") | red on the old text | green |
+| 7 | The assessment page uses `BackLink`; unused imports removed. `page.test.tsx` asserts `min-h-11`; the assessment form is in the 360px page list of `oversight-records.spec.ts` | the unit test was red on the old inline link | green |
+
+**Found by row 7 (not in the ruling).** Putting the assessment form in the 360px list failed the 44px check on its own controls: the viability select was 42px and both coordinate boxes 36px (the form had a local select class without `min-h-11`; the form was moved by T1 with its old classes). Fixed in the same pass: the form uses the shared oversight `SELECT_CLASSES` and `min-h-11` on both inputs. Test: `edit-form.test.tsx` "touch targets" (red with the fix reverted, green with it); the e2e case was red before the fix and green after. No visible string changed.
+
+**Also added.** `e2e/oversight-records.spec.ts` list case: Birch's buildings cell now asserts "1 building" (it was only matching another "Not recorded" cell), then retires its building in the database and asserts "None in use".
+
+**Verification (all on the pipeline branch, serial DB runs):**
+- `npm run typecheck`, `npm run lint` (zero warnings), `npm run check` (all ten tripwires; help check: 34 entries, 30 published, 7 images).
+- `blob-audience.db.test.ts`, the oversight unit and DB files, `src/lib/help`, the `db/domain` files and the founding-administrator, invitations and presbytery tests: 88 files, 1,931 tests, 0 failed (`dotenv -e .env.local -- vitest run ... --no-file-parallelism`).
+- `scripts/oversight/test-rls-89.sql` as `presby_app`: 172 passes. `scripts/oversight/test-0089-migration.sh`: D6 PASS.
+- e2e on my own server (port 3104, the brief's env, `E2E_ALLOW_SHARED_DB=true`, `--project=chromium`): `oversight-records` (including the new 360px assessment page and the "None in use" case), `oversight-finance`, `oversight-founder`: 21 / 21 passed in the second run. The first run had 19 passed and 1 failed (the assessment form's 44px controls above) and 1 not run. Server stopped by PID; `org_portal.oversight` was switched on by the specs and is off again (the branch's baseline).
+- Looked at in a real browser at 360px with a throwaway fixture: the portal home shows "Congregation Oversight" under the "Governance & Courts" heading (the help sentence is true); the list (360px and 1280px: a congregation whose only building is retired reads "None in use", one with two reads "2 buildings"; the buildings column is hidden below `sm`, as before); the assessment form (back link and fields at 44px); the help page (no sideways scroll; the new navigation and audit sentences read as ruled). No real data; the temporary spec was deleted and is not committed.
+- `verifiedIn` on the help page was not moved. `docs/TODO.md` not edited (shared file); the loan screen-reader suffix follow-up from A4 is still for the orchestrator to add.
+
+Handoff to **qa (Phase 5, run 2)**: re-run `blob-audience.db.test.ts`, D6, `npm run check`, the help walk, and `oversight-records`, `hydration/oversight-forms`; the 0089 edit means a fresh-database full `test-rls.sql` is worth repeating.
+
 ---
 
 # Phase 5 — Verification (qa)

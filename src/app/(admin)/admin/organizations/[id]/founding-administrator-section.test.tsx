@@ -280,6 +280,7 @@ describe("FoundingAdministratorSection — confirm dialog copy", () => {
         administrationPermissionKeys={[
           ...BASE_PROPS.administrationPermissionKeys,
           "congregation_oversight.manage",
+          "congregation_oversight.finance",
         ]}
       />,
     );
@@ -290,6 +291,9 @@ describe("FoundingAdministratorSection — confirm dialog copy", () => {
 
     const body = document.body.textContent ?? "";
     expect(body).toMatch(/congregation oversight/i);
+    // The tier-2 key is named in plain words, never as a raw key (congregation records, Copy C10).
+    expect(body).toMatch(/congregation appraisals, insurance and loans/i);
+    expect(body).not.toMatch(/congregation_oversight\.finance/);
     expect(body).toMatch(/presbytery stated clerk/i);
   });
 

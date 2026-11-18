@@ -1,5 +1,6 @@
 import { OrgAccessError } from "@/lib/authz";
-import { getCongregationOversightList } from "@/lib/presbytery";
+import { STATE } from "@/lib/oversight/copy";
+import { readOversightList } from "@/lib/oversight/reads";
 import { gateOversightPage } from "@/lib/presbytery-reports/gate";
 import { OversightGateStateView, OVERSIGHT_AREA } from "./oversight-gate-state";
 import { OversightForbidden, OversightLoadError } from "./oversight-states";
@@ -32,7 +33,7 @@ export default async function OversightPage({
 
   let result;
   try {
-    result = await getCongregationOversightList(identity.personId, identity.organizationId);
+    result = await readOversightList(identity);
   } catch (err) {
     if (err instanceof OrgAccessError) {
       throw err;
@@ -46,6 +47,7 @@ export default async function OversightPage({
     }
     return <OversightLoadError slug={slug} />;
   }
+  const list = result.data;
 
   return (
     <section className="space-y-6">
@@ -53,12 +55,13 @@ export default async function OversightPage({
         <h1 className="text-2xl font-semibold">{AREA}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{identity.organizationName}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          The presbytery&apos;s own record of each member congregation&apos;s
-          viability, buildings, and insurance — never the congregation&apos;s
-          own data.
+          The presbytery&apos;s own record of each member congregation: viability, profile, buildings, insurance and loans. It is never
+          the congregation&apos;s own data.
         </p>
+        {!list.manage ? <p className="mt-2 text-sm text-muted-foreground">{STATE.listNeedsManage}</p> : null}
+        {!list.finance ? <p className="mt-2 text-sm text-muted-foreground">{STATE.listNeedsFinance}</p> : null}
       </div>
-      <OversightList entries={result.data} slug={slug} />
+      <OversightList list={list} slug={slug} />
     </section>
   );
 }

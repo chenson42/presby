@@ -160,6 +160,22 @@ export async function readTodayInOrg(tx: OrgTx, organizationId: string, now: Dat
   return todayInOrgZone(now, await orgTimeZoneInTx(tx, organizationId));
 }
 
+/**
+ * The `{ year, today }` a form page injects into its zod schema (the pure
+ * validators never read a clock). The organization's local calendar day and its
+ * year. Reads no record and no key: a page calls it only after a section reader
+ * has already answered `ok`, to colour a form's own client-side checks.
+ */
+export async function readFormEnv(
+  viewer: OversightViewer,
+  now: Date = new Date(),
+): Promise<{ year: number; today: string }> {
+  const today = await withOrgContext(viewer.personId, viewer.organizationId, (tx) =>
+    readTodayInOrg(tx, viewer.organizationId, now),
+  );
+  return { year: Number(today.slice(0, 4)), today };
+}
+
 // ---------------------------------------------------------------------------
 // Access (the front door)
 // ---------------------------------------------------------------------------

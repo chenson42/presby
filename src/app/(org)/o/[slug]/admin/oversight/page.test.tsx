@@ -41,9 +41,8 @@ vi.mock("@/lib/flags", () => ({
 }));
 
 const getCongregationOversightList = vi.fn();
-vi.mock("@/lib/presbytery", () => ({
-  getCongregationOversightList: (...args: unknown[]) =>
-    getCongregationOversightList(...args),
+vi.mock("@/lib/oversight/reads", () => ({
+  readOversightList: (...args: unknown[]) => getCongregationOversightList(...args),
 }));
 
 const redirectMock = vi.fn((url: string) => {
@@ -266,7 +265,7 @@ describe("OversightPage — result branches", () => {
     cachedAuth.mockResolvedValue({ user: { id: "u1" } });
     resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
     isFlagEnabled.mockResolvedValue(true);
-    getCongregationOversightList.mockResolvedValue({ kind: "ok", data: [] });
+    getCongregationOversightList.mockResolvedValue({ kind: "ok", data: { manage: true, finance: true, today: "2026-11-18", rows: [] } });
 
     const el = await OversightPage({ params: makeParams() });
     render(el);
@@ -283,46 +282,101 @@ describe("OversightPage — result branches", () => {
     isFlagEnabled.mockResolvedValue(true);
     getCongregationOversightList.mockResolvedValue({
       kind: "ok",
-      data: [
-        {
-          organizationId: "cong-1",
-          name: "Alder Creek Presbyterian Church",
-          platformStatus: "managed",
-          hasData: true,
-          viabilityScore: 3,
-          redevelopmentNotes: null,
-          buildingsNotes: null,
-          latitude: "41.2033",
-          longitude: "-77.1945",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        },
-        {
-          organizationId: "cong-2",
-          name: "Quillhaven Presbyterian Church",
-          platformStatus: "unmanaged",
-          hasData: false,
-          viabilityScore: null,
-          redevelopmentNotes: null,
-          buildingsNotes: null,
-          latitude: null,
-          longitude: null,
-          updatedAt: null,
-        },
-      ],
+      data: {
+        manage: true,
+        finance: true,
+        today: "2026-11-18",
+        rows: [
+          {
+            organizationId: "cong-1",
+            name: "Alder Creek Presbyterian Church",
+            platformStatus: "managed",
+            manage: { viabilityScore: 3, assessmentUpdatedAt: "2026-01-01T00:00:00.000Z", city: "Aldermoor", county: "Reach", buildingsInUse: 2 },
+            finance: { insuranceExpiresOn: "2026-01-31" },
+          },
+          {
+            organizationId: "cong-2",
+            name: "Quillhaven Presbyterian Church",
+            platformStatus: "unmanaged",
+            manage: { viabilityScore: null, assessmentUpdatedAt: null, city: null, county: null, buildingsInUse: 0 },
+            finance: { insuranceExpiresOn: null },
+          },
+        ],
+      },
     });
 
     const el = await OversightPage({ params: makeParams() });
     render(el);
 
-    expect(screen.getByText("Alder Creek Presbyterian Church")).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "Alder Creek Presbyterian Church" })).toBeTruthy();
     expect(screen.getByText("Healthy")).toBeTruthy();
-    expect(screen.getByText("Quillhaven Presbyterian Church")).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "Quillhaven Presbyterian Church" })).toBeTruthy();
     expect(screen.getByText("Not yet assessed")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /view \/ edit/i }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /^open alder creek/i }).getAttribute("href")).toBe(
       "/o/northern-reach/admin/oversight/cong-1",
     );
-    expect(screen.getByRole("link", { name: /^assess$/i }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /^open quillhaven/i }).getAttribute("href")).toBe(
       "/o/northern-reach/admin/oversight/cong-2",
     );
+    // City and county, the building count and the expiry in words; an unrecorded one is never a zero.
+    expect(screen.getByText("Aldermoor, Reach")).toBeTruthy();
+    expect(screen.getByText("2 buildings")).toBeTruthy();
+    expect(screen.getByText(/^Expired/)).toBeTruthy();
+    expect(screen.getAllByText("Not recorded").length).toBeGreaterThanOrEqual(3);
+    // Both keys held: no "needs permission" note.
+    expect(screen.queryByText(/An administrator can give it under Roles/)).toBeNull();
+  });
+
+  it("a manage-only viewer gets no Insurance column and one note naming the finance permission (T7)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightList.mockResolvedValue({
+      kind: "ok",
+      data: {
+        manage: true,
+        finance: false,
+        today: null,
+        rows: [
+          {
+            organizationId: "cong-1",
+            name: "Alder Creek Presbyterian Church",
+            platformStatus: "managed",
+            manage: { viabilityScore: 2, assessmentUpdatedAt: null, city: null, county: null, buildingsInUse: 1 },
+          },
+        ],
+      },
+    });
+    render(await OversightPage({ params: makeParams() }));
+    expect(screen.queryByRole("columnheader", { name: "Insurance expires" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Viability" })).toBeTruthy();
+    expect(screen.getByText(/Insurance needs permission to manage congregation property finances/)).toBeTruthy();
+  });
+
+  it("a finance-only viewer gets no Viability, city or building columns and one note naming the manage permission (T7)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED_PRESBYTERY);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightList.mockResolvedValue({
+      kind: "ok",
+      data: {
+        manage: false,
+        finance: true,
+        today: "2026-11-18",
+        rows: [
+          {
+            organizationId: "cong-1",
+            name: "Alder Creek Presbyterian Church",
+            platformStatus: "managed",
+            finance: { insuranceExpiresOn: "2027-01-31" },
+          },
+        ],
+      },
+    });
+    render(await OversightPage({ params: makeParams() }));
+    expect(screen.queryByRole("columnheader", { name: "Viability" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "City and county" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Insurance expires" })).toBeTruthy();
+    expect(screen.getByText(/Viability, city and county, and buildings need permission to manage congregation oversight/)).toBeTruthy();
   });
 });

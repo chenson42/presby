@@ -391,6 +391,31 @@ Given to B8 at hand-off and recorded here so the off-table strings have a source
 - **Cover rule (QA run 1 item 1):** the design and help win. A new photo takes the cover mark only when the building has no live photo. After the cover is removed, the oldest remaining photo shows as the cover until someone chooses another, and a later upload does not take it.
 
 
+## Fix pass after QA run 1
+
+Branch `pipeline/congregation-profile-inc2`, from HEAD 879df20b. Commits: `fe261887` (test, item 2), `93d2eeb4` (fix, item 1 with its DB test), `9d7cb67d` (test, item 1 browser step).
+
+**Item 1: the cover rule.**
+- Cause: `photo-store.ts` took `const cover = marked === undefined`, so any upload took the mark while no live photo carried it. After the marked cover was removed, the next upload became the cover.
+- Fix: the final locked transaction now looks for any live photo of the building and a new photo takes the mark only when there is none (`const cover = anyLive === undefined`). The cap recount and the `for update` lock are unchanged, so two simultaneous first uploads still end with one cover.
+- DB test (`photo-store.db.test.ts`, "the cover rule — regression for an upload taking the cover after the marked cover was removed..."): first-ever upload is marked; remove the marked cover and nothing is promoted; a later upload is not marked; the oldest photo left is the one `readBuildingPhotos` and `readBuildingCovers` show as the cover; the `added` audit rows read `cover: true, false, false`; removing every photo and uploading again marks it.
+  - **Red (test written first, source unfixed):** `expected [ false, true ] to deeply equal [ false, false ]` at the new photo's `is_cover`.
+  - **Green (fix in):** the whole file, 28 tests, serial.
+- Browser step (`e2e/oversight-photos.spec.ts`, same name, on a building of its own so the later tests' counts are untouched): two uploads through the island, remove the marked cover through the AlertDialog, the oldest one left carries the "Cover" badge, upload a third, the new tile has no badge, no row is marked, and the `added` rows read `true, false, false`.
+  - **Red:** `photo-store.ts` put back to the pre-fix version under a running server on 3102; `expected [false, true] to equal [false, false]` at the spec's `is_cover` assertion.
+  - **Green:** fix restored, then the whole spec: 13 passed (12 before plus this).
+- Help: `congregation-records.md:32` ("The first photo you add is the cover") and `:39` ("If you remove the cover, the oldest photo left shows as the cover until you choose another") are now true against the build; not edited.
+
+**Item 2: the hub help link.** `page.test.tsx`, in the reports-hub describe: "the help link under the cards is a 44px target..." asserts the link's `href` and `min-h-11` in its class, in the style of `views.test.tsx`. **Red:** with `inline-flex min-h-11 items-center` removed from `reports-hub.tsx:108`, `expected 'text-primary underline-offset-4 hover…' to match /min-h-11/`. **Green:** the class restored; the file's 36 tests pass.
+
+**Verification.** `npm run typecheck`, `npm run lint` (zero warnings) and `npm run check` (all tripwires, exit 0) clean. Serial run of `src/lib/oversight`, `src/components/oversight` and the reports `page.test.tsx` with `.env.local`: passed (14 files, 303 tests, the DB-backed ones included). `oversight-photos.spec.ts` on its own server at 3102 with the stated env: 13 passed; the server was stopped by PID and nothing listens on 3102. Flags read back at the baseline (`org_portal.oversight` off, `org_portal.reports` on). Every picture is a generated solid colour. Nothing is left reverted in the tree.
+
+### Handoff
+
+Next: **qa** (Phase 5, run 2).
+
+---
+
 # Phase 5 — Verification (qa)
 
 **Date:** 2026-11-18

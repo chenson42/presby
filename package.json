@@ -1,6 +1,6 @@
 {
   "name": "presby",
-  "version": "0.60.0",
+  "version": "0.60.1",
   "private": true,
   "description": "Multitenant church and council management for Presbyterian congregations, presbyteries, and synods: rolls, officers, directory, and council operations. Pre-release.",
   "repository": {
@@ -70,7 +70,7 @@
     "leaflet": "~1.9.4",
     "lucide-react": "^1.63.0",
     "mermaid": "^11.17.2",
-    "next": "^16.4.3",
+    "next": "^16.4.6",
     "next-auth": "^5.0.0-beta.32",
     "next-themes": "^0.4.6",
     "otplib": "^13.5.0",
@@ -111,7 +111,7 @@
     "dotenv-cli": "^11.1.0",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
-    "eslint-config-next": "^16.4.3",
+    "eslint-config-next": "^16.4.6",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",

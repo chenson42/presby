@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
-| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | B5, B6, B7, B8 complete (2026-11-18); B9 pending | — | 2026-11-18 |
+| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | Complete (B5 to B9, 2026-11-18) | — | 2026-11-18 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -54,7 +54,7 @@ The design is in the parent's Phase 3. Sections an implementer of this increment
 
 ## Increment-specific notes
 
-**Handoff.** B5 to B8 are done (2026-11-18). Next: **full-stack-developer** (B9). B9 note: `e2e/presbytery-report-exports.spec.ts` still asserts four hub links; the hub has six.
+**Handoff.** B5 to B9 are done (2026-11-18). Next: **qa** (Phase 5).
 
 - Starts after 0.61.0 is released (back to back, same branch).
 - **Phase 6 walk:** a real phone-photo upload on a deployed environment at 360px; both reports and a CSV opened; the help pages read as their reader.
@@ -337,6 +337,40 @@ One commit (`feat(reports)`: code, help and this section). No Rule 16 shared fil
 - typecheck, eslint (`src`, `e2e`), `npm run check` (all ten, including `check:help`: 34 entries, 30 published) zero; `npm run build` exit 0; `npx vitest run`: 924 files passed, 160 skipped; 15,183 tests passed, 4,300 skipped.
 - **360px walk** (temporary Playwright spec on the oversight fixture, own dev server on 3102 stopped by PID, spec deleted, not committed): hub (six cards; a manage-only holder sees the finance page's permission refusal), Buildings (cards: two buildings, "None in use" for a congregation with only a retired building), Insurance and loans (Expired, "1 not recorded", Total card, no `$0`), both CSVs downloaded and read (BOM, CRLF, headers exact, no street address, policy number or lender sentinel; Birch's single empty row), the photos page with exactly one "Cover" badge, the four help pages loaded with no sideways scroll. No sideways scroll anywhere; every control at least 44px apart from the sr-only file input (1px by design) and the pre-existing year links in note 2. A desktop (1024px) table screenshot was taken for both. Flags `org_portal.oversight` and `org_portal.reports` were switched on for the walk and restored by the fixture. Images were generated solids; none committed.
 - "Not recorded" (never ever recorded) is covered by the DB and view tests, not the browser: the e2e fixture has no congregation with no building at all beside one with a retired one.
+
+## B9 (full-stack-developer, 2026-11-18): the browser tests and the seed
+
+Branch `pipeline/congregation-profile-inc2`. No application code touched; **no integration patch needed from B9** (`e2e/support/oversight-fixture.ts` is unchanged: the helpers the new specs need live in the spec files). No schema, flag, route or env var.
+
+### Files Created
+
+- `e2e/oversight-photos.spec.ts` (12 cases, serial, 360px): the building page's "Add a photo"; an upload of a generated, EXIF- and GPS-bearing JPEG through the real island (wire size under 1,000,000 bytes, master stored `private`, JPEG, no EXIF, the first photo carries the cover mark, audit row ids and a boolean only); two more uploads and the grid (two columns, the third wraps, tiles at least 44px, one "Cover" badge); a wrong-type file, a corrupt picture and a duplicate refused with their fixed strings and nothing written (rows and audit unchanged); the larger view and its controls; a 201-character caption refused under the field, 200 unbroken characters wrapping with no sideways scroll, a short caption saved, an unchanged save writing no audit row; make cover (badge moves, previous cover in the audit row, a repeat writes nothing, the cover on the record page's card and the building page's block); remove through the AlertDialog (Cancel changes nothing, confirm hides the photo, the row stays, 44px dialog buttons inside the viewport, no native dialog); a finance-only holder sees the Locked state with and without `?view=` and no picture; another presbytery's congregation, another congregation's building, a removed building, a non-UUID and a nonexistent building are the same 404, and a `?view=` that is another building's photo, a removed photo or a non-UUID shows no larger picture; the cap at ten (a stale page's eleventh is refused with the C14 sentence, a fresh page shows the sentence and no Add button); photo audit rows carry ids and booleans only.
+- `e2e/oversight-reports.spec.ts` (7 cases, serial): the hub per viewer (the clerk opens Buildings and Viability, the finance-only holder opens Insurance and loans, the rest Locked with the reason); Buildings at 360px (cards, facts, "Not recorded" for a congregation with no building ever, then "None in use" once it has only a retired building, no street address or note on the page, 44px, no sideways scroll) and as a table at 1100px; Insurance and loans at 360px ("Expired" in words, "1 not recorded", the guarantee, a Total card, no `$0`, no policy number or lender); the wrong key (a permission line, no export link, no data; each export the one 403, nothing audited); the Buildings CSV downloaded from the page (BOM, CRLF, exact header, exact rows, none of the five sentinels) and the Insurance and loans CSV (exact header and rows, guarantee present, no sentinel); the export audit rows (`{ organizationId, report, rowCount }` and nothing else, no name or amount).
+- `e2e/hydration/oversight-photos.spec.ts` (2 cases): the upload island is inert until hydration (a forced click and a file set before it write no row and no audit row), then a picture is stored as the cover; the larger view's three controls are inert until hydration (a pre-hydration Remove opens nothing), then Remove opens the dialog and Cancel changes nothing, a caption typed after the gate opened is the one saved, and make cover moves the mark. Failing-first: the island's `HydrationGate` swapped for a `div` turns the first case red; restored.
+
+### Files Modified
+
+- `e2e/presbytery-report-exports.spec.ts`: six segments; the clerk (four keys, no finance key) sees five links and one Locked card with the finance reason; the no-key member sees six Locked cards and no link; Buildings and Insurance and loans pages load, the clerk's Insurance page is a permission line and its export a 403 while Buildings exports 200; six exports 403 for the no-key member and six 307 signed out; the 360px loop covers six pages.
+- `scripts/oversight/seed-dev-oversight.sql` (not a Rule 16 file): two photos of the Alder Creek Sanctuary, GENERATED solid-colour images (a 320x240 JPEG master and a 160x160 WebP thumbnail each, about 700 and 120 bytes), private audience, the first the cover with a caption, blobs `bb890000-...-0001` to `-0004`, photos `b0890000-...-0007` and `-0008`; idempotent (`where not exists`). Applied twice to the pipeline branch (2 photos, 4 blobs, 1 cover after both), and `scripts/oversight/test-rls-89.sql` re-run as `presby_app` against that branch with the seed present: passes. The Education Wing has no photo, so its page shows "Add a photo".
+
+### Implementer Notes
+
+1. **Pre-existing hub 360px finding not retested:** the hub's year links (B8 note 2) are not in any of these specs' controls scans; the Buildings and Insurance pages' scans are clean.
+2. The fixture helpers `seedAppraisal`, `seedInsurance` and `seedLoan` author their rows as the fixture's `both` user, so the reports spec enrols `both` (it is not a viewer there).
+3. A spec race caught and fixed in the photos spec itself: re-opening "Edit caption" before the refreshed view arrived saved the older caption back (a legitimate change, so a third audit row); the spec now waits for the refreshed caption and the field's value first. This was the test's, not the app's.
+4. The "Not recorded" state of the Buildings report is covered here in the browser (it was DB- and view-tested only in B8): Birch has no building ever, then only a retired one.
+
+### Gates and counts (2026-11-18, pipeline Neon branch)
+
+- `npm run typecheck`, `eslint e2e`, `npm run check` (all ten): zero.
+- Dev lane, own server on 3102 (stopped by PID), `--project=chromium --workers=1`, `E2E_ALLOW_SHARED_DB=true`: `oversight-photos` 12 passed, `oversight-reports` 7 passed, `presbytery-report-exports` 8 passed, `hydration/oversight-photos` 2 passed, `hydration/oversight-forms` 2 passed. Regression of the Increment 1 specs: `oversight-records` 9, `oversight-finance` 8, `oversight-founder` 4, `presbytery-oversight` 9, `presbytery-reports` 10: 40 passed.
+- Production lane: `PW_PROD_BUILD=1 PW_PROD_PORT=3103 npm run test:e2e:prod -- e2e/hydration/oversight-photos.spec.ts e2e/hydration/oversight-forms.spec.ts --workers=1`: 4 passed (the two oversight hydration files, scoped; the rest of the lane is untouched by this increment).
+- Flags left at the CI baseline (read back: `org_portal.oversight` off, `org_portal.reports` on); no `e2e-ovs` organizations left behind; no server left running on 3102 or 3103.
+- Every picture is a generated solid colour; no real photograph, and none committed.
+
+### Handoff
+
+Next: **qa** (Phase 5). In the browser: nothing further for B5 to B8's walks; Phase 6's real phone-photo upload on a deployed environment is still the analyst's input.
 
 ---
 

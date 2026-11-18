@@ -8,7 +8,7 @@
 > **Pipeline mode:** Full (no schema change in this increment; 0089 shipped in Increment 1)
 > **Release:** 0.62.0 (`package.json` bump and `docs/release-notes/v0.62.md` after Phase 6 SHIP IT, through `/release-notes`)
 > **Parent:** `docs/work-log/2026-11-17-congregation-profile.md` (Phases 1 to 3: the analyst's brief and the orchestrator rulings, the architect's R1 to R10 and DECISION-344 to 348, and the one Phase 3 design for both increments). **Do not restate or summarize them here.**
-> **Numbers (pre-assigned, Rule 16):** migration 0089 (applied in Increment 1; this increment adds no schema); DECISION-344 to 352 (349 to 351 used by Phase 3); F450 to F455 used, F456+ free; dev port 3102 (3103 for the production hydration lane); e2e ids `00000000-0000-4089-8000-` (people), `-9000-` (roles), `-9001-` (organizations); Neon branch `br-spring-bonus-axifozcw` (`pipeline-congregation-profile`); worktree `../presby-profile`, branch `pipeline/congregation-profile`
+> **Numbers (pre-assigned, Rule 16):** migration 0089 (applied in Increment 1; this increment adds no schema); DECISION-344 to 352 (349 to 351 used by Phase 3); F450 to F455 used, F456+ free; dev port 3102 (3103 for the production hydration lane); e2e ids `00000000-0000-4089-8000-` (people), `-9000-` (roles), `-9001-` (organizations); Neon branch `br-spring-bonus-axifozcw` (`pipeline-congregation-profile`); worktree `../presby-profile`, branch `pipeline/congregation-profile-inc2`
 > **Source:** operator decisions A to G, 2026-11-17 ("take congregation profiles all the way to the end (pushed to production)")
 
 ---
@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
-| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | Pending | — | — |
+| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | B5 complete (2026-11-18); B6 to B9 pending | — | 2026-11-18 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -54,7 +54,7 @@ The design is in the parent's Phase 3. Sections an implementer of this increment
 
 ## Increment-specific notes
 
-**Handoff.** Next agent: **api-developer** (B5), after Increment 1's Phase 6 verdict.
+**Handoff.** B5 is done (2026-11-18). Next agent: **ux-developer** (B6), consuming the B5 contract below; **api-developer** (B7) is independent of B6 and may run in parallel.
 
 - Starts after 0.61.0 is released (back to back, same branch).
 - **Phase 6 walk:** a real phone-photo upload on a deployed environment at 360px; both reports and a CSV opened; the help pages read as their reader.
@@ -64,33 +64,124 @@ The design is in the parent's Phase 3. Sections an implementer of this increment
 
 # Phase 4 — Implementation
 
-## Files Created
+## B5 (api-developer, 2026-11-18): the `storage/image/` extraction and the photo server side
 
-- `path/to/file` — purpose
+Branch `pipeline/congregation-profile-inc2`, worktree `/Users/cshenso/git/presby-platform/presby-profile`. Two code commits: `refactor(storage)` (the extraction) then `feat(oversight)` (the photo store, reads, actions, audit keys, copy, tests). Neither touches a Rule 16 shared file; **no integration patch is needed from B5.**
 
-## Files Modified
+### Files Created
 
-- `path/to/file` — what changed
+- `src/lib/storage/image/limits.ts`: the image limits (`UPLOAD_MAX_BYTES`, `CLIENT_TARGET_BYTES`, `CLIENT_MAX_EDGE`, `MASTER_MAX_EDGE`, `MASTER_MAX_BYTES`, `THUMB_EDGE`, `MAX_INPUT_PIXELS`, `MAX_INPUT_EDGE`) and `ImageRefusal`. No imports; the client island reads it.
+- `src/lib/oversight/photo-store.ts`: the only writer of `oversight_building_photos`; the only `getBlobStore().store(` caller in the module.
+- `src/lib/oversight/photo-reads.ts`: the readers and the one photo `resolveMany` (`audience: "private"`).
+- `src/app/(org)/o/[slug]/admin/oversight/[aboutOrgId]/buildings/[buildingId]/photos/actions.ts`: the four Server Actions.
+- Tests: `src/lib/oversight/photo-store.unit.test.ts`, `src/lib/oversight/photo-store.db.test.ts`, `.../photos/actions.test.ts`.
 
-## Schema Changes
+### Files Modified
 
-- [Tables / columns added, or "none"]
-- Applied via: `npm run db:push` / `npm run db:generate`
+- Moved by `git mv` (history kept): `person-photos/image.ts` to `storage/image/photo.ts`; `person-photos/image.test.ts` to `storage/image/photo.test.ts` (a one-line wrapper passes `{ thumbnail: "top" }`, so every moved assertion is unchanged); `.../community/[id]/edit/photos/downscale.ts` and `downscale.test.ts` to `storage/image/` (the test unchanged apart from its `limits` import).
+- `storage/image/photo.ts`: `processPhoto(bytes, { thumbnail: "top" | "centre" })` (required, no default); new export `preflightPhoto(bytes)` (steps 1 to 3 of the order, no decode; `processPhoto` runs exactly it).
+- Repointed: `person-photos/store.ts` (passes `"top"`), `store.db.test.ts` (mock path), `types.ts` (imports `ImageRefusal`; the literal list in `PhotoRefusal` is kept because `copy.test.ts` parses it, with a compile-time guard that `ImageRefusal` is a subset), `limits.ts` (now only `PHOTO_CAP_PER_PERSON`), `scan.test.ts`; the person-photo island and its test, `actions.ts` and `actions.test.ts` under `community/[id]/edit/photos/`; `image-sanitize.ts` (comment), `image-sanitize.test.ts`.
+- `SHARP_FILES` is now `["src/lib/storage/image-sanitize.ts", "src/lib/storage/image/photo.ts"]` (sorted: `-` sorts before `/`) in `scripts/check-treasury-boundaries.mjs`, its `.test.mjs` (the destructuring order flipped), `image-sanitize.test.ts` and `scan.test.ts`.
+- `src/lib/audit.ts` (four keys, appended block) and `audit.test.ts`.
+- `src/lib/oversight/`: `contract.ts` (`LIMITS.photoCap = 10`, `PhotoRefusal`, `PhotoOutcome`, `PhotoWritten`, `PhotoActionData`, `PhotoActionResult`), `copy.ts` (C14), `validate.ts` (`parseCaption`, `captionSchema`), `derive.ts` (`pickCover`), `reads.ts` (`readUnder` exported), `action-gate.ts` (`finishPhoto`), and the tests `boundaries`, `audit-coverage`, `copy`, `validate`, `derive`.
+- `src/lib/storage/audience-callsites.test.ts`: two ACTIVE rows (`photo-reads.ts` `["resolveMany:private"]`, `photo-store.ts` `["store:private", "store:private"]`). The FORWARD table was empty in the tree (Increment 1 added no FORWARD rows), so the rows were added to ACTIVE directly.
 
-## Audit Events
+### Schema Changes
 
-- [Action key written when the security-sensitive mutation fires]
+None. The photo table shipped in 0089; `presby_app` may update only `caption`, `is_cover` and the removal pair on it, which is all this code does.
 
-## Implementer Notes
+### Audit Events
 
-[Tradeoffs taken, anything that diverged from the design and why.]
+All `tenant.oversight_photo.*`, `resourceType` `oversight_photo`, `resourceId` the photo id, written with `insertAuditRow(tx, ...)` in the write's own transaction. Metadata is ids and booleans only (never a caption, hash, dimension or filename).
 
-Strings added or changed: [file:line each, or "none"]
+| Key | Metadata beyond `organizationId`, `aboutOrgId` |
+|---|---|
+| `OVERSIGHT_PHOTO_ADDED` `tenant.oversight_photo.added` | `buildingId`, `photoId`, `cover` |
+| `OVERSIGHT_PHOTO_REMOVED` `...removed` | `buildingId`, `photoId` |
+| `OVERSIGHT_PHOTO_COVER_SET` `...cover_set` | `buildingId`, `photoId`, `previousCoverPhotoId` (null when no photo carried the mark) |
+| `OVERSIGHT_PHOTO_CAPTION_SET` `...caption_set` | `buildingId`, `photoId` |
 
-*Keep Phase 4 sections short: files, deviations from the design, gates with
-counts, and anything the next phase must know. Leave out narration of how
-the work went; git history already records it. Judgment output (analyst,
-architect, qa) is still recorded verbatim.*
+A same-caption save and a make-cover on the marked cover write and audit nothing.
+
+### Implementer Notes
+
+**Deviations and decisions the next phases need.**
+
+1. **`preflightPhoto` is an addition to the pipeline.** The design's order puts "type" before "building resolution", but `processPhoto` folds size, sniff and APNG into the decode call. Rather than copy the sniff, `photo.ts` exports `preflightPhoto` (no decode) and `processPhoto` calls it, so the two cannot disagree. It is in the `feat` commit, not the `refactor` commit; person-photo output is unchanged (below).
+2. **Order as built** (`photo-store.ts` header; pinned by `photo-store.unit.test.ts` and a source-order rule in `boundaries.test.ts`): manage key, `org_portal.oversight`, type, congregation, building, cap, then decode, then the two blobs, then one transaction that repeats all of it with the building row locked `for update` before the cap recount. Before the store, the action refuses a signed-out or second-factor-stale caller, an unresolvable slug, a malformed id (`not_found`), and a missing, empty (`empty`) or over-1,000,000-byte (`too_large`) file by its `File` handle without reading the bytes.
+3. **Toggle off is worded `not_found`** ("That record could not be found."): C14 has no string for it and the surface does not exist with the toggle off. Say so to QA; if a different sentence is wanted it is one line in `PHOTO_REFUSAL`.
+4. **Cover is derived on read.** A photo carries the mark (`is_cover`) when it was the building's first, or when staff chose it. If the marked cover is removed, no photo is promoted (that would be an unaudited write, or a second audit row per remove); instead `pickCover` shows the oldest live photo as the cover. `readBuildingPhotos` marks exactly one tile `isCover` either way, so the UI never shows a building with photos and no cover, and the "Make this the cover" button hides on that tile as C14 says. Choosing a photo then writes the mark.
+5. **`photo-reads.ts` imports `readUnder` from `reads.ts`** (now exported), so a photo read has the same key, congregation, row order as every other reader.
+6. **Covers are 160 px thumbnails** (the design: thumbnails in the grid, covers on the record page). If B6 wants a larger building-page cover, `readBuildingPhotos` can carry the master for the cover too; say so before B6 starts it, it is a small change here.
+7. **The accepted residuals are unchanged** and are in the `photo-store.ts` header: an orphaned blob when the final transaction fails; `bytea` growth about 4 MB per building at the cap; removal hides, the file stays. A failed pre-check leaves nothing stored (no blob is written before step 7).
+8. **Attribution.** The commits end with `Co-Authored-By: Claude Sonnet 5.5`, not `Claude Opus 5.5` as the kickoff asked: the harness's attribution reminder names the model that wrote them.
+
+### Contract B6 consumes
+
+**Server Actions** (`"use server"`, in `src/app/(org)/o/[slug]/admin/oversight/[aboutOrgId]/buildings/[buildingId]/photos/actions.ts`). Gate for all four: `assertOrgSession(await auth())` (signed in, second-factor recheck), `resolveOrgContext(userId, slug)`, a UUID check on every id, then `photo-store.ts` re-checks `congregation_oversight.manage` (tier 1, live), the global `org_portal.oversight` toggle (upload only), the congregation, the building and the photo inside its own transaction. Never `FEATURES.*`. `organizationId` is never a parameter.
+
+```ts
+addBuildingPhotoAction(slug: string, aboutOrgId: string, buildingId: string, formData: FormData): Promise<PhotoActionResult>
+//  formData: ONE field named "photo" (a File). The island downscales to <= 900 KB first (downscaleToJpeg).
+setPhotoCaptionAction(slug, aboutOrgId, buildingId, photoId, values: { caption: string }): Promise<PhotoActionResult>
+//  values is CaptionValues; an empty or whitespace caption clears it. Validate on the client with captionSchema().
+setPhotoCoverAction(slug, aboutOrgId, buildingId, photoId): Promise<PhotoActionResult>
+removePhotoAction(slug, aboutOrgId, buildingId, photoId): Promise<PhotoActionResult>
+```
+
+```ts
+// from "@/lib/oversight/contract"
+type PhotoActionResult =
+  | { ok: true; data: { id: string; unchanged?: true; cover?: boolean } }   // cover: set by add only
+  | { ok: false; error: string; field?: string; kind?: PhotoRefusal | Refusal | "invalid" | "unauthenticated" | "two_factor_required" };
+// error is always one fixed C14 / REFUSAL string, safe to toast. field is "caption" when a caption fails its rule.
+// unchanged: true means nothing was written (same caption, already the cover): toast nothing or "No changes to save.".
+type PhotoRefusal = ImageRefusal | "forbidden" | "not_found" | "building_removed" | "duplicate" | "cap_reached" | "already_removed" | "save_failed";
+```
+
+Success revalidates `/o/<slug>/admin/oversight/<aboutOrgId>`, `.../buildings/<buildingId>` and `.../buildings/<buildingId>/photos`; the client still calls `router.refresh()` as the other forms do. No action redirects.
+
+**Reads** (`src/lib/oversight/photo-reads.ts`, all `congregation_oversight.manage`, each its own transaction, each `OversightRead<T>` = `{ kind: "ok", data } | { kind: "forbidden" } | { kind: "not_found" }`; an `OrgAccessError` propagates to `[slug]/error.tsx`). Call with `viewer = { personId: resolved.org.personId, organizationId: resolved.org.organizationId }`.
+
+```ts
+readBuildingPhotos(viewer, aboutOrgId, buildingId, { viewPhotoId?: string | null }): OversightRead<BuildingPhotosView>
+// BuildingPhotosView = { buildingId, buildingName, photos: PhotoTileView[] /* oldest first */, count, cap /* 10 */, atCap,
+//                        viewed: PhotoViewedView | null }
+// PhotoTileView  = { id, caption: string | null, isCover /* exactly one true when count > 0 */, thumbSrc: string | null /* data: URI, 160 px WebP */, width, height }
+// PhotoViewedView = { id, caption, src /* data: URI, JPEG master <= 1,200 px */, width, height }
+// viewed is non-null only when viewPhotoId is a LIVE photo of THIS building (pass the raw ?view= value; isUuid it first if you like, a bad one is ignored).
+readBuildingCovers(viewer, aboutOrgId): OversightRead<Record<buildingId, BuildingCoverView>>
+// the record page's building cards; a building with no photo is ABSENT from the record.
+readBuildingPhotoSummary(viewer, aboutOrgId, buildingId): OversightRead<BuildingCoverView | null>
+// the building page's Photos block; data null = no photos ("Add a photo"), not_found = no such live building.
+// BuildingCoverView = { buildingId, photoId, caption: string | null, thumbSrc: string | null, count }
+```
+
+`thumbSrc` is `null` if its blob could not be read (one fixed log line): render the tile without the picture, never an error. Gate order for the page, as everywhere in the tree: `gateOversightPage`, `isUuid` on `aboutOrgId`, `buildingId`, `view`, then the reader; `forbidden` renders `OversightForbidden`/the Locked card, `not_found` is `notFound()`.
+
+**Copy constants** (`src/lib/oversight/copy.ts`; the UI imports them and writes no sentence of its own):
+
+- `PHOTO_COPY`: `blockHeading` "Photos", `addPhoto` "Add a photo", `allPhotos(n)`, `pageTitle(buildingName)`, `backToBuilding(buildingName)`, `viewLarger(caption | null)` (the tile's accessible name), `editCaption`, `captionLabel` "Caption (optional)", `makeCover`, `removePhoto`, `backToAll`, `uploadFailed` (the island's own rejection string), `removeDialog` `{ title, body, confirm, cancel }`.
+- `PHOTO_REFUSAL`: one string per `PhotoRefusal` (`photoRefusalMessage(reason)`). A server refusal arrives as the action's `error`; the island's own client-side failures (`DownscaleError`) keep the strings the person-photo island already gives them, and `PHOTO_COPY.uploadFailed` covers a thrown network error.
+- `TOAST.photoAdded`, `captionSaved`, `coverChanged`, `photoRemoved`; `VALIDATION.captionTooLong`; `LIMITS.captionMax` (200), `LIMITS.photoCap` (10).
+- Client-safe imports for the island: `@/lib/storage/image/downscale` (`downscaleToJpeg`, `DownscaleError`), `@/lib/storage/image/limits` (pure).
+
+**What B6 must still do (not in B5):** the photos page, grid, `?view=` master, the upload island (no `capture` attribute, no `blob:` URL; `check:treasury-boundaries` T3 and the downscale test scan for both), the photos block on the building page and the covers on the record page's building cards, the help edits stay B8.
+
+### Gates and counts (2026-11-18, pipeline Neon branch)
+
+- `npm run typecheck`: clean. `eslint` on the touched trees: clean. `npm run check`: all ten tripwires pass (zero violations). `npm run build`: exit 0.
+- `npx vitest run` (whole suite, no DB env): 916 files passed, 160 skipped; 15,020 tests passed, 4,281 skipped.
+- **Person photos, byte for byte.** sha256 of master and thumbnail for four generated pictures compared before the extraction, after it, and after `preflightPhoto` landed: identical (the PNG case is refused `too_large` before and after, as it was). `storage/image/photo.test.ts` (24 tests, the moved `image.test.ts`) and the DB-backed suites, re-run after the last `photo.ts` change: `npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/person-photos src/lib/storage` (22 files, 484 tests) pass.
+- `photo-store.db.test.ts`: 27 tests, serial, pass (143 s). `photo-store.unit.test.ts`: 30 tests. `photos/actions.test.ts`: 41 tests.
+- **Failing-first (mechanisms shown red against a deliberate break, then restored):** the type check moved after the building lookup (5 red); the final transaction not locking (3 red in the unit file, 2 red in the DB file); the toggle before the key (12 red); the cap not recounted (3 red); the decode before the pre-check (12 red); the lock removed from the DB races (cover and first-upload races red). `boundaries.test.ts` carries a failing sample for each new rule.
+- `scripts/check-treasury-boundaries.test.mjs` (98 tests) and `scan.test.ts` pass with the new `SHARP_FILES`.
+
+### Strings added or changed
+
+`src/lib/oversight/copy.ts`: `VALIDATION.captionTooLong`; `TOAST.photoAdded`, `captionSaved`, `coverChanged`, `photoRemoved`; `PHOTO_REFUSAL` (13 kinds; 10 are C14, 3 are existing `REFUSAL` strings); `PHOTO_COPY`. All are the C14 strings verbatim; no wording outside C14. No help page or registry change in B5 (B8's).
+
+*Keep Phase 4 sections short: files, deviations from the design, gates with counts, and anything the next phase must know. Leave out narration of how the work went; git history already records it. Judgment output (analyst, architect, qa) is still recorded verbatim.*
 
 ---
 

@@ -343,11 +343,14 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
     if (bStat.kind !== "ok") throw new Error("B stat fixture failed");
 
     // Oversight.
-    const over = async (org: string, input: { viabilityScore?: number | null; redevelopmentNotes?: string | null; buildingsNotes?: string | null; insuranceCarrier?: string | null; latitude?: number | null; longitude?: number | null }) => {
+    const over = async (org: string, input: { viabilityScore?: number | null; redevelopmentNotes?: string | null; buildingsNotes?: string | null; latitude?: number | null; longitude?: number | null }) => {
       const r = await presbytery.setCongregationOversight(clerk, A, userId, org, input);
       if (r.kind !== "ok") throw new Error(`oversight fixture failed: ${JSON.stringify(r)}`);
     };
-    await over(c.installed, { viabilityScore: 3, redevelopmentNotes: "Steady", buildingsNotes: "SECRET-BUILDINGS", insuranceCarrier: "SECRET-CARRIER", latitude: 12.5, longitude: -45.25 });
+    await over(c.installed, { viabilityScore: 3, redevelopmentNotes: "Steady", buildingsNotes: "SECRET-BUILDINGS", latitude: 12.5, longitude: -45.25 });
+    // The superseded carrier column is no longer writable through setCongregationOversight (F451, R8), so the
+    // sentinel the viability reader must never read is planted directly, as a legacy row would hold it.
+    await platform.update(schema.oversight).set({ insuranceCarrier: "SECRET-CARRIER" }).where(and(eq(schema.oversight.organizationId, A), eq(schema.oversight.aboutOrgId, c.installed)));
     await over(c.ended, { viabilityScore: 1, redevelopmentNotes: 'Roof, "urgent"\nand boiler' });
     await over(c.none, { viabilityScore: null, redevelopmentNotes: "Watching closely" });
     await over(c.supply, { viabilityScore: 2 });

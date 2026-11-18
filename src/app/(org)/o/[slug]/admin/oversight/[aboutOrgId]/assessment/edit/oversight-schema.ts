@@ -35,8 +35,6 @@ export const oversightSchema = z
     viabilityScore: z.enum(["", "1", "2", "3"]),
     redevelopmentNotes: z.string().max(4000, "Must be 4000 characters or fewer"),
     buildingsNotes: z.string().max(4000, "Must be 4000 characters or fewer"),
-    insuranceCarrier: z.string().max(255, "Must be 255 characters or fewer"),
-    insuranceExpiresOn: z.string(),
     latitude: coordinateText(-90, 90, "Must be between -90 and 90"),
     longitude: coordinateText(-180, 180, "Must be between -180 and 180"),
   })

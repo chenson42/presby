@@ -108,8 +108,7 @@ const PER_CAPITA_MANAGE = "per_capita.manage";
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const YEAR_MIN = 1900;
 const YEAR_MAX = 2100;
-const FREE_TEXT_MAX = 4000; // redevelopmentNotes / buildingsNotes
-const SHORT_TEXT_MAX = 255; // insuranceCarrier
+const FREE_TEXT_MAX = 4000; // redevelopmentNotes / buildingsNotes (shown as "Property notes")
 const MINUTE_REFERENCE_MAX = 500;
 
 /** Same shape as `CredentialsResult`/`SetPersonDemographicsResult` — every
@@ -186,7 +185,7 @@ async function hasPermission(
  * id. See this file's header for why the type check is `'congregation'`
  * only.
  */
-async function resolveMemberCongregation(
+export async function resolveMemberCongregation(
   tx: OrgTx,
   organizationId: string,
   aboutOrgId: string,
@@ -214,7 +213,7 @@ async function resolveMemberCongregation(
  *  left-join their own table against, so a congregation with NO oversight/
  *  statistics row on file still appears (the "no data on file" empty
  *  state, Phase 3 Edge Cases). */
-async function listMemberCongregations(
+export async function listMemberCongregations(
   tx: OrgTx,
   organizationId: string,
 ): Promise<Array<{ id: string; name: string; platformStatus: string }>> {
@@ -354,9 +353,6 @@ export interface OversightRow {
   viabilityScore: number | null;
   redevelopmentNotes: string | null;
   buildingsNotes: string | null;
-  insuranceCarrier: string | null;
-  /** 'YYYY-MM-DD', or null. */
-  insuranceExpiresOn: string | null;
   latitude: string | null;
   longitude: string | null;
   updatedAt: string | null;
@@ -378,8 +374,19 @@ export async function getCongregationOversightList(
       return { kind: "ok", data: [] };
     }
 
+    // EXPLICIT COLUMNS (F454): a bare select() would read every column of the row,
+    // including the superseded insurance_carrier and insurance_expires_on (R8), under
+    // the tier-1 key. A source test (presbytery.test.ts, U10) pins their absence here.
     const oversightRows = await tx
-      .select()
+      .select({
+        aboutOrgId: congregationOversight.aboutOrgId,
+        viabilityScore: congregationOversight.viabilityScore,
+        redevelopmentNotes: congregationOversight.redevelopmentNotes,
+        buildingsNotes: congregationOversight.buildingsNotes,
+        latitude: congregationOversight.latitude,
+        longitude: congregationOversight.longitude,
+        updatedAt: congregationOversight.updatedAt,
+      })
       .from(congregationOversight)
       .where(
         and(
@@ -402,8 +409,6 @@ export async function getCongregationOversightList(
         viabilityScore: row?.viabilityScore ?? null,
         redevelopmentNotes: row?.redevelopmentNotes ?? null,
         buildingsNotes: row?.buildingsNotes ?? null,
-        insuranceCarrier: row?.insuranceCarrier ?? null,
-        insuranceExpiresOn: row?.insuranceExpiresOn ?? null,
         latitude: row?.latitude ?? null,
         longitude: row?.longitude ?? null,
         updatedAt: row?.updatedAt ? row.updatedAt.toISOString() : null,
@@ -431,7 +436,14 @@ export async function getCongregationOversightDetail(
     if (!cong) return { kind: "invalid_target" };
 
     const [row] = await tx
-      .select()
+      .select({
+        viabilityScore: congregationOversight.viabilityScore,
+        redevelopmentNotes: congregationOversight.redevelopmentNotes,
+        buildingsNotes: congregationOversight.buildingsNotes,
+        latitude: congregationOversight.latitude,
+        longitude: congregationOversight.longitude,
+        updatedAt: congregationOversight.updatedAt,
+      })
       .from(congregationOversight)
       .where(
         and(
@@ -451,8 +463,6 @@ export async function getCongregationOversightDetail(
         viabilityScore: row?.viabilityScore ?? null,
         redevelopmentNotes: row?.redevelopmentNotes ?? null,
         buildingsNotes: row?.buildingsNotes ?? null,
-        insuranceCarrier: row?.insuranceCarrier ?? null,
-        insuranceExpiresOn: row?.insuranceExpiresOn ?? null,
         latitude: row?.latitude ?? null,
         longitude: row?.longitude ?? null,
         updatedAt: row?.updatedAt ? row.updatedAt.toISOString() : null,
@@ -465,9 +475,6 @@ export interface SetOversightInput {
   viabilityScore?: number | null;
   redevelopmentNotes?: string | null;
   buildingsNotes?: string | null;
-  insuranceCarrier?: string | null;
-  /** 'YYYY-MM-DD', or null. */
-  insuranceExpiresOn?: string | null;
   latitude?: number | null;
   longitude?: number | null;
 }
@@ -495,16 +502,6 @@ export async function setCongregationOversight(
     };
   }
   if (
-    input.insuranceExpiresOn !== undefined &&
-    input.insuranceExpiresOn !== null &&
-    !DATE_RE.test(input.insuranceExpiresOn)
-  ) {
-    return {
-      kind: "invalid_input",
-      message: "Insurance expiration must be a valid date.",
-    };
-  }
-  if (
     input.redevelopmentNotes !== undefined &&
     input.redevelopmentNotes !== null &&
     input.redevelopmentNotes.length > FREE_TEXT_MAX
@@ -521,17 +518,7 @@ export async function setCongregationOversight(
   ) {
     return {
       kind: "invalid_input",
-      message: `Buildings notes must be ${FREE_TEXT_MAX} characters or fewer.`,
-    };
-  }
-  if (
-    input.insuranceCarrier !== undefined &&
-    input.insuranceCarrier !== null &&
-    input.insuranceCarrier.length > SHORT_TEXT_MAX
-  ) {
-    return {
-      kind: "invalid_input",
-      message: `Insurance carrier must be ${SHORT_TEXT_MAX} characters or fewer.`,
+      message: `Property notes must be ${FREE_TEXT_MAX} characters or fewer.`,
     };
   }
   // The one coordinate rule (src/lib/coordinates.ts, DECISION-343): a server
@@ -555,8 +542,6 @@ export async function setCongregationOversight(
       viabilityScore: input.viabilityScore ?? null,
       redevelopmentNotes: input.redevelopmentNotes ?? null,
       buildingsNotes: input.buildingsNotes ?? null,
-      insuranceCarrier: input.insuranceCarrier ?? null,
-      insuranceExpiresOn: input.insuranceExpiresOn ?? null,
       latitude: coordinates.value ? String(coordinates.value.lat) : null,
       longitude: coordinates.value ? String(coordinates.value.lng) : null,
       updatedBy: actingUserId,

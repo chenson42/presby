@@ -44,8 +44,6 @@ const ROW: OversightRow = {
   viabilityScore: null,
   redevelopmentNotes: null,
   buildingsNotes: null,
-  insuranceCarrier: null,
-  insuranceExpiresOn: null,
   latitude: null,
   longitude: null,
   updatedAt: null,

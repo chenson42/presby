@@ -12,8 +12,6 @@ const valid = {
   viabilityScore: "2",
   redevelopmentNotes: "",
   buildingsNotes: "",
-  insuranceCarrier: "",
-  insuranceExpiresOn: "",
   latitude: "",
   longitude: "",
 };
@@ -51,19 +49,16 @@ describe("oversightSchema", () => {
     expect(await errorsOf({ buildingsNotes: "b".repeat(4001) })).toEqual({
       buildingsNotes: "Must be 4000 characters or fewer",
     });
-    expect(await errorsOf({ insuranceCarrier: "i".repeat(256) })).toEqual({
-      insuranceCarrier: "Must be 255 characters or fewer",
-    });
     expect(
-      (await resolveForm(oversightSchema, { ...valid, redevelopmentNotes: "r".repeat(4000), insuranceCarrier: "i".repeat(255) })).failed,
+      (await resolveForm(oversightSchema, { ...valid, redevelopmentNotes: "r".repeat(4000), buildingsNotes: "b".repeat(4000) })).failed,
     ).toBe(false);
   });
 
   it("reports several failures together", async () => {
-    expect(await errorsOf({ latitude: "x", longitude: "999", insuranceCarrier: "i".repeat(256) })).toEqual({
+    expect(await errorsOf({ latitude: "x", longitude: "999", buildingsNotes: "b".repeat(4001) })).toEqual({
       latitude: "Must be a number",
       longitude: "Must be between -180 and 180",
-      insuranceCarrier: "Must be 255 characters or fewer",
+      buildingsNotes: "Must be 4000 characters or fewer",
     });
   });
 

@@ -13,6 +13,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 const cachedAuth = vi.fn();
+vi.mock("server-only", () => ({}));
+vi.mock("@/auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/auth/cached-auth", () => ({
   cachedAuth: () => cachedAuth(),
 }));
@@ -105,6 +107,17 @@ describe("OversightPage — the shared four-way miss response", () => {
       "REDIRECT:/signin?callbackUrl=%2Fo%2Fnorthern-reach%2Fadmin%2Foversight",
     );
     expect(resolveOrgContext).not.toHaveBeenCalled();
+  });
+
+  it("a stale second-factor claim redirects to /totp before the organization or the flag is read (F452)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1", twoFactorRequired: true, twoFactorVerified: false } });
+
+    await expect(OversightPage({ params: makeParams() })).rejects.toThrow(
+      "REDIRECT:/totp?callbackUrl=%2Fo%2Fnorthern-reach%2Fadmin%2Foversight",
+    );
+    expect(resolveOrgContext).not.toHaveBeenCalled();
+    expect(isFlagEnabled).not.toHaveBeenCalled();
+    expect(getCongregationOversightList).not.toHaveBeenCalled();
   });
 
   it("calls notFound() for a slug with no organization", async () => {
@@ -279,8 +292,6 @@ describe("OversightPage — result branches", () => {
           viabilityScore: 3,
           redevelopmentNotes: null,
           buildingsNotes: null,
-          insuranceCarrier: "Fieldstone Mutual",
-          insuranceExpiresOn: "2027-03-01",
           latitude: "41.2033",
           longitude: "-77.1945",
           updatedAt: "2026-01-01T00:00:00.000Z",
@@ -293,8 +304,6 @@ describe("OversightPage — result branches", () => {
           viabilityScore: null,
           redevelopmentNotes: null,
           buildingsNotes: null,
-          insuranceCarrier: null,
-          insuranceExpiresOn: null,
           latitude: null,
           longitude: null,
           updatedAt: null,

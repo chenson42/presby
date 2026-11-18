@@ -75,12 +75,8 @@ export function OversightList({
               <ViabilityBadge score={entry.viabilityScore} />
             </TableCell>
             <TableCell className="hidden max-w-[16rem] text-muted-foreground sm:table-cell">
-              {entry.buildingsNotes || entry.insuranceCarrier ? (
-                <span className="line-clamp-2">
-                  {entry.insuranceCarrier
-                    ? `${entry.insuranceCarrier}${entry.insuranceExpiresOn ? ` (exp. ${entry.insuranceExpiresOn})` : ""}`
-                    : entry.buildingsNotes}
-                </span>
+              {entry.buildingsNotes ? (
+                <span className="line-clamp-2">{entry.buildingsNotes}</span>
               ) : (
                 "—"
               )}

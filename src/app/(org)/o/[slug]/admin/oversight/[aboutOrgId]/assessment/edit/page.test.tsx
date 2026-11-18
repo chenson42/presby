@@ -2,7 +2,9 @@
 /**
  * Orchestration tests for `/o/<slug>/admin/oversight/<aboutOrgId>`'s
  * page.tsx — Presbytery program Increment 3
- * (`docs/work-log/2026-08-27-presbytery-program.md`). Mirrors
+ * (`docs/work-log/2026-08-27-presbytery-program.md`), moved to `assessment/edit/`
+ * and put behind `gateOversightPage` by the congregation-records pipeline (T1,
+ * F452). Mirrors
  * `../../officers/[personId]/page.test.tsx`'s assertion style for a
  * per-congregation detail route:
  *
@@ -42,6 +44,7 @@ vi.mock("@/lib/authz", () => {
 });
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/auth", () => ({ auth: vi.fn() }));
 
 const mapTileConfig = vi.fn();
 vi.mock("@/lib/presbytery-reports/map-config", () => ({
@@ -114,14 +117,14 @@ const DETAIL_ROW = {
   viabilityScore: 3,
   redevelopmentNotes: null,
   buildingsNotes: null,
-  insuranceCarrier: null,
-  insuranceExpiresOn: null,
   latitude: null,
   longitude: null,
   updatedAt: null,
 };
 
-function makeParams(slug = "northern-reach", aboutOrgId = "cong-1") {
+const CONG_ID = "00000000-0000-4000-8000-000000000001";
+
+function makeParams(slug = "northern-reach", aboutOrgId = CONG_ID) {
   return Promise.resolve({ slug, aboutOrgId });
 }
 
@@ -130,7 +133,7 @@ describe("OversightDetailPage — the ordering/error-handling contract", () => {
     cachedAuth.mockResolvedValue(null);
 
     await expect(OversightDetailPage({ params: makeParams() })).rejects.toThrow(
-      "REDIRECT:/signin?callbackUrl=%2Fo%2Fnorthern-reach%2Fadmin%2Foversight%2Fcong-1",
+      `REDIRECT:/signin?callbackUrl=${encodeURIComponent(`/o/northern-reach/admin/oversight/${CONG_ID}/assessment/edit`)}`,
     );
   });
 
@@ -210,9 +213,7 @@ describe("OversightDetailPage — the ordering/error-handling contract", () => {
     const el = await OversightDetailPage({ params: makeParams() });
     render(el);
 
-    expect(
-      screen.getByRole("heading", { name: "Alder Creek Presbyterian Church" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Edit assessment" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^save$/i })).toBeTruthy();
   });
 
@@ -253,5 +254,40 @@ describe("OversightDetailPage — the ordering/error-handling contract", () => {
     isFlagEnabled.mockResolvedValue(true);
     render(await OversightDetailPage({ params: makeParams() }));
     expect(mapTileConfig).toHaveBeenCalledTimes(1);
+  });
+  it("a stale second-factor claim redirects to /totp BEFORE the organization or the flag is read (F452)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1", twoFactorRequired: true, twoFactorVerified: false } });
+
+    await expect(OversightDetailPage({ params: makeParams() })).rejects.toThrow(
+      `REDIRECT:/totp?callbackUrl=${encodeURIComponent(`/o/northern-reach/admin/oversight/${CONG_ID}/assessment/edit`)}`,
+    );
+    expect(resolveOrgContext).not.toHaveBeenCalled();
+    expect(isFlagEnabled).not.toHaveBeenCalled();
+    expect(getCongregationOversightDetail).not.toHaveBeenCalled();
+  });
+
+  it("a non-UUID aboutOrgId is a 404 before any read, not a load error (F452)", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+
+    await expect(OversightDetailPage({ params: makeParams("northern-reach", "not-a-uuid") })).rejects.toThrow("NOT_FOUND");
+    expect(getCongregationOversightDetail).not.toHaveBeenCalled();
+  });
+
+  it("the page is the assessment form: an h1, a back link naming the congregation, and no carrier or expiry field", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightDetail.mockResolvedValue({ kind: "ok", data: DETAIL_ROW });
+
+    render(await OversightDetailPage({ params: makeParams() }));
+
+    expect(screen.getByRole("heading", { name: "Edit assessment" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Back to Alder Creek Presbyterian Church/ }).getAttribute("href")).toBe(
+      `/o/northern-reach/admin/oversight/${CONG_ID}`,
+    );
+    expect(screen.getByLabelText("Property notes")).toBeTruthy();
+    expect(screen.queryByLabelText(/insurance/i)).toBeNull();
   });
 });

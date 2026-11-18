@@ -19,9 +19,9 @@
 |-------|-------|--------|---------|------|
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
-| 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
+| 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below); amendment A after QA run 1 | Design complete | 2026-11-18 |
 | 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | Complete (B1 to B4; next Phase 5, qa) | — | 2026-11-18 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1) | FAIL | 2026-11-18 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -63,6 +63,135 @@ Order: B1 merges to the pipeline branch before B2 (B2 imports the Drizzle mirror
 - **Operator actions:** switch `org_portal.oversight` on in production; confirm `org_portal.reports` and `org_portal.insights`.
 - **Phase 6 walks:** the founding-administrator path (R2) and every page at 360px as the people each path creates; the five help pages read as their reader.
 - **Release notes:** the C13 lines, through the `/release-notes` skill after SHIP IT, with the deploy-day count deciding the "nothing had been entered" sentence. Also the functionality-map line (Rule 14) and TODO reconciliation (Rule 10).
+
+## Phase 3 amendment A (after QA run 1)
+
+**Date:** 2026-11-18. **Author:** tech-lead. **Trigger:** QA run 1 FAIL (Phase 5 below). Items 2 to 4 trace to this design's Copy section (C12, C10, C1); items 1 and 5 are harness defects that need no design ruling. The parent's Copy section is not rewritten: this amendment supersedes the named strings, and the implementer applies it as written. Per the Phase 3 rule, every string below carries the four copy checks, and each fix names an exact-text test that fails on the old text.
+
+**Implementer: full-stack-developer for all five items** (one small change set that spans a migration line, a server reader, a client label, a help page and two test files; splitting it across database-admin and ux-developer, as QA suggested, would add hand-offs for under 40 changed lines).
+
+### Rulings
+
+| # | Item | Ruling |
+|---|---|---|
+| A1 | C12 navigation step (QA 2) | **Corrected.** The tile is `category: "operate"`, `domain: "governance"`, so it sits on the presbytery's portal home page under the `<h2>` "Governance & Courts" (`DOMAIN_LABELS.governance`, rendered by `domain-tile-sections.tsx:74`). It is not on the Administration hub. "Administration" leaves the page and its `labels`; "Governance & Courts" joins `labels`. (C11's line "shown on the Administration hub" was the same design error; the tile string itself is unchanged and true. No code reads that line.) |
+| A2 | C10 manage-key description (QA 3) | **Replaced** by an `UPDATE` inside 0089 (0089 is unreleased; 0038 has shipped and is not edited). |
+| A3 | C1 "Buildings in use" (QA 4) | **Three states, three strings.** The list reads both counts, and a congregation whose recorded buildings are all retired says "None in use". |
+| A4 | Off-table strings | **All six ratified** (table below). One accessibility follow-up is filed as a TODO line for the orchestrator. |
+| A5 | Help audit sentence vs F455 | **Reworded** so it neither says "every" nor denies the assessment residual. |
+| A6 | Assessment back link, 20px at 360px | **Fix now (polish).** It is a one-component swap to the shared `BackLink` (`min-h-11`), no new string, and the 44px control rule is a stated gate for every oversight page; deferring leaves a known gate failure in a page we ship. |
+
+### A1. C12: the help page's first navigation sentence and its labels
+
+Final text, replacing `src/content/help/congregation-records.md:3`'s second sentence. The first paragraph of the page is unchanged. Line 3 becomes:
+
+> Open your presbytery's page, choose "Congregation Oversight" under "Governance & Courts", then choose "Open" beside a congregation. The page has five sections: "Profile", "Assessment", "Buildings", "Insurance" and "Loans".
+
+`labels` for the `congregation-records` entry (`src/lib/help/registry.ts`, about line 1008): **remove** `"Administration"`; **add** `"Governance & Courts"` directly after `"Congregation Oversight"`. Every other label is unchanged. `check:help` H10 passes only if the label is in a non-test `src/` file (it is: `tiles.ts:127`) and the page says it.
+
+1. *Residuals:* none denied. 2. *Source of truth:* the section heading is `DOMAIN_LABELS[tile.domain]` and the tile name is `tile.label`, both from `PORTAL_TILES` (key `oversight`), which is what the portal home renders; "Open" is the list row's link text (`oversight-list.tsx:99`). QA's own 360px and 1280px walk found the tile only on the home page. 3. *Audience:* the page's reader is presbytery staff holding either key; the tile is gated by the flag and the organization type (`tiles.ts:566-570`), not by a permission, so a person without either key may see the tile and is answered by `OversightForbidden`, which the page's "Who can see what" section already explains; the instruction (open a page, choose a tile, choose "Open") needs no permission beyond the keys already named under "Who can see what". 4. *Neighbours (grepped `src/content/help`, `src/lib`, `src/app`):* `presbytery-reports.md:76` ("Open "Congregation Oversight", then choose "Open"…") names no section and stays true; `first-day-as-administrator.md:7` already names "Governance & Courts" as a home-page heading; `registry.ts:1149` (`presbytery-tools`) names no navigation. Nothing else says the tile is under Administration.
+
+**Help impact:** `congregation-records` (the sentence and `labels`); `verifiedIn` is left as the implementer set it and Phase 6 re-reads the page. The implementer re-walks the sentence on the portal home at 360px (the tile is in the "Governance & Courts" section, and the phone menu is the other way to it) and does not move `verifiedIn`.
+
+### A2. C10: the `congregation_oversight.manage` description
+
+Final string (parallel in form to the finance description beside it on Create role and Edit role):
+
+> See and record a member congregation's viability assessment, profile and buildings (the presbytery's own record)
+
+Where it ships: a new statement in `drizzle/0089_presby_oversight_records.sql` section 1, directly after the finance `insert ... on conflict`, so the section stays the one place permission rows change:
+
+```sql
+update permissions
+   set description = 'See and record a member congregation''s viability assessment, profile and buildings (the presbytery''s own record)'
+ where key = 'congregation_oversight.manage'
+   and description is distinct from 'See and record a member congregation''s viability assessment, profile and buildings (the presbytery''s own record)';
+```
+
+It replays (the second apply matches nothing, so the D6 identical-digest check holds) and writes nothing in an environment where the row was already corrected. Update the section's header comment to say it also corrects the manage description (0038 shipped; DECISION-298 is not needed because 0089 is unreleased and this is an in-place edit of 0089, not of 0038). `drizzle/0038_presby_presbytery_program.sql:707` is not edited.
+
+1. *Residuals:* none denied. "See and record" is true of every key holder (the list and the record page read under it; the forms write under it), and the string does not say appraisals, insurance or loans, which are the finance key's. It also does not name photos (Increment 2). 2. *Source of truth:* the sections gated by `congregation_oversight.manage` in `readOversightAccess` and the actions: Profile, Assessment (which includes the redevelopment and property notes and the map location) and Buildings. 3. *Audience:* presbytery administrators building a role on Create role and Edit role; they hold `roles.manage` and can tick the key only if they hold it, as C10 recorded; nothing in the string is an instruction. 4. *Neighbours (grepped the live tree for "buildings/insurance", "insurance notes", "viability assessments"):* only `0038...sql:707`, now overridden by the update; `scripts/oversight/test-rls-89.sql:353-354` pins the finance description and is the place to pin this one. The `PERMISSION_LABELS` sentence (C10, second row) is the finance key's and is unchanged.
+
+### A3. C1: "Buildings in use"
+
+**The three states and the final strings** (cell under the unchanged column header "Buildings in use"; viewer: holders of `congregation_oversight.manage`):
+
+| State of this congregation's buildings (removed ones are as if never recorded) | Cell |
+|---|---|
+| At least one in use | "1 building" / "{n} buildings" (the in-use count) |
+| None in use, at least one retired | "None in use" |
+| None recorded at all | "Not recorded" |
+
+Why not a count of retired: the header says "in use", so the cell answers that question only; "None in use" is true, short at 360px, and the record page (which lists each retired building with its "Retired" badge) is one tap away. A combined "2 in use, 1 retired" is not adopted because it is a new string family and the list is a scan view.
+
+Shape change (`src/lib/oversight/reads.ts`):
+
+- `OversightListRow.manage` gains `buildingsRetired: number` (live, retired; the existing `buildingsInUse` stays "live, not retired").
+- The one buildings query (`reads.ts` about lines 279-286) becomes a single grouped query selecting two counts, `count(*) filter (where retired_on is null)::int` and `count(*) filter (where retired_on is not null)::int`, with the existing `removed_at is null` condition. Keep the `sql<number>` annotation style the file already uses.
+- `buildingsInUseLabel(inUse: number, retired: number)` in `src/lib/oversight/derive.ts`: `inUse > 0` gives the count wording; else `retired > 0` gives `STATE.noneInUse`; else `STATE.notRecorded`. `src/lib/oversight/copy.ts` `STATE` (about line 142) gains `noneInUse: "None in use"`.
+- `oversight-list.tsx:81` passes both counts.
+
+1. *Residuals:* none denied; a removed building is not counted in either figure, which matches the record page (it lists live buildings only). 2. *Source of truth:* both figures come from `oversight_buildings` with `removed_at is null`, split on `retired_on`; "None in use" is only reachable when at least one live retired row exists, so the claim is read, not inferred; "Not recorded" is reached only when no live row exists. 3. *Audience:* manage holders, who also see the record page's retired buildings. 4. *Neighbours:* `derive.test.ts:137-139`, `page.test.tsx:294, 301, 345` (fixtures gain `buildingsRetired`), `reads.db.test.ts:283` (the exact key list) and `:323, :328`, `reads.ts:225` (the type and its comment), `e2e/oversight-records.spec.ts:251` (a comment states "the list counts only the live, unretired ones"; it asserts nothing today). The help page names no list cell. C1's first table row in the parent is superseded by the table above.
+
+### A4. Off-table strings: ratified
+
+Each passes the four checks (no residual denied; no claim about a person or date beyond the row it labels; each is read by the person who can act; no older string says otherwise, grepped under `src/lib/oversight` and `src/components/oversight`).
+
+| String | Where | Ruling and reason |
+|---|---|---|
+| "Choose a type" | the building-type select's empty option (`building-form.tsx:118`) | **Ratified.** The field is required and the refusal message is "Choose a type." (C9); the option is the same instruction before submit. Other selects say "Not recorded" because they are optional; this one must not. |
+| "Choose the kind of loan" | the loan-kind select's empty option (`loan-form.tsx:96`) | **Ratified.** Matches C9's "Choose the kind of loan." |
+| "Choose why" | the retire dialog's empty option (`retire-dialog.tsx:100`) | **Ratified.** Matches the label "Why is it retired?" and the refusal "Choose why this building is retired." |
+| " insurance for {year}" (screen-reader suffix after "Remove") | `insurance-card.tsx:53` | **Ratified.** Reads "Remove insurance for 2024"; the year is the row's own `policy_year`. |
+| " appraisal for {year}" (suffix after "Remove") | `appraisals-block.tsx:63` | **Ratified.** Reads "Remove appraisal for 2024"; the year is the row's `assessed_year`. |
+| " loan" (suffix after "Remove" and after "Edit") | `loan-actions.tsx:56` and `:46` | **Ratified as true, with a follow-up.** It is true but does not tell two loans apart. Not a truthfulness defect and not in the QA FAIL set; filed for the orchestrator to add to `docs/TODO.md` at integration (a shared file, Rule 16): "oversight loans: the screen-reader suffix for Edit and Remove says only 'loan'; name the kind (and lender when recorded) so two loans on one congregation are told apart." Owner: tech-lead (design a string, then ux-developer). |
+
+### A5. The help's audit sentence
+
+Replaces the paragraph at `src/content/help/congregation-records.md` that begins "Every change is recorded in the audit trail" (the paragraph after the "Appraisals, insurance and loans" section). Final text:
+
+> Changes are recorded in the audit trail with who made them, and the notes and amounts are not copied into it. A change to the "Assessment" is recorded just after it is saved, so in rare cases a saved assessment can be missing from the trail. Looking at a record is not recorded.
+
+1. *Residuals:* this states the F455 residual (the assessment write audits after commit and `recordAudit` swallows its own failure) and the standing residual that reads are not audited; it no longer says "every". 2. *Source of truth:* the profile, building, appraisal, insurance and loan writes call `insertAuditRow` inside the same transaction as the row (store.ts; proven by D3), so for those a change and its entry stand or fall together, and "Changes are recorded" is true of them; the assessment write is `actions.ts` `recordAudit` after commit (F455); the audit metadata carries ids and the viability rating, not notes or amounts, which is what "the notes and amounts are not copied into it" says (the rating is not a note or an amount). 3. *Audience:* presbytery staff reading help; it asks nothing of them. 4. *Neighbours:* grepped the help tree for "audit trail" in the oversight context: `presbytery-reports.md`, `roles-who-can-do-what.md` and `why-cant-i-see-this.md` make no claim about the record's audit. No other string changes.
+
+### A6. The assessment back link
+
+Fix now. `src/app/(org)/o/[slug]/admin/oversight/[aboutOrgId]/assessment/edit/page.tsx:72-78` replaces its inline `<Link className="inline-flex items-center …"><ArrowLeft/>Back to {name}</Link>` with `<BackLink href={`/o/${slug}/admin/oversight/${aboutOrgId}`}>Back to {result.data.name}</BackLink>` from `@/components/oversight/back-link`. The visible words ("Back to {name}") are unchanged, so no copy check is needed; remove the now-unused `Link` and `ArrowLeft` imports (lint runs with `--max-warnings=0`).
+
+### Implementation list (full-stack-developer)
+
+Every row is written test-first: run the named test against the old code and see it red, then fix.
+
+| # | Fix | Files | Exact-text test that fails on the old text |
+|---|---|---|---|
+| 1 | QA 1: add the two photo FKs to the `blob_assets` FK name pin (the `person_photos_image_fk` precedent, commit `11456fd7`) | `src/lib/storage/blob-audience.db.test.ts` (both name lists near `:399` and `:408`: add `oversight_building_photos_image_fk` and `oversight_building_photos_thumb_fk`) | The test "holds for every FK in the catalog" at `:404` is the pin; it is red on the current tree and green after. No new test. |
+| 2 | QA 2 / A1: the help sentence and `labels` | `src/content/help/congregation-records.md` (line 3), `src/lib/help/registry.ts` (`labels`: drop "Administration", add "Governance & Courts") | New `src/lib/help/congregation-records-nav.test.ts`: read the tile `oversight` from `PORTAL_TILES`; assert `tile.category === "operate"`, that the help body contains the exact string `choose "${tile.label}" under "${DOMAIN_LABELS[tile.domain]}"` and does **not** contain `Open "Administration"`, and that the entry's `labels` contain `DOMAIN_LABELS[tile.domain]` and not `"Administration"`. Fails on the old line; also fails later if the tile moves. `npm run check:help` stays green. |
+| 3 | QA 3 / A2: the manage description | `drizzle/0089_presby_oversight_records.sql` (the section-1 `update`, header comment); `scripts/oversight/test-rls-89.sql` section (b) (a new `assert_eq` for `congregation_oversight.manage` with the exact description, tier 1, no 2FA: extend the existing 89b manage assertion at `:355-358`). | The extended 89b assertion: with the `update` removed the description is the 0038 text and the count is 0. Apply 0089 twice and confirm the same digest (D6 runs this). Not an edit to 0038. |
+| 4 | QA 4 / A3: the list label | `src/lib/oversight/reads.ts`, `derive.ts`, `copy.ts`, `oversight-list.tsx` | `derive.test.ts:137-139` rewritten: `(0, 0)` "Not recorded", `(0, 2)` "None in use", `(1, 0)` "1 building", `(2, 3)` "2 buildings"; `page.test.tsx` renders a row with `buildingsInUse: 0, buildingsRetired: 2` and expects "None in use" (old code renders "Not recorded"); `reads.db.test.ts` seeds a congregation whose only building is retired and expects `{ buildingsInUse: 0, buildingsRetired: 1 }`, and the `:283` key list gains `buildingsRetired`. If `seedBuilding` in `e2e/support/oversight-fixture.ts` already supports `retiredOn`, add one assertion to `e2e/oversight-records.spec.ts` that the list shows "None in use" for such a congregation (the comment at `:251` becomes true); otherwise the unit and DB tests are the pin. |
+| 5 | QA 5: the D6 harness ordering | `scripts/oversight/test-0089-migration.sh` (step 3, `:196-199`) | `seed-dev.sql` now `\ir`s `seed-dev-oversight.sql`, which needs 0089's permission row. Apply `seed-dev.sql` to the pre-0089 state with the `\ir oversight/seed-dev-oversight.sql` line filtered out (a temp copy in `scripts/`, so any other `\ir` resolves), keep the pre-0089 fixtures that the backfill count depends on, apply 0089, then apply `seed-dev-oversight.sql`. The harness itself is the test: it must exit 0 on the integrated tree (it exits 1 at step 3 today). |
+| 6 | A6: the assessment back link | `.../assessment/edit/page.tsx` | In `.../assessment/edit/page.test.tsx` assert the "Back to {name}" link carries the `min-h-11` class (red on the old string, which has none); in `e2e/oversight-records.spec.ts:352` add `["the assessment form", `${record()}/assessment/edit`]` to the `pages` list so the 44px and no-sideways-scroll checks cover it (red today at 20px). |
+| 7 | A5: the audit sentence | `src/content/help/congregation-records.md` | Extend the new `congregation-records-nav.test.ts` (or `src/lib/help/content.test.ts`'s style): assert the body contains "A change to the \"Assessment\" is recorded just after it is saved" and does not contain "Every change is recorded". Red on the old text. |
+
+Order: items 1 to 7 are independent; commit them as `fix:` commits per class (one prefix per commit): the test-only pin and the D6 harness as `test:`, the migration, reader and label as one `fix:` (`Caught-By: agent-review`, `Discovered-In: Phase-5`, `Work-Log: 2026-11-17-congregation-profile-inc1`), the help and back link as one `fix:`.
+
+**Gates for the implementer:** `npm run check` zero, typecheck, lint, the files above including the DB-backed `reads.db.test.ts` and `blob-audience.db.test.ts` and the 0089 test-rls and D6, the help walk of the changed sentence at 360px, then hand to QA for run 2 (re-run `blob-audience.db.test.ts`, D6, `npm run check`, the help walk and the specs that touch the changed strings: `oversight-records`, `hydration/oversight-forms`).
+
+### Carry-forward (amendment A)
+
+| Requirement | Where addressed |
+|---|---|
+| QA 1 (`blob-audience.db.test.ts:404`) | Item 1 |
+| QA 2 / C12 navigation | A1, item 2 |
+| QA 3 / C10 description | A2, item 3 |
+| QA 4 / C1 "Not recorded" | A3, item 4 |
+| QA 5 (D6 ordering) | Item 5 |
+| Off-table strings | A4: ratified; loan screen-reader follow-up **deferred**, by tech-lead (this ruling), to a TODO line the orchestrator adds |
+| F455 help sentence | A5, item 7 (F455 itself stays deferred to the monthly security review, as the parent recorded) |
+| 20px assessment back link | A6, item 6: fixed now |
+| Copy checks (residuals, source, audience, neighbours) | stated for A1, A2, A3 and A5; A4 and A6 as above |
+| Edge-case claims | "None in use" only when a live retired row exists: pinned by `reads.db.test.ts` and `page.test.tsx` (item 4); "a removed building counts in neither figure": unverified until the implementer adds one `reads.db.test.ts` case (a removed building beside a retired one) as part of item 4, which this amendment requires |
+| e2e blast radius | `oversight-records.spec.ts` (list rows, 360px loop: only the added page), `presbytery-oversight.spec.ts` and the map spec (no string they assert changes); no flag added; flags unchanged |
+
 
 ---
 
@@ -340,56 +469,171 @@ architect, qa) is still recorded verbatim.*
 
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-11-18
 **Verified by:** qa
+**Tree:** `pipeline/congregation-profile` at `a564335c` in `/Users/cshenso/git/presby-platform/presby-profile`, which I did not modify. One disclosure: I briefly copied a walk script into the gitignored `.tmp/` and deleted it in the same command.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+`npm run typecheck`: **PASS**. `npm run lint`: **PASS** (`--max-warnings=0`). `npm run check`: **PASS**, all ten tripwires (help check: 34 entries, 30 published, 7 images). `npm run build`: **PASS** (run inside the production lane below).
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+- **Without a database** (`npm test -- --no-file-parallelism`): 914 files passed, 159 skipped. Tests: 14,956 passed, 4,253 skipped, **0 failed**, 317.5s.
+  - Every skip is environment-gated: 176 `describe.skipIf(!hasDb)` blocks plus one `STATEMENT_SAMPLE_DIR` sample test. The DB-gated ones ran in the next item.
+- **The whole DB-backed suite.** The run-scope rule requires it because the diff touches a migration and `src/lib/db/`.
+  - Run like CI's job, on a fresh `scratch_qa5_db` database on the pipeline branch: migrate, schema-parity (0 failing), seed, `seed-dev.sql`, `db-baseline.sql`, test helpers, then the suite serially. The database was dropped afterwards.
+  - Files: 1,072 passed, **1 failed** (1,073). Tests: 19,207 passed, **1 failed**, 1 skipped (the sample test). 6,713s.
+  - This covers every file the brief named: oversight, the `db/domain/oversight*` files, presbytery and its reports reader, founding-administrator, invitations, two-factor-default, worship, dev-docs and the designation-parity files.
+  - **Failure:** `src/lib/storage/blob-audience.db.test.ts:404`, "holds for every FK in the catalog".
+    - The test names every foreign key into `blob_assets`, and 0089 adds `oversight_building_photos_image_fk` and `oversight_building_photos_thumb_fk` without adding them there.
+    - The product side is fine. The same test's "no offenders" assertion passed, and the live catalog shows both keys pinned by the validated CHECK `oversight_building_photos_audience_private`.
+    - It is a missing name pin (the person-photos precedent is `11456fd7`). The failure is deterministic and CI's DB shard will fail the PR the same way.
+- **Isolation suites (all as `presby_app`, `rolbypassrls = f`):**
+  - The full `scripts/test-rls.sql` on a fresh `scratch_qa5_rls` database (CI's test-rls job order): exit 0, 2,157 pass notices, 0 errors, "Section 89 complete". The date-dependent `presby_submit_granted_return` failure did not occur from empty.
+  - `scripts/oversight/test-rls-89.sql` from fresh: exit 0, 171 passes.
+  - `scripts/oversight/test-rls-89.sql` on the pipeline branch (with the oversight seed): exit 0, 171 passes.
+- **D6 (`scripts/oversight/test-0089-migration.sh`): FAIL, harness only.**
+  - It stops at step 3, `scripts/oversight/test-0089-migration.sh:199`, because `seed-dev.sql` runs before 0089 is applied.
+  - Since integration, `seed-dev.sql` includes `\ir oversight/seed-dev-oversight.sql`, which inserts the finance key that only 0089 creates (FK `app_role_permissions_permission_key_permissions_key_fk`).
+  - It is not a product defect: the integrated from-empty path above passes. But the committed D6 can no longer pass on this tree.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+- **Flag state:** before e2e I reset global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`; 38 seeded flags).
+  - That turned off `org_portal.admin_hub`, `.features`, `.insights` and `.oversight`, which were on from the B3/B4 walks. The branch is left at that baseline.
+  - I switched `.oversight` and `.admin_hub` on only for my own walk and put them back.
+- **Dev lane** (own server on 3104 with the brief's env, stopped by PID; `E2E_BASE_URL=http://localhost:3104`, `--project=chromium`, desktop project with 360px cases inside the specs):
+  - `oversight-records`, `oversight-finance`, `oversight-founder`, `presbytery-oversight`, `presbytery-dashboard`, `hydration/oversight-forms`, `totp-full-login`: **40 / 40 passed**, 3.9m, no skips.
+  - Blast radius I added, because both specs render the changed `founding-administrator-section.tsx` on a presbytery: `admin-organizations`, `designation-revoke`: **33 / 33 passed**, 1.6m.
+- **Map project** (`PW_MAP=1`, its own server on 3104): **10 / 10 passed**, 47.1s.
+- **Production lane** (`PW_PROD_BUILD=1 PW_PROD_PORT=3105`, `npm run test:e2e:prod`, both projects): **117 / 117 passed**, 6.9m, including both `hydration/oversight-forms` cases. Port 3105 was released afterwards.
+- **Auth-touching gate:** satisfied. The founder spec signs in through the real `/signin` form, answers `/totp` for MFA-enrolled users with a real code, and walks forced enrolment after the grant with a real code. `totp-full-login` passed.
+- **Full chromium suite: not run.** The diff touches no proxy, auth file, layout, `playwright.config.ts` or shared component. The only `e2e/support` change is a new file imported only by the new specs. The rest rests on the PR's CI run.
+
+Failures: none in e2e.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+I checked failing-first myself for each one: in a scratch copy for the unit and DB tests, and on a scratch dev server on 3106 for the e2e case.
+
+- **F451/F454:**
+  - `src/lib/presbytery.test.ts:841` (DB): red against `origin/main`'s `presbytery.ts` (the legacy carrier is nulled on save), green on HEAD.
+  - `src/lib/presbytery.superseded-fields.test.ts:28`: 4 red against main, green on HEAD.
+- **F452 (second factor):** `src/lib/presbytery-reports/gate.test.ts:221`, `oversight/page.test.tsx:111` and `[aboutOrgId]/assessment/edit/page.test.tsx:258`. With the gate's `two_factor_required` redirect removed, 5 tests went red; restored, green.
+- **F452 (UUID 404):** `oversight/record-pages.test.tsx:105` and `:210`. Red with the `isUuid` loop removed from `record-front-door.tsx`; restored, green. Also `assessment/edit/page.test.tsx:269`.
+- **B4 back link:** `e2e/oversight-records.spec.ts:352`. Red against the pre-fix `back-link.tsx` from `801f448e~1` (sideways scroll 1,202px), green with the fix.
+  - It asserts the property (no sideways scroll on six pages at 360px), not the fix's own class names. The fix commit carries the `fix:` trailers.
+- **Naming:** the F452 tests are tagged "(F452)" rather than the "— regression for …" suffix the convention asks for.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100%
+- `src/lib/two-factor.ts`: 91.11% statements (lines 35–39 uncovered)
+- `src/lib/flags.ts`: 100%
+
+`permissions.ts` and `flags.ts` are 12 of 12 statements together; the text reporter leaves out fully covered rows. The diff touches none of the three.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+These are `(org)` tenant surfaces, so there is no `FEATURES.*`. I checked sign-in plus the Node-side second-factor recheck, then the tenant key inside the transaction (`holdsPermissions` / `presby_has_permission`). I read the bodies, not just the test results.
 
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+| Route or action | Signed in + 2FA recheck | Tenant key check present | Correct key |
+|---|---|---|---|
+| Page: list `oversight/page.tsx` | yes (`gateOversightPage`) | yes, `readOversightList`; each column follows its own key | either key; columns manage / finance |
+| Page: record `[aboutOrgId]/page.tsx` | yes | yes, `openRecord`: UUID 404 then `readOversightAccess`; each section reads under its own key | either key; sections per key |
+| Page: `profile/edit` | yes | yes, `readProfile` | manage |
+| Page: `assessment/edit` | yes, then `isUuid` | yes, `getCongregationOversightDetail` | manage |
+| Pages: `buildings/new`, `buildings/[id]`, `buildings/[id]/edit` | yes | yes, `readBuildings` / `readBuilding`; appraisals block uses `readAppraisals` | manage; appraisals finance |
+| Page: `appraisals/new` | yes | yes, both readers; a Locked page for the missing one | finance + manage |
+| Pages: `insurance/new`, `insurance/[recordId]/edit`, `loans/new`, `loans/[loanId]/edit` | yes | yes, `readInsuranceYear(s)` / `readLoan(s)` | finance |
+| `setProfileAction` | yes (`resolveOversightActor`: `assertOrgSession` before `resolveOrgContext`, then UUIDs) | yes, `store.gate()` in the transaction | manage |
+| `create/update/retire/reinstate/removeBuildingAction` | yes | yes | manage |
+| `record/removeAppraisalAction` | yes | yes | finance |
+| `record/update/removeInsuranceAction` | yes | yes | finance |
+| `record/update/markLoanPaidOff/removeLoanAction` | yes | yes | finance |
+| `setCongregationOversightAction` (moved) | yes (now gained the recheck, F452) | yes, in `presbytery.ts` | manage |
+
+Other checks:
+
+- No `route.ts` and no `loading.tsx` exist under `oversight/**`.
+- Every store write: key, then congregation, then row, then version, and one `insertAuditRow` in the same transaction.
+- No `console.log` and no native dialogs in the diff. The one `console.error` is the documented SQLSTATE-only line.
+- **Observation (not a FAIL):** no action checks the `org_portal.oversight` flag, so a key holder can write with the flag off by calling an action directly. This matches the design's API contract and the shipped assessment action; the permission is still enforced.
+
+**Schema/RLS audit (live catalog, pipeline branch):**
+
+- All six `oversight_*` tables are `relrowsecurity` and `relforcerowsecurity` true, owned by `neondb_owner`.
+- One `tenant_isolation` policy each, with both USING and WITH CHECK `organization_id = presby_current_org()`.
+- `aclexplode`: `presby_app` holds INSERT and SELECT plus column-level UPDATE only. No DELETE or TRUNCATE, and no `presby_platform` grant.
+- 17 non-internal triggers.
+- `congregation_oversight.finance` is tier 2 with `requires_two_factor = t`. The presbytery bundle ends `…manage, …finance`, and the congregation bundle carries neither.
+- Refusals were proven by running the tests as `presby_app` (test-rls-89 a to i), not inferred.
 
 ## Copy Truthfulness
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
-
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
-- [ ] Help diff covered: every labels string is on screen, every claim walked at 360px, every committed image opened
+- [ ] **Every added or changed string is in the design's Copy table.** Off-table strings, none false but needing ratification:
+  - The empty select options "Choose a type", "Choose the kind of loan" and "Choose why" (B3 deviation 3; no ruling recorded).
+  - The screen-reader suffixes "insurance for {year}" (`insurance-card.tsx:50`), "loan" (`loan-actions.tsx:46`) and "appraisal for {year}" (`appraisals-block.tsx:63`).
+  - The help's finance-only-appraisals sentence is covered by the orchestrator ruling (`docs/TODO.md:135`).
+- [x] **The query behind each claim was opened.** One defect found:
+  - **copy truthfulness: FAIL.** `src/lib/oversight/derive.ts:54` with `reads.ts`. The count excludes retired buildings, so "Buildings in use" says **"Not recorded"** for a congregation whose recorded buildings are all retired.
+  - On the same congregation, the record page lists those buildings with a "Retired" badge.
+  - Viewer: manage holders on the list. The string is C1's own (design-traced).
+- [ ] **Each instruction was traced to its role.** One defect found:
+  - **copy truthfulness: FAIL.** `src/content/help/congregation-records.md:3`: "Open "Administration", choose "Congregation Oversight"" is false.
+  - The tile is `category: "operate"` (`src/lib/org-portal/tiles.ts:568`), so it appears on the portal home under "Governance & Courts".
+  - The Administration hub (`/o/<slug>/admin`, "Organization Administration") lists only administer tiles. On screen at 360px and 1280px, with `org_portal.admin_hub` both on and off, it shows only "Per-Capita, SASR & Imports".
+  - Viewer: presbytery staff holding either key. The text is C12's own (design-traced). "Administration" is also in the page's `labels`.
+- [ ] **Older strings about the same subject were grepped.** One defect found:
+  - **copy truthfulness: FAIL.** `drizzle/0038_presby_presbytery_program.sql:707`: the `congregation_oversight.manage` description "Record viability assessments and buildings/insurance notes for a member congregation" is now false, because insurance belongs to the finance key.
+  - It is shown beside the tick on Create role and Edit role (`roles/new/create-role-form.tsx:116`, `roles/[id]/edit/edit-role-form.tsx:102`), right next to the new finance description that also says "insurance".
+  - Viewer: presbytery administrators building a role. C10's neighbour list missed it.
+  - 0089 is unreleased, so it can be corrected in place.
+- [x] **Help diff walked.**
+  - My own 360px walk, light and dark, as `presbytery-clerk` with the flag on, found these labels on screen: "Congregation Oversight", "Open", the five section headings, "Locked", "Add profile details", "Edit assessment", "Add a building", "Primary building", "Save building", "How these records work". Sideways scroll was 0 on every page.
+  - The e2e specs assert the finance, retire and stale labels.
+  - "Try again" is covered by unit tests only.
+  - The `presbytery-reports`, `roles-who-can-do-what`, `why-cant-i-see-this` and `presbytery-tools` edits match C12.
+  - The `privacy-policy` page is unchanged (correct for Increment 1).
+  - There are no committed images in this diff, so no pixels to read.
+- **For tech-lead to rule (not counted as failures):**
+  - "Every change is recorded in the audit trail" (help) is the design's own wording but brushes the F455 residual: the assessment write audits after commit and swallows a failure.
+  - The assessment page's back link is 20px tall at 360px (`assessment/edit/page.tsx`, a pre-existing class string carried over by the `git mv`; the 44px case doesn't cover that page). Polish.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+1. **Regression in the test suite:** `src/lib/storage/blob-audience.db.test.ts:404`. Add the two oversight photo foreign keys to the name pin. Owner: database-admin (B1).
+2. **copy truthfulness: FAIL.** The help navigation step at `congregation-records.md:3` is false (the tile is on the portal home, not under Administration).
+3. **copy truthfulness: FAIL.** The stale manage-key description at `0038…sql:707` still claims insurance, on the Roles screens.
+4. **copy truthfulness: FAIL.** The list says "Not recorded" for a congregation whose buildings are all retired (`derive.ts:54`).
+5. **D6 harness** cannot pass on the integrated tree (`test-0089-migration.sh:199`). Owner: database-admin.
+
+Items 2 to 4 trace to the design's Copy section (C12, C10, C1), so they go to **Phase 3 first**: tech-lead writes the corrected strings. Then the implementers apply them, each with an exact-text test that fails on the old text:
+
+- database-admin: the 0089 in-place description update (section 1), plus items 1 and 5.
+- ux-developer: the help step and `labels`, and the list label.
+
+Everything else passed: typecheck, lint, build, all ten tripwires, every e2e run (40, 33, 10 and 117 tests, MFA path included), the full `test-rls.sql` from empty, the live-catalog audit, the gate audit, and all four regression tests, each shown failing first.
+
+**Run scope:**
+
+- Ran: typecheck, lint, check, the unit suite, the whole DB-backed suite (fresh database), the full `test-rls.sql` from empty, `test-rls-89` (fresh and branch), D6, the targeted e2e plus two blast-radius specs, the map lane, and the production lane.
+- Not re-run: the full chromium e2e suite (it rests on the PR's CI).
+
+---
+
+**Per-Phase Status row**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (run 1) | FAIL | 2026-11-18 |
+
+**Handoff:** **tech-lead** (Phase 3 loop-back) for amended C1, C10 and C12 strings, covering items 2 to 4. It should also ratify the off-table strings and rule on the F455 audit sentence. Then **database-admin** (items 1, 3 and 5, with 0089 corrected in place because it is unreleased) and **ux-developer** (items 2 and 4). Then QA run 2, which re-runs `blob-audience.db.test.ts`, D6, `npm run check`, the help walk and the specs touching the changed strings.
+
+Logs, scripts and walk screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa5/`.
 
 ---
 

@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
 | 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | Complete (B5 to B9, 2026-11-18) | — | 2026-11-18 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1) | FAIL | 2026-11-18 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -374,58 +374,287 @@ Next: **qa** (Phase 5). In the browser: nothing further for B5 to B8's walks; Ph
 
 ---
 
+
+## Orchestrator rulings on Phase 4 copy (recorded after QA run 1)
+
+Given to B8 at hand-off and recorded here so the off-table strings have a source:
+
+- **(a)** The Buildings report lists buildings in use. A congregation with none uses the oversight list's three-state wording: "None in use" when every recorded building is retired, "Not recorded" when none was ever recorded. This supersedes C15's "None recorded".
+- **(b)** The Insurance-and-loans file carries each loan's guarantee (R7). The page, help and release note say what the files leave out (street address, policy number, lender, notes) and that the guarantee is included. C16's second line is amended to match.
+- **(c)** F445's ban on two-factor wording in report copy may narrow for the finance report. B8 kept it for all six; only the help mentions two-factor.
+- **(d)** The cover tile carries a "Cover" badge in words.
+- **Ratified as shipped:**
+  - `PHOTO_COPY.coverBadge` "Cover", `saveCaption` "Save caption", `saving` "Saving…", and the alt fallback "Photo".
+  - `BUILDINGS_COPY.inUseNote`, `.fileNote`, `.count` and `.helpLink`.
+  - `INSURANCE_LOANS_COPY.newestNote`, `.fileNote` and `.helpLink`.
+  - The photo tile is a link rather than a button; the help matches.
+- **Cover rule (QA run 1 item 1):** the design and help win. A new photo takes the cover mark only when the building has no live photo. After the cover is removed, the oldest remaining photo shows as the cover until someone chooses another, and a later upload does not take it.
+
+
 # Phase 5 — Verification (qa)
 
-**Date:** YYYY-MM-DD
+**Date:** 2026-11-18
 **Verified by:** qa
+**Tree:** `pipeline/congregation-profile-inc2` at `11a3fff7`, in `/Users/cshenso/git/presby-platform/presby-profile`, diffed against `e77658f9` (0.61.0).
+
+- I did not modify the tree or use `git stash`, and `git status` was clean at the end. Env vars were checked by presence and length only, never printed.
+- All my code experiments ran in a `git archive HEAD` copy outside the tree (`.../scratchpad/qa6/red/`, with `node_modules` and `.env.local` symlinked).
+- I wrote to the database only through the fixtures' own setup and teardown. Afterwards: 0 `e2e-ovs*` organizations, and the branch's photo count is back to the seeded 2.
 
 ## Type Check
 
-`npm run typecheck`: PASS / FAIL
+- `npm run typecheck`: **PASS**.
+- `npm run lint` (`--max-warnings=0`): **PASS**.
+- `npm run check`: **PASS**, all ten tripwires. Help check: 34 entries, 30 published, 30 content files, 7 images.
+- `next build`: **PASS**, run inside the production lane (compiled, TypeScript, 86 static pages).
 
 ## Unit Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [test name — error — file:line]
+- **Full unit suite with no database:** 924 files passed, 160 skipped. 15,183 tests passed, 4,300 skipped, **0 failed**, 349s. Every skip is gated on the database and ran in the next item.
+- **Whole DB-backed suite** on a fresh `scratch_qa6_db`, in CI's order, serially (migrate, schema-parity, seed, `seed-dev.sql`, `db-baseline.sql`, test helpers, then vitest):
+  - 1,083 of 1,084 files passed. 19,481 tests passed, 1 skipped (the sample test), **1 failed**. 113 minutes. The scratch database was dropped.
+  - It includes `photo-store.db.test.ts`, `readers.db.test.ts`, every person-photo DB suite and `src/lib/storage/*` (including `blob-audience.db.test.ts`).
+  - **The one failure is a timeout, not a regression.** `src/lib/org-features.test.ts:532` hit its 20s limit. The diff does not touch that file, and my e2e lanes were loading the same Neon compute at the time. Re-run once on its own: 29 of 29 passed. It also passed in Increment 1 run 2.
+- **Isolation suites, all as `presby_app` (`rolbypassrls = f`):**
+  - Full `scripts/test-rls.sql` on a fresh `scratch_qa6_rls`: exit 0, 2,158 passes, "Section 89 (congregation records) complete". Dropped afterwards.
+    - Run 1 of this job failed at `db:migrate` with no message. It had been started at the same moment as the DB suite's migrate on the same compute. Re-run on its own, it passed, so it is a harness collision, not a product failure.
+  - `scripts/oversight/test-rls-89.sql` from fresh: 172 passes.
+  - `scripts/oversight/test-rls-89.sql` on the pipeline branch, with the seeded photos present: 172 passes.
+- **Person-photo output is byte-identical (DECISION-346).**
+  - I ran the old `person-photos/image.ts` (from `e77658f9`) and the new `storage/image/photo.ts` with `{ thumbnail: "top" }` on the same 12 generated inputs.
+  - Inputs: a JPEG with EXIF, GPS and orientation 6; a portrait; a PNG with alpha; a WebP; a tiny image; a large solid image; a q100 image that forces the quality steps; an empty file; text; a truncated JPEG; a PNG over the pixel cap; and a WebP.
+  - Result: **12 of 12 identical** (sha256 of master and thumbnail, dimensions, refusal kind). `"centre"` changes only the thumbnail, never the master.
+- **EXIF is stripped:** every output master has no EXIF, ICC, XMP or IPTC. The orientation-6 input came out rotated (600x400 became 400x600).
+- **`sharp` importers:** `SHARP_FILES` is exactly `image-sanitize.ts` and `storage/image/photo.ts`. `check:treasury-boundaries` and `scan.test.ts` are green.
 
 ## End-to-End Tests
 
-Total: N | Passed: N | Failed: N | Duration: Xs
-Failures: [...]
+**Flag state.** Before e2e I reset the global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`, 38 seeded flags).
+
+- The 9 flags that are on were already the baseline, so the reset changed nothing.
+- After every lane I read them back: the same 9. **The branch is left at the CI baseline.**
+
+**Dev lane.** Own server on 3102 with the brief's environment; `E2E_BASE_URL=http://localhost:3102`, `E2E_ALLOW_SHARED_DB=true`, `--project=chromium`, one worker. Stopped by PID; 3102 confirmed free.
+
+- **83 of 83 passed**, 8.8 minutes, no skips or retries.
+- By spec:
+
+| Spec | Passed |
+|---|---|
+| `oversight-photos` | 12 |
+| `oversight-reports` | 7 |
+| `hydration/oversight-photos` | 2 |
+| `presbytery-report-exports` | 8 |
+| `oversight-records` | 9 |
+| `oversight-finance` | 8 |
+| `oversight-founder` | 4 |
+| `presbytery-oversight` | 9 |
+| `hydration/oversight-forms` | 2 |
+| `presbytery-reports` | 10 |
+| `presbytery-dashboard` | 7 |
+| `person-photos` | 5 |
+| `totp-full-login` | 1 |
+
+**Map lane** (`PW_MAP=1`, its own server on 3102): **10 of 10 passed**.
+
+**Production lane** (`PW_PROD_BUILD=1 PW_PROD_PORT=3103`, `E2E_BASE_URL` unset, both projects): **119 of 119 passed**, 6.7 minutes. This includes `hydration/oversight-photos` (2), `hydration/oversight-forms` (2) and `hydration/person-photos-upload` (1). 3103 is free afterwards.
+
+**Auth-touching gate.** The diff touches no auth file. `totp-full-login` passed, and the MFA-enrolled holder in my walk signed in through `/totp` with a real code.
+
+**Full chromium suite: not run.** The diff touches no proxy, auth file, layout, `e2e/support` file, `playwright.config.ts` or `src/components/shared`/`ui` file, so the rest relies on the PR's CI.
+
+**My own 360px walk.** This was a walk spec in the scratch copy only, against 3102, on the oversight fixture, with generated images. Screenshots are in the scratch `qa6/walk/` folder.
+
+- *Photos:*
+  - Three uploads put the cover on photo 1. The grid is two columns with no sideways scroll.
+  - The larger view shows "Edit caption", "Remove photo" and "Back to all photos", and no "Make this the cover" on the cover.
+  - The caption form shows "Caption (optional)", "Save caption" and "Cancel".
+  - The dialog reads "Remove this photo? It will no longer be listed here. The picture file itself stays in storage and can't be erased from here." with "Cancel" and "Remove photo".
+  - At ten photos the cap sentence shows, there is no Add button, and no control is under 44px.
+- *Reports, as an MFA holder of both keys:*
+  - Hub help link 44px.
+  - Buildings: "1 building in 1 congregation", "None in use" for the congregation whose only building is retired, "Primary", and "Not recorded" for each blank.
+  - Insurance and loans: "Expired", "Total", the guarantee, and no `$0`.
+  - Both pages have no sideways scroll and no small controls.
+  - Both CSVs: 200, BOM, CRLF, exact headers, `'=Generated Nave` and `'=SUM(1) …` guarded, `50000.00` and `1234567.89`, and none of the note, policy-number or lender sentinels.
+  - One audit row per export: `{ organizationId, report, rowCount }`.
+- *Help:* `/help/congregation-records`, `/help/presbytery-reports`, `/help/privacy-policy` and `/help/planned/presbytery-tools` all return 200 with no sideways scroll, in light and dark.
+
+Failures: none in e2e.
 
 ## Regression Tests Added
 
-- [test name — file:line — guards against: brief description]
+I showed each mechanism red myself in the scratch copy, then restored it to green.
+
+| Fix or mechanism | Test | Red on the break | Green on HEAD |
+|---|---|---|---|
+| **B7 dashboard key regression** (`DASHBOARD_REPORT_KEYS`) | `src/lib/presbytery-reports/dashboard.test.ts`, "holding only the two oversight reports' keys … — regression for the finance-only viewer reaching the roster count" | 1 red with `dashboard.ts:112` reverted to `Object.values(held).some(Boolean)` | 23 of 23 |
+| Upload order: type after the building | `photo-store.unit.test.ts` + `oversight/boundaries.test.ts` | 5 red | 63 of 63 |
+| Final write without the row lock | same | 3 red | yes |
+| Decode before the pre-check | same | 12 red | yes |
+| Cap not recounted under the lock | same | 3 red | yes |
+| CSV guard removed (guarantee / carrier / building name) | `csv.test.ts` | 7 / 6 / 7 red | 58 of 58 |
+| CSV header renamed; balance written as raw cents | `csv.test.ts` | 1 / 2 red | yes |
+| B8 report-frame help link at 44px | `e2e/oversight-reports.spec.ts:159, :217` (`smallControls`, which would have caught the 17px link) | not re-shown by me | passed |
+| B9 island `HydrationGate` | `e2e/hydration/oversight-photos.spec.ts` | the implementer reports red when swapped for a `div`; not re-shown by me | passed in both lanes |
+
+**Missing (named gap):** B8 also fixed the **hub's** help link (`src/app/(org)/o/[slug]/admin/reports/reports-hub.tsx:108`, 17px to `min-h-11`), and no test pins it. The hub is not in any `smallControls` scan, because of the pre-existing 20px year links, and `reports/page.test.tsx` makes no assertion on its class.
 
 ## Coverage on Critical Modules
 
-- `src/lib/permissions.ts`: X%
-- `src/lib/two-factor.ts`: X%
-- `src/lib/flags.ts`: X%
+- `src/lib/permissions.ts`: 100% (Increment 1 run 1)
+- `src/lib/two-factor.ts`: 91.11% (Increment 1 run 1)
+- `src/lib/flags.ts`: 100% (Increment 1 run 1)
+
+The diff touches none of the three, so these are not re-measured.
 
 ## Feature-Gate Audit
 
-*(Mandatory — see qa agent. Verified by reading route/action bodies, not by inferring from green tests. Write "no protected routes touched" if none.)*
+These are `(org)` tenant surfaces, so there is no `FEATURES.*`. I checked sign-in plus the Node-side second-factor recheck, then the tenant key inside the transaction. I read the bodies, not just the test results.
 
-| Route or action | `auth()` present? | `hasFeature(...)` present? | Correct `FEATURES.*` key? |
-|-----------------|-------------------|----------------------------|----------------------------|
-| [method + path, or action name] | yes / no | yes / no | `FEATURES.X` or n/a |
+| Route or action | Signed in + 2FA recheck | Tenant key check present | Correct key |
+|---|---|---|---|
+| Page `…/buildings/[buildingId]/photos/page.tsx` | yes (`gateOversightPage`) | yes. `openRecord` checks UUIDs, then the either-key front door, then `readBuildingPhotos` via `readUnder`, which checks the key, the congregation and the live building. `?view=` is honoured only for a live photo of this building | manage |
+| Building page Photos block; record-page covers | unchanged gate | yes (`readBuildingPhotoSummary`; `readBuildingCovers` only `if (manage)`) | manage |
+| `addBuildingPhotoAction` | yes (`resolveOversightActor`: `assertOrgSession`, then `resolveOrgContext`, then UUIDs) | yes. Order: key, then `org_portal.oversight`, then `preflightPhoto`, congregation, live building, cap, then decode, then blobs, then one transaction repeating all of it under `for update` | manage |
+| `setPhotoCaptionAction`, `setPhotoCoverAction`, `removePhotoAction` | yes | yes (`gate()`, then building `for update`, then `lockPhoto`) | manage |
+| Page `reports/buildings/page.tsx` | yes (`gateReportPage`) | yes, `holdsPermissions` inside `readBuildingsReport`'s transaction | `congregation_oversight.manage` |
+| Page `reports/insurance-and-loans/page.tsx` | yes | yes, the first statement in the transaction | `congregation_oversight.finance` |
+| `GET …/reports/buildings/export` | yes (`gateReportRoute`: 307 when signed out or second factor needed, four-way miss, flag, type) | yes; CSV and audit row (`auditReportExport(tx, …)`) in the read's transaction | manage |
+| `GET …/reports/insurance-and-loans/export` | yes | yes, same shape | finance |
+| Dashboard (`dashboard.ts:112`) | unchanged | the "no key, forbidden" rule now reads the four dashboard keys | n/a |
+
+Other checks:
+
+- No `loading.tsx` added; no `route.ts` under `oversight/**`.
+- No `console.log` and no native dialogs. Only two fixed `console.error` lines: the SQLSTATE-only line and the "photo read failed" line.
+- Observation, as in Increment 1: the caption, cover and remove actions do not read `org_portal.oversight`. Upload does. The permission is enforced on all four.
+
+**Schema/RLS (no schema change in this increment), probed on the live branch catalog:**
+
+- `oversight_building_photos` is `relrowsecurity` and `relforcerowsecurity` true.
+- `aclexplode`: `presby_app` holds INSERT and SELECT, plus UPDATE on 4 columns only. No DELETE.
+- CHECK `asset_audience = 'private'` is in place.
+- Both photo blobs of every live photo are `private` and owned by the presbytery (2 of 2, 0 offenders).
+- `presby_public_site_asset()` filters on audience, and test-rls-89 (h) passes as `presby_app`.
+- **Blobs are private:** confirmed at the database by catalog and row probe, and in the e2e (`oversight-photos` checks the stored master's audience).
 
 ## Copy Truthfulness
 
-*(Every run whose diff adds or changes a user-facing string; write "no strings changed" otherwise. Report a defect as `copy truthfulness: FAIL` with file:line and the viewer's role.)*
-
-- [ ] Every added or changed string is in the design's Copy table
-- [ ] The query behind each claim about a person, account, date or state was opened, and what it does not read was named
-- [ ] Each instruction was traced to the role that sees it, and that role can do it (render gate and permission check)
-- [ ] Older strings about the same subject were grepped for and none is made false
-- [ ] Help diff covered: every labels string is on screen, every claim walked at 360px, every committed image opened
+- [ ] **Every added or changed string is in the design's Copy table.** The C14 and C15 strings are verbatim. These are off the table, and none is false, but no ratification is recorded anywhere except B8's own phrase "rulings applied (a) to (d)":
+  - `PHOTO_COPY.coverBadge` "Cover", `saveCaption` "Save caption", `saving` "Saving…".
+  - The alt fallback "Photo" (`photo-viewed.tsx:23,27`).
+  - `BUILDINGS_COPY.inUseNote`, `.fileNote`, `.count`, `.helpLink`.
+  - `INSURANCE_LOANS_COPY.newestNote`, `.fileNote`, `.helpLink`.
+  - "None in use" on the Buildings report, where C15 says "None recorded".
+  - The tile is a link where C14 says a button; the help matches the build.
+- [x] **The query behind each claim was opened.** One defect:
+  - **copy truthfulness: FAIL.** `src/content/help/congregation-records.md:32` says "The first photo you add is the cover". `:39` says "If you remove the cover, the oldest photo left shows as the cover until you choose another". Both are false, and so is Phase 1's "The first photo is the cover" (parent log `:106`).
+  - The cause is `src/lib/oversight/photo-store.ts:290-295`, `const cover = marked === undefined`: any upload takes the mark while no live photo carries it.
+  - After the marked cover is removed, the oldest remaining photo shows as the cover (by `pickCover`), with no row marked. The next upload then takes the mark, and the cover silently jumps to the **newest** photo. There is no "Make this the cover" and no `cover_set` audit row, only `added` with `cover: true`.
+  - **Shown in the database:** a probe case in the scratch copy of `photo-store.db.test.ts`, on the branch. The cover before the upload was photo 2, and after it photo 3. The record page's card follows.
+  - **Shown in the browser at 360px:** grid `2*,3` became `2,3,4*`, and the rows read `removed, live, live, live+mark` (screenshots `p4`, `p5`).
+  - No test covers this sequence.
+  - Viewer: holders of `congregation_oversight.manage`. The rule is the implementer's (B5 note 4), not the design's.
+  - Every other claim holds:
+    - private and never published (catalog, test-rls-89 h);
+    - "without its location or camera details" (byte probe, e2e);
+    - the cap of 10 and the cap sentence;
+    - duplicates refused;
+    - the audit trail carries no caption (e2e and DB metadata keys);
+    - "1 building in 1 congregation" (roster minus `withoutBuildings`);
+    - "None in use" / "Not recorded" (the retired count query);
+    - newest policy year (live-year unique index, `distinct on … desc`);
+    - "Expired" against the organization's local date;
+    - appraised value from in-use buildings only;
+    - CSV contents (the walk's downloads).
+- [x] **Each instruction was traced to its role.**
+  - "Add a photo", "Edit caption", "Make this the cover" and "Remove photo" are rendered only after `readBuildingPhotos` passes the manage key. Each action re-checks manage. The help's Photos section names that permission.
+  - The finance report's help says its holder is asked to set up two-factor. The key is `requires_two_factor` (Increment 1 catalog).
+  - The finance page itself says nothing about two-factor (F445 holds).
+- [x] **Older strings about the same subject were grepped.**
+  - No user-facing "four reports" remains outside the dashboard. The dashboard's text is correctly kept (C15 note 4): `copy.ts:306` stays true, and a finance-only holder is forbidden there.
+  - The tile description and the registry summary now say six.
+  - The `person-photos` copy is untouched.
+  - The privacy policy's retention section does not contradict "removed from view, not erased".
+  - **Residuals are not denied anywhere:**
+    - the orphaned blob after a failed final transaction is not mentioned, and nothing claims a failed save stores nothing;
+    - bytea growth is not mentioned and not denied;
+    - "removed from view, not erased" is in the help (`:39`), the privacy bullet (`privacy-policy.md:40`) and the dialog.
+- [x] **Help diff covered.**
+  - Every new `labels` string for both pages was seen on screen at 360px in the walk or the specs: Photos, Add a photo, Cover, Edit caption, Caption (optional), Save caption, Make this the cover, Remove photo, Remove this photo?, Cancel, Back to all photos, the cap sentence, Buildings, Insurance and loans, None in use, Not recorded, Primary, Carrier, Policy year, Guarantee, Expired, Total, Export CSV.
+  - All four pages were walked at 360px, light and dark.
+  - No image under `src/content/help/images/` changed, so there were no pixels to read. My walk screenshots show only fixture names and generated colours.
 
 ## Verdict
 
-[PASS | FAIL | BLOCKED — name the unmet prerequisite]
+**FAIL**
 
-*(Auth-touching diffs: PASS requires e2e against a real dev server with an MFA-enrolled seeded user; deferred e2e = BLOCKED.)*
+1. **copy truthfulness: FAIL, behaviour defect behind it.**
+   - Where: `src/lib/oversight/photo-store.ts:290-295`, against `src/content/help/congregation-records.md:32` and `:39` and Phase 1 `:106`. Viewer: manage holders.
+   - Symptom: after the cover is removed, the next upload becomes the cover.
+   - Owner: **api-developer (B5)**.
+   - The likely fix, which matches the design and the help, is that a new photo takes the mark only when the building has no live photo.
+   - It needs a failing-first DB test: remove the cover, add a photo, and the oldest remaining photo is still the cover, with the `added` row's `cover: false`. Ideally an e2e step too.
+   - If the team would rather keep the current rule, that is a tech-lead copy ruling (Phase 3), and both help sentences and the Phase 1 statement change instead.
+2. **Missing regression test.** B8's 44px fix to the hub help link (`reports-hub.tsx:108`) has no test. Owner: **ux-developer (B8)**. A unit assertion on its class, as `views.test.tsx:37` does for the export button, would do; red on the old class string.
+
+Everything else passed:
+
+- typecheck, lint, build, all ten tripwires;
+- the unit suite;
+- the whole DB-backed suite (the one timeout is unrelated and passed on re-run);
+- full `test-rls.sql` and `test-rls-89` (fresh and branch);
+- the dev lane (83), map (10) and production (119) lanes;
+- byte-identity 12 of 12;
+- EXIF stripping;
+- the refusal order and lock;
+- private blobs;
+- the export audit row in the read's transaction;
+- CSV guard, money and headers;
+- no address, policy number, lender or note in either CSV;
+- the B7 failing-first test;
+- the gate audit.
+
+**For tech-lead and the orchestrator (not counted as failures):**
+
+- Ratify and record the off-table strings listed above (B8's rulings (a) to (d) have no recorded source).
+- **Release notes:** C16's second line, "The files leave out street addresses, policy numbers and notes", would deny the guarantee column (`oversight_loans.guarantee_note`) that the Insurance-and-loans file carries. The page (`fileNote`) and the help both say "It does include each loan's guarantee", and the release note must say so too.
+- Pre-existing, not this pipeline's: the hub's year links are 20px (`reports/page.tsx`, B8 note 2); "Back to portal" is 20px.
+- B6 note 4: a retired building's photos page still renders and allows uploads. Nothing in C14 says otherwise.
+- The commits carry `Co-Authored-By: Claude Sonnet 5.5` (B5 note 8).
+
+**Run scope:**
+
+- **Ran:**
+  - typecheck, lint, `npm run check`, build;
+  - the full unit suite;
+  - the whole DB-backed suite on a fresh database, in CI order, serially;
+  - full `test-rls.sql` and `test-rls-89` on a fresh database, and `test-rls-89` on the branch, as `presby_app`;
+  - the dev lane (13 specs);
+  - the map lane;
+  - the full production lane;
+  - a 360px walk of photos, both reports, both CSVs and four help pages.
+- **Not re-run:**
+  - the full chromium suite (relies on the PR's CI);
+  - critical-module coverage (untouched);
+  - e2e red-first for B8's frame link and B9's hydration gate (relies on the implementers' reports).
+
+---
+
+**Per-Phase Status row**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (run 1) | FAIL | 2026-11-18 |
+
+**Handoff:**
+
+- **api-developer** for item 1: the cover rule in `photo-store.ts`, with a failing-first DB test. If they want to keep the current behaviour, they go to **tech-lead** for a copy ruling instead.
+- **ux-developer** for item 2: the hub help-link test.
+- Then QA run 2 re-runs `photo-store.db.test.ts`, `photo-store.unit.test.ts`, `oversight-photos.spec.ts` (dev and 360px), the hub page test, `npm run check`, and the help walk of `congregation-records`.
+
+Logs, scripts, the byte-comparison script, the probe and the walk screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa6/`.
 
 ---
 

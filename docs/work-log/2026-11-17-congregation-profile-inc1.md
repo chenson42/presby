@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
-| 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | In progress (B1 and B2 complete; next B3) | — | 2026-11-18 |
+| 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | In progress (B1, B2 and B3 complete; next B4) | — | 2026-11-18 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -241,6 +241,40 @@ Reads (`@/lib/oversight/reads`, all return `{ kind: "ok", data } | { kind: "forb
 Strings added or changed in B2: only the design's Copy section (C1 to C9, the toasts, "Edit assessment", "Back to {name}", "Property notes"); the one string choice outside it is note 5.
 
 Handoff to **ux-developer (B3)**: import `@/lib/oversight/{contract,validate,copy,derive}` in client forms (all pure; zod schemas take the injected `{ year, today }`), `@/lib/oversight/reads` in pages, the actions above in forms. Replace `[aboutOrgId]/page.tsx` and the list page; read `readTodayInOrg` for the env a form's schema is given. Then B4.
+
+## B3 — Client: pages, forms, help (ux-developer, 2026-11-18)
+
+### Files Created
+
+- Pages under `src/app/(org)/o/[slug]/admin/oversight/`: the sections page `[aboutOrgId]/page.tsx` (replaces the B2 interim redirect), `profile/edit/`, `buildings/new/`, `buildings/[buildingId]/` (detail) and `/edit/`, `buildings/[buildingId]/appraisals/new/`, `insurance/new/` and `[recordId]/edit/`, `loans/new/` and `[loanId]/edit/`; forms `profile-form.tsx`, `buildings/building-form.tsx`, `appraisals/appraisal-form.tsx`, `insurance/insurance-form.tsx`, `loans/loan-form.tsx` (five new `useForm` roots, each in `HydrationGate`, each with `useUnsavedChangesGuard`); `record-front-door.tsx` (`openRecord`: `isUuid` on every id, then the either-key `readOversightAccess`; `settle`: rethrows `OrgAccessError`, anything else is a section/page load error).
+- `src/components/oversight/`: `section-frame`, `locked-section`, `locked-page`, `section-load-error`, `fact-list`, `imported-note`, `back-link`, `form-page-frame`, `section-state`; the five sections (`profile-`, `assessment-`, `buildings-`, `insurance-`, `loans-section`), `appraisals-block`, `building-card`, `insurance-card`, `loan-card`; client: `confirm-remove-dialog` (one AlertDialog for the four removals), `retire-dialog`, `paid-off-dialog`, `building-actions`, `loan-actions`; form parts `form-field`, `text-field`, `money-field`, `year-field`, `select-field`, `select-classes`, `form-result`, `loan-values`.
+- Help: `src/content/help/congregation-records.md` (published) and its registry entry; `slug-history.ts` row; one sentence in `docs/product/functionality-map.md` (the check requires it).
+- Tests: `oversight/record-pages.test.tsx` (U8, 18), `oversight/oversight-forms.test.tsx` (U9, 17).
+
+### Files Modified
+
+- `oversight/page.tsx` + `oversight-list.tsx`: `readOversightList`; columns by held key, the one note per missing key, "Open", "Expired {date}", "Not recorded" (never a zero); `page.test.tsx` rewritten to the new shape (+2 cases: manage-only, finance-only).
+- `src/lib/oversight/reads.ts`: ONE added export, `readFormEnv(viewer)` -> `{ year, today }` in the organization's zone (the forms' zod schemas need the injected env; no key, no record, called only after a keyed reader or the front door has answered).
+- `src/lib/org-portal/tiles.ts` (C11), `founding-administrator-section.tsx` (+ test case, C10), `help/registry.ts` (new entry; the `presbytery-tools` sentence; "Edit assessment" in `presbytery-reports` labels; "Locked" in `why-cant-i-see-this` labels), `coverage-allowlist.ts` (`tile:oversight` deleted, 13 to 12), `coverage.test.ts` (pin 12; the "still lists" key list), `presbytery-reports.md` (map steps now go through "Edit assessment"), `roles-who-can-do-what.md` (new subsection), `why-cant-i-see-this.md` (new "Locked" subsection).
+
+### Gate evidence
+
+- `npm run typecheck`, `eslint --max-warnings=0 src e2e`, `npm run build` clean; `npm run check` all ten pass (`check:hydration-gate` and `check:help` included: 34 entries, 30 published); vitest over `src/lib/oversight`, `src/lib/help`, `presbytery-reports`, the oversight pages, `components`, `org-portal`, the admin organizations pages: 2,273 tests, 0 failed.
+- Real browser, port 3102 (stopped by PID), Chromium via Playwright, as `presbytery.clerk.fixture` (manage only) and `finance.fixture` (finance only, TOTP enrolled on the pipeline branch): 360px light and dark, 1280px light; document `scrollWidth - clientWidth` was 0 on every page walked. Flows run end to end at 360px: empty building form shows both C9 messages, duplicate name lands under Name, create returns to the record page, Retire dialog (reason error, then "Sold on {date}"), Bring back into use, Remove (AlertDialog) back to the record page; as finance: Mark paid off, Reopen this loan, record an insurance year (expiry in the past shows "Expired"), remove it. Screenshots: `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/profile-b3/` (`a-` and `b-` 360 light, `d-` 360 dark, `e-` 1280, `c-` dialogs). Branch state touched for the walk: `org_portal.oversight` and `.insights` flags turned on; TOTP enrolled for `e0890000-...-0001`; the seed's Bramblewood loan was paid off, reopened and restored by SQL; two throwaway buildings and one insurance year created and removed (removed rows remain).
+
+### Deviations and things B4 and the orchestrator need
+
+1. **GAP (needs a ruling): a finance-only holder cannot reach appraisals.** Appraisals live on the building's page, and a building is tier 1 (`readBuilding` is manage-keyed), so a viewer with only `congregation_oversight.finance` sees a Locked "Buildings" section and a Locked page at a building URL; `appraisals/new` needs both keys. The help page says so ("a person needs the first permission to open [a building's page] and the second to see its Appraisals"). `oversight-finance.spec.ts` (an "MFA finance holder: appraisal, ...") must use a holder of both keys for the appraisal step. Options if the operator wants finance-only appraisals: a finance-keyed building-name read, or an appraisals section on the record page. Not built.
+2. **List stays a table at 360px** (design) rather than cards: hidden columns show from `sm`; a finance-only viewer's Insurance column stays visible at 360px because it is their only data column. Existing e2e case 1 asserts `columnheader` and `cell` roles, which a duplicated card list would have broken.
+3. **Empty options of three required selects** are not in the Copy section: Building "Type" `Choose a type`, Loan "Kind of loan" `Choose the kind of loan`, Retire "Why is it retired?" `Choose why` (every optional select reads "Not recorded", per the design). Names for review in the branding pass.
+4. **`verifiedIn` is `0.60.1`, not `0.61.0`**: `check:help` H13 refuses a release later than `package.json`. The orchestrator moves it to `0.61.0` with the version bump (the page's labels were walked at 360px on this branch; the Roles-screen permission sentence quoted in two pages comes from migration 0089 and is not on a screen the check scans).
+5. **Insurance "Expired"** renders as a destructive `Badge` beside the date (in words, not colour alone) rather than `{date} · Expired`.
+6. The record page links "How these records work" to the help page, and the help page says the PresbyPortal team switches Congregation Oversight on (the flag is off in production until the operator flips it, deploy checklist item 4).
+7. Edit forms stay on the page, `router.refresh()` and `form.reset(values)` (so the unsaved-changes guard reads clean); creates return to the record page (the profile form returns only when it created the profile). A retired building's "Primary building" box is a disabled, unregistered checkbox (react-hook-form reads a disabled control as undefined).
+8. B4 selectors: ids `profile-address|city|county|year-organized|phone`, `building-name|type|primary|year-built|first-addition|second-addition|square-feet|roof|plumbing|hvac|boiler|sprinklers|fire-alarm|security|notes`, `appraisal-year|amount|notes`, `insurance-year|carrier|policy-number|expires|claims|pool|notes`, `loan-kind|lender|original|balance|balance-as-of|grants|guarantee|notes`, dialogs `retire-reason|retire-date`, `paid-off-date`. A manage-only person at `/insurance/new` or `/loans/new` sees a "Locked" page (h1 is the form's title) with no form, not `OversightForbidden`.
+9. **Help screenshots: none** (design). Help walked against the screens above; its quoted labels all appear on them.
+
+Strings added outside the Copy section: deviation 3 only.
 
 *Keep Phase 4 sections short: files, deviations from the design, gates with
 counts, and anything the next phase must know. Leave out narration of how

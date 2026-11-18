@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
-| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | B5, B6 complete (2026-11-18); B7 to B9 pending | — | 2026-11-18 |
+| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | B5, B6, B7 complete (2026-11-18); B8, B9 pending | — | 2026-11-18 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -54,7 +54,7 @@ The design is in the parent's Phase 3. Sections an implementer of this increment
 
 ## Increment-specific notes
 
-**Handoff.** B5 and B6 are done (2026-11-18). Next: **api-developer** (B7, reports) and **ux-developer** (B8, report pages and help), then **full-stack-developer** (B9).
+**Handoff.** B5, B6 and B7 are done (2026-11-18). Next: **ux-developer** (B8, report pages, views and help), then **full-stack-developer** (B9).
 
 - Starts after 0.61.0 is released (back to back, same branch).
 - **Phase 6 walk:** a real phone-photo upload on a deployed environment at 360px; both reports and a CSV opened; the help pages read as their reader.
@@ -211,6 +211,96 @@ One code commit (`feat(oversight)`); no Rule 16 shared file touched, **no integr
 - Vitest, oversight trees: 331 passed, 78 skipped (DB-backed). New: page test 11, upload island 6, controls 6, record-pages +4.
 - **360px walk** (a temporary Playwright spec on the e2e oversight fixture, own server on 3102, not committed; flag `org_portal.oversight` switched on for the walk and read back OFF afterwards; fixture removed by its own teardown): the building page's Photos block with none and with photos; the empty photos page; three generated JPEG uploads through the real downscale and server pipeline; the two-column grid (tiles 150px at x=24 and x=186, third wraps); the larger view; a 201-character caption refused under the field, then a 200-character-plus wrapped caption saved with "Caption saved."; make cover (button disappears, DB shows the new `is_cover`); the cover on the record page's building card and the block on the building page; the remove AlertDialog (Cancel keeps it, confirm removes, URL drops `?view=`, DB live count 2); a duplicate refused with the C14 string; filling to ten (eight more generated uploads) shows the cap sentence and no Add button. **No sideways scroll and every control at least 44px at every step** (including the dialog buttons, measured after its animation settled). The sr-only file input is 1px by design and excluded from the measurement, as in the person-photo precedent.
 - Screenshots were of generated noise images only; none committed.
+
+## B7 (api-developer, 2026-11-18): the Buildings and Insurance-and-loans reports, server side
+
+One `feat(reports)` commit. No Rule 16 shared file touched, **no integration patch needed from B7**. No schema, no new permission, no flag, no audit key (the two exports reuse `PRESBYTERY_REPORT_EXPORTED` with `report: "buildings" | "insurance_and_loans"`, DECISION-348). The pages and views are B8's.
+
+### Files Created
+
+- `src/lib/oversight/report-facts.ts`: types only; the facts the two reports read. No street address, policy number, lender, note or photo exists in any of them.
+- `src/lib/oversight/report-rows.ts` (`server-only`): `readBuildingsReportFacts(tx, org, aboutOrgIds)` (2 queries) and `readInsuranceLoansReportFacts(tx, org, aboutOrgIds)` (4 queries). The only place the six tables are named for a report. The caller checks the key; each statement names its columns.
+- `src/lib/presbytery-reports/oversight-derive.ts` (pure): `deriveBuildings`, `deriveInsuranceLoans`; `oversight-derive.test.ts` (14 tests).
+- `src/lib/presbytery-reports/buildings.ts` and `insurance-loans.ts`: the readers (below).
+- `src/app/(org)/o/[slug]/admin/reports/buildings/export/route.ts` and `.../insurance-and-loans/export/route.ts`.
+
+### Files Modified
+
+- `contract.ts`: `REPORT_KEYS`/`REPORTS` gain the two entries; new `DASHBOARD_REPORT_KEYS` (below).
+- `csv.ts`: `BUILDINGS_HEADER`, `INSURANCE_LOANS_HEADER`, `buildBuildingsCsv`, `buildInsuranceLoansCsv` (BOM, CRLF, `csvTextCell`, `csvIntegerCell`, `centsToDecimal`).
+- `copy.ts` and `reports-hub.tsx`: the two `HUB_COPY.cards` entries (C15, verbatim) and their cases in the hub's `cardText` switch. **Forced by the registry:** `cardText` is an exhaustive switch over `ReportKey`, so the tree does not typecheck without them. B8 owns everything else on the hub.
+- `dashboard.ts`: the "no key held is forbidden" rule now reads `DASHBOARD_REPORT_KEYS` (the four with a card), not every report key. **Regression caught and fixed:** with six keys a finance-only holder would have passed the old `Object.values(held).some(Boolean)` and reached the keyless roster count the rule exists to protect (DECISION-342). Failing-first test in `dashboard.test.ts`.
+- Tests, in place: `contract.test.ts`, `boundaries.test.ts` (six exports, six routes), `routes.test.ts` (six routes), `csv.test.ts`, `readers.db.test.ts`, `dashboard.test.ts`, `src/lib/oversight/boundaries.test.ts` (one rule: `report-rows.ts` names no street address, policy number, lender, phone, caption or `notes` column), plus four tests that iterated every `REPORTS` entry and now iterate the four dashboard reports: `copy.test.ts`, `dashboard-views.test.tsx`, `help-page.test.ts`, and the hub's `page.test.tsx` (now six cards and six keys).
+
+### Implementer Notes
+
+1. **Interim allowance in `boundaries.test.ts`.** `PAGES_PENDING = ["buildings", "insurance-and-loans"]` lets the "each segment has a page.tsx" and `pages` count assertions hold with only the two export routes in the tree. **B8 deletes that constant in its own commit**, which makes both assertions strict for all six.
+2. **Retired buildings are not in the Buildings report** (no column says "retired", so a sold or demolished building would read as a building in use). A congregation whose only buildings are retired shows the same empty line as one with none, so the page's "None recorded" is slightly loose for it; if a different line ("None in use") is wanted it is a copy ruling, the data is `withoutBuildings` per row (the list's `buildingsInUseLabel` has the three-state precedent). The roster is `roster.ts` (active lifecycle only), as C15 says.
+3. **`guarantee` is the one free-text column in either file**, by R7 ("carrier, lender and guarantee go through the text guard"), though C15 also says "any free-text note" is never in a file: the two statements disagree and R7 is the architect's ruling, so the file carries the loans' guarantee text (formula-guarded and quoted) and **no lender**, which R7 names but the C15 headers do not include. Several open loans join their guarantee texts with `"; "` in one cell. Flag to the analyst for Phase 6: the copy must not say "no notes" about the guarantee column.
+4. **CSV cells.** Tri-states are `Yes` / `No` / empty (a file never says "Not recorded"); closed values are labels (`Education building`, `Good`), not stored keys; a recorded zero is `0.00`, a figure not recorded is empty; a congregation with no building is one line of name, city and county; `balance_unrecorded_loans` is the count of open loans without a balance (the other two sums carry `originalUnrecorded` and `grantsUnrecorded` on the row for the page, not in the file, as C15 specifies).
+5. **Insurance-and-loans reads the organization's local date** (`today`), so B8 can say "Expired" in words from `expiry` without a clock. `getInsuranceLoans`/`exportInsuranceLoans` take an optional `now` (tests only).
+6. **Not delivered, and why:** `BUILDINGS_COPY` and `INSURANCE_LOANS_COPY` (page titles, column labels, the roster note): page copy is B8's with the views. The CSV needs none of them.
+7. **Hub card links 404 until B8.** The two cards are live and link to `/o/<slug>/admin/reports/buildings` and `.../insurance-and-loans`, which have no `page.tsx` until B8. Not shipped from this branch state.
+8. **B9 note:** `e2e/presbytery-report-exports.spec.ts` asserts four locked cards and four report links (`:60-80`); the hub now has six. Not edited (B9's).
+
+### Contract B8 consumes
+
+```ts
+// src/lib/presbytery-reports/buildings.ts          gate: key congregation_oversight.manage, inside the transaction
+getBuildingsReport(viewer: ReportViewer): Promise<ReportRead<BuildingsData>>            // ReportRead = { kind: "ok", data } | { kind: "forbidden" }
+exportBuildingsReport(viewer: ReportViewer): Promise<ReportExport>                      // ok { csv, rowCount, filenameBase: "buildings" } | forbidden
+// src/lib/presbytery-reports/insurance-loans.ts    gate: key congregation_oversight.finance, inside the transaction
+getInsuranceLoans(viewer: ReportViewer, now?: Date): Promise<ReportRead<InsuranceLoansData>>
+exportInsuranceLoans(viewer: ReportViewer, now?: Date): Promise<ReportExport>           // filenameBase "insurance-and-loans"
+```
+
+Pages follow the viability page exactly: `gateReportPage({ slug, path })`, then `runReportRead(() => getBuildingsReport(identity))` (`identity` is a `ReportViewer`), `forbidden` renders `ReportsSectionForbidden` (`section="congregation oversight"` for Buildings; for Insurance and loans the finance phrase is `reportByKey("insurance_and_loans").permissionPhrase`, "manage congregation property finances"), the export button is `<ExportButton href={`${path}/export`} label={FRAME_COPY.exportCsv} />`. **No query parameter on either page or export** (the exports ignore the query; pinned in `routes.test.ts`).
+
+```ts
+// from "@/lib/presbytery-reports/oversight-derive"
+interface BuildingsData { rosterCount: number; rows: BuildingsRow[]; withoutBuildings: number; buildingCount: number }
+// rows: roster order (name, id); inside a congregation the primary first, then by building name. One row per building in use,
+// or exactly ONE row with building: null for a congregation with none (the page's "None recorded").
+interface BuildingsRow { organizationId: string; name: string; city: string | null; county: string | null; building: BuildingReportItem | null }
+// BuildingReportItem (from "@/lib/oversight/report-facts" BuildingReportFact):
+//   { id, aboutOrgId, name, buildingType: BuildingType, yearBuilt, firstAdditionYear, secondAdditionYear, squareFeet: number | null,
+//     roofCondition, plumbingCondition, hvacCondition, boilerCondition: Condition | null,
+//     hasSprinklers, hasFireAlarm, hasSecuritySystem: boolean | null /* null = not recorded */, isPrimary: boolean }
+// Render with formatBuildingType / formatCondition / formatTriState / formatInteger from "@/lib/oversight/derive" (Not recorded for null).
+
+interface InsuranceLoansData { today: string /* org-local YYYY-MM-DD */; rosterCount: number; rows: InsuranceLoansRow[]; totals: InsuranceLoansTotals }
+interface InsuranceLoansRow {
+  organizationId; name;
+  insurance: { policyYear, carrier: string | null, policyExpiresOn: string | null, expiry: "none" | "current" | "expired",
+               recentClaims: boolean | null, poolInterest: boolean | null } | null;   // the NEWEST live policy year; null = none recorded
+  openLoans: number;                                                                   // open, live loans only
+  originalCents, balanceCents, grantsCents: number | null;                             // sums of the RECORDED figures; null = none recorded (never $0)
+  originalUnrecorded, balanceUnrecorded, grantsUnrecorded: number;                     // "{n} not recorded" beside the figure
+  guarantees: string[];                                                                // trimmed, non-empty, in the order recorded
+  appraisedCents: number | null;                                                       // sum of each in-use building's newest appraisal; null = none
+  buildingsWithoutAppraisal: number;                                                   // in-use buildings with no appraisal
+}
+interface InsuranceLoansTotals { openLoans; originalCents, balanceCents, grantsCents, appraisedCents: number | null;
+                                 originalUnrecorded, balanceUnrecorded, grantsUnrecorded, buildingsWithoutAppraisal: number }
+// Money: formatMoney(cents) from "@/lib/oversight/derive". A congregation with no records still has a row (insurance null, openLoans 0).
+```
+
+**Export routes** (plain `GET`, no body, no parameters), gate = `gateReportRoute` (session, second-factor recheck, four-way org miss, `org_portal.reports`, presbytery type), then the key in the transaction: `GET /o/<slug>/admin/reports/buildings/export` and `GET /o/<slug>/admin/reports/insurance-and-loans/export`. Status: 200 CSV (`<filenameBase>-<slug>-<date>.csv`, BOM, `no-store`), 307 signed-out or second factor, 404 no such org, 403 (one body for no relationship, ended, flag off, wrong type, missing key), 503 failure (including a failed audit insert: no file). The audit row is `tenant.presbytery_report.exported` with `{ organizationId, report, rowCount }`, written in the read's transaction.
+
+**CSV headers** (exact): buildings `congregation,city,county,building,building_type,year_built,first_addition_year,second_addition_year,square_feet,roof_condition,plumbing_condition,hvac_condition,boiler_condition,sprinklers,fire_alarm,security_system,primary`; insurance and loans `congregation,carrier,policy_year,policy_expires_on,recent_claims,pool_interest,open_loans,original_amount,balance,balance_unrecorded_loans,grants,guarantee,appraised_value,buildings_without_appraisal`.
+
+**Copy keys that exist for B8:** `HUB_COPY.cards.buildings` and `.insurance_and_loans` (`{ description, source }`); registry titles "Buildings" / "Insurance and loans" and the lock phrases are `REPORTS` entries (`reportByKey("buildings" | "insurance_and_loans")`); `FRAME_COPY.exportCsv`/`back`/`loadError`/`retry`; `ROUTE_COPY` for the routes. **To be added by B8:** `BUILDINGS_COPY`, `INSURANCE_LOANS_COPY` (C15), and note `copy.test.ts`'s "no string mentions two-factor" rule (F445) was written when no report key forced it: the finance key does, so any new two-factor sentence needs the test narrowed for that report only. Also B8 updates `help-page.test.ts` (`startsWith(... four reports ...)`).
+
+### Gates and counts (2026-11-18, pipeline Neon branch)
+
+- `npm run typecheck` clean. `eslint` on `presbytery-reports`, `oversight`, the reports route tree and the components: clean. `npm run check`: all ten tripwires pass. `npm run build`: exit 0.
+- `npx vitest run` (whole suite, no DB env): 921 files passed, 160 skipped; 15,154 tests passed, 4,299 skipped.
+- `readers.db.test.ts` (serial, `npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/presbytery-reports/readers.db.test.ts`): 48 tests pass (18 new: the key gate for both, a finance-only and a manage-only viewer, another presbytery, a moved-away and a no-longer-active congregation, removed and retired buildings, a removed newer policy year, paid-off and removed loans, an appraisal of a retired or removed building, sentinels for street address, policy number, notes and lender absent from page and file, page-equals-file, the audit row, a failed audit insert). The hub test now covers six keys.
+- **Failing-first (each mechanism shown red against a deliberate break, then restored):** retired filter dropped (5 red); loans' removed filter dropped (4 red); newest policy year taken as the oldest (3 red); Buildings key check removed (2 red); Insurance key check removed (2 red); the Insurance export's audit call removed (2 red); the dashboard's key rule reverted to every key (1 red). `csv.test.ts` and `oversight/boundaries.test.ts` carry their own failing samples.
+
+### Strings added or changed
+
+Only the two `HUB_COPY.cards` entries, verbatim from C15. No help page or registry change (B8's).
 
 ---
 

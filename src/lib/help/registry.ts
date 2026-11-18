@@ -1055,7 +1055,7 @@ export const HELP_PAGES = [
       "Try again",
       "This record was changed by someone else after you opened it.",
     ],
-    verifiedIn: "0.61.0",
+    verifiedIn: "0.62.0",
   },
   // ---- Treasurers ---------------------------------------------------------------------------
   {

@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
 | 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | Complete (B5 to B9, 2026-11-18) | — | 2026-11-18 |
 | 5 — Verification | qa | Complete (run 2; run 1 FAIL above it) | PASS | 2026-11-18 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-11-18 |
 
 ---
 
@@ -890,35 +890,171 @@ Logs, the walk spec and the screenshots are in `/private/tmp/claude-501/-Users-c
 
 # Phase 6 — Shipped vs Intent (analyst)
 
+**Tree:** `/Users/cshenso/git/presby-platform/presby-profile`, `pipeline/congregation-profile-inc2` at `5ced0c2d` (release 0.62.0).
+**Date:** 2026-11-18
+
 ## VERDICT
 
-[SHIP IT | SHIP WITH NOTES | NEEDS REWORK]
+**SHIP WITH NOTES.** Nothing needs rework. Each note below is a tracked follow-up, and one is an operator check after deploy.
 
 ## ONE-LINE TAKE
 
-> [The shipped feature in one honest sentence.]
+> Presbytery staff holding the manage key can add, caption, cover and remove private building photos, and the right key holders can read and download two new reports. The reports leave out street addresses, policy numbers, lenders and notes, and say so, and the help pages match what shipped.
+
+## How I walked it
+
+- I ran my own dev server on port 3102 with the stated environment, against the pipeline Neon branch. It ran inside the worktree, so `.next` and `.tmp` were written there. Both are gitignored, and `git status` is clean at `5ced0c2d` with an empty stash list.
+- I stopped the server by PID (98165 and 98182). Nothing is listening on 3102.
+- Spec, config, source photo and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/p6/`. Nothing is committed. Every image is generated, and the folder name is non-identifying.
+- Flags:
+  - `org_portal.oversight` was off at baseline, was switched on for the walk, and is read back **off**.
+  - `org_portal.admin_hub` was switched on for one step and is back **off**.
+  - `org_portal.reports` stayed **on**.
+- I left 0 `e2e-ovs*` organizations behind, and the photo table is back to the seeded 2 rows.
+- All pages were walked at 360 px with `isMobile` and touch. The sign-ins used the oversight fixture. The "both" holder was the **founding administrator minted through the real `presby_apply_founding_administrator` definer**, not a custom-role fixture. This increment changes no account-connection or role-grant path, so I did not re-walk an accepted-invitation founder. Increment 1's walk covered that.
+
+## The people it serves
+
+Every page below returned no sideways scroll at 360 px.
+
+| Holder | What I saw |
+|---|---|
+| **Manage-only** (clerk, no second factor) | The congregation-oversight tile was on the portal home under "Governance & Courts".<br>The list showed a note that Insurance needs the finance permission.<br>The record page showed Profile, Assessment and Buildings open, and Insurance and Loans **Locked** with the permission named.<br>The building page showed "Photos – Add a photo", and "Appraisals" **Locked**.<br>The photos page was empty, then uploaded, then showed the grid with a "Cover" badge.<br>The larger view showed Edit caption, Remove photo and Back to all photos, with no "Make this the cover" on the cover.<br>The record card showed the cover thumbnail, and the building block showed the cover plus "All photos (n)".<br>Buildings report: 2 buildings in 1 congregation, then "Not recorded" for Birch, who has no building ever.<br>Buildings CSV: 200, BOM, CRLF, header exact.<br>Insurance report: the permission line. Its export returned **403**. |
+| **Finance-only** (MFA through `/totp`) | The list hid Viability, city, county and buildings behind a note. It showed the "Insurance expires" column.<br>Profile, Assessment and Buildings were **Locked**. Insurance and Loans were open.<br>The building page, the photos page, and the photos page with `?view=<id>` were all **Locked**, with 0 images.<br>Insurance report: Expired in words, "$120,000 / 1 not recorded", the guarantee text, a Total card, and no `$0`.<br>Insurance CSV: header exact, BOM, CRLF. Buildings export returned **403**. |
+| **Both** (founding administrator) | Everything above was open, including Appraisals on the building page.<br>Both reports and both CSVs worked.<br>The export audit rows read `{report, rowCount, organizationId}` only.<br>Both reports render as tables at 1100 px. |
+| **Neither** (a member with no role) | The list, record, building, photos and hub all returned a refusal. The refusal was **byte-identical for the building and photos URLs**, so it does not reveal whether the building exists.<br>Hub: six Locked cards. Both report pages gave the permission line. Both exports returned **403**. |
+
+### CSV contents (opened and read)
+
+- **Buildings CSV:** the header is the C15 header. Alder's two buildings, then Birch as one row of name, city and county. None of the five sentinels appeared: street address, building note, policy number, lender, loan note.
+- **Insurance-and-loans CSV:** the row reads `Alder Mutual,2023,2023-06-30,,,2,120000.00,,2,,Guaranteed by the session in 2019,500000.00,1`. The street address, building and loan notes, policy-number and lender sentinels are absent. **The guarantee is present**, as ruling (b) says.
+
+## Real phone-photo upload, closest local equivalent
+
+- **Test picture:** a generated 12-megapixel portrait scene of 4.7 MB. It has no real subject.
+  - It was stored the way a phone stores it: landscape raw pixels 4032×3024, EXIF Orientation 6, camera make and model, and GPS tags.
+  - Its upright view puts a red marker top-left, blue sky above, and green ground below.
+- **Upload route:** through the real island at a 360 px mobile viewport with touch, as the manage-only clerk.
+  - The file input has no `capture` attribute.
+  - Its `accept` list is JPEG, PNG, WebP, HEIC and HEIF.
+- **Stored master:** 900×1200, JPEG, `audience = private`, 55 KB.
+  - **It is upright.** The aspect ratio is 0.7500, the same as the upright source.
+  - The top-left pixel is red and the top is blue. I also read the larger view in a screenshot, and it shows red top-left, sky above and ground below.
+  - **No location or camera data is stored.** It has no EXIF, ICC or XMP, and no `Exif`, camera make or model, or original filename bytes.
+- **Stored thumbnail:** 160×160 WebP, private, no EXIF. The top is bluer and the bottom greener, so it is not rotated.
+- **Audit:** one `tenant.oversight_photo.added` row with ids and a `cover: true` flag. No caption or filename is in it.
+- **Photo controls the help describes:**
+  - A non-image renamed `.jpg` gets "That file isn't a JPEG, PNG or WebP picture. If it's an iPhone photo, pick it from your photo library or convert it to JPEG first."
+  - Re-adding the same picture gets "That picture is already in this building's photos."
+  - A second photo stays unmarked. "Make this the cover" works, and "Cover changed." shows.
+  - The remove dialog reads "Remove this photo? It will no longer be listed here. The picture file itself stays in storage and can't be erased from here." Its buttons are 44 px once the animation settles.
+  - Cancel keeps the photo, and the building page then shows "All photos (2)".
+- **What this does not prove:** my run was Chromium only. A real deployed-environment upload from an iPhone in Safari and an Android phone in Chrome **remains for the operator after deploy**. The downscale uses `createImageBitmap` with `imageOrientation: "from-image"` and `resizeWidth`. Safari and Chrome may differ in how those two options combine. Local Chromium came out upright with no distortion, but only a real phone settles Safari.
+
+## Help pages read as their reader (360 px, against the build)
+
+- **`congregation-records` — pass.**
+  - The Photos section and "Reports from these records" were read in a rendered 360 px screenshot, with no sideways scroll.
+  - Each claim matched the build:
+    - the permission needed;
+    - the grid links;
+    - "Cover" on the first photo;
+    - the 200-character caption label;
+    - Make this the cover being hidden on the cover;
+    - the remove dialog and Cancel;
+    - the cap-10 sentence;
+    - the duplicate refusal;
+    - the iPhone hint;
+    - "removed from view, not erased";
+    - "oldest left shows as the cover" (QA run 2 walked this);
+    - "stored privately … never published";
+    - the audit trail without the caption.
+  - The page is clear to a clerk who has never seen the feature.
+- **`presbytery-reports` — pass.**
+  - It now says six reports. Both table rows match the Permission column on the hub.
+  - The Buildings and Insurance-and-loans sections match the pages. That covers "None in use" versus "Not recorded", Primary, Not recorded, Expired in words, "1 not recorded", Total, and the guarantee.
+  - The CSV paragraphs match the files: Buildings "leaves out street addresses and notes". Insurance says it "includes each loan's guarantee" and leaves out street addresses, policy numbers, lenders and notes.
+  - The two-factor sentence is true, and the finance page itself says nothing about two-factor.
+  - The Administration path works with the admin hub on: "Per-Capita, SASR & Imports" is under "Reports & Insights" and opens the hub.
+- **`privacy-policy` — pass.** The building-photos bullet is true.
+  - It reads: "stored privately, never published, and removed from view, not erased, when staff remove them."
+  - That matches the private audience I read at the database. The page loads at 360 px with no sideways scroll.
+- **`planned/presbytery-tools` — pass.** The page says "read six reports", and the portal tile also says six.
+- **`limitationUntil` and `[help:]` tokens:** none are involved, and none need removing.
+- **`verifiedIn`:** I read the full text of congregation-records and the changed sections of the two others.
+  - I recommend moving `congregation-records` to `0.62.0`.
+  - I did not re-walk the unchanged map, per-capita and vacant-pulpit sections of `presbytery-reports`, or the rest of `privacy-policy`. I recommend leaving both at `0.60.0` unless the orchestrator accepts a section-level walk.
 
 ## What's Working
 
-- [Specific. The flow that works well and why.]
+- **Gating.** Every key and flag gate behaved as Phase 1 intended. The neither-holder refusal does not reveal whether a building exists. The finance-only holder gets no picture, even with a direct `?view=` link.
+- **Photos.** The photo pipeline is genuinely safe: orientation and metadata are handled and the blob is private. The failure strings are in plain words, and a failed upload does not show a stack trace.
+- **Reports.** The reports are honest about what is missing: "Not recorded", "None in use" and "1 not recorded" replace any false zero. The page and help say what the file leaves out, including the guarantee exception.
 
 ## Intent-vs-Shipped Diff
 
-- Phase 1 said: [X]. Shipped: [Y]. Verdict: [matches | acceptable drift | regression]
+- **Flow 4, photos.**
+  - Phase 1 named the failure strings loosely.
+  - Shipped: the person-photo strings, building-worded. Phase 3 and the rulings ratified them.
+  - Verdict: acceptable drift.
+- **Flow 4, "the first photo is the cover".** Matches, after QA's fix. Removing the cover leaves the oldest photo shown as the cover until someone chooses another, and I saw this match the help. Verdict: matches.
+- **Flow 8, report contents.** Matches. Neither export has street addresses or policy numbers. Phase 1 said "free-text notes", and ruling (b) amended that to include the guarantee text. Verdict: acceptable drift, honestly disclosed on the page and in the help.
+- **Gap 9, departed congregations.** The reports list active members only, and the page says so. Verdict: matches.
+- **Empty state.** The photos page with no photos shows "All photos (0)" and an "Add a photo" button, with no sentence. The building block's "Add a photo" is fine. Verdict: acceptable, with a polish note.
 
 ## Edge Cases
 
-- Empty state: [pass | fail | not applicable]
-- Failure microcopy: [pass | fail]
-- Permission gate: [pass | fail]
-- Audit event: [pass | fail | not applicable]
-- Mobile (360px): [pass | fail]
-- Help pages read as their reader (each page named in Help impact): [pass | fail | no help impact]
+- Empty state: pass. Birch shows "Not recorded", and a no-photo building shows "Add a photo". The photos page lacks an empty sentence (polish note).
+- Failure microcopy: pass. Wrong-type, duplicate and cap refusals are plain words, and QA and B9 pinned the cap and server-failure paths.
+- Permission gate: pass, enforced on pages, exports and direct URLs for all four holder types.
+- Audit event: pass. Photo and export rows are written, and I saw one `added` row and the export rows.
+- Mobile (360 px): pass. No sideways scroll anywhere. The upload island's own 1 px file input is by design. The hub's four year links are 20 px, and they are pre-existing.
+- Help pages read as their reader: pass for all four.
 
-## Follow-Ups (if SHIP WITH NOTES)
+## Rulings on QA's standing notes
 
-- [Concrete, actionable. Each gets its own work-log entry.]
+1. **A retired building's photos page still accepts uploads.** Accepted as is. A retired building (sold or closed) is still a record whose history stays, and a photo from before the sale is plausible. Phase 1 and C14 are silent. It is noted as a decision follow-up, not a defect.
+2. **The caption, cover and remove actions don't read `org_portal.oversight` (upload does).** Accepted. This is the same as the existing platform pattern in `docs/TODO.md:140`. The permission check holds on all four. I fold these actions into that TODO line.
+3. **The pre-existing 20 px year links and "Back to portal".** Not this pipeline's. I re-measured the year links at 20 px, on the hub for the clerk, finance-only and neither holders. The shared `/admin` "Back to portal" link is already on `docs/TODO.md:137`. I add the hub year links to that line.
 
-## Red Flags (if NEEDS REWORK)
+## Follow-Ups (each becomes a `docs/TODO.md` line, Rule 10)
 
-- [Specific. What has to change before this ships.]
+1. **Operator, after deploy:** do a real phone-photo upload at 360 px on an iPhone (Safari) and an Android phone (Chrome), using any non-identifying picture and not committing it. Check that it lands upright with no location data, and that an iPhone HEIC picks up the iPhone hint if needed. This closes the planned deployed-environment upload. The operator must also switch `org_portal.oversight` on in production (an open line at `docs/TODO.md:141`).
+2. **Fold into `docs/TODO.md:140`:** the caption, cover and remove photo actions also do not check the flag.
+3. **Add to `docs/TODO.md:137`:** the reports hub's year links ("‹ 2024", "2026 ›") are 20 px. Also add the photos page's empty state, which has no sentence beside "All photos (0)". The Buildings cards repeat the congregation heading on each building, and "Not recorded" repeats down the cards, which is noisy but honest.
+4. **Decision line (low priority):** should a retired building's photos page refuse uploads, or stay open for history? Currently it stays open.
+5. **Move `verifiedIn`:** set `congregation-records` to `0.62.0`. `presbytery-reports`, `privacy-policy` and the planned page stay as they are unless the orchestrator accepts my section-level read.
+
+## Housekeeping at SHIP
+
+- **Rule 12.** The Source block records operator decisions, not a feedback row, so there is no row to mark `done`.
+- **Rule 13.** No what's-new entry, per the operator's standing rule. Drafts stay in work-logs.
+- **Rules 10, 14 and 15.**
+  - Move the Increment 2 line (`docs/TODO.md:133`) to Done and add the follow-ups above.
+  - Update the functionality map: six reports, building photos.
+  - `docs/architecture.md` needs no update, because there is no new subsystem. The `src/lib/storage/image/` extraction is a Project Layout line in `CLAUDE.md`, which the Phase 3 handoff lists for integration.
+- **Release.** `docs/release-notes/v0.62.md` and the `package.json` bump to 0.62.0 do not exist yet. They come through `/release-notes`.
+
+## Draft member-facing release note (work-log only)
+
+> **Photos and two new reports for a presbytery's congregation records (0.62.0)**
+>
+> - Staff who manage congregation oversight can now add photos to a building on a congregation's record. Choose a picture from your phone's photo library or camera, add a caption, and mark one as the cover. A building keeps up to 10. The picture is shrunk on your phone first and saved without its location or camera details. Photos are private to the presbytery's staff and are never published.
+> - When you remove a photo, it is removed from view but not erased: the picture file stays in storage and can't be erased from here. Rarely, if a photo fails to save partway, a stray file can be left behind. It is not shown anywhere.
+> - Two new reports join the four on the reports page. "Buildings" needs the permission to manage congregation oversight. "Insurance and loans" needs the permission to manage congregation property finances.
+> - Each report has a spreadsheet download. The Insurance-and-loans file includes each loan's guarantee. Both files leave out street addresses, and the Insurance-and-loans file also leaves out policy numbers, lenders and notes. Downloads are recorded.
+
+I read it against `docs/schema-design.md` residuals in the work-log: it does not deny a removed photo's file staying, nor a stray file after a failed save. It does not say "no notes" about the guarantee.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete | SHIP WITH NOTES | 2026-11-18 |
+
+## Handoff
+
+Next: the **orchestrator**, for the Rule 10, 14 and 15 housekeeping (TODO, functionality map), the `/release-notes` entry for v0.62 with the draft above, the 0.62.0 bump, and the `verifiedIn` move. The deployed-environment phone-photo upload is for the operator after deploy.
+
+---
+

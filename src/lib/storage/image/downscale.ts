@@ -1,4 +1,4 @@
-import { CLIENT_MAX_EDGE, CLIENT_TARGET_BYTES } from "@/lib/person-photos/limits";
+import { CLIENT_MAX_EDGE, CLIENT_TARGET_BYTES } from "./limits";
 
 /**
  * The client-side downscale that runs BEFORE an upload (docs/work-log/

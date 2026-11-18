@@ -191,11 +191,11 @@ describe("T5: sharp has a closed list of two importers (DECISION-312)", () => {
     return out;
   }
 
-  it("`src/lib/person-photos/image.ts` and `src/lib/storage/image-sanitize.ts` import sharp and no other non-test source file does", () => {
+  it("`src/lib/storage/image/photo.ts` and `src/lib/storage/image-sanitize.ts` import sharp and no other non-test source file does", () => {
     const importers = walk(SRC)
       .filter((file) => /(^|\n)\s*import[^;]*\bfrom\s+["']sharp["']|\brequire\(\s*["']sharp["']\s*\)|\bimport\(\s*["']sharp["']\s*\)/.test(readFileSync(file, "utf8")))
       .map((file) => relative(process.cwd(), file).split(sep).join("/"));
-    expect(importers.sort()).toEqual(["src/lib/person-photos/image.ts", "src/lib/storage/image-sanitize.ts"]);
+    expect(importers.sort()).toEqual(["src/lib/storage/image-sanitize.ts", "src/lib/storage/image/photo.ts"]);
   });
 });
 

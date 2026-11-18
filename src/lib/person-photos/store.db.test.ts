@@ -41,14 +41,14 @@ const hooks = vi.hoisted(() => ({
   beforeDecode: null as null | (() => Promise<void>),
   auditFails: false,
 }));
-vi.mock("./image", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./image")>();
+vi.mock("@/lib/storage/image/photo", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/storage/image/photo")>();
   return {
     ...actual,
-    processPhoto: async (bytes: Buffer) => {
+    processPhoto: async (bytes: Buffer, options: { thumbnail: "top" | "centre" }) => {
       hooks.processed.push(bytes.byteLength);
       if (hooks.beforeDecode) await hooks.beforeDecode();
-      return actual.processPhoto(bytes);
+      return actual.processPhoto(bytes, options);
     },
   };
 });
@@ -268,7 +268,7 @@ describe.skipIf(!hasDb)("person-photos/store.ts (Postgres-backed)", { timeout: 1
       expect((await add(q2, file)).kind).toBe("ok");
     });
 
-    it("refuses what image.ts refuses, each with its own kind, and writes nothing", async () => {
+    it("refuses what photo.ts refuses, each with its own kind, and writes nothing", async () => {
       const p = await person("Gus");
       const before = await snapshot(p);
       expect(await add(p, Buffer.alloc(0))).toEqual({ kind: "refused", reason: "empty" });

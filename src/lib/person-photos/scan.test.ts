@@ -4,7 +4,7 @@
  * are tripwires, not the real control: the DB tests prove the rules, these catch
  * the next file that quietly breaks them.
  *
- *   1. `sharp` is imported by `image.ts` and nothing else.
+ *   1. `sharp` is imported by `storage/image/photo.ts` and `storage/image-sanitize.ts` and nothing else.
  *   2. The two tables are named only by `store.ts` (the only writer), `reader.ts`,
  *      the Drizzle declaration, and the dev-docs classification.
  *   3. `getBlobStore().store(` appears only in `store.ts`, twice, each with the
@@ -52,13 +52,13 @@ const PHOTOS_PAGE_DIR = at("app", "(org)", "o", "[slug]", "admin", "community", 
 const FEATURE_FILES = APP_FILES.filter((f) => f.startsWith(FEATURE_LIB) || f.startsWith(PHOTOS_PAGE_DIR));
 
 describe("sharp (R6)", () => {
-  it("is imported by image.ts and image-sanitize.ts and nothing else (DECISION-312)", () => {
+  it("is imported by storage/image/photo.ts and storage/image-sanitize.ts and nothing else (DECISION-312)", () => {
     const importers = APP_FILES.filter((f) => /from\s+["']sharp["']|require\(\s*["']sharp["']\s*\)|import\(\s*["']sharp["']\s*\)/.test(code(f)));
-    expect(importers.map(rel).sort()).toEqual(["src/lib/person-photos/image.ts", "src/lib/storage/image-sanitize.ts"]);
+    expect(importers.map(rel).sort()).toEqual(["src/lib/storage/image-sanitize.ts", "src/lib/storage/image/photo.ts"]);
   });
 
-  it("image.ts is server-only", () => {
-    expect(readFileSync(at("lib", "person-photos", "image.ts"), "utf8")).toMatch(/^import "server-only";/m);
+  it("photo.ts is server-only", () => {
+    expect(readFileSync(at("lib", "storage", "image", "photo.ts"), "utf8")).toMatch(/^import "server-only";/m);
   });
 });
 

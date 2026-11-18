@@ -1,3 +1,4 @@
+import type { ImageRefusal } from "@/lib/storage/image/limits";
 import type { PhotoStateSnapshot } from "./consequences";
 import type { StatusLines } from "./status-lines";
 /**
@@ -30,14 +31,18 @@ export type PhotoRefusal =
   | "attestation_required"
   | "save_failed";
 
+/**
+ * Every refusal the shared image pipeline can produce (`ImageRefusal`, in
+ * `src/lib/storage/image/limits.ts`) must be one of these, because each needs a
+ * person-photo string in `copy.ts`. A kind added to the pipeline and not here
+ * fails the typecheck on the next line.
+ */
+export type ImageRefusalsAreCovered = [ImageRefusal] extends [PhotoRefusal] ? true : never;
+const imageRefusalsAreCovered: ImageRefusalsAreCovered = true;
+void imageRefusalsAreCovered;
+
 /** Why SQL withholds a photo. Priority order is the SQL's (0078 section 5). */
 export type Withheld = "toggle_off" | "minor" | "merged" | "hide_photo";
-
-/** The subset of refusals the image pipeline itself can produce. */
-export type ImageRefusal = Extract<
-  PhotoRefusal,
-  "unsupported_type" | "animated" | "too_many_pixels" | "too_large" | "unreadable" | "empty"
->;
 
 /**
  * `first` is the person's preferred or first name, set ONLY on the refusals whose

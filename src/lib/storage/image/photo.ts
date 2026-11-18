@@ -7,8 +7,8 @@ import {
   MAX_INPUT_PIXELS,
   THUMB_EDGE,
   UPLOAD_MAX_BYTES,
+  type ImageRefusal,
 } from "./limits";
-import type { ImageRefusal } from "./types";
 
 /**
  * ONE OF THE TWO FILES IN `src/` THAT IMPORT `sharp`, the other being
@@ -16,6 +16,11 @@ import type { ImageRefusal } from "./types";
  * source scan in `scan.test.ts` fails on any third importer). Pure bytes in,
  * bytes out: no database, no filename, no request.
  * docs/work-log/2026-10-26-person-photos-inc1.md, R6/R7.
+ *
+ * Moved here from `person-photos/image.ts` so that a second caller (building
+ * photos, DECISION-346) runs the SAME refusal order and re-encode rather than a
+ * copy of it. The pipeline names no caller: the only thing a caller chooses is
+ * where the square thumbnail is cropped from (`ThumbnailGravity`).
  *
  * THE ORDER IS THE SECURITY PROPERTY. Everything that can refuse a hostile or
  * oversized file runs BEFORE a single pixel is decoded:
@@ -41,9 +46,18 @@ import type { ImageRefusal } from "./types";
  *   - master: a JPEG, long edge at most MASTER_MAX_EDGE, never enlarged, no
  *     forced crop (a 5:7 portrait stays 5:7), at most MASTER_MAX_BYTES (quality
  *     steps down, then the size does);
- *   - thumbnail: THUMB_EDGE square WebP, `position: "top"` so a portrait keeps
- *     the head rather than the torso.
+ *   - thumbnail: THUMB_EDGE square WebP. The caller names the crop, with no
+ *     default (a forgotten argument must not silently pick one): `"top"` for a
+ *     person, so a portrait keeps the head rather than the torso; `"centre"` for
+ *     a building, where the subject is in the middle of the frame.
  */
+
+/** Where the square thumbnail is cropped from. Required: there is no default. */
+export type ThumbnailGravity = "top" | "centre";
+
+export interface ProcessPhotoOptions {
+  thumbnail: ThumbnailGravity;
+}
 
 export type ProcessedPhoto =
   | {
@@ -102,7 +116,7 @@ const EDGE_STEPS = [MASTER_MAX_EDGE, 1000, 800, 640] as const;
 
 const FLATTEN_BACKGROUND = "#ffffff";
 
-export async function processPhoto(bytes: Buffer): Promise<ProcessedPhoto> {
+export async function processPhoto(bytes: Buffer, options: ProcessPhotoOptions): Promise<ProcessedPhoto> {
   if (bytes.byteLength === 0) return { kind: "refused", reason: "empty" };
   if (bytes.byteLength > UPLOAD_MAX_BYTES) return { kind: "refused", reason: "too_large" };
 
@@ -151,7 +165,7 @@ export async function processPhoto(bytes: Buffer): Promise<ProcessedPhoto> {
 
     const thumb = await base
       .clone()
-      .resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: "cover", position: "top" })
+      .resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: "cover", position: options.thumbnail === "top" ? "top" : "centre" })
       .webp({ quality: 72 })
       .toBuffer();
 

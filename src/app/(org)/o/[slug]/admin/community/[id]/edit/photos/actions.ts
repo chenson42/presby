@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { resolveOrgContext } from "@/lib/authz";
 import { REFUSAL_COPY, REFUSALS_NAMING_PERSON, REUSED_COPY, refusalMessage } from "@/lib/person-photos/copy";
-import { UPLOAD_MAX_BYTES } from "@/lib/person-photos/limits";
+import { UPLOAD_MAX_BYTES } from "@/lib/storage/image/limits";
 import { addPhoto, designatePhoto, removePhoto, undesignatePhoto, type PhotoCtx } from "@/lib/person-photos/store";
 import type { PhotoRefusal, Purpose, Refused } from "@/lib/person-photos/types";
 import { parseBlobKey } from "@/lib/storage/blob-key";

@@ -3,13 +3,18 @@
  * Phase 3 Test Plan). Real `sharp`, synthetic bytes only: every fixture is
  * generated here, no file on disk and no real photograph.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import sharp, { type Sharp, type CreateRaw } from "sharp";
 
 vi.mock("server-only", () => ({}));
 
-import { processPhoto } from "./image";
+import { processPhoto as processPhotoWith } from "./photo";
 import { MASTER_MAX_BYTES, MASTER_MAX_EDGE, THUMB_EDGE } from "./limits";
+
+/** The person-photo call: a top-biased thumbnail (the output these tests pinned before the extraction). */
+const processPhoto = (bytes: Buffer) => processPhotoWith(bytes, { thumbnail: "top" });
 
 /**
  * A deterministic textured picture: white noise at 1/`cell` resolution, upscaled
@@ -272,5 +277,40 @@ describe("processPhoto: it is pure bytes in, bytes out", () => {
   it("takes no filename and returns no filename, dimensions of the thumbnail, or metadata beyond the master's size", async () => {
     const out = ok(await processPhoto(await jpegOf(100, 100)));
     expect(Object.keys(out).sort()).toEqual(["height", "kind", "master", "masterContentType", "thumb", "thumbContentType", "width"]);
+  });
+});
+
+describe("processPhoto: the thumbnail gravity is the caller's choice (DECISION-346)", () => {
+  /** A tall picture whose top third is white and whose middle third is black, so the crop's origin is visible. */
+  async function bandedPortrait(): Promise<Buffer> {
+    const w = 400;
+    const h = 1200;
+    const raw = Buffer.alloc(w * h * 3, 128);
+    for (let y = 0; y < h; y += 1) {
+      const v = y < 400 ? 255 : y < 800 ? 0 : 128;
+      raw.fill(v, y * w * 3, (y + 1) * w * 3);
+    }
+    return sharp(raw, { raw: { width: w, height: h, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+  }
+
+  async function meanLuma(webp: Buffer): Promise<number> {
+    const { channels } = await sharp(webp).stats();
+    return channels.reduce((sum, c) => sum + c.mean, 0) / channels.length;
+  }
+
+  it('"top" keeps the head end and "centre" keeps the middle; the master is the same either way', async () => {
+    const input = await bandedPortrait();
+    const top = ok(await processPhotoWith(input, { thumbnail: "top" }));
+    const centre = ok(await processPhotoWith(input, { thumbnail: "centre" }));
+    expect(await meanLuma(top.thumb)).toBeGreaterThan(200);
+    expect(await meanLuma(centre.thumb)).toBeLessThan(60);
+    expect(centre.master.equals(top.master)).toBe(true);
+    expect([centre.width, centre.height]).toEqual([top.width, top.height]);
+  });
+
+  it("the argument is required: no default gravity exists (source scan)", () => {
+    const source = readFileSync(path.resolve(__dirname, "photo.ts"), "utf8");
+    expect(source).toMatch(/processPhoto\(bytes: Buffer, options: ProcessPhotoOptions\)/);
+    expect(source).not.toMatch(/options\??:[^)]*=\s*\{/);
   });
 });

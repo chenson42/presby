@@ -8,6 +8,7 @@ import { ProfileSection } from "@/components/oversight/profile-section";
 import type { SectionState } from "@/components/oversight/section-state";
 import { helpHref } from "@/lib/help/urls";
 import { STATE } from "@/lib/oversight/copy";
+import { readBuildingCovers } from "@/lib/oversight/photo-reads";
 import { readBuildings, readFormEnv, readInsuranceYears, readLoans, readProfile, type LoanRow } from "@/lib/oversight/reads";
 import { getCongregationOversightDetail, type OversightRow } from "@/lib/presbytery";
 import { gateOversightPage } from "@/lib/presbytery-reports/gate";
@@ -48,10 +49,11 @@ export default async function OversightRecordPage({
   if (!opened.ok) return opened.view;
   const { congregation, manage, finance } = opened;
 
-  const [profile, assessment, buildings, insurance, loans] = await Promise.all([
+  const [profile, assessment, buildings, covers, insurance, loans] = await Promise.all([
     manage ? settle(readProfile(identity, aboutOrgId)) : null,
     manage ? settle(getCongregationOversightDetail(identity.personId, identity.organizationId, aboutOrgId)) : null,
     manage ? settle(readBuildings(identity, aboutOrgId)) : null,
+    manage ? settle(readBuildingCovers(identity, aboutOrgId)) : null,
     finance ? settle(readInsuranceYears(identity, aboutOrgId)) : null,
     finance ? settle(Promise.all([readLoans(identity, aboutOrgId), readFormEnv(identity)])) : null,
   ]);
@@ -59,6 +61,8 @@ export default async function OversightRecordPage({
   const locked = { kind: "locked" } as const;
   const profileState = profile ? toState(profile) : locked;
   const buildingsState = buildings ? toState(buildings) : locked;
+  // The covers are decoration on the building cards: a failed or refused read just shows the cards without a picture.
+  const coversById = covers?.ok && covers.value.kind === "ok" ? covers.value.data : {};
   const insuranceState = insurance ? toState(insurance) : locked;
 
   // The assessment reader answers `PresbyteryResult` (its own `ok` / `forbidden` / `invalid_target`).
@@ -93,7 +97,7 @@ export default async function OversightRecordPage({
       </div>
       <ProfileSection slug={slug} aboutOrgId={aboutOrgId} state={profileState} />
       <AssessmentSection slug={slug} aboutOrgId={aboutOrgId} state={assessmentState} />
-      <BuildingsSection slug={slug} aboutOrgId={aboutOrgId} state={buildingsState} />
+      <BuildingsSection slug={slug} aboutOrgId={aboutOrgId} state={buildingsState} covers={coversById} />
       <InsuranceSection slug={slug} aboutOrgId={aboutOrgId} state={insuranceState} />
       <LoansSection slug={slug} aboutOrgId={aboutOrgId} state={loansState} />
     </div>

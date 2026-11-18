@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { STATE } from "@/lib/oversight/copy";
+import type { BuildingCoverView } from "@/lib/oversight/photo-reads";
 import type { BuildingsData } from "@/lib/oversight/reads";
 import { BuildingCard } from "./building-card";
 import { LockedSection } from "./locked-section";
@@ -13,10 +14,13 @@ export function BuildingsSection({
   slug,
   aboutOrgId,
   state,
+  covers = {},
 }: {
   slug: string;
   aboutOrgId: string;
   state: SectionState<BuildingsData>;
+  /** Each building's cover, by building id; a building with no photo is absent. */
+  covers?: Record<string, BuildingCoverView>;
 }) {
   const recordHref = `/o/${slug}/admin/oversight/${aboutOrgId}`;
   const action =
@@ -35,7 +39,7 @@ export function BuildingsSection({
       {state.kind === "ok" && state.data.buildings.length > 0 ? (
         <ul className="space-y-3">
           {state.data.buildings.map((building) => (
-            <BuildingCard key={building.id} slug={slug} aboutOrgId={aboutOrgId} building={building} />
+            <BuildingCard key={building.id} slug={slug} aboutOrgId={aboutOrgId} building={building} cover={covers[building.id]} />
           ))}
         </ul>
       ) : null}

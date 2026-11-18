@@ -248,7 +248,8 @@ test.describe.serial("Oversight records: the manage-only clerk", () => {
     await expect(page.getByText(/^Sold on /)).toBeVisible();
     await expect(page.getByText("Retired", { exact: true }).first()).toBeVisible();
 
-    // A retired building is not "in use": the list counts only the live, unretired ones.
+    // A retired building is not "in use": the list counts only the live, unretired ones
+    // (the list's three states are asserted in the manage-only list test below).
     // Bring it back into use.
     await page.getByRole("button", { name: "Bring back into use" }).click();
     await expect(page.getByText("Building brought back into use.")).toBeVisible();
@@ -342,7 +343,16 @@ test.describe.serial("Oversight records: the manage-only clerk", () => {
     await expect(alder.getByRole("cell", { name: "2 buildings" })).toBeVisible();
     await expect(alder.getByRole("cell", { name: "Aldermoor Falls, Reach County" })).toBeVisible();
     const birch = page.locator("tr", { hasText: fx.congB.name });
-    await expect(birch.getByRole("cell", { name: "Not recorded" }).first()).toBeVisible();
+    // One live building ("Birch Hall", seeded by the 404 test above), so the count wording.
+    await expect(birch.getByRole("cell", { name: "1 building", exact: true })).toBeVisible();
+    // Three states (QA run 1 item 4): once every recorded building is retired the cell says
+    // "None in use", never "Not recorded" (the record page still lists it with its "Retired" badge).
+    await sql`update oversight_buildings set retired_on = current_date, retired_reason = 'sold'
+               where organization_id = ${fx.presbytery.id}::uuid and about_org_id = ${fx.congB.id}::uuid and removed_at is null`;
+    await page.reload();
+    await expect(
+      page.locator("tr", { hasText: fx.congB.name }).getByRole("cell", { name: "None in use", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("row").filter({ hasText: fx.congO.name })).toHaveCount(0);
     await alder.getByRole("link", { name: /^Open/ }).click();
     await page.waitForURL((url) => url.pathname === record());
@@ -360,6 +370,7 @@ test.describe.serial("Oversight records: the manage-only clerk", () => {
       ["the new-building form", `${record()}/buildings/new`],
       ["the profile form", `${record()}/profile/edit`],
       ["the list", base()],
+      ["the assessment form", `${record()}/assessment/edit`],
     ];
     for (const [label, path] of pages) {
       await page.goto(path);

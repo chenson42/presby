@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { OrgTx } from "@/lib/authz";
 import {
   oversightBuildingAppraisals,
@@ -28,7 +28,7 @@ import type { BuildingsReportFacts, InsuranceLoansReportFacts } from "./report-f
  * Read-only, and each statement names its columns: no street address, no
  * policy number, no free-text note, no photo and no lender is ever selected, so
  * a later edit to a report cannot leak one by accident (`boundaries.test.ts`
- * scans this file for them). A FIXED number of queries (two for buildings, four
+ * scans this file for them). A FIXED number of queries (three for buildings, four
  * for insurance and loans) whatever the roster size.
  *
  * "Live" means `removed_at is null`. A building that is RETIRED (sold,
@@ -37,13 +37,13 @@ import type { BuildingsReportFacts, InsuranceLoansReportFacts } from "./report-f
  * appraised value. A paid-off loan is not an open loan.
  */
 
-/** Buildings report: the profile's city and county, and every in-use building, for the given congregations. */
+/** Buildings report: the profile's city and county, every in-use building, and the retired count, for the given congregations. */
 export async function readBuildingsReportFacts(
   tx: OrgTx,
   organizationId: string,
   aboutOrgIds: readonly string[],
 ): Promise<BuildingsReportFacts> {
-  if (aboutOrgIds.length === 0) return { profiles: [], buildings: [] };
+  if (aboutOrgIds.length === 0) return { profiles: [], buildings: [], retiredCounts: [] };
   const ids = [...aboutOrgIds];
 
   const profiles = await tx
@@ -85,7 +85,26 @@ export async function readBuildingsReportFacts(
     )
     .orderBy(asc(oversightBuildings.aboutOrgId), asc(oversightBuildings.name), asc(oversightBuildings.id));
 
-  return { profiles, buildings };
+  // Live buildings that are retired, per congregation: only so a row with none in use can say
+  // "None in use" (every recorded building is retired) rather than "Not recorded" (none ever was).
+  const retiredRows = await tx
+    .select({
+      aboutOrgId: oversightBuildings.aboutOrgId,
+      retired: sql<number>`count(*)::int`,
+    })
+    .from(oversightBuildings)
+    .where(
+      and(
+        eq(oversightBuildings.organizationId, organizationId),
+        inArray(oversightBuildings.aboutOrgId, ids),
+        isNull(oversightBuildings.removedAt),
+        isNotNull(oversightBuildings.retiredOn),
+      ),
+    )
+    .groupBy(oversightBuildings.aboutOrgId);
+  const retiredCounts = retiredRows.map((r) => ({ aboutOrgId: r.aboutOrgId, retired: Number(r.retired) }));
+
+  return { profiles, buildings, retiredCounts };
 }
 
 /**

@@ -52,6 +52,7 @@ const bRow = (over: Partial<BuildingsRow> = {}, building: Partial<NonNullable<Bu
   name: "Alder Creek",
   city: "Alderton",
   county: "Marsh",
+  buildingsRetired: 0,
   building:
     building === null
       ? null

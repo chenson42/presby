@@ -80,7 +80,7 @@ export function PhotoUploadIsland({ slug, aboutOrgId, buildingId }: { slug: stri
           onChange={onChange}
         />
         <Button type="button" className="min-h-11" disabled={busy} onClick={() => inputRef.current?.click()}>
-          {busy ? "Saving…" : PHOTO_COPY.addPhoto}
+          {busy ? PHOTO_COPY.saving : PHOTO_COPY.addPhoto}
         </Button>
       </div>
     </HydrationGate>

@@ -54,14 +54,6 @@ const insightsFiles = load(walk(INSIGHTS_DIR).filter((f) => /\.tsx?$/.test(f) &&
 const allSrcFiles = load(walk(path.join(ROOT, "src")).filter((f) => /\.tsx?$/.test(f) && !isTest(f)));
 const hubFile = load([path.join(REPORTS_DIR, "reports-hub.tsx")].filter((f) => { try { statSync(f); return true; } catch { return false; } }));
 
-/**
- * The segments whose page.tsx has not landed yet. DECISION-348's two reports are built
- * in two batches: the server side (reader, CSV, export route; B7) and then the pages
- * and views (B8). B8 empties this list in its own commit, which makes every
- * "has a page" assertion below strict for all six.
- */
-const PAGES_PENDING: readonly string[] = ["buildings", "insurance-and-loans"];
-
 /** An oversight table by its SQL or Drizzle name: only `src/lib/oversight/` may write one. */
 const NAMES_AN_OVERSIGHT_TABLE =
   /\b(oversight_(profiles|buildings|building_photos|building_appraisals|insurance_years|loans)|oversight(Profiles|Buildings|BuildingPhotos|BuildingAppraisals|InsuranceYears|Loans))\b/;
@@ -319,7 +311,7 @@ describe("the real tree", () => {
   it("scans real files (a scan over nothing proves nothing)", () => {
     expect(moduleFiles.length).toBeGreaterThan(10);
     expect(routes).toHaveLength(6);
-    expect(pages).toHaveLength(REPORT_SEGMENTS.length - PAGES_PENDING.length);
+    expect(pages).toHaveLength(REPORT_SEGMENTS.length);
     expect(componentFiles.length).toBeGreaterThan(5);
     // The insights page sits outside REPORTS_DIR, so it is not one of `pages`.
     expect(insightsFiles.length).toBeGreaterThanOrEqual(1);
@@ -465,7 +457,7 @@ describe("the real tree", () => {
   it("each segment has a page.tsx and an export/route.ts and nothing else that serves", () => {
     for (const segment of REPORT_SEGMENTS) {
       const files = walk(path.join(REPORTS_DIR, segment)).map((p) => path.relative(path.join(REPORTS_DIR, segment), p)).sort();
-      expect(files, segment).toEqual(PAGES_PENDING.includes(segment) ? ["export/route.ts"] : ["export/route.ts", "page.tsx"]);
+      expect(files, segment).toEqual(["export/route.ts", "page.tsx"]);
     }
   });
 

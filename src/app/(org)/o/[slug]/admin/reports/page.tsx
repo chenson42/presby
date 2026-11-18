@@ -125,7 +125,7 @@ export default async function ReportsPage({
   const parsedBillingYear = parseBillingYear(query.billingYear, now);
   const billingYear = parsedBillingYear.ok ? parsedBillingYear.value : now.getUTCFullYear();
 
-  // The "Reports and exports" hub (the four reports, locked cards shown not
+  // The "Reports and exports" hub (the six reports, locked cards shown not
   // hidden): also a plain value computed before the return, for the same reason.
   const hubSection = await renderReportsHub({
     slug,

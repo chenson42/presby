@@ -198,6 +198,11 @@ export const PHOTO_COPY = {
   editCaption: "Edit caption",
   captionLabel: "Caption (optional)",
   makeCover: "Make this the cover",
+  /** The word on the grid tile that is the cover (never colour alone). */
+  coverBadge: "Cover",
+  /** The caption form's submit and the progress word on it and on the upload button (ratified in B8). */
+  saveCaption: "Save caption",
+  saving: "Saving…",
   removePhoto: "Remove photo",
   backToAll: "Back to all photos",
   /** The client's own rejection, when the upload fails before the server answers. */

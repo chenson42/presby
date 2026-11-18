@@ -153,6 +153,9 @@ describe("C14: building photos", () => {
     expect(PHOTO_COPY.captionLabel).toBe("Caption (optional)");
     expect(PHOTO_COPY.makeCover).toBe("Make this the cover");
     expect(PHOTO_COPY.removePhoto).toBe("Remove photo");
+    expect(PHOTO_COPY.coverBadge).toBe("Cover");
+    expect(PHOTO_COPY.saveCaption).toBe("Save caption");
+    expect(PHOTO_COPY.saving).toBe("Saving…");
     expect(PHOTO_COPY.backToAll).toBe("Back to all photos");
     expect(PHOTO_COPY.uploadFailed).toBe("That picture couldn't be uploaded. Check your connection, or try a smaller picture.");
     expect(PHOTO_COPY.removeDialog).toEqual({

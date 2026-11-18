@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { FRAME_COPY } from "@/lib/presbytery-reports/copy";
 
 /**
- * The one layout all four reports share: back link, the `<h1>`, a subtitle,
+ * The one layout all six reports share: back link, the `<h1>`, a subtitle,
  * the standing notes, the export control(s) and the help link. Presentation
  * only; every string comes from `copy.ts`.
  */
@@ -62,7 +62,7 @@ export function ReportFrame({
       {children}
 
       <p className="text-sm">
-        <Link href={helpHref} className="text-primary underline-offset-4 hover:underline">
+        <Link href={helpHref} className="inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline">
           {helpLabel}
         </Link>
       </p>

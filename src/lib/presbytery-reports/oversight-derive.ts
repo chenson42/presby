@@ -57,7 +57,7 @@ export type BuildingReportItem = BuildingReportFact;
 
 /**
  * One line per in-use building; a congregation with none in use has exactly one line with
- * `building: null` (the page says "None recorded", the file leaves the building cells empty).
+ * `building: null` (the page says "None in use" or "Not recorded", the file leaves the building cells empty).
  */
 export interface BuildingsRow {
   organizationId: string;
@@ -66,6 +66,11 @@ export interface BuildingsRow {
   city: string | null;
   county: string | null;
   building: BuildingReportItem | null;
+  /**
+   * Live buildings of this congregation that are retired. Meaningful on the one `building: null` row:
+   * more than 0 reads "None in use", 0 reads "Not recorded" (the oversight list's three-state wording).
+   */
+  buildingsRetired: number;
 }
 
 export interface BuildingsData {
@@ -87,6 +92,7 @@ function compareBuildings(a: BuildingReportFact, b: BuildingReportFact): number 
 export function deriveBuildings(roster: readonly RosterEntry[], facts: BuildingsReportFacts): BuildingsData {
   const profiles = new Map(facts.profiles.map((p) => [p.aboutOrgId, p]));
   const buildings = groupBy(facts.buildings);
+  const retired = new Map(facts.retiredCounts.map((r) => [r.aboutOrgId, r.retired]));
   const rows: BuildingsRow[] = [];
   let withoutBuildings = 0;
   let buildingCount = 0;
@@ -97,6 +103,7 @@ export function deriveBuildings(roster: readonly RosterEntry[], facts: Buildings
       name: congregation.name,
       city: profile?.city ?? null,
       county: profile?.county ?? null,
+      buildingsRetired: retired.get(congregation.id) ?? 0,
     };
     const own = [...(buildings.get(congregation.id) ?? [])].sort(compareBuildings);
     if (own.length === 0) {

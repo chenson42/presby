@@ -121,7 +121,7 @@ function CaptionForm({ caption, onDone, ...ids }: Ids & { caption: string | null
         />
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button type="submit" disabled={submitting} className="min-h-11">
-            {submitting ? "Saving…" : "Save caption"}
+            {submitting ? PHOTO_COPY.saving : PHOTO_COPY.saveCaption}
           </Button>
           <Button type="button" variant="outline" className="min-h-11" onClick={onDone}>
             {PHOTO_COPY.removeDialog.cancel}

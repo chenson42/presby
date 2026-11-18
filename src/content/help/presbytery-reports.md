@@ -1,10 +1,10 @@
-Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read four reports about its member congregations. Each report is a page on screen and a file you can download and open in a spreadsheet. The reports cover the congregations that are members of your presbytery today. New worshiping communities are not included, and neither is a congregation that has left.
+Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read six reports about its member congregations. Each report is a page on screen and a file you can download and open in a spreadsheet. The reports cover the congregations that are members of your presbytery today. New worshiping communities are not included, and neither is a congregation that has left.
 
 ## Open the reports
 
 Open "Administration", then choose the "Per-Capita, SASR & Imports" tile under "Reports & Insights". The page opens with a section headed "Reports and exports", with one card for each report. Choose a card to open the report.
 
-Each report needs its own permission, and having one does not open another. A card you cannot open says "Locked" and what it needs. An administrator can give the permission under "Roles". See [Roles: who can do what](/help/roles-who-can-do-what).
+Each report needs a permission, and having one does not open a report that needs a different one. A card you cannot open says "Locked" and what it needs. An administrator can give the permission under "Roles". See [Roles: who can do what](/help/roles-who-can-do-what).
 
 | Report | What it shows | Where its data is entered | Permission you need |
 |---|---|---|---|
@@ -12,6 +12,8 @@ Each report needs its own permission, and having one does not open another. A ca
 | "Membership trend" | Ending active members by congregation and year | Statistics, in the Congregation Statistics section of "Per-Capita, SASR & Imports", or reported by the congregation | Manage statistics |
 | "Viability" | How the presbytery rates each congregation | "Congregation Oversight" | Manage congregation oversight |
 | "Per capita" | What each congregation was billed for a year, has paid and still owes | The rate and the bills in the Per-Capita section of "Per-Capita, SASR & Imports" | Manage per-capita billing |
+| "Buildings" | Every building in use for each congregation, with its year, size, condition and safety systems | "Congregation Oversight" | Manage congregation oversight |
+| "Insurance and loans" | Each congregation's newest insurance, its open loans and its appraised value | "Congregation Oversight" | Manage congregation property finances |
 
 ## Insights and analytics
 
@@ -87,9 +89,27 @@ Where the map is turned on, open "Insights & Analytics" after you save to see th
 
 Choose a year with the arrows. Each row shows what the congregation was billed, what it has paid and what is still owed, with a total at the bottom. A congregation that paid more than it was billed shows its still-owed amount as a credit. A congregation with no bill yet shows "Not billed" and says why: either there are no statistics on file for the year the bill is based on, or the bill has not been generated yet. A congregation that has left but still has a bill is kept and marked "No longer a member". Amounts are rounded to the nearest cent. "Export all years" downloads every bill the presbytery has recorded, for every year.
 
+## Buildings
+
+The "Buildings" report lists each member congregation's buildings that are in use, from the records on "Congregation Oversight". You need the permission to manage congregation oversight. Each building shows its type, the year built, the square feet, the condition of the roof, plumbing, heating and cooling (HVAC) and boiler, whether it has sprinklers, a fire alarm and a security system, and whether it is the "Primary" building. A figure that was never recorded says "Not recorded". Above the list, a line says how many buildings are listed and how many congregations they belong to.
+
+A building that was retired is not listed, because it is no longer in use. A congregation with no building in use still has one line. It says "None in use" when every building recorded for it has been retired, and "Not recorded" when no building was ever recorded. A congregation that is no longer active is not listed.
+
+"Export CSV" downloads one row for each building, or one row for a congregation with none. The file carries the congregation, its city and county, and the facts above. It leaves out street addresses and notes.
+
+## Insurance and loans
+
+The "Insurance and loans" report has one line for each member congregation, from the records on "Congregation Oversight". You need the permission to manage congregation property finances, which is not the permission for "Buildings". Anyone who holds it is asked to set up two-factor sign-in the next time they sign in, if they have not already. See [Setting up two-factor sign-in](/help/setting-up-two-factor).
+
+Each line shows the congregation's newest insurance year: the "Carrier", the "Policy year", when the policy expires, whether it had recent claims and whether it is interested in the insurance pool. A policy whose expiry date has passed says "Expired" in words. It then shows the congregation's open loans: how many, the original amount, the current balance, any grants, and the "Guarantee" written on each loan. Last, it shows the appraised value, which adds up each building in use's newest appraisal. A loan that has been paid off is not counted, and neither is a building that was retired. A "Total" line closes the list.
+
+A figure nobody recorded says "Not recorded" and is never shown as $0. Where a total leaves some figures out, it says how many, for example "1 not recorded". A congregation with no insurance or loans recorded still has a line.
+
+"Export CSV" downloads one row for each congregation. It carries the figures above, and it includes each loan's guarantee. It leaves out street addresses, policy numbers, lenders and notes. A figure that was not recorded is an empty cell, and two extra columns count what is missing: the open loans with no balance, and the buildings with no appraisal.
+
 ## Downloading a report
 
-Choose "Export CSV". The file is the table as shown: one row for each congregation, or for each congregation and year in the membership trend. It holds no email addresses, street addresses, coordinates or people's names, apart from anything written in the redevelopment notes. If a text cell begins with =, +, - or @, the file adds a leading apostrophe so a spreadsheet shows it as text and does not run it as a formula. The file is UTF-8 with a byte-order mark, so Excel shows accented letters correctly. Every export is recorded in the audit trail with which report, who exported it and how many rows, and never the names or notes in it.
+Choose "Export CSV". The file is the table as shown: one row for each congregation, for each building in "Buildings", or for each congregation and year in the membership trend. Each of the files for vacant pulpits, membership trend, viability and per capita holds no email addresses, street addresses, coordinates or people's names, apart from anything written in the redevelopment notes. What the two files from "Congregation Oversight" leave out is under their own headings above. If a text cell begins with =, +, - or @, the file adds a leading apostrophe so a spreadsheet shows it as text and does not run it as a formula. The file is UTF-8 with a byte-order mark, so Excel shows accented letters correctly. Every export is recorded in the audit trail with which report, who exported it and how many rows, and never the names or notes in it.
 
 ## If a report is locked or missing
 

@@ -25,11 +25,28 @@ The assessment is the presbytery's rating of the congregation (at risk, fair or 
 
 Choose "Add a building". A building has a name and a type, and everything else is optional: the year built and up to two addition years, the square feet, the condition of the roof, plumbing, heating and cooling and boiler, whether it has sprinklers, a fire alarm and a security system, and notes. Only one building can be the "Primary building". Choose "Open" on a building to see the same facts on its own page. Choose "Retire this building" for one that was sold, demolished or closed: it leaves the active list, its history stays, and "Bring back into use" undoes it. "Remove (entered by mistake)" is for a building that should never have been recorded. A removed building, and its appraisals, are no longer listed, and the page offers no way to undo it.
 
+## Photos
+
+You need the permission to manage congregation oversight. A building's page has a "Photos" section. Choose "Add a photo" to pick a picture from your phone's photo library or camera, or from your computer. The picture is shrunk on your phone before it is sent, then saved here without its location or camera details. If you choose an iPhone photo that will not upload, pick it from your photo library or convert it to JPEG first. A building keeps up to 10 photos. At 10, the page says "This building already has 10 photos. Remove one to add another." and the "Add a photo" button is gone. Adding the same picture twice is refused.
+
+Once a building has photos, the section shows its cover and a link to all of its photos. Each photo in the grid is a link: choose it to see it larger. The first photo you add is the cover, and the grid marks it with the word "Cover". On a photo's own page:
+
+- Choose "Edit caption" to give it a caption of up to 200 characters, then "Save caption". The field is labelled "Caption (optional)", and an empty caption clears it.
+- Choose "Make this the cover" to change the cover. The button is not shown on the photo that already is the cover.
+- Choose "Remove photo" and confirm "Remove this photo?" to take it off the building. "Cancel" keeps it.
+- Choose "Back to all photos" to return to the grid.
+
+A photo you remove is removed from view, not erased: it is no longer listed, but the picture file stays in storage and cannot be erased from here. If you remove the cover, the oldest photo left shows as the cover until you choose another. Photos are stored privately for the presbytery's staff who manage congregation oversight. They are never published, on the website or anywhere else. See the [Privacy policy](/help/privacy-policy). Adding, changing the caption or cover of, and removing a photo are recorded in the audit trail; the caption is not copied into it.
+
 ## Appraisals, insurance and loans
 
 These need the finance permission. On a building's page, under "Appraisals", choose "Record an appraisal" with the year assessed and the amount in dollars; the newest year is marked "Current". To correct an appraisal, remove it and record it again. Under "Insurance", choose "Record a year" for the policy year, carrier, policy number, expiry date, recent claims and interest in the insurance pool. There is one record for each year. A policy whose expiry date has passed says "Expired" in words. Under "Loans", choose "Record a loan": the kind (a presbytery program loan, a guaranteed outside loan or another kind), the lender, the original amount, the current balance and the date it is as of, any grants, and a note about the guarantee. "Mark paid off" sets the balance to $0 as of the date you choose, and "Reopen this loan" undoes it. A section with nothing in it says so and never shows a zero for something that was not recorded.
 
 Changes are recorded in the audit trail with who made them, and the notes and amounts are not copied into it. A change to the "Assessment" is recorded just after it is saved, so in rare cases a saved assessment can be missing from the trail. Looking at a record is not recorded.
+
+## Reports from these records
+
+Two presbytery reports read these records: "Buildings" needs the permission to manage congregation oversight, and "Insurance and loans" needs the permission to manage congregation property finances. See [Presbytery reports and downloads](/help/presbytery-reports#buildings).
 
 ## If something looks wrong
 

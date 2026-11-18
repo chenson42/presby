@@ -14,7 +14,7 @@ const page = readFileSync(
 describe("presbytery-reports help page", () => {
   it("does not say a presbytery turns the reports on", () => {
     expect(page).not.toMatch(/presbytery that has turned on/i);
-    expect(page.startsWith('Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read four reports')).toBe(true);
+    expect(page.startsWith('Where "Per-Capita, SASR & Imports" is turned on, a presbytery can read six reports')).toBe(true);
   });
 
   it("says the platform team switches the reports on", () => {

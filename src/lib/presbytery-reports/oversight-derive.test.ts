@@ -34,9 +34,18 @@ const building = (aboutOrgId: string, over: Partial<BuildingReportFact> = {}): B
   isPrimary: false,
   ...over,
 });
-const facts = (over: Partial<BuildingsReportFacts> = {}): BuildingsReportFacts => ({ profiles: [], buildings: [], ...over });
+const facts = (over: Partial<BuildingsReportFacts> = {}): BuildingsReportFacts => ({ profiles: [], buildings: [], retiredCounts: [], ...over });
 
 describe("deriveBuildings", () => {
+  it("carries the retired count on a congregation with none in use, so the page can say None in use or Not recorded", () => {
+    const data = deriveBuildings([A, B, C], facts({ buildings: [building("a")], retiredCounts: [{ aboutOrgId: "b", retired: 2 }, { aboutOrgId: "a", retired: 1 }] }));
+    expect(data.rows.map((r) => [r.name, r.building?.name ?? null, r.buildingsRetired])).toEqual([
+      ["Alder Creek", "Sanctuary", 1],
+      ["Bramblewood", null, 2],
+      ["Cedar Hollow", null, 0],
+    ]);
+  });
+
   it("lists every roster congregation in roster order; one with no building is one line with building null", () => {
     const data = deriveBuildings([A, B, C], facts({ buildings: [building("c", { name: "Hall" }), building("a")] }));
     expect(data.rows.map((r) => [r.name, r.building?.name ?? null])).toEqual([

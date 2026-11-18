@@ -1002,6 +1002,15 @@ describe.skipIf(!hasDb)("presbytery-reports readers (Postgres-backed)", () => {
       expect(d.buildingCount).toBe(2 + 1);
     });
 
+    it("carries the retired count on the empty line: more than 0 where every recorded building is retired, 0 where none ever was", async () => {
+      const d = await data();
+      const empty = (id: string) => d.rows.find((r) => r.organizationId === id && r.building === null)!;
+      expect(empty(c.supply).buildingsRetired).toBe(1); // its only building is retired: "None in use"
+      expect(empty(c.none).buildingsRetired).toBe(0); // none ever recorded: "Not recorded"
+      // a congregation with a building in use and a retired one still carries the count, on its building lines
+      expect(d.rows.find((r) => r.organizationId === c.installed)!.buildingsRetired).toBe(1);
+    });
+
     it("carries the facts of one building, and the profile's city and county on each line of its congregation", async () => {
       const d = await data();
       const [first, second, chapel] = d.rows;

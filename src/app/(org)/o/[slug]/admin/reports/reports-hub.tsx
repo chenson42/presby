@@ -105,7 +105,7 @@ export async function renderReportsHub({
       )}
 
       <p className="text-sm">
-        <Link href={helpHref("presbytery-reports")} className="text-primary underline-offset-4 hover:underline">
+        <Link href={helpHref("presbytery-reports")} className="inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline">
           {HUB_COPY.helpLink}
         </Link>
       </p>

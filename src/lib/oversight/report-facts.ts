@@ -74,9 +74,17 @@ export interface AppraisalReportFact {
   amountCents: number;
 }
 
+/** How many live buildings of one congregation are retired (only congregations with at least one appear). */
+export interface RetiredCountReportFact {
+  aboutOrgId: string;
+  retired: number;
+}
+
 export interface BuildingsReportFacts {
   profiles: ProfileReportFact[];
   buildings: BuildingReportFact[];
+  /** Lets a congregation with no building in use say "None in use" (all retired) rather than "Not recorded". */
+  retiredCounts: RetiredCountReportFact[];
 }
 
 export interface InsuranceLoansReportFacts {

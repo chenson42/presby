@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-17 |
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
-| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | B5, B6, B7 complete (2026-11-18); B8, B9 pending | — | 2026-11-18 |
+| 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | B5, B6, B7, B8 complete (2026-11-18); B9 pending | — | 2026-11-18 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -54,7 +54,7 @@ The design is in the parent's Phase 3. Sections an implementer of this increment
 
 ## Increment-specific notes
 
-**Handoff.** B5, B6 and B7 are done (2026-11-18). Next: **ux-developer** (B8, report pages, views and help), then **full-stack-developer** (B9).
+**Handoff.** B5 to B8 are done (2026-11-18). Next: **full-stack-developer** (B9). B9 note: `e2e/presbytery-report-exports.spec.ts` still asserts four hub links; the hub has six.
 
 - Starts after 0.61.0 is released (back to back, same branch).
 - **Phase 6 walk:** a real phone-photo upload on a deployed environment at 360px; both reports and a CSV opened; the help pages read as their reader.
@@ -301,6 +301,42 @@ interface InsuranceLoansTotals { openLoans; originalCents, balanceCents, grantsC
 ### Strings added or changed
 
 Only the two `HUB_COPY.cards` entries, verbatim from C15. No help page or registry change (B8's).
+
+---
+
+## B8 (ux-developer, 2026-11-18): the two report pages, views, hub, cover badge and help
+
+Two commits (`feat(reports)` code and help, `docs(work-log)` this section). No Rule 16 shared file touched, **no integration patch needed from B8**. No schema, no route handler, no flag, no `loading.tsx`.
+
+### Files Created
+
+- Pages: `reports/buildings/page.tsx`, `reports/insurance-and-loans/page.tsx` (the viability page's shape: `gateReportPage`, `runReportRead`, forbidden, load error, `ExportButton` only when the roster is non-empty; the finance page's lock names "congregation property finances").
+- Views: `src/components/presbytery-reports/buildings-view.tsx`, `insurance-loans-view.tsx` (cards below `sm`, a table above; the insurance table has a "Total" footer and the cards a "Total" card).
+- Tests: `oversight-report-pages.test.tsx` (gate, forbidden, empty, failed read, data, links), `oversight-report-views.test.tsx` (both strings, `{n} not recorded`, no `$0`, Expired in words), `photo-grid.test.tsx`; additions to `copy.test.ts`, `oversight-derive.test.ts`, `readers.db.test.ts` (retired count; 49 tests pass, serial).
+
+### Files Modified and rulings applied
+
+- **(a)** `report-rows.ts` runs a third query (live, retired, grouped count); `BuildingsReportFacts.retiredCounts`; `BuildingsRow.buildingsRetired`. The congregation with no building in use reads "None in use" when that count is above 0, "Not recorded" otherwise; "None recorded" appears nowhere in the new copy (test).
+- **(b)** `fileNote` on both pages: Buildings "The CSV file leaves out street addresses and notes."; Insurance "...leaves out street addresses, policy numbers, lenders and notes. It does include each loan's guarantee." Help says the same.
+- **(c)** Not needed: no report copy mentions two-factor, so the F445 ban in `copy.test.ts` is **unchanged** for all six. The help page says, truthfully, that the finance permission asks its holder to set up two-factor sign-in.
+- **(d)** `PHOTO_COPY.coverBadge` "Cover": a `Badge` beside the tile link (the link's accessible name is unchanged). B6's "Save caption" and "Saving…" ratified as `PHOTO_COPY.saveCaption` and `saving` (components now import them).
+- `BUILDINGS_COPY`, `INSURANCE_LOANS_COPY` in `presbytery-reports/copy.ts` (import-free; equality with oversight `STATE` pinned). `PAGES_PENDING` deleted; `help-page.test.ts` says six reports.
+- Help: `presbytery-reports.md` (lead, table rows, "Buildings" and "Insurance and loans" sections, what each CSV carries, who can see each), `congregation-records.md` ("Photos" section, "Reports from these records"), `privacy-policy.md` (building photos bullet: private, never published, removed from view not erased), `presbytery-tools` `today` (six reports), registry labels and anchors. `verifiedIn` untouched. The tile description in `tiles.ts` said "four reports"; now "six".
+- 44px fix: the report frame's help link and the hub's help link were 17px; both are now `min-h-11`.
+
+### Implementer Notes
+
+1. **Two-factor, for QA:** the finance page itself says nothing about two-factor; only the help page does.
+2. **Pre-existing, not fixed (out of B8's scope):** the hub's Congregation Statistics and Per-Capita year links ("‹ 2024", "2026 ›") are 20px tall (`reports/page.tsx`). Flag for a follow-up.
+3. The Buildings cards repeat the congregation heading on each building's card (one card per row, as the other reports).
+4. "Not recorded" for every blank figure on the cards is noisy for a congregation with no insurance; kept for honesty (never a blank that could be read as zero).
+5. Copy strings new in B8 for the branding pass: both `fileNote`s, `inUseNote` ("Only buildings in use are listed. A building that has been retired is not."), `newestNote`, `count`, `total`, `helpLink` pair.
+
+### Gates (2026-11-18)
+
+- typecheck, eslint (`src`, `e2e`), `npm run check` (all ten, including `check:help`: 34 entries, 30 published) zero; `npm run build` exit 0; `npx vitest run`: 924 files passed, 160 skipped; 15,183 tests passed, 4,300 skipped.
+- **360px walk** (temporary Playwright spec on the oversight fixture, own dev server on 3102 stopped by PID, spec deleted, not committed): hub (six cards; a manage-only holder sees the finance page's permission refusal), Buildings (cards: two buildings, "None in use" for a congregation with only a retired building), Insurance and loans (Expired, "1 not recorded", Total card, no `$0`), both CSVs downloaded and read (BOM, CRLF, headers exact, no street address, policy number or lender sentinel; Birch's single empty row), the photos page with exactly one "Cover" badge, the four help pages loaded with no sideways scroll. No sideways scroll anywhere; every control at least 44px apart from the sr-only file input (1px by design) and the pre-existing year links in note 2. A desktop (1024px) table screenshot was taken for both. Flags `org_portal.oversight` and `org_portal.reports` were switched on for the walk and restored by the fixture. Images were generated solids; none committed.
+- "Not recorded" (never ever recorded) is covered by the DB and view tests, not the browser: the e2e fixture has no congregation with no building at all beside one with a retired one.
 
 ---
 

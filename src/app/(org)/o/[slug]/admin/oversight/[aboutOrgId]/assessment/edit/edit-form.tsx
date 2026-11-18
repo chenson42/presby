@@ -16,9 +16,7 @@ import type { OversightRow } from "@/lib/presbytery";
 import { oversightSchema, type OversightFormValues } from "./oversight-schema";
 import { setCongregationOversightAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
-
-const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
+import { SELECT_CLASSES } from "@/components/oversight/select-classes";
 
 function defaultValues(row: OversightRow): OversightFormValues {
   return {
@@ -183,7 +181,7 @@ export function OversightEditForm({
                 spellCheck={false}
                 aria-describedby="oversight-latitude-hint"
                 aria-invalid={errors.latitude ? true : undefined}
-                className="mt-1"
+                className="mt-1 min-h-11"
                 {...register("latitude", { onChange: () => setPasteNote(false) })}
                 onPaste={onCoordinatePaste}
               />
@@ -205,7 +203,7 @@ export function OversightEditForm({
                 spellCheck={false}
                 aria-describedby="oversight-longitude-hint"
                 aria-invalid={errors.longitude ? true : undefined}
-                className="mt-1"
+                className="mt-1 min-h-11"
                 {...register("longitude", { onChange: () => setPasteNote(false) })}
                 onPaste={onCoordinatePaste}
               />

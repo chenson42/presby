@@ -306,7 +306,7 @@ Only the two `HUB_COPY.cards` entries, verbatim from C15. No help page or regist
 
 ## B8 (ux-developer, 2026-11-18): the two report pages, views, hub, cover badge and help
 
-Two commits (`feat(reports)` code and help, `docs(work-log)` this section). No Rule 16 shared file touched, **no integration patch needed from B8**. No schema, no route handler, no flag, no `loading.tsx`.
+One commit (`feat(reports)`: code, help and this section). No Rule 16 shared file touched, **no integration patch needed from B8**. No schema, no route handler, no flag, no `loading.tsx`.
 
 ### Files Created
 

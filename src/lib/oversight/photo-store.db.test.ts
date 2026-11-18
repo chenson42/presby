@@ -343,6 +343,41 @@ describe.skipIf(!hasDb)("oversight/photo-store.ts and photo-reads.ts (Postgres-b
       expect(audit.map((r) => r.resource_id)).toEqual([first, second]);
     });
 
+    it("the cover rule — regression for an upload taking the cover after the marked cover was removed: a new photo takes the mark only when the building has no live photo", async () => {
+      const b = await makeBuilding();
+      const first = await addOk(b);
+      const second = await addOk(b);
+      // The first-ever upload is the marked cover.
+      expect((await photosOf(b)).find((r) => r.id === first)).toMatchObject({ is_cover: true });
+
+      // Remove the marked cover: nothing is promoted, the oldest left (the second) shows as the cover.
+      expect(await store.removePhoto(manage(), C1, b, first)).toMatchObject({ kind: "ok" });
+      expect((await live(b)).filter((r) => r.is_cover)).toHaveLength(0);
+
+      // A later upload must not take the mark.
+      const third = await addOk(b);
+      const rows = await live(b);
+      expect(rows.map((r) => r.id)).toEqual([second, third]);
+      expect(rows.map((r) => r.is_cover)).toEqual([false, false]);
+      const view = await reads.readBuildingPhotos(viewer("manage"), C1, b);
+      expect(view.kind).toBe("ok");
+      if (view.kind === "ok") {
+        expect(view.data.photos.filter((p) => p.isCover).map((p) => p.id)).toEqual([second]);
+      }
+      const covers = await reads.readBuildingCovers(viewer("manage"), C1);
+      expect(covers.kind).toBe("ok");
+      if (covers.kind === "ok") expect(covers.data[b]).toMatchObject({ photoId: second, count: 2 });
+      const added = (await auditOf(b)).filter((r) => r.action === "tenant.oversight_photo.added");
+      expect(added.map((r) => r.resource_id)).toEqual([first, second, third]);
+      expect(added.map((r) => (r.metadata as { cover: boolean }).cover)).toEqual([true, false, false]);
+
+      // Removing every photo leaves no live photo, so the next upload is the cover again.
+      expect(await store.removePhoto(manage(), C1, b, second)).toMatchObject({ kind: "ok" });
+      expect(await store.removePhoto(manage(), C1, b, third)).toMatchObject({ kind: "ok" });
+      const fourth = await addOk(b);
+      expect((await live(b)).map((r) => [r.id, r.is_cover])).toEqual([[fourth, true]]);
+    });
+
     it("a byte-identical picture already live in the building is `duplicate`; once removed it can be added again", async () => {
       const b = await makeBuilding();
       const file = await jpeg();

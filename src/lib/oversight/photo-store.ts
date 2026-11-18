@@ -287,12 +287,16 @@ export async function addPhoto(
       .limit(1);
     if (same) throw new Refuse("duplicate");
 
-    const [marked] = await tx
+    // The mark is the building's FIRST photo's: a new photo takes it only when no live photo exists
+    // (counted here, inside the locked transaction). If the marked cover was removed, the oldest
+    // remaining photo shows as the cover (`pickCover`, derived on read), and a later upload must
+    // not take the mark and silently become the cover.
+    const [anyLive] = await tx
       .select({ id: oversightBuildingPhotos.id })
       .from(oversightBuildingPhotos)
-      .where(and(inBuilding(ctx, aboutOrgId, buildingId), isNull(oversightBuildingPhotos.removedAt), eq(oversightBuildingPhotos.isCover, true)))
+      .where(and(inBuilding(ctx, aboutOrgId, buildingId), isNull(oversightBuildingPhotos.removedAt)))
       .limit(1);
-    const cover = marked === undefined;
+    const cover = anyLive === undefined;
 
     // `created_at` is stamped by the guard trigger; never passed (0089).
     const [row] = await tx

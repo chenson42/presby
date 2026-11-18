@@ -735,6 +735,7 @@ Logs, scripts, the byte-comparison script, the probe and the walk screenshots ar
 
 **Dev lane.**
 
+<!-- leak-ok: the fixed e2e fixture cron value CI and the e2e config already use, not a credential -->
 - Own server: `next dev -p 3102`, started with `CRON_SECRET=giving-e2e-cron-secret RATE_LIMIT_DISABLED=true DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=.tmp/domains-fake-state.json`.
 - Run with `E2E_BASE_URL=http://localhost:3102`, `E2E_ALLOW_SHARED_DB=true`, `--project=chromium`, one worker.
 - **49 of 49 passed**, 4.7 minutes, no failures, skips or retries.

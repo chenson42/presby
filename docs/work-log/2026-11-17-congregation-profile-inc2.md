@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete (parent; R1–R10) | Approved with suggestions | 2026-11-17 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-17 |
 | 4 — Implementation | api-developer (B5, B7), ux-developer (B6, B8), full-stack-developer (B9) | Complete (B5 to B9, 2026-11-18) | — | 2026-11-18 |
-| 5 — Verification | qa | Complete (run 1) | FAIL | 2026-11-18 |
+| 5 — Verification | qa | Complete (run 2; run 1 FAIL above it) | PASS | 2026-11-18 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -680,6 +680,211 @@ Everything else passed:
 - Then QA run 2 re-runs `photo-store.db.test.ts`, `photo-store.unit.test.ts`, `oversight-photos.spec.ts` (dev and 360px), the hub page test, `npm run check`, and the help walk of `congregation-records`.
 
 Logs, scripts, the byte-comparison script, the probe and the walk screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa6/`.
+
+---
+
+## Run 2 (qa)
+
+**Date:** 2026-11-18
+**Verified by:** qa
+**Tree:** `pipeline/congregation-profile-inc2` at `04aacffb`, in `/Users/cshenso/git/presby-platform/presby-profile`. The fix pass is `879df20b..04aacffb`: `fe261887`, `93d2eeb4`, `9d7cb67d`, `04aacffb`.
+
+- I did not modify the tree or use `git stash`. At the end `git status` was clean, HEAD was still `04aacffb` and the stash list was empty.
+- Env vars were checked by presence and length only, never printed.
+- Every red run and my walk ran in a `git archive 04aacffb` copy at `.../scratchpad/qa6r2/red/`, with `node_modules` and `.env.local` symlinked.
+- I wrote to the database only through the fixtures' own setup and teardown. Afterwards there were 0 `e2e-ov*` organizations and 2 photo rows (the seeded 2).
+- Disk was checked first: 527 GiB free.
+
+**What the fix pass changed:**
+
+- `src/lib/oversight/photo-store.ts:290-299`: the cover predicate is now "any live photo of the building", inside the existing locked transaction.
+- `src/lib/oversight/photo-store.db.test.ts`: one new test.
+- `e2e/oversight-photos.spec.ts`: one new test.
+- `src/app/(org)/o/[slug]/admin/reports/page.test.tsx`: one new test.
+- Plus the work-log.
+
+**Trailers:** the `fix:` commit `93d2eeb4` carries `Caught-By: agent-review`, `Discovered-In: Phase-5` and `Work-Log:`. The `test:` and `docs:` commits carry `Work-Log:`.
+
+## Type Check
+
+- `npm run typecheck`: **PASS**.
+- `npm run lint` (`--max-warnings=0`): **PASS**.
+- `npm run check`: **PASS**, all ten tripwires. Help check: 34 registry entries, 30 published, 30 content files, 7 images.
+- `next build`: **PASS**, run inside the production lane (compiled, TypeScript finished, 86 of 86 static pages).
+
+## Unit Tests
+
+- **Full unit suite with no database:** 924 files passed, 160 skipped. 15,184 tests passed, 4,301 skipped, **0 failed**, 45s, exit 0.
+  - Against run 1 that is one more pass (the new hub test) and one more skip (the new DB test, which is gated on the database and ran in the next item).
+- **DB-backed, serial, against the pipeline branch** (`dotenv -e .env.local -- vitest run src/lib/oversight src/lib/storage src/lib/person-photos --no-file-parallelism`):
+  - **32 files passed, 737 tests passed, 0 skipped, 0 failed**, 632s.
+  - The zero skip count means every database-gated describe ran. That covers `photo-store.db.test.ts` (28 tests, including the new cover-rule test and the CONCURRENCY tests at `:414`, `:428` and `:516`), `oversight/reads.db.test.ts`, `oversight/store.db.test.ts`, `storage/blob-audience`, `blob-store-find` and `public-asset` DB tests, `storage/blob-store.test.ts`, and the three `person-photos` DB suites.
+  - **My judgement on scope:** I did not re-run the whole DB-backed suite on a fresh database.
+    - The fix changes one predicate in `addPhoto`'s final locked transaction, and the rest of the diff is tests.
+    - It touches no migration, no `src/lib/authz.ts`, nothing under `src/lib/db/` and no shared fixture (`e2e/support/` is unchanged).
+    - Run 1's full DB suite on `11a3fff7` and its `test-rls.sql` / `test-rls-89` results still stand for everything else.
+    - The one-cover guarantee under concurrency still rests on the unique partial index `oversight_building_photos_one_cover_idx` (`drizzle/0089…:580`, `where is_cover and removed_at is null`) and the `:428` concurrency test, which passed.
+
+## End-to-End Tests
+
+**Flag state.**
+
+- Before e2e I reset the global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`; "set 38 seeded flags to their seed values").
+- The 9 flags that were on already matched the baseline, so the reset changed nothing.
+- After both lanes I read them back: the same 9. **The branch is left at the CI baseline.**
+
+**Dev lane.**
+
+- Own server: `next dev -p 3102`, started with `CRON_SECRET=giving-e2e-cron-secret RATE_LIMIT_DISABLED=true DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=.tmp/domains-fake-state.json`.
+- Run with `E2E_BASE_URL=http://localhost:3102`, `E2E_ALLOW_SHARED_DB=true`, `--project=chromium`, one worker.
+- **49 of 49 passed**, 4.7 minutes, no failures, skips or retries.
+- The server was stopped by PID (94386 and its `npx` parent 94368), and 3102 was confirmed free.
+
+| Spec | Passed |
+|---|---|
+| `oversight-photos` | 13 (12 + the new cover-rule step at `:447`, 16.4s) |
+| `oversight-reports` | 7 |
+| `hydration/oversight-photos` | 2 |
+| `presbytery-report-exports` | 8 |
+| `oversight-records` | 9 |
+| `presbytery-reports` | 10 |
+
+**Production lane** (`PW_PROD_BUILD=1 PW_PROD_PORT=3103`, `E2E_BASE_URL` unset, `prod-build` and `prod-custom-hosts`):
+
+- **119 of 119 passed**, 6.3 minutes, exit 0.
+- That includes `hydration/oversight-photos` (2), `hydration/oversight-forms` (2) and `hydration/person-photos-upload` (1).
+- 3103 is free afterwards, and no `next` server is left on 3102 or 3103.
+
+**Auth-touching gate:** not applicable. Neither run 1's diff nor the fix pass touches an auth file, the proxy or a layout.
+
+**Full chromium suite: not run.** The diff touches no proxy, auth file, layout, `e2e/support/`, `playwright.config.ts` or shared component, so the rest relies on the PR's CI.
+
+**My own 360px walk** (scratch spec `e2e/qa-walk2.spec.ts`, scratch copy only, against 3102, fixture tag `qb`, generated solid-colour images only):
+
+| Step | Grid (`*` = "Cover" badge) | Rows (`x` removed, `l` live, `*` marked) |
+|---|---|---|
+| A. 3 uploads | `1*,2,3` | marks `true,false,false` |
+| B. remove the marked cover (1) through the AlertDialog | `2*,3` | `x,l,l`: nothing marked; 2 is the cover by derivation |
+| C. upload 4 | `2*,3,4` (no sideways scroll) | `x,l,l,l`: **4 did not take the mark** (run 1's defect showed `2,3,4*` here) |
+| D. open the derived cover (2) | "Make this the cover" not shown | — |
+| E. open 4 | "Make this the cover" shown | — |
+| F. record page | the building card shows a cover image | — |
+| G. "Make this the cover" on 4 | `2,3,4*`, toast "Cover changed." | `x,l,l,l*` |
+| H. remove all, upload 5 | `5*` | `x,x,x,x,l*` |
+| I. `added` audit `cover` flags | — | `true,false,false,false,true` |
+| J. small controls | none | sideways scroll 0 |
+
+- Screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa6r2/walk/`. I read `c-after-upload-360.png`: the "Cover" badge is on the oldest live tile, the grid is two columns, and every picture is a generated colour.
+
+**Help walk of `/help/congregation-records` at 360px:**
+
+- 200 in light and dark, sideways scroll 0 in both. I read the dark full-page screenshot.
+- The rendered Photos section matches `src/content/help/congregation-records.md:27-39` word for word.
+- The cover sentences, read against the build:
+  - `:32` "The first photo you add is the cover, and the grid marks it with the word 'Cover'" is **true**. It holds for the first-ever upload (step A) and for the first upload after every photo is removed (step H), and it is not taken by a later upload (step C).
+  - `:36` "The button is not shown on the photo that already is the cover" is **true**, including for the derived cover (step D; `photo-reads.ts:157` sets `isCover` from `pickCover`).
+  - `:39` "If you remove the cover, the oldest photo left shows as the cover until you choose another" is **true** (steps B to G).
+
+Failures: none.
+
+## Regression Tests Added
+
+I showed each test red myself in the scratch copy, then restored the source and showed it green.
+
+| Fix | Test | Red on the break (my run) | Green |
+|---|---|---|---|
+| **Item 1: the cover rule** (`93d2eeb4`) | `src/lib/oversight/photo-store.db.test.ts`, "the cover rule — regression for an upload taking the cover after the marked cover was removed: a new photo takes the mark only when the building has no live photo" | Pre-fix `photo-store.ts` from `879df20b` in the scratch copy, file run serially on the branch: **1 failed, 27 passed**, `expected [ false, true ] to deeply equal [ false, false ]` at `photo-store.db.test.ts:361:43` | 28 of 28 in the tree (inside the 737) |
+| Item 1, nearby mutant (property check) | same test | A predicate counting every photo ever, removed ones included (`.where(inBuilding(...))`): **red at `:378`**, the "remove all, next upload is the cover" clause | — |
+| Item 1, browser step (`9d7cb67d`) | `e2e/oversight-photos.spec.ts:447` | **Not re-shown red by me.** It needs a server running the pre-fix source, and the tree cannot be modified. This rests on the implementer's report (red `expected [false, true] to equal [false, false]` under the pre-fix file on 3102). | passed in the dev lane |
+| **Item 2: hub help link at 44px** (`fe261887`) | `src/app/(org)/o/[slug]/admin/reports/page.test.tsx:450`, "the help link under the cards is a 44px target, so a thumb can hit it at 360px" | `reports-hub.tsx:108` className reverted to `"text-primary underline-offset-4 hover:underline"`, which is **byte-identical to the pre-B8 string at `e77658f9` line 104**: **1 failed, 35 passed**, `expected 'text-primary underline-offset-4 hover…' to match /min-h-11/` at `:454:28` | 36 of 36 |
+
+**Property, not logic:**
+
+- The DB test checks the property from both sides: a later upload does not take the mark, and an upload into a building with no live photo does.
+- It also checks the two readers that show the cover (`readBuildingPhotos` and `readBuildingCovers`) and the audit metadata, so it would catch a bypass of the same kind, as the mutant showed.
+- The item 2 test pins a class token, not a rendered size. That matches the `views.test.tsx` precedent the run 1 report asked for. The 44px result was also measured in run 1's walk.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100% (Increment 1 run 1)
+- `src/lib/two-factor.ts`: 91.11% (Increment 1 run 1)
+- `src/lib/flags.ts`: 100% (Increment 1 run 1)
+
+Neither the diff nor the fix pass touches these, so I did not re-measure them.
+
+## Feature-Gate Audit
+
+**The fix pass touches no protected route or action.** `photo-store.ts`'s change sits after `checkUpload(tx, …, true)` inside the final locked transaction, so the gate order is unchanged: key, flag, preflight, congregation, live building, cap, decode, blobs, then the locked re-check. Run 1's table stands unchanged for `04aacffb`.
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the design's Copy table.**
+  - The fix pass adds or changes no user-facing string: the only changes under `src/` are one code predicate, a code comment and tests.
+  - The run 1 off-table strings are now ratified in "Orchestrator rulings on Phase 4 copy": `coverBadge`, `saveCaption`, `saving`, the alt fallback "Photo", the `BUILDINGS_COPY` and `INSURANCE_LOANS_COPY` notes and help links, "None in use" per ruling (a), and the tile as a link.
+- [x] **The query behind each claim was opened.**
+  - The run 1 defect is **resolved**. `photo-store.ts:294-299` (`anyLive === undefined`) now matches `congregation-records.md:32` and `:39`, the cover rule ruling, and Phase 1's "The first photo is the cover" (parent log `:106`).
+  - This was shown in the database (the DB test and my red run), in the browser at 360px (walk steps A to H) and in the audit metadata.
+  - **copy truthfulness: PASS.**
+- [x] **Each instruction was traced to its role.** No change since run 1. "Make this the cover" is offered on every live non-cover photo to manage holders (step E) and works (step G).
+- [x] **Older strings about the same subject were grepped.** The fix makes no older string false. `derive.ts:183-187`'s doc comment ("the photo carrying the cover mark, else the oldest") is consistent.
+- [x] **Help diff covered.**
+  - The fix pass does not edit `src/content/help/` or `src/lib/help/`. `congregation-records` was walked at 360px in light and dark, with the cover sentences read against the build.
+  - No image under `src/content/help/images/` changed, so there were no new pixels to read. My walk screenshots show only fixture names and generated colours.
+
+## Verdict
+
+**PASS**
+
+1. **Item 1 (cover rule): resolved.** The fix matches the ruling. The DB regression test was shown red by me on the pre-fix source (`photo-store.db.test.ts:361`), it kills a nearby mutant (`:378`), and it is green on HEAD. The browser step passes, and the 360px walk shows the help's sentences are true.
+2. **Item 2 (hub help-link test): resolved.** It was red on the exact pre-B8 class string (`page.test.tsx:454`) and is green on HEAD.
+
+**Still to do at release (not counted as failures):**
+
+- C16's second release-note line must say the Insurance-and-loans file includes each loan's guarantee (orchestrator ruling (b)). The release note does not exist yet, so Phase 6 or `/release-notes` should check it.
+- Run 1's other notes stand:
+  - the pre-existing 20px year links and "Back to portal";
+  - a retired building's photos page still accepts uploads;
+  - the caption, cover and remove actions do not read `org_portal.oversight`.
+
+**Run scope:**
+
+- **Ran on `04aacffb`:**
+  - typecheck, lint, `npm run check`, build (in the production lane);
+  - the full unit suite;
+  - `src/lib/oversight`, `src/lib/storage` and `src/lib/person-photos` serially against the pipeline branch, DB-backed tests included;
+  - the dev lane: the 6 named specs, 49 tests;
+  - the full production lane, 119 tests;
+  - the 360px cover walk and the `congregation-records` help walk in light and dark;
+  - red runs for both items, plus one mutant.
+- **Not re-run, resting on run 1 (`11a3fff7`):**
+  - the whole DB-backed suite on a fresh database;
+  - `test-rls.sql` and `test-rls-89`;
+  - the map lane;
+  - `oversight-finance`, `oversight-founder`, `presbytery-oversight`, `hydration/oversight-forms` (dev), `presbytery-dashboard`, `person-photos` and `totp-full-login` in the dev lane;
+  - the byte-identity and EXIF probes;
+  - the CSV walk.
+  - All are untouched by the fix pass.
+- **Not run at all:**
+  - the full chromium suite (relies on the PR's CI);
+  - critical-module coverage (untouched);
+  - e2e red-first for `oversight-photos.spec.ts:447` (rests on the implementer's report).
+
+---
+
+**Per-Phase Status row**
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (run 2) | PASS | 2026-11-18 |
+
+**Handoff:** next is **analyst** (Phase 6, shipped vs intent). The analyst still needs to:
+
+- do a real phone-photo upload on a deployed environment at 360px, with a non-identifying picture that is never committed;
+- open both reports and a CSV;
+- read `congregation-records`, `presbytery-reports`, `privacy-policy` and `planned/presbytery-tools` as their reader;
+- check the C16 guarantee line in the release note.
+
+Logs, the walk spec and the screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/qa6r2/`. The main logs are `item1-red.log`, `item1-mutant.log`, `item2-red.log`, `unit.log`, `db.log`, `e2e-dev.log`, `e2e-prod.log`, `walk.log` and `flag-reset.log`, plus `walk/*.png`.
 
 ---
 

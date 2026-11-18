@@ -290,4 +290,16 @@ describe("OversightDetailPage — the ordering/error-handling contract", () => {
     expect(screen.getByLabelText("Property notes")).toBeTruthy();
     expect(screen.queryByLabelText(/insurance/i)).toBeNull();
   });
+
+  it("the back link is the shared BackLink, a 44px control (min-h-11), not a 20px inline link — regression for the assessment back link at 360px", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    getCongregationOversightDetail.mockResolvedValue({ kind: "ok", data: DETAIL_ROW });
+
+    render(await OversightDetailPage({ params: makeParams() }));
+
+    const link = screen.getByRole("link", { name: /Back to Alder Creek Presbyterian Church/ });
+    expect(link.className).toContain("min-h-11");
+  });
 });

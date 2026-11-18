@@ -1007,7 +1007,7 @@ export const HELP_PAGES = [
     anchors: ["who-can-see-what", "profile", "assessment", "buildings", "appraisals-insurance-and-loans", "if-something-looks-wrong"],
     labels: [
       "Congregation Oversight",
-      "Administration",
+      "Governance & Courts",
       "Open",
       "Profile",
       "Assessment",

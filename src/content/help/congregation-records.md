@@ -1,6 +1,6 @@
 Where "Congregation Oversight" is turned on, a presbytery keeps its own record of each member congregation. This page is for the presbytery's staff. The record is the presbytery's own copy: the congregation does not see it, and nothing here changes what the congregation has recorded for itself.
 
-Open "Administration", choose "Congregation Oversight", then choose "Open" beside a congregation. The page has five sections: "Profile", "Assessment", "Buildings", "Insurance" and "Loans".
+Open your presbytery's page, choose "Congregation Oversight" under "Governance & Courts", then choose "Open" beside a congregation. The page has five sections: "Profile", "Assessment", "Buildings", "Insurance" and "Loans".
 
 ## Who can see what
 
@@ -29,7 +29,7 @@ Choose "Add a building". A building has a name and a type, and everything else i
 
 These need the finance permission. On a building's page, under "Appraisals", choose "Record an appraisal" with the year assessed and the amount in dollars; the newest year is marked "Current". To correct an appraisal, remove it and record it again. Under "Insurance", choose "Record a year" for the policy year, carrier, policy number, expiry date, recent claims and interest in the insurance pool. There is one record for each year. A policy whose expiry date has passed says "Expired" in words. Under "Loans", choose "Record a loan": the kind (a presbytery program loan, a guaranteed outside loan or another kind), the lender, the original amount, the current balance and the date it is as of, any grants, and a note about the guarantee. "Mark paid off" sets the balance to $0 as of the date you choose, and "Reopen this loan" undoes it. A section with nothing in it says so and never shows a zero for something that was not recorded.
 
-Every change is recorded in the audit trail with who made it, and the notes and amounts are not copied into it. Looking at a record is not recorded.
+Changes are recorded in the audit trail with who made them, and the notes and amounts are not copied into it. A change to the "Assessment" is recorded just after it is saved, so in rare cases a saved assessment can be missing from the trail. Looking at a record is not recorded.
 
 ## If something looks wrong
 

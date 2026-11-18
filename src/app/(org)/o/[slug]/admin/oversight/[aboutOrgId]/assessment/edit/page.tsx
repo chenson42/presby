@@ -1,6 +1,5 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
+import { BackLink } from "@/components/oversight/back-link";
 import { OrgAccessError } from "@/lib/authz";
 import { getCongregationOversightDetail } from "@/lib/presbytery";
 import { isFlagEnabled } from "@/lib/flags";
@@ -69,13 +68,7 @@ export default async function OversightAssessmentEditPage({
   return (
     <section className="space-y-6">
       <div>
-        <Link
-          href={`/o/${slug}/admin/oversight/${aboutOrgId}`}
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        >
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          Back to {result.data.name}
-        </Link>
+        <BackLink href={`/o/${slug}/admin/oversight/${aboutOrgId}`}>Back to {result.data.name}</BackLink>
         <h1 className="mt-3 text-2xl font-semibold">Edit assessment</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {identity.organizationName}&apos;s own oversight record for this congregation.

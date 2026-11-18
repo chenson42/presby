@@ -39,6 +39,7 @@ import {
   csvResponse,
   respondWithExport,
   gateInsightsPage,
+  gateOversightPage,
   gateReportPage,
   gateReportRoute,
   runReportRead,
@@ -177,6 +178,90 @@ describe("gateInsightsPage (DECISION-342)", () => {
   it("an OrgAccessError is rethrown to the error boundary", async () => {
     mocks.assertOrgAccess.mockRejectedValue(new mocks.FakeOrgAccessError("ended"));
     await expect(gateInsightsPage({ slug: "northern", path: INSIGHTS_PATH })).rejects.toBeInstanceOf(
+      mocks.FakeOrgAccessError,
+    );
+  });
+});
+
+describe("gateOversightPage (DECISION-347, F452)", () => {
+  const OVERSIGHT_PATH = "/o/northern/admin/oversight/00000000-0000-4000-8000-000000000001";
+
+  /** Records the order the gate's collaborators run in. */
+  function trackOrder() {
+    const order: string[] = [];
+    mocks.cachedAuth.mockImplementation(async () => (order.push("session"), signedIn));
+    mocks.resolveOrgContext.mockImplementation(async () => (order.push("resolve"), { kind: "ok", org: ORG }));
+    mocks.assertOrgAccess.mockImplementation(async () => void order.push("access"));
+    mocks.isFlagEnabled.mockImplementation(async () => (order.push("flag"), true));
+    return order;
+  }
+
+  it("runs signed-in, then the Node-side second-factor check, then the org miss, access, the flag, the type, in that order", async () => {
+    const order = trackOrder();
+    const gate = await gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH });
+    expect(gate).toMatchObject({ ok: true, identity: { organizationId: "org-1", personId: "person-1", slug: "northern" } });
+    expect(order).toEqual(["session", "resolve", "access", "flag"]);
+  });
+
+  it("checks org_portal.oversight and never the reports or insights flag", async () => {
+    await gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH });
+    expect(mocks.isFlagEnabled).toHaveBeenCalledWith("org_portal.oversight");
+    expect(mocks.isFlagEnabled).not.toHaveBeenCalledWith("org_portal.reports");
+    expect(mocks.isFlagEnabled).not.toHaveBeenCalledWith("org_portal.insights");
+  });
+
+  it("signed out redirects to /signin with the page's own path", async () => {
+    mocks.cachedAuth.mockResolvedValue(null);
+    await expect(gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH })).rejects.toThrow(
+      `REDIRECT:/signin?callbackUrl=${encodeURIComponent(OVERSIGHT_PATH)}`,
+    );
+    expect(mocks.resolveOrgContext).not.toHaveBeenCalled();
+  });
+
+  it("a stale second-factor claim redirects to /totp BEFORE the organization is read (the F452 recheck)", async () => {
+    mocks.cachedAuth.mockResolvedValue(stale2fa);
+    await expect(gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH })).rejects.toThrow(
+      `REDIRECT:/totp?callbackUrl=${encodeURIComponent(OVERSIGHT_PATH)}`,
+    );
+    expect(mocks.resolveOrgContext).not.toHaveBeenCalled();
+    expect(mocks.isFlagEnabled).not.toHaveBeenCalled();
+  });
+
+  it("the four-way org miss: not found is a 404, no relationship and ended are states", async () => {
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "not-found" });
+    await expect(gateOversightPage({ slug: "nope", path: OVERSIGHT_PATH })).rejects.toThrow("NOT_FOUND");
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "forbidden", name: "Northern Reach", organizationType: "presbytery" });
+    expect(await gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH })).toEqual({
+      ok: false,
+      state: { kind: "org_forbidden", name: "Northern Reach", organizationType: "presbytery" },
+    });
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "ended", name: "Northern Reach", endedOn: "2026-03-31" });
+    expect(await gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH })).toEqual({
+      ok: false,
+      state: { kind: "org_ended", name: "Northern Reach", endedOn: "2026-03-31" },
+    });
+  });
+
+  it("flag off is flag_off (and the flag is checked before the type)", async () => {
+    mocks.isFlagEnabled.mockResolvedValue(false);
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "ok", org: { ...ORG, organizationType: "congregation" } });
+    expect(await gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH })).toEqual({
+      ok: false,
+      state: { kind: "flag_off", name: "Northern Reach" },
+    });
+  });
+
+  it("a congregation with the flag on is not_applicable", async () => {
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "ok", org: { ...ORG, organizationType: "congregation" } });
+    expect(await gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH })).toEqual({
+      ok: false,
+      state: { kind: "not_applicable", name: "Northern Reach" },
+    });
+  });
+
+  it("an OrgAccessError is rethrown to the error boundary", async () => {
+    mocks.assertOrgAccess.mockRejectedValue(new mocks.FakeOrgAccessError("ended"));
+    await expect(gateOversightPage({ slug: "northern", path: OVERSIGHT_PATH })).rejects.toBeInstanceOf(
       mocks.FakeOrgAccessError,
     );
   });

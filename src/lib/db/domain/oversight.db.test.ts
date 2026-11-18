@@ -500,6 +500,51 @@ describe.skipIf(!hasDb)("drizzle/0089 congregation records (Postgres-backed)", (
       });
     });
 
+    it("'imported' is the owner-run import's alone: a tenant insert of it is refused on all five tables; an unknown value is the CHECK's", async () => {
+      await rolledBack("app", async (tx) => {
+        const b = await building(tx, C1, "B89 Prov");
+        const code = OVERSIGHT_GUARD_CODES.provenance;
+        const cases: SQL[] = [
+          sql`insert into oversight_profiles (organization_id, about_org_id, provenance, created_by, updated_by) values (${P}, ${C2}, 'imported', ${U}, ${U})`,
+          sql`insert into oversight_buildings (organization_id, about_org_id, name, building_type, provenance, created_by, updated_by) values (${P}, ${C1}, 'B89 Imp', 'other', 'imported', ${U}, ${U})`,
+          sql`insert into oversight_building_appraisals (organization_id, about_org_id, building_id, assessed_year, amount_cents, provenance, created_by) values (${P}, ${C1}, ${b}, 2020, 1, 'imported', ${U})`,
+          sql`insert into oversight_insurance_years (organization_id, about_org_id, policy_year, provenance, created_by, updated_by) values (${P}, ${C1}, 2020, 'imported', ${U}, ${U})`,
+          sql`insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (${P}, ${C1}, 'other', 'imported', ${U}, ${U})`,
+        ];
+        for (const stmt of cases) await refused(tx, stmt, "23514", code);
+        await tx.execute(
+          sql`insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (${P}, ${C1}, 'other', 'presbytery_entered', ${U}, ${U})`,
+        );
+      });
+      await rolledBack("owner", async (tx) => {
+        await tx.execute(
+          sql`insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (${P}, ${C1}, 'other', 'imported', ${U}, ${U})`,
+        );
+        await tx.execute(
+          sql`insert into oversight_profiles (organization_id, about_org_id, provenance, created_by, updated_by) values (${P}, ${C2}, 'imported', ${U}, ${U})`,
+        );
+        await refused(
+          tx,
+          sql`insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (${P}, ${C1}, 'other', 'guessed', ${U}, ${U})`,
+          "23514",
+          "oversight_loans_provenance",
+        );
+      });
+    });
+
+    it("an imported row stays imported through a tenant edit, and a tenant cannot change its provenance", async () => {
+      const [row] = await q(sql`
+        insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by)
+        values (${P}, ${C1}, 'other', 'imported', ${U}, ${U}) returning id`);
+      const loan = String(row!.id);
+      await rolledBack("app", async (tx) => {
+        await tx.execute(sql`update oversight_loans set lender = 'Edited', row_version = row_version + 1 where id = ${loan}`);
+        const r = await one(tx, sql`select provenance, lender from oversight_loans where id = ${loan}`);
+        expect(r).toEqual({ provenance: "imported", lender: "Edited" });
+        await refused(tx, sql`update oversight_loans set provenance = 'presbytery_entered' where id = ${loan}`, "42501");
+      });
+    });
+
     it("a building photo cannot point at a public_site blob, even as the owner", async () => {
       await rolledBack("owner", async (tx) => {
         const b = await building(tx, C1, "B89 Photo");
@@ -653,10 +698,19 @@ describe.skipIf(!hasDb)("drizzle/0089 congregation records (Postgres-backed)", (
         await tx.execute(sql`insert into oversight_building_appraisals (organization_id, about_org_id, building_id, assessed_year, amount_cents, created_by) values (${P}, ${C1}, ${b}, 2024, 1, ${U})`);
         await tx.execute(sql`alter table group_memberships disable trigger group_memberships_reject_derived`);
         await refused(tx, sql`delete from organizations where id = ${C1}`, "23503");
-        await tx.execute(sql`delete from oversight_building_appraisals where organization_id = ${P}`);
-        await tx.execute(sql`delete from oversight_buildings where organization_id = ${P}`);
+        // The B4 contract: all six tables, children before buildings (committed
+        // rows of earlier tests included), then the congregations, then the presbytery.
+        for (const t of [
+          "oversight_building_photos",
+          "oversight_building_appraisals",
+          "oversight_loans",
+          "oversight_buildings",
+          "oversight_insurance_years",
+          "oversight_profiles",
+        ]) {
+          await tx.execute(sql`delete from ${sql.identifier(t)} where organization_id = ${P}`);
+        }
         for (const c of [C1, C2, C3]) await tx.execute(sql`delete from organizations where id = ${c}`);
-        // (The race test's committed building about C2 went with the delete above.)
         await tx.execute(sql`delete from organizations where id = ${P}`);
         const [n] = rowsOf(
           await tx.execute(sql`select (select count(*) from oversight_buildings where organization_id = ${P})::int as n`),

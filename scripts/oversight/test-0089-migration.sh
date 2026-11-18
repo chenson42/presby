@@ -110,7 +110,7 @@ select md5(string_agg(x, E'\n' order by x)) from (
   select 'fn ' || p.oid::regprocedure::text || ' ' || md5(pg_get_functiondef(p.oid)) || ' ' || coalesce(p.proacl::text, '-')
     from pg_proc p
    where p.proname in ('presby_founding_administrator_permission_keys', 'presby_oversight_guard_write',
-                       'presby_oversight_building_live_guard')
+                       'presby_oversight_building_live_guard', 'presby_oversight_guard_provenance')
   union all
   select 'con ' || conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid) || ' ' || convalidated
     from pg_constraint where conrelid::regclass::text like 'oversight\\_%'
@@ -142,7 +142,8 @@ select md5(string_agg(x, E'\n' order by x)) from (
                or (d.objoid = 'permissions'::regclass and d.objsubid > 0)))
       or (d.classoid = 'pg_proc'::regclass
           and d.objoid in ('presby_two_factor_required(uuid)'::regprocedure, 'presby_oversight_guard_write()'::regprocedure,
-                           'presby_oversight_building_live_guard()'::regprocedure))
+                           'presby_oversight_building_live_guard()'::regprocedure,
+                           'presby_oversight_guard_provenance()'::regprocedure))
 ) t(x)"
 ROWS="select md5(coalesce(string_agg(r, E'\n' order by r), '')) from (
         select x::text as r from oversight_profiles x union all select x::text from oversight_buildings x

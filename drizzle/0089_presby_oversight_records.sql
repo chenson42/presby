@@ -67,8 +67,11 @@
 --                             one-way, immutable columns) on the five with the
 --                             removal pair; presby_oversight_building_live_guard
 --                             (no new child of a removed building, FOR SHARE)
---                             on photos, appraisals and loans. All SECURITY
---                             INVOKER and binding the OWNER too (F44)
+--                             on photos, appraisals and loans;
+--                             presby_oversight_guard_provenance ('imported'
+--                             is the owner-run import's alone) on the five
+--                             tables with provenance. All SECURITY INVOKER;
+--                             the first two bind the OWNER too (F44)
 --   7. RLS + grants           ENABLE + FORCE, tenant_isolation, presby_app
 --                             SELECT + INSERT + column-limited UPDATE, NO
 --                             DELETE, presby_platform nothing
@@ -738,6 +741,69 @@ create trigger oversight_loans_building_live
   before insert or update of building_id on oversight_loans
   for each row execute function presby_oversight_building_live_guard();
 
+-- 6d. presby_oversight_guard_provenance(): 'imported' is reserved for the
+--     operator's owner-run import session (DECISION-351; orchestrator ruling
+--     on the B1 report, 2026-11-18). A non-owner connection (presby_app, and
+--     presby_platform should it ever gain a grant) may not INSERT a row with
+--     any provenance but 'presbytery_entered', and may not UPDATE a row's
+--     provenance to anything else. An UPDATE that leaves an imported row's
+--     provenance unchanged passes: an imported row stays imported after an
+--     edit. On presby_app the column grant already refuses any UPDATE of
+--     provenance (42501), so the UPDATE arm is defence in depth; the owner's
+--     UPDATE of provenance is refused by presby_oversight_guard_write on four
+--     tables (the profile has no removal pair and no write guard, and the
+--     owner may correct it). Owner test copied from 0078. Plain plpgsql,
+--     SECURITY INVOKER: it reads no other relation.
+create or replace function presby_oversight_guard_provenance()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_owner boolean;
+begin
+  select c.relowner = (select r.oid from pg_roles r where r.rolname = current_user)
+    into v_owner
+    from pg_class c
+   where c.oid = tg_relid;
+  if coalesce(v_owner, false) then
+    return new;
+  end if;
+  if new.provenance is distinct from 'presbytery_entered'
+     and (tg_op = 'INSERT' or new.provenance is distinct from old.provenance) then
+    raise exception '%: provenance % is reserved for the operator''s import; a tenant write is presbytery_entered', tg_table_name, new.provenance
+      using errcode = 'check_violation', constraint = 'oversight_guard_provenance';
+  end if;
+  return new;
+end $$;
+
+revoke all on function presby_oversight_guard_provenance() from public, presby_app, presby_platform;
+
+drop trigger if exists oversight_profiles_guard_provenance on oversight_profiles;
+create trigger oversight_profiles_guard_provenance
+  before insert or update on oversight_profiles
+  for each row execute function presby_oversight_guard_provenance();
+
+drop trigger if exists oversight_buildings_guard_provenance on oversight_buildings;
+create trigger oversight_buildings_guard_provenance
+  before insert or update on oversight_buildings
+  for each row execute function presby_oversight_guard_provenance();
+
+drop trigger if exists oversight_building_appraisals_guard_provenance on oversight_building_appraisals;
+create trigger oversight_building_appraisals_guard_provenance
+  before insert or update on oversight_building_appraisals
+  for each row execute function presby_oversight_guard_provenance();
+
+drop trigger if exists oversight_insurance_years_guard_provenance on oversight_insurance_years;
+create trigger oversight_insurance_years_guard_provenance
+  before insert or update on oversight_insurance_years
+  for each row execute function presby_oversight_guard_provenance();
+
+drop trigger if exists oversight_loans_guard_provenance on oversight_loans;
+create trigger oversight_loans_guard_provenance
+  before insert or update on oversight_loans
+  for each row execute function presby_oversight_guard_provenance();
+
 -- ---------------------------------------------------------------------------
 -- 7. RLS and grants. Without FORCE the owner bypasses every policy and RLS is
 --    silently inert (F1). presby_platform gets nothing: no platform page reads
@@ -842,21 +908,23 @@ comment on column oversight_loans.building_id is
   'Optional link to a building of the same congregation (three-column FK, MATCH SIMPLE: not enforced while null). No UI in v1 (T9).';
 
 comment on column oversight_profiles.provenance is
-  '''presbytery_entered'' or ''imported'' (the operator''s one-time import session, DECISION-351). Immutable after insert: an imported row stays imported after an edit.';
+  '''presbytery_entered'' or ''imported'' (the operator''s one-time import session, DECISION-351). A tenant write is always presbytery_entered (presby_oversight_guard_provenance); an imported row stays imported after an edit.';
 comment on column oversight_buildings.provenance is
-  '''presbytery_entered'' or ''imported''. Immutable after insert (presby_oversight_guard_write).';
+  '''presbytery_entered'' or ''imported''. Immutable after insert (presby_oversight_guard_write); a tenant write is always presbytery_entered (presby_oversight_guard_provenance).';
 comment on column oversight_building_appraisals.provenance is
-  '''presbytery_entered'' or ''imported''. Immutable after insert (presby_oversight_guard_write).';
+  '''presbytery_entered'' or ''imported''. Immutable after insert (presby_oversight_guard_write); a tenant write is always presbytery_entered (presby_oversight_guard_provenance).';
 comment on column oversight_insurance_years.provenance is
-  '''presbytery_entered'' or ''imported''. Immutable after insert (presby_oversight_guard_write).';
+  '''presbytery_entered'' or ''imported''. Immutable after insert (presby_oversight_guard_write); a tenant write is always presbytery_entered (presby_oversight_guard_provenance).';
 comment on column oversight_loans.provenance is
-  '''presbytery_entered'' or ''imported''. Immutable after insert (presby_oversight_guard_write).';
+  '''presbytery_entered'' or ''imported''. Immutable after insert (presby_oversight_guard_write); a tenant write is always presbytery_entered (presby_oversight_guard_provenance).';
 
 comment on column oversight_profiles.row_version is
   'Optimistic concurrency (T5, DECISION-349): the writer compares it in the UPDATE''s WHERE and increments it. Likewise on buildings, insurance years and loans.';
 
 comment on function presby_oversight_guard_write() is
   'BEFORE INSERT OR UPDATE on the five oversight tables with a removal pair. Removal is one-way; TG_ARGV[0] names the immutable columns; a non-owner insert starts unremoved with created_at = clock_timestamp(). SECURITY INVOKER, binds the owner too (F44). drizzle/0089 section 6b.';
+comment on function presby_oversight_guard_provenance() is
+  'BEFORE INSERT OR UPDATE on the five oversight tables with provenance: a non-owner connection may write only ''presbytery_entered'' (''imported'' is the owner-run import''s alone, DECISION-351); an edit that leaves an imported row imported passes. SECURITY INVOKER. drizzle/0089 section 6d.';
 comment on function presby_oversight_building_live_guard() is
   'BEFORE INSERT OR UPDATE OF building_id on oversight_building_photos, _appraisals and oversight_loans: refuses a new child of a removed building. FOR SHARE serializes with a concurrent removal. SECURITY INVOKER. drizzle/0089 section 6c.';
 
@@ -938,10 +1006,11 @@ begin
   end if;
 
   select count(*) into v_n from pg_proc p
-   where p.proname in ('presby_oversight_guard_write', 'presby_oversight_building_live_guard')
+   where p.proname in ('presby_oversight_guard_write', 'presby_oversight_building_live_guard',
+                       'presby_oversight_guard_provenance')
      and not p.prosecdef and p.proconfig = array['search_path=public, pg_temp'];
-  if v_n <> 2 then
-    raise exception '0089: the two oversight guard functions are not both SECURITY INVOKER with search_path pinned';
+  if v_n <> 3 then
+    raise exception '0089: the three oversight guard functions are not all SECURITY INVOKER with search_path pinned';
   end if;
 
   select count(*) into v_n from pg_trigger t
@@ -958,8 +1027,13 @@ begin
        ('oversight_building_photos', 'oversight_building_photos_guard_write'),
        ('oversight_building_photos', 'oversight_building_photos_building_live'),
        ('oversight_building_appraisals', 'oversight_building_appraisals_building_live'),
-       ('oversight_loans', 'oversight_loans_building_live'));
-  if v_n <> 12 then
-    raise exception '0089: expected the 12 oversight triggers enabled, found %', v_n;
+       ('oversight_loans', 'oversight_loans_building_live'),
+       ('oversight_profiles', 'oversight_profiles_guard_provenance'),
+       ('oversight_buildings', 'oversight_buildings_guard_provenance'),
+       ('oversight_building_appraisals', 'oversight_building_appraisals_guard_provenance'),
+       ('oversight_insurance_years', 'oversight_insurance_years_guard_provenance'),
+       ('oversight_loans', 'oversight_loans_guard_provenance'));
+  if v_n <> 17 then
+    raise exception '0089: expected the 17 oversight triggers enabled, found %', v_n;
   end if;
 end $$;

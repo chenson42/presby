@@ -51,6 +51,11 @@ import { users } from "../schema";
  *   - no new photo, appraisal or loan link on a REMOVED building, serialized
  *     with a concurrent removal by FOR SHARE: `<table>_building_live` ->
  *     presby_oversight_building_live_guard() (0089 section 6c);
+ *   - `provenance = 'imported'` is the owner-run import's alone: a non-owner
+ *     (tenant) insert must be 'presbytery_entered', and a tenant update may
+ *     not change provenance to anything else - `<table>_guard_provenance` ->
+ *     presby_oversight_guard_provenance() on the five tables with the column
+ *     (0089 section 6d);
  *   - the about-org must be affiliated with the presbytery TODAY on insert
  *     (and on an update that moves about_org_id): `<table>_about_org` ->
  *     presby_check_about_org_affiliated('about_org_id', '') on profiles,
@@ -118,6 +123,7 @@ export const OVERSIGHT_GUARD_CODES = {
   removalFinal: "oversight_guard_removal_final",
   immutable: "oversight_guard_immutable",
   buildingRemoved: "oversight_guard_building_removed",
+  provenance: "oversight_guard_provenance",
 } as const;
 
 // bigint cents as a JS number: the ceiling (1e11) is far inside 2^53.

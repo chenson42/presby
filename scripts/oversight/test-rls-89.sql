@@ -43,7 +43,8 @@
 --       (f) about-org: never-affiliated and departed congregations refused
 --           on insert; an affiliated unmanaged congregation accepted
 --       (g) removal one-way, the column grant as immutability, the guard's
---           insert rules, the building-live guard, every partial unique
+--           insert rules, 'imported' refused on the tenant path, the
+--           building-live guard, every partial unique
 --       (h) presby_public_site_asset() serves no building-photo key; a photo
 --           cannot reference a public_site blob
 --       (i) CHECK boundaries: years, money, square feet, lengths, pairs
@@ -297,7 +298,7 @@ begin;
   select assert_eq(
     (select count(*) from pg_trigger t
       where t.tgrelid::regclass::text like 'oversight\_%' and not t.tgisinternal and t.tgenabled = 'O'),
-    12, '89a: the 12 oversight triggers exist and are ENABLED (origin) - they bind the owner too (F44)');
+    17, '89a: the 17 oversight triggers exist and are ENABLED (origin) - they fire on the owner path too (F44)');
   select assert_eq(
     (select count(*) from pg_trigger t
       where not t.tgisinternal and t.tgfoid = 'presby_check_about_org_affiliated()'::regprocedure
@@ -321,15 +322,24 @@ begin;
         and t.tgrelid::regclass::text in ('oversight_building_photos', 'oversight_building_appraisals', 'oversight_loans')),
     3, '89a: the building-live guard on photos, appraisals and loans');
   select assert_eq(
-    (select count(*) from pg_proc p
-      where p.proname in ('presby_oversight_guard_write', 'presby_oversight_building_live_guard')
-        and not p.prosecdef and p.proconfig = array['search_path=public, pg_temp']),
-    2, '89a: both guards are SECURITY INVOKER with search_path pinned');
+    (select count(*) from pg_trigger t
+      where not t.tgisinternal and t.tgfoid = 'presby_oversight_guard_provenance()'::regprocedure
+        and t.tgrelid::regclass::text in ('oversight_profiles', 'oversight_buildings', 'oversight_building_appraisals',
+                                          'oversight_insurance_years', 'oversight_loans')
+        and t.tgtype & 2 = 2 and t.tgtype & 4 = 4 and t.tgtype & 16 = 16),
+    5, '89a: the provenance guard, BEFORE INSERT OR UPDATE, on the five tables with provenance (photos have none)');
   select assert_eq(
     (select count(*) from pg_proc p
-      where p.proname in ('presby_oversight_guard_write', 'presby_oversight_building_live_guard')
+      where p.proname in ('presby_oversight_guard_write', 'presby_oversight_building_live_guard',
+                          'presby_oversight_guard_provenance')
+        and not p.prosecdef and p.proconfig = array['search_path=public, pg_temp']),
+    3, '89a: the three guards are SECURITY INVOKER with search_path pinned');
+  select assert_eq(
+    (select count(*) from pg_proc p
+      where p.proname in ('presby_oversight_guard_write', 'presby_oversight_building_live_guard',
+                          'presby_oversight_guard_provenance')
         and p.proacl = array[(pg_get_userbyid(p.proowner) || '=X/' || pg_get_userbyid(p.proowner))::aclitem]),
-    2, '89a: both guards are executable by their owner alone (a trigger needs no EXECUTE at fire time)');
+    3, '89a: the three guards are executable by their owner alone (a trigger needs no EXECUTE at fire time)');
 rollback;
 
 -- ===========================================================================
@@ -620,6 +630,36 @@ begin;
     (select count(*) from oversight_loans where about_org_id = :ALDER and kind = 'other' and created_at > now() - interval '1 hour'),
     1, '89g: a tenant insert''s created_at is the server''s clock, not the value it supplied');
 
+  -- 'imported' is the owner-run import's alone (orchestrator ruling,
+  -- 2026-11-18; presby_oversight_guard_provenance).
+  select pg_temp.t89_expect(
+    format('insert into oversight_profiles (organization_id, about_org_id, provenance, created_by, updated_by) values (%L, %L, %L, %L, %L)',
+           pg_temp.v('nr'), pg_temp.v('bramble'), 'imported', pg_temp.v('u'), pg_temp.v('u')),
+    '23514', 'oversight_guard_provenance', null, '89g: a tenant cannot insert an imported profile');
+  select pg_temp.t89_expect(
+    format('insert into oversight_buildings (organization_id, about_org_id, name, building_type, provenance, created_by, updated_by) values (%L, %L, %L, %L, %L, %L, %L)',
+           pg_temp.v('nr'), pg_temp.v('alder'), 'T89 Imported', 'other', 'imported', pg_temp.v('u'), pg_temp.v('u')),
+    '23514', 'oversight_guard_provenance', null, '89g: ...nor an imported building');
+  select pg_temp.t89_expect(
+    format('insert into oversight_building_appraisals (organization_id, about_org_id, building_id, assessed_year, amount_cents, provenance, created_by) values (%L, %L, %L, 2019, 1, %L, %L)',
+           pg_temp.v('nr'), pg_temp.v('alder'), pg_temp.v('b1'), 'imported', pg_temp.v('u')),
+    '23514', 'oversight_guard_provenance', null, '89g: ...nor an imported appraisal');
+  select pg_temp.t89_expect(
+    format('insert into oversight_insurance_years (organization_id, about_org_id, policy_year, provenance, created_by, updated_by) values (%L, %L, 2019, %L, %L, %L)',
+           pg_temp.v('nr'), pg_temp.v('alder'), 'imported', pg_temp.v('u'), pg_temp.v('u')),
+    '23514', 'oversight_guard_provenance', null, '89g: ...nor an imported insurance year');
+  select pg_temp.t89_expect(
+    format('insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (%L, %L, %L, %L, %L, %L)',
+           pg_temp.v('nr'), pg_temp.v('alder'), 'other', 'imported', pg_temp.v('u'), pg_temp.v('u')),
+    '23514', 'oversight_guard_provenance', null, '89g: ...nor an imported loan');
+  select pg_temp.t89_expect(
+    format('update oversight_loans set provenance = %L where id = %L', 'imported', pg_temp.v('la')),
+    '42501', null, '%permission denied%', '89g: a tenant cannot UPDATE a row to imported (the column grant refuses first)');
+  select assert_eq(
+    (select count(*) from oversight_loans where id = pg_temp.v('la') and provenance = 'presbytery_entered')
+    + (select count(*) from oversight_buildings where id = pg_temp.v('b1') and provenance = 'presbytery_entered'),
+    2, '89g: (control) a tenant insert left at the default is presbytery_entered');
+
   -- The column grant is presby_app's immutability (the guard proves the same
   -- on the owner path, oversight.db.test.ts).
   select pg_temp.t89_expect(
@@ -858,8 +898,12 @@ begin;
     ('loan reopened', 'update oversight_loans set status = ''open'', paid_off_on = null where id = ''%la%''', true, null),
     ('row_version 0', 'update oversight_loans set row_version = 0 where id = ''%la%''', false, 'oversight_loans_row_version_positive'),
     ('photo width 2001', 'insert into oversight_building_photos (organization_id, about_org_id, building_id, image_asset_key, thumb_asset_key, width, height, created_by) values (''%nr%'', ''%alder%'', ''%b1%'', ''%img3%'', ''%thumb3%'', 2001, 10, ''%u%'')', false, 'oversight_building_photos_dimensions'),
-    ('provenance unknown', 'insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (''%nr%'', ''%alder%'', ''other'', ''guessed'', ''%u%'', ''%u%'')', false, 'oversight_loans_provenance'),
-    ('provenance imported', 'insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (''%nr%'', ''%alder%'', ''other'', ''imported'', ''%u%'', ''%u%'')', true, null);
+    -- On the tenant path the provenance guard (BEFORE) refuses anything but
+    -- presbytery_entered before the CHECK is reached; the CHECK itself is
+    -- proven on the owner path (oversight.db.test.ts).
+    ('provenance unknown', 'insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (''%nr%'', ''%alder%'', ''other'', ''guessed'', ''%u%'', ''%u%'')', false, 'oversight_guard_provenance'),
+    ('provenance imported', 'insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (''%nr%'', ''%alder%'', ''other'', ''imported'', ''%u%'', ''%u%'')', false, 'oversight_guard_provenance'),
+    ('provenance explicit default', 'insert into oversight_loans (organization_id, about_org_id, kind, provenance, created_by, updated_by) values (''%nr%'', ''%alder%'', ''other'', ''presbytery_entered'', ''%u%'', ''%u%'')', true, null);
   select set_config('t89.img3', (select pg_temp.t89_blob(:NREACH, 'private'))::text, true);
   select set_config('t89.thumb3', (select pg_temp.t89_blob(:NREACH, 'private'))::text, true);
   do $$

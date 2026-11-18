@@ -447,6 +447,13 @@ describe("ReportsPage — the reports hub (docs/work-log/2026-11-15-presbytery-r
     expect(hub.queryByText("Locked")).toBeNull();
   });
 
+  it("the help link under the cards is a 44px target, so a thumb can hit it at 360px", async () => {
+    await renderOk();
+    const link = within(screen.getByTestId("reports-hub")).getByRole("link", { name: "Help with presbytery reports" });
+    expect(link.getAttribute("href")).toBe("/help/presbytery-reports");
+    expect(link.className).toMatch(/min-h-11/);
+  });
+
   it("a locked card is shown, says why, and is not a link", async () => {
     await renderOk({ held: { vacant_pulpits: false, membership_trend: true, viability: false, per_capita: true, buildings: true, insurance_and_loans: true } });
     const hub = within(screen.getByTestId("reports-hub"));

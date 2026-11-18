@@ -72,7 +72,7 @@ export type ProcessedPhoto =
     }
   | { kind: "refused"; reason: ImageRefusal };
 
-type Sniffed = "jpeg" | "png" | "webp";
+export type Sniffed = "jpeg" | "png" | "webp";
 
 function sniff(bytes: Buffer): Sniffed | null {
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpeg";
@@ -116,13 +116,28 @@ const EDGE_STEPS = [MASTER_MAX_EDGE, 1000, 800, 640] as const;
 
 const FLATTEN_BACKGROUND = "#ffffff";
 
-export async function processPhoto(bytes: Buffer, options: ProcessPhotoOptions): Promise<ProcessedPhoto> {
+/**
+ * Steps 1 to 3 of the order above (size, magic-byte sniff, APNG marker scan) and
+ * nothing else: no `sharp`, no header read, no pixel. A caller that has other
+ * cheap checks to run (its own authorization, its own cap) before it spends the
+ * decoder calls this first, so a wrong type is refused in the position its own
+ * refusal order names. `processPhoto` runs exactly this, so the two cannot
+ * disagree. Returns the format the bytes announce, or the refusal.
+ */
+export function preflightPhoto(bytes: Buffer): { kind: "ok"; format: Sniffed } | { kind: "refused"; reason: ImageRefusal } {
   if (bytes.byteLength === 0) return { kind: "refused", reason: "empty" };
   if (bytes.byteLength > UPLOAD_MAX_BYTES) return { kind: "refused", reason: "too_large" };
 
   const sniffed = sniff(bytes);
   if (sniffed === null) return { kind: "refused", reason: "unsupported_type" };
   if (sniffed === "png" && isAnimatedPng(bytes)) return { kind: "refused", reason: "animated" };
+  return { kind: "ok", format: sniffed };
+}
+
+export async function processPhoto(bytes: Buffer, options: ProcessPhotoOptions): Promise<ProcessedPhoto> {
+  const pre = preflightPhoto(bytes);
+  if (pre.kind === "refused") return pre;
+  const sniffed = pre.format;
 
   const open = () =>
     sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "error", animated: false });

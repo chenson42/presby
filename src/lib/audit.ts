@@ -772,6 +772,23 @@ export const AUDIT_ACTIONS = {
   OVERSIGHT_LOAN_UPDATED: "tenant.oversight_loan.updated",
   OVERSIGHT_LOAN_PAID_OFF: "tenant.oversight_loan.paid_off",
   OVERSIGHT_LOAN_REMOVED: "tenant.oversight_loan.removed",
+  // ---------------------------------------------------------------------------
+  // Congregation records, Increment 2: building photos (DECISION-344, 346).
+  // Written by src/lib/oversight/photo-store.ts with insertAuditRow(tx, ...) in
+  // the mutation's own transaction. resourceType "oversight_photo", resourceId
+  // the photo id. Metadata is ids and booleans only: never a caption, a
+  // filename, a hash, a dimension or the bytes (audit_events is
+  // platform-readable).
+  //   - OVERSIGHT_PHOTO_ADDED: { organizationId, aboutOrgId, buildingId,
+  //     photoId, cover } (cover: the new photo took the cover mark)
+  //   - OVERSIGHT_PHOTO_REMOVED: { ..., buildingId, photoId }
+  //   - OVERSIGHT_PHOTO_COVER_SET: { ..., buildingId, photoId,
+  //     previousCoverPhotoId } (null when no photo carried the mark)
+  //   - OVERSIGHT_PHOTO_CAPTION_SET: { ..., buildingId, photoId }
+  OVERSIGHT_PHOTO_ADDED: "tenant.oversight_photo.added",
+  OVERSIGHT_PHOTO_REMOVED: "tenant.oversight_photo.removed",
+  OVERSIGHT_PHOTO_COVER_SET: "tenant.oversight_photo.cover_set",
+  OVERSIGHT_PHOTO_CAPTION_SET: "tenant.oversight_photo.caption_set",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

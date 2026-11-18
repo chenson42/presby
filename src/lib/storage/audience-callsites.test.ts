@@ -69,6 +69,9 @@ const ACTIVE: Record<string, string[]> = {
   "src/components/org-portal/person-avatar.tsx": ["resolveMany:private"],
   "src/lib/brand/read-org-brand.ts": ["resolve:public_site"], // the mark, inlined as data:
   "src/lib/giving/statements.ts": ["store:private"], // the statement PDF
+  // building photos (DECISION-346): the master, then its thumbnail; the only writer (photo-store.ts), both private
+  "src/lib/oversight/photo-reads.ts": ["resolveMany:private"], // the grid's thumbnails, a cover's, and the one `?view=` master
+  "src/lib/oversight/photo-store.ts": ["store:private", "store:private"],
   // person photos: the master, then its thumbnail; the only writer (store.ts), both private
   "src/lib/person-photos/reader.ts": ["resolveMany:private"], // the photos page's thumbnails (and the one `?view=` master)
   "src/lib/person-photos/store.ts": ["store:private", "store:private"],

@@ -10,7 +10,7 @@ import sharp, { type Sharp, type CreateRaw } from "sharp";
 
 vi.mock("server-only", () => ({}));
 
-import { processPhoto as processPhotoWith } from "./photo";
+import { preflightPhoto, processPhoto as processPhotoWith } from "./photo";
 import { MASTER_MAX_BYTES, MASTER_MAX_EDGE, THUMB_EDGE } from "./limits";
 
 /** The person-photo call: a top-biased thumbnail (the output these tests pinned before the extraction). */
@@ -312,5 +312,25 @@ describe("processPhoto: the thumbnail gravity is the caller's choice (DECISION-3
     const source = readFileSync(path.resolve(__dirname, "photo.ts"), "utf8");
     expect(source).toMatch(/processPhoto\(bytes: Buffer, options: ProcessPhotoOptions\)/);
     expect(source).not.toMatch(/options\??:[^)]*=\s*\{/);
+  });
+});
+
+describe("preflightPhoto: the cheap half of the order, with no decode (DECISION-346)", () => {
+  it("is the refusal processPhoto gives for size, type and an animated PNG, and `ok` with the format otherwise", async () => {
+    expect(preflightPhoto(Buffer.alloc(0))).toEqual({ kind: "refused", reason: "empty" });
+    expect(preflightPhoto(Buffer.alloc(1_000_001, 1))).toEqual({ kind: "refused", reason: "too_large" });
+    expect(preflightPhoto(Buffer.from("%PDF-1.7 not a picture"))).toEqual({ kind: "refused", reason: "unsupported_type" });
+    expect(preflightPhoto(await jpegOf(64, 64))).toEqual({ kind: "ok", format: "jpeg" });
+    for (const bytes of [Buffer.alloc(0), Buffer.from("not an image"), await jpegOf(64, 64)]) {
+      const pre = preflightPhoto(bytes);
+      const processed = await processPhoto(bytes);
+      if (pre.kind === "refused") expect(processed).toEqual({ kind: "refused", reason: pre.reason });
+    }
+  });
+
+  it("decodes nothing: a truncated JPEG passes the preflight (only the decoder can tell) and is `unreadable` after it", async () => {
+    const truncated = (await jpegOf(300, 300)).subarray(0, 400);
+    expect(preflightPhoto(truncated)).toEqual({ kind: "ok", format: "jpeg" });
+    expect(await processPhoto(truncated)).toEqual({ kind: "refused", reason: "unreadable" });
   });
 });

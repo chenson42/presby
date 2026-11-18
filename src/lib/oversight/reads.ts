@@ -137,10 +137,11 @@ export interface LoanRow {
 
 /**
  * One transaction: the section's own key, then the congregation, then the read.
- * `read` returns null for "no such row under this congregation", which is the
+ * Exported for `photo-reads.ts`, which reads the photo table under the same key
+ * order. `read` returns null for "no such row under this congregation", which is the
  * same `not_found` as a congregation that is not ours.
  */
-async function readUnder<T>(
+export async function readUnder<T>(
   viewer: OversightViewer,
   key: string,
   aboutOrgId: string,

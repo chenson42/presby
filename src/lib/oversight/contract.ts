@@ -1,7 +1,8 @@
 /**
  * The congregation-records contract (docs/work-log/2026-11-17-congregation-
  * profile.md, Phase 3 "Module and file plan"; DECISION-344, 349). PURE: no
- * imports, so a form, a page, the validators, the store and the tests all read
+ * runtime imports (one type-only import, erased at build, from a file that has
+ * none), so a form, a page, the validators, the store and the tests all read
  * the same lists and limits. A client form may import it.
  *
  * Every closed list and every limit here is pinned against the migration by
@@ -14,6 +15,7 @@
  * (profile, assessment, buildings, photos); tier 2 is
  * `congregation_oversight.finance` (appraisals, insurance years, loans).
  */
+import type { ImageRefusal } from "@/lib/storage/image/limits";
 
 /** The two tenant permission keys. Never mapped into `FEATURES.*` (Permissions vs Flags). */
 export const OVERSIGHT_MANAGE_KEY = "congregation_oversight.manage";
@@ -110,6 +112,8 @@ export const LIMITS = {
   guaranteeNoteMax: 1000,
   loanNotesMax: 2000,
   captionMax: 200,
+  /** Live photos per building, counted after the building row is locked (DECISION-346). */
+  photoCap: 10,
   /** $1,000,000,000 in integer cents (DECISION-349). */
   moneyMaxCents: 100_000_000_000,
 } as const;
@@ -206,6 +210,34 @@ export interface Written {
   unchanged?: true;
 }
 
+/**
+ * Why a photo write was refused (Increment 2, copy C14). The six image kinds are
+ * `ImageRefusal` from the shared pipeline (`src/lib/storage/image/limits.ts`);
+ * every kind has one fixed string in `copy.ts` (`PHOTO_REFUSAL`), never raw
+ * error text. `feature_off` is the global `org_portal.oversight` toggle being off
+ * when an action arrives: it is worded as `not_found`, because with the toggle
+ * off the surface does not exist.
+ */
+export type PhotoRefusal =
+  | ImageRefusal
+  | "forbidden"
+  | "not_found"
+  | "building_removed"
+  | "duplicate"
+  | "cap_reached"
+  | "already_removed"
+  | "save_failed";
+
+export type PhotoOutcome<T> = { kind: "ok"; data: T } | { kind: "refused"; reason: PhotoRefusal };
+
+/** What a photo write returns on success. */
+export interface PhotoWritten {
+  /** The photo's id. */
+  id: string;
+  /** True when the call changed nothing (same caption, already the cover): nothing was written or audited. */
+  unchanged?: true;
+}
+
 /** What a read returns (the shape `presbytery-reports` uses, plus `not_found`). */
 export type OversightRead<T> = { kind: "ok"; data: T } | { kind: "forbidden" } | { kind: "not_found" };
 
@@ -234,4 +266,24 @@ export type OversightActionResult =
       error: string;
       field?: string;
       kind?: Refusal | "invalid" | "unauthenticated" | "two_factor_required";
+    };
+
+/** The success payload of a photo action: the photo's id, plus whether the upload took the cover. */
+export interface PhotoActionData extends PhotoWritten {
+  /** `addBuildingPhotoAction`: the new photo became the building's cover. */
+  cover?: boolean;
+}
+
+/**
+ * What a photo Server Action returns: `ActionResult`'s shape, plus `kind` (why)
+ * and, for a caption that fails its rule, `field: "caption"`. `error` is always
+ * one fixed `copy.ts` string, never database text.
+ */
+export type PhotoActionResult =
+  | { ok: true; data: PhotoActionData }
+  | {
+      ok: false;
+      error: string;
+      field?: string;
+      kind?: PhotoRefusal | Refusal | "invalid" | "unauthenticated" | "two_factor_required";
     };

@@ -16,6 +16,8 @@ import {
   paidOffSchema,
   parseAppraisal,
   parseBuilding,
+  parseCaption,
+  captionSchema,
   parseDate,
   parseInsurance,
   parseLoan,
@@ -507,5 +509,37 @@ describe("the zod schemas are the parsers (one rule, two wrappers)", () => {
     }
     expect(profileSchema(ENV).safeParse(profile()).success).toBe(true);
     expect(buildingSchema(ENV).safeParse(building()).success).toBe(true);
+  });
+});
+
+describe("parseCaption (C14)", () => {
+  it("is one line of at most 200 characters; empty clears it", () => {
+    expect(parseCaption({ caption: "The front steps" })).toEqual({ ok: true, value: { caption: "The front steps" } });
+    expect(parseCaption({ caption: "" })).toEqual({ ok: true, value: { caption: null } });
+    expect(parseCaption({ caption: "   " })).toEqual({ ok: true, value: { caption: null } });
+    expect(parseCaption({ caption: "a".repeat(200) })).toEqual({ ok: true, value: { caption: "a".repeat(200) } });
+    const tooLong = parseCaption({ caption: "a".repeat(201) });
+    expect(tooLong).toMatchObject({ ok: false, field: "caption", message: "Caption must be 200 characters or fewer." });
+  });
+
+  it("measures code points like char_length: 200 emoji pass, 201 do not", () => {
+    expect(parseCaption({ caption: "\u{1F3E0}".repeat(200) }).ok).toBe(true);
+    expect(parseCaption({ caption: "\u{1F3E0}".repeat(201) }).ok).toBe(false);
+  });
+
+  it("control characters and line breaks become single spaces; the ends are trimmed", () => {
+    expect(parseCaption({ caption: "  north\nwall\t\u0007 side  " })).toEqual({ ok: true, value: { caption: "north wall side" } });
+  });
+
+  it("a value of the wrong type reads as empty (a tampered submit clears nothing it should not keep)", () => {
+    expect(parseCaption({ caption: 5 })).toEqual({ ok: true, value: { caption: null } });
+    expect(parseCaption(null)).toEqual({ ok: true, value: { caption: null } });
+  });
+
+  it("the zod schema is the parser", () => {
+    expect(captionSchema().safeParse({ caption: "ok" }).success).toBe(true);
+    const bad = captionSchema().safeParse({ caption: "a".repeat(201) });
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.error.issues[0]).toMatchObject({ path: ["caption"], message: "Caption must be 200 characters or fewer." });
   });
 });

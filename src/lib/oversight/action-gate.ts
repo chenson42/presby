@@ -4,8 +4,18 @@ import { auth } from "@/auth";
 import { resolveOrgContext } from "@/lib/authz";
 import { isUuid } from "@/lib/is-uuid";
 import { assertOrgSession } from "@/lib/org-portal/session-check";
-import type { ActionData, Outcome, OversightActionResult, OversightCtx, Refusal, Written } from "./contract";
-import { GATE_COPY, REFUSAL, refusalMessage } from "./copy";
+import type {
+  ActionData,
+  Outcome,
+  OversightActionResult,
+  OversightCtx,
+  PhotoActionResult,
+  PhotoOutcome,
+  PhotoWritten,
+  Refusal,
+  Written,
+} from "./contract";
+import { GATE_COPY, REFUSAL, photoRefusalMessage, refusalMessage } from "./copy";
 import type { Parsed, ValidationEnv } from "./validate";
 
 /**
@@ -130,4 +140,27 @@ export function finish(
     case "invalid":
       return { ok: false, error: outcome.message, field: outcome.field, kind: "invalid" };
   }
+}
+
+/**
+ * A photo store outcome as the `PhotoActionResult` the client toasts, revalidating
+ * the record page, the building page and the photos page when something was
+ * written. Every sentence is a `copy.ts` string; a refusal never carries database text.
+ */
+export function finishPhoto(
+  identity: OversightActionIdentity,
+  aboutOrgId: string,
+  buildingId: string,
+  outcome: PhotoOutcome<PhotoWritten & { cover?: boolean }>,
+): PhotoActionResult {
+  if (outcome.kind === "refused") {
+    return { ok: false, error: photoRefusalMessage(outcome.reason), kind: outcome.reason };
+  }
+  if (!outcome.data.unchanged) {
+    const record = `/o/${identity.slug}/admin/oversight/${aboutOrgId}`;
+    revalidatePath(record);
+    revalidatePath(`${record}/buildings/${buildingId}`);
+    revalidatePath(`${record}/buildings/${buildingId}/photos`);
+  }
+  return { ok: true, data: outcome.data };
 }

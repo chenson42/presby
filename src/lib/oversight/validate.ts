@@ -613,6 +613,24 @@ export function parsePaidOff(values: unknown, env: ValidationEnv): Parsed<{ paid
 }
 
 // ---------------------------------------------------------------------------
+// Photo caption (C14)
+// ---------------------------------------------------------------------------
+
+export interface CaptionValues {
+  caption: string;
+}
+
+/** A one-line caption: control characters out, at most 200 characters, empty clears it (null). */
+export function parseCaption(values: unknown): Parsed<{ caption: string | null }> {
+  const v = (values ?? {}) as Record<string, unknown>;
+  const clean = textLine(v.caption, LIMITS.captionMax, VALIDATION.captionTooLong);
+  if (!clean.ok) {
+    return { ok: false, errors: { caption: clean.message }, field: "caption", message: clean.message };
+  }
+  return { ok: true, value: { caption: clean.value } };
+}
+
+// ---------------------------------------------------------------------------
 // zod schemas for the forms (thin wrappers over the parsers above)
 // ---------------------------------------------------------------------------
 
@@ -628,6 +646,8 @@ function refine<T extends z.ZodTypeAny>(
     }
   }) as unknown as z.ZodType<z.infer<T>, z.infer<T>>;
 }
+
+export const captionSchema = () => refine(z.object({ caption: z.string() }), (values) => parseCaption(values));
 
 export const profileSchema = (env: ValidationEnv) =>
   refine(

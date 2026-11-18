@@ -205,3 +205,72 @@ describe("the scan's helpers fail on samples that break the rules", () => {
     expect(auditCalls("await audit(tx, c, K, 't', i, a, {}); await audit(tx, c, K, 't', i, a, {});")).toHaveLength(2);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Increment 2: src/lib/oversight/photo-store.ts (building photos)
+// ---------------------------------------------------------------------------
+
+const PHOTO_STORE = readFileSync(path.join(__dirname, "photo-store.ts"), "utf8");
+
+const PHOTO_KEYS: Record<string, string> = {
+  OVERSIGHT_PHOTO_ADDED: "tenant.oversight_photo.added",
+  OVERSIGHT_PHOTO_REMOVED: "tenant.oversight_photo.removed",
+  OVERSIGHT_PHOTO_COVER_SET: "tenant.oversight_photo.cover_set",
+  OVERSIGHT_PHOTO_CAPTION_SET: "tenant.oversight_photo.caption_set",
+};
+
+/** function -> [audit key, allowed metadata keys beyond organizationId and aboutOrgId]. Ids and booleans only. */
+const PHOTO_WRITES: Record<string, [string, string[]]> = {
+  addPhoto: ["OVERSIGHT_PHOTO_ADDED", ["buildingId", "photoId", "cover"]],
+  setPhotoCaption: ["OVERSIGHT_PHOTO_CAPTION_SET", ["buildingId", "photoId"]],
+  setPhotoCover: ["OVERSIGHT_PHOTO_COVER_SET", ["buildingId", "photoId", "previousCoverPhotoId"]],
+  removePhoto: ["OVERSIGHT_PHOTO_REMOVED", ["buildingId", "photoId"]],
+};
+
+const photoFns = exportedFunctions(PHOTO_STORE);
+
+describe("audit coverage of src/lib/oversight/photo-store.ts (U6, Increment 2)", () => {
+  it("finds the module's photo writes (the scan is not vacuous)", () => {
+    expect(photoFns.map((f) => f.name).sort()).toEqual(Object.keys(PHOTO_WRITES).sort());
+  });
+
+  it("the four keys exist in AUDIT_ACTIONS as tenant.oversight_photo.*", () => {
+    for (const [key, value] of Object.entries(PHOTO_KEYS)) {
+      expect(AUDIT_TS, key).toContain(`${key}: "${value}"`);
+      expect(value).toMatch(/^tenant\.oversight_photo\.[a-z_]+$/);
+    }
+  });
+
+  it("every write calls audit( exactly once, with its own key and the oversight_photo resource type", () => {
+    for (const fn of photoFns) {
+      const calls = auditCalls(fn.body);
+      expect(calls, `${fn.name} must audit exactly once`).toHaveLength(1);
+      const [key] = PHOTO_WRITES[fn.name]!;
+      expect(calls[0], fn.name).toContain(`AUDIT_ACTIONS.${key},`);
+    }
+  });
+
+  it("audit() writes with insertAuditRow(tx, ...) in the same transaction, and recordAudit is nowhere in the file", () => {
+    const code = stripComments(PHOTO_STORE);
+    const body = /async function audit\([\s\S]*?\n}\n/.exec(code)?.[0] ?? "";
+    expect(body).toMatch(/insertAuditRow\(\s*tx\b/);
+    expect(body).toContain('resourceType: "oversight_photo"');
+    expect(body).toMatch(/metadata: \{ organizationId: ctx\.organizationId, aboutOrgId, \.\.\.metadata \}/);
+    expect(code).not.toMatch(/\brecordAudit\b/);
+    expect(code).toMatch(/from "@\/lib\/audit-tx"/);
+  });
+
+  it("the metadata keys each call passes equal the allowlist: ids and booleans, never a caption, hash, dimension or filename", () => {
+    for (const fn of photoFns) {
+      const [, allowed] = PHOTO_WRITES[fn.name]!;
+      const keys = metadataKeys(auditCalls(fn.body)[0]!);
+      expect(keys.sort(), fn.name).toEqual([...allowed].sort());
+      for (const key of keys) expect(key).not.toMatch(/caption|hash|width|height|name|filename|bytes|key/i);
+    }
+  });
+
+  it("every one of the four photo keys is used", () => {
+    expect([...new Set(Object.values(PHOTO_WRITES).map(([key]) => key))].sort()).toEqual(Object.keys(PHOTO_KEYS).sort());
+  });
+});

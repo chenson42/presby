@@ -67,3 +67,7 @@ A Founding Administrator cannot, on the first day:
 - turn on "Website domain", which is not on the Features page.
 
 For these, the PresbyPortal team sets things up. {{contactAdmin}} When the team gives you a role that allows them, you can give the same role to others.
+
+### A presbytery's Founding Administrator
+
+A presbytery's Founding Administrator can also see and record each member congregation's appraisals, insurance and loans, where "Congregation Oversight" is turned on. To let someone else do that, create a role that includes the permission described as "See and record a member congregation's appraisals, insurance and loans (the presbytery's own record)", and give it to them. They are asked to set up two-factor sign-in at their next sign-in, if they have not already. See [Congregation records](/help/congregation-records).

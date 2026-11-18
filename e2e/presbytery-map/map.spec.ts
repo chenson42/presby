@@ -425,7 +425,8 @@ test.describe.serial("Presbytery dashboard map (2026-11-17-presbytery-dashboard-
     const page = await context.newPage();
     await mockProvider(page);
 
-    await page.goto(`/o/${SLUG}/admin/oversight/${GAMMA.id}`);
+    // The assessment form moved to its own page (congregation profile Increment 1, T1); the record page is now five sections.
+    await page.goto(`/o/${SLUG}/admin/oversight/${GAMMA.id}/assessment/edit`);
     await expect(page.locator("#oversight-latitude")).toBeEnabled();
     await page.locator("#oversight-latitude").fill("39.7");
     await page.locator("#oversight-longitude").fill("-83.2");

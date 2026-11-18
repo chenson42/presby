@@ -187,6 +187,13 @@ src/lib/presbytery-reports/ — presbytery reports (DECISION-337 to 339): contra
                          both its page and its CSV export, which audits in the read's transaction.
                          boundaries.test.ts pins the gate, the audit and no getPlatformDb
 src/components/presbytery-reports/ — the reports' views (cards below sm, a table above)
+src/lib/oversight/     — a presbytery's own records about its congregations (DECISION-344 to 351):
+                         contract.ts, validate.ts, copy.ts and derive.ts (pure); store.ts, the ONLY
+                         writer of the oversight_* record tables (audit in the same transaction);
+                         reads.ts (one reader per section, each under its own key in its own
+                         transaction); tier 1 `congregation_oversight.manage`, tier 2
+                         `congregation_oversight.finance`. boundaries.test.ts pins the writer, the
+                         table names and no getPlatformDb
 src/lib/org-portal/session-check.ts, permission-check.ts — the (org) Node-side session/2FA
                          check (pure) and the in-transaction permission helper (DECISION-338);
                          treasury/session.ts and keys.ts re-export them; in check:treasury-boundaries T1
@@ -670,6 +677,13 @@ above tier 1 in that bundle). The founding administrator can read job
 applications once they exist; the key reads nothing until the applications
 increment ships, and that increment's resume-download audit row is what detects
 use. `paper`.
+
+*Third known violation:* the presbytery founding-administrator bundle carries
+`congregation_oversight.finance`, a tier-2 key (DECISION-345; the F150/F292
+reason: under `assertPermissionSubset()` a key nobody at an organization holds
+can never be granted). The founding administrator of a presbytery can read the
+presbytery's appraisal, insurance and loan records for its congregations. Every
+write is audited; reads are not. `paper`.
 
 ### Permissions vs Flags
 

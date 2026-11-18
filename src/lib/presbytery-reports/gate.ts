@@ -6,7 +6,7 @@ import { cachedAuth } from "@/lib/auth/cached-auth";
 import { assertOrgAccess, OrgAccessError, resolveOrgContext, type OrganizationType } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { assertOrgSession, orgTotpRedirectUrl } from "@/lib/org-portal/session-check";
-import { INSIGHTS_FLAG, REPORT_ORG_TYPES, REPORTS_FLAG, type ReportExport, type ReportRead, type ReportViewer } from "./contract";
+import { INSIGHTS_FLAG, OVERSIGHT_FLAG, REPORT_ORG_TYPES, REPORTS_FLAG, type ReportExport, type ReportRead, type ReportViewer } from "./contract";
 import { ROUTE_COPY } from "./copy";
 
 /**
@@ -35,9 +35,14 @@ import { ROUTE_COPY } from "./copy";
  * under the four segments calls this file.
  *
  * The page skin is one private core, `gatePresbyteryPage`, with a closed flag
- * union and no default, and two named exports over it (DECISION-342): no call
- * site passes a flag, so none can pass the wrong one, and `boundaries.test.ts`
- * pins each page to its own name.
+ * union and no default, and three named exports over it (DECISION-342, 347): no
+ * call site passes a flag, so none can pass the wrong one, and the
+ * `boundaries.test.ts` of each surface pins each page to its own name. The third,
+ * `gateOversightPage`, is Congregation Oversight's (`org_portal.oversight`):
+ * every page under `admin/oversight/**`, old and new, calls it, which adds the
+ * Node-side second-factor recheck the shipped oversight pages lacked (F452). Like
+ * the others it checks no KEY: each oversight reader checks its own, inside its
+ * own transaction.
  *
  * No `callbackUrl` or `next` is ever READ: the only redirects carry the
  * request's own path and query.
@@ -62,7 +67,7 @@ export type ReportPageGate =
   | { ok: false; state: ReportGateState };
 
 /** The flags a presbytery page gate may check: a closed union, never a free string. */
-type PresbyteryPageFlag = typeof REPORTS_FLAG | typeof INSIGHTS_FLAG;
+type PresbyteryPageFlag = typeof REPORTS_FLAG | typeof INSIGHTS_FLAG | typeof OVERSIGHT_FLAG;
 
 interface PageGateOptions {
   slug: string;
@@ -78,6 +83,11 @@ export function gateReportPage(options: PageGateOptions): Promise<ReportPageGate
 /** The dashboard's gate (`/admin/insights`): the `org_portal.insights` flag, same order and result. */
 export function gateInsightsPage(options: PageGateOptions): Promise<ReportPageGate> {
   return gatePresbyteryPage({ ...options, flag: INSIGHTS_FLAG });
+}
+
+/** Congregation Oversight's gate (`/o/<slug>/admin/oversight/**`): the `org_portal.oversight` flag, same order and result (DECISION-347). */
+export function gateOversightPage(options: PageGateOptions): Promise<ReportPageGate> {
+  return gatePresbyteryPage({ ...options, flag: OVERSIGHT_FLAG });
 }
 
 async function gatePresbyteryPage(options: PageGateOptions & { flag: PresbyteryPageFlag }): Promise<ReportPageGate> {

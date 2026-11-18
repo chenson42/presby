@@ -44,8 +44,6 @@ const ROW: OversightRow = {
   viabilityScore: null,
   redevelopmentNotes: null,
   buildingsNotes: null,
-  insuranceCarrier: null,
-  insuranceExpiresOn: null,
   latitude: null,
   longitude: null,
   updatedAt: null,
@@ -200,5 +198,14 @@ describe("OversightEditForm — the save toast", () => {
 
   it("adds no description when the pair is cleared (nothing to see on the map)", async () => {
     expect(await saveWith(true, "", "")).toEqual(["Oversight record saved.", undefined]);
+  });
+});
+
+describe("OversightEditForm — touch targets", () => {
+  it("the viability select and both coordinate boxes are 44px controls (min-h-11) — regression for the assessment form at 360px", () => {
+    render(<OversightEditForm slug="northern-reach" aboutOrgId="cong-1" row={ROW} mapOn={false} />);
+    for (const control of [screen.getByLabelText("Viability"), lat(), lng()]) {
+      expect(control.className, control.id).toContain("min-h-11");
+    }
   });
 });

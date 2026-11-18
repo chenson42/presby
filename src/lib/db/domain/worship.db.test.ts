@@ -768,7 +768,8 @@ describe.skipIf(!hasDb)("drizzle/0085 worship (Postgres-backed, owner path)", ()
       for (const t of ["presbytery", "synod", "general_assembly"]) {
         expect(byType[t]!.some((k) => k.startsWith("worship.")), t).toBe(false);
       }
-      expect(byType.presbytery!.at(-1)).toBe("congregation_oversight.manage");
+      // drizzle/0089 (DECISION-345) appends the finance key after the manage key.
+      expect(byType.presbytery!.slice(-2)).toEqual(["congregation_oversight.manage", "congregation_oversight.finance"]);
       expect(byType.synod).toHaveLength(11);
     });
 

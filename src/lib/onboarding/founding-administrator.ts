@@ -150,8 +150,20 @@ export function foundingAdministratorPlan(
     organizationType === "new_worshiping_community"
       ? ["worship.manage", "worship.plan", "worship.schedule"]
       : [];
+  // Congregation records (docs/work-log/2026-11-17-congregation-profile.md,
+  // DECISION-345, F450): `congregation_oversight.finance` (TIER 2, two-factor)
+  // joins the presbytery arm after `congregation_oversight.manage`, for the
+  // same F111 reason as domains.manage and the careers keys: a key nobody at
+  // the presbytery holds can never be granted there, so without it the
+  // appraisal, insurance and loan records would be unreachable. The founding
+  // administrator delegates it through a custom role. CLAUDE.md records it as
+  // the third known violation under No Role Carries a Wildcard (`paper`;
+  // writes audited, reads not). drizzle/0089 re-creates the SQL function in
+  // the same order and backfills presbytery founding roles already designated.
   const oversight =
-    organizationType === "presbytery" ? ["congregation_oversight.manage"] : [];
+    organizationType === "presbytery"
+      ? ["congregation_oversight.manage", "congregation_oversight.finance"]
+      : [];
   return {
     administration: {
       key: "founding_administrator",

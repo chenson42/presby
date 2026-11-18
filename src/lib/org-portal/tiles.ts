@@ -562,7 +562,7 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   {
     key: "oversight",
     label: "Congregation Oversight",
-    description: "A presbytery's downward read into its member congregations.",
+    description: "The presbytery's own record of each member congregation: viability, profile, buildings, insurance and loans.",
     href: (slug) => `/o/${slug}/admin/oversight`,
     flagKey: "org_portal.oversight",
     category: "operate",

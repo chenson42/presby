@@ -73,10 +73,11 @@ Each congregation shows the rating the presbytery recorded on "Congregation Over
 
 A congregation appears on the map when it has a location on "Congregation Oversight". "Congregation Oversight" must be turned on (the PresbyPortal team switches it on for the whole platform), and you need the permission to manage congregation oversight.
 
-1. Open "Congregation Oversight", then choose the congregation.
-2. Under "Map location", enter the "Latitude" first. It is a decimal number between -90 and 90, for example 39.9612.
-3. Enter the "Longitude". It is a decimal number between -180 and 180. A congregation in the United States has a negative longitude, for example -82.9988.
-4. Choose "Save".
+1. Open "Congregation Oversight", then choose "Open" beside the congregation.
+2. In the "Assessment" section, choose "Edit assessment".
+3. Under "Map location", enter the "Latitude" first. It is a decimal number between -90 and 90, for example 39.9612.
+4. Enter the "Longitude". It is a decimal number between -180 and 180. A congregation in the United States has a negative longitude, for example -82.9988.
+5. Choose "Save".
 
 Enter both numbers or neither. To copy them from a maps application, copy the pair of numbers it shows, for example 39.9612, -82.9988, and paste it into either box: both boxes fill themselves, and you should check them before you save. A latitude and longitude of 0 and 0 is refused, because it is a point in the ocean. If a pin lands in the wrong place, check the signs. To take a congregation off the map, clear both boxes and choose "Save".
 

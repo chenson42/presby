@@ -186,6 +186,28 @@ const ALLOWLIST: Array<{
       "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION (drizzle/0078 section 1, person_photos_thumb_fk); person-photos.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
     since: "2026-10-26",
   },
+  // Building photos (drizzle/0089 section 4c, DECISION-344/346): the same
+  // shape and reason as person_photos above. oversight.ts does not import
+  // assets.ts (DECISION-058; its header says so). The table ships in 0.61.0
+  // and is written from Increment 2.
+  {
+    table: "oversight_building_photos",
+    kind: "extra_fk",
+    fk: "(asset_audience,image_asset_key,organization_id) -> blob_assets(audience,id,organization_id)",
+    category: "architectural",
+    reason:
+      "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION (drizzle/0089 section 4c, oversight_building_photos_image_fk); oversight.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
+    since: "2026-11-17",
+  },
+  {
+    table: "oversight_building_photos",
+    kind: "extra_fk",
+    fk: "(asset_audience,organization_id,thumb_asset_key) -> blob_assets(audience,organization_id,id)",
+    category: "architectural",
+    reason:
+      "DDL-only three-column composite FK into blob_assets pinned to audience 'private', NO ACTION (drizzle/0089 section 4c, oversight_building_photos_thumb_fk); oversight.ts does not import assets.ts (DECISION-058; see assets.ts's header).",
+    since: "2026-11-17",
+  },
   // The treasury receipt (Treasury Increment 1, Batch 1b). Same shape and the
   // same reason as giving_statements above: reimbursement.ts does not import
   // assets.ts (DECISION-058). Enforced at drizzle/0073_presby_reimbursements.sql

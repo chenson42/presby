@@ -25,6 +25,10 @@ is checked.*
 
 ---
 
+## 2026-11-18
+
+- [ ] **`decision` · Congregation records shipped (0.61.0, DECISION-344 to DECISION-351, migration 0089).** A presbytery's Congregation Oversight now opens a record per congregation: profile, buildings with appraisals, insurance by year and loans. The new key `congregation_oversight.finance` (tier 2, two-factor) is in the presbytery founding-administrator bundle, the first financial key there (third known violation in CLAUDE.md; reversible by removing it from the bundle function). 0089 backfills it to existing presbytery founding administrators, so each of them is newly asked for two-factor at their next page load if not enrolled; the deploy records that count. **Your action:** switch `org_portal.oversight` on in production; until then nobody reaches these pages. Open question: the clerk's wording for "Interested in the insurance pool". F455 (assessment audit after commit) is deferred and stated in the help.
+
 ## 2026-11-17
 
 - [ ] **`defect` · Next.js patched to 16.4.6 (0.60.1, no DECISION).** Clears two moderate Next.js advisories that touched a caching feature we do not use, and the start-up notice that had begun stopping local test servers on many starts. Nothing anyone sees changes. Sign-in and two-factor tests passed 99 of 99 on the new version. **Unchanged:** the remaining package advisories (none high in production) on their existing TODO line, now with corrected counts.

@@ -940,13 +940,17 @@ rollback;
 --     are in Vitest), the fixture-wide agreement, and the resolver pin.
 -- ===========================================================================
 begin;
-  -- Nine: the three giving keys (0055), the three administration keys
-  -- (drizzle/0080, F343, DECISION-291), and the three reimbursement keys
+  -- Ten: the three giving keys (0055), the three administration keys
+  -- (drizzle/0080, F343, DECISION-291), the three reimbursement keys
   -- (drizzle/0074, DECISION-269, F323: reimbursement.view, .pay and .manage;
-  -- request_for_others does not require it). A pipeline that flags another
-  -- key updates this count when it merges.
-  select assert_eq((select count(*) from permissions where requires_two_factor), 9,
-                   '46j: requires_two_factor is true for exactly nine keys (0055 giving, 0074 reimbursement, 0080 administration)');
+  -- request_for_others does not require it), and congregation_oversight.finance
+  -- (drizzle/0089, DECISION-345). A pipeline that flags another key updates
+  -- this count when it merges.
+  select assert_eq((select count(*) from permissions where requires_two_factor), 10,
+                   '46j: requires_two_factor is true for exactly ten keys (0055 giving, 0074 reimbursement, 0080 administration, 0089 oversight finance)');
+  select assert_eq((select count(*) from permissions where requires_two_factor
+                     and key = 'congregation_oversight.finance' and module = 'presbytery' and sensitivity_tier = 2),
+                   1, '46j: ...one is congregation_oversight.finance, module presbytery, tier 2 (drizzle/0089, DECISION-345)');
   select assert_eq((select count(*) from permissions where requires_two_factor
                      and key in ('reimbursement.view','reimbursement.pay','reimbursement.manage')
                      and module = 'reimbursement' and sensitivity_tier = 2),

@@ -730,6 +730,48 @@ export const AUDIT_ACTIONS = {
   //     { allYears: true } (or none for vacant pulpits and viability). Never a
   //     congregation name, a note or an amount.
   PRESBYTERY_REPORT_EXPORTED: "tenant.presbytery_report.exported",
+  // ---------------------------------------------------------------------------
+  // Congregation records, Increment 1 (docs/work-log/2026-11-17-congregation-
+  // profile.md, Phase 3 "API Contract"; DECISION-344, 349). Written by
+  // src/lib/oversight/store.ts with insertAuditRow(tx, ...) INSIDE the
+  // mutation's own transaction, so a failed audit insert undoes the change.
+  // `check:audit` scans only actions.ts files that call `db.` directly and so
+  // cannot see them; src/lib/oversight/audit-coverage.test.ts and store.db.test.ts
+  // are the guard. resourceType is the table's singular noun, resourceId the
+  // row id. Metadata is ids, closed enumerations, booleans, years and field
+  // NAMES only: never an amount, a policy number, a carrier or lender, a caption,
+  // a note or an address (audit_events is platform-readable).
+  //   - OVERSIGHT_PROFILE_SET: { organizationId, aboutOrgId, created, changed }
+  //   - OVERSIGHT_BUILDING_CREATED: { organizationId, aboutOrgId, buildingId,
+  //     primary, previousPrimaryBuildingId }
+  //   - OVERSIGHT_BUILDING_UPDATED: { ..., buildingId, changed } (+
+  //     previousPrimaryBuildingId when it took the primary mark; "retired" in
+  //     `changed` is a bring-back)
+  //   - OVERSIGHT_BUILDING_RETIRED: { ..., buildingId, reason }
+  //   - OVERSIGHT_BUILDING_REMOVED: { ..., buildingId }
+  //   - OVERSIGHT_APPRAISAL_RECORDED: { ..., buildingId, appraisalId, assessedYear }
+  //   - OVERSIGHT_APPRAISAL_REMOVED: { ..., buildingId, appraisalId }
+  //   - OVERSIGHT_INSURANCE_RECORDED: { ..., insuranceId, policyYear }
+  //   - OVERSIGHT_INSURANCE_UPDATED: { ..., insuranceId, policyYear, changed }
+  //   - OVERSIGHT_INSURANCE_REMOVED: { ..., insuranceId, policyYear }
+  //   - OVERSIGHT_LOAN_RECORDED: { ..., loanId, kind }
+  //   - OVERSIGHT_LOAN_UPDATED: { ..., loanId, kind, changed }
+  //   - OVERSIGHT_LOAN_PAID_OFF: { ..., loanId, kind }
+  //   - OVERSIGHT_LOAN_REMOVED: { ..., loanId, kind }
+  OVERSIGHT_PROFILE_SET: "tenant.oversight_profile.set",
+  OVERSIGHT_BUILDING_CREATED: "tenant.oversight_building.created",
+  OVERSIGHT_BUILDING_UPDATED: "tenant.oversight_building.updated",
+  OVERSIGHT_BUILDING_RETIRED: "tenant.oversight_building.retired",
+  OVERSIGHT_BUILDING_REMOVED: "tenant.oversight_building.removed",
+  OVERSIGHT_APPRAISAL_RECORDED: "tenant.oversight_appraisal.recorded",
+  OVERSIGHT_APPRAISAL_REMOVED: "tenant.oversight_appraisal.removed",
+  OVERSIGHT_INSURANCE_RECORDED: "tenant.oversight_insurance.recorded",
+  OVERSIGHT_INSURANCE_UPDATED: "tenant.oversight_insurance.updated",
+  OVERSIGHT_INSURANCE_REMOVED: "tenant.oversight_insurance.removed",
+  OVERSIGHT_LOAN_RECORDED: "tenant.oversight_loan.recorded",
+  OVERSIGHT_LOAN_UPDATED: "tenant.oversight_loan.updated",
+  OVERSIGHT_LOAN_PAID_OFF: "tenant.oversight_loan.paid_off",
+  OVERSIGHT_LOAN_REMOVED: "tenant.oversight_loan.removed",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

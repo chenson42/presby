@@ -1756,6 +1756,49 @@ founding-administrator invitation.
 
 **Rollback.** There is no global switch. The toggle is the per-organization off switch and deletes nothing (nothing is stored). Pulling the feature from every organization at once takes a deploy (revert and redeploy); an owner-connection `update organization_feature_toggles set enabled = false where feature_key = 'org_portal.spot_the_scam'` is break-glass, writes no audit row, and is not a product feature (DECISION-334).
 
+## Congregation records (0089)
+
+**Not yet applied to production** (v0.61.0; `docs/work-log/2026-11-17-congregation-profile-inc1.md`; DECISION-344 to 352; F450 to F455). Migration `0089`. Additive and idempotent (a whole-file second apply leaves the same catalog and writes nothing): six tables (`oversight_profiles`, `oversight_buildings`, `oversight_building_photos`, `oversight_building_appraisals`, `oversight_insurance_years`, `oversight_loans`; FORCE RLS, no DELETE or TRUNCATE grant, `unique (id, organization_id)`, composite foreign keys), the new tier-2 permission `congregation_oversight.finance` (`requires_two_factor`), the re-created `presby_founding_administrator_permission_keys` (the presbytery arm gains the finance key) with a backfill of every existing presbytery `founding_administrator` role, three guard functions, and comment-only restatements. It needs `0072` (it refuses to run without it) and touches no existing row's data.
+
+### Pre-deploy runbook: 0089, then the code
+
+1. **Order: counts, snapshot `production`, apply `0089`, verify, then merge and deploy in the same sitting.** Every merge to `main` auto-deploys production, so **0089 is applied BEFORE the code is merged**. New code against the old schema fails on the missing tables; the old code against the new schema is harmless (the old assessment form still writes its two dormant columns, and no old code reads a new table).
+2. **Counts, read-only, on the owner connection just before the apply.** Record only the numbers (No Real Data): never a name, an address or an id. Each inside `begin transaction read only; ... rollback;`.
+   - **Legacy carrier and expiry rows (R8, DECISION-347).** The old assessment form's two fields stay in the table, visible to nobody. On 2026-11-17: 0 rows. **If this is not 0, stop and tell the operator the number:** the import session converts those rows into insurance records, and the release note must not say nothing had been entered.
+
+     ```sql
+     begin transaction read only;
+     select count(*) filter (where insurance_carrier is not null) as carrier_rows,
+            count(*) filter (where insurance_expires_on is not null) as expiry_rows,
+            count(*) filter (where buildings_notes is not null) as property_notes_rows
+       from congregation_oversight;
+     rollback;
+     ```
+   - **Who will be newly required to use two-factor (R2).** The finance key is flagged, so anyone who holds it at any membership is asked to enrol at their next sign-in. Expected: no change, because a presbytery founding administrator already holds the flagged `roles.manage`. Read "required, but not enrolled" from `/admin/2fa` (or the shared count in `src/lib/admin/two-factor-stranded.ts`) **before** and **after** the apply and record the two numbers. **If the after number is higher, stop and tell the operator how many, and put it in the release note** (the 0080 precedent).
+3. **Snapshot `production`** in Neon (for example `pre-migration-0089-<date>`) before any statement runs; `restore_snapshot` is the emergency rollback.
+4. **Read the live body of `presby_founding_administrator_permission_keys` first** (F362, and 0085, also re-create it). Whichever migration is applied second must carry the other's keys: 0089 re-creates the function from the live 0085 body plus the finance key, so apply it after 0085 and after any F362 fix, and diff the three array texts against `development` before the apply.
+5. **Apply `0089` WITH `-1`, as the owner, on the direct endpoint** (the endpoint-host swap of `MIGRATE_DATABASE_URL`): `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0089_presby_oversight_records.sql`. The migration prints a notice of how many founding-administrator roles the backfill topped up with the finance key (`oversight 0089: N founding_administrator role(s) at a presbytery topped up with the finance key`): **note that number.** A second apply prints 0.
+6. **Verify** (read-only), then merge and deploy:
+   - The permission exists, tier 2, flagged: `select sensitivity_tier, requires_two_factor from permissions where key = 'congregation_oversight.finance';` returns `2` and `t`.
+   - The bundle carries both oversight keys: `select presby_founding_administrator_permission_keys('presbytery');` ends `congregation_oversight.manage, congregation_oversight.finance`; for `'congregation'` and `'synod'` it carries neither oversight key.
+   - Every existing presbytery founding role holds the finance key: the query below returns 0.
+
+     ```sql
+     select count(*) from app_roles r join organizations o on o.id = r.organization_id
+      where r.key = 'founding_administrator' and o.organization_type = 'presbytery'
+        and not exists (select 1 from app_role_permissions p where p.role_id = r.id and p.permission_key = 'congregation_oversight.finance');
+     ```
+   - The six tables are forced and `presby_app` holds no DELETE: `select count(*) from pg_class where relname like 'oversight\_%' and relkind = 'r' and relrowsecurity and relforcerowsecurity;` returns 6, and `select count(*) from information_schema.role_table_grants where table_name like 'oversight\_%' and grantee in ('presby_app','presby_platform') and privilege_type in ('DELETE','TRUNCATE');` returns 0.
+7. **Merge and deploy the code** in the same sitting (`/merge-pr`). Then fill the release note's two deploy-day counts (point 2).
+8. **Operator, after the deploy:** switch `org_portal.oversight` on in production (it is off today, so nothing in this release is reachable until then; a global flag flip is a Rule 17 event) and confirm `org_portal.reports` and `org_portal.insights`. Then read `/help/congregation-records`, `/help/presbytery-reports` and `/help/roles-who-can-do-what` against that state.
+9. **On `development`, after merge:** apply `0089` the same way, then `scripts/oversight/seed-dev-oversight.sql`, then re-run `scripts/test-rls.sql` as `presby_app` (Rule 16) and `scripts/oversight/test-rls-89.sql` standalone. Do not rely on the full `test-rls.sql` alone while the known presbytery-count drift halts it at line 219 (see the Learn section above).
+10. **The founding-administrator walk (R2), on the deployed environment with a throwaway congregation council:** a founder designated through the platform operator's real designation sees all five sections; creates a custom role carrying only `congregation_oversight.finance` and grants it to a second person; that person is sent to enrol two-factor, enrols, and sees Insurance and Loans open and Profile, Assessment and Buildings Locked; a person who holds only `congregation_oversight.manage` sees Insurance and Loans Locked. `e2e/oversight-founder.spec.ts` is the scripted version.
+11. **Rollback** is a forward migration, never an edit of 0089 once shipped. The tables hold presbytery records and are never dropped. To withdraw the key from founders: re-create the function without the finance key and delete the key from the founding roles' `app_role_permissions` (and from any custom role). Anyone given the key through a custom role is no longer asked to enrol once the permission's `requires_two_factor` is cleared. A code rollback alone is safe against the new schema (the old code never reads a new table).
+
+**What to tell the operator after merging.** The presbytery founding administrator now holds a tier-2 key (the third recorded known violation of "no role carries a wildcard", DECISION-345, `paper`); anyone given the key is asked to use two-factor; the new pages stay hidden until `org_portal.oversight` is on.
+
+---
+
 ## Membership standing (0066)
 
 Added by Community Increment 3a (DECISION-232 to 237; F240 to F247). Migration

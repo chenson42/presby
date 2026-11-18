@@ -311,6 +311,21 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   WORSHIP_REQUESTS_SENT: "tenant.worship.requests_sent",
   WORSHIP_SERVICE_CANCELLED: "tenant.worship.service_cancelled",
   PRESBYTERY_REPORT_EXPORTED: "tenant.presbytery_report.exported",
+  // Congregation records, Increment 1 (DECISION-344, 349): the fourteen oversight writes.
+  OVERSIGHT_PROFILE_SET: "tenant.oversight_profile.set",
+  OVERSIGHT_BUILDING_CREATED: "tenant.oversight_building.created",
+  OVERSIGHT_BUILDING_UPDATED: "tenant.oversight_building.updated",
+  OVERSIGHT_BUILDING_RETIRED: "tenant.oversight_building.retired",
+  OVERSIGHT_BUILDING_REMOVED: "tenant.oversight_building.removed",
+  OVERSIGHT_APPRAISAL_RECORDED: "tenant.oversight_appraisal.recorded",
+  OVERSIGHT_APPRAISAL_REMOVED: "tenant.oversight_appraisal.removed",
+  OVERSIGHT_INSURANCE_RECORDED: "tenant.oversight_insurance.recorded",
+  OVERSIGHT_INSURANCE_UPDATED: "tenant.oversight_insurance.updated",
+  OVERSIGHT_INSURANCE_REMOVED: "tenant.oversight_insurance.removed",
+  OVERSIGHT_LOAN_RECORDED: "tenant.oversight_loan.recorded",
+  OVERSIGHT_LOAN_UPDATED: "tenant.oversight_loan.updated",
+  OVERSIGHT_LOAN_PAID_OFF: "tenant.oversight_loan.paid_off",
+  OVERSIGHT_LOAN_REMOVED: "tenant.oversight_loan.removed",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

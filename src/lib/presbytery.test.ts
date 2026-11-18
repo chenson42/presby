@@ -796,15 +796,18 @@ describe.skipIf(!hasDb)(
         expect(result.kind).toBe("invalid_input");
       });
 
-      it("invalid_input for a malformed insuranceExpiresOn", async () => {
+      it("invalid_input for Property notes over 4000 characters, in the renamed words", async () => {
         const result = await setCongregationOversight(
           clerkPerson,
           presbyteryA,
           grantingUserId,
           congA,
-          { insuranceExpiresOn: "not-a-date" },
+          { buildingsNotes: "x".repeat(4001) },
         );
-        expect(result.kind).toBe("invalid_input");
+        expect(result).toEqual({
+          kind: "invalid_input",
+          message: "Property notes must be 4000 characters or fewer.",
+        });
       });
 
       it("creates, then UPSERTS on a second call — one row per congregation, not two", async () => {
@@ -833,6 +836,47 @@ describe.skipIf(!hasDb)(
         if (detail.kind !== "ok") throw new Error("expected ok");
         expect(detail.data.viabilityScore).toBe(2);
         expect(detail.data.buildingsNotes).toBe("Fellowship hall leak");
+      });
+
+      it("a legacy row's carrier and expiry survive a save and a re-save, and neither reader returns them — regression for F451/F454 (the superseded fields)", async () => {
+        // The columns are dormant (R8, 0089): no code writes them, but a row from before the form dropped
+        // the fields can hold values, and the first save after must not null them (`input.x ?? null` did).
+        const platform = getPlatformDb();
+        await platform.execute(sql`
+          insert into congregation_oversight (organization_id, about_org_id, insurance_carrier, insurance_expires_on, updated_by)
+          values (${presbyteryA}, ${congB}, 'Legacy Mutual (fixture)', '2031-02-03', ${grantingUserId})
+          on conflict (organization_id, about_org_id)
+          do update set insurance_carrier = 'Legacy Mutual (fixture)', insurance_expires_on = '2031-02-03'`);
+        const legacy = async () => {
+          const rows = await platform.execute(sql`
+            select insurance_carrier, insurance_expires_on::text as expires, viability_score, buildings_notes
+              from congregation_oversight where organization_id = ${presbyteryA} and about_org_id = ${congB}`);
+          return (rows as unknown as { rows: Array<Record<string, unknown>> }).rows[0];
+        };
+        expect(await legacy()).toMatchObject({ insurance_carrier: "Legacy Mutual (fixture)", expires: "2031-02-03" });
+
+        try {
+          for (const input of [{ viabilityScore: 2, buildingsNotes: "Property note" }, { viabilityScore: 3 }, {}]) {
+            const saved = await setCongregationOversight(clerkPerson, presbyteryA, grantingUserId, congB, input);
+            expect(saved.kind).toBe("ok");
+            expect(await legacy(), JSON.stringify(input)).toMatchObject({ insurance_carrier: "Legacy Mutual (fixture)", expires: "2031-02-03" });
+          }
+          expect(await legacy()).toMatchObject({ viability_score: null, buildings_notes: null });
+
+          // neither reader hands the superseded values to a tier-1 holder (F454: an explicit column list)
+          const detail = await getCongregationOversightDetail(clerkPerson, presbyteryA, congB);
+          const list = await getCongregationOversightList(clerkPerson, presbyteryA);
+          if (detail.kind !== "ok" || list.kind !== "ok") throw new Error("expected ok");
+          for (const payload of [detail.data, list.data.find((r) => r.organizationId === congB)]) {
+            const text = JSON.stringify(payload);
+            expect(text).not.toContain("Legacy Mutual");
+            expect(text).not.toContain("2031-02-03");
+            expect(Object.keys(payload as object).some((k) => /insurance/i.test(k))).toBe(false);
+          }
+        } finally {
+          // Later tests in this file expect congB to have no oversight row.
+          await platform.execute(sql`delete from congregation_oversight where organization_id = ${presbyteryA} and about_org_id = ${congB}`);
+        }
       });
 
       it("stores a valid coordinate pair, refuses a half-set or NaN pair without touching it, and clears on two blanks", async () => {

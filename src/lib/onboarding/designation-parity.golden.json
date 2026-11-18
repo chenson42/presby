@@ -171,6 +171,7 @@
         "permissions": [
           "careers.applicants",
           "careers.manage",
+          "congregation_oversight.finance",
           "congregation_oversight.manage",
           "domains.manage",
           "groups.manage",
@@ -419,6 +420,7 @@
         "permissions": [
           "careers.applicants",
           "careers.manage",
+          "congregation_oversight.finance",
           "congregation_oversight.manage",
           "domains.manage",
           "groups.manage",

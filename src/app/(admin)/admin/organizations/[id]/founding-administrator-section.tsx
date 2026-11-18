@@ -49,6 +49,8 @@ const PERMISSION_LABELS: Record<string, string> = {
   "worship.plan": "worship services",
   "worship.schedule": "worship scheduling",
   "congregation_oversight.manage": "congregation oversight",
+  // congregation records Inc 1, Copy C10: names the tier-2 key in plain words (DECISION-345).
+  "congregation_oversight.finance": "congregation appraisals, insurance and loans",
 };
 
 function summarizePermissions(keys: string[]): string {
@@ -142,7 +144,7 @@ export function FoundingAdministratorSection({
 
   // `organizationType` is accepted as a prop (and threaded through, per the
   // page-gate contract) but is not read directly here: the presbytery-only
-  // `congregation_oversight.manage` clause is already folded into
+  // `congregation_oversight.manage` and `.finance` clauses are already folded into
   // `administrationPermissionKeys` by `foundingAdministratorPlan()` on the
   // server, so `permissionSummary` alone is correct for every org type
   // without a second branch in this component.

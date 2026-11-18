@@ -16,17 +16,13 @@ import type { OversightRow } from "@/lib/presbytery";
 import { oversightSchema, type OversightFormValues } from "./oversight-schema";
 import { setCongregationOversightAction } from "./actions";
 import { HydrationGate } from "@/components/shared/hydration-gate";
-
-const SELECT_CLASSES =
-  "w-full appearance-none rounded-md border border-input bg-background px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
+import { SELECT_CLASSES } from "@/components/oversight/select-classes";
 
 function defaultValues(row: OversightRow): OversightFormValues {
   return {
     viabilityScore: row.viabilityScore ? (String(row.viabilityScore) as "1" | "2" | "3") : "",
     redevelopmentNotes: row.redevelopmentNotes ?? "",
     buildingsNotes: row.buildingsNotes ?? "",
-    insuranceCarrier: row.insuranceCarrier ?? "",
-    insuranceExpiresOn: row.insuranceExpiresOn ?? "",
     latitude: row.latitude ?? "",
     longitude: row.longitude ?? "",
   };
@@ -99,8 +95,6 @@ export function OversightEditForm({
       viabilityScore: values.viabilityScore ? Number(values.viabilityScore) : null,
       redevelopmentNotes: values.redevelopmentNotes || null,
       buildingsNotes: values.buildingsNotes || null,
-      insuranceCarrier: values.insuranceCarrier || null,
-      insuranceExpiresOn: values.insuranceExpiresOn || null,
       latitude,
       longitude,
     });
@@ -157,7 +151,7 @@ export function OversightEditForm({
         </div>
 
         <div>
-          <Label htmlFor="oversight-buildings">Buildings notes</Label>
+          <Label htmlFor="oversight-buildings">Property notes</Label>
           <Textarea
             id="oversight-buildings"
             rows={4}
@@ -169,37 +163,6 @@ export function OversightEditForm({
               {errors.buildingsNotes.message}
             </p>
           )}
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="oversight-insurance-carrier">Insurance carrier</Label>
-            <Input
-              id="oversight-insurance-carrier"
-              type="text"
-              className="mt-1"
-              {...register("insuranceCarrier")}
-            />
-            {errors.insuranceCarrier && (
-              <p className="mt-1 text-sm text-destructive">
-                {errors.insuranceCarrier.message}
-              </p>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="oversight-insurance-expires">Insurance expires</Label>
-            <Input
-              id="oversight-insurance-expires"
-              type="date"
-              className="mt-1"
-              {...register("insuranceExpiresOn")}
-            />
-            {errors.insuranceExpiresOn && (
-              <p className="mt-1 text-sm text-destructive">
-                {errors.insuranceExpiresOn.message}
-              </p>
-            )}
-          </div>
         </div>
 
         <fieldset className="space-y-2">
@@ -218,7 +181,7 @@ export function OversightEditForm({
                 spellCheck={false}
                 aria-describedby="oversight-latitude-hint"
                 aria-invalid={errors.latitude ? true : undefined}
-                className="mt-1"
+                className="mt-1 min-h-11"
                 {...register("latitude", { onChange: () => setPasteNote(false) })}
                 onPaste={onCoordinatePaste}
               />
@@ -240,7 +203,7 @@ export function OversightEditForm({
                 spellCheck={false}
                 aria-describedby="oversight-longitude-hint"
                 aria-invalid={errors.longitude ? true : undefined}
-                className="mt-1"
+                className="mt-1 min-h-11"
                 {...register("longitude", { onChange: () => setPasteNote(false) })}
                 onPaste={onCoordinatePaste}
               />

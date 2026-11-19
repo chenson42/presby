@@ -21,9 +21,9 @@ const bag = (values: unknown): Record<string, unknown> =>
 
 export async function recordCommissionAction(slug: string, values: CommissionValues): Promise<CommitteesActionResult> {
   const v = bag(values);
-  const gate = await resolveCommitteesActor(slug);
+  const gate = await resolveCommitteesActor(slug, {}, { subject: "commission" });
   if (!gate.ok) return gate.result;
-  const parsed = parseCommission(v);
+  const parsed = parseCommission(v, gate.identity.env);
   if (!parsed.ok) return invalidResult(parsed);
   return finishCommission(gate.identity, null, await recordCommission(gate.identity.ctx, parsed.value));
 }

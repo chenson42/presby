@@ -102,6 +102,12 @@ describe("copy.ts (U3)", () => {
       "A member started on Nov 1, 2026. The end date can't be before that.",
     );
     expect(COMMISSION_REFUSAL.dateBeforeStart("2026-11-01")).toBe("A member started on Nov 1, 2026. The end date can't be before that.");
+    // orchestrator rulings on B5 (additions to C15)
+    expect(COMMISSION_REFUSAL.notFound).toBe("That commission could not be found.");
+    expect(refusalMessage("not_found", { subject: "commission" })).toBe("That commission could not be found.");
+    expect(refusalMessage("not_found")).toBe("That committee could not be found.");
+    expect(VALIDATION.appointedAfterEnd).toBe("The appointed date can't be after the end date.");
+    expect(VALIDATION.appointedFuture).toBe("The appointed date can't be after today.");
     expect(VALIDATION.titleRequired).toBe("Title is required.");
     expect(VALIDATION.titleTooLong).toBe("Title must be 200 characters or fewer.");
     expect(VALIDATION.chargeTooLong).toBe("Charge must be 500 characters or fewer.");
@@ -124,7 +130,7 @@ describe("copy.ts (U3)", () => {
   });
 
   it("the same kind is worded differently for a commission only through `subject`, and the default wording is unchanged", () => {
-    for (const reason of ["stale", "overlap", "already_ended", "date_before_start"] as const) {
+    for (const reason of ["stale", "overlap", "already_ended", "date_before_start", "not_found"] as const) {
       const detail = { personName: "Wren", committeeName: "Finance", date: "2026-11-01" };
       expect(refusalMessage(reason, { ...detail, subject: "commission" }), reason).not.toBe(refusalMessage(reason, detail));
     }

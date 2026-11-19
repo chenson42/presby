@@ -10,7 +10,7 @@ import {
   cleanLine,
   cleanText,
   parseChangeRole,
-  parseCommission,
+  parseCommission as parseCommissionWith,
   parseCommissionMember,
   parseCommittee,
   parseEndCommission,
@@ -268,6 +268,8 @@ describe("the zod schemas are thin wrappers over the same rules", () => {
 // Increment 2: the commission record (C15)
 // ---------------------------------------------------------------------------
 
+/** The commission parse with today injected (`env`, as every other parse here). */
+const parseCommission = (values: unknown) => parseCommissionWith(values, env);
 const commission = (over: Record<string, string> = {}) => ({
   title: "Commission on Alder Creek",
   charge: "",
@@ -309,7 +311,16 @@ describe("parseCommission", () => {
     expect(errorsOf(parseCommission(commission({ minuteReference: "m".repeat(201) })) as never).minuteReference).toBe(VALIDATION.minuteTooLong);
   });
 
-  it("appointed on: required, a real day, on or after 1900-01-01 (1899-12-31 refused); no ahead limit is worded", () => {
+  it("appointed on may not be after today (orchestrator ruling 3): today is allowed, tomorrow is refused with the ruled sentence — regression for the missing upper bound", () => {
+    expect(parseCommissionWith(commission({ appointedOn: TODAY }), env).ok).toBe(true);
+    expect(errorsOf(parseCommissionWith(commission({ appointedOn: "2026-11-20" }), env) as never).appointedOn).toBe(VALIDATION.appointedFuture);
+    expect(errorsOf(parseCommissionWith(commission({ appointedOn: "2999-01-01" }), env) as never).appointedOn).toBe(VALIDATION.appointedFuture);
+    expect(VALIDATION.appointedFuture).toBe("The appointed date can't be after today.");
+    // the injected day is the rule: the same date is fine one day later
+    expect(parseCommissionWith(commission({ appointedOn: "2026-11-20" }), { today: "2026-11-20" }).ok).toBe(true);
+  });
+
+  it("appointed on: required, a real day, on or after 1900-01-01 (1899-12-31 refused)", () => {
     expect(errorsOf(parseCommission(commission({ appointedOn: "" })) as never).appointedOn).toBe(VALIDATION.appointedRequired);
     expect(errorsOf(parseCommission(commission({ appointedOn: "2026-02-30" })) as never).appointedOn).toBe(VALIDATION.dateInvalid);
     expect(errorsOf(parseCommission(commission({ appointedOn: "1899-12-31" })) as never).appointedOn).toBe(VALIDATION.dateInvalid);
@@ -338,7 +349,7 @@ describe("parseCommission", () => {
   });
 
   it("the schema reports the same messages under the same fields", () => {
-    const r = commissionSchema().safeParse(commission({ title: "" }));
+    const r = commissionSchema(env).safeParse(commission({ title: "" }));
     expect(r.success).toBe(false);
     if (!r.success) expect(r.error.issues[0]).toMatchObject({ path: ["title"], message: VALIDATION.titleRequired });
   });

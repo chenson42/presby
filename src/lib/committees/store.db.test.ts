@@ -1084,14 +1084,17 @@ describe.skipIf(!hasDb)("committees/store.ts (Postgres-backed)", { timeout: 240_
     // --- helpers ----------------------------------------------------------
     const commissionIn = (over: Partial<CommissionValues> = {}) =>
       ok(
-        parseCommission({
-          title: `Cm90 ${stamp} ${(counter += 1)}`,
-          charge: "",
-          aboutOrgId: "",
-          appointedOn: shift(TODAY, -60),
-          minuteReference: "",
-          ...over,
-        }),
+        parseCommission(
+          {
+            title: `Cm90 ${stamp} ${(counter += 1)}`,
+            charge: "",
+            aboutOrgId: "",
+            appointedOn: shift(TODAY, -60),
+            minuteReference: "",
+            ...over,
+          },
+          ENV,
+        ),
       );
     const memberIn = (personId: string, role = "member", startsOn = shift(TODAY, -30), endsOn = "") =>
       ok(parseCommissionMember({ personId, role, startsOn, endsOn } satisfies SeatValues, ENV));
@@ -1143,7 +1146,8 @@ describe.skipIf(!hasDb)("committees/store.ts (Postgres-backed)", { timeout: 240_
         groups: await snapshot(),
       };
     }
-    const never = { kind: "refused", reason: "not_found" } as const;
+    // Orchestrator ruling 1: a commission miss is `not_found` worded for a commission, one answer for every miss.
+    const never = { kind: "refused", reason: "not_found", detail: { subject: "commission" } } as const;
 
     // --- the six writes -----------------------------------------------------
     describe("a missing key, or an organization that is not a presbytery, writes nothing and audits nothing", () => {
@@ -1205,6 +1209,18 @@ describe.skipIf(!hasDb)("committees/store.ts (Postgres-backed)", { timeout: 240_
         const after = await downward();
         expect(after.downward).toEqual(before.downward);
         expect(after.groups).toEqual(before.groups);
+      });
+
+      it("the appointment may not be after today in the ORGANIZATION'S day (orchestrator ruling 3): refused with the ruled sentence on a hand-built input, writing nothing; today is allowed", async () => {
+        const before = await csnapshot();
+        const tomorrow = { ...commissionIn(), appointedOn: shift(TODAY, 1) };
+        expect(await store.recordCommission(clerkCtx(), tomorrow)).toEqual({
+          kind: "invalid",
+          field: "appointedOn",
+          message: "The appointed date can't be after today.",
+        });
+        expect(await csnapshot()).toEqual(before);
+        expect((await store.recordCommission(clerkCtx(), { ...commissionIn(), appointedOn: TODAY })).kind).toBe("ok");
       });
 
       it("a record about no congregation has a null congregation and audits `aboutOrgId: null`", async () => {
@@ -1307,6 +1323,19 @@ describe.skipIf(!hasDb)("committees/store.ts (Postgres-backed)", { timeout: 240_
         expect(await csnapshot()).toEqual(before);
       });
 
+      it("moving the appointment to after today is refused with the ruled sentence (orchestrator ruling 3); an unrelated edit of a record is not held to it", async () => {
+        const id = await mkCommission({ appointedOn: shift(TODAY, -60) });
+        const before = await csnapshot();
+        expect(await store.updateCommission(clerkCtx(), id, { ...commissionIn({ appointedOn: shift(TODAY, -60) }), appointedOn: shift(TODAY, 1) }, 1)).toEqual({
+          kind: "invalid",
+          field: "appointedOn",
+          message: "The appointed date can't be after today.",
+        });
+        expect(await csnapshot()).toEqual(before);
+        // today is allowed
+        expect((await store.updateCommission(clerkCtx(), id, { ...commissionIn({ appointedOn: shift(TODAY, -60) }), title: `Cm90 ${stamp} Today`, appointedOn: TODAY }, 1)).kind).toBe("ok");
+      });
+
       it("an edit that changes nothing writes nothing, audits nothing and keeps the version (`unchanged`)", async () => {
         const id = await mkCommission({ title: `Cm90 ${stamp} Same`, charge: "c", aboutOrgId: CG1, minuteReference: "m" });
         const before = await csnapshot();
@@ -1326,12 +1355,15 @@ describe.skipIf(!hasDb)("committees/store.ts (Postgres-backed)", { timeout: 240_
       });
 
       it("an ENDED record may still be corrected, but not given an appointment after its end", async () => {
+        vi.spyOn(console, "error").mockImplementation(() => {});
         const id = await mkCommission({ appointedOn: shift(TODAY, -60) });
         expect((await store.endCommission(clerkCtx(), id, endIn(shift(TODAY, -10)))).kind).toBe("ok");
         expect((await store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} Corrected`, appointedOn: shift(TODAY, -60) }), 2)).kind).toBe("ok");
         const r = await store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} Corrected`, appointedOn: shift(TODAY, -5) }), 3);
-        expect(r).toMatchObject({ kind: "invalid", field: "appointedOn" });
+        // orchestrator ruling 2: the database's refusal (ended_after_appointed) is mapped to the ruled sentence, nothing is logged
+        expect(r).toEqual({ kind: "invalid", field: "appointedOn", message: "The appointed date can't be after the end date." });
         expect((await recordRow(id)).appointed_on).toBe(shift(TODAY, -60));
+        expect(console.error).not.toHaveBeenCalled();
       });
 
       it("a record whose congregation has LEFT the presbytery keeps it through an unrelated edit (R9), and may be moved to a member", async () => {
@@ -1594,6 +1626,7 @@ describe.skipIf(!hasDb)("committees/store.ts (Postgres-backed)", { timeout: 240_
           for (const a of answers) expect(a, label).toEqual(never);
         }
         expect(await csnapshot()).toEqual(before);
+        expect(refusalMessage("not_found", never.detail)).toBe("That commission could not be found.");
         // the other presbytery's clerk cannot touch this presbytery's record
         const mine = await mkCommission();
         expect(await store.removeCommissionRecord(ctxFor(clerkP2, P2), mine)).toEqual(never);

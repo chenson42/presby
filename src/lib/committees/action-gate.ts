@@ -67,7 +67,11 @@ const refuse = (error: string, kind: Refused["kind"]): ActorResult => ({
 });
 
 /** Authenticate, resolve the organization from the slug, and check every id: or return the refusal. */
-export async function resolveCommitteesActor(slug: unknown, ids: Record<string, unknown> = {}): Promise<ActorResult> {
+export async function resolveCommitteesActor(
+  slug: unknown,
+  ids: Record<string, unknown> = {},
+  options: { subject?: "commission" } = {},
+): Promise<ActorResult> {
   const session = await auth();
   const check = assertOrgSession(session);
   if (check.kind === "unauthenticated") return refuse(GATE_COPY.signedOut, "unauthenticated");
@@ -84,7 +88,8 @@ export async function resolveCommitteesActor(slug: unknown, ids: Record<string, 
   if (!(await isFlagEnabled(COMMITTEES_FLAG))) return refuse(GATE_COPY.flagOff(resolved.org.name), "forbidden");
 
   for (const value of Object.values(ids)) {
-    if (!isUuid(value)) return refuse(REFUSAL.not_found, "not_found");
+    // A commission action's malformed id reads in the commission's wording (orchestrator ruling on B5), one answer for every miss.
+    if (!isUuid(value)) return refuse(refusalMessage("not_found", { subject: options.subject }), "not_found");
   }
 
   return {

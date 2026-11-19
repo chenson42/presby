@@ -57,6 +57,8 @@ export const REFUSAL: Record<PlainRefusal, string> = {
 
 /** C15: the same refusal kinds, worded for a commission record (`RefusalDetail.subject === "commission"`). */
 export const COMMISSION_REFUSAL = {
+  /** Orchestrator ruling (B5): one string for every commission miss (removed, another presbytery's, a committee's id, nonexistent, malformed). */
+  notFound: "That commission could not be found.",
   stale: "This record was changed by someone else after you opened it. Reload the page, then make your change again.",
   alreadyEnded: "This commission has already ended.",
   overlap: (personName: string) => `${personName} already serves on this commission during those dates. End that term first.`,
@@ -86,6 +88,8 @@ export function refusalMessage(reason: Refusal, detail: RefusalDetail = {}): str
       return `A member started on ${detail.date ? dateText(detail.date) : "a later date"}. The dissolve date can't be before that.`;
     case "committee_dissolved":
       return detail.during === "edit" ? COMMITTEE_DISSOLVED_EDIT : COMMITTEE_DISSOLVED_ADD;
+    case "not_found":
+      return commission ? COMMISSION_REFUSAL.notFound : REFUSAL.not_found;
     case "stale":
       return commission ? COMMISSION_REFUSAL.stale : REFUSAL.stale;
     case "already_ended":
@@ -152,6 +156,9 @@ export const VALIDATION = {
   chargeTooLong: "Charge must be 500 characters or fewer.",
   minuteTooLong: "Minute reference must be 200 characters or fewer.",
   appointedRequired: "Choose the date it was appointed.",
+  // Orchestrator rulings on B5 (additions to C15)
+  appointedAfterEnd: "The appointed date can't be after the end date.",
+  appointedFuture: "The appointed date can't be after today.",
   endedFuture: "The end date can't be in the future.",
   endedBeforeAppointed: (iso: string) => `The end date can't be before ${dateText(iso)}, when it was appointed.`,
 } as const;

@@ -94,6 +94,19 @@ describe("resolveCommitteesActor", () => {
     }
   });
 
+  it("a commission action's malformed id is the commission's not_found string (orchestrator ruling 1), a committee action's is unchanged", async () => {
+    for (const bad of ["not-a-uuid", "", undefined, null]) {
+      expect(await resolveCommitteesActor("northern", { commissionId: bad }, { subject: "commission" }), String(bad)).toEqual({
+        ok: false,
+        result: { ok: false, error: "That commission could not be found.", kind: "not_found" },
+      });
+      expect(await resolveCommitteesActor("northern", { committeeId: bad }), String(bad)).toEqual({
+        ok: false,
+        result: { ok: false, error: REFUSAL.not_found, kind: "not_found" },
+      });
+    }
+  });
+
   it("returns the organization and the acting person from the slug and the session, never from the client", async () => {
     const result = await resolveCommitteesActor("northern", { committeeId: UUID });
     expect(result).toMatchObject({

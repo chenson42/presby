@@ -149,7 +149,14 @@ const GUARD_CODES: Record<string, Refusal> = {
 /** What a guard's refusal says it is about, when the kind's sentence depends on the object (committee or commission). */
 const GUARD_DETAIL: Record<string, RefusalDetail> = {
   [COMMITTEES_GUARD_CODES.commissionEndedFinal]: { subject: "commission" },
+  [COMMITTEES_GUARD_CODES.commissionRemovalFinal]: { subject: "commission" },
 };
+
+/**
+ * The CHECK that stops an appointment falling after a recorded end. The refusal is the ruled
+ * sentence on the `appointedOn` field (orchestrator ruling on B5), not a `save_failed`.
+ */
+const APPOINTED_AFTER_END_CHECK = "commission_records_ended_after_appointed";
 
 /** The one-open-seat unique index of a commission's roster: the database's backstop for the interval check. */
 const COMMISSION_OPEN_SEAT_INDEX = "commission_record_members_one_open_idx";
@@ -165,6 +172,9 @@ function outcomeFor(err: unknown): Outcome<never> {
 
   const code = pgErrorField(err, "code");
   const constraint = pgErrorField(err, "constraint");
+  if (code === "23514" && constraint === APPOINTED_AFTER_END_CHECK) {
+    return { kind: "invalid", field: "appointedOn", message: VALIDATION.appointedAfterEnd };
+  }
   if (code === "23514" && constraint && constraint in GUARD_CODES) {
     return { kind: "refused", reason: GUARD_CODES[constraint]!, detail: GUARD_DETAIL[constraint] };
   }
@@ -871,7 +881,7 @@ async function loadCommission(tx: OrgTx, ctx: CommitteesCtx, commissionId: strin
     )
     .limit(1);
   const [row] = lock === "update" ? await query.for("update") : lock === "share" ? await query.for("share") : await query;
-  if (!row) throw new Refuse("not_found");
+  if (!row) throw new Refuse("not_found", { subject: "commission" });
   return row;
 }
 
@@ -956,6 +966,8 @@ async function writingAbout<T>(presbyteryName: string, write: () => Promise<T>):
 export function recordCommission(ctx: CommitteesCtx, input: CommissionInput): Promise<Outcome<Written>> {
   return inTransaction(ctx, async (tx) => {
     await gate(tx, ctx);
+    // The appointment may not be after today in the ORGANIZATION'S day (the form's parse used the server's UTC day).
+    if (input.appointedOn > (await localToday(tx, ctx))) throw new Invalid("appointedOn", VALIDATION.appointedFuture);
 
     const about = input.aboutOrgId === null ? null : await requireCongregation(tx, ctx, input.aboutOrgId);
     const [row] = await writingAbout(about?.presbyteryName ?? "", () =>
@@ -1012,8 +1024,10 @@ export function updateCommission(
     if ((stored.minuteReference ?? null) !== input.minuteReference) changed.push("minuteReference");
     if (changed.length === 0) return { id: commissionId, unchanged: true as const };
 
-    if (stored.endedOn !== null && input.appointedOn > stored.endedOn) {
-      throw new Invalid("appointedOn", VALIDATION.dateInvalid);
+    // Moving the appointment: not after today in the organization's day. An appointment after a recorded end is
+    // refused by the database's CHECK, mapped to the ruled sentence in `outcomeFor`.
+    if (changed.includes("appointedOn") && input.appointedOn > (await localToday(tx, ctx))) {
+      throw new Invalid("appointedOn", VALIDATION.appointedFuture);
     }
 
     // Resolved only when the edit moves the congregation: an unrelated edit of a record whose congregation has left passes.

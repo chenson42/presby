@@ -65,6 +65,7 @@ const refusal = { ok: false, error: "You must be signed in to do that.", kind: "
 const stores = ["recordCommission", "updateCommission", "addCommissionMember", "endCommissionMember", "endCommission", "removeCommissionRecord"] as const;
 
 const record = { title: "Commission on Alder Creek", charge: "", aboutOrgId: "", appointedOn: "2026-06-01", minuteReference: "" };
+const COMMISSION = { subject: "commission" };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -92,17 +93,17 @@ describe("every commission action runs the gate first and returns its refusal un
 
   it("each action names its ids to the gate (a malformed id is refused there, before any SQL) and never an organization id", async () => {
     await recordCommissionAction("northern", record);
-    expect(mocks.resolveCommitteesActor).toHaveBeenLastCalledWith("northern");
+    expect(mocks.resolveCommitteesActor).toHaveBeenLastCalledWith("northern", {}, COMMISSION);
     await updateCommissionAction("northern", { ...record, commissionId: KID, expectedVersion: "1" });
-    expect(mocks.resolveCommitteesActor).toHaveBeenLastCalledWith("northern", { commissionId: KID });
+    expect(mocks.resolveCommitteesActor).toHaveBeenLastCalledWith("northern", { commissionId: KID }, COMMISSION);
     await endCommissionMemberAction("northern", { commissionId: KID, memberId: MID, endsOn: "2026-06-01" });
-    expect(mocks.resolveCommitteesActor).toHaveBeenLastCalledWith("northern", { commissionId: KID, memberId: MID });
+    expect(mocks.resolveCommitteesActor).toHaveBeenLastCalledWith("northern", { commissionId: KID, memberId: MID }, COMMISSION);
   });
 
   it("a null or non-object form is handled defensively (the gate refuses the missing id)", async () => {
     mocks.resolveCommitteesActor.mockResolvedValue({ ok: false, result: refusal });
     expect(await removeCommissionRecordAction("northern", null as never)).toEqual(refusal);
-    expect(mocks.resolveCommitteesActor).toHaveBeenLastCalledWith("northern", { commissionId: undefined });
+    expect(mocks.resolveCommitteesActor).toHaveBeenLastCalledWith("northern", { commissionId: undefined }, COMMISSION);
     noStoreCalls();
   });
 });
@@ -112,6 +113,13 @@ describe("an invalid form returns BEFORE any store call, with the field's own me
     expect(await recordCommissionAction("northern", { ...record, title: " " })).toEqual({ ok: false, error: "Title is required.", field: "title", kind: "invalid" });
     expect(await recordCommissionAction("northern", { ...record, charge: "c".repeat(501) })).toMatchObject({ ok: false, field: "charge", error: "Charge must be 500 characters or fewer." });
     expect(await recordCommissionAction("northern", { ...record, appointedOn: "" })).toMatchObject({ ok: false, field: "appointedOn", error: "Choose the date it was appointed." });
+    expect(await recordCommissionAction("northern", { ...record, appointedOn: "2026-06-16" })).toMatchObject({
+      ok: false,
+      field: "appointedOn",
+      error: "The appointed date can't be after today.",
+    });
+    expect((await recordCommissionAction("northern", { ...record, appointedOn: "2026-06-15" })).ok).toBe(true);
+    mocks.recordCommission.mockClear();
     noStoreCalls();
   });
 

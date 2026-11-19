@@ -47,9 +47,9 @@ export async function updateCommissionAction(
   values: CommissionValues & { commissionId: string; expectedVersion: string | number },
 ): Promise<CommitteesActionResult> {
   const v = bag(values);
-  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId });
+  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId }, { subject: "commission" });
   if (!gate.ok) return gate.result;
-  const parsed = parseCommission(v);
+  const parsed = parseCommission(v, gate.identity.env);
   if (!parsed.ok) return invalidResult(parsed);
   const expectedVersion = parseExpectedVersion(v.expectedVersion);
   if (expectedVersion === null) return tamperedResult;
@@ -66,7 +66,7 @@ export async function addCommissionMemberAction(
   values: SeatValues & { commissionId: string },
 ): Promise<CommitteesActionResult> {
   const v = bag(values);
-  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId });
+  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId }, { subject: "commission" });
   if (!gate.ok) return gate.result;
   const parsed = parseCommissionMember(v, gate.identity.env);
   if (!parsed.ok) return invalidResult(parsed);
@@ -83,7 +83,7 @@ export async function endCommissionMemberAction(
   values: EndSeatValues & { commissionId: string; memberId: string },
 ): Promise<CommitteesActionResult> {
   const v = bag(values);
-  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId, memberId: v.memberId });
+  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId, memberId: v.memberId }, { subject: "commission" });
   if (!gate.ok) return gate.result;
   const parsed = parseEndSeat(v, gate.identity.env);
   if (!parsed.ok) return invalidResult(parsed);
@@ -100,7 +100,7 @@ export async function endCommissionAction(
   values: EndCommissionValues & { commissionId: string },
 ): Promise<CommitteesActionResult> {
   const v = bag(values);
-  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId });
+  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId }, { subject: "commission" });
   if (!gate.ok) return gate.result;
   const parsed = parseEndCommission(v, gate.identity.env);
   if (!parsed.ok) return invalidResult(parsed);
@@ -113,7 +113,7 @@ export async function removeCommissionRecordAction(
   values: { commissionId: string },
 ): Promise<CommitteesActionResult> {
   const v = bag(values);
-  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId });
+  const gate = await resolveCommitteesActor(slug, { commissionId: v.commissionId }, { subject: "commission" });
   if (!gate.ok) return gate.result;
   const commissionId = v.commissionId as string;
   return finishCommission(gate.identity, commissionId, await removeCommissionRecord(gate.identity.ctx, commissionId));

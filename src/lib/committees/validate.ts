@@ -318,10 +318,12 @@ export interface CommissionInput {
  * A commission record's own fields (C15). The congregation is NOT validated here:
  * a malformed id, another presbytery's congregation, a non-congregation and a
  * nonexistent id must all read as the one `congregation_not_found` answer, and only
- * the store (which knows this presbytery) can give it. There is no ahead-limit on
- * `appointedOn` (C15 words none); the database's 1900 floor is the lower bound.
+ * the store (which knows this presbytery) can give it. `appointedOn` may not be after
+ * today (orchestrator ruling on B5: the same rule as dissolve, with `today` injected;
+ * the store re-checks it against the organization's own day); the database's 1900
+ * floor is the lower bound.
  */
-export function parseCommission(values: unknown): Parsed<CommissionInput> {
+export function parseCommission(values: unknown, env: ValidationEnv): Parsed<CommissionInput> {
   const v = (values ?? {}) as Record<string, unknown>;
   const errors = new Errors();
 
@@ -338,6 +340,7 @@ export function parseCommission(values: unknown): Parsed<CommissionInput> {
   const appointed = readDate(v.appointedOn);
   if (appointed.kind === "empty") errors.add("appointedOn", VALIDATION.appointedRequired);
   else if (appointed.kind === "invalid") errors.add("appointedOn", VALIDATION.dateInvalid);
+  else if (appointed.value > env.today) errors.add("appointedOn", VALIDATION.appointedFuture);
   else appointedOn = appointed.value;
 
   const minuteReference = cleanLine(str(v.minuteReference));
@@ -439,10 +442,10 @@ export const endSeatSchema = (env: ValidationEnv, seat?: Pick<SeatFacts, "starts
 export const dissolveSchema = (env: ValidationEnv) =>
   refine(z.object({ dissolvedOn: z.string() }), (values) => parseDissolve(values, env));
 
-export const commissionSchema = () =>
+export const commissionSchema = (env: ValidationEnv) =>
   refine(
     z.object({ title: z.string(), charge: z.string(), aboutOrgId: z.string(), appointedOn: z.string(), minuteReference: z.string() }),
-    (values) => parseCommission(values),
+    (values) => parseCommission(values, env),
   );
 
 export const commissionMemberSchema = seatSchema;

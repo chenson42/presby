@@ -222,10 +222,17 @@ begin;
   -- fixture holder, a staff membership with no roll) = 3, bumped the same
   -- committed-fixture-derived way. Her membership carries current_roll =
   -- NULL, so the roll_actions count below is unaffected.
-  select assert_eq((select count(*) from people), 3, 'presbytery: sees only its own members');
+  --
+  -- Presbytery committees (drizzle/0090, scripts/committees/
+  -- seed-dev-committees.sql): +16 members (the committees clerk, a plain
+  -- member and fourteen committee and commission people; one membership
+  -- ended, still a row) = 19, bumped the same committed-fixture-derived way.
+  -- Every one carries current_roll = NULL, so the roll_actions count below is
+  -- unaffected.
+  select assert_eq((select count(*) from people), 19, 'presbytery: sees only its own members');
   select assert_eq((select count(*) from people where id = :ELDER), 0,
                    'presbytery: CANNOT see a congregation''s elder');
-  select assert_eq((select count(*) from memberships), 3, 'presbytery: sees only its own memberships');
+  select assert_eq((select count(*) from memberships), 19, 'presbytery: sees only its own memberships');
   -- The presbytery has roll actions of its OWN - a minister's membership sits
   -- there (G-2.0502). What it must never see is a congregation's. +1 (Idris
   -- Calloway's own opening_balance row, same reasoning as above) — unaffected
@@ -8831,3 +8838,18 @@ rollback;
 --     own rows and rolls back), so it is never run against production.
 -- ===========================================================================
 \ir oversight/test-rls-89.sql
+
+-- ===========================================================================
+-- APPENDED SECTION - pipeline/presbytery-committees (integration).
+-- 90. Presbytery committees and administrative commission records: the
+--     group_role vocabulary, committee_details, commission_records and
+--     commission_record_members, and the public committee roster
+--     fix-forward (drizzle/0090_presby_committees.sql; DECISION-352 to 359).
+--     Its own file, as 46, 47, 59 to 89 above; \ir resolves relative to this
+--     script. It needs the test helpers and the stock seed's councils,
+--     Fernwood's live site, the treasury fixture and the clerk fixture
+--     account; it works with or without
+--     scripts/committees/seed-dev-committees.sql (every block builds its own
+--     rows and rolls back), so it is never run against production.
+-- ===========================================================================
+\ir committees/test-rls-90.sql

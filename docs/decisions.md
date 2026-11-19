@@ -4,6 +4,70 @@ Architectural and implementation decisions for PresbyPortal (presby). Newest fir
 
 ---
 
+**DECISION-359 — The committees module's seams into shared code (T9 to T11, T13).**
+
+**Status:** Resolved (tech-lead Phase 3) · **Date:** 2026-11-19 · **Feature:** `2026-11-19-presbytery-committees` (both increments; full text in the parent work-log)
+
+The committees store reaches `groups`/`group_memberships` only through `groups.ts` exports (`addManagedGroupSeatInTx`, `endManagedGroupMemberInTx`, `insertManagedGroupInTx`, `updateManagedGroupInTx`, `setManagedMembershipPublicListedInTx`) and role grants only through `role-grants.ts#readGroupRoleGrantsInTx`; the committees pages are gated by `gateCommitteesPage`; public-listing changes audit in the mutation's own transaction as `committee.member_listed|unlisted`; public display order is not offered at a presbytery.
+
+---
+
+**DECISION-358 — Commission record shape (T6 to T8, T12).**
+
+**Status:** Resolved (tech-lead Phase 3) · **Date:** 2026-11-19 · **Feature:** `2026-11-19-presbytery-committees` (both increments; full text in the parent work-log)
+
+Commission member roles are the six committee titles under their own CHECK; the congregation is optional, resolved by `resolveMemberCongregation()` and fenced by the 0045 trigger under `WHEN (about_org_id is not null)`; one open seat per person per commission is a unique index; a live-parent guard serializes member inserts against ending and removal; a record has a one-way removal pair; no `group_id`, `role_id` or `public_listed` column exists on either table. The `groups.manage` description is left unchanged until Increment 2 has shipped.
+
+---
+
+**DECISION-357 — Committee seat dates and the atomic role change (T2 to T5).**
+
+**Status:** Resolved (tech-lead Phase 3) · **Date:** 2026-11-19 · **Feature:** `2026-11-19-presbytery-committees` (both increments; full text in the parent work-log)
+
+All end-like dates are the first day the thing no longer applies and the copy says so; a role change is one transaction with one effective date for both rows and one audit row; seat overlap is interval overlap excluding zero-length rows, serialized by an advisory lock per committee; dissolve takes a non-future date and ends every seat (a not-yet-started seat zero-length); dissolution is one-way.
+
+---
+
+**DECISION-356 — 0090 fix-forwards `presby_public_committee_roster` with the 0078 signature and photo lateral unchanged.**
+
+**Status:** Resolved (architect Phase 2) · **Date:** 2026-11-19 · **Feature:** `2026-11-19-presbytery-committees` (both increments; full text in the parent work-log)
+
+0090 fix-forwards `presby_public_committee_roster` with the 0078 signature and photo lateral unchanged. It adds checks on start date, end date (null or future), active membership, death, merge and dissolution. The projection's column list is pinned by test.
+
+---
+
+**DECISION-355 — In v1 an administrative commission is a presbytery-owned record, not a grant.**
+
+**Status:** Resolved (architect Phase 2) · **Date:** 2026-11-19 · **Feature:** `2026-11-19-presbytery-committees` (both increments; full text in the parent work-log)
+
+In v1 an administrative commission is a presbytery-owned **record** (`commission_records`, `commission_record_members`): no `role_id`, no `group_id`, an optional congregation validated by the 0045 trigger under `WHEN not null`, visible to the presbytery only. Its members are not groups, so nothing can grant through them and nothing can list them publicly. Nothing writes `administrative_commissions`, `org_delegations` or a `role_id`; a source scan and an RLS case pin it. Downward access is a future pipeline, gated on closing F456.
+
+---
+
+**DECISION-354 — `group_memberships.group_role` is a closed seven-value CHECK; the four new titles carry no authority.**
+
+**Status:** Resolved (architect Phase 2) · **Date:** 2026-11-19 · **Feature:** `2026-11-19-presbytery-committees` (both increments; full text in the parent work-log)
+
+`group_memberships.group_role` is a closed seven-value CHECK. The four new titles (vice chair, clerk, secretary, ex officio) carry no authority; the seat predicates in 0073 and 0085 stay exact-match on `('chair','leader')`. Committee seats use half-open dates; a role change ends the old row and starts the new one on the same effective date, in one transaction with one audit row.
+
+---
+
+**DECISION-353 — A committee's kind label and dissolved state live in a 1:1 side table with a composite FK to `groups`, guarded so it attaches only to a managed committee group at a presbytery.**
+
+**Status:** Resolved (architect Phase 2) · **Date:** 2026-11-19 · **Feature:** `2026-11-19-presbytery-committees` (both increments; full text in the parent work-log)
+
+A committee's kind label and dissolved state live in a 1:1 side table with a composite FK to `groups`, guarded so it attaches only to a managed committee group at a presbytery. They are not columns on the shared `groups` table. A missing label means "Not yet labelled", with no backfill. Dissolution is one-way and ends every seat in the same transaction.
+
+---
+
+**DECISION-352 — Presbytery committees and commission records live in a new `src/lib/committees/` module.**
+
+**Status:** Resolved (architect Phase 2) · **Date:** 2026-11-19 · **Feature:** `2026-11-19-presbytery-committees` (both increments; full text in the parent work-log)
+
+Presbytery committees and commission records live in a new `src/lib/committees/` module. `groups.ts` stays the only application writer of `groups` and `group_memberships`; the committees store reaches them only through its `*InTx` primitives, extended additively. At a presbytery, `committee`-type groups belong to Committees & Commissions and leave `/admin/groups`; congregations are unchanged.
+
+---
+
 **DECISION-351 — Import contract and deploy order.**
 
 **Status:** Resolved (tech-lead Phase 3) · **Date:** 2026-11-17 · **Feature:** `2026-11-17-congregation-profile` (both increments; full text and T-rulings in the parent work-log's Phase 3)

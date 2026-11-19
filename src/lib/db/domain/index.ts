@@ -39,3 +39,4 @@ export * from "./careers";
 export * from "./help-contact";
 export * from "./worship";
 export * from "./oversight";
+export * from "./committees";

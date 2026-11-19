@@ -229,6 +229,13 @@ export const MODULES: Record<string, string> = {
   oversight_building_appraisals: "M. Presbytery oversight",
   oversight_insurance_years: "M. Presbytery oversight",
   oversight_loans: "M. Presbytery oversight",
+  // Presbytery committees (drizzle/0090, src/lib/db/domain/committees.ts):
+  // a committee's label and dissolved state, and the presbytery's records of
+  // administrative commissions (DECISION-353, 355). Seats stay in
+  // group_memberships (F. Groups).
+  committee_details: "W. Presbytery committees",
+  commission_records: "W. Presbytery committees",
+  commission_record_members: "W. Presbytery committees",
 };
 
 /**

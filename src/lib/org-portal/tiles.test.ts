@@ -503,3 +503,21 @@ describe("PORTAL_TILES — liveFor (DECISION-342)", () => {
     expect(tile!.description).not.toMatch(/permission|ask |contact/i);
   });
 });
+
+describe("PORTAL_TILES — the committees tile has graduated (presbytery committees, C11)", () => {
+  it("is not coming soon, keeps its label, flag, scope and category, and carries the Increment 1 description", () => {
+    const tile = PORTAL_TILES.find((t) => t.key === "committees");
+    expect(tile).toBeDefined();
+    expect(tile!.comingSoon).toBeUndefined();
+    expect(tile!.liveFor).toBeUndefined();
+    expect(tile!.label).toBe("Committees & Commissions");
+    expect(tile!.flagKey).toBe("org_portal.committees");
+    expect(tile!.orgTypeScope).toEqual(["presbytery"]);
+    expect(tile!.category).toBe("operate");
+    expect(tile!.domain).toBe("governance");
+    expect(tile!.href("northern-reach")).toBe("/o/northern-reach/admin/committees");
+    // Increment 1 claims no commissions: its description says only what it does.
+    expect(tile!.description).toBe("The presbytery's committees and who serves on them.");
+    expect(tile!.description).not.toMatch(/commission/i);
+  });
+});

@@ -12,6 +12,10 @@ describe("next.config.ts help redirects", () => {
   });
   it("yields exactly the redirects of the placeholders a published page replaced", () => {
     // worship Increment 1: /help/worship-setting-up replaces the planned worship-planning placeholder.
-    expect(helpRedirects("(?:example\\.test)").map((r) => r.source)).toEqual(["/help/planned/worship-planning"]);
+    // presbytery committees Increment 1: /help/presbytery-committees replaces the planned presbytery-tools placeholder.
+    expect(helpRedirects("(?:example\\.test)").map((r) => r.source)).toEqual([
+      "/help/planned/worship-planning",
+      "/help/planned/presbytery-tools",
+    ]);
   });
 });

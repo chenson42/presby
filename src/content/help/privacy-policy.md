@@ -32,6 +32,7 @@ An organization using PresbyPortal may keep:
 - people and households, with their contact details and dates such as birth dates
 - the membership roll and the actions recorded on it
 - officers and their terms, and groups
+- committees, with who serves on them and in which role. A person appears on a public website only if the organization chose to list them
 - each person's privacy settings
 - events and calendars
 - giving records, if the congregation uses giving

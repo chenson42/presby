@@ -38,7 +38,7 @@ import type { HelpContentEntry, HelpEntry } from "./types";
 // 15 - 1: the presbytery reports page documents tile:reports, so it leaves the list.
 // 14 - 1: the same page documents tile:insights (the presbytery dashboard, DECISION-342).
 // 13 - 1: the congregation records page documents tile:oversight (docs/work-log/2026-11-17-congregation-profile.md).
-const ALLOWLIST_PIN = 12;
+const ALLOWLIST_PIN = 11;
 
 const ROOT = path.resolve(__dirname, "../../..");
 
@@ -200,7 +200,7 @@ describe("the shrink-only allowlist", () => {
     for (const k of [
       "org_portal.giving", "tile:giving", "tile:giving-admin", "org_portal.mail_domain",
       "org_portal.sensitive_info", "org_portal.parishes", "tile:groups", "tile:staff",
-      "tile:credentials", "tile:filings", "tile:committees",
+      "tile:credentials", "tile:filings",
       "tile:communications",
     ]) expect(keys.has(k), k).toBe(true);
   });

@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-19 |
 | 2 — Architectural review | architect | Complete (parent; R1–R6) | Approved with suggestions | 2026-11-19 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-19 |
-| 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | In progress: B1 and B2 complete; B3 next | — | 2026-11-19 |
+| 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | In progress: B1, B2 and B3 complete; B4 next | — | 2026-11-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -240,6 +240,94 @@ Deviations from the design (none touches an invariant or a string):
 Strings: no string was added outside the Copy section. Two cross-checks the Copy section does not fully spell out and B3 should know: the add form's role helper, person helper and the empty-state text (C5) and the date fields' helper text (C5 to C8) are page chrome, not in `copy.ts`; B3 puts them where the oversight forms put theirs.
 
 **Handoff to B3 (ux-developer).** Import `reads`, `copy`, `contract`, `derive`, `validate` as above; pages call `gateCommitteesPage` then `isUuid` on every id segment (404 before any read) then the readers with `Promise.all`; a reader's `forbidden` renders `CommitteesForbidden` (`PAGE_STATE.forbidden(name)`), `not_found` renders `notFound()`, a throw renders the section load error (`PAGE_STATE.sectionError` / `tryAgain`), and an `OrgAccessError` is rethrown. Replace the placeholder `admin/committees/page.tsx` and its `page.test.tsx` (the boundaries exemption then expires). Forms call the actions above and use the zod wrappers with the reader's `today`; each root needs `HydrationGate`. `splitRoster(seats, today)`, `seatDatesText(seat, today)`, `chairNames`, `groupCommittees` and `personStatus` are the derivations; `carriesNote`, `carriesWarning`, `TITLES_NOTE`, `STATUS_BADGE`, `END_CONTROL`, `seatDateLineText` are the strings. The public-listing switch is a copy of the groups admin's control with `setCommitteeSeatPublicListedAction` passed in as a prop (the committees tree imports nothing from `admin/groups/`). The `groups` admin pointer (C10) needs `resolved.org.organizationType`; the exclusion itself is already in `groups.ts`.
+
+## B3 — ux-developer (2026-11-19)
+
+Scope as the batch table: the list, committee page and every form page; the components, forms and dialogs; the three forms' tests (U8, U9, U10); the tile graduating; the groups admin pointer and empty state; the help page, its registry entry, allowlist and pin, and the three other help edits. Community at a presbytery was walked first and the "person not yet recorded" paragraph worded from the screen. No `loading.tsx` and no `route.ts` under `admin/committees/**`. No schema, server-module or Rule 16 shared file was touched (see the two non-design edits under Implementer Notes).
+
+### Files Created
+
+- Pages under `src/app/(org)/o/[slug]/admin/committees/`: `page.tsx` (replaces the `ComingSoon` placeholder; the boundaries exemption has expired with it), `new/page.tsx`, `[committeeId]/page.tsx`, `[committeeId]/edit/page.tsx`, `[committeeId]/members/new/page.tsx`, `[committeeId]/members/[membershipId]/role/page.tsx`, `committee-gate-state.tsx`. Each page: `gateCommitteesPage`, then `isUuid` on every id segment (404 before any read), then its reader; `forbidden` renders `CommitteesForbidden`, `not_found` is `notFound()`, a throw is the load error with "Try again", an `OrgAccessError` is rethrown. `?show` is read as the fixed enum `dissolved`.
+- `src/components/committees/` (server unless marked): `committees-list`, `committees-section`, `committee-card`, `kind-badge`, `role-badge`, `roster` (+ `seat-card`, `seat-actions`, `seat-badges`, `seat-dates`), `carries-role-note`, `titles-note`, `committee-states` (forbidden, load error, section error, form-unavailable, guided empty), `back-link`, `form-page-frame`, `form-field`, `text-field`, `select-field`, `select-classes`; **client:** `committee-form`, `add-member-form`, `change-role-form` (the three `useForm` roots, each in `HydrationGate`, each with `useUnsavedChangesGuard`), `end-term-dialog`, `dissolve-dialog` (AlertDialog, plain controlled date input, no `useForm`), `public-listing-toggle` (a copy of the groups admin's control, the action passed in as a prop), `form-failure.ts` (field versus toast).
+- `src/lib/committees/ui-copy.ts`: the page chrome (C2 to C8, C10), pure, one file, pinned by `ui-copy.test.ts`.
+- `src/app/(org)/o/[slug]/admin/groups/committees-pointer.tsx`.
+- `src/content/help/presbytery-committees.md` (published, text only, no screenshots).
+- Tests: `committees/pages.test.tsx` (50, U8), `components/committees/committee-forms.test.tsx` (31, U9), `components/committees/committee-views.test.tsx` (11), `lib/committees/ui-copy.test.ts`.
+
+### Files Modified
+
+- `src/lib/org-portal/tiles.ts`: `comingSoon` removed, description "The presbytery's committees and who serves on them." (C11); `tiles.test.ts` gains a pin.
+- `admin/groups/page.tsx`, `groups-list.tsx` (+ the two tests, additive): the one-line pointer and "No groups yet" at a presbytery only (`atPresbytery` from `resolved.org.organizationType`); a congregation's page is unchanged and the new test pins it.
+- `src/lib/committees/copy.ts`: one new export, `seatDateLinePrefix` (the "Since", "Starts"... words a page puts before a `FormattedDate`); no string changed.
+- Help: `registry.ts` (the `presbytery-tools` placeholder deleted, `presbytery-committees` published with `replaces: ["presbytery-tools"]`, `covers: ["tile:committees"]`, `verifiedIn: "0.62.0"` for the release commit to set), `slug-history.ts`, `coverage-allowlist.ts` (`tile:committees` removed, "11 entries", the covering page named), `coverage.test.ts` (pin 12 to 11, `tile:committees` leaves the still-listed array); `roles-who-can-do-what.md`, `why-cant-i-see-this.md` (labels gain "Committees & Commissions" and "Congregation Oversight") and `privacy-policy.md` as C13 words them.
+- `docs/product/functionality-map.md`: one sentence appended to the portal-IA bullet (see Implementer Notes 8).
+- Deleted: `admin/committees/page.test.tsx` (the placeholder's test).
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit`, `npm run lint` (`--max-warnings=0`) | clean |
+| `npm run check` (all ten, new files staged) | 10/10 passed, including `check:hydration-gate` (the three new roots) and `check:help` ("Help check passed", 34 entries, 31 published) |
+| `npm run build` | passes |
+| New unit tests | 93 across the four new files; the committees boundaries test (35, with the placeholder exemption expired) and every help, tile and groups test green |
+| Full unit suite, no DB credentials | 936 files passed, 165 skipped, 1 failed: `dev-docs.test.ts` "sees the same tables in the exports as are declared in the schema files", **the expected red until integration** (B1/B2's note) |
+| DB, serial, pipeline branch | `reads.db`, `store.db`, `groups.committees.db`: 92 passed (B3 changed no server module; this is the regression run) |
+| Tap targets | measured in a real browser at 360px on every page and dialog: nothing of this feature is under 44px. The only sub-44px elements are the platform shell's "PresbyPortal" and "Back to portal" links and sonner's close button (not this feature's) |
+| No horizontal scroll at 360px | `scrollWidth == clientWidth` on every page, a 200-character committee name (list, committee page, end dialog) included |
+
+No failing-first mutation runs for B3: it is presentation over B2's proven server layer. One test did fail before the code was right and found a real defect: the "Change role for {name}" link read "Change rolefor {name}" to a screen reader because the sr-only suffix carried its own leading space; the space now lives in the parent (also fixed on the end control).
+
+### Browser walk (own server on port 3101, `E2E_BASE_URL` set, stopped by PID 31942 and its wrapper 31925; Chromium, invented data only)
+
+360px, light, unless stated. Signed in as `committees.clerk@example.invalid` (`groups.manage` only) and the dev seed's other accounts.
+
+| State | Result |
+|---|---|
+| List | five sections in order, the unlabelled prompt, "Show dissolved committees (1)", cards below `sm` and the table at desktop; dissolved shown with "Dissolved {date}" |
+| Empty list | walked at the fixture presbytery `e2e-presbytery` (a temporary role holding only `groups.manage`, removed afterwards): "No committees yet", the body and "Create your first committee" |
+| Create | the C4 errors on the fields; a duplicate ("committee on ministry") refused under the name field with the stored spelling, values kept; a 200-character name created |
+| Edit | "Edit {name}", values loaded, kind changed, saved |
+| Add member | errors; 20 options; a person already serving disabled "(already serves)"; added as chair; a later start shows under "Starting later" |
+| Change role | "Now Chair, since {date}."; the empty select refused with "Choose a different role."; changed to Clerk; the old chair row is in Past members "Ended the day it started" |
+| End term | a date before the start refused in the dialog under the field; ended with a planned end; "Change end date" dialog title; "Cancel planned term" dialog without a date field |
+| Public listing | the consent dialog opens on the switch with the groups admin's text (not confirmed, to leave no public listing) |
+| Dissolve | dialog text, date capped at today; dissolved; the page shows the dissolved note and no write control; edit and add pages for it show the C4 and C5 sentences |
+| Add member, no one selectable | walked at `e2e-presbytery` after adding everyone: the guided empty state naming Community and Features |
+| Denied | `committees.plain@example.invalid`: the C1 permission sentence naming the presbytery, on the list and on `/new` |
+| Flag off | `org_portal.committees` flipped off and back: "Committees & Commissions isn't turned on for {name} yet." |
+| Wrong org type | `org1@presby.invalid` at a congregation: the not-available sentence; that user at the presbytery gets the org denial |
+| 404s | a non-UUID, an unknown UUID and a bad seat segment: 404 |
+| Groups admin at a presbytery | (with `org_portal.groups` temporarily on) the pointer line, "No groups yet", no "Committee" in the type select, and the old committee-type group's id is a 404; a congregation's groups page unchanged |
+| Portal | the tile sits under "Governance & Courts" with no "Coming soon" pill (Communications keeps its own) |
+| Dark | list, committee page and an end dialog: badges, borders and the destructive button legible |
+| Desktop 1280px | list, committee page, new and add forms |
+
+Community at a presbytery (walked with `people.manage` and the global `org_portal.members_create` flag and the organization's toggle temporarily on, restored after): the Community page is "Member management isn't turned on for {name} yet." with a "How features are turned on" link until both are on. With them on, "Add person" opens a six-step wizard whose fifth step, "How is this person connected?", offers "Visitor" and, for someone who can propose roll actions, "Participant" and "Member"; a person who can only manage people is offered Visitor alone. That is the help paragraph's wording.
+
+### Implementer Notes
+
+Deviations from the design:
+
+1. **`ui-copy.ts` is new.** The design had no file for the page chrome; B2 pointed it to "where the oversight forms put theirs". One pure file, so the copy has one place, pinned byte for byte by `ui-copy.test.ts`.
+2. **One string outside the Copy section, for a ruling:** the empty first option of the change-role "New role" select reads "Choose a different role" (C6 has only the error "Choose a different role." and gives no placeholder). The alternative, preselecting the first role, risks a wrong change. Add form: the Role select has no placeholder, Member is preselected (C5 gives none and the groups form does the same).
+3. **The help page could not say "Cancel planned term" or "planned end".** `check:help` H8 bans "planned" in prose even inside a quoted label, so the design's draft failed (its "banned phrases: none" line was wrong). The label left the registry `labels`, and the page says "a term with an end date already set shows 'Change end date' instead, and a term that has not started yet has a button that cancels it". The button itself still reads "Cancel planned term" (C3). If the ruling is to keep the label in the help, H8 needs an exemption for labels (tech-lead).
+4. **The Community paragraph (†) is from the screen, not the draft:** "Add person", the step "How is this person connected?", "Visitor", or "Participant" only for someone able to propose roll actions; and "If 'Community' says it isn't turned on" instead of "is off". The draft said "as a participant or visitor".
+5. **Contact line:** `[Contact the team](/help/contact)`, the sibling pages' form, instead of `{{contactAdmin}}`.
+6. **Two other test pins moved by the placeholder's redirect** (a published page that `replaces` a planned slug adds `/help/planned/<slug>` to `helpRedirects()`): `src/lib/help/next-config-wiring.test.ts` and `src/lib/giving/csp.test.ts` list the redirects exactly. Neither was in the design's pin list.
+7. **`slug-history.ts` appended** (H3 requires every published slug).
+8. **`docs/product/functionality-map.md` edited** (one sentence): `check:help` H15 fails without a `/help/presbytery-committees` mention, so the Rule 14 line could not wait for ship time. The orchestrator can rewrite it at integration.
+9. **Both layouts rendered.** The roster and the list render a card list (`sm:hidden`) and a table (`hidden sm:block`); CSS shows one, so the hidden one is out of the tab order and the accessibility tree. Ids and accessible names are made unique by an `idPrefix`. A test that counts controls sees each one twice for that reason.
+10. **The dialogs use a plain `Button` for the confirm, not `AlertDialogAction`,** so the dialog stays open and shows the error under the date field on a refusal.
+11. **A planned seat's change-role subtitle** reads "{Role}. Starts {date}." (the C6 "Now {Role}, since {date}." would say "since" a future date).
+12. **The edit and add pages for a dissolved committee link "Back to committees"** (the list), since the reader returns no committee name in that case.
+13. **Walk residue on the pipeline Neon branch:** "Walk Test Committee" (dissolved) with a few seats at the Northern Reach, and "Solo Committee" with the three people of `e2e-presbytery` seated. The temporary roles, grants and toggles used to walk were removed or restored (`org_portal.committees` true, `org_portal.groups` false, `org_portal.members_create` false and its toggle off). B4's fixtures use their own organizations.
+
+**TODO edit for the orchestrator (not made here).** `check:help` passes with `[help:presbytery-tools]` still on `docs/TODO.md` line 29 (H12 passes a token no entry uses), so nothing blocks. At integration, still remove that token from line 29, as the design's C12 rules, then `grep -n "\[help:" docs/TODO.md`.
+
+Strings added: none beyond the Copy section, except the one in note 2. New copy a fork's branding pass should review: none brand-specific.
+
+**Handoff to B4 (full-stack-developer).** The pages and forms are real. Selectors worth pinning in the specs: fields by label ("Committee name", "Kind", "Person", "Role", "Starts on", "Ends on (optional)", "New role", "Effective on"); the dialogs are `alertdialog` with "Ends on" and "Dissolved on"; the roster controls are named "Change role for {name}" and "End term for {name}" (duplicated: a card and a table row, one hidden by CSS, so scope with `:visible` or a viewport); the carries note has `data-testid="carries-role-note"`; the toggle's switch name is "List {name} publicly on {committee}'s public roster, currently on|off". `reads.today` is the organization's local day. Not in the unit tests and left for the e2e: the production-lane hydration spec and the audit rows.
 
 ---
 

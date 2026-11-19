@@ -550,14 +550,12 @@ export const PORTAL_TILES: readonly PortalTile[] = [
   {
     key: "committees",
     label: "Committees & Commissions",
-    description:
-      "Presbytery committees, commissions, and administrative-commission tracking.",
+    description: "The presbytery's committees and who serves on them.",
     href: (slug) => `/o/${slug}/admin/committees`,
     flagKey: "org_portal.committees",
     category: "operate",
     domain: "governance",
     orgTypeScope: ["presbytery"],
-    comingSoon: true,
   },
   {
     key: "oversight",

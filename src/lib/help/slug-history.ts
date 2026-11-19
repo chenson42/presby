@@ -51,4 +51,6 @@ export const SLUG_HISTORY: readonly string[] = [
   "presbytery-reports",
   // 2026-11-18, congregation records Increment 1: profile, buildings, insurance and loans.
   "congregation-records",
+  // 2026-11-19, presbytery committees Increment 1: committees and who serves on them (replaces the planned presbytery-tools).
+  "presbytery-committees",
 ];

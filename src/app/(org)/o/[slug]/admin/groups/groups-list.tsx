@@ -8,6 +8,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { DerivedGroupListEntry, GroupListEntry } from "@/lib/groups";
+import { GROUPS_POINTER } from "@/lib/committees/ui-copy";
 import { derivedGroupManagedFromText } from "@/lib/derived-group-labels";
 
 /**
@@ -25,14 +26,19 @@ import { derivedGroupManagedFromText } from "@/lib/derived-group-labels";
 export function GroupsList({
   slug,
   entries,
+  atPresbytery = false,
 }: {
   slug: string;
   entries: GroupListEntry[];
+  /** A presbytery keeps its committees elsewhere (C10): its empty state must not say "committees". */
+  atPresbytery?: boolean;
 }) {
   if (entries.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border py-16 text-center">
-        <p className="text-sm font-medium">No committees or groups yet</p>
+        <p className="text-sm font-medium">
+          {atPresbytery ? GROUPS_POINTER.emptyTitle : "No committees or groups yet"}
+        </p>
         <p className="mt-1 text-sm text-muted-foreground">
           Add your first one to get started.
         </p>

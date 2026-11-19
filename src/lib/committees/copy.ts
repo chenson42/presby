@@ -187,6 +187,11 @@ const DATE_LINE_PREFIX: Record<Exclude<SeatDateLine["kind"], "zero_length">, str
   ended: "Ended",
 };
 
+/** The words before the date ("Since", "Ends"...) of a date line; empty for the zero-length line. A page puts `FormattedDate` after it. */
+export function seatDateLinePrefix(line: SeatDateLine): string {
+  return line.kind === "zero_length" ? "" : DATE_LINE_PREFIX[line.kind];
+}
+
 /** The text of a date line with the date already formatted by the caller (`FormattedDate` in JSX, `dateText` in a string). */
 export function seatDateLineText(line: SeatDateLine, formattedDate: string): string {
   return line.kind === "zero_length" ? "Ended the day it started" : `${DATE_LINE_PREFIX[line.kind]} ${formattedDate}`;

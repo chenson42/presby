@@ -12,6 +12,12 @@ describe("GroupsList", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
+  it("at a presbytery the empty state does not say 'committees' (they live under Committees & Commissions)", () => {
+    render(<GroupsList slug="northern-reach" entries={[]} atPresbytery />);
+    expect(screen.getByText("No groups yet")).toBeTruthy();
+    expect(screen.queryByText(/no committees or groups yet/i)).toBeNull();
+  });
+
   it("renders a table row per group, linking to its detail page", () => {
     render(
       <GroupsList

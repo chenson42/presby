@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete (parent; R1–R6) | Approved with suggestions | 2026-11-19 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-19 |
 | 4 — Implementation | api-developer (B5), ux-developer (B6), full-stack-developer (B7) | **Complete** (B5, B6, B7; 2026-11-19) | Ready for Phase 5 | 2026-11-19 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1; copy rulings recorded below) | PASS | 2026-11-19 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -289,8 +289,229 @@ Scope as the batch table: the fixture additions, the commissions spec, the hydra
 ---
 
 # Phase 5 — Verification (qa)
+**Verdict: PASS.** Every check you asked for ran green on the pipeline branch. Six findings are below; none is a defect in what ships. Two need a ruling (copy and the Phase 4 help record), one is a suggested hardening of the boundary test, and three are notes.
 
-Pending.
+# Phase 5 — Verification (qa)
+
+**Date:** 2026-11-19
+**Verified by:** qa
+
+**Where I worked.** Worktree `/Users/cshenso/git/presby-platform/presby-committees`, branch `pipeline/presbytery-committees-inc2` at `09060feb`. The Increment 2 diff is `98729e07..09060feb`: 55 files, no migration, nothing under `src/auth.ts`, `src/proxy.ts`, a layout, `e2e/support/` outside this pipeline's own fixture, `playwright.config.ts` or a shared component. So the auth gate does not apply.
+
+**Database.** The pipeline Neon branch, endpoint `ep-odd-hall-ax6wtzf0`. I checked connections by role name only and printed no value: `DATABASE_URL` is `presby_app` (`rolbypassrls = f`) and `PLATFORM_DATABASE_URL` is `neondb_owner`. I never touched production or :3000. Disk was 42% used.
+
+**Flag state.** Before the e2e run I reset global flags to the CI baseline with `scripts/ci/e2e-reset-flags.sql -v pipeline_branch=1`. It set 38 seeded flags. Flags on afterwards: `auth.local_login`, `auth.require_2fa`, `org_portal.committees`, `org_portal.communications`, `org_portal.home_v2`, `org_portal.reports`, `platform.merged_home`, `sites.public_render`, `ui.brand_theming`. Same set after all runs.
+
+**Scope run.**
+- **In full:** typecheck, lint, `npm run check`, `npm run build`, and the whole unit suite.
+- **DB:** the six committees files, serially.
+- **RLS:** `test-rls-90.sql` as `presby_app`.
+- **e2e:** the 43 tests the Phase 4 QA list names (dev lane), and the 6-test production hydration lane.
+- **Not re-run:** the whole DB-backed set and the full e2e suite. The diff touches no migration, `authz.ts`, `src/lib/db/`, shared fixture, proxy, auth, layout or shared component. CI covers the rest.
+
+## Type Check
+
+`npx tsc --noEmit`: **PASS**. `npm run lint` (`--max-warnings=0`): **PASS**. `npm run check`: **PASS**, exit 0, all ten tripwires (Help check: 34 entries, 31 published, 31 content files, 7 images). `npm run build`: **PASS**; the four commission routes are in the route table.
+
+## Unit Tests
+
+- **Full suite, no DB credentials** (`npx vitest run`): 941 files passed, 165 skipped. 15,575 tests passed, 4,488 skipped, 0 failed (43.7 s).
+  - The skips are DB-backed files only. In the committees-related set, the only skips are `store.db` (88), `reads.db` (34) and `seat-semantics.db` (5), which all ran in the DB pass below, plus the unrelated `help-contact/inbox.db` (5).
+- **Committees DB suites, serial** (`npx dotenv -e .env.local -- vitest run --no-file-parallelism` over `committees.db`, `committees.schema`, `store.db`, `reads.db`, `seat-semantics.db`, `groups.committees.db`): 6 of 6 files, **206 of 206 tests passed** (523.7 s). That matches B5's 204 plus the 2 tests added by the rulings.
+  - After the run, the triggers those tests switch off and on in teardown (`memberships_guard_end`, `group_memberships_reject_derived`), and `commission_record_members_live_guard` (switched off in B5's own failing-first run), are all `tgenabled = 'O'`.
+  - 0 `e2e-cmt%` organizations are left.
+- **`scripts/committees/test-rls-90.sql` as `presby_app`:** exit 0, **120 passes**, sections (a) to (j).
+
+Failures: none.
+
+## End-to-End Tests
+
+**Dev lane, own server on :3101**, started with the env in the brief (`CRON_SECRET`, `RATE_LIMIT_DISABLED`, the domains fakes, `E2E_BASE_URL=http://localhost:3101`, `E2E_ALLOW_SHARED_DB=true`) and stopped by PID.
+
+- **Run 1: discarded, an environment fault.** The `beforeAll` of `committees-commissions.spec.ts:103` timed out after 420 s at sign-in.
+  - The dev log shows `/signin` re-requested in a loop, each request followed by "Compiled in 1ms". That is the HMR-hash reload loop `playwright.config.ts` warns about when `next dev` restarts over a warm `.next/dev`; my `npm run build` had just run.
+  - 1 failed (the hook), 42 did not run. I interrupted Playwright with SIGINT so its teardown ran: 0 fixture organizations left, `org_portal.committees` restored.
+- **Fix before run 2:** I removed `.next/dev`, a gitignored cache (`git check-ignore` confirmed), as the config does for its own lanes, and restarted the server.
+- **Run 2: Total 43 | Passed 43 | Failed 0 | Skipped 0 | 5.5 min.**
+  - `committees-commissions` 16, `committees-roster` 16, `committees-gates` 5, `hydration/commissions-forms` 3, `hydration/committees-forms` 3.
+- **Production hydration lane** (`PW_PROD_BUILD=1 PW_PROD_PORT=3801`, `--project=prod-build`, `E2E_BASE_URL` unset, dev server stopped first): **Total 6 | Passed 6 | Failed 0 | 1.0 min.** Playwright built, served and stopped it.
+- **Afterwards:** nothing listening on 3101 or 3801, `git status` clean, 0 fixture organizations.
+
+## Regression Tests Added
+
+I confirmed these by reading the tests and the Phase 4 failing-first record, as the QA list asked. I re-sabotaged nothing; I am read-only.
+
+| Mechanism | Test | Failing-first |
+|---|---|---|
+| Audit is written in the mutation's own transaction | `store.db.test.ts` "injected audit failure" block, with a non-vacuity control at `:1674` | B5: red with `audit()` made best-effort |
+| Interval overlap | `store.db.test.ts:1419`, dated terms | B5: red with `seatsOverlap` disabled |
+| Live-parent guard (an add racing the end) | `store.db.test.ts:1752`, deterministic, uncommitted end held | B5: red with the trigger disabled; I confirmed it is enabled again |
+| One neutral congregation refusal | `store.db.test.ts:1245` (six misses), `:1285` (the 0045 trigger path); e2e test 7 (four forged ids, one sentence, nothing written) | B5: resolver break went red |
+| `HydrationGate` on the member form | `hydration/commissions-forms.spec.ts` | B7: red with the gate removed |
+| The no-access sentence is shown | e2e test 2; `copy.test.ts:83-86` byte for byte | B7: red with the sentence not rendered |
+| Rulings 1 to 3 (not-found wording, appointment after end, appointment after today) | `copy`, `validate`, `action-gate` and action tests; `store.db` | B5 rulings: 7 unit and 5 DB tests red first |
+| Stale edit | `store.db.test.ts:1300`, `:1721` (two simultaneous edits) | Not separately sabotaged. Both tests assert `stale` directly, so removing the `rowVersion` compare fails them |
+| Key and organization-type gate in the store | `store.db.test.ts:1154` (a member with no key; a congregation's clerk) | Not separately sabotaged. Every write asserts `forbidden` |
+| Hard rule: nothing written downward | e2e test 14 (fixture-scoped counts of `administrative_commissions`, `org_delegations`, `role_grants` unchanged across all six actions driven through the UI); `store.db` snapshots for `recordCommission` and `addCommissionMember`; `boundaries.test.ts:459` (name scan) and `:443` (commission functions reach no groups primitive), each with failing samples | — |
+
+**Not covered by a failing-first app test, by design:** removing the app's `commission_ended` check in `addCommissionMember`. The database live guard would refuse the same add with the same answer, so the property holds without it (defence in depth).
+
+## Coverage on Critical Modules
+
+- `permissions.ts`, `two-factor.ts`, `flags.ts`: not touched by this diff; not re-measured.
+- `src/lib/committees` pure modules: `validate.ts` 100%, `derive.ts` 100%, `copy.ts` 96.8%, `ui-copy.ts` 97.2% statements (99.2% overall). `contract.ts` reports no executable statements.
+
+## Feature-Gate Audit
+
+No route handler is touched. Gates were read in the action bodies, `action-gate.ts`, `store.ts` and `reads.ts`, not inferred from green tests.
+
+- **Pages, order:** session (`assertOrgSession` with the Node-side second-factor recheck), the four-way org resolution, then flag, then organization type (`gateCommitteesPage`, `gate.ts:108-151`), then `groups.manage` inside the reader's own transaction (`readUnder` calls `mayManage`, `reads.ts:249-257`, `:160-168`).
+- **Actions, order:** session, org resolution, flag (`action-gate.ts`), `isUuid` on every id, parse, then the store's `gate()` (`store.ts:242-248`) inside the write's own transaction. `gate()` checks `groups.manage` first and the presbytery type second.
+  - Both answer `forbidden` with one string, so the order is not observable from outside. It is the store's documented "cheapest, least informative first".
+  - Every one of the six commission store functions calls `gate()` first (`store.ts:968, 1014, 1075, 1129, 1183, 1242`); `boundaries.test.ts:434` pins it.
+
+| Route or action | auth() / session check | Permission check | Key |
+|---|---|---|---|
+| page `/o/[slug]/admin/committees` (commissions section) | yes, `gateCommitteesPage` (flag, type) | `readCommissionList` → `mayManage` | `groups.manage` |
+| page `/commissions/new` | yes, `gateCommitteesPage` | `readCommissionFormOptions` → `mayManage` | `groups.manage` |
+| page `/commissions/[commissionId]` | yes; `isUuid` before any read | `readCommission` → `mayManage` | `groups.manage` |
+| page `/commissions/[commissionId]/edit` | yes; `isUuid` | `readCommission` and `readCommissionFormOptions` | `groups.manage` |
+| page `/commissions/[commissionId]/members/new` | yes; `isUuid` | `readCommissionMemberFormOptions` | `groups.manage` |
+| `recordCommissionAction` | yes, `resolveCommitteesActor` (flag) | `store.gate` | `groups.manage`, presbytery |
+| `updateCommissionAction` | yes; `isUuid(commissionId)` | `store.gate` | `groups.manage`, presbytery |
+| `addCommissionMemberAction` | yes; `isUuid` | `store.gate` | `groups.manage`, presbytery |
+| `endCommissionMemberAction` | yes; `isUuid` ×2 | `store.gate` | `groups.manage`, presbytery |
+| `endCommissionAction` | yes; `isUuid` | `store.gate` | `groups.manage`, presbytery |
+| `removeCommissionRecordAction` | yes; `isUuid` | `store.gate` | `groups.manage`, presbytery |
+
+`FEATURES.*` does not apply: this is the tenant axis, checked through `presby_has_permission` via `holdsPermissions`.
+
+**Behavioural confirmation (e2e run 2):**
+- The clerk (`groups.manage` only) records with no `/totp` (test 8).
+- A keyless member gets the C1 sentence on all five pages and nothing is written (test 9).
+- With the flag off, every page shows the flag-off state (test 12).
+- Twelve misses answer one identical 404 (test 11).
+
+## Schema/RLS Audit (live catalog, no DDL in this increment)
+
+Probed on `presby_app` against the seed's records (three at the Northern Reach: one active about Alder Creek, one ended about none, one removed).
+
+- **Congregation context** (`app.current_org_id` = Alder Creek, the congregation a record is about): `commission_records` 0 rows, `commission_record_members` 0 rows. `UPDATE commission_records … where about_org_id = Alder Creek` gives `UPDATE 0`; `UPDATE commission_record_members` gives `UPDATE 0`.
+- **Control:** the presbytery's context reads 3. No context reads 0.
+- **Refusing layer:** the RLS policy, not a grant or a trigger. Both tables are `relrowsecurity` and `relforcerowsecurity`, with one `tenant_isolation` `ALL` policy whose `USING` and `WITH CHECK` are both `organization_id = presby_current_org()`.
+- **Grants (`aclexplode`):** `presby_app` holds SELECT and INSERT only on both commission tables; `presby_platform` holds nothing.
+- **Triggers:** the four commission triggers are present and `O`.
+
+**The hard rule:**
+- Nothing in `src/lib/committees`, `src/components/committees` or the `admin/committees` route tree names `administrative_commissions`, `org_delegations`, `role_grants`, `roleGrants`, `roleId` or `role_id` outside two comments (`copy.ts:176`, `store.ts:96`).
+- No owner connection appears there.
+- The commission tables are named only in `store.ts`, `reads.ts`, `db/domain/committees.ts` and `dev-docs.ts`.
+- `test-rls-90` (a) asserts no `role_id`, `group_id` or `public_listed` column, and (i) asserts the resolver cannot see a commission member.
+- e2e test 14 shows the downward counts unchanged across the full flow.
+- **A congregation cannot read a record about it:** proven at the database (above, and `test-rls-90` (d)) and in the browser (e2e test 10: the congregation's administrator gets the organization denial naming the presbytery, and the record's title appears nowhere on the congregation's paths).
+
+**Neutral congregation refusal:**
+- One sentence: "That congregation could not be found among {presbytery}'s member congregations."
+- It covers another presbytery's congregation, a non-congregation child, a departed congregation, the presbytery itself, a nonexistent id, a malformed id (`store.db:1245`) and the 0045 trigger path (`:1285`).
+- In the browser, four forged ids give one identical message, nothing is written, and neither name of the other presbytery appears (e2e test 7).
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the design's Copy table**, except the items below. All are truthful; they are recorded for a ruling, not as defects.
+  1. **Charge helper differs from C15 by one word.** C15 says "…Don't record confidential details **here**. Anyone who can…". The build ships it without "here": `src/lib/committees/ui-copy.ts:179`, pinned to the shipped text at `ui-copy.test.ts:101` and `commission-forms.test.tsx:98`. No ruling covers it; B6 did not flag it. Either rule the shipped text in, or restore "here" (both pins change with it).
+  2. **Help prose beyond the C15 draft.** C15 authorised a field-by-field sentence. These additions go further and none is ruled:
+     - in the section: "'Appointed on' cannot be after today." (rests on ruling 3); the Community and "Add person" route; "and each commission's page says so"; "On a member's row, choose 'End term'…"; "Choose 'Edit commission'… A commission that has finished can still be corrected this way."; and the "Ended on" walk-through;
+     - the intro sentence "It also keeps the presbytery's record of its administrative commissions.";
+     - the troubleshooting bullet "A commission's page that no longer opens…" (B6 note 7; not covered by B6 rulings 1 to 3).
+
+     Each was checked against the build (next item).
+  3. **C13 II reworded.**
+     - Privacy: C13 says "…and, for a presbytery, its own notes about administrative commissions, which are never published". The build says "A presbytery also keeps its own notes about administrative commissions, which are never published" (`privacy-policy.md:35`).
+     - Roles: the bullet `roles-who-can-do-what.md:56` gained "and its record of administrative commissions" (C13 II named only the paragraph at `:75`).
+
+     Both mean the same as C13 II. "Never published" holds: no public function or `(public)` route reads the commission tables.
+- [x] **The query behind each claim was opened.**
+  - "About {congregation}" and "(no longer a member…)": `readCommission` compares `organizations.parent_id` with the presbytery. It does not read the affiliation history; that is the design's own definition.
+  - "{n} serving": the half-open rule on the organization's local day (`reads.ts`). It is shown only on active records.
+  - "gives no one access" / "does not see it": the absent grant columns, plus the organization-only policy probed above.
+  - "does not record who has read it": there is no read audit; true.
+  - "never copied into the audit trail": e2e test 13 and the `store.db` sentinel test.
+- [x] **Each instruction is doable by the role that sees it.** Every commission page and action requires `groups.manage` at a presbytery; the help's Needs block names that key.
+  - The help's "use 'Add person' under 'Community'" depends on the Community toggle and `people.manage`. That was already ruled and stated in Increment 1, and the add-member empty state (`COMMISSION_MEMBER.emptyBody`) says how to turn it on.
+- [x] **Older strings grepped; none is made false.**
+  - The Increment 1 sentence "This page keeps committees. It does not keep administrative commissions…" is replaced.
+  - `v0.63.md:42` ("Not yet: administrative commissions") is release history, as C16 expected.
+  - `why-cant-i-see-this.md:43` and `dev-docs.ts` remain true.
+- [x] **Help diff covered, by walking it.** My own server, 360px, light and dark, as `committees.clerk@example.invalid` (`groups.manage` only), on the dev seed: the list, `?show=ended`, the active and ended commission pages, edit, add member, add member on the ended record, record form, and the End commission, Remove and End term dialogs.
+  - All 13 new registry `labels`, plus "Add a member", "End term" and "Hide ended commissions", are on screen.
+  - No help images changed (0 files under `src/content/help/images/`).
+  - **Process gap:** the Phase 4 record has no per-claim "page, fact, how verified" table (B6 says only that claims were written from the screens). I traced every claim myself, above. This needs a ruling on whether my walk stands in for it.
+
+`copy truthfulness: PASS`. The items above are for a ruling.
+
+## 360px
+
+- No page scrolls sideways at 360px (`scrollWidth == clientWidth`), light or dark.
+- Every control in `<main>` is 44px or taller, except the platform shell's "Back to portal" link, which is not this feature's.
+- The End commission and Remove dialogs fit the viewport with 44px inputs and buttons once the open animation has settled. An early reading of 42px was the dialog's 95% zoom-in scale caught mid-animation; I re-measured by `offsetHeight`.
+- Dark mode: badges, the no-access panel, the destructive "Remove this record" and the roster cards are all legible (screenshots read).
+- The long-text cases (200-character title, 498-character charge, 198-character minute, 120-character person name) pass in e2e test 15.
+
+## Findings
+
+1. **Copy, needs a ruling:** the charge-helper wording (Copy item 1 above).
+2. **Copy, needs a ruling:** the unruled help prose, the troubleshooting bullet and the C13 rewording (Copy items 2 and 3), and whether my walk stands in for the missing Phase 4 "page, fact, how verified" record.
+3. **Suggested follow-up for tech-lead, not blocking: a stronger boundary test.** The hard-rule scan (`boundaries.test.ts:459`) matches names. A future `import { grantRole } from "@/lib/role-grants"` in `store.ts` would pass it.
+   - Today the surface imports only `readGroupRoleGrantsInTx` from that file (`store.ts:27`, `reads.ts:7`).
+   - e2e test 14 is the behavioural backstop across all six actions.
+   - The fix: an import allowlist for `@/lib/role-grants` and any delegation module in the surface. That would turn the name list into the property.
+4. **Accessibility, minor.** On the commission page the screen-reader-only `<dt>` "Appointed" (`[commissionId]/page.tsx:89`) sits before a `<dd>` that also starts "Appointed" (`:91`), so a screen reader hears "Appointed Appointed 9/14/2026". The "Congregation" `<dt>` before "About …" reads fine. Suggest a different `<dt>` word, or dropping the prefix inside the `<dd>`. A ruling is needed only if the word changes.
+5. **Order, no action.** Actions check the key before the organization type; pages check flag, then type, then key. Both refusals are the same `forbidden` string, so the difference cannot be seen from outside.
+6. **Environment, no action.** The first e2e run was lost to the dev-server reload loop after `npm run build`. I cleared the gitignored `.next/dev` and the rerun was clean (both runs reported above).
+
+## Verdict
+
+**PASS**
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (tsc, lint, check 10/10, build; unit 15,575/0 failed; committees DB 206/206; test-rls-90 120; e2e 43/43 dev lane (run 1 lost to a reload-loop environment fault, rerun clean) + 6/6 prod hydration; gate, live-catalog and hard-rule audits; 360px light and dark; flags reset to the CI baseline; copy rulings open for tech-lead and orchestrator) | PASS | 2026-11-19 |
+
+## Handoff
+
+Next agent: **analyst (Phase 6).** Before or alongside it:
+- **tech-lead or orchestrator** rules on findings 1 and 2, and decides whether to open a line for finding 3 (TODO) and finding 4 (one word).
+
+Phase 6 should:
+- read `/help/presbytery-committees` "Administrative commissions" and its troubleshooting bullet as its reader, plus the two edited lines in `roles-who-can-do-what.md` and `privacy-policy.md`;
+- walk as the invitation-path founding administrator (not the clerk I walked as).
+
+My walk's screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/walk/`.
+
+Files read for the findings:
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/ui-copy.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/store.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/reads.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/action-gate.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/boundaries.test.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/app/(org)/o/[slug]/admin/committees/commissions/[commissionId]/page.tsx`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/content/help/presbytery-committees.md`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/content/help/privacy-policy.md`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/content/help/roles-who-can-do-what.md`
+- `/Users/cshenso/git/presby-platform/presby-committees/scripts/committees/test-rls-90.sql`
+- `/Users/cshenso/git/presby-platform/presby-committees/e2e/committees-commissions.spec.ts`
+
+---
+
+## Orchestrator rulings after QA run 1 (2026-11-19)
+
+- **Finding 1:** the shipped charge helper is ruled in as it stands, without "here". C15 is amended to the shipped text.
+- **Finding 2:** the help prose beyond the C15 draft, the troubleshooting bullet and the C13 rewordings are accepted. QA traced every claim against the build and walked the page at 360px in light and dark, and that walk stands in for the missing Phase 4 "page, fact, how verified" table. Phase 6 reads the same sections as their reader.
+- **Finding 3:** filed as a TODO line, not fixed here. The import allowlist for `@/lib/role-grants` and any delegation module in the committees surface is still to do; e2e test 14 is the behavioural backstop today.
+- **Finding 4:** filed as a TODO polish line. The repeated "Appointed" heard by a screen reader on the commission page is still open.
+- **Findings 5 and 6:** no action.
 
 ---
 

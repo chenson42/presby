@@ -21,7 +21,7 @@
 | 2 — Architectural review | architect | Complete (parent; R1–R6) | Approved with suggestions | 2026-11-19 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-19 |
 | 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | Complete (B1 to B4; see the Phase 4 completion summary) | Ready for Phase 5 | 2026-11-19 |
-| 5 — Verification | qa | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1; G1, C1, R1 and copy rulings open) | PASS | 2026-11-19 |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
 ---
@@ -410,8 +410,282 @@ Strings added: none. New copy a fork's branding pass should review: none.
 ---
 
 # Phase 5 — Verification (qa)
+I ran everything the orchestrator listed. The verdict is **PASS**. Four findings follow; none is a defect in what ships, but two need a tech-lead ruling and one needs a read on production before the deploy.
 
-Pending.
+# Phase 5 — Verification (qa)
+
+**Date:** 2026-11-19
+**Verified by:** qa
+**Tree:** worktree `/Users/cshenso/git/presby-platform/presby-committees`, branch `pipeline/presbytery-committees`, HEAD `1fadad5f` (the integration commit). `git status` was clean at the start and at the end. I wrote no files to the repository.
+**Database:** the pipeline Neon branch `br-calm-rice-ax2zn9jw` (endpoint ep-odd-hall-ax6wtzf0). I checked environment variables by length only and printed none.
+
+## Scope run
+
+- **In full:**
+  - `npm run typecheck`, `npm run lint`, `npm run check` (ten tripwires).
+  - The unit suite, with no database credentials.
+  - `npm run build`.
+- **Database-backed, run serially:**
+  - The six committees files from the Phase 4 paragraph.
+  - Eleven neighbouring files: the three public-roster pins, `groups.test`, `groups.primitives.db`, `dev-docs.test`, `worship/store.db`, `reimbursement/config.db`, `db/domain/reimbursement.db`, `role-grants.test`, `sites.test`.
+- **Not re-run:**
+  - The whole database-backed set rests on B2's full serial run: 1,098 of 1,099 files. Its one red, `dev-docs.test.ts`, is green now that the patches are integrated.
+  - Nothing after B2 changed a server module or a database test.
+- **RLS:**
+  - `test-rls-90.sql` as `presby_app`.
+  - The whole `scripts/test-rls.sql` as `presby_app` on the branch.
+  - D6 (`test-0090-migration.sh`) from empty on a scratch database. I created `scratch_0090qa` on the pipeline branch's compute and dropped it afterwards; it is confirmed gone.
+- **e2e:**
+  - Before the runs I reset the branch's global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, 38 flags set to their seed values). This switched `org_portal.admin_hub` and `org_portal.features` from on to off, which differs from what B3's walk saw.
+  - Server: my own dev server on 3101, started with the env the orchestrator gave. It was PID 53589, with children 53608 and 53609, and I stopped it by those PIDs.
+  - Specs: the three new ones, plus 15 blast-radius specs. I did not run the full chromium suite: the only `e2e/support/` change is a new file that only the new specs import, and no layout, proxy, auth or shared component changed.
+  - Then the production hydration lane on 3801. Nothing touched :3000, and nothing listens on 3101 or 3801 afterwards.
+  - After the runs: `org_portal.committees` is on, `org_portal.groups` is off. No `e2e-cmt*` organizations, fixture users or `4090` fixture people are left behind.
+
+## Type Check
+
+`npm run typecheck`: **PASS**. `npm run lint` (`--max-warnings=0`): **PASS**. `npm run check`: **PASS**, all ten tripwires (Help check: 34 entries, 31 published, 7 images). `npm run build`: **PASS**, with six committees routes in the route table.
+
+## Unit Tests
+
+- **Without database credentials:**
+  - 937 files passed, 165 skipped. The skipped files are the database-backed ones, skipped without credentials and covered by the serial runs below.
+  - 15,458 tests passed, 4,433 skipped, 0 failed, in 41.7 s.
+  - `dev-docs.test.ts`, the one expected red in Phase 4, is green after integration.
+- **Committees database suites, serial:**
+  - Files: `committees.db`, `committees.schema`, `store.db`, `reads.db`, `seat-semantics.db`, `groups.committees.db`.
+  - 6 of 6 files, **151 of 151 tests passed, 0 skipped**, in 322 s.
+  - The count matches Phase 4's per-file totals (26 + 28 + 49 + 18 + 5 + 25).
+- **Neighbouring database suites, serial:** 11 of 11 files, **347 of 347 tests passed**, in 552 s.
+- **Coverage:**
+  - `permissions.ts`, `flags.ts`, `committees/contract.ts` and `group-roles.ts` are at 100%.
+  - `two-factor.ts` is at 91.1% statements.
+  - The committees pure files are at 98.95% statements, 93.8% branches.
+
+Failures: none.
+
+## End-to-End Tests
+
+| Run | Result |
+|---|---|
+| New specs, dev lane, own server on 3101 (`committees-roster` 16, `committees-gates` 5, `hydration/committees-forms` 3) | **24 passed**, 0 failed, 0 skipped, 0 retries (2.7 min) |
+| Blast radius, same server: `presbytery-dashboard`, `portal-footer-sitemap`, `portal-home-cards`, `presbytery-credentials`, `presbytery-oversight`, `oversight-founder`, `presbytery-reports`, `role-boundaries`, `visitor-access`, `help`, `help-gates`, `help-404`, `reimbursement-role-bundle`, `reimbursement-treasurer-ui`, `parishes` | **157 passed**, 0 failed, 0 skipped (9.5 min) |
+| Production hydration lane (`PW_PROD_BUILD=1 PW_PROD_PORT=3801`, `--project=prod-build`, no `E2E_BASE_URL`; it builds and starts its own server) | **3 passed** (51 s) |
+
+**Not an auth-touching diff.** Nothing under `src/auth.ts`, `src/proxy.ts`, `(auth)`, `api/auth` or `lib/auth` changed, so the stricter gate does not apply. Even so, roster test 1 signs the MFA-enrolled founder in through the real `/totp` challenge.
+
+**My own 360px walk** (Chromium, 360×740, as `committees.clerk@example.invalid` on the dev seed's Northern Reach):
+- Pages: the portal, the list, the list with `?show=dissolved`, six committee pages, edit, add member, change role, and the open dissolve and end dialogs (closed without confirming).
+- No page scrolls sideways.
+- 27 of the 31 help `labels` were on screen. The other four only appear in other states:
+  - "Create your first committee" (the empty list) and "Create committee" (the new form) are shown on screen by roster tests 1 and 2 in this run.
+  - "Features" (no one available to add) and "Try again" (a load error) are proven only by component tests: `pages.test.tsx:322` and `pages.test.tsx:161`. B3's own browser walk saw the empty state.
+- Dark mode is Phase 6's.
+
+## Schema/RLS Audit (live catalog, pipeline branch)
+
+- **Isolation:**
+  - All three new tables are `relrowsecurity` and `relforcerowsecurity` true.
+  - Each has one `tenant_isolation` policy: `ALL`, permissive, `organization_id = presby_current_org()` for both USING and WITH CHECK.
+- **Table grants (`aclexplode`):**
+  - `presby_app` holds SELECT and INSERT only on all three.
+  - It holds no DELETE or TRUNCATE.
+  - `presby_platform` and PUBLIC hold nothing.
+- **Column grants:** UPDATE only on the designed columns: `committee_details` 6, `commission_records` 13, `commission_record_members` 5.
+- **Triggers:**
+  - Five triggers, all enabled, running four functions: the three new SECURITY INVOKER guards and 0045's `presby_check_about_org_affiliated`.
+  - The about-org trigger carries its `WHEN` clause.
+- **Role CHECK:** `group_memberships_group_role_check` is validated and holds the seven values.
+- **Fingerprint:** the branch's catalog fingerprint is `2eba1dc526606058337efb367e08fe9a`, identical to D6's from-empty apply 1, apply 2 and runner apply.
+- **Public roster function:** SECURITY DEFINER. The body adds start, end, active membership, death, merge and dissolved predicates to 0078's.
+- **Which layer refuses each claimed protection:** `test-rls-90.sql` proves each one on `presby_app`, 120 passes. B1's failing-first record attributes each refusal to its layer: FORCE, policy, details guard, write guard, live guard, WHEN, CHECK, roster body, grant, index (M1 to M12). I did not re-run those mutations (see Regression Tests).
+- **Shared-file drift F456 and F459, re-confirmed:**
+  - `presby_app` and `presby_platform` hold DELETE on `administrative_commissions`, `org_delegations`, `groups` and `group_memberships`.
+  - This is tracked in the integration commit's TODO lines and not changed by 0090.
+
+**`scripts/test-rls.sql` on the branch** halts at two places. Both are pre-existing and unrelated to 0090:
+
+1. **Line 232 (the old 225): "expected 19, got 20".**
+   - The presbytery's memberships are 3 rows with the stock `c0000000` prefix, 1 with the oversight `c0890000` prefix, and 16 with the committees `c0900000` prefix.
+   - The extra row has a stock-seed prefix: the untracked third presbytery membership the file's own comment and `docs/TODO.md:295` describe. The committees seed added exactly the 16 the patch counts for.
+2. **Line 6272: "presby_submit_granted_return: grant not usable".**
+   - I re-ran the file from stdin with only the two counts set to 20. It then halts here after 487 passes.
+   - The only unsubmitted, unrevoked `statistics_submission_grants` row expired on 2026-11-06. That is time-based drift, recorded in `docs/TODO.md:295`, on a table 0090 does not touch.
+
+**D6 from empty: PASS.**
+- 0090 is refused without 0078 and without 0045, and refused when a role outside the seven exists.
+- Applied twice, the catalog fingerprint and the rows are identical.
+- `test-rls-90.sql` gives 120 passes.
+- **The whole integrated `scripts/test-rls.sql` exits 0**, section 90 included.
+- The `drizzle-kit migrate` runner path gives the same fingerprint.
+
+`test-rls-90.sql` on the branch exits 0 with 120 passes.
+
+## Regression Tests Added
+
+I am read-only, so I did not re-run the catalog and source mutations. Failing-first rests on the implementers' records: B1 M1 to M12 and D1/D2 sabotage; B2's audit, atomic-change, lock, exclusion and time-zone sabotage; B4's two hydration and carries sabotages. Where a test sabotages its own mechanism every run, I confirmed it exists and passed in this run.
+
+- **Audit is written in the same transaction:**
+  - `src/lib/committees/store.db.test.ts:855` sabotages the audit write in-test.
+  - `store.db.test.ts:894` is the non-vacuity control.
+  - Guards against the audit becoming best-effort.
+- **Atomic role change, no gap and no double:**
+  - `store.db.test.ts:570`, `:599`, `:613`.
+  - `:613` makes a failure after both writes leave neither.
+- **Listing carried to the new row:** `store.db.test.ts:681`.
+- **Concurrency:**
+  - `store.db.test.ts:927` (two creates of one name), `:937` (two adds of one person).
+  - `:949` (a dissolve racing an add), `:965` (a role change racing an end term).
+- **One `not_found` answer:** `store.db.test.ts:422`, and e2e `committees-roster.spec.ts:537`.
+- **The organization's local day:** `reads.db.test.ts:272` (Kiritimati against Pago Pago). **A fixed number of queries:** `reads.db.test.ts:307`.
+- **Presbytery exclusion in groups:**
+  - All nine gated functions: `groups.committees.db.test.ts:152` to `:253`.
+  - The primitives stay unrestricted: `:263`.
+- **The four titles carry no authority:** `seat-semantics.db.test.ts:101`.
+- **Public roster's seven scenarios and column list:** `committees.db.test.ts:596`, and `test-rls-90` (h).
+- **Live guard waits, then refuses:** `committees.db.test.ts:547`.
+- **No grant drift on the new tables:** `committees.db.test.ts:670`.
+- **Every role has a public title:** `committee-directory.test.tsx:170` fails on a missing role title.
+- **No "Last day" or "the day before" in date copy:** `copy.test.ts:160`.
+- **Source rules:** `boundaries.test.ts:410` runs a failing sample for every rule.
+- **Hydration on both lanes:** `e2e/hydration/committees-forms.spec.ts:77`, `:99`, `:121`.
+- **Not pinned, observation only:**
+  - B2's two extra locks have no dedicated race test: rename against dissolve in `updateCommittee`, and listing against role change in `setCommitteeSeatPublicListed`.
+  - They are additions beyond the design, so this is not a gap against the design.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`: 100% (unchanged by this diff)
+- `src/lib/two-factor.ts`: 91.1% statements (unchanged by this diff)
+- `src/lib/flags.ts`: 100% (unchanged by this diff)
+- `src/lib/committees/` pure files: contract 100%, derive 100%, validate 100%, copy 95.5%, ui-copy 96.2% statements. `src/lib/group-roles.ts`: 100%.
+
+## Feature-Gate Audit
+
+I verified this by reading each page and action body. The key is the tenant permission `groups.manage`, checked by `holdsPermissions` (`presby_has_permission`) inside the reader's or the store's own `withOrgContext` transaction. It is never a `FEATURES.*` key. No `route.ts` and no `loading.tsx` exist under `admin/committees/**`.
+
+| Route or action | Signed in + second factor | Organization from the slug | Flag `org_portal.committees` | Presbytery type | `groups.manage` |
+|---|---|---|---|---|---|
+| `/o/[slug]/admin/committees` (`page.tsx:33`), `/new`, `/[committeeId]`, `/edit`, `/members/new`, `/members/[membershipId]/role` | yes: `gateCommitteesPage` (`cachedAuth` + `assertOrgSession`) | yes: `resolveOrgContext` + `assertOrgAccess` | **yes**, in the gate before the type check (`gate.ts:134`) | yes, in the gate, and again in the reader's transaction (`reads.ts:150`) | yes, in the reader's transaction (`reads.ts:244`); `isUuid` on every id segment runs before any read |
+| `createCommitteeAction` (`new/actions.ts:16`) | yes: `resolveCommitteesActor` (`auth()` + `assertOrgSession`) | yes | **no** | yes, `store.ts:172` `gate()` in the transaction | yes, `store.ts:173` |
+| `updateCommitteeAction` (`[committeeId]/actions.ts:46`), `dissolveCommitteeAction` (`:59`), `addCommitteeSeatAction` (`:76`), `changeCommitteeSeatRoleAction` (`:89`), `endCommitteeSeatAction` (`:111`), `setCommitteeSeatPublicListedAction` (`:128`) | yes | yes; UUID check on every id | **no** | yes, all seven store writers call `gate(tx)` | yes |
+| `/admin/groups` at a presbytery (nine gated `groups.ts` functions) | unchanged | unchanged | `org_portal.groups`, unchanged | the exclusion applies after the key (`groups.committees.db.test.ts:253`) | unchanged |
+| Public committee directory (anonymous SECURITY DEFINER read) | n/a | n/a | `sites.public_committee_directory`, unchanged | n/a | n/a (opt-in per seat) |
+
+**Finding G1, for tech-lead: the actions do not check `org_portal.committees`.**
+- What the code does: pages check flag, then type, then key. Actions and readers check type and key inside their transaction, but no action checks the flag.
+- Why it is not a FAIL:
+  - It is not an authorization gap. Every action checks the session, the second factor, the organization, the type and the key.
+  - It matches the design's own API Contract "common body", which lists no flag.
+  - It matches the repo: 43 of the 50 `(org)` `actions.ts` files check no flag.
+  - `docs/TODO.md:368` already holds the same open project-wide decision for Community.
+- Where it contradicts the design:
+  - Phase 3 Permissions & Flags (parent log line 652) says "Order, on every page, reader and action: flag, then organization type, then `groups.manage`".
+  - Phase 2's placement says `action-gate.ts` "checks flag, then org type, then permission".
+  - Phase 3's rollback sentence says that with the flag off "a presbytery's committees cannot be edited at all". That is true of the UI only: a `groups.manage` holder can still call a Server Action directly while the flag is off.
+- The runbook's wording ("hides every page", `docs/deployment.md:1846`) is accurate.
+- Tech-lead should either rule that the flag stays page-only (and correct line 652 and the rollback sentence), or add it to `resolveCommitteesActor`.
+
+## Copy Truthfulness
+
+- [x] **Every added or changed string is in the design's Copy table**, except these. All of them are truthful; they are recorded for a ruling, not as defects:
+  - `src/lib/committees/ui-copy.ts:100` "Choose a different role": the empty option of the "New role" select. B3 note 2 asked for a ruling; none is recorded in the integration commit or `docs/decisions.md`.
+  - `ui-copy.ts:54`: the roster table headings "Name", "Role", "Dates", "Actions". These are not in C3; only the list's headings are in C2. B3 did not flag them.
+  - "Saving…": the pending label, the house pattern already used in `admin/groups/public-listing-toggle.tsx:146`. Acceptable.
+  - B3 note 3 is also unruled: H8 bans "planned", so "Cancel planned term" is not among the help `labels`. The help paraphrases it truthfully at `presbytery-committees.md:39`.
+  - Viewer for all of these: `groups.manage` holders.
+- [x] **I opened the query behind each claim.**
+  - **Public website section of the help:** the 0090 roster body checks start, end, `m.ended_on is null`, `date_of_death`, `merged_into_id` and dissolved. It reads `current_date` (UTC), and the help says so.
+  - **"Each shows its chair, how many people serve now":** `readCommitteeList` against the organization's local day.
+  - **"Two active committees cannot have the same name, ignoring capital letters":** the store's trimmed, case-insensitive check among non-dissolved committees. It is application-only, stated as a refusal, not a guarantee.
+  - **"The people you can choose are the presbytery's own records":** `readSeatFormOptions`, which reads `memberships.ended_on is null` at the presbytery. Visitors are membership rows (0066).
+  - **"No longer connected" and "Recorded as deceased":** `memberships.ended_on` at this presbytery, and `people.date_of_death`.
+  - **The quoted permission description** matches the live `permissions` row exactly. `groups.manage` is in the presbytery founding-administrator bundle (live function), with `requires_two_factor = f`.
+  - **"Committees & Commissions" and "Congregation Oversight" are switched on platform-wide:** both are global `feature_flags` rows.
+  - **Privacy bullet:** a person appears only when `public_listed` is set.
+- [ ] **Each instruction traced to a role that can do it: unproven against production (finding C1).**
+  - **Which instructions:**
+    - "create a role that includes it under 'Roles'" (`presbytery-committees.md:7`).
+    - The Community, "Add person" and "Features" path (`:21`), and its twin in the add-member empty state (C5, `ui-copy.ts` `ADD.emptyBody`).
+  - **What they need:** the global flags `org_portal.roles`, `org_portal.members_create` and `org_portal.features` / `org_portal.admin_hub` to be on. All four are off on the pipeline branch at the CI baseline, so on this branch the instructions are not doable. Production state for these four is not recorded anywhere I could find.
+  - **Why it is not a FAIL:** the published neighbours `adding-people.md:6`, `first-day-as-administrator.md:31` and `:57`, and `roles-who-can-do-what.md` (the oversight paragraph) already rely on the same flags.
+  - **The gap:** the runbook's operator step (`docs/deployment.md:1846`) confirms only `org_portal.groups`, the same gap the careers Phase 6 found (`docs/TODO.md:99`, `:394`).
+  - **Before the deploy:** the orchestrator reads these four flags on production (read-only). If any is off, the help and the empty-state wording are false for a presbytery's founding administrator.
+- [x] **Older strings grepped; none is made false.**
+  - The `presbytery-tools` placeholder and its "There is no committees-and-commissions module" are deleted, and `/help/planned/presbytery-tools` answers 308 to `/help/presbytery-committees`.
+  - The tile description and the coming-soon pill are gone.
+  - `coverage-allowlist.ts` lost `tile:committees` (11 entries).
+  - `first-day-as-administrator.md:34` ("Groups": committees…) is congregation-scoped, so still true. `what-presbyportal-does.md:11` is still true.
+  - `[help:presbytery-tools]` is gone from `docs/TODO.md`.
+- [x] **Help diff covered.**
+  - Labels on screen: as listed in the 360px walk under End-to-End Tests.
+  - Claims walked: at 360px on the dev server against the shipped screens.
+  - Images: none committed; the help is text only, as designed, and I confirmed `src/content/help/images/` gained nothing.
+- **Runbook truthfulness (`docs/deployment.md`, 0090 section), finding R1, minor:**
+  - **Point 2:** every read-only query in it ran on the branch and returned what the text says. Two values differ from the production values the text quotes, as expected on a dev branch: six `group_role` values and 1 `public_listed` row.
+  - **Line 1802, "three guard functions behind five triggers":** the five triggers run four functions (three new, plus 0045's about-org function).
+  - **Point 6 (`:1836`, `:1839`):** it checks DELETE, TRUNCATE and `presby_platform` grants through `information_schema.role_table_grants`, not `aclexplode`. Both agree here (0), because it runs as the owner who granted them, but `aclexplode`, which point 2 already uses, is the authoritative source.
+  - **Point 9:** it tells the orchestrator to "apply the five integration patches" on `development` after merge. They are already applied in `1fadad5f`; after merge, applying them again would fail. It should read "apply 0090, then the seed".
+
+## Verdict
+
+**PASS.**
+- Every required check is green: typecheck, lint, ten tripwires, unit, the database suites in scope, `test-rls-90`, D6 including the whole integrated `test-rls.sql` from empty, e2e on both lanes with blast radius, build, 360px, the live-catalog RLS audit, and the gate audit.
+- The `test-rls.sql` halts on the branch are pre-existing, with evidence above.
+
+Before Phase 6 closes or the deploy happens:
+1. **G1:** tech-lead rules on the flag in actions, and corrects the parent log's line 652 or the code.
+2. **C1:** the orchestrator reads `org_portal.roles`, `org_portal.members_create`, `org_portal.features` and `org_portal.admin_hub` on production, and the runbook's operator step names them.
+3. **Copy:** tech-lead rules on B3 notes 2 and 3 and on the roster table headings.
+4. **R1:** fix the runbook wording (four functions, `aclexplode`, point 9).
+
+None of these is a defect in the shipped behaviour. The implementer has no failing test to fix.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete (unit 15,458/0 failed; DB 151 + 347/0; test-rls-90 120; D6 PASS incl. whole test-rls.sql; e2e 24 + 157 + prod 3/0; build; gate and live-catalog audits; G1, C1, R1 and the copy rulings open for tech-lead/orchestrator) | PASS | 2026-11-19 |
+
+## Handoff
+
+The next agent is **analyst (Phase 6)**, for the walks the design assigns:
+- The real founding-administrator invitation on `development`, at 360px, light and dark.
+- A member with no key.
+- Community at a presbytery.
+- The public committee list.
+- Each named help page, read as its reader.
+
+In parallel:
+- The **orchestrator** does C1 (the production flag read) and R1.
+- **tech-lead** rules on G1 and the three copy items.
+
+Phase 6 should read the C1 answer before judging the "Who can use it" and "Adding a member" paragraphs of `/help/presbytery-committees`.
+
+Files referenced:
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/action-gate.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/store.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/reads.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/ui-copy.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/presbytery-reports/gate.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/app/(org)/o/[slug]/admin/committees/new/actions.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/app/(org)/o/[slug]/admin/committees/[committeeId]/actions.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/content/help/presbytery-committees.md`
+- `/Users/cshenso/git/presby-platform/presby-committees/docs/deployment.md`
+- `/Users/cshenso/git/presby-platform/presby-committees/scripts/test-rls.sql`
+- `/Users/cshenso/git/presby-platform/presby-committees/docs/work-log/2026-11-19-presbytery-committees.md`
+
+---
+
+## Orchestrator rulings after QA run 1 (2026-11-19)
+
+- **G1:** the flag is checked in the actions too, as the design says (parent Phase 3, flag, then org type, then `groups.manage` on every page, reader and action). Add `org_portal.committees` to `resolveCommitteesActor`, with a failing-first test. With the flag off, an action answers the same refusal as the page's "isn't turned on yet" state. The rollback sentence then stays true.
+- **C1:** production, read-only, 2026-11-19: `org_portal.roles`, `org_portal.members_create`, `org_portal.features` and `org_portal.admin_hub` are all **on**. The help's Roles and Community instructions are doable for a presbytery's founding administrator. The runbook's operator step names the four flags.
+- **Copy:** "Choose a different role" (B3 note 2) is accepted. The roster table headings "Name", "Role", "Dates", "Actions" are accepted. The help's paraphrase of "Cancel planned term" (B3 note 3, the H8 ban) is accepted as written.
+- **R1:** runbook wording fixes:
+  - "four functions behind five triggers";
+  - use `aclexplode` for the grant checks in point 6;
+  - point 9 reads "apply 0090, then the seed", because the patches are already integrated.
 
 ---
 

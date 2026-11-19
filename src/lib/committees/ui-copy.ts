@@ -164,6 +164,8 @@ export const COMMISSIONS = {
   addMember: "Add a member",
   endCommission: "End commission",
   removeRecord: "Remove this record",
+  /** Orchestrator ruling (B6 ruling 3): C3's empty-roster line, worded for a commission; an active record only. */
+  emptyRoster: "No one serves on this commission yet.",
   // The record form
   newTitle: "Record a commission",
   editTitle: "Edit commission",

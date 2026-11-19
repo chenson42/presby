@@ -79,6 +79,7 @@ describe("ui-copy: the commission chrome (C15), byte for byte", () => {
       "Remove this record",
       "Charge",
     ]);
+    expect(COMMISSIONS.emptyRoster).toBe("No one serves on this commission yet.");
     expect(COMMISSIONS.minute("Item 4")).toBe("Minute: Item 4");
     expect(COMMISSIONS.noMinute).toBe("No minute recorded");
     expect(COMMISSIONS.reportedIn("Item 9")).toBe("Reported in: Item 9");

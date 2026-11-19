@@ -237,6 +237,18 @@ describe("the commission page", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Past members" })).toBeTruthy();
   });
 
+  it("an active commission with no one serving shows the empty-roster line with Add a member; an ended one shows nothing extra", async () => {
+    gate.mockResolvedValue(okGate);
+    reads.readCommission.mockResolvedValue(page({}, []));
+    await show();
+    expect(text()).toContain("No one serves on this commission yet.");
+    expect(screen.getAllByRole("link", { name: "Add a member" })).toHaveLength(2);
+    cleanup();
+    reads.readCommission.mockResolvedValue(page({ endedOn: "2026-09-01" }, []));
+    await show();
+    expect(text()).not.toContain("No one serves on this commission yet.");
+  });
+
   it("an active member row offers the end control, named for the person", async () => {
     gate.mockResolvedValue(okGate);
     reads.readCommission.mockResolvedValue(page());

@@ -219,6 +219,12 @@ list with the commissions section and "Show ended commissions (1)"; the ended li
 6. **The empty state shows one "Record a commission"** (the header button is hidden then), so there are never two identically named links.
 7. **Help (Rule 17):** claims were written from the screens; one troubleshooting bullet speaks of a commission page that "no longer opens" because a missing record is the platform's 404 page, not a string. "planned" avoided (H8).
 
+### B6 rulings (orchestrator, applied after the first B6 commit)
+
+1. Accepted: the C5 and C7 helpers worded with "commission" (`COMMISSION_MEMBER`).
+2. Accepted: "{name} (no longer a member of this presbytery)" (`COMMISSIONS.leftOption`).
+3. Added: an empty-roster state for an ACTIVE commission with no one serving or starting later: "No one serves on this commission yet." (`COMMISSIONS.emptyRoster`), in the same guided box and place as the committee page's, above its "Add a member" button. An ended commission with no members shows nothing extra. Pinned in `ui-copy.test.ts` and `commissions/pages.test.tsx`. The help page does not quote it, so no registry label was added.
+
 **Handoff to B7.** Selectors: fields by label ("Title", "Charge (optional)", "Congregation (optional)", "Appointed on", "Minute reference (optional)", "Ended on", "Minute reference for its report (optional)"); buttons "Record commission", "Add to commission", "End commission" (the trigger and the dialog's confirm share the name: scope to the `alertdialog`), "Remove this record" / "Remove record"; member controls "End term for {name}" (a card and a table row: scope by viewport). Both pages of a commission render the member roster twice (card and table, CSS shows one).
 
 ---

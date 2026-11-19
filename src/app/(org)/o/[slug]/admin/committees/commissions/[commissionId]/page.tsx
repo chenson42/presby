@@ -4,13 +4,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { OrgAccessError } from "@/lib/authz";
 import { commissionAboutLine, commissionNoAccess } from "@/lib/committees/copy";
+import { classifySeat } from "@/lib/committees/derive";
 import { readCommission, type CommissionMemberRow, type SeatRow } from "@/lib/committees/reads";
 import { isUuid } from "@/lib/is-uuid";
 import { gateCommitteesPage } from "@/lib/presbytery-reports/gate";
 import { BACK_TO_COMMITTEES, COMMISSIONS } from "@/lib/committees/ui-copy";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { BackLink } from "@/components/committees/back-link";
-import { CommitteesForbidden, CommitteesLoadError } from "@/components/committees/committee-states";
+import { CommitteesForbidden, CommitteesLoadError, GuidedEmpty } from "@/components/committees/committee-states";
 import { EndCommissionDialog } from "@/components/committees/end-commission-dialog";
 import { EndTermDialog } from "@/components/committees/end-term-dialog";
 import { RemoveRecordDialog } from "@/components/committees/remove-record-dialog";
@@ -63,6 +64,7 @@ export default async function CommissionPage({ params }: { params: Promise<{ slu
   const { commission, members, today } = result.data;
   const active = commission.endedOn === null;
   const seats = members.map(asSeat);
+  const noOneYet = active && seats.every((m) => classifySeat(m, today) === "past");
 
   return (
     <section className="space-y-6">
@@ -138,6 +140,13 @@ export default async function CommissionPage({ params }: { params: Promise<{ slu
 
       <TitlesNote />
 
+      {noOneYet ? (
+        <GuidedEmpty title={COMMISSIONS.emptyRoster}>
+          <Button asChild className="mt-3 min-h-11">
+            <Link href={`${path}/members/new`}>{COMMISSIONS.addMember}</Link>
+          </Button>
+        </GuidedEmpty>
+      ) : null}
       <RosterView
         seats={seats}
         today={today}

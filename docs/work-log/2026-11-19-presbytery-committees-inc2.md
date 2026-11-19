@@ -22,7 +22,7 @@
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-19 |
 | 4 — Implementation | api-developer (B5), ux-developer (B6), full-stack-developer (B7) | **Complete** (B5, B6, B7; 2026-11-19) | Ready for Phase 5 | 2026-11-19 |
 | 5 — Verification | qa | Complete (run 1; copy rulings recorded below) | PASS | 2026-11-19 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 6 — Shipped vs intent | analyst | Complete (Increment 2; closes the parent) | SHIP WITH NOTES | 2026-11-19 |
 
 ---
 
@@ -517,4 +517,178 @@ Files read for the findings:
 
 # Phase 6 — Shipped vs Intent (analyst)
 
-Pending.
+*Date: 2026-11-19. Tree: `/Users/cshenso/git/presby-platform/presby-committees`, branch `pipeline/presbytery-committees-inc2`, HEAD `f07af4bd`. I wrote no files to the repository, and `git status` is clean.*
+
+**Environment**
+- My own dev server ran on port 3102 with the env you gave. I stopped it by PID (listener 15568, wrapper 15551). Nothing listens on 3102, and I cleared `.next/dev`.
+- It ran against the pipeline Neon branch (endpoint `ep-odd-hall-ax6wtzf0`). I never touched production or :3000.
+- I flipped no flags. `org_portal.committees` was on and still is. `org_portal.groups`, `org_portal.oversight` and `sites.public_committee_directory` were off and still are.
+- I made a throwaway presbytery with `setupCommitteesFixture`. The founding administrator was minted by the real definer `presby_apply_founding_administrator`, enrolled in two-factor sign-in, and signed in by password plus the real `/totp` challenge. She held only the minted bundle (`founding_administrator` and `presbytery_stated_clerk`).
+- I removed the fixture afterwards. 0 `e2e-cmt` organizations, users or people remain.
+- I drove everything with headless Chromium at 360px. My scripts and screenshots are in `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/p6c2/` (screenshots in `shots/`).
+- I did not click through a real invitation email. This is the same basis as Increment 1: the definer is the single point both the invitation and designation paths write.
+
+## VERDICT: SHIP WITH NOTES
+
+Commission records deliver what Phase 1 promised and what operator decision B asked for. Every flow I walked matches its Phase 1 verb and its C15 string. The help section, its troubleshooting bullet and the two edited lines contradict nothing I saw on screen.
+
+The notes are one real usability gap, one dark-mode contrast problem and some polish and housekeeping. None blocks 0.64.0, and each becomes a TODO line.
+
+## ONE-LINE TAKE
+
+> A presbytery's founding administrator can now keep a record of each administrative commission (title, charge in general terms, optional congregation, appointed date, minute, members and titles), end it, correct it or remove a mistaken one. The congregation sees nothing, no one is granted anything, and the audit trail carries ids and field names only.
+
+## Walks
+
+**Founding administrator (the person the definer creates), 360px.** Every page and state below had `scrollWidth == clientWidth`.
+
+- **Tile.** The tile reads "The presbytery's committees, who serves on them, and the administrative commissions it has recorded." It opens the list.
+- **Empty commissions section.**
+  - The heading and the intro sentence are present: "A record gives no one access to a congregation's PresbyPortal, and the congregation does not see it."
+  - The empty state reads "No administrative commissions are recorded." with one "Record a commission" button.
+  - The list opens with a sensible guided state for committees as well, so a brand-new presbytery is not a dead end.
+- **Record form.**
+  - An empty submit gives "Title is required." under the field.
+  - An appointed date in the future gives "The appointed date can't be after today."
+  - The congregation select offers "No congregation" first, then only this presbytery's two member congregations.
+  - Recording one about a congregation (with charge and minute) lands on its page with the toast "Commission recorded."
+- **Commission page.**
+  - It shows the Active badge, "About {congregation}", appointed date and minute, the charge, and the no-access sentence byte for byte: "This record gives no one access to {congregation}'s PresbyPortal, and {congregation} does not see it."
+  - The four actions follow: Edit commission, Add a member, End commission, Remove this record. The titles note sits after them.
+  - A commission about no congregation reads "No congregation recorded" and "This record gives no one access to any congregation's PresbyPortal."
+  - The empty active roster says "No one serves on this commission yet." with the "Add a member" button.
+- **Members.**
+  - The role picker offers the six titles.
+  - Adding with nothing chosen gives "Choose a person."
+  - I added a Chair, a Clerk and a planned Member (starting in a week). They sat under "Serving now" and "Starting later", and each person already seated showed as a disabled "(already serves)" option.
+  - Ending the Clerk's term with a date before their start was refused inside the dialog ("The end date can't be before the start date."). A valid date moved them to "Past members" with their dates.
+  - A person with an ended presbytery membership is not offered.
+- **Edit.** Values were carried. A title change saved with "Commission saved." Editing the minute on an **ended** commission also saved. That is exactly what the help says: "A commission that has finished can still be corrected this way."
+- **End commission.**
+  - The dialog refused a future date ("The end date can't be in the future.") and a date before the appointment ("The end date can't be before Oct 20, 2026, when it was appointed."), both under the field.
+  - A valid end with a "reported in" minute gave "Commission ended."
+  - Every member's term ended that day. The planned member was ended "the day it started". The audit row says `membersEnded: 2`.
+  - The page then showed "Ended 11/19/2026", "Reported in: …", no End or Add controls, and Edit and Remove still present.
+  - The add-member URL on an ended record shows "This commission has ended, so no one can be added."
+- **List.** The default list hid the ended one. "Show ended commissions (1)" revealed it, with "Hide ended commissions" to return.
+- **Remove.**
+  - "Go back" wrote nothing.
+  - "Remove record" gave "Record removed." and returned to the list.
+  - The removed id and its `/edit` page answer 404.
+- **Neutral refusal.**
+  - I forged four congregation ids into the select: another presbytery's congregation, the presbytery itself, a nonexistent id and a malformed id.
+  - Each gave the identical sentence "That congregation could not be found among {presbytery}'s member congregations." under the field. None wrote a row, and no name from the other presbytery appeared.
+- **Dark mode, 360px.** I checked the list, the ended list, the record form, the add form, an active commission, an ended commission, and the End, Remove and End-term dialogs. Layout, badges and the no-access panel are legible. See note 2 for one contrast problem.
+- **Tap targets.** No control of this feature is under 44px on any page or dialog. The shell's "Back to portal" link is excluded, as in earlier increments.
+
+**The congregation's side (an administrator holding `groups.manage` at the congregation the first commission was about).**
+- The congregation's portal shows no Governance tile and no record.
+- `/o/<congregation>/admin/committees`, and the same path with a commission id appended, say "Committees & Commissions isn't available for {congregation} — this isn't the kind of organization this tool is built for."
+- The presbytery's list, a commission page about their own congregation, and `/new` all give the organization denial naming the presbytery.
+- A text search of every page for the record's title, charge, minute and member names found nothing.
+- The database agrees. `administrative_commissions` and `org_delegations` counts are 0 across the fixture, and the presbytery's role-grant count never changed.
+
+**A keyless presbytery member.**
+- The tile is visible, as at Inc 1 (accepted).
+- The list, `/new`, an active commission, an ended commission, `/edit` and `/members/new` each show the single sentence "You don't have permission to manage committees at {presbytery}. If you think this is a mistake, ask your presbytery's administrator." They show no record, no form and no control.
+- An unknown but well-formed id gets the same denial, so the key check runs before any existence check. A malformed id gets 404.
+
+**A clerk holding only `groups.manage`.** The list, commissions section and commission page work as the founder's do. This confirms no new key was needed (ruling Q2).
+
+**Audit.** The walk wrote exactly one row per action: recorded (twice), member_added (three times), member_ended, updated, ended and removed. Their metadata holds only ids, role, dates, `changed` field names, `membersEnded` and `aboutOrgId`. I searched them for the titles, charge, minute text and every member's first name, and found none. Reads wrote no row.
+
+## Help pages, read as their reader at 360px
+
+All three pages return 200 with no sideways scroll.
+
+- **`presbytery-committees`, "Administrative commissions" section.**
+  - Every quoted label is on screen: "Record a commission", "Title", "Charge (optional)", "Congregation (optional)", "No congregation", "Appointed on", "Minute reference (optional)", "Record commission", "Add a member", "Add person", "End term", "Edit commission", "End commission", "Ended on", "Show ended commissions", "Remove this record".
+  - Every behavioural claim matched the walk:
+    - "Appointed on" cannot be after today.
+    - The charge limit of 500, and "does not record who has read it" (my page views wrote no audit row).
+    - End commission ends every member on the date and keeps the record.
+    - An ended commission leaves the list and "Show ended commissions" restores it.
+    - Remove has no undo.
+    - The audit does not copy the title, charge or minute.
+  - The intro sentence "It also keeps the presbytery's record of its administrative commissions" is true. The old "does not keep commissions" sentence is gone, and I found no `limitationUntil`.
+  - Readability: the section is four long paragraphs, and the third and fourth each pack three to five actions. It is correct but dense on a phone (note 4).
+- **Troubleshooting bullet.** "A commission's page that no longer opens: the record was removed, or the address is not one of this presbytery's commissions." This is true, but the page the reader then sees says "We couldn't find that organization… Organization links look like /o/alder-creek". The bullet is not contradicted, but it points the reader at a message that talks about something else (note 1).
+- **`roles-who-can-do-what`.** The bullet at line 56 ("At a presbytery this also covers its committees and its record of administrative commissions") and the founding-administrator sentence at line 75 are true. The founder and the `groups.manage`-only clerk both do everything the page says. The Roles screen's permission description still does not mention commissions. That is already ruled (T12), with its TODO line at `docs/TODO.md:151`.
+- **`privacy-policy`.** "A presbytery also keeps its own notes about administrative commissions, which are never published" is true. A grep found no public function, `(public)` route or `/admin` file that reads the commission tables. Only `store.ts`, `reads.ts`, the domain schema, `audit.ts`, `contract.ts` and `dev-docs.ts` name them.
+- **`verifiedIn`.** The page footer still reads "Last checked against release 0.63.0." I have now walked the page against the 0.64.0 build, so the release commit may set `verifiedIn: "0.64.0"` on `presbytery-committees`. I did not re-walk `roles-who-can-do-what` or `privacy-policy` in full. I read only the two edited lines against the build, so those pages' `verifiedIn` should move only if the orchestrator accepts that partial read.
+
+## Per-gap check against Phase 1
+
+- **Gap 2 (a record, not a grant)**
+  - Nothing writes `administrative_commissions`, `org_delegations`, `role_grants` or a `role_id`. The tables have no such columns, and the counts were unchanged across the whole walk.
+  - QA verified the boundary test and `test-rls-90.sql`, and I confirmed them in the browser and the database.
+- **Gap 3 (what a commission is)**
+  - The congregation is optional, and "Administrative commission" is used on every screen.
+  - Matches.
+- **Gap 4 (who sees it)**
+  - The congregation sees nothing, as a deliberate v1 position.
+  - Matches.
+- **Gap 5 (the charge is sensitive)**
+  - The helper says "Describe the charge in general terms. Don't record confidential details. Anyone who can manage committees at this presbytery can read it." The charge is capped at 500 characters.
+  - It appears on no list, in no audit row and on no public path. The residual (every `groups.manage` holder reads it, and reads are unaudited) is stated in the form, the help and the release lines.
+  - Matches.
+- **Gap 11 (titles are not roles)**
+  - The titles note sits on every commission page and in the add form.
+  - Matches.
+- **Flow 5 failure path**
+  - The neutral congregation refusal, the stale-edit toast and a form that keeps its contents on failure are all designed.
+  - I walked the refusal. The stale toast is covered by QA's e2e test 3, which I did not re-run.
+- **Gap 7 (a commission's members must never be publicly listable)**
+  - The members table has no `public_listed` column and no group row. There is no toggle on a commission roster and no public path reads it.
+  - Matches.
+- **Adversarial pass**
+  - There is no `callbackUrl` or `next` on any page. Only static back links exist.
+  - The key is checked before existence. Wrong-kind ids and removed ids give the same 404.
+  - A forged congregation id is refused with one sentence.
+  - Server-side validation held: future appointment, end before start, end in the future.
+  - Self-targeting is not an issue, because titles grant nothing.
+- **Operator decision B, commissions at go-live.** The operator's need is a record of who was appointed, about what, when, by what minute, and whether it has reported. All of it is walkable in production the day 0.64.0 deploys, with no migration.
+
+## Notes (each a TODO follow-up)
+
+1. **A missing commission shows an "organization" 404.**
+   - A removed, unknown or other-presbytery commission id (a keyed member's removed record, or a bookmarked link) lands on the platform page "We couldn't find that organization… Organization links look like /o/alder-creek".
+   - B6 note 7 chose this, and the help bullet describes it honestly. But a clerk who removed a record, then follows an old link, is told about organizations.
+   - Suggested fix: a commission-specific not-found for the commission routes, using the existing string "That commission could not be found." plus a "Back to committees" link, **without** a status or timing change.
+2. **Dark mode: "Remove this record" and field errors use the `--destructive` text colour at low contrast.**
+   - I measured the "Remove this record" label from a screenshot: text (179,43,30) on a (32,45,63) button is about **2.2:1**, below WCAG AA's 4.5:1 for text. The light-mode contrast is 6.4:1.
+   - The cause is the platform token (`--destructive: hsl(5 71% 41%)` is the same in light and dark in `globals.css`). So this is platform-wide, not specific to this increment. The Inc 1 "Dissolve committee" trigger and field errors on dark very likely share it.
+   - QA recorded it as legible. I would call it faint.
+   - Suggested fix: a lighter destructive text colour for dark mode. This is a polish follow-up for the platform palette, and it needs the brand-contract classification check.
+3. **Sentence-level accessibility on the commission page.** QA's finding 4 is confirmed and already filed as polish: a screen reader hears "Appointed Appointed 9/14/2026". The same pattern repeats for "Ended Ended …" on an ended record, so fix both.
+4. **Help readability, polish.** The "Administrative commissions" section is four dense paragraphs. Splitting it into short steps (Record, Add members, End, Remove) would suit a phone reader. This is not a truthfulness issue.
+5. **Not walked, and why.**
+   - The guided empty state of the add-member form (zero eligible people) is covered only by unit and component tests. It needs a presbytery with no eligible person, which my fixture cannot make without damaging its data.
+   - The flag-off and stale-edit states are covered by QA's e2e tests 12 and 3, which I did not re-run.
+   - Anyone who goes live should confirm the empty-people state once in a real new presbytery.
+6. **Boundary-test hardening (QA finding 3)** is already filed. An import allowlist for `@/lib/role-grants` and any delegation module in the committees surface is still owed. The behavioural backstop (the downward counts were unchanged throughout my walk) holds.
+7. **Housekeeping at the release commit** (orchestrator, Rules 10, 13, 14 and 17):
+   - set `presbytery-committees` `verifiedIn` to `0.64.0` and `package.json` to 0.64.0;
+   - move `docs/TODO.md:526` (the Increment 2 line) to Done;
+   - keep `docs/TODO.md:151` open (the `groups.manage` Roles-screen description, T12);
+   - update the functionality-map line for the presbytery;
+   - run `grep -n "\[help:" docs/TODO.md` and confirm no token names `presbytery-committees`;
+   - Rule 13: the C16 lines are the draft what's-new text. Per the standing instruction, keep them in the work-log and do not publish.
+8. **Carried residuals, not new:** F456, F459 and F460. Every `groups.manage` holder can read the charge, and reads are unaudited (tier-1, architect-accepted). Name uniqueness is `paper`. The Inc 1 notes 2 to 4 are tracked at `docs/TODO.md:133–135`.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete for Increment 2 (founder walk through the real definer at 360px, light and dark: record about a congregation and about none, add and end members, end the commission, edit an ended record, remove; the neutral refusal with four forged ids; a congregation administrator, a keyless member and a `groups.manage`-only clerk; audit rows and downward counts read from the database; help section, troubleshooting bullet, `roles-who-can-do-what` and `privacy-policy` read at 360px; fixture removed, server stopped by PID, flags untouched) | SHIP WITH NOTES | 2026-11-19 |
+
+## Closing judgement for the parent pipeline (`2026-11-19-presbytery-committees`)
+
+The parent pipeline can close. Operator decision B is delivered in full across two increments. A presbytery can keep its committees, each labelled Required, Standing or Ad hoc, with the six dated titles. It can also keep a record of each administrative commission, with members, an end and a mistaken-entry removal. Both rest on one migration (0090) that the second increment never touched. The hard property Phase 1 cared most about held through to the end: a commission record is the presbytery's note and not a grant. The tables carry no role or group column. The only policy is organization-scoped. A boundary test pins the no-write rule. In the walk, the congregation saw nothing and every downward count stayed at zero. The audit trail carries ids and field names but no free text. What remains is polish and tracked residuals: the "organization" 404 for a missing commission, the faint destructive text in dark mode, the unaudited charge reads and the F456/F459/F460 write-model debt. None of these gates a presbytery's go-live. Both increments shipped as SHIP WITH NOTES, which is the honest verdict. The parent log may now record both children as complete.
+
+---
+
+
+## What's-new draft (Rule 13; not published, per the operator's standing "no what's-new for now")
+
+> **Administrative commission records.** Committees & Commissions now keeps your presbytery's record of each administrative commission: its charge, the congregation it concerns, when and by what minute it was appointed, who serves, and when it reported. A record gives no one access, and the congregation does not see it.

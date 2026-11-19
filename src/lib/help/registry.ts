@@ -1223,7 +1223,7 @@ export const HELP_PAGES = [
       "Minute reference (optional)",
       "Ended on",
     ],
-    verifiedIn: "0.63.0",
+    verifiedIn: "0.64.0",
   },
 ] as const satisfies readonly HelpEntry[];
 

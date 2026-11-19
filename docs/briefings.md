@@ -27,6 +27,18 @@ is checked.*
 
 ## 2026-11-19
 
+- [ ] **`decision` · Administrative commission records shipped (0.64.0, DECISION-355 and DECISION-358; no migration).**
+  - **What it does:** Committees & Commissions now records each administrative commission: title, charge in general terms, optional congregation, appointed date and minute, members with titles, an end with a "reported in" minute, and a removal for mistakes.
+  - **Access:** a record grants nothing, and the congregation it concerns never sees it. This is enforced by the database policy and pinned by tests.
+  - **Who can read it:** anyone with `groups.manage` at the presbytery can read a commission's charge, and reading it is not audited, as the form says.
+  - **Decision B:** operator decision B is now fully delivered.
+  - **Later:** if a commission should ever open a congregation's portal, that is its own pipeline and must first close F456/F460.
+  - **Follow-ups (TODO):**
+    - a commission-specific "not found" page;
+    - faint red text in dark mode, platform-wide;
+    - a screen-reader word repeat;
+    - help readability.
+
 - [ ] **`decision` · Presbytery committees shipped (0.63.0, DECISION-352 to DECISION-359, migration 0090).** Committees & Commissions now works at a presbytery.
   - **What it keeps:** committees labelled Required, Standing or Ad hoc; members with dated titles (chair, vice chair, clerk, secretary, ex officio, member); a role change with no gap; end term; and dissolve, which is one-way and needs a data fix to undo.
   - **No access from titles:** a title gives no one access.

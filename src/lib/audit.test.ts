@@ -339,6 +339,12 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   COMMITTEE_MEMBER_ENDED: "tenant.committee.member_ended",
   COMMITTEE_MEMBER_LISTED: "tenant.committee.member_listed",
   COMMITTEE_MEMBER_UNLISTED: "tenant.committee.member_unlisted",
+  COMMISSION_RECORD_RECORDED: "tenant.commission_record.recorded",
+  COMMISSION_RECORD_UPDATED: "tenant.commission_record.updated",
+  COMMISSION_RECORD_MEMBER_ADDED: "tenant.commission_record.member_added",
+  COMMISSION_RECORD_MEMBER_ENDED: "tenant.commission_record.member_ended",
+  COMMISSION_RECORD_ENDED: "tenant.commission_record.ended",
+  COMMISSION_RECORD_REMOVED: "tenant.commission_record.removed",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

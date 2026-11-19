@@ -143,3 +143,38 @@ export function finish(
       return { ok: false, error: outcome.message, field: outcome.field, kind: "invalid" };
   }
 }
+
+/**
+ * A commission store outcome as the `ActionResult` the client toasts (Increment 2): the
+ * same shape as `finish`, revalidating the list and the commission's own page when
+ * something was written. The commission pages are not the committee's, so the path
+ * differs (`/commissions/<id>`). Every sentence is a `copy.ts` string.
+ */
+export function finishCommission(
+  identity: CommitteesActionIdentity,
+  commissionId: string | null,
+  outcome: Outcome<Written & Partial<Omit<ActionData, keyof Written>>>,
+): CommitteesActionResult {
+  switch (outcome.kind) {
+    case "ok": {
+      const { id, unchanged, membersEnded, cancelled } = outcome.data;
+      if (!unchanged) {
+        revalidatePath(`/o/${identity.slug}/admin/committees`);
+        revalidatePath(`/o/${identity.slug}/admin/committees/commissions/${commissionId ?? id}`);
+      }
+      return {
+        ok: true,
+        data: {
+          id,
+          ...(unchanged ? { unchanged } : {}),
+          ...(membersEnded !== undefined ? { membersEnded } : {}),
+          ...(cancelled !== undefined ? { cancelled } : {}),
+        },
+      };
+    }
+    case "refused":
+      return { ok: false, error: refusalMessage(outcome.reason, outcome.detail), kind: outcome.reason };
+    case "invalid":
+      return { ok: false, error: outcome.message, field: outcome.field, kind: "invalid" };
+  }
+}

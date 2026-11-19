@@ -2,10 +2,15 @@ import "server-only";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { OrgAccessError, withOrgContext, type OrgTx } from "@/lib/authz";
 import { AUDIT_ACTIONS, insertAuditRow } from "@/lib/audit-tx";
-import { COMMITTEES_GUARD_CODES, committeeDetails } from "@/lib/db/domain/committees";
+import {
+  COMMITTEES_GUARD_CODES,
+  commissionRecordMembers,
+  commissionRecords,
+  committeeDetails,
+} from "@/lib/db/domain/committees";
 import { groupMemberships, groups, groupTypes } from "@/lib/db/domain/groups";
 import { memberships, people } from "@/lib/db/domain/people";
-import { pgErrorField } from "@/lib/db/errors";
+import { pgErrorField, pgErrorMessages } from "@/lib/db/errors";
 import {
   addManagedGroupSeatInTx,
   endManagedGroupMemberInTx,
@@ -15,14 +20,17 @@ import {
   type GroupsResult,
 } from "@/lib/groups";
 import { COMMITTEE_ROLES, type CommitteeRole } from "@/lib/group-roles";
+import { isUuid } from "@/lib/is-uuid";
 import { holdsPermissions } from "@/lib/org-portal/permission-check";
 import { orgTimeZoneInTx } from "@/lib/org-settings";
+import { resolveMemberCongregation } from "@/lib/presbytery";
 import { readGroupRoleGrantsInTx } from "@/lib/role-grants";
 import { todayInOrgZone } from "@/lib/shared/org-time";
 import {
   GROUPS_MANAGE_KEY,
   LIMITS,
   type ChangedField,
+  type CommissionChangedField,
   type CommitteesCtx,
   type Outcome,
   type Refusal,
@@ -31,11 +39,11 @@ import {
 } from "./contract";
 import { VALIDATION } from "./copy";
 import { addYears, classifySeat, seatsOverlap } from "./derive";
-import type { CommitteeInput, SeatInput } from "./validate";
+import type { CommissionInput, CommitteeInput, EndCommissionInput, SeatInput } from "./validate";
 
 /**
- * THE ONLY WRITER of the committee tables in `src/` (`committee_details`; the two
- * commission tables are the second increment's). docs/work-log/2026-11-19-
+ * THE ONLY WRITER of the committee tables in `src/` (`committee_details` and, from
+ * Increment 2, the two commission record tables). docs/work-log/2026-11-19-
  * presbytery-committees.md, Phase 3 "API Contract" and R1 to R6; DECISION-352,
  * 353, 354, 357, 359. `boundaries.test.ts` pins the list, and that NOTHING here
  * inserts, updates or deletes `groups` or `group_memberships`: a committee is a
@@ -81,6 +89,28 @@ import type { CommitteeInput, SeatInput } from "./validate";
  * longer applies. A role change sets the old seat's `ends_on` and the new seat's
  * `starts_on` to the SAME effective date, in one transaction, with one audit row
  * (T3). "Today" is the organization's local calendar day (T15).
+ *
+ * COMMISSION RECORDS (Increment 2; DECISION-355, 358; the second half of this file).
+ * A commission record is the presbytery's OWN note about an administrative
+ * commission: it is not a group, carries no role and grants nothing, and NOTHING HERE
+ * WRITES `administrative_commissions`, `org_delegations`, `role_grants` or a role id
+ * (`boundaries.test.ts` pins every spelling). The same check order applies, with the
+ * commission in place of the committee: key, organization type, then the record (this
+ * organization's, not removed: one `not_found` for every other id), then the member,
+ * then `commission_ended`, `stale`. The congregation it is about is optional and goes
+ * through `resolveMemberCongregation()` (this presbytery's child, type congregation, no
+ * lifecycle filter: a closing congregation is accepted, T7); every miss (another
+ * presbytery's, a non-congregation, a nonexistent or a malformed id, and the 0045
+ * trigger's refusal) is the one `congregation_not_found` answer.
+ *
+ * COMMISSION CONCURRENCY. One transaction advisory lock per record,
+ * `commission_members:{org}:{commission}`, serializes the roster reads-then-writes
+ * (add, end a member). It is NOT taken by ending or removing the record: an add racing
+ * an end is the DATABASE's to settle, through the live-parent guard (0090 section 3c,
+ * `FOR SHARE` against the end's row lock), and that guard's refusal is
+ * `commission_ended`. Ending the record locks its row `FOR UPDATE` first and reads the
+ * roster after, so a member added a moment earlier is ended with the rest. A member's
+ * end takes the record `FOR SHARE`, so it cannot interleave with the end of the record.
  */
 
 /** Thrown inside a transaction to roll it back with a typed refusal. */
@@ -109,7 +139,23 @@ class Invalid extends Error {
 const GUARD_CODES: Record<string, Refusal> = {
   [COMMITTEES_GUARD_CODES.detailsDissolvedFinal]: "committee_dissolved",
   [COMMITTEES_GUARD_CODES.detailsTarget]: "not_found",
+  // Commission records (Increment 2). The live-parent guard refuses a member of a removed record on every
+  // connection and of an ended one off the owner path: the loser of an add racing an end or a removal.
+  [COMMITTEES_GUARD_CODES.commissionRecordClosed]: "commission_ended",
+  [COMMITTEES_GUARD_CODES.commissionRemovalFinal]: "not_found",
+  [COMMITTEES_GUARD_CODES.commissionEndedFinal]: "already_ended",
 };
+
+/** What a guard's refusal says it is about, when the kind's sentence depends on the object (committee or commission). */
+const GUARD_DETAIL: Record<string, RefusalDetail> = {
+  [COMMITTEES_GUARD_CODES.commissionEndedFinal]: { subject: "commission" },
+};
+
+/** The one-open-seat unique index of a commission's roster: the database's backstop for the interval check. */
+const COMMISSION_OPEN_SEAT_INDEX = "commission_record_members_one_open_idx";
+
+/** The about-org trigger's refusal (0045's deny helper, SQLSTATE 42501): the congregation is not (or no longer) affiliated. */
+const NOT_AFFILIATED_MARKER = "was not affiliated with this council";
 
 /** Maps whatever a transaction threw to the one answer the caller gets. */
 function outcomeFor(err: unknown): Outcome<never> {
@@ -120,7 +166,10 @@ function outcomeFor(err: unknown): Outcome<never> {
   const code = pgErrorField(err, "code");
   const constraint = pgErrorField(err, "constraint");
   if (code === "23514" && constraint && constraint in GUARD_CODES) {
-    return { kind: "refused", reason: GUARD_CODES[constraint]! };
+    return { kind: "refused", reason: GUARD_CODES[constraint]!, detail: GUARD_DETAIL[constraint] };
+  }
+  if (code === "23505" && constraint === COMMISSION_OPEN_SEAT_INDEX) {
+    return { kind: "refused", reason: "overlap", detail: { subject: "commission" } };
   }
   // A fixed line: the SQLSTATE and nothing else. No message, no id, no content.
   console.error(`[committees] save failed (sqlstate ${code ?? "none"})`);
@@ -150,14 +199,25 @@ type CommitteeAuditAction =
   | typeof AUDIT_ACTIONS.COMMITTEE_MEMBER_LISTED
   | typeof AUDIT_ACTIONS.COMMITTEE_MEMBER_UNLISTED;
 
+type CommissionAuditAction =
+  | typeof AUDIT_ACTIONS.COMMISSION_RECORD_RECORDED
+  | typeof AUDIT_ACTIONS.COMMISSION_RECORD_UPDATED
+  | typeof AUDIT_ACTIONS.COMMISSION_RECORD_MEMBER_ADDED
+  | typeof AUDIT_ACTIONS.COMMISSION_RECORD_MEMBER_ENDED
+  | typeof AUDIT_ACTIONS.COMMISSION_RECORD_ENDED
+  | typeof AUDIT_ACTIONS.COMMISSION_RECORD_REMOVED;
+
 /** The one audit write: in the mutation's own transaction (a failure here undoes the change). */
 async function audit(
   tx: OrgTx,
   ctx: CommitteesCtx,
-  action: CommitteeAuditAction,
+  action: CommitteeAuditAction | CommissionAuditAction,
   resourceType: string,
   resourceId: string,
-  metadata: Record<string, string | number | boolean | null | undefined | string[] | ChangedField[]>,
+  metadata: Record<
+    string,
+    string | number | boolean | null | undefined | string[] | ChangedField[] | CommissionChangedField[]
+  >,
 ): Promise<void> {
   await insertAuditRow(tx, {
     action,
@@ -515,6 +575,28 @@ async function seatsOfPerson(tx: OrgTx, ctx: CommitteesCtx, committeeId: string,
 }
 
 /**
+ * The display name of a person who holds a CURRENT membership at this presbytery, or
+ * `not_a_member` (one answer for a person who left, never joined or does not exist).
+ * Shared by a committee seat and a commission member: the same people list.
+ */
+async function currentMemberName(tx: OrgTx, ctx: CommitteesCtx, personId: string): Promise<string> {
+  const [person] = await tx
+    .select({ firstName: people.firstName, lastName: people.lastName, preferredName: people.preferredName })
+    .from(memberships)
+    .innerJoin(people, eq(people.id, memberships.personId))
+    .where(
+      and(
+        eq(memberships.personId, personId),
+        eq(memberships.organizationId, ctx.organizationId),
+        isNull(memberships.endedOn),
+      ),
+    )
+    .limit(1);
+  if (!person) throw new Refuse("not_a_member");
+  return `${person.preferredName ?? person.firstName} ${person.lastName}`;
+}
+
+/**
  * Adds a seat. The person must hold a CURRENT membership at this presbytery
  * (`not_a_member`, one answer for a person who left, never joined or does not
  * exist); the role is one of the six; the interval may not overlap another seat of
@@ -535,27 +617,12 @@ export function addCommitteeSeat(
     const committee = await loadCommittee(tx, ctx, committeeId);
     if (committee.dissolvedOn !== null) throw new Refuse("committee_dissolved");
 
-    const [person] = await tx
-      .select({ firstName: people.firstName, lastName: people.lastName, preferredName: people.preferredName })
-      .from(memberships)
-      .innerJoin(people, eq(people.id, memberships.personId))
-      .where(
-        and(
-          eq(memberships.personId, input.personId),
-          eq(memberships.organizationId, ctx.organizationId),
-          isNull(memberships.endedOn),
-        ),
-      )
-      .limit(1);
-    if (!person) throw new Refuse("not_a_member");
+    const personName = await currentMemberName(tx, ctx, input.personId);
 
     const mine = await seatsOfPerson(tx, ctx, committeeId, input.personId);
     const proposed = { startsOn: input.startsOn, endsOn: input.endsOn };
     if (mine.some((seat) => seatsOverlap(proposed, seat))) {
-      throw new Refuse("overlap", {
-        personName: `${person.preferredName ?? person.firstName} ${person.lastName}`,
-        committeeName: committee.name,
-      });
+      throw new Refuse("overlap", { personName, committeeName: committee.name });
     }
 
     const added = unwrap(
@@ -761,5 +828,418 @@ export function setCommitteeSeatPublicListed(
       { committeeId, membershipId: seat.id, personId: seat.personId },
     );
     return { id: seat.id, publicListed };
+  });
+}
+
+// ===========================================================================
+// COMMISSION RECORDS (Increment 2). See the header: the presbytery's own record,
+// not a group, not a grant. Every function below calls `gate` first (the
+// boundaries test pins it) and writes ONE audit row in its own transaction.
+// ===========================================================================
+
+/** A transaction-scoped advisory lock on one commission's roster (add, end a member). Never taken by end or remove: the database settles those. */
+const lockMembers = (tx: OrgTx, ctx: CommitteesCtx, commissionId: string) =>
+  tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`commission_members:${ctx.organizationId}:${commissionId}`}, 0))`,
+  );
+
+/**
+ * The commission record, or `not_found` for any other id: this organization's, not
+ * removed, one query. `lock` takes a row lock in the same statement: `update` for the
+ * writes that change the record, `share` for an act that must not interleave with the
+ * record's end (the same lock the live-parent guard takes).
+ */
+async function loadCommission(tx: OrgTx, ctx: CommitteesCtx, commissionId: string, lock: "update" | "share" | null = null) {
+  const query = tx
+    .select({
+      id: commissionRecords.id,
+      title: commissionRecords.title,
+      charge: commissionRecords.charge,
+      aboutOrgId: commissionRecords.aboutOrgId,
+      appointedOn: commissionRecords.appointedOn,
+      minuteReference: commissionRecords.minuteReference,
+      endedOn: commissionRecords.endedOn,
+      rowVersion: commissionRecords.rowVersion,
+    })
+    .from(commissionRecords)
+    .where(
+      and(
+        eq(commissionRecords.id, commissionId),
+        eq(commissionRecords.organizationId, ctx.organizationId),
+        isNull(commissionRecords.removedAt),
+      ),
+    )
+    .limit(1);
+  const [row] = lock === "update" ? await query.for("update") : lock === "share" ? await query.for("share") : await query;
+  if (!row) throw new Refuse("not_found");
+  return row;
+}
+
+/** A member of THAT commission, or `seat_not_found` (the member twin of `not_found`). */
+async function loadMember(tx: OrgTx, ctx: CommitteesCtx, commissionId: string, memberId: string) {
+  const [row] = await tx
+    .select({
+      id: commissionRecordMembers.id,
+      personId: commissionRecordMembers.personId,
+      role: commissionRecordMembers.role,
+      startsOn: commissionRecordMembers.startsOn,
+      endsOn: commissionRecordMembers.endsOn,
+    })
+    .from(commissionRecordMembers)
+    .where(
+      and(
+        eq(commissionRecordMembers.id, memberId),
+        eq(commissionRecordMembers.commissionRecordId, commissionId),
+        eq(commissionRecordMembers.organizationId, ctx.organizationId),
+      ),
+    )
+    .limit(1);
+  if (!row) throw new Refuse("seat_not_found");
+  return row;
+}
+
+/** The members of one commission, as intervals. */
+const membersOfCommission = (tx: OrgTx, ctx: CommitteesCtx, commissionId: string) =>
+  tx
+    .select({
+      id: commissionRecordMembers.id,
+      personId: commissionRecordMembers.personId,
+      startsOn: commissionRecordMembers.startsOn,
+      endsOn: commissionRecordMembers.endsOn,
+    })
+    .from(commissionRecordMembers)
+    .where(
+      and(
+        eq(commissionRecordMembers.commissionRecordId, commissionId),
+        eq(commissionRecordMembers.organizationId, ctx.organizationId),
+      ),
+    );
+
+/**
+ * T7: the congregation a record is about is one of THIS presbytery's member
+ * congregations (`resolveMemberCongregation`: parent, type congregation, no lifecycle
+ * filter). Every miss is the one `congregation_not_found` answer carrying the stored
+ * presbytery name: another presbytery's, a non-congregation, a nonexistent and a malformed
+ * id are indistinguishable (DECISION-040). Returns the resolved (lower-case) id and the
+ * name, which the trigger's later refusal (the affiliation history disagreeing with
+ * `parent_id`) also needs, because the transaction is aborted by then.
+ */
+async function requireCongregation(
+  tx: OrgTx,
+  ctx: CommitteesCtx,
+  aboutOrgId: string,
+): Promise<{ congregationId: string; presbyteryName: string }> {
+  const result = await tx.execute(sql`select name from organizations where id = ${ctx.organizationId}`);
+  const presbyteryName = (result as unknown as { rows?: Array<{ name: string }> }).rows?.[0]?.name ?? "this presbytery";
+  const found = isUuid(aboutOrgId) ? await resolveMemberCongregation(tx, ctx.organizationId, aboutOrgId) : null;
+  if (!found) throw new Refuse("congregation_not_found", { presbyteryName });
+  return { congregationId: found.id, presbyteryName };
+}
+
+/** A write that names a congregation: the 0045 trigger's refusal is the same one answer as a miss. */
+async function writingAbout<T>(presbyteryName: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    if (pgErrorField(err, "code") === "42501" && pgErrorMessages(err).includes(NOT_AFFILIATED_MARKER)) {
+      throw new Refuse("congregation_not_found", { presbyteryName });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Records a commission (C15). The congregation is optional; named, it is resolved
+ * under this presbytery (`congregation_not_found` for every miss). One row, one audit
+ * row `commission_record.recorded` carrying only the ids.
+ */
+export function recordCommission(ctx: CommitteesCtx, input: CommissionInput): Promise<Outcome<Written>> {
+  return inTransaction(ctx, async (tx) => {
+    await gate(tx, ctx);
+
+    const about = input.aboutOrgId === null ? null : await requireCongregation(tx, ctx, input.aboutOrgId);
+    const [row] = await writingAbout(about?.presbyteryName ?? "", () =>
+      tx
+        .insert(commissionRecords)
+        .values({
+          organizationId: ctx.organizationId,
+          aboutOrgId: about?.congregationId ?? null,
+          title: input.title,
+          charge: input.charge,
+          appointedOn: input.appointedOn,
+          minuteReference: input.minuteReference,
+          createdBy: ctx.actor.userId,
+          updatedBy: ctx.actor.userId,
+        })
+        .returning({ id: commissionRecords.id }),
+    );
+    const id = row!.id;
+
+    await audit(tx, ctx, AUDIT_ACTIONS.COMMISSION_RECORD_RECORDED, "commission_record", id, {
+      commissionId: id,
+      aboutOrgId: about?.congregationId ?? null,
+    });
+    return { id };
+  });
+}
+
+/**
+ * Edits a record's title, charge, congregation, appointed date and minute. The
+ * record is locked and its `row_version` must be the one the form held (`stale`: the
+ * charge is sensitive, so last-write-wins is the worst case). Nothing changed writes
+ * nothing and audits nothing. An ENDED record may still be corrected (the database
+ * freezes only its end); a congregation that has since left the presbytery may stay
+ * named (a congregation is resolved only when the edit MOVES it). One audit row with the
+ * field NAMES.
+ */
+export function updateCommission(
+  ctx: CommitteesCtx,
+  commissionId: string,
+  input: CommissionInput,
+  expectedVersion: number,
+): Promise<Outcome<Written>> {
+  return inTransaction(ctx, async (tx) => {
+    await gate(tx, ctx);
+    const stored = await loadCommission(tx, ctx, commissionId, "update");
+    if (stored.rowVersion !== expectedVersion) throw new Refuse("stale", { subject: "commission" });
+
+    const wantedAbout = input.aboutOrgId === null ? null : input.aboutOrgId.toLowerCase();
+    const changed: CommissionChangedField[] = [];
+    if (stored.title !== input.title) changed.push("title");
+    if ((stored.charge ?? null) !== input.charge) changed.push("charge");
+    if ((stored.aboutOrgId ?? null) !== wantedAbout) changed.push("congregation");
+    if (stored.appointedOn !== input.appointedOn) changed.push("appointedOn");
+    if ((stored.minuteReference ?? null) !== input.minuteReference) changed.push("minuteReference");
+    if (changed.length === 0) return { id: commissionId, unchanged: true as const };
+
+    if (stored.endedOn !== null && input.appointedOn > stored.endedOn) {
+      throw new Invalid("appointedOn", VALIDATION.dateInvalid);
+    }
+
+    // Resolved only when the edit moves the congregation: an unrelated edit of a record whose congregation has left passes.
+    const moved = changed.includes("congregation") && input.aboutOrgId !== null;
+    const about = moved ? await requireCongregation(tx, ctx, input.aboutOrgId!) : null;
+    const aboutOrgId = input.aboutOrgId === null ? null : (about?.congregationId ?? stored.aboutOrgId);
+
+    await writingAbout(about?.presbyteryName ?? "", () =>
+      tx
+        .update(commissionRecords)
+        .set({
+          title: input.title,
+          charge: input.charge,
+          aboutOrgId,
+          appointedOn: input.appointedOn,
+          minuteReference: input.minuteReference,
+          rowVersion: sql`${commissionRecords.rowVersion} + 1`,
+          updatedAt: nowStamp(),
+          updatedBy: ctx.actor.userId,
+        })
+        .where(and(eq(commissionRecords.id, commissionId), eq(commissionRecords.organizationId, ctx.organizationId))),
+    );
+
+    await audit(tx, ctx, AUDIT_ACTIONS.COMMISSION_RECORD_UPDATED, "commission_record", commissionId, {
+      commissionId,
+      changed,
+    });
+    return { id: commissionId };
+  });
+}
+
+/**
+ * Adds a member to a commission (C15; the person, role and date rules of a committee
+ * seat: a CURRENT membership, one of the six titles, interval overlap). The roster is
+ * read and written under the record's members lock. An ENDED record refuses
+ * (`commission_ended`); an add that raced the end is refused by the database's live-parent
+ * guard with the same answer. Never a `group_memberships` row: no group, no role.
+ */
+export function addCommissionMember(
+  ctx: CommitteesCtx,
+  commissionId: string,
+  input: SeatInput,
+): Promise<Outcome<Written>> {
+  return inTransaction(ctx, async (tx) => {
+    await gate(tx, ctx);
+    await lockMembers(tx, ctx, commissionId);
+
+    const commission = await loadCommission(tx, ctx, commissionId);
+    if (commission.endedOn !== null) throw new Refuse("commission_ended");
+
+    const personName = await currentMemberName(tx, ctx, input.personId);
+
+    const mine = (await membersOfCommission(tx, ctx, commissionId)).filter((m) => m.personId === input.personId);
+    const proposed = { startsOn: input.startsOn, endsOn: input.endsOn };
+    if (mine.some((member) => seatsOverlap(proposed, member))) {
+      throw new Refuse("overlap", { personName, subject: "commission" });
+    }
+
+    const [added] = await tx
+      .insert(commissionRecordMembers)
+      .values({
+        organizationId: ctx.organizationId,
+        commissionRecordId: commissionId,
+        personId: input.personId,
+        role: input.role,
+        startsOn: input.startsOn,
+        endsOn: input.endsOn,
+        createdBy: ctx.actor.userId,
+        updatedBy: ctx.actor.userId,
+      })
+      .returning({ id: commissionRecordMembers.id });
+    const memberId = added!.id;
+
+    await audit(tx, ctx, AUDIT_ACTIONS.COMMISSION_RECORD_MEMBER_ADDED, "commission_record", commissionId, {
+      commissionId,
+      memberId,
+      personId: input.personId,
+      role: input.role,
+      startsOn: input.startsOn,
+      endsOn: input.endsOn,
+    });
+    return { id: memberId };
+  });
+}
+
+/**
+ * Ends a member's term (or moves a planned end, or cancels a term that has not
+ * started): the committee seat's rules, on a commission's roster. Takes the record
+ * `FOR SHARE`, so it cannot interleave with the record's own end (which then finds the
+ * member already ended, or ends it with the rest).
+ */
+export function endCommissionMember(
+  ctx: CommitteesCtx,
+  commissionId: string,
+  memberId: string,
+  input: { endsOn: string | null },
+): Promise<Outcome<Written & { cancelled: boolean }>> {
+  return inTransaction(ctx, async (tx) => {
+    await gate(tx, ctx);
+    await lockMembers(tx, ctx, commissionId);
+
+    await loadCommission(tx, ctx, commissionId, "share");
+    const member = await loadMember(tx, ctx, commissionId, memberId);
+
+    const today = await localToday(tx, ctx);
+    const state = classifySeat(member, today);
+    if (state === "past") throw new Refuse("already_ended");
+
+    const cancelled = state === "planned";
+    let endsOn: string;
+    if (cancelled) {
+      endsOn = member.startsOn;
+    } else {
+      if (input.endsOn === null) throw new Invalid("endsOn", VALIDATION.dateInvalid);
+      if (input.endsOn < member.startsOn) throw new Invalid("endsOn", VALIDATION.endBeforeStart);
+      if (input.endsOn > addYears(today, LIMITS.endAheadYears)) throw new Invalid("endsOn", VALIDATION.endTooFar);
+      endsOn = input.endsOn;
+    }
+    if (member.endsOn === endsOn) return { id: member.id, cancelled, unchanged: true as const };
+
+    await tx
+      .update(commissionRecordMembers)
+      .set({ endsOn, updatedAt: nowStamp(), updatedBy: ctx.actor.userId })
+      .where(and(eq(commissionRecordMembers.id, member.id), eq(commissionRecordMembers.organizationId, ctx.organizationId)));
+
+    await audit(tx, ctx, AUDIT_ACTIONS.COMMISSION_RECORD_MEMBER_ENDED, "commission_record", commissionId, {
+      commissionId,
+      memberId: member.id,
+      personId: member.personId,
+      role: member.role,
+      endsOn,
+      cancelled,
+    });
+    return { id: member.id, cancelled };
+  });
+}
+
+/**
+ * Ends the commission on a date that is not in the future (C15), ending every member:
+ * the record is locked `FOR UPDATE` and its roster read AFTER, so a member added a
+ * moment earlier is ended with the rest. The date may not precede the appointment or
+ * the start of any member who has begun (`date_before_start`, naming that date). Every
+ * member with no end or a later one ends at the date; one who has not started ends
+ * zero-length at their own start (nothing deleted, nothing left open). One-way (the
+ * guard freezes the end), `already_ended` after. One audit row with the count.
+ */
+export function endCommission(
+  ctx: CommitteesCtx,
+  commissionId: string,
+  input: EndCommissionInput,
+): Promise<Outcome<Written & { membersEnded: number }>> {
+  return inTransaction(ctx, async (tx) => {
+    await gate(tx, ctx);
+
+    const stored = await loadCommission(tx, ctx, commissionId, "update");
+    if (stored.endedOn !== null) throw new Refuse("already_ended", { subject: "commission" });
+
+    const today = await localToday(tx, ctx);
+    if (input.endedOn > today) throw new Invalid("endedOn", VALIDATION.endedFuture);
+    if (input.endedOn < stored.appointedOn) throw new Invalid("endedOn", VALIDATION.endedBeforeAppointed(stored.appointedOn));
+
+    const members = await membersOfCommission(tx, ctx, commissionId);
+    const begun = members.filter((m) => m.startsOn <= today).map((m) => m.startsOn);
+    const latestBegun = begun.length > 0 ? begun.reduce((a, b) => (a > b ? a : b)) : null;
+    if (latestBegun !== null && input.endedOn < latestBegun) {
+      throw new Refuse("date_before_start", { date: latestBegun, subject: "commission" });
+    }
+
+    await tx
+      .update(commissionRecords)
+      .set({
+        endedOn: input.endedOn,
+        endedMinuteReference: input.endedMinuteReference,
+        endedBy: ctx.actor.userId,
+        endedAt: nowStamp(),
+        rowVersion: sql`${commissionRecords.rowVersion} + 1`,
+        updatedAt: nowStamp(),
+        updatedBy: ctx.actor.userId,
+      })
+      .where(and(eq(commissionRecords.id, commissionId), eq(commissionRecords.organizationId, ctx.organizationId)));
+
+    let membersEnded = 0;
+    for (const member of members) {
+      if (member.endsOn !== null && member.endsOn <= input.endedOn) continue;
+      // A member who has not started ends zero-length at their own start; a begun one ends at the date.
+      const newEnd = member.startsOn > input.endedOn ? member.startsOn : input.endedOn;
+      if (member.endsOn === newEnd) continue;
+      await tx
+        .update(commissionRecordMembers)
+        .set({ endsOn: newEnd, updatedAt: nowStamp(), updatedBy: ctx.actor.userId })
+        .where(and(eq(commissionRecordMembers.id, member.id), eq(commissionRecordMembers.organizationId, ctx.organizationId)));
+      membersEnded += 1;
+    }
+
+    await audit(tx, ctx, AUDIT_ACTIONS.COMMISSION_RECORD_ENDED, "commission_record", commissionId, {
+      commissionId,
+      endedOn: input.endedOn,
+      membersEnded,
+    });
+    return { id: commissionId, membersEnded };
+  });
+}
+
+/**
+ * Removes a record entered by mistake (the one way out, T8: all deletes are soft): the
+ * removal pair is set, one way. A record already removed, or never this
+ * organization's, is `not_found`. Its members are untouched (they have no removal of
+ * their own), and nothing can be added to it again (the live-parent guard).
+ */
+export function removeCommissionRecord(ctx: CommitteesCtx, commissionId: string): Promise<Outcome<Written>> {
+  return inTransaction(ctx, async (tx) => {
+    await gate(tx, ctx);
+
+    await loadCommission(tx, ctx, commissionId, "update");
+    await tx
+      .update(commissionRecords)
+      .set({
+        removedAt: nowStamp(),
+        removedBy: ctx.actor.userId,
+        rowVersion: sql`${commissionRecords.rowVersion} + 1`,
+        updatedAt: nowStamp(),
+        updatedBy: ctx.actor.userId,
+      })
+      .where(and(eq(commissionRecords.id, commissionId), eq(commissionRecords.organizationId, ctx.organizationId)));
+
+    await audit(tx, ctx, AUDIT_ACTIONS.COMMISSION_RECORD_REMOVED, "commission_record", commissionId, { commissionId });
+    return { id: commissionId };
   });
 }

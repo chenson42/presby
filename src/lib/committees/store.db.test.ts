@@ -33,6 +33,15 @@
  *     racing an add leaves NO open seat on a dissolved committee; a role change
  *     racing an end term ends consistent.
  *
+ *   - INCREMENT 2, commission records (the last describe): each of the six writes (key,
+ *     audit row with ids only, no title/charge/minute in any audit row, the audit in the
+ *     SAME transaction, nothing written to a group or to the downward tables); the
+ *     congregation resolver (another presbytery's, a non-congregation, a departed one, a
+ *     nonexistent and a malformed id, and the 0045 trigger's refusal all give ONE
+ *     byte-identical answer; a closing congregation is accepted); `stale`; interval
+ *     overlap; the live-parent guard (an add racing an end or a removal); end-of-record
+ *     ends every member.
+ *
  * Run (serial, per docs/testing.md):
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/committees/store.db.test.ts
  */
@@ -45,10 +54,14 @@ import { todayInOrgZone } from "@/lib/shared/org-time";
 import "@/lib/db/schema";
 import type { CommitteesCtx, Outcome } from "./contract";
 import { addYears } from "./derive";
-import { refusalMessage, REFUSAL, VALIDATION } from "./copy";
+import { dateText, refusalMessage, REFUSAL, VALIDATION } from "./copy";
 import {
+  parseCommission,
+  parseCommissionMember,
   parseCommittee,
+  parseEndCommission,
   parseSeat,
+  type CommissionValues,
   type CommitteeValues,
   type SeatValues,
 } from "./validate";
@@ -60,7 +73,19 @@ vi.mock("@/auth", () => ({ auth: vi.fn() }));
 // A switch in front of the real audit insert.
 const hooks = vi.hoisted(() => ({
   mode: "ok" as "ok" | "fail_before" | "fail_after",
+  /** An organization the stand-in `resolveMemberCongregation` pretends is a member (the about-org trigger case). */
+  pretendMember: null as null | string,
 }));
+vi.mock("@/lib/presbytery", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/presbytery")>();
+  return {
+    ...actual,
+    resolveMemberCongregation: async (...args: Parameters<typeof actual.resolveMemberCongregation>) =>
+      hooks.pretendMember && args[2] === hooks.pretendMember
+        ? { id: hooks.pretendMember, name: "Pretend member", platformStatus: "unmanaged" }
+        : actual.resolveMemberCongregation(...args),
+  };
+});
 vi.mock("@/lib/audit-tx", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit-tx")>();
   return {
@@ -244,6 +269,7 @@ describe.skipIf(!hasDb)("committees/store.ts (Postgres-backed)", { timeout: 240_
 
   beforeEach(() => {
     hooks.mode = "ok";
+    hooks.pretendMember = null;
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -980,6 +1006,772 @@ describe.skipIf(!hasDb)("committees/store.ts (Postgres-backed)", { timeout: 240_
         expect(rows.find((r) => r.id === seat)!.ends_on).toBe(shift(TODAY, -1));
         expect(rows.filter((r) => r.ends_on === null).length).toBe(changed.kind === "ok" ? 1 : 0);
       }
+    });
+  });
+
+  // ===========================================================================
+  // INCREMENT 2: commission records
+  // ===========================================================================
+  describe("commission records (Increment 2)", () => {
+    let CG1: string; // a member congregation of P
+    let CG2: string; // another member congregation of P
+    let CGX: string; // a member congregation of the OTHER presbytery
+    let CGN: string; // a congregation that never belonged to anyone
+    let CGCLOSING: string; // a member congregation of P whose lifecycle is no longer active
+    let CGDEPART: string; // a congregation that left P for the other presbytery
+    let CGNWC: string; // a new worshiping community under P: a non-congregation child
+    let stranger: string; // a person with no membership anywhere
+    let commissionP2: string; // a commission record at the other presbytery
+    const made: string[] = [];
+
+    async function affiliate(subject: string, parent: string, type = "member_congregation") {
+      await q(sql`
+        insert into organization_affiliations
+          (organization_id, subject_org_id, parent_org_id, relationship_type, effective_from, authority, minute_reference)
+        values (${parent}, ${subject}, ${parent}, ${type}, '2000-01-01', 'recorded',
+                'Fixture affiliation for the commission records of store.db.test.ts')`);
+    }
+    async function depart(subject: string, from: string, to: string) {
+      await fx.platform.transaction(async (tx) => {
+        await tx.execute(sql`select set_config('presby.affiliation_trigger_active', 'true', true)`);
+        await tx.execute(sql`
+          update organization_affiliations
+             set effective_to = '2024-01-01', closed_by_org_id = ${from}, closed_on = '2024-01-01',
+                 closed_minute_reference = 'Fixture departure for the commission records of store.db.test.ts'
+           where subject_org_id = ${subject} and effective_to is null`);
+        await tx.execute(sql`
+          insert into organization_affiliations
+            (organization_id, subject_org_id, parent_org_id, relationship_type, effective_from, authority, minute_reference)
+          values (${to}, ${subject}, ${to}, 'member_congregation', '2024-01-01', 'recorded', 'Fixture arrival for the commission records of store.db.test.ts')`);
+      });
+    }
+    async function cong(label: string, parent: string | null, type = "congregation", relationship = "member_congregation"): Promise<string> {
+      const id = await fx.makeOrg(`${label}${(counter += 1)}`, { organizationType: type as never });
+      made.push(id);
+      if (parent) await affiliate(id, parent, relationship);
+      return id;
+    }
+
+    beforeAll(async () => {
+      CG1 = await cong("CmCong1", P);
+      CG2 = await cong("CmCong2", P);
+      CGX = await cong("CmCongX", P2);
+      CGN = await cong("CmCongNever", null);
+      CGCLOSING = await cong("CmCongClosing", P);
+      await q(sql`update organizations set lifecycle_status = 'dissolved' where id = ${CGCLOSING}`);
+      CGDEPART = await cong("CmCongDeparted", P);
+      await depart(CGDEPART, P, P2);
+      CGNWC = await cong("CmNwc", P, "new_worshiping_community", "member_nwc");
+      stranger = await fx.makePerson("Stranger", `Nowhere${stamp}`);
+      const r = await store.recordCommission(ctxFor(clerkP2, P2), commissionIn({ title: `Cm90 ${stamp} other presbytery` }));
+      if (r.kind !== "ok") throw new Error(`the other presbytery's commission did not record: ${JSON.stringify(r)}`);
+      commissionP2 = r.data.id;
+    });
+
+    afterAll(async () => {
+      if (!fx) return;
+      // about_org_id is NO ACTION: the record rows go before the congregations they name; cleanup() then takes the presbyteries.
+      await q(sql`delete from commission_record_members where organization_id in (${P}, ${P2})`);
+      await q(sql`delete from commission_records where organization_id in (${P}, ${P2})`);
+      await q(sql`alter table group_memberships disable trigger group_memberships_reject_derived`);
+      try {
+        for (const id of made) await q(sql`delete from organizations where id = ${id}`);
+      } finally {
+        await q(sql`alter table group_memberships enable trigger group_memberships_reject_derived`);
+      }
+    });
+
+    // --- helpers ----------------------------------------------------------
+    const commissionIn = (over: Partial<CommissionValues> = {}) =>
+      ok(
+        parseCommission({
+          title: `Cm90 ${stamp} ${(counter += 1)}`,
+          charge: "",
+          aboutOrgId: "",
+          appointedOn: shift(TODAY, -60),
+          minuteReference: "",
+          ...over,
+        }),
+      );
+    const memberIn = (personId: string, role = "member", startsOn = shift(TODAY, -30), endsOn = "") =>
+      ok(parseCommissionMember({ personId, role, startsOn, endsOn } satisfies SeatValues, ENV));
+    const endIn = (endedOn = TODAY, endedMinuteReference = "") => ok(parseEndCommission({ endedOn, endedMinuteReference }, ENV));
+
+    async function mkCommission(over: Partial<CommissionValues> = {}): Promise<string> {
+      const r = await store.recordCommission(clerkCtx(), commissionIn(over));
+      if (r.kind !== "ok") throw new Error(`recordCommission fixture refused: ${JSON.stringify(r)}`);
+      return r.data.id;
+    }
+    async function mkMember(commissionId: string, personId: string, role = "member", startsOn = shift(TODAY, -30), endsOn = ""): Promise<string> {
+      const r = await store.addCommissionMember(clerkCtx(), commissionId, memberIn(personId, role, startsOn, endsOn));
+      if (r.kind !== "ok") throw new Error(`addCommissionMember fixture refused: ${JSON.stringify(r)}`);
+      return r.data.id;
+    }
+    const recordRow = async (id: string): Promise<Row> => {
+      const rows = await q(sql`select title, charge, about_org_id, appointed_on::text as appointed_on, minute_reference, ended_on::text as ended_on,
+                                      ended_minute_reference, ended_by, removed_at, removed_by, row_version, created_by, updated_by
+                                 from commission_records where id = ${id}`);
+      expect(rows, `commission ${id}`).toHaveLength(1);
+      return rows[0]!;
+    };
+    const membersOf = (commissionId: string) =>
+      q(sql`select id, person_id, role, starts_on::text as starts_on, ends_on::text as ends_on from commission_record_members
+             where commission_record_id = ${commissionId} order by starts_on, id`);
+    const commissionAudit = (commissionId: string) =>
+      q(sql`select action, resource_type, resource_id, actor_user_id, metadata from audit_events
+             where action like 'tenant.commission_record.%' and metadata->>'commissionId' = ${commissionId} order by created_at, id`);
+    const commissionAuditCount = async () =>
+      Number((await q(sql`select count(*)::int as n from audit_events where action like 'tenant.commission_record.%' and metadata->>'organizationId' in (${P}, ${P2})`))[0]!.n);
+
+    /** Everything the commission writes touch at both presbyteries, plus their audit rows. */
+    async function csnapshot(): Promise<unknown> {
+      const tables: Row[] = [];
+      for (const t of ["commission_records", "commission_record_members"] as const) {
+        tables.push(
+          ...(await q(
+            sql`select ${t}::text as t, count(*)::int as n, coalesce(md5(string_agg(x::text, '|' order by x.id)), '') as h
+                  from ${sql.identifier(t)} x where x.organization_id in (${P}, ${P2})`,
+          )),
+        );
+      }
+      return { tables, audit: await commissionAuditCount() };
+    }
+    /** The downward tables, the role grants and every group row: a commission record writes none of them. */
+    async function downward(): Promise<{ downward: unknown; groups: unknown }> {
+      return {
+        downward: await q(sql`select (select count(*) from administrative_commissions)::int as admin, (select count(*) from org_delegations)::int as deleg, (select count(*) from role_grants)::int as grants`),
+        groups: await snapshot(),
+      };
+    }
+    const never = { kind: "refused", reason: "not_found" } as const;
+
+    // --- the six writes -----------------------------------------------------
+    describe("a missing key, or an organization that is not a presbytery, writes nothing and audits nothing", () => {
+      it("every commission write refuses `forbidden` for a member with no key, and for a clerk of a congregation", async () => {
+        const id = await mkCommission();
+        const member = await mkMember(id, people[0]!);
+        const before = await csnapshot();
+        const calls: Array<[string, (c: CommitteesCtx) => Promise<{ kind: string }>]> = [
+          ["recordCommission", (c) => store.recordCommission(c, commissionIn())],
+          ["updateCommission", (c) => store.updateCommission(c, id, commissionIn(), 1)],
+          ["addCommissionMember", (c) => store.addCommissionMember(c, id, memberIn(people[1]!))],
+          ["endCommissionMember", (c) => store.endCommissionMember(c, id, member, { endsOn: TODAY })],
+          ["endCommission", (c) => store.endCommission(c, id, endIn())],
+          ["removeCommissionRecord", (c) => store.removeCommissionRecord(c, id)],
+        ];
+        for (const [name, call] of calls) {
+          expect(await call(ctxFor(keyless)), `${name} (no key)`).toEqual({ kind: "refused", reason: "forbidden" });
+        }
+        expect(await csnapshot()).toEqual(before);
+        // groups.manage AT a congregation is not a presbytery
+        expect(await store.recordCommission(ctxFor(clerkC, C), commissionIn())).toEqual({ kind: "refused", reason: "forbidden" });
+        expect(await csnapshot()).toEqual(before);
+      });
+    });
+
+    describe("recordCommission", () => {
+      it("writes the record and exactly one audit row with ONLY ids (no title, charge or minute), and writes no group, role or downward-table row", async () => {
+        const before = await downward();
+        const auditBefore = await commissionAuditCount();
+        const r = await store.recordCommission(
+          clerkCtx(),
+          commissionIn({
+            title: `Cm90 ${stamp} Commission on Alder Creek`,
+            charge: "To review the session's records in general terms.",
+            aboutOrgId: CG1,
+            minuteReference: "2026-05-12, item 7",
+          }),
+        );
+        if (r.kind !== "ok") throw new Error(JSON.stringify(r));
+        const id = r.data.id;
+
+        expect(await recordRow(id)).toMatchObject({
+          title: `Cm90 ${stamp} Commission on Alder Creek`,
+          charge: "To review the session's records in general terms.",
+          about_org_id: CG1,
+          minute_reference: "2026-05-12, item 7",
+          ended_on: null,
+          removed_at: null,
+          row_version: 1,
+          created_by: fx.actingUserId,
+          updated_by: fx.actingUserId,
+        });
+        const rows = await commissionAudit(id);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ action: "tenant.commission_record.recorded", resource_type: "commission_record", resource_id: id, actor_user_id: fx.actingUserId });
+        expect(rows[0]!.metadata).toEqual({ organizationId: P, commissionId: id, aboutOrgId: CG1 });
+        expect(await commissionAuditCount()).toBe(auditBefore + 1);
+        // the hard rule: no group, no role grant, no downward row was written
+        const after = await downward();
+        expect(after.downward).toEqual(before.downward);
+        expect(after.groups).toEqual(before.groups);
+      });
+
+      it("a record about no congregation has a null congregation and audits `aboutOrgId: null`", async () => {
+        const id = await mkCommission();
+        expect((await recordRow(id)).about_org_id).toBeNull();
+        expect((await commissionAudit(id))[0]!.metadata).toEqual({ organizationId: P, commissionId: id, aboutOrgId: null });
+      });
+
+      it("a CLOSING congregation (still this presbytery's, lifecycle no longer active) is accepted", async () => {
+        const id = await mkCommission({ aboutOrgId: CGCLOSING });
+        expect((await recordRow(id)).about_org_id).toBe(CGCLOSING);
+      });
+
+      it("a congregation id in upper case is stored and audited in its canonical (lower-case) form", async () => {
+        const id = await mkCommission({ aboutOrgId: CG2.toUpperCase() });
+        expect((await recordRow(id)).about_org_id).toBe(CG2);
+        expect((await commissionAudit(id))[0]!.metadata).toMatchObject({ aboutOrgId: CG2 });
+      });
+    });
+
+    describe("the congregation resolver: every miss is ONE byte-identical answer (DECISION-040)", () => {
+      it("another presbytery's congregation, a non-congregation child, a departed congregation, the presbytery itself, a nonexistent id and a malformed one all read the same, and write nothing", async () => {
+        const misses: Array<[string, string]> = [
+          ["another presbytery's congregation", CGX],
+          ["a new worshiping community under this presbytery (a non-congregation)", CGNWC],
+          ["a congregation that left", CGDEPART],
+          ["a congregation that never belonged to anyone", CGN],
+          ["the presbytery itself", P],
+          ["the other presbytery", P2],
+          ["a nonexistent id", "00000000-0000-4090-8000-00000000ffff"],
+          ["a malformed id", "not-a-uuid"],
+          ["a truncated id", "00000000-0000-4090-8000-00000000fff"],
+        ];
+        const before = await csnapshot();
+        const results = new Map<string, unknown>();
+        for (const [label, id] of misses) results.set(label, await store.recordCommission(clerkCtx(), commissionIn({ aboutOrgId: id })));
+        const [first] = [...results.values()];
+        const stored = String((await q(sql`select name from organizations where id = ${P}`))[0]!.name);
+        expect(first).toEqual({ kind: "refused", reason: "congregation_not_found", detail: { presbyteryName: stored } });
+        for (const [label, result] of results) {
+          expect(JSON.stringify(result), label).toBe(JSON.stringify(first));
+        }
+        // and the sentence a form shows is the same bytes
+        const sentences = [...results.values()].map((r) => refusalMessage((r as { reason: "congregation_not_found" }).reason, (r as { detail: never }).detail));
+        expect(new Set(sentences).size).toBe(1);
+        expect(sentences[0]).toBe(`That congregation could not be found among ${stored}'s member congregations.`);
+        expect(await csnapshot()).toEqual(before);
+      });
+
+      it("moving a record to such a congregation gives the same answer and changes nothing", async () => {
+        const id = await mkCommission({ aboutOrgId: CG1 });
+        const before = await csnapshot();
+        const answers = [];
+        for (const miss of [CGX, CGNWC, CGDEPART, "00000000-0000-4090-8000-00000000ffff", "nope"]) {
+          answers.push(await store.updateCommission(clerkCtx(), id, commissionIn({ aboutOrgId: miss }), 1));
+        }
+        expect(new Set(answers.map((a) => JSON.stringify(a))).size).toBe(1);
+        expect(answers[0]).toMatchObject({ kind: "refused", reason: "congregation_not_found" });
+        expect(await csnapshot()).toEqual(before);
+      });
+
+      it("the 0045 trigger's refusal (the resolver passes, the affiliation history disagrees) is the SAME answer, with nothing written and nothing logged", async () => {
+        hooks.pretendMember = CGN;
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        const before = await csnapshot();
+        const viaTrigger = await store.recordCommission(clerkCtx(), commissionIn({ aboutOrgId: CGN }));
+        hooks.pretendMember = null;
+        const viaResolver = await store.recordCommission(clerkCtx(), commissionIn({ aboutOrgId: CGX }));
+        expect(JSON.stringify(viaTrigger)).toBe(JSON.stringify(viaResolver));
+        expect(viaTrigger).toMatchObject({ kind: "refused", reason: "congregation_not_found" });
+        expect(await csnapshot()).toEqual(before);
+        expect(console.error).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("updateCommission", () => {
+      it("writes `commission_record.updated` with only the changed FIELD NAMES, bumps the version and refuses a stale form", async () => {
+        const id = await mkCommission({ title: `Cm90 ${stamp} Before`, charge: "first", aboutOrgId: CG1, minuteReference: "m1" });
+        const r = await store.updateCommission(
+          clerkCtx(),
+          id,
+          commissionIn({ title: `Cm90 ${stamp} After`, charge: "second", aboutOrgId: CG2, appointedOn: shift(TODAY, -90), minuteReference: "m2" }),
+          1,
+        );
+        expect(r).toEqual({ kind: "ok", data: { id } });
+        expect(await recordRow(id)).toMatchObject({ title: `Cm90 ${stamp} After`, charge: "second", about_org_id: CG2, appointed_on: shift(TODAY, -90), minute_reference: "m2", row_version: 2 });
+        const rows = await commissionAudit(id);
+        expect(rows.map((x) => x.action)).toEqual(["tenant.commission_record.recorded", "tenant.commission_record.updated"]);
+        const metadata = rows[1]!.metadata as { changed: string[] };
+        expect([...metadata.changed].sort()).toEqual(["appointedOn", "charge", "congregation", "minuteReference", "title"]);
+        expect(Object.keys(rows[1]!.metadata as object).sort()).toEqual(["changed", "commissionId", "organizationId"]);
+
+        // a form opened on version 1 is stale now, naming the record wording
+        const before = await csnapshot();
+        const stale = await store.updateCommission(clerkCtx(), id, commissionIn({ title: "Late" }), 1);
+        expect(stale).toEqual({ kind: "refused", reason: "stale", detail: { subject: "commission" } });
+        expect(refusalMessage("stale", { subject: "commission" })).toBe(
+          "This record was changed by someone else after you opened it. Reload the page, then make your change again.",
+        );
+        expect(await csnapshot()).toEqual(before);
+      });
+
+      it("an edit that changes nothing writes nothing, audits nothing and keeps the version (`unchanged`)", async () => {
+        const id = await mkCommission({ title: `Cm90 ${stamp} Same`, charge: "c", aboutOrgId: CG1, minuteReference: "m" });
+        const before = await csnapshot();
+        const r = await store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} Same`, charge: "c", aboutOrgId: CG1.toUpperCase(), appointedOn: shift(TODAY, -60), minuteReference: "m" }), 1);
+        expect(r).toEqual({ kind: "ok", data: { id, unchanged: true } });
+        expect(await csnapshot()).toEqual(before);
+        expect((await recordRow(id)).row_version).toBe(1);
+      });
+
+      it("clearing the congregation or the charge is a change; the congregation may be cleared without being resolved", async () => {
+        const title = `Cm90 ${stamp} Clearing`;
+        const id = await mkCommission({ title, aboutOrgId: CG1, charge: "c" });
+        expect(await store.updateCommission(clerkCtx(), id, commissionIn({ title, aboutOrgId: "", charge: "", appointedOn: shift(TODAY, -60) }), 1)).toEqual({ kind: "ok", data: { id } });
+        expect(await recordRow(id)).toMatchObject({ about_org_id: null, charge: null });
+        const meta = (await commissionAudit(id))[1]!.metadata as { changed: string[] };
+        expect([...meta.changed].sort()).toEqual(["charge", "congregation"]);
+      });
+
+      it("an ENDED record may still be corrected, but not given an appointment after its end", async () => {
+        const id = await mkCommission({ appointedOn: shift(TODAY, -60) });
+        expect((await store.endCommission(clerkCtx(), id, endIn(shift(TODAY, -10)))).kind).toBe("ok");
+        expect((await store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} Corrected`, appointedOn: shift(TODAY, -60) }), 2)).kind).toBe("ok");
+        const r = await store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} Corrected`, appointedOn: shift(TODAY, -5) }), 3);
+        expect(r).toMatchObject({ kind: "invalid", field: "appointedOn" });
+        expect((await recordRow(id)).appointed_on).toBe(shift(TODAY, -60));
+      });
+
+      it("a record whose congregation has LEFT the presbytery keeps it through an unrelated edit (R9), and may be moved to a member", async () => {
+        const leaver = await cong("CmCongLeaver", P);
+        const id = await mkCommission({ aboutOrgId: leaver });
+        await depart(leaver, P, P2);
+        expect((await store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} While gone`, aboutOrgId: leaver, appointedOn: shift(TODAY, -60) }), 1)).kind).toBe("ok");
+        expect((await recordRow(id)).about_org_id).toBe(leaver);
+        expect((await store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} While gone`, aboutOrgId: CG1, appointedOn: shift(TODAY, -60) }), 2)).kind).toBe("ok");
+        expect((await recordRow(id)).about_org_id).toBe(CG1);
+      });
+    });
+
+    describe("addCommissionMember", () => {
+      it("writes a member row with the role and dates, and one audit row with only ids, role and dates; no group row exists", async () => {
+        const id = await mkCommission();
+        const before = await downward();
+        const r = await store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "chair", shift(TODAY, -20), shift(TODAY, 40)));
+        if (r.kind !== "ok") throw new Error(JSON.stringify(r));
+        const rows = await membersOf(id);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ id: r.data.id, person_id: people[0], role: "chair", starts_on: shift(TODAY, -20), ends_on: shift(TODAY, 40) });
+        const audit = await commissionAudit(id);
+        expect(audit.map((x) => x.action)).toEqual(["tenant.commission_record.recorded", "tenant.commission_record.member_added"]);
+        expect(audit[1]).toMatchObject({ resource_type: "commission_record", resource_id: id });
+        expect(audit[1]!.metadata).toEqual({
+          organizationId: P,
+          commissionId: id,
+          memberId: r.data.id,
+          personId: people[0],
+          role: "chair",
+          startsOn: shift(TODAY, -20),
+          endsOn: shift(TODAY, 40),
+        });
+        const after = await downward();
+        expect(after.downward).toEqual(before.downward);
+        // a commission member is NOT a group seat: the committee tables are exactly as they were
+        expect(after.groups).toEqual(before.groups);
+      });
+
+      it("`not_a_member`: a person whose membership ended, one who never belonged, one at another organization only, and a nonexistent id: one answer", async () => {
+        const id = await mkCommission();
+        const before = await csnapshot();
+        const answers = [];
+        for (const person of [gone, congOnly, stranger, "00000000-0000-4090-8000-00000000fffe"]) {
+          answers.push(await store.addCommissionMember(clerkCtx(), id, memberIn(person)));
+        }
+        expect(new Set(answers.map((a) => JSON.stringify(a))).size).toBe(1);
+        expect(answers[0]).toEqual({ kind: "refused", reason: "not_a_member" });
+        expect(await csnapshot()).toEqual(before);
+      });
+
+      it("interval overlap: the same dates overlap (naming the person, in the commission wording), adjacent terms do not, a back-dated disjoint term is accepted next to an open one", async () => {
+        const id = await mkCommission();
+        // DATED terms: only the application's interval check sees these (the database's unique index covers open terms only)
+        await mkMember(id, people[0]!, "member", shift(TODAY, -20), shift(TODAY, 30));
+        const before = await csnapshot();
+        const clash = await store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "clerk", TODAY, shift(TODAY, 60)));
+        expect(clash).toMatchObject({ kind: "refused", reason: "overlap", detail: { subject: "commission" } });
+        expect((clash as { detail: { personName: string } }).detail.personName).toBe(`Avery Seat0${stamp}`);
+        expect(refusalMessage("overlap", (clash as unknown as { detail: never }).detail)).toBe(
+          `Avery Seat0${stamp} already serves on this commission during those dates. End that term first.`,
+        );
+        // contained, enclosing, and open-ended starting inside
+        for (const [start, end] of [[shift(TODAY, -5), shift(TODAY, 5)], [shift(TODAY, -40), shift(TODAY, 40)], [shift(TODAY, 10), ""]] as const) {
+          expect((await store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "clerk", start, end))).kind, `${start}..${end}`).toBe("refused");
+        }
+        expect(await csnapshot()).toEqual(before);
+        // adjacent: starts the day the first ends
+        expect((await store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "clerk", shift(TODAY, 30), shift(TODAY, 90)))).kind).toBe("ok");
+        // disjoint, before the first
+        expect((await store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "member", shift(TODAY, -90), shift(TODAY, -20)))).kind).toBe("ok");
+        // and an open one after both
+        expect((await store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "member", shift(TODAY, 90)))).kind).toBe("ok");
+        expect(await membersOf(id)).toHaveLength(4);
+      });
+
+      it("an open term for a person already serving is `overlap`; co-chairs and a zero-length term are fine", async () => {
+        const id = await mkCommission();
+        await mkMember(id, people[1]!, "chair", shift(TODAY, -30));
+        expect(await store.addCommissionMember(clerkCtx(), id, memberIn(people[1]!, "clerk", shift(TODAY, -10)))).toMatchObject({ kind: "refused", reason: "overlap" });
+        // co-chairs: another person, the same title
+        expect((await store.addCommissionMember(clerkCtx(), id, memberIn(people[2]!, "chair", shift(TODAY, -30)))).kind).toBe("ok");
+        // a zero-length term (it served no day) overlaps nothing
+        const zero = await mkMember(id, people[3]!, "member", shift(TODAY, -5));
+        expect((await store.endCommissionMember(clerkCtx(), id, zero, { endsOn: shift(TODAY, -5) })).kind).toBe("ok");
+        expect((await store.addCommissionMember(clerkCtx(), id, memberIn(people[3]!, "clerk", shift(TODAY, -10)))).kind).toBe("ok");
+      });
+
+      it("an ENDED commission refuses (`commission_ended`); another presbytery's record is `not_found`; neither writes anything", async () => {
+        const ended = await mkCommission();
+        expect((await store.endCommission(clerkCtx(), ended, endIn(TODAY))).kind).toBe("ok");
+        const before = await csnapshot();
+        expect(await store.addCommissionMember(clerkCtx(), ended, memberIn(people[1]!))).toEqual({ kind: "refused", reason: "commission_ended" });
+        expect(await store.addCommissionMember(clerkCtx(), commissionP2, memberIn(people[1]!))).toEqual(never);
+        expect(await csnapshot()).toEqual(before);
+      });
+
+      it("a term that starts later is accepted (it shows as planned)", async () => {
+        const id = await mkCommission();
+        await mkMember(id, people[0]!, "member", shift(TODAY, 15), shift(TODAY, 45));
+        expect((await membersOf(id))[0]).toMatchObject({ starts_on: shift(TODAY, 15), ends_on: shift(TODAY, 45) });
+      });
+    });
+
+    describe("endCommissionMember", () => {
+      it("ends a serving term on the given date (half-open) with one audit row; the same date again changes nothing", async () => {
+        const id = await mkCommission();
+        const member = await mkMember(id, people[0]!, "clerk", shift(TODAY, -30));
+        const r = await store.endCommissionMember(clerkCtx(), id, member, { endsOn: shift(TODAY, 3) });
+        expect(r).toEqual({ kind: "ok", data: { id: member, cancelled: false } });
+        expect((await membersOf(id))[0]).toMatchObject({ ends_on: shift(TODAY, 3) });
+        const audit = await commissionAudit(id);
+        const row = audit[audit.length - 1]!;
+        expect(row.action).toBe("tenant.commission_record.member_ended");
+        expect(row.metadata).toEqual({ organizationId: P, commissionId: id, memberId: member, personId: people[0], role: "clerk", endsOn: shift(TODAY, 3), cancelled: false });
+        const count = audit.length;
+        expect(await store.endCommissionMember(clerkCtx(), id, member, { endsOn: shift(TODAY, 3) })).toEqual({ kind: "ok", data: { id: member, cancelled: false, unchanged: true } });
+        expect((await commissionAudit(id)).length).toBe(count);
+      });
+
+      it("a term that has not started is ended AT ITS OWN START whatever the date field says (cancel); an ended term, a blank date, an early date and a far date are refused", async () => {
+        const id = await mkCommission();
+        const planned = await mkMember(id, people[0]!, "member", shift(TODAY, 20));
+        expect(await store.endCommissionMember(clerkCtx(), id, planned, { endsOn: null })).toEqual({ kind: "ok", data: { id: planned, cancelled: true } });
+        expect((await membersOf(id))[0]).toMatchObject({ starts_on: shift(TODAY, 20), ends_on: shift(TODAY, 20) });
+        expect(await store.endCommissionMember(clerkCtx(), id, planned, { endsOn: TODAY })).toEqual({ kind: "refused", reason: "already_ended" });
+
+        const serving = await mkMember(id, people[1]!, "member", shift(TODAY, -10));
+        expect(await store.endCommissionMember(clerkCtx(), id, serving, { endsOn: null })).toMatchObject({ kind: "invalid", field: "endsOn", message: VALIDATION.dateInvalid });
+        expect(await store.endCommissionMember(clerkCtx(), id, serving, { endsOn: shift(TODAY, -11) })).toMatchObject({ kind: "invalid", field: "endsOn", message: VALIDATION.endBeforeStart });
+        expect(await store.endCommissionMember(clerkCtx(), id, serving, { endsOn: shift(addYears(TODAY, 10), 2) })).toMatchObject({ kind: "invalid", field: "endsOn", message: VALIDATION.endTooFar });
+      });
+
+      it("a member of ANOTHER commission, or no member at all, is `seat_not_found` (one answer)", async () => {
+        const a = await mkCommission();
+        const b = await mkCommission();
+        const memberOfB = await mkMember(b, people[0]!);
+        const before = await csnapshot();
+        const results = [
+          await store.endCommissionMember(clerkCtx(), a, memberOfB, { endsOn: TODAY }),
+          await store.endCommissionMember(clerkCtx(), a, "00000000-0000-4090-8000-00000000fffd", { endsOn: TODAY }),
+          await store.endCommissionMember(clerkCtx(), a, a, { endsOn: TODAY }),
+        ];
+        for (const r of results) expect(r).toEqual({ kind: "refused", reason: "seat_not_found" });
+        expect(await csnapshot()).toEqual(before);
+      });
+    });
+
+    describe("endCommission", () => {
+      it("sets the end trio, ends EVERY member (open and longer ones at the date; a not-yet-started one zero-length at its own start; a past one untouched) and audits once with the count", async () => {
+        const id = await mkCommission({ appointedOn: shift(TODAY, -100) });
+        const open = await mkMember(id, people[0]!, "chair", shift(TODAY, -50));
+        const longer = await mkMember(id, people[1]!, "clerk", shift(TODAY, -50), shift(TODAY, 90));
+        const later = await mkMember(id, people[2]!, "member", shift(TODAY, 30));
+        const past = await mkMember(id, people[3]!, "member", shift(TODAY, -80), shift(TODAY, -40));
+        const sooner = await mkMember(id, people[4]!, "member", shift(TODAY, -50), shift(TODAY, -3));
+        const endedOn = shift(TODAY, -2);
+
+        const r = await store.endCommission(clerkCtx(), id, endIn(endedOn, "Reported 2026-11-01"));
+        expect(r).toEqual({ kind: "ok", data: { id, membersEnded: 3 } });
+        expect(await recordRow(id)).toMatchObject({ ended_on: endedOn, ended_minute_reference: "Reported 2026-11-01", ended_by: fx.actingUserId, row_version: 2 });
+        const byId = new Map((await membersOf(id)).map((m) => [String(m.id), m]));
+        expect(byId.get(open)!.ends_on).toBe(endedOn);
+        expect(byId.get(longer)!.ends_on).toBe(endedOn);
+        expect(byId.get(later)!.ends_on).toBe(shift(TODAY, 30)); // zero-length at its own start
+        expect(byId.get(past)!.ends_on).toBe(shift(TODAY, -40));
+        expect(byId.get(sooner)!.ends_on).toBe(shift(TODAY, -3));
+        // no member is left open, or serving after the end date
+        const openAfter = Number(
+          (await q(sql`select count(*)::int as n from commission_record_members
+                        where commission_record_id = ${id} and (ends_on is null or (ends_on > ${endedOn}::date and ends_on > starts_on))`))[0]!.n,
+        );
+        expect(openAfter).toBe(0);
+
+        const audit = await commissionAudit(id);
+        expect(audit.filter((x) => x.action === "tenant.commission_record.ended")).toHaveLength(1);
+        expect(audit[audit.length - 1]!.metadata).toEqual({ organizationId: P, commissionId: id, endedOn, membersEnded: 3 });
+      });
+
+      it("refuses a future date, a date before the appointment (naming it) and one before the start of a member who has begun (naming it); writes nothing", async () => {
+        const id = await mkCommission({ appointedOn: shift(TODAY, -100) });
+        await mkMember(id, people[0]!, "chair", shift(TODAY, -20));
+        const before = await csnapshot();
+        // the parse refuses a future date before the store ever sees it, so the store's own backstop is reached with a hand-built input
+        expect(await store.endCommission(clerkCtx(), id, { endedOn: shift(TODAY, 1), endedMinuteReference: null })).toMatchObject({ kind: "invalid", field: "endedOn", message: VALIDATION.endedFuture });
+        expect(await store.endCommission(clerkCtx(), id, endIn(shift(TODAY, -101)))).toMatchObject({
+          kind: "invalid",
+          field: "endedOn",
+          message: VALIDATION.endedBeforeAppointed(shift(TODAY, -100)),
+        });
+        const early = await store.endCommission(clerkCtx(), id, endIn(shift(TODAY, -30)));
+        expect(early).toEqual({ kind: "refused", reason: "date_before_start", detail: { date: shift(TODAY, -20), subject: "commission" } });
+        expect(refusalMessage("date_before_start", (early as unknown as { detail: never }).detail)).toBe(
+          `A member started on ${dateText(shift(TODAY, -20))}. The end date can't be before that.`,
+        );
+        expect(await csnapshot()).toEqual(before);
+        // a member who has NOT begun does not constrain the date
+        await mkMember(id, people[1]!, "member", shift(TODAY, 40));
+        expect((await store.endCommission(clerkCtx(), id, endIn(shift(TODAY, -20)))).kind).toBe("ok");
+      });
+
+      it("is one-way: ending twice is `already_ended` (the commission wording); nothing changes; no one can be added afterwards", async () => {
+        const id = await mkCommission();
+        await mkMember(id, people[0]!);
+        expect((await store.endCommission(clerkCtx(), id, endIn(TODAY, "first"))).kind).toBe("ok");
+        const before = await csnapshot();
+        expect(await store.endCommission(clerkCtx(), id, endIn(shift(TODAY, -1), "second"))).toEqual({ kind: "refused", reason: "already_ended", detail: { subject: "commission" } });
+        expect(refusalMessage("already_ended", { subject: "commission" })).toBe("This commission has already ended.");
+        expect(await csnapshot()).toEqual(before);
+        expect(await store.addCommissionMember(clerkCtx(), id, memberIn(people[1]!))).toEqual({ kind: "refused", reason: "commission_ended" });
+      });
+    });
+
+    describe("removeCommissionRecord", () => {
+      it("is a soft, one-way removal with one audit row; afterwards every act on the record is `not_found`, and removing again is too", async () => {
+        const id = await mkCommission();
+        const member = await mkMember(id, people[0]!);
+        expect(await store.removeCommissionRecord(clerkCtx(), id)).toEqual({ kind: "ok", data: { id } });
+        const row = await recordRow(id);
+        expect(row.removed_at).not.toBeNull();
+        expect(row.removed_by).toBe(fx.actingUserId);
+        // history stays: the row and its member are still there
+        expect(await membersOf(id)).toHaveLength(1);
+        const audit = await commissionAudit(id);
+        expect(audit[audit.length - 1]).toMatchObject({ action: "tenant.commission_record.removed", resource_type: "commission_record", resource_id: id });
+        expect(audit[audit.length - 1]!.metadata).toEqual({ organizationId: P, commissionId: id });
+
+        const before = await csnapshot();
+        expect(await store.removeCommissionRecord(clerkCtx(), id)).toEqual(never);
+        expect(await store.updateCommission(clerkCtx(), id, commissionIn(), 2)).toEqual(never);
+        expect(await store.addCommissionMember(clerkCtx(), id, memberIn(people[1]!))).toEqual(never);
+        expect(await store.endCommissionMember(clerkCtx(), id, member, { endsOn: TODAY })).toEqual(never);
+        expect(await store.endCommission(clerkCtx(), id, endIn())).toEqual(never);
+        expect(await csnapshot()).toEqual(before);
+      });
+    });
+
+    describe("not_found is byte-identical for every wrong kind of target (DECISION-040)", () => {
+      it("another presbytery's record, a committee's group id, a removed record, a congregation's id and a nonexistent UUID give one answer in every write", async () => {
+        const committee = await mkCommittee();
+        const removed = await mkCommission();
+        await store.removeCommissionRecord(clerkCtx(), removed);
+        const targets: Array<[string, string]> = [
+          ["another presbytery's record", commissionP2],
+          ["a committee's group id", committee],
+          ["a removed record", removed],
+          ["a nonexistent UUID", "00000000-0000-4090-8000-00000000fffc"],
+          ["a congregation's id", CG1],
+        ];
+        const before = await csnapshot();
+        for (const [label, id] of targets) {
+          const answers = [
+            await store.updateCommission(clerkCtx(), id, commissionIn(), 1),
+            await store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!)),
+            await store.endCommission(clerkCtx(), id, endIn()),
+            await store.removeCommissionRecord(clerkCtx(), id),
+            await store.endCommissionMember(clerkCtx(), id, "00000000-0000-4090-8000-00000000fffb", { endsOn: TODAY }),
+          ];
+          for (const a of answers) expect(a, label).toEqual(never);
+        }
+        expect(await csnapshot()).toEqual(before);
+        // the other presbytery's clerk cannot touch this presbytery's record
+        const mine = await mkCommission();
+        expect(await store.removeCommissionRecord(ctxFor(clerkP2, P2), mine)).toEqual(never);
+        expect((await recordRow(mine)).removed_at).toBeNull();
+      });
+    });
+
+    describe("the audit is in the SAME transaction (the two sabotages)", () => {
+      type Write = [string, () => Promise<{ kind: string }>];
+      async function setup() {
+        const id = await mkCommission({ title: `Cm90 ${stamp} Sabotage` });
+        const toEndMember = await mkMember(id, people[0]!, "member", shift(TODAY, -40));
+        const planned = await mkMember(id, people[1]!, "member", shift(TODAY, 15));
+        const target = await mkCommission({ title: `Cm90 ${stamp} Sabotage ended` });
+        await mkMember(target, people[2]!, "member", shift(TODAY, -40));
+        const removable = await mkCommission({ title: `Cm90 ${stamp} Sabotage removable` });
+        const writes: Write[] = [
+          ["recordCommission", () => store.recordCommission(clerkCtx(), commissionIn())],
+          ["updateCommission", () => store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} Sabotage v2`, appointedOn: shift(TODAY, -60) }), 1)],
+          ["addCommissionMember", () => store.addCommissionMember(clerkCtx(), id, memberIn(people[3]!))],
+          ["endCommissionMember", () => store.endCommissionMember(clerkCtx(), id, toEndMember, { endsOn: TODAY })],
+          ["endCommissionMember (cancel)", () => store.endCommissionMember(clerkCtx(), id, planned, { endsOn: null })],
+          ["endCommission", () => store.endCommission(clerkCtx(), target, endIn(TODAY))],
+          ["removeCommissionRecord", () => store.removeCommissionRecord(clerkCtx(), removable)],
+        ];
+        return writes;
+      }
+
+      it.each(["fail_before", "fail_after"] as const)(
+        "%s: every commission write leaves the data and the audit table exactly as they were, and the caller is told `save_failed`",
+        async (mode) => {
+          const writes = await setup();
+          vi.spyOn(console, "error").mockImplementation(() => {});
+          const before = await csnapshot();
+          for (const [name, write] of writes) {
+            hooks.mode = mode;
+            const r = await write();
+            hooks.mode = "ok";
+            expect(r, name).toEqual({ kind: "refused", reason: "save_failed" });
+            expect(await csnapshot(), name).toEqual(before);
+          }
+        },
+      );
+
+      it("and with the audit working each of those writes does change the data (the sabotages above are not passing vacuously)", async () => {
+        const writes = await setup();
+        for (const [name, write] of writes) {
+          const before = await csnapshot();
+          const r = await write();
+          expect(r.kind, name).toBe("ok");
+          expect(await csnapshot(), name).not.toEqual(before);
+        }
+      });
+    });
+
+    describe("no audit row carries a title, a charge, a minute or a person's name", () => {
+      it("sentinel strings in the title, charge, minute and end minute appear in no audit row of any commission write", async () => {
+        const SENT = ["ZQ-TITLE-SENTINEL", "ZQ-CHARGE-SENTINEL", "ZQ-MINUTE-SENTINEL", "ZQ-ENDMINUTE-SENTINEL"];
+        const id = await mkCommission({ title: `Cm90 ${SENT[0]} ${stamp}`, charge: SENT[1]!, minuteReference: SENT[2]!, aboutOrgId: CG1, appointedOn: shift(TODAY, -60) });
+        const member = await mkMember(id, people[0]!, "member", shift(TODAY, -30));
+        await mkMember(id, people[1]!, "chair", shift(TODAY, -30));
+        await store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${SENT[0]} ${stamp} v2`, charge: `${SENT[1]} 2`, minuteReference: `${SENT[2]} 2`, aboutOrgId: CG2, appointedOn: shift(TODAY, -60) }), 1);
+        await store.endCommissionMember(clerkCtx(), id, member, { endsOn: shift(TODAY, -1) });
+        await store.endCommission(clerkCtx(), id, endIn(TODAY, SENT[3]));
+        const removable = await mkCommission({ title: `Cm90 ${SENT[0]} removable ${stamp}`, charge: SENT[1]! });
+        await store.removeCommissionRecord(clerkCtx(), removable);
+
+        const rows = [...(await commissionAudit(id)), ...(await commissionAudit(removable))];
+        expect(rows.length).toBeGreaterThanOrEqual(8);
+        const text = JSON.stringify(rows);
+        for (const sentinel of SENT) expect(text).not.toContain(sentinel);
+        expect(text).not.toMatch(/Avery|Blair|Seat0|Seat1/);
+        // and no audit row of any action, anywhere, carries one
+        const anywhere = await q(sql`select count(*)::int as n from audit_events where metadata::text like '%ZQ-%SENTINEL%'`);
+        expect(Number(anywhere[0]!.n)).toBe(0);
+      });
+    });
+
+    describe("concurrency", () => {
+      it("two simultaneous adds of one person end with ONE member and one `overlap`", async () => {
+        for (let i = 0; i < 3; i += 1) {
+          const id = await mkCommission();
+          const results = await Promise.all([
+            store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "member", shift(TODAY, -5))),
+            store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "clerk", shift(TODAY, -5))),
+          ]);
+          expect(results.map((r) => (r.kind === "ok" ? "ok" : (r as { reason: string }).reason)).sort()).toEqual(["ok", "overlap"]);
+          expect(await membersOf(id)).toHaveLength(1);
+        }
+      });
+
+      it("two simultaneous edits of one version end with ONE write and one `stale`", async () => {
+        for (let i = 0; i < 3; i += 1) {
+          const id = await mkCommission({ title: `Cm90 ${stamp} Race edit ${i}` });
+          const results = await Promise.all([
+            store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} Race A ${i}`, appointedOn: shift(TODAY, -60) }), 1),
+            store.updateCommission(clerkCtx(), id, commissionIn({ title: `Cm90 ${stamp} Race B ${i}`, appointedOn: shift(TODAY, -60) }), 1),
+          ]);
+          expect(results.map((r) => (r.kind === "ok" ? "ok" : (r as { reason: string }).reason)).sort()).toEqual(["ok", "stale"]);
+          expect((await recordRow(id)).row_version).toBe(2);
+        }
+      });
+
+      it("a member added racing the end of the commission: whichever order, NO member is left serving on an ended commission", async () => {
+        for (let i = 0; i < 6; i += 1) {
+          const id = await mkCommission({ appointedOn: shift(TODAY, -60) });
+          await mkMember(id, people[1]!, "member", shift(TODAY, -30));
+          const [ended, added] = await Promise.all([
+            store.endCommission(clerkCtx(), id, endIn(TODAY)),
+            store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "member", shift(TODAY, -3))),
+          ]);
+          expect(ended.kind, `iteration ${i}`).toBe("ok");
+          expect(["ok", "refused"]).toContain(added.kind);
+          if (added.kind === "refused") expect((added as { reason: string }).reason, `iteration ${i}`).toBe("commission_ended");
+          const serving = Number(
+            (await q(sql`select count(*)::int as n from commission_record_members where commission_record_id = ${id} and (ends_on is null or ends_on > ${TODAY}::date)`))[0]!.n,
+          );
+          expect(serving, `iteration ${i}: ${JSON.stringify(added)}`).toBe(0);
+          expect((await recordRow(id)).ended_on).toBe(TODAY);
+        }
+      });
+
+      it("THE LIVE-PARENT GUARD: an add that read the record as active but reaches the database after the end commits is refused by the guard, and writes no member", async () => {
+        const id = await mkCommission({ appointedOn: shift(TODAY, -60) });
+        // The end is held UNCOMMITTED on the owner connection: the store's plain read still sees an active record.
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let held!: () => void;
+        const holding = new Promise<void>((resolve) => (held = resolve));
+        const ender = fx.platform.transaction(async (tx) => {
+          await tx.execute(sql`update commission_records set ended_on = ${TODAY}::date, ended_by = ${fx.actingUserId}, ended_at = now() where id = ${id}`);
+          held();
+          await gate;
+        });
+        await holding;
+        const adding = store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "member", shift(TODAY, -3)));
+        // Give the add time to pass its own checks and block inside the guard's FOR SHARE.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        release();
+        await ender;
+        const result = await adding;
+        expect(result).toEqual({ kind: "refused", reason: "commission_ended" });
+        expect(await membersOf(id)).toHaveLength(0);
+        expect((await recordRow(id)).ended_on).toBe(TODAY);
+      });
+
+      it("a member added racing the REMOVAL of the record: refused, or landed before the removal; never a member added after it", async () => {
+        for (let i = 0; i < 6; i += 1) {
+          const id = await mkCommission();
+          const [removed, added] = await Promise.all([
+            store.removeCommissionRecord(clerkCtx(), id),
+            store.addCommissionMember(clerkCtx(), id, memberIn(people[0]!, "member", shift(TODAY, -3))),
+          ]);
+          expect(removed.kind, `iteration ${i}`).toBe("ok");
+          if (added.kind === "refused") {
+            expect(["commission_ended", "not_found"], `iteration ${i}`).toContain((added as { reason: string }).reason);
+            expect(await membersOf(id), `iteration ${i}`).toHaveLength(0);
+          } else {
+            expect(await membersOf(id), `iteration ${i}`).toHaveLength(1);
+          }
+        }
+      });
+
+      it("ending a member racing the end of the commission ends consistent: the member is ended, never after the commission's own end", async () => {
+        for (let i = 0; i < 6; i += 1) {
+          const id = await mkCommission({ appointedOn: shift(TODAY, -60) });
+          const member = await mkMember(id, people[2]!, "member", shift(TODAY, -30));
+          const [ended, memberEnded] = await Promise.all([
+            store.endCommission(clerkCtx(), id, endIn(shift(TODAY, -1))),
+            store.endCommissionMember(clerkCtx(), id, member, { endsOn: shift(TODAY, -2) }),
+          ]);
+          expect(ended.kind, `iteration ${i}`).toBe("ok");
+          expect(["ok", "refused"]).toContain(memberEnded.kind);
+          const [row] = await membersOf(id);
+          expect(row!.ends_on, `iteration ${i}`).not.toBeNull();
+          expect(String(row!.ends_on) <= shift(TODAY, -1), `iteration ${i}: ${row!.ends_on}`).toBe(true);
+        }
+      });
     });
   });
 });

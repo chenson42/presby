@@ -294,6 +294,114 @@ export function parseDissolve(values: unknown, env: ValidationEnv): Parsed<Disso
 }
 
 // ---------------------------------------------------------------------------
+// Record a commission, edit it, end it (Increment 2, C15)
+// ---------------------------------------------------------------------------
+
+export interface CommissionValues {
+  title: string;
+  charge: string;
+  /** Empty means "No congregation". A non-empty value is checked by the store against this presbytery's member congregations. */
+  aboutOrgId: string;
+  appointedOn: string;
+  minuteReference: string;
+}
+export interface CommissionInput {
+  title: string;
+  charge: string | null;
+  /** Null is "No congregation". A client value otherwise: the store resolves it (one neutral refusal for every miss). */
+  aboutOrgId: string | null;
+  appointedOn: string;
+  minuteReference: string | null;
+}
+
+/**
+ * A commission record's own fields (C15). The congregation is NOT validated here:
+ * a malformed id, another presbytery's congregation, a non-congregation and a
+ * nonexistent id must all read as the one `congregation_not_found` answer, and only
+ * the store (which knows this presbytery) can give it. There is no ahead-limit on
+ * `appointedOn` (C15 words none); the database's 1900 floor is the lower bound.
+ */
+export function parseCommission(values: unknown): Parsed<CommissionInput> {
+  const v = (values ?? {}) as Record<string, unknown>;
+  const errors = new Errors();
+
+  const title = cleanLine(str(v.title));
+  if (title === "") errors.add("title", VALIDATION.titleRequired);
+  else if (charLength(title) > LIMITS.titleMax) errors.add("title", VALIDATION.titleTooLong);
+
+  const charge = cleanText(str(v.charge));
+  if (charLength(charge) > LIMITS.chargeMax) errors.add("charge", VALIDATION.chargeTooLong);
+
+  const aboutOrgId = str(v.aboutOrgId).trim();
+
+  let appointedOn: string | null = null;
+  const appointed = readDate(v.appointedOn);
+  if (appointed.kind === "empty") errors.add("appointedOn", VALIDATION.appointedRequired);
+  else if (appointed.kind === "invalid") errors.add("appointedOn", VALIDATION.dateInvalid);
+  else appointedOn = appointed.value;
+
+  const minuteReference = cleanLine(str(v.minuteReference));
+  if (charLength(minuteReference) > LIMITS.minuteMax) errors.add("minuteReference", VALIDATION.minuteTooLong);
+
+  if (errors.any) return errors.fail();
+  return {
+    ok: true,
+    value: {
+      title,
+      charge: charge === "" ? null : charge,
+      aboutOrgId: aboutOrgId === "" ? null : aboutOrgId,
+      appointedOn: appointedOn!,
+      minuteReference: minuteReference === "" ? null : minuteReference,
+    },
+  };
+}
+
+/** The optimistic-lock token a form carries (`row_version`): a positive safe integer, or null. */
+export function parseExpectedVersion(raw: unknown): number | null {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d{1,9}$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+  return Number.isSafeInteger(n) && n >= 1 ? n : null;
+}
+
+/**
+ * A commission member is a seat with the same fields and rules as a committee's
+ * (the same six titles, the same date rules, the same limits: C15 "the person,
+ * role and date fields and helpers of C5"), so it is the same parse.
+ */
+export const parseCommissionMember = parseSeat;
+
+export interface EndCommissionValues {
+  endedOn: string;
+  endedMinuteReference: string;
+}
+export interface EndCommissionInput {
+  endedOn: string;
+  endedMinuteReference: string | null;
+}
+
+/** What a form that already holds the record passes so its own check agrees with the store's. */
+export interface CommissionFacts {
+  appointedOn: string;
+}
+
+export function parseEndCommission(values: unknown, env: ValidationEnv, record?: CommissionFacts): Parsed<EndCommissionInput> {
+  const v = (values ?? {}) as Record<string, unknown>;
+  const errors = new Errors();
+
+  let endedOn: string | null = null;
+  const ended = readDate(v.endedOn);
+  if (ended.kind !== "date") errors.add("endedOn", VALIDATION.dateInvalid);
+  else if (ended.value > env.today) errors.add("endedOn", VALIDATION.endedFuture);
+  else if (record && ended.value < record.appointedOn) errors.add("endedOn", VALIDATION.endedBeforeAppointed(record.appointedOn));
+  else endedOn = ended.value;
+
+  const minute = cleanLine(str(v.endedMinuteReference));
+  if (charLength(minute) > LIMITS.minuteMax) errors.add("endedMinuteReference", VALIDATION.minuteTooLong);
+
+  if (errors.any) return errors.fail();
+  return { ok: true, value: { endedOn: endedOn!, endedMinuteReference: minute === "" ? null : minute } };
+}
+
+// ---------------------------------------------------------------------------
 // zod schemas for the forms (thin wrappers over the parsers above)
 // ---------------------------------------------------------------------------
 
@@ -330,3 +438,14 @@ export const endSeatSchema = (env: ValidationEnv, seat?: Pick<SeatFacts, "starts
 
 export const dissolveSchema = (env: ValidationEnv) =>
   refine(z.object({ dissolvedOn: z.string() }), (values) => parseDissolve(values, env));
+
+export const commissionSchema = () =>
+  refine(
+    z.object({ title: z.string(), charge: z.string(), aboutOrgId: z.string(), appointedOn: z.string(), minuteReference: z.string() }),
+    (values) => parseCommission(values),
+  );
+
+export const commissionMemberSchema = seatSchema;
+
+export const endCommissionSchema = (env: ValidationEnv, record?: CommissionFacts) =>
+  refine(z.object({ endedOn: z.string(), endedMinuteReference: z.string() }), (values) => parseEndCommission(values, env, record));

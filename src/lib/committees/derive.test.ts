@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   chairNames,
   classifySeat,
+  groupCommissions,
   groupCommittees,
   orderSeats,
   personStatus,
@@ -201,5 +202,27 @@ describe("personStatus", () => {
     expect(personStatus({ membershipEndedOn: "2025-01-01", dateOfDeath: null })).toEqual({ connected: false, deceased: false });
     expect(personStatus({ membershipEndedOn: null, dateOfDeath: "2025-01-01" })).toEqual({ connected: true, deceased: true });
     expect(personStatus({ membershipEndedOn: "2025-01-01", dateOfDeath: "2025-01-01" })).toEqual({ connected: false, deceased: true });
+  });
+});
+
+describe("groupCommissions (C15)", () => {
+  const k = (id: string, title: string, appointedOn: string, endedOn: string | null = null) => ({ id, title, appointedOn, endedOn });
+
+  it("splits active from ended; active newest-appointed first, ended most-recently-ended first, then title, then id", () => {
+    const sections = groupCommissions([
+      k("1", "Alder Creek", "2024-01-01"),
+      k("2", "Birch Hollow", "2025-06-01"),
+      k("3", "Camp Ridge", "2023-01-01", "2024-03-01"),
+      k("4", "Dune Point", "2022-01-01", "2025-01-01"),
+      k("5", "Aspen", "2025-06-01"),
+    ]);
+    expect(sections.active.map((c) => c.title)).toEqual(["Aspen", "Birch Hollow", "Alder Creek"]);
+    expect(sections.ended.map((c) => c.title)).toEqual(["Dune Point", "Camp Ridge"]);
+  });
+
+  it("an empty list has two empty sections, and the order is total (equal titles fall to the id)", () => {
+    expect(groupCommissions([])).toEqual({ active: [], ended: [] });
+    const two = groupCommissions([k("b", "Same", "2025-01-01"), k("a", "Same", "2025-01-01")]);
+    expect(two.active.map((c) => c.id)).toEqual(["a", "b"]);
   });
 });

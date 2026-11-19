@@ -262,7 +262,8 @@ function noConsoleLog(files: SourceFile[]): Hit[] {
 /** The names of exported functions and their bodies in a plain (non-actions) source file. */
 function exportedFunctions(content: string): Array<{ name: string; body: string }> {
   const c = code(content);
-  const starts = [...c.matchAll(/\n(?:export )?(?:async )?function (\w+)|\nconst \w+ =|\nclass \w+/g)];
+  // A top-level interface or type also ends a function's body, so a row type's field names are never read as the function's.
+  const starts = [...c.matchAll(/\n(?:export )?(?:async )?function (\w+)|\nconst \w+ =|\nclass \w+|\n(?:export )?(?:interface|type) \w+/g)];
   return starts
     .map((m, i) => ({ text: m[0], name: m[1], index: m.index!, end: starts[i + 1]?.index ?? c.length }))
     .filter((m) => m.text.startsWith("\nexport") && m.name)
@@ -280,7 +281,7 @@ function storeChecksTheKeyFirst(file: SourceFile | undefined): Hit[] {
   if (fns.length === 0) hits.push({ rule: "store-functions-found", file: file.rel });
   for (const fn of fns) {
     const gateAt = fn.body.indexOf("await gate(tx, ctx)");
-    const later = ["lockNames(", "lockSeats(", "loadCommittee(", "loadSeat(", ".insert(", ".update("]
+    const later = ["lockNames(", "lockSeats(", "lockMembers(", "loadCommittee(", "loadSeat(", "loadCommission(", "loadMember(", ".insert(", ".update("]
       .map((needle) => fn.body.indexOf(needle))
       .filter((i) => i >= 0);
     if (gateAt < 0 || later.some((i) => i < gateAt)) hits.push({ rule: "store-checks-key-first", file: `${file.rel}#${fn.name}` });
@@ -310,6 +311,37 @@ function commissionTablesHaveNoGrantColumns(file: SourceFile | undefined): Hit[]
   const start = c.indexOf("export const commissionRecords = pgTable(");
   if (start < 0) return [{ rule: "commission-tables-found", file: file.rel }];
   return /["'](role_id|group_id|public_listed)["']/.test(c.slice(start)) ? [{ rule: "commission-tables-no-grant-columns", file: file.rel }] : [];
+}
+
+/**
+ * A commission record is NOT a group (DECISION-355): the commission functions of `store.ts` (every exported one
+ * whose name has "Commission" in it) reach no `groups` primitive, no `group_memberships` and no role. A commission
+ * member is a `commission_record_members` row; routing one through the groups primitives would make it a group
+ * seat the permission resolver and the public roster can see.
+ */
+const GROUP_REACH = /\b(addManagedGroupSeatInTx|endManagedGroupMemberInTx|insertManagedGroupInTx|updateManagedGroupInTx|setManagedMembershipPublicListedInTx|groupMemberships|group_memberships|groups|groupTypes)\b|\bgroupId\b|\bgroup_id\b/;
+function commissionFunctionsReachNoGroups(file: SourceFile | undefined): Hit[] {
+  if (!file) return [{ rule: "store-found", file: "store.ts" }];
+  const fns = exportedFunctions(file.content).filter((f) => /Commission/.test(f.name));
+  const hits: Hit[] = [];
+  if (fns.length === 0) hits.push({ rule: "commission-functions-found", file: file.rel });
+  for (const fn of fns) if (GROUP_REACH.test(fn.body)) hits.push({ rule: "commission-functions-reach-no-groups", file: `${file.rel}#${fn.name}` });
+  return hits;
+}
+
+/**
+ * The charge is tier 1 and sensitive (residual 10): only the one reader that renders the record (`readCommission`)
+ * returns it. The list and the form readers do not name it, so a list can never carry a charge to a card, a CSV or a log.
+ */
+function chargeOnlyInTheRecordReader(file: SourceFile | undefined): Hit[] {
+  if (!file) return [{ rule: "reads-found", file: "reads.ts" }];
+  const readers = exportedFunctions(file.content).filter((f) => /^readCommission/.test(f.name));
+  const hits: Hit[] = [];
+  if (readers.length === 0) hits.push({ rule: "commission-readers-found", file: file.rel });
+  for (const fn of readers) {
+    if (fn.name !== "readCommission" && /\bcharge\b/.test(fn.body)) hits.push({ rule: "charge-only-in-the-record-reader", file: `${file.rel}#${fn.name}` });
+  }
+  return hits;
 }
 
 // ── The real tree ──────────────────────────────────────────────────────────
@@ -406,6 +438,29 @@ describe("committees: source boundaries (U5)", () => {
 
   it("the Drizzle mirror's commission tables have no role_id, group_id or public_listed column", () => {
     expect(commissionTablesHaveNoGrantColumns(allSrc.find((f) => f.rel === "src/lib/db/domain/committees.ts"))).toEqual([]);
+  });
+
+  it("the commission actions exist, and a commission is never a group: its store functions reach no groups primitive and no role", () => {
+    const rels = routeFiles.map((f) => f.rel);
+    expect(rels).toContain("src/app/(org)/o/[slug]/admin/committees/commissions/actions.ts");
+    expect(rels).toContain("src/app/(org)/o/[slug]/admin/committees/commissions/[commissionId]/actions.ts");
+    const store = moduleFiles.find((f) => base(f.rel) === "store.ts");
+    expect(commissionFunctionsReachNoGroups(store)).toEqual([]);
+    // the six commission writes are there, so the rule above is not vacuous
+    expect(exportedFunctions(store!.content).filter((f) => /Commission/.test(f.name)).map((f) => f.name).sort()).toEqual(
+      ["addCommissionMember", "endCommission", "endCommissionMember", "recordCommission", "removeCommissionRecord", "updateCommission"].sort(),
+    );
+  });
+
+  it("only the record reader returns a commission's charge", () => {
+    expect(chargeOnlyInTheRecordReader(moduleFiles.find((f) => base(f.rel) === "reads.ts"))).toEqual([]);
+  });
+
+  it("nothing in the surface writes administrative_commissions, org_delegations, role_grants or a role id, by any spelling (the hard rule of Increment 2)", () => {
+    expect(noDownwardTables(surface)).toEqual([]);
+    for (const f of surface) {
+      expect(code(f.content), f.rel).not.toMatch(/\b(administrative_?commissions|administrativeCommissions|org_?delegations|orgDelegations|role_?grants|roleGrants|roleId|role_id)\b/i);
+    }
   });
 });
 
@@ -575,6 +630,40 @@ describe("each rule fails on a sample that breaks it", () => {
     expect(readersCheckAKey(sample("reads.ts", reads("\nexport function readThing(v) {\n  return readUnder(v, f);\n}\n")))).toHaveLength(0);
     expect(readersCheckAKey(sample("reads.ts", reads("\nexport function readThing(v) {\n  return readUnder(v, f);\n}\n", "return withOrgContext(a, b, read);")))).toHaveLength(1);
     expect(readersCheckAKey(undefined)).toHaveLength(1);
+  });
+
+  it("commission-functions-reach-no-groups", () => {
+    const store = (body: string) => `\nexport function addCommissionMember(ctx) {\n  ${body}\n}\n`;
+    expect(commissionFunctionsReachNoGroups(sample("store.ts", store("await gate(tx, ctx); await tx.insert(commissionRecordMembers);")))).toHaveLength(0);
+    for (const bad of [
+      "await addManagedGroupSeatInTx(tx, org, input, opts);",
+      "await tx.insert(groupMemberships).values(v);",
+      "await tx.execute(sql`insert into group_memberships (id) values (1)`);",
+      "const g = await tx.select().from(groups);",
+      "const x = { groupId: committeeId };",
+    ]) {
+      expect(commissionFunctionsReachNoGroups(sample("store.ts", store(bad))), bad).toHaveLength(1);
+    }
+    // a committee function may; only the Commission-named ones are held to it
+    expect(commissionFunctionsReachNoGroups(sample("store.ts", `\nexport function addCommitteeSeat(ctx) {\n  await addManagedGroupSeatInTx();\n}\n${store("await gate(tx, ctx);")}`))).toHaveLength(0);
+    expect(commissionFunctionsReachNoGroups(sample("store.ts", "\nexport function addCommitteeSeat(ctx) {\n  return 1;\n}\n")).map((h) => h.rule)).toContain("commission-functions-found");
+    expect(commissionFunctionsReachNoGroups(undefined)).toHaveLength(1);
+  });
+
+  it("charge-only-in-the-record-reader", () => {
+    const reads = (list: string) =>
+      `\nexport async function readCommission(v) {\n  return sql\`select r.charge from commission_records r\`;\n}\n\nexport async function readCommissionList(v) {\n  ${list}\n}\n`;
+    expect(chargeOnlyInTheRecordReader(sample("reads.ts", reads("return sql`select r.title from commission_records r`;")))).toHaveLength(0);
+    expect(chargeOnlyInTheRecordReader(sample("reads.ts", reads("return sql`select r.title, r.charge from commission_records r`;")))).toHaveLength(1);
+    expect(chargeOnlyInTheRecordReader(sample("reads.ts", "\nexport async function readThing(v) {\n  return 1;\n}\n")).map((h) => h.rule)).toContain("commission-readers-found");
+    expect(chargeOnlyInTheRecordReader(undefined)).toHaveLength(1);
+  });
+
+  it("the key-first needles cover the commission loaders and the members lock", () => {
+    const fn = (first: string) => `\nexport function endCommissionMember(ctx) {\n  ${first}\n  await gate(tx, ctx);\n}\n`;
+    for (const early of ["await loadCommission(tx, ctx, id);", "await loadMember(tx, ctx, id, m);", "await lockMembers(tx, ctx, id);"]) {
+      expect(storeChecksTheKeyFirst(sample("store.ts", fn(early))), early).toHaveLength(1);
+    }
   });
 
   it("commission-tables-no-grant-columns", () => {

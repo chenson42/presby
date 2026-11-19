@@ -15,6 +15,7 @@ import { COMMITTEES_FLAG as REPORTS_CONTRACT_FLAG } from "@/lib/presbytery-repor
 import { COMMITTEE_ROLES, GROUP_ROLE_VALUES } from "@/lib/group-roles";
 import {
   CHANGED_FIELDS,
+  COMMISSION_CHANGED_FIELDS,
   COMMITTEE_KIND_VALUES,
   COMMITTEE_KINDS,
   COMMITTEE_ROLE_OPTIONS,
@@ -73,6 +74,21 @@ describe("contract.ts against drizzle/0090 (U4)", () => {
     expect(LIMITS.meetsWhenMax).toBe(200);
     expect(LIMITS.startAheadYears).toBe(5);
     expect(LIMITS.endAheadYears).toBe(10);
+  });
+
+  it("the commission limits are the char_length bounds in 0090 section 3 (parsed out of the migration)", () => {
+    expect(SQL).toMatch(/char_length\(btrim\(title\)\) between 1 and 200/);
+    expect(LIMITS.titleMax).toBe(200);
+    expect(SQL).toMatch(/charge is null or char_length\(charge\) <= 500/);
+    expect(LIMITS.chargeMax).toBe(500);
+    expect(SQL).toMatch(/minute_reference is null or char_length\(minute_reference\) <= 200/);
+    expect(SQL).toMatch(/ended_minute_reference is null or char_length\(ended_minute_reference\) <= 200/);
+    expect(LIMITS.minuteMax).toBe(200);
+    expect(SQL).toContain("appointed_on >= date '1900-01-01'");
+  });
+
+  it("the commission audit `changed` vocabulary is field names only", () => {
+    expect([...COMMISSION_CHANGED_FIELDS]).toEqual(["title", "charge", "congregation", "appointedOn", "minuteReference"]);
   });
 
   it("the audit `changed` vocabulary is field names only", () => {

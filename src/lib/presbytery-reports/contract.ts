@@ -25,6 +25,14 @@ export const INSIGHTS_FLAG = "org_portal.insights";
  * on"). Presentational: they gate nothing (DECISION-003).
  */
 export const OVERSIGHT_FLAG = "org_portal.oversight";
+
+/**
+ * The existing global flag Committees & Commissions sits behind
+ * (`/o/<slug>/admin/committees/**`; DECISION-359). A toggle (bare
+ * `isFlagEnabled`); rollback is the flag. It is NOT `org_portal.groups`: the
+ * committees tree depends on no groups-admin flag.
+ */
+export const COMMITTEES_FLAG = "org_portal.committees";
 export const CREDENTIALS_FLAG = "org_portal.credentials";
 
 /** Reports are for presbyteries only. */

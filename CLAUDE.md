@@ -196,6 +196,16 @@ src/lib/oversight/     — a presbytery's own records about its congregations (D
                          transaction); tier 1 `congregation_oversight.manage`, tier 2
                          `congregation_oversight.finance`. boundaries.test.ts pins the writer, the
                          table names and no getPlatformDb
+src/lib/committees/    — a presbytery's committees and commission records (DECISION-352 to 359):
+                         contract.ts, validate.ts, copy.ts, ui-copy.ts and derive.ts (pure); store.ts,
+                         the ONLY writer of committee_details and the commission_record* tables, reaching
+                         groups/group_memberships only through groups.ts's *InTx exports (audit in the
+                         same transaction); reads.ts; action-gate.ts; `groups.manage`, flag
+                         org_portal.committees. A commission record grants nothing; boundaries.test.ts
+                         bars the downward tables (administrative_commissions, org_delegations, role_grants)
+src/lib/group-roles.ts — the one closed group_role vocabulary (seven values) and its labels; only
+                         chair and leader carry seat authority (0073, 0085)
+src/components/committees/ — the committee list, roster, forms and dialogs (cards below sm)
 src/lib/org-portal/session-check.ts, permission-check.ts — the (org) Node-side session/2FA
                          check (pure) and the in-transaction permission helper (DECISION-338);
                          treasury/session.ts and keys.ts re-export them; in check:treasury-boundaries T1

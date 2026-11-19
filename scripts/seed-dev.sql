@@ -2024,3 +2024,15 @@ commit;
 -- the browser walk; org_portal.oversight stays a global flag. Idempotent.
 -- scripts/oversight/test-rls-89.sql does NOT need it (and tolerates it).
 \ir oversight/seed-dev-oversight.sql
+
+-- Presbytery committees Increment 1 fixture (drizzle/0090). Its own file and
+-- transaction, after every include above (it creates no organization; it uses
+-- the Northern Reach and Alder Creek). Five labelled committees and one
+-- dissolved, every roster state (planned start and end, an ended seat, an
+-- ended presbytery membership, a death), two commission records, a
+-- "Committees Clerk" (committees.clerk@example.invalid, groups.manage only)
+-- and a plain presbytery member (committees.plain@example.invalid) for the
+-- browser walk. The "Commission on Alder Creek" group stays unlabelled.
+-- Idempotent. scripts/committees/test-rls-90.sql does NOT need it (and
+-- tolerates it).
+\ir committees/seed-dev-committees.sql

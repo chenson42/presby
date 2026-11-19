@@ -1,5 +1,6 @@
 import { PersonCard } from "presby-site-kit";
 import type { SiteUrls } from "@/lib/site-urls";
+import { GROUP_ROLE_LABELS, type GroupRoleValue } from "@/lib/group-roles";
 import {
   getPublicCommitteeRoster,
   type PublicCommitteeRosterEntry,
@@ -53,9 +54,19 @@ import {
  * explicitly required" note) — see the work-log's Phase 4 step 5/6 section.
  */
 
-const GROUP_ROLE_LABELS: Record<"chair" | "leader" | "member", string | undefined> = {
-  chair: "Chair",
-  leader: "Leader",
+/**
+ * The seven-value vocabulary (DECISION-354), keyed by `GroupRoleValue` so a
+ * value without an entry is a type error, and `committee-directory.test.tsx`
+ * fails if one is missing. The four new titles (vice chair, clerk, secretary,
+ * ex officio) are titles only; they carry no authority.
+ */
+export const PUBLIC_ROLE_TITLES: Record<GroupRoleValue, string | undefined> = {
+  chair: GROUP_ROLE_LABELS.chair,
+  leader: GROUP_ROLE_LABELS.leader,
+  vice_chair: GROUP_ROLE_LABELS.vice_chair,
+  clerk: GROUP_ROLE_LABELS.clerk,
+  secretary: GROUP_ROLE_LABELS.secretary,
+  ex_officio: GROUP_ROLE_LABELS.ex_officio,
   // "Member" is the redundant common case — matches StaffPerson.title's own
   // "optional, omit it" prior art; PersonCard renders no <p> at all for it.
   member: undefined,
@@ -149,7 +160,7 @@ export async function PublicCommitteeDirectory({
                 // down in the sibling repo.
                 key={`${group.groupName}-${index}`}
                 name={member.displayName}
-                title={GROUP_ROLE_LABELS[member.groupRole]}
+                title={PUBLIC_ROLE_TITLES[member.groupRole]}
                 photoUrl={member.photoKey ? urls.asset(member.photoKey) : undefined}
                 className={PERSON_CARD_CLASSNAME}
                 headingClassName={PERSON_CARD_HEADING_CLASSNAME}

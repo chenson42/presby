@@ -11,6 +11,7 @@ import { isFlagEnabled } from "@/lib/flags";
 import { Button } from "@/components/ui/button";
 import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
 import { GroupsFlagOff, GroupsForbidden, GroupsLoadError } from "./groups-states";
+import { CommitteesPointer } from "./committees-pointer";
 import { DerivedGroupsList, GroupsList } from "./groups-list";
 
 const GROUPS_FLAG = "org_portal.groups";
@@ -127,6 +128,8 @@ export default async function GroupsPage({
     return <GroupsLoadError slug={slug} />;
   }
 
+  const atPresbytery = resolved.org.organizationType === "presbytery";
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -141,7 +144,8 @@ export default async function GroupsPage({
         </Button>
       </div>
 
-      <GroupsList slug={slug} entries={result.data} />
+      {atPresbytery ? <CommitteesPointer slug={slug} name={resolved.org.name} /> : null}
+      <GroupsList slug={slug} entries={result.data} atPresbytery={atPresbytery} />
       <DerivedGroupsList slug={slug} entries={derivedResult.data} />
     </section>
   );

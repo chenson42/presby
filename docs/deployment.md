@@ -1797,6 +1797,60 @@ founding-administrator invitation.
 
 **What to tell the operator after merging.** The presbytery founding administrator now holds a tier-2 key (the third recorded known violation of "no role carries a wildcard", DECISION-345, `paper`); anyone given the key is asked to use two-factor; the new pages stay hidden until `org_portal.oversight` is on.
 
+## Presbytery committees (0090)
+
+**Not yet applied to production** (v0.63.0; `docs/work-log/2026-11-19-presbytery-committees.md` and `-inc1.md`; DECISION-352 to 359; F456 to F460). Migration `0090`, written once for both increments: Increment 1 (committees) ships first, Increment 2 (commission records) is code only and needs no further migration. Additive and idempotent (a whole-file second apply leaves the same catalog and writes nothing): one new CHECK on `group_memberships` (`group_memberships_group_role_check`, the closed seven-value vocabulary chair, leader, member, vice_chair, clerk, secretary, ex_officio), three tables (`committee_details`, `commission_records`, `commission_record_members`; FORCE RLS, an organization-only `tenant_isolation` policy, no DELETE or TRUNCATE grant, `unique (id, organization_id)`, composite foreign keys, nothing for `presby_platform`), four functions behind five triggers (three new guards, plus 0045's about-org function), and the re-created `presby_public_committee_roster(text, text, boolean)` (same signature and projection; it now also hides a seat that has not started or has ended, a person who left, died or was merged, and a dissolved committee). It needs `0045`, `0072` and `0078` (section 0 refuses without them, naming the one that is missing), and it touches no existing row's data. **It writes no permission row, no flag row, no backfill and no audit row**, and it does not touch the founding-administrator bundle function (so the F362 ordering hazard that 0085 and 0089 carry does not apply here).
+
+### Pre-deploy runbook: 0090, then the code
+
+1. **Order: counts, snapshot `production`, apply `0090`, apply it again, verify, then merge and deploy in the same sitting.** Every merge to `main` auto-deploys production, so **0090 is applied BEFORE the code is merged**. New code against the old schema fails on the missing tables and on the role vocabulary; old code against the new schema is harmless (old code only ever writes the roles chair, leader or member, and nothing old names the new tables).
+2. **Counts, read-only, on the owner connection just before the apply.** Record only the numbers (No Real Data): never a name, a committee title or an id. Each query inside `begin transaction read only; ... rollback;`.
+   - **Which roles exist today.** `select group_role, count(*) from group_memberships group by 1 order by 1;` On 2026-11-19 production held only `member`. **If any value is outside the seven above, stop and tell the operator**: 0090 refuses to run and names the values, and nothing is applied.
+   - **Public listings already switched on.** `select count(*) from group_memberships where public_listed;` On 2026-11-19: 0. The re-created public roster hides a seat that has not started or has ended, so a non-zero count means the public site can change on the deploy: **if it is not 0, the release note must not say nobody was listed or that nothing changes on the public site**, and the operator should be told the number.
+   - **The live body of the public committee roster is the 0078 one.** `select md5(prosrc) from pg_proc where proname = 'presby_public_committee_roster';` must return `08030577cd5b93e3700dca822781811a` (the md5 of the function body text in `drizzle/0078_presby_person_photos.sql`). **If it differs, stop:** someone changed the function after 0078, and 0090's re-created body (written against 0078's) would silently discard that change. Diff the live body against 0078 and against 0090 section 5 first.
+   - **The prerequisites exist.** `select to_regprocedure('presby_person_public_photo(uuid, uuid)') is not null, to_regprocedure('presby_check_about_org_affiliated()') is not null;` returns `t, t`.
+   - **F456 and F459, record only.** The grant drift this pipeline tracks and does not fix. Read what production holds; the orchestrator records the answer on the F456 and F459 entries (`docs/TODO.md`, `docs/schema-design-2.md`):
+
+     ```sql
+     begin transaction read only;
+     select c.relname, a.grantee::regrole::text as grantee, a.privilege_type
+       from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('administrative_commissions', 'org_delegations', 'groups', 'group_memberships')
+        and a.grantee::regrole::text in ('presby_app', 'presby_platform')
+        and a.privilege_type = 'DELETE'
+      order by 1, 2;
+     rollback;
+     ```
+
+     On the pipeline's Neon branch (a copy of `development`) `presby_app` and `presby_platform` both hold DELETE on all four. 0090 neither grants nor revokes any of them (F456: the downward tables; F459: committee and seat history is soft by the application's convention, not by a database grant). The only thing to confirm on production is that the answer is the same.
+3. **Snapshot `production`** in Neon (for example `pre-migration-0090-<date>`) before any statement runs; `restore_snapshot` is the emergency rollback.
+4. **Apply `0090` WITH `-1`, as the owner, on the direct endpoint** (the endpoint-host swap of `MIGRATE_DATABASE_URL`): `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0090_presby_committees.sql`. `-1` is mandatory: the file holds no transaction of its own, and `-1` is what makes it atomic. It prints no backfill notice (there is none); a clean exit and the closing assertions passing are the signal.
+5. **Apply it a second time** the same way and confirm it exits 0 and changes nothing (the closing `do` block raises if anything is out of shape). Re-run the counts of point 2 (roles, listings) and confirm they are unchanged.
+6. **Verify** (read-only), then merge and deploy:
+   - The three tables are forced, carry one policy each, and `presby_app` holds no DELETE or TRUNCATE on them, and `presby_platform` holds nothing:
+
+     ```sql
+     select count(*) from pg_class where relname in ('committee_details', 'commission_records', 'commission_record_members')
+        and relkind = 'r' and relrowsecurity and relforcerowsecurity;                      -- 3
+     select count(*) from pg_policies where tablename in ('committee_details', 'commission_records', 'commission_record_members'); -- 3
+     select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('committee_details', 'commission_records', 'commission_record_members')
+        and a.grantee::regrole::text in ('presby_app', 'presby_platform') and a.privilege_type in ('DELETE', 'TRUNCATE');  -- 0
+     select count(*) from pg_class c, aclexplode(c.relacl) a
+      where c.relname in ('committee_details', 'commission_records', 'commission_record_members')
+        and a.grantee::regrole::text = 'presby_platform';                                  -- 0
+     ```
+   - The role vocabulary is in force and validated: `select convalidated from pg_constraint where conname = 'group_memberships_group_role_check';` returns `t`.
+   - The three tables are empty (nothing writes them until the code is live): `select (select count(*) from committee_details), (select count(*) from commission_records), (select count(*) from commission_record_members);` returns `0, 0, 0`.
+   - The public roster is the new body: `select prosecdef, md5(prosrc) from pg_proc where proname = 'presby_public_committee_roster';` returns `t` and an md5 that is **not** `08030577cd5b93e3700dca822781811a`.
+7. **Merge and deploy the code** in the same sitting (`/merge-pr`). Then fill the release note's deploy-day sentence from the listing count in point 2.
+8. **Operator, at the deploy.** `org_portal.committees` is already on in production, so **the Committees & Commissions page goes live the moment 0.63.0 deploys** (the tile stops saying "coming soon" and opens the page for anyone holding `groups.manage` at a presbytery). Deploy it when you are ready to demonstrate it; **the rollback is switching `org_portal.committees` off**, which hides every page and deletes nothing. Confirm these five are on (read from production 2026-11-19: all on): `org_portal.groups` (the groups pages point to the new place) and, for the help's Roles and Community instructions, `org_portal.roles`, `org_portal.members_create`, `org_portal.features` and `org_portal.admin_hub`. `sites.public_committee_directory` is on in production and is not changed by this release; flipping it is a Rule 17 event. After the deploy read `/help/presbytery-committees` against the screens.
+9. **On `development`, after merge:** the five integration patches under `scripts/committees/` (`domain-index.ts`, `_journal.json`, `dev-docs.ts`, `seed-dev.sql`, `test-rls.sql`) are already in the branch, so **do not apply them again**. The orchestrator applies `0090` (`-1`, as the owner), then `scripts/committees/seed-dev-committees.sql`, then runs `scripts/committees/test-rls-90.sql` standalone as `presby_app` (for example `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/committees/test-rls-90.sql`) and `scripts/test-rls.sql` (Rule 16). The full `test-rls.sql` halts early on the known presbytery-count drift (`docs/TODO.md`); the patch moves the two counts to match the seed's extra people, so read the first halt, not the last.
+10. **The founding-administrator walk, on the deployed environment with a throwaway presbytery:** the person a presbytery's founding-administrator invitation creates (that is how a real user holds `groups.manage`; the bundle needs no further grant) opens Committees & Commissions from the portal tile, sees the guided empty state, creates a committee, adds a member as chair, changes the role, ends a term and dissolves a second committee, at 360px; a presbytery member with no role sees the one permission sentence; a committee that carries a role says so before anyone is added. `e2e/committees-roster.spec.ts` is the scripted version (a founder minted through `presby_apply_founding_administrator`, MFA enrolled).
+11. **Rollback** is a forward migration, never an edit of 0090 once shipped. The tables hold presbytery records and are never dropped. A code rollback alone is safe against the new schema (the old code never reads a new table; the role CHECK only refuses roles the old code never writes), and the public roster's new body is harmless to old code. To retract the role vocabulary or the roster body, write a forward migration (the roster's 0078 body is the file's own predecessor); do not hand-edit the live function.
+
+**What to tell the operator after merging.** The page goes live with the deploy and the switch is `org_portal.committees`. Adding someone to a committee that carries a role is an access change (the page says so before and after; every add is audited with the role it grants). A founding administrator can appoint themselves to a committee (`paper`, shown in the audit). A committee's history is kept by the application, not by a database grant (F459), and the downward tables' grant drift (F456) and the commission-roster arm (F460) are tracked, not fixed. Commission records are Increment 2 (code only, no further migration).
+
 ---
 
 ## Membership standing (0066)

@@ -316,3 +316,52 @@ describe("GroupsPage — the shared four-way miss response", () => {
     ).toBeTruthy();
   });
 });
+
+// U10 (presbytery committees, C10): at a presbytery the page points at Committees & Commissions and its empty
+// state stops saying "committees"; a congregation's page is byte-for-byte what it was.
+describe("GroupsPage — the presbytery pointer (C10)", () => {
+  const PRESBYTERY_RESOLVED = {
+    kind: "ok" as const,
+    org: {
+      organizationId: "org-p",
+      personId: "person-1",
+      name: "Presbytery of the Northern Reach",
+      organizationType: "presbytery" as const,
+      slug: "northern-reach",
+      platformStatus: "managed" as const,
+    },
+  };
+
+  it("a presbytery sees the one-line pointer to Committees & Commissions and 'No groups yet'", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(PRESBYTERY_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGroups.mockResolvedValue({ kind: "ok", data: [] });
+    listDerivedGroups.mockResolvedValue({ kind: "ok", data: [] });
+
+    render(await GroupsPage({ params: makeParams("northern-reach") }));
+
+    expect(
+      screen.getByText(/Committees of Presbytery of the Northern Reach are kept under/),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Committees & Commissions" }).getAttribute("href"),
+    ).toBe("/o/northern-reach/admin/committees");
+    expect(screen.getByText("No groups yet")).toBeTruthy();
+    expect(screen.queryByText(/no committees or groups yet/i)).toBeNull();
+  });
+
+  it("a congregation sees neither the pointer nor the changed empty state", async () => {
+    cachedAuth.mockResolvedValue({ user: { id: "u1" } });
+    resolveOrgContext.mockResolvedValue(OK_RESOLVED);
+    isFlagEnabled.mockResolvedValue(true);
+    listGroups.mockResolvedValue({ kind: "ok", data: [] });
+    listDerivedGroups.mockResolvedValue({ kind: "ok", data: [] });
+
+    render(await GroupsPage({ params: makeParams() }));
+
+    expect(screen.queryByText(/are kept under/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Committees & Commissions" })).toBeNull();
+    expect(screen.getByText(/no committees or groups yet/i)).toBeTruthy();
+  });
+});

@@ -40,6 +40,7 @@ The page opens and says it "isn't turned on" for your congregation.
 
 - What it means: the feature is turned off for your congregation.
 - Who can fix it: an administrator can turn it on in "Features".
+- The exception: a presbytery page named "Committees & Commissions" or "Congregation Oversight" is switched on by the PresbyPortal team for the whole platform, not in "Features". [Contact the team](/help/contact) if you need it.
 
 ### The page says "You don't have permission to"
 

@@ -780,8 +780,11 @@ async function seedFlags() {
     {
       key: "org_portal.committees",
       description:
-        "Presbytery committees & commissions placeholder area in (org). Presbytery-scoped tile (orgTypeScope). OFF = 'isn't turned on yet'. ON with no feature built = 'coming soon' stub.",
-      enabled: true, // GO-LIVE: false
+        "Presbytery committees & commissions (src/lib/committees/, 0090). Presbytery-scoped tile (orgTypeScope). OFF = 'isn't turned on yet'; data stays.",
+      // Graduated with 0.63.0 (2026-11-19-presbytery-committees): real
+      // schema sits behind it, so it is no longer part of the go-live
+      // placeholder sweep above. On in production.
+      enabled: true,
     },
     {
       key: "org_portal.communications",

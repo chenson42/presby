@@ -1,86 +1,62 @@
-import { notFound, redirect } from "next/navigation";
-import { cachedAuth } from "@/lib/auth/cached-auth";
-import {
-  assertOrgAccess,
-  resolveOrgContext,
-  type OrganizationType,
-} from "@/lib/authz";
-import { isFlagEnabled } from "@/lib/flags";
-import {
-  ComingSoon,
-  PlaceholderFlagOff,
-  PlaceholderNotAvailable,
-} from "@/components/org-portal/coming-soon";
-import { OrgAccessDenied, OrgAccessEnded } from "../../org-states";
-
-const COMMITTEES_FLAG = "org_portal.committees";
-const AREA = "Committees & Commissions";
-const DESCRIPTION =
-  "Presbytery committees, commissions, and administrative-commission tracking (Presbytery Increment 1) — planned but not yet built.";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { OrgAccessError } from "@/lib/authz";
+import { readCommitteeList } from "@/lib/committees/reads";
+import { gateCommitteesPage } from "@/lib/presbytery-reports/gate";
+import { AREA, LIST } from "@/lib/committees/ui-copy";
+import { CommitteesList } from "@/components/committees/committees-list";
+import { CommitteesForbidden, CommitteesLoadError } from "@/components/committees/committee-states";
+import { CommitteeGateStateView } from "./committee-gate-state";
 
 /**
- * `/o/<slug>/admin/committees` — one of the 7 product-IA placeholder routes,
- * docs/work-log/2026-08-27-product-ia-scaffold.md (Phase 3 §3, DECISION-117).
- * An inert "coming soon" stub: no data read, no mutation.
- *
- * Repeats the `(org)` auth pattern in full (DECISION-040), same as every
- * other page under `(org)` — see `admin/credentials/page.tsx`'s header for
- * the fuller rationale on why the auth check lives in the page rather than
- * the layout.
- *
- * THREE CHECKS, IN THIS ORDER, mirroring `admin/credentials/page.tsx`'s own
- * bug-fixed ordering: flag, then org type. A congregation/synod/GA org with
- * the flag ON must land on `PlaceholderNotAvailable`, not
- * `PlaceholderFlagOff` — the org-type check runs strictly AFTER the flag
- * check (flag-off wins regardless of org type, same as `credentials`).
+ * `/o/<slug>/admin/committees`: the presbytery's committees by kind (Required,
+ * Standing, Ad hoc, Not yet labelled) and, on request, the dissolved ones
+ * (`?show=dissolved`, read as a fixed enum, never a redirect target). Behind
+ * `gateCommitteesPage` (DECISION-359): signed in, the Node-side second-factor
+ * recheck, the four-way org miss, `assertOrgAccess`, the `org_portal.committees`
+ * flag, then the organization type. The key (`groups.manage`) is the reader's own
+ * business, inside its own transaction. No `loading.tsx` beneath this tree
+ * (DECISION-251).
  */
-const COMMITTEES_ORG_TYPES: readonly OrganizationType[] = ["presbytery"];
-
 export default async function CommitteesPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ show?: string | string[] }>;
 }) {
   const { slug } = await params;
+  const { show } = await searchParams;
+  const showDissolved = show === "dissolved";
+  const base = `/o/${slug}/admin/committees`;
 
-  const session = await cachedAuth();
-  if (!session?.user) {
-    redirect(
-      `/signin?callbackUrl=${encodeURIComponent(`/o/${slug}/admin/committees`)}`,
-    );
+  const gate = await gateCommitteesPage({ slug, path: showDissolved ? `${base}?show=dissolved` : base });
+  if (!gate.ok) return <CommitteeGateStateView state={gate.state} slug={slug} />;
+  const { identity } = gate;
+
+  let result;
+  try {
+    result = await readCommitteeList(identity, { showDissolved });
+  } catch (err) {
+    if (err instanceof OrgAccessError) throw err;
+    return <CommitteesLoadError href={base} />;
   }
+  if (result.kind === "forbidden") return <CommitteesForbidden name={identity.organizationName} />;
+  if (result.kind !== "ok") return <CommitteesLoadError href={base} />;
 
-  const resolved = await resolveOrgContext(session.user.id, slug);
-
-  switch (resolved.kind) {
-    case "not-found":
-      notFound();
-    case "forbidden":
-      return (
-        <OrgAccessDenied
-          name={resolved.name}
-          organizationType={resolved.organizationType}
-          slug={slug}
-        />
-      );
-    case "ended":
-      return (
-        <OrgAccessEnded name={resolved.name} endedOn={resolved.endedOn} slug={slug} />
-      );
-    case "ok":
-      break;
-  }
-
-  await assertOrgAccess(resolved.org.personId, resolved.org.organizationId);
-
-  const committeesEnabled = await isFlagEnabled(COMMITTEES_FLAG);
-  if (!committeesEnabled) {
-    return <PlaceholderFlagOff area={AREA} orgName={resolved.org.name} />;
-  }
-
-  if (!COMMITTEES_ORG_TYPES.includes(resolved.org.organizationType)) {
-    return <PlaceholderNotAvailable area={AREA} orgName={resolved.org.name} />;
-  }
-
-  return <ComingSoon area={AREA} description={DESCRIPTION} slug={slug} />;
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">{AREA}</h1>
+          <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">{identity.organizationName}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{LIST.intro(identity.organizationName)}</p>
+        </div>
+        <Button asChild className="min-h-11">
+          <Link href={`${base}/new`}>{LIST.newCommittee}</Link>
+        </Button>
+      </div>
+      <CommitteesList list={result.data} slug={slug} />
+    </section>
+  );
 }

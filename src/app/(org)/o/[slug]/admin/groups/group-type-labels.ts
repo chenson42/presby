@@ -44,8 +44,11 @@ export const GROUP_ROLES = [
   "member",
 ] as const satisfies readonly GroupRole[];
 
-export const GROUP_ROLE_LABELS: Record<GroupRole, string> = {
-  chair: "Chair",
-  leader: "Leader",
-  member: "Member",
-};
+/**
+ * The TOTAL seven-value label map (DECISION-354, F458): re-exported from the one
+ * vocabulary in `@/lib/group-roles`, so a role this admin does not offer (a
+ * presbytery committee's vice chair, say) can never render as a blank title. The
+ * form still offers `GROUP_ROLES` (three) above; a congregation's page is
+ * unchanged for those three.
+ */
+export { GROUP_ROLE_LABELS } from "@/lib/group-roles";

@@ -120,7 +120,13 @@ export const groupMemberships = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     groupId: uuid("group_id").notNull(),
     personId: uuid("person_id").notNull(),
-    groupRole: text("group_role").notNull().default("member"), // chair | leader | member
+    // Closed vocabulary of seven (group_memberships_group_role_check below,
+    // drizzle/0090 section 1, DECISION-354): chair | leader | member |
+    // vice_chair | clerk | secretary | ex_officio. The four last are titles
+    // that carry no authority; the seat predicates in 0073 and 0085 stay
+    // exact-match on ('chair', 'leader'). src/lib/group-roles.ts holds the
+    // labels and the two offer sets.
+    groupRole: text("group_role").notNull().default("member"),
     source: text("source").notNull().default("managed"), // managed | derived
     // Derived rows map 1:1 to the officer term that produced them (F22).
     // Without this the trigger cannot tell two non-consecutive terms apart and
@@ -192,5 +198,10 @@ export const groupMemberships = pgTable(
       foreignColumns: [memberships.id, memberships.organizationId],
       name: "group_memberships_membership_fk",
     }),
+    // drizzle/0090 section 1 (DECISION-354).
+    check(
+      "group_memberships_group_role_check",
+      sql`${t.groupRole} in ('chair', 'leader', 'member', 'vice_chair', 'clerk', 'secretary', 'ex_officio')`,
+    ),
   ],
 );

@@ -468,6 +468,10 @@ export async function smallControls(page: Page): Promise<string[]> {
       const rect = target.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) continue;
       if (getComputedStyle(el).visibility === "hidden") continue;
+      // Radix renders an aria-hidden, pointer-events-none native input behind a Switch (its form
+      // "bubble" input); it is not a tap target, and until Radix measures the switch it sits at the
+      // browser's default 13px checkbox size, which made this check flaky on a slow runner.
+      if (el.tagName === "INPUT" && el.getAttribute("aria-hidden") === "true") continue;
       // The portal layout's own "Back to portal" link is not this feature's to resize.
       if ((el.textContent ?? "").trim() === "Back to portal") continue;
       if (rect.height < 43.5) out.push(`${el.tagName.toLowerCase()} "${(el.textContent ?? "").trim().slice(0, 40)}" ${Math.round(rect.height)}px`);

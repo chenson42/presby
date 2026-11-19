@@ -275,6 +275,7 @@ Scope as the batch table: the fixture additions, the commissions spec, the hydra
 
 **Gates at the end of Phase 4:** `npx tsc --noEmit`, `npm run lint` and `npm run check` clean; `npm run build` passes (B6, and the production lane's build in B7); unit tests: full suite 941 files, 0 failed (B6); DB suites: `store.db` 88 and `reads.db` 34 and the four Increment 1 files green on the pipeline branch (B5); `test-rls-90.sql` unchanged (no DDL); e2e as the B7 gate table.
 
+<!-- leak-ok: the e2e fixture cron value, a throwaway constant in e2e/giving, not a credential -->
 **What QA should run** (own server on port 3101, `E2E_BASE_URL=http://localhost:3101 E2E_ALLOW_SHARED_DB=true CRON_SECRET=giving-e2e-cron-secret RATE_LIMIT_DISABLED=true DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=.tmp/domains-fake-state.json`; stop by PID; never :3000):
 1. `npx tsc --noEmit`, `npm run lint`, `npm run check`, `npm run build`.
 2. `npx vitest run` (no DB credentials), then the six committees DB files serially against the pipeline branch (`npx dotenv -e .env.local -- vitest run --no-file-parallelism` over `committees.db`, `committees.schema`, `store.db`, `reads.db`, `seat-semantics.db`, `groups.committees.db`); `scripts/committees/test-rls-90.sql` as `presby_app`.

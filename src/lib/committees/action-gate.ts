@@ -2,9 +2,10 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { resolveOrgContext } from "@/lib/authz";
+import { isFlagEnabled } from "@/lib/flags";
 import { isUuid } from "@/lib/is-uuid";
 import { assertOrgSession } from "@/lib/org-portal/session-check";
-import type { ActionData, CommitteesActionResult, CommitteesCtx, Outcome, Written } from "./contract";
+import { COMMITTEES_FLAG, type ActionData, type CommitteesActionResult, type CommitteesCtx, type Outcome, type Written } from "./contract";
 import { GATE_COPY, REFUSAL, refusalMessage } from "./copy";
 import type { Parsed, ValidationEnv } from "./validate";
 
@@ -20,7 +21,10 @@ import type { Parsed, ValidationEnv } from "./validate";
  *      organization and the acting person come from the URL slug and the session,
  *      never from a client value (`organizationId` is not a parameter of any
  *      action);
- *   3. every id the action names is a UUID, or the answer is the one `not_found`
+ *   3. the `org_portal.committees` flag, as the pages check it (a refusal in the
+ *      page's own flag-off sentence, so the rollback sentence "a presbytery's
+ *      committees cannot be edited at all" is true of Server Actions too);
+ *   4. every id the action names is a UUID, or the answer is the one `not_found`
  *      string, before any SQL runs (a malformed id is a genuine Postgres cast
  *      error otherwise: F446).
  *
@@ -72,6 +76,12 @@ export async function resolveCommitteesActor(slug: unknown, ids: Record<string, 
   if (typeof slug !== "string") return refuse(GATE_COPY.noAccess, "forbidden");
   const resolved = await resolveOrgContext(check.userId, slug);
   if (resolved.kind !== "ok") return refuse(GATE_COPY.noAccess, "forbidden");
+
+  // The global flag, as the pages check it (flag, then organization type, then
+  // `groups.manage`; the type and the key are checked in the store's own
+  // transaction). After the organization resolves, so a non-member learns nothing
+  // about a rollout; before the ids, so a switched-off area answers one sentence.
+  if (!(await isFlagEnabled(COMMITTEES_FLAG))) return refuse(GATE_COPY.flagOff(resolved.org.name), "forbidden");
 
   for (const value of Object.values(ids)) {
     if (!isUuid(value)) return refuse(REFUSAL.not_found, "not_found");

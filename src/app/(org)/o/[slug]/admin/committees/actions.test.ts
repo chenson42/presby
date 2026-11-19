@@ -27,6 +27,7 @@ vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 // The real action-gate (for finish, invalidResult, tamperedResult) imports these; nothing here signs anyone in.
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/authz", () => ({ resolveOrgContext: vi.fn() }));
+vi.mock("@/lib/flags", () => ({ isFlagEnabled: vi.fn() }));
 vi.mock("@/lib/committees/action-gate", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/committees/action-gate")>();
   return { ...actual, resolveCommitteesActor: mocks.resolveCommitteesActor };

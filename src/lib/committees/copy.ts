@@ -21,6 +21,7 @@
 import { formatDateUTC } from "@/lib/format-date";
 import { GROUP_ROLE_LABELS, type GroupRoleValue } from "@/lib/group-roles";
 import type { Refusal, RefusalDetail } from "./contract";
+import { AREA } from "./ui-copy";
 
 /** A date-only `YYYY-MM-DD` as a plain string ("Mar 4, 2026"): for messages built outside JSX (the UTC day, deterministic). */
 export function dateText(iso: string): string {
@@ -74,6 +75,8 @@ export function refusalMessage(reason: Refusal, detail: RefusalDetail = {}): str
 export const GATE_COPY = {
   signedOut: "You must be signed in to do that.",
   noAccess: "You don't have access to that organization.",
+  /** The page's own flag-off sentence (`PlaceholderFlagOff`), so a Server Action refused for the flag says what the page says. */
+  flagOff: (orgName: string) => `${AREA} isn't turned on for ${orgName} yet.`,
 } as const;
 
 // ---------------------------------------------------------------------------

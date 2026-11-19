@@ -83,7 +83,13 @@ describe("copy.ts (U3)", () => {
     expect(REFUSAL.seat_not_found).toBe("That member could not be found.");
     expect(REFUSAL.already_dissolved).toBe("This committee has already been dissolved.");
     expect(REFUSAL.save_failed).toBe("We couldn't save that. Nothing was changed. Try again.");
-    expect(GATE_COPY).toEqual({ signedOut: "You must be signed in to do that.", noAccess: "You don't have access to that organization." });
+    expect({ ...GATE_COPY, flagOff: undefined }).toEqual({
+      signedOut: "You must be signed in to do that.",
+      noAccess: "You don't have access to that organization.",
+      flagOff: undefined,
+    });
+    // the page's own sentence (PlaceholderFlagOff), so an action refused for the flag says what the page says
+    expect(GATE_COPY.flagOff("Northern Reach")).toBe("Committees & Commissions isn't turned on for Northern Reach yet.");
     expect(refusalMessage("duplicate_name", { existingName: "Finance Committee" })).toBe(
       'A committee named "Finance Committee" already exists. Choose a different name.',
     );

@@ -203,12 +203,18 @@ function actionsCallTheActorGate(files: SourceFile[]): Hit[] {
   return hits;
 }
 
-/** The helper itself authenticates (with the second-factor recheck) before it resolves the organization. */
+/**
+ * The helper itself authenticates (with the second-factor recheck) before it resolves the organization,
+ * and reads the `org_portal.committees` flag after that and before it checks an id (G1: every action,
+ * through the one gate, answers what the page answers).
+ */
 function actorGateOrder(file: SourceFile | undefined): Hit[] {
   const c = file ? code(file.content) : "";
   const session = c.indexOf("assertOrgSession(");
   const resolve = c.indexOf("resolveOrgContext(");
-  const ok = session >= 0 && resolve >= 0 && session < resolve && /\bauth\(\)/.test(c);
+  const flag = c.indexOf("isFlagEnabled(COMMITTEES_FLAG)");
+  const ids = c.indexOf("isUuid(");
+  const ok = session >= 0 && resolve >= 0 && session < resolve && /\bauth\(\)/.test(c) && flag > resolve && flag < ids;
   return ok ? [] : [{ rule: "actor-gate-order", file: file?.rel ?? "action-gate.ts" }];
 }
 
@@ -516,8 +522,13 @@ describe("each rule fails on a sample that breaks it", () => {
     expect(actionsCallTheActorGate([sample("x/committees/actions.ts", readsFirst)])).toHaveLength(1);
     expect(actionsCallTheActorGate([sample("x/committees/actions.ts", "export const x = 1;")]).map((h) => h.rule)).toContain("actions-found");
     expect(actorGateOrder(sample("action-gate.ts", "await resolveOrgContext(u, s); const c = assertOrgSession(await auth());"))).toHaveLength(1);
-    expect(actorGateOrder(sample("action-gate.ts", "const c = assertOrgSession(await auth()); await resolveOrgContext(u, s);"))).toHaveLength(0);
+    expect(actorGateOrder(sample("action-gate.ts", "const c = assertOrgSession(await auth()); await resolveOrgContext(u, s); await isFlagEnabled(COMMITTEES_FLAG); isUuid(v);"))).toHaveLength(0);
     expect(actorGateOrder(undefined)).toHaveLength(1);
+    // G1: the flag check is part of the order, after the organization and before the ids
+    const ordered = "const c = assertOrgSession(await auth()); await resolveOrgContext(u, s); if (!(await isFlagEnabled(COMMITTEES_FLAG))) return; isUuid(v);";
+    expect(actorGateOrder(sample("action-gate.ts", ordered))).toHaveLength(0);
+    expect(actorGateOrder(sample("action-gate.ts", ordered.replace("if (!(await isFlagEnabled(COMMITTEES_FLAG))) return; ", "")))).toHaveLength(1);
+    expect(actorGateOrder(sample("action-gate.ts", "const c = assertOrgSession(await auth()); await resolveOrgContext(u, s); isUuid(v); isFlagEnabled(COMMITTEES_FLAG);"))).toHaveLength(1);
   });
 
   it("no-org-param", () => {

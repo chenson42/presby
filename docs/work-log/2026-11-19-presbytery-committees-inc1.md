@@ -407,6 +407,31 @@ Strings added: none. New copy a fork's branding pass should review: none.
 
 **For Phase 5 (qa), what to run.** Everything on the pipeline's own server and branch: `npm run check`; `npx tsc --noEmit`; `npm run lint`; the unit suite (expect only `dev-docs.test.ts` red); the DB suites serially (`npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/db/domain/committees.db.test.ts src/lib/db/domain/committees.schema.test.ts src/lib/committees/store.db.test.ts src/lib/committees/reads.db.test.ts src/lib/committees/seat-semantics.db.test.ts src/lib/groups.committees.db.test.ts`); `scripts/committees/test-rls-90.sql` as `presby_app`; `scripts/committees/test-0090-migration.sh` (needs a scratch database); then, with your own server on its own port and `E2E_BASE_URL` set and `E2E_ALLOW_SHARED_DB=true`: `npx playwright test e2e/committees-roster.spec.ts e2e/committees-gates.spec.ts e2e/hydration/committees-forms.spec.ts`; and the production hydration lane: `PW_PROD_BUILD=1 PW_PROD_PORT=3801 npx playwright test --project=prod-build e2e/hydration/committees-forms.spec.ts` (no `E2E_BASE_URL`). Phase 5's copy-truthfulness check covers the help diff (`presbytery-committees`, `roles-who-can-do-what`, `why-cant-i-see-this`, `privacy-policy`) and the runbook's claims; the 360px check is already in the specs. **Phase 6 walks** (the real invitation path on `development`, dark mode, the public committee list, the named help pages read as their reader) are the analyst's, per the Deploy checklist.
 
+### Fix pass after QA run 1 (full-stack-developer, 2026-11-19)
+
+Scope: the orchestrator's rulings G1 and R1 ("Orchestrator rulings after QA run 1"). C1 and the copy rulings need no code.
+
+**G1: the actions now check `org_portal.committees`.**
+- `src/lib/committees/action-gate.ts`, `resolveCommitteesActor`: after the session and the organization resolve, before the id check, `isFlagEnabled(COMMITTEES_FLAG)` (the bare helper the page gate uses). Off: `{ ok: false, error: GATE_COPY.flagOff(orgName), kind: "forbidden" }`. The order is flag, then (in the store's own transaction) organization type, then `groups.manage`. It sits after the organization so a non-member learns nothing about the rollout. Every action calls this one gate first (pinned), so `createCommitteeAction` and the six in `[committeeId]/actions.ts` are covered with one change.
+- Copy: `GATE_COPY.flagOff(name)` in `src/lib/committees/copy.ts` is "Committees & Commissions isn't turned on for {name} yet." It is the page's own `PlaceholderFlagOff` sentence (`{area} isn't turned on for {orgName} yet.`), no new wording.
+- Tests (written first):
+  - `action-gate.test.ts`: "with org_portal.committees off, every action is refused with the page's flag-off sentence, regression for G1" and "the flag is read after the organization resolves ... and before the ids".
+  - `boundaries.test.ts`: `actorGateOrder` now also requires `isFlagEnabled(COMMITTEES_FLAG)` after `resolveOrgContext(` and before `isUuid(`, with a sample that drops it and one that reorders it. Because the existing boundary already pins that every action calls the gate first, a future action cannot skip the flag.
+  - `copy.test.ts` pins the sentence; `actions.test.ts` mocks `@/lib/flags` (the real gate now imports the db).
+- **Failing before the change** (`npx vitest run src/lib/committees/action-gate.test.ts`, the test and the mock in place, no change to the gate):
+
+  ```
+   × with org_portal.committees off, every action is refused with the page's flag-off sentence ... regression for G1
+   × the flag is read after the organization resolves (a non-member learns nothing) and before the ids are looked at
+  TypeError: GATE_COPY.flagOff is not a function
+  Tests  2 failed | 10 passed (12)
+  ```
+  (The sentence helper was added alongside the gate; the gate behaviour itself is proven by the second test's expectation that a malformed id is refused as `forbidden` with the flag off, which the old gate answered `not_found`: `expected 'forbidden', received 'not_found'`.) After the change: 12 passed.
+
+**R1: runbook (`docs/deployment.md`, "Presbytery committees (0090)"), a separate docs commit:** "four functions behind five triggers (three new guards, plus 0045's about-org function)"; point 6's grant checks use `aclexplode` (both return 0, run on the dev branch); point 8 names `org_portal.groups`, `org_portal.roles`, `org_portal.members_create`, `org_portal.features` and `org_portal.admin_hub` (C1: all on in production, read 2026-11-19); point 9 no longer tells anyone to apply the five integration patches again ("apply 0090, then the seed").
+
+**Gates:** `npx tsc --noEmit` clean; `npm run lint` clean; `npm run check` clean (all ten); committees unit tests 670 passed; full unit suite 15,460 passed, 0 failed. No DB path changed, so no DB suite was re-run. e2e on my own server (port 3101, `E2E_BASE_URL`, `E2E_ALLOW_SHARED_DB=true`; stopped by PID): `committees-gates.spec.ts` 5 passed; `committees-roster.spec.ts` 16 passed (the actions with the flag on are unaffected).
+
 ---
 
 # Phase 5 — Verification (qa)

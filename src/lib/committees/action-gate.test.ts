@@ -15,7 +15,9 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   resolveOrgContext: vi.fn(),
   revalidatePath: vi.fn(),
+  isFlagEnabled: vi.fn(),
 }));
+vi.mock("@/lib/flags", () => ({ isFlagEnabled: mocks.isFlagEnabled }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/authz", () => ({ resolveOrgContext: mocks.resolveOrgContext }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
@@ -32,6 +34,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.auth.mockResolvedValue(signedIn);
   mocks.resolveOrgContext.mockResolvedValue({ kind: "ok", org: ORG });
+  mocks.isFlagEnabled.mockResolvedValue(true);
 });
 
 describe("resolveCommitteesActor", () => {
@@ -61,6 +64,25 @@ describe("resolveCommitteesActor", () => {
       mocks.resolveOrgContext.mockResolvedValue({ kind });
       expect(await resolveCommitteesActor("northern"), kind).toMatchObject({ ok: false, result: { error: GATE_COPY.noAccess, kind: "forbidden" } });
     }
+  });
+
+  it("with org_portal.committees off, every action is refused with the page's flag-off sentence — regression for G1, the actions skipping the flag", async () => {
+    mocks.isFlagEnabled.mockResolvedValue(false);
+    expect(await resolveCommitteesActor("northern", { committeeId: UUID })).toEqual({
+      ok: false,
+      result: { ok: false, error: GATE_COPY.flagOff("Northern Reach"), kind: "forbidden" },
+    });
+    expect(mocks.isFlagEnabled).toHaveBeenCalledWith("org_portal.committees");
+    expect(GATE_COPY.flagOff("Northern Reach")).toBe("Committees & Commissions isn't turned on for Northern Reach yet.");
+  });
+
+  it("the flag is read after the organization resolves (a non-member learns nothing) and before the ids are looked at", async () => {
+    mocks.isFlagEnabled.mockResolvedValue(false);
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "forbidden", name: "Northern Reach", organizationType: "presbytery" });
+    expect(await resolveCommitteesActor("northern")).toMatchObject({ ok: false, result: { error: GATE_COPY.noAccess } });
+    expect(mocks.isFlagEnabled).not.toHaveBeenCalled();
+    mocks.resolveOrgContext.mockResolvedValue({ kind: "ok", org: ORG });
+    expect(await resolveCommitteesActor("northern", { committeeId: "bad" })).toMatchObject({ ok: false, result: { kind: "forbidden" } });
   });
 
   it("every id must be a UUID or the answer is the one not_found string, before any SQL", async () => {

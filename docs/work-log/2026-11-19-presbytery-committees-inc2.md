@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-19 |
 | 2 — Architectural review | architect | Complete (parent; R1–R6) | Approved with suggestions | 2026-11-19 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-19 |
-| 4 — Implementation | api-developer (B5), ux-developer (B6), full-stack-developer (B7) | **B5 complete** (api-developer, 2026-11-19); B6 and B7 pending | — | 2026-11-19 |
+| 4 — Implementation | api-developer (B5), ux-developer (B6), full-stack-developer (B7) | **B5, B6 complete** (api-developer, ux-developer, 2026-11-19); B7 pending | — | 2026-11-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -173,6 +173,53 @@ Three orchestrator-ruled additions to C15 (the strings are quoted exactly; `copy
 **Gates after the rulings.** `tsc`, lint and `npm run check` (10/10) clean; committees and related unit tests 698 passed; full unit suite 938 files passed, 0 failed (15,510 tests); `store.db` (now 88: 86 + 2 new) and `reads.db` (34) run serially against the pipeline branch: **122 passed**. The other four DB files, `test-rls-90.sql` and the DDL are untouched by the rulings.
 
 **Handoff to B6 (ux-developer).** Import `reads`, `copy`, `contract`, `derive`, `validate` as above. Pages call `gateCommitteesPage`, then `isUuid` on `commissionId` and `memberId` segments (404 before any read), then the readers with `Promise.all`; a reader's `forbidden` renders `CommitteesForbidden`, `not_found` renders `notFound()` (rulings 2 above pending for the wording of a commission miss), a throw renders the section load error, an `OrgAccessError` is rethrown. The list page adds `?show=ended` read as a fixed enum. The no-access sentence is `commissionNoAccess(congregationName | null)` and the page must show it (it is true by construction while nothing writes a role and the policy is organization-only; `boundaries.test.ts` and `test-rls-90.sql` (d), (i), (j) pin both). Forms: `HydrationGate` on `commission-form.tsx` and `commission-member-form.tsx` (two `useForm` roots), `end-commission-dialog.tsx` and `remove-record-dialog.tsx` are plain controlled AlertDialogs; the form carries `rowVersion` as `expectedVersion`.
+
+---
+
+## B6 — ux-developer (2026-11-19)
+
+Scope as the batch table: the commissions section, record form, commission page, member form, end-commission and remove dialogs, the tile description, the help rewrite (C15) and the roles and privacy edits (C13). No `loading.tsx`, no `route.ts`, no schema or server-module change, no Rule 16 shared file.
+
+### Files Created
+
+- Pages under `src/app/(org)/o/[slug]/admin/committees/commissions/`: `new/page.tsx`, `[commissionId]/page.tsx`, `[commissionId]/edit/page.tsx`, `[commissionId]/members/new/page.tsx`, `pages.test.tsx` (31). Each: `gateCommitteesPage`, `isUuid` before any read, reader outcomes as in Increment 1; `not_found` is `notFound()`.
+- Components (`src/components/committees/`): `commissions-section.tsx` (cards below `sm`, table above), `commission-form.tsx` and `commission-member-form.tsx` (the two `useForm` roots, each in `HydrationGate` with the unsaved-changes guard), `end-commission-dialog.tsx`, `remove-record-dialog.tsx` (plain controlled AlertDialogs); tests `commission-views.test.tsx` (7), `commission-forms.test.tsx` (21).
+
+### Files Modified
+
+- `admin/committees/page.tsx`: the commissions section below the committees; `?show=` is a fixed enum (`dissolved`, `ended`, both, or nothing: any other value, in any combination, is no request); the commissions reader fails on its own (section error with "Try again") and the committees stay up; each toggle link keeps the other's state.
+- `roster.tsx` now exports `RosterView` (renderActions prop) with `Roster` as the committee wrapper; `seat-card.tsx` takes an `actions` node. Behaviour of the committee page is unchanged (its tests pass untouched). `end-term-dialog.tsx` gains an optional `commissionId` (ends a member term through `endCommissionMemberAction`, worded for a commission). `committee-card.tsx` exports `LINK_CLASSES`; `committees-list.tsx` takes an optional `toggleHref`.
+- `ui-copy.ts`: C2 II intro; `COMMISSIONS`, `COMMISSION_MEMBER`, `END_COMMISSION`, `REMOVE_RECORD`. `tiles.ts` (C11 II description) and its test.
+- Existing tests: `pages.test.tsx` (commission readers mocked, new intro), `committee-forms.test.tsx` and `committee-views.test.tsx` (mock the commission member action, which `EndTermDialog` now imports), `ui-copy.test.ts` (+5), `tiles.test.ts`.
+- Help: `presbytery-committees.md` (the "Administrative commissions" section rewritten, one intro sentence, one troubleshooting bullet), `registry.ts` (summary, 13 added labels; `verifiedIn` left at 0.63.0: Phase 6 walks it), `roles-who-can-do-what.md` (the bullet and the founding-administrator sentence), `privacy-policy.md` (the commissions clause, never published).
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit`, `npm run lint` | clean |
+| `npm run check` (new files staged) | 10/10, including `check:hydration-gate` (two new roots) and `check:help` (34 entries, 31 published) |
+| `npm run build` | passes |
+| Full unit suite, no DB credentials | 941 files passed, 0 failed; 15,574 tests |
+| Tap targets | measured in a real browser on every page and dialog at 360px: nothing of this feature under 44px; the only smaller elements are the platform shell's "PresbyPortal"/"Back to portal" links and sonner's close button |
+| Horizontal scroll | `scrollWidth == clientWidth` on every page at 360px and 1280px, a 170-character commission title included |
+
+### Browser walk (own server on 3101, stopped by PID 95728 and its wrapper 95710; Chromium; invented data)
+
+Signed in as `committees.clerk@example.invalid` (`groups.manage` only). 360px light and dark, 1280px light and dark (the mutating walk ran at 360px light; the others read-only):
+list with the commissions section and "Show ended commissions (1)"; the ended list; record form and its field errors; record with a congregation and a 170-character title; commission page (empty roster, then one member, then a planned clerk): charge, the no-access sentence, About line, four actions; add-member form and errors, the "(already serves)" option; end-term dialog; edit form and "The appointed date can't be after today."; end dialog (the date-before-appointment refusal stays in the dialog under the field); the two seeded records (active about a congregation, ended about none with "Reported in"); add member to an ended record; remove dialog, removal, and the removed id then answering the not-found page. Not walked in a browser: the empty-list state of the commissions section (the dev branch always has seed records; unit-tested), the stale-edit toast and the neutral congregation refusal (unit-tested; the latter needs a hand-built id). Walk residue on the pipeline branch: one removed record ("Walk Commission xxx...") with two members.
+
+### Implementer Notes (deviations and strings for a ruling)
+
+1. **C7 and C5 reused "for a commission", not word for word (needs a ruling).** C15 says "the helpers of C5" and "the C7 dialog" but those say "committee". Shipped with "commission": the Person helper ("People serve on a commission from the presbytery's own records..."), the Ends-on helper ("...no longer on the commission..."), the add-form empty body, and the member-term end dialog body ("Their name stays in the history of this commission, with its dates.") and helper. All in `COMMISSION_MEMBER`, pinned and checked to contain no "committee".
+2. **One string not in Copy:** the select option for a record whose congregation has left the presbytery, "{name} (no longer a member of this presbytery)" (`COMMISSIONS.leftOption`), so an unrelated edit keeps the stored congregation selected (the reader's own contract).
+3. **No empty-roster string for a commission** (C3's says "committee"): an active commission with no members shows the roster area empty under the actions, whose "Add a member" button is the next step. A ruling can add one.
+4. **"Remove this record" shows on an ended record too** (the store allows it; "Edit commission" also stays). End, add and the member end controls are active-only.
+5. **The list's commissions "Congregation" cell** says "About {name}" always (the list reader carries no still-a-member flag); the commission page says the "(no longer a member...)" form.
+6. **The empty state shows one "Record a commission"** (the header button is hidden then), so there are never two identically named links.
+7. **Help (Rule 17):** claims were written from the screens; one troubleshooting bullet speaks of a commission page that "no longer opens" because a missing record is the platform's 404 page, not a string. "planned" avoided (H8).
+
+**Handoff to B7.** Selectors: fields by label ("Title", "Charge (optional)", "Congregation (optional)", "Appointed on", "Minute reference (optional)", "Ended on", "Minute reference for its report (optional)"); buttons "Record commission", "Add to commission", "End commission" (the trigger and the dialog's confirm share the name: scope to the `alertdialog`), "Remove this record" / "Remove record"; member controls "End term for {name}" (a card and a table row: scope by viewport). Both pages of a commission render the member roster twice (card and table, CSS shows one).
 
 ---
 

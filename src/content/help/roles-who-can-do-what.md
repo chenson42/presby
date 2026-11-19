@@ -53,7 +53,7 @@ A Founding Administrator can:
 - turn features on and off;
 - add and change people, households and contact details, and record how people are connected;
 - record officers and the Session;
-- create and manage groups, and record staff positions. At a presbytery this also covers its committees: see [Committees and commissions](/help/presbytery-committees);
+- create and manage groups, and record staff positions. At a presbytery this also covers its committees and its record of administrative commissions: see [Committees and commissions](/help/presbytery-committees);
 - give roles, take them away, and create and edit roles from what they hold;
 - ask the PresbyPortal team for help with a ticket;
 - write and publish job openings, once "Job openings" is turned on;
@@ -72,4 +72,4 @@ For these, the PresbyPortal team sets things up. {{contactAdmin}} When the team 
 
 A presbytery's Founding Administrator can also see and record each member congregation's appraisals, insurance and loans, where "Congregation Oversight" is turned on. To let someone else do that, create a role that includes the permission described as "See and record a member congregation's appraisals, insurance and loans (the presbytery's own record)", and give it to them. They are asked to set up two-factor sign-in at their next sign-in, if they have not already. See [Congregation records](/help/congregation-records).
 
-It can also keep the presbytery's committees and who serves on them, where "Committees & Commissions" is turned on, using the permission described as "Create and edit managed groups (committees, small groups, choirs, teams) and manage their rosters". See [Committees and commissions](/help/presbytery-committees).
+It can also keep the presbytery's committees and who serves on them, and its record of administrative commissions, where "Committees & Commissions" is turned on, using the permission described as "Create and edit managed groups (committees, small groups, choirs, teams) and manage their rosters". See [Committees and commissions](/help/presbytery-committees).

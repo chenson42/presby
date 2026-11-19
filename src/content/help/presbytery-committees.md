@@ -1,4 +1,4 @@
-Where "Committees & Commissions" is turned on, a presbytery keeps its committees here: what each one is for, who serves on it and in which role, and for how long. This page is for the presbytery's staff. It does not change anything a congregation has recorded.
+Where "Committees & Commissions" is turned on, a presbytery keeps its committees here: what each one is for, who serves on it and in which role, and for how long. It also keeps the presbytery's record of its administrative commissions. This page is for the presbytery's staff. It does not change anything a congregation has recorded.
 
 Open your presbytery's page, then choose "Committees & Commissions" under "Governance & Courts".
 
@@ -50,11 +50,20 @@ On a row under "Serving now", the switch lists the person on your website's comm
 
 ## Administrative commissions
 
-This page keeps committees. It does not keep administrative commissions, so record those in your own minutes.
+An administrative commission is a body the presbytery appoints to carry out a task, often about one congregation. Under "Administrative commissions" this page keeps the presbytery's own record of each one: its title, what it was charged with, which congregation it concerns, when it was appointed and by what minute, and who serves on it.
+
+Choose "Record a commission". Fill in "Title", "Charge (optional)", "Congregation (optional)" (or leave "No congregation"), "Appointed on" and "Minute reference (optional)", then choose "Record commission". "Appointed on" cannot be after today. The people you can add are the presbytery's own records, as for a committee, so choose "Add a member" on the commission's page and use "Add person" under "Community" first if someone is missing.
+
+**A record gives no one access.** It does not open a congregation's PresbyPortal to the commission's members, it does not change what any congregation can see, and the congregation does not see the record. It is the presbytery's note, and each commission's page says so. Members serve in the same six roles as a committee, and the same rules for dates apply: "Ends on" is the first day a person is no longer on it. On a member's row, choose "End term" to end that person's term.
+
+The charge is for general terms, up to 500 characters. Do not record confidential details. Anyone who can manage committees at your presbytery can read it, and PresbyPortal does not record who has read it. It is never copied into the audit trail.
+
+Choose "Edit commission" to correct the record. A commission that has finished can still be corrected this way. Choose "End commission" when it has reported: choose the date under "Ended on", add the minute that received its report if you have one, and confirm. Every member's term ends on that date, the record is kept, and the page offers no way to reopen it. An ended commission leaves the list; choose "Show ended commissions" to see it again. Choose "Remove this record" only for one entered by mistake: it is no longer listed, and the page offers no way to bring it back. Recording, changing, ending and removing a commission are recorded in the audit trail, which does not copy the title, charge or minute.
 
 ## If something looks wrong
 
 - A page that says "You don't have permission to manage committees at": you do not hold the permission above. Ask your presbytery's administrator.
 - A committee under "Not yet labelled": it has no label yet. Open it and choose one.
 - A name that is refused as already in use: another active committee has that name. Choose a different one, or dissolve the other.
+- A commission's page that no longer opens: the record was removed, or the address is not one of this presbytery's commissions.
 - A section that fails to load has a "Try again" link, and the rest of the page still works.

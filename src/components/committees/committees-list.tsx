@@ -13,7 +13,16 @@ import { GuidedEmpty } from "./committee-states";
  * presbytery with no committee of any kind (dissolved ones included) sees the
  * guided empty state, never a bare "No committees".
  */
-export function CommitteesList({ list, slug }: { list: CommitteeList; slug: string }) {
+export function CommitteesList({
+  list,
+  slug,
+  toggleHref,
+}: {
+  list: CommitteeList;
+  slug: string;
+  /** The page's own path with the Dissolved toggle flipped and the commissions toggle kept; defaults to the bare list. */
+  toggleHref?: string;
+}) {
   const base = `/o/${slug}/admin/committees`;
   const sections = groupCommittees(list.committees);
   const liveCount = list.committees.filter((c) => c.dissolvedOn === null).length;
@@ -43,7 +52,7 @@ export function CommitteesList({ list, slug }: { list: CommitteeList; slug: stri
       {list.dissolvedCount > 0 ? (
         <p>
           <Link
-            href={list.showDissolved ? base : `${base}?show=dissolved`}
+            href={toggleHref ?? (list.showDissolved ? base : `${base}?show=dissolved`)}
             className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             {list.showDissolved ? LIST.hideDissolved : LIST.showDissolved(list.dissolvedCount)}

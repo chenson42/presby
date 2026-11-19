@@ -145,6 +145,39 @@ describe("PublicCommitteeDirectory — groupRole -> subtitle mapping", () => {
   });
 });
 
+describe("PublicCommitteeDirectory — the seven-value role titles (DECISION-354, U11)", () => {
+  it("renders vice chair, clerk, secretary and ex officio as titles, and a Member with none (all seven rendered)", async () => {
+    getPublicCommitteeRoster.mockResolvedValue([
+      { groupName: "Ministry Committee", groupRole: "chair", displayName: "Wren Halloway", photoKey: null },
+      { groupName: "Ministry Committee", groupRole: "vice_chair", displayName: "Iris Bramblewood", photoKey: null },
+      { groupName: "Ministry Committee", groupRole: "clerk", displayName: "Corwin Aldridge", photoKey: null },
+      { groupName: "Ministry Committee", groupRole: "secretary", displayName: "Maren Ostrander", photoKey: null },
+      { groupName: "Ministry Committee", groupRole: "ex_officio", displayName: "Tobias Fenwick", photoKey: null },
+      { groupName: "Ministry Committee", groupRole: "leader", displayName: "Odette Marsh", photoKey: null },
+      { groupName: "Ministry Committee", groupRole: "member", displayName: "Pell Ardmore", photoKey: null },
+    ]);
+
+    const el = await PublicCommitteeDirectory({ slug: "alder-creek", urls: SLUG_URLS, filter: {} });
+    const { container } = render(el);
+
+    for (const title of ["Chair", "Vice chair", "Clerk", "Secretary", "Ex officio", "Leader"]) {
+      expect(screen.getByText(title), title).toBeTruthy();
+    }
+    expect(container.querySelectorAll("[data-slot='title']").length).toBe(6);
+    expect(screen.getByText("Pell Ardmore")).toBeTruthy();
+  });
+
+  it("every value in GROUP_ROLE_VALUES has an entry (a missing one fails here, not on a public page)", async () => {
+    const { PUBLIC_ROLE_TITLES } = await import("./committee-directory");
+    const { GROUP_ROLE_VALUES } = await import("@/lib/group-roles");
+    for (const role of GROUP_ROLE_VALUES) {
+      expect(Object.prototype.hasOwnProperty.call(PUBLIC_ROLE_TITLES, role), role).toBe(true);
+    }
+    expect(PUBLIC_ROLE_TITLES.member).toBeUndefined();
+    expect(Object.values(PUBLIC_ROLE_TITLES).filter(Boolean)).toHaveLength(6);
+  });
+});
+
 describe("PublicCommitteeDirectory — photoUrl and field scope", () => {
   it("builds photoUrl from slug + photoKey when present, and renders no <img> when photoKey is null", async () => {
     getPublicCommitteeRoster.mockResolvedValue([

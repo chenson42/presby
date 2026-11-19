@@ -271,6 +271,54 @@ export async function listGrants(
 }
 
 // ---------------------------------------------------------------------------
+// readGroupRoleGrantsInTx
+// ---------------------------------------------------------------------------
+
+/**
+ * "This group carries a role", read inside a transaction the caller already
+ * holds (docs/work-log/2026-11-19-presbytery-committees.md, Phase 3 T11;
+ * DECISION-359). The roles granted to the GROUP (`rg.group_id = $group`, never a
+ * person grant) that are in effect on `asOf` (`starts_on <= asOf`, `ends_on is
+ * null or > asOf`: half-open, as the resolver reads them), by name.
+ *
+ * NO PERMISSION CHECK and NO AUDIT: its callers (the committees reader and
+ * store) have gated on `groups.manage`, which is deliberately NOT
+ * `role_grants.manage` (`listGrants` needs that key, which a committee manager
+ * may not hold). It reads one fact, which roles a committee's roster confers, so
+ * the page can say "adding someone here also gives them that role's access" and
+ * the audit row can carry `grantsRole`. The committees tree is barred from
+ * naming `role_grants` at all (R3.3), which is why this reader lives here.
+ */
+export async function readGroupRoleGrantsInTx(
+  tx: OrgTx,
+  organizationId: string,
+  groupId: string,
+  asOf: string,
+): Promise<{ carriedRoles: Array<{ id: string; name: string }> }> {
+  if (!DATE_RE.test(asOf)) {
+    throw new Error(
+      `readGroupRoleGrantsInTx: asOf must be 'YYYY-MM-DD', got ${JSON.stringify(asOf)}`,
+    );
+  }
+  const result = await tx.execute(sql`
+    select distinct ar.id as role_id, ar.name as role_name
+      from role_grants rg
+      join app_roles ar on ar.id = rg.role_id
+     where rg.organization_id = ${organizationId}::uuid
+       and rg.group_id = ${groupId}::uuid
+       and rg.starts_on <= ${asOf}::date
+       and (rg.ends_on is null or rg.ends_on > ${asOf}::date)
+     order by ar.name, ar.id
+  `);
+  const rows =
+    (result as unknown as { rows?: Array<{ role_id: string; role_name: string }> })
+      .rows ?? [];
+  return {
+    carriedRoles: rows.map((row) => ({ id: row.role_id, name: row.role_name })),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // getGrantFormOptions
 // ---------------------------------------------------------------------------
 

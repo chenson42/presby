@@ -330,6 +330,15 @@ const EXPECTED_ENTRIES: Record<keyof typeof AUDIT_ACTIONS, string> = {
   OVERSIGHT_PHOTO_REMOVED: "tenant.oversight_photo.removed",
   OVERSIGHT_PHOTO_COVER_SET: "tenant.oversight_photo.cover_set",
   OVERSIGHT_PHOTO_CAPTION_SET: "tenant.oversight_photo.caption_set",
+  COMMITTEE_CREATED: "tenant.committee.created",
+  COMMITTEE_UPDATED: "tenant.committee.updated",
+  COMMITTEE_LABELLED: "tenant.committee.labelled",
+  COMMITTEE_DISSOLVED: "tenant.committee.dissolved",
+  COMMITTEE_MEMBER_ADDED: "tenant.committee.member_added",
+  COMMITTEE_MEMBER_ROLE_CHANGED: "tenant.committee.member_role_changed",
+  COMMITTEE_MEMBER_ENDED: "tenant.committee.member_ended",
+  COMMITTEE_MEMBER_LISTED: "tenant.committee.member_listed",
+  COMMITTEE_MEMBER_UNLISTED: "tenant.committee.member_unlisted",
 };
 
 const EXPECTED_COUNT = Object.keys(EXPECTED_ENTRIES).length;

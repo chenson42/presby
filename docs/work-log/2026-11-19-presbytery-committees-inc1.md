@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-19 |
 | 2 — Architectural review | architect | Complete (parent; R1–R6) | Approved with suggestions | 2026-11-19 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-19 |
-| 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | In progress: B1 complete; B2 next | — | 2026-11-19 |
+| 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | In progress: B1 and B2 complete; B3 next | — | 2026-11-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -156,6 +156,90 @@ Strings added or changed: none user-facing. The guards' exception messages are d
 - **What the database does not enforce**: adding a member to a dissolved committee, committee-name uniqueness and seat interval overlap are the store's alone (R2.4, R5.3, R5.4).
 - **Local apply**: `psql "$MIGRATE_DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f drizzle/0090_presby_committees.sql`, then `scripts/committees/seed-dev-committees.sql`.
 - **RLS sections**: `scripts/committees/test-rls-90.sql` (a) to (j) is new. `scripts/test-rls.sql` is touched only through the integration patch.
+
+## B2 — api-developer (2026-11-19)
+
+Scope as the batch table: `group-roles.ts`; the additive `groups.ts` primitives and the presbytery exclusion; `readGroupRoleGrantsInTx`; the `committees/` module (`contract`, `validate`, `copy`, `derive`, `reads`, `store`, `action-gate`); `gateCommitteesPage`; the nine audit keys; the label map on the public committee directory; the two `actions.ts` files; and every test the batch table names. **No page, component, tile, help or Rule 16 shared file is touched.** B1's migration was not changed.
+
+### Files Created
+
+- `src/lib/group-roles.ts` (+ `group-roles.test.ts`): the seven-value vocabulary, the total label map, `GROUP_ADMIN_ROLES`, `COMMITTEE_ROLES` (display order), `SEAT_ROLES`, `TITLE_ONLY_ROLES`, `groupRoleSortRank`. No imports.
+- `src/lib/committees/contract.ts`: flag and key constants, `COMMITTEE_KINDS`, `LIMITS`, `CHANGED_FIELDS`, the viewer/ctx/`Outcome`/`Refusal`/read/action-result types. Its only runtime import is `@/lib/group-roles`.
+- `src/lib/committees/validate.ts`: `parseCommittee`, `parseSeat`, `parseChangeRole`, `parseEndSeat`, `parseDissolve` (each takes the form's string values and an injected `{ today }`) and the five thin zod wrappers (`committeeSchema()`, `seatSchema(env)`, `changeRoleSchema(env, seat?)`, `endSeatSchema(env, seat?)`, `dissolveSchema(env)`).
+- `src/lib/committees/copy.ts`: Increment 1 strings only (C1, C3 to C9 as the module produces them: refusals, validator messages, the titles note, the carries note, warning and dissolve sentence, status badges, seat date lines, the end-control labels, toasts, the C1 page states).
+- `src/lib/committees/derive.ts`: `classifySeat`, `seatsOverlap`, `orderSeats`, `splitRoster`, `chairNames`, `seatDatesText`, `groupCommittees`, `personStatus`, `addYears`, `compareNames`.
+- `src/lib/committees/reads.ts`: `readCommitteeList`, `readCommittee`, `readCommitteeFormDefaults`, `readSeatFormOptions`, `readSeat`.
+- `src/lib/committees/store.ts`: `createCommittee`, `updateCommittee`, `dissolveCommittee`, `addCommitteeSeat`, `changeCommitteeSeatRole`, `endCommitteeSeat`, `setCommitteeSeatPublicListed`. The only writer of `committee_details`.
+- `src/lib/committees/action-gate.ts`: `resolveCommitteesActor`, `finish`, `invalidResult`, `tamperedResult`, `serverEnv`.
+- `src/app/(org)/o/[slug]/admin/committees/new/actions.ts` and `[committeeId]/actions.ts`.
+- Tests: `committees/{validate,derive,copy,contract,boundaries,audit-coverage,action-gate}.test.ts`, `committees/{store,reads,seat-semantics}.db.test.ts`, `admin/committees/actions.test.ts`, `src/lib/groups.committees.db.test.ts`.
+
+### Files Modified
+
+- `src/lib/groups.ts`: additive. `addManagedGroupSeatInTx(tx, org, { groupId, personId, groupRole, startsOn, endsOn? }, { allowedRoles, overlap: "open_row" | "caller" })` and `setManagedMembershipPublicListedInTx(tx, org, actingUserId, { groupMembershipId, publicListed })` are new exports (no permission check, no audit); the private roster-row helper gained two opt-in extras and its two existing callers are untouched; `setGroupMembershipPublicListed` now calls the InTx body with identical behaviour; `GroupRosterEntry.groupRole` widened to `GroupRoleValue` (type only). **The presbytery exclusion** is in the nine gated functions only: `listGroups` and `getGroup` filter in SQL, `getGroupFormOptions` omits the `committee` type, `createGroup` returns `invalid_input` with the C10 sentence, the other five return `invalid_target`. The `*InTx` primitives are not restricted.
+- `src/lib/role-grants.ts`: `readGroupRoleGrantsInTx(tx, org, groupId, asOf)`, returning `{ carriedRoles: Array<{ id, name }> }`. No permission check, no audit.
+- `src/lib/audit.ts`, `audit.test.ts`: the nine `tenant.committee.*` keys (an appended block with the metadata allowlist in a comment).
+- `src/lib/presbytery-reports/contract.ts` (`COMMITTEES_FLAG`), `gate.ts` (`gateCommitteesPage` over the private core), `gate.test.ts` (8 cases, U7).
+- `src/lib/sites.ts`: `PublicCommitteeRosterEntry.groupRole` and the row type take `GroupRoleValue`.
+- `src/app/(public)/site/[slug]/committee-directory.tsx` (+ test): the label map is now `PUBLIC_ROLE_TITLES: Record<GroupRoleValue, string | undefined>` (Chair, Leader, Vice chair, Clerk, Secretary, Ex officio; Member renders none), exported so the test can fail on a missing value.
+- `src/app/(org)/o/[slug]/admin/groups/group-type-labels.ts`: `GROUP_ROLE_LABELS` is a re-export of the total map (F458 closed); the form's offer set `GROUP_ROLES` is unchanged. Needed in B2 because widening `GroupRosterEntry.groupRole` otherwise breaks the groups roster page's typecheck.
+
+### API contract (the next agent consumes this)
+
+No route handler. Every mutation is a Server Action, a plain object of strings (never `FormData`), returning `CommitteesActionResult` (`{ ok: true, data?: { id, unchanged?, seatsEnded?, cancelled?, publicListed? } } | { ok: false, error, field?, kind? }`, a superset of `ActionResult<{ id: string }>`); `error` is always one fixed `copy.ts` string. The key everywhere is `groups.manage`, the flag `org_portal.committees`. Auth and gate on every action, in this order: `assertOrgSession(await auth())` (stale second factor gets the signed-out string), `resolveOrgContext(userId, slug)` (the organization and actor come from the slug and the session; `organizationId` is never a parameter), a UUID check on every id (`not_found` string before any SQL), the pure parse (invalid returns before a transaction opens), then the store, which re-checks key, organization type and committee in its own transaction and writes ONE audit row in the same transaction.
+
+| Action (file) | Values | Audit key and metadata |
+|---|---|---|
+| `createCommitteeAction(slug, v)` (`new/actions.ts`) | `name, kind, purpose, meetsWhen` | `COMMITTEE_CREATED` `{ organizationId, committeeId, kind }` |
+| `updateCommitteeAction(slug, v)` (`[committeeId]/actions.ts`) | `committeeId, name, kind, purpose, meetsWhen` | `COMMITTEE_UPDATED` `{ …, committeeId, changed }` and/or `COMMITTEE_LABELLED` `{ …, committeeId, kind, previousKind }`; nothing changed writes and audits nothing (`unchanged: true`) |
+| `dissolveCommitteeAction(slug, v)` | `committeeId, dissolvedOn` | `COMMITTEE_DISSOLVED` `{ …, committeeId, dissolvedOn, seatsEnded, carriesRole }`; returns `data.seatsEnded` |
+| `addCommitteeSeatAction(slug, v)` | `committeeId, personId, role, startsOn, endsOn` | `COMMITTEE_MEMBER_ADDED` `{ …, committeeId, membershipId, personId, role, startsOn, endsOn, grantsRole, roleIds? }` |
+| `changeCommitteeSeatRoleAction(slug, v)` | `committeeId, membershipId, expectedRole, newRole, effectiveOn` | `COMMITTEE_MEMBER_ROLE_CHANGED` `{ …, committeeId, membershipId, newMembershipId, personId, fromRole, toRole, effectiveOn, grantsRole, publicListed }` (one row) |
+| `endCommitteeSeatAction(slug, v)` | `committeeId, membershipId, endsOn` (empty is allowed for a seat that has not started) | `COMMITTEE_MEMBER_ENDED` `{ …, committeeId, membershipId, personId, role, endsOn, cancelled }`; returns `data.cancelled` |
+| `setCommitteeSeatPublicListedAction(slug, v)` | `committeeId, membershipId, publicListed: boolean` | `COMMITTEE_MEMBER_LISTED` / `_UNLISTED` `{ …, committeeId, membershipId, personId }`; a non-boolean is refused as tampered |
+
+Refusal kinds a form can read from `result.kind`: `unauthenticated`, `two_factor_required`, `forbidden`, `not_found`, `seat_not_found`, `invalid` (with `field`), `duplicate_name`, `overlap`, `not_a_member`, `committee_dissolved`, `already_dissolved`, `already_ended`, `same_role`, `date_before_start`, `stale`, `save_failed`. A client toasts `result.error` and puts an `invalid` message under `result.field`.
+
+**Readers** (`reads.ts`, each its own transaction; the key and then the organization type are checked first, inside it): `readCommitteeList(viewer, { showDissolved? }, now?)` returns `{ today, committees: [{ id, name, meetsWhen, kind | null, dissolvedOn | null, chairNames[], servingCount }], dissolvedCount, showDissolved }` in five queries whatever the committee count; `readCommittee(viewer, committeeId)` returns `{ committee, seats[], carriedRoles[], today }` (each seat has `membershipId, personId, displayName, role, startsOn, endsOn, publicListed, connected, deceased`; split it with `splitRoster` from `derive.ts`); `readCommitteeFormDefaults(viewer, committeeId?)`; `readSeatFormOptions(viewer, committeeId)` (people with `alreadyServes`, `carriedRoles`); `readSeat(viewer, committeeId, membershipId)`. Each returns `{ kind: "ok", data } | { kind: "forbidden" } | { kind: "not_found" }`; the two form readers also return `{ kind: "committee_dissolved" }`. `viewer` is `{ personId, organizationId }` from the gate's identity.
+
+**Page gate:** `gateCommitteesPage({ slug, path })` from `@/lib/presbytery-reports/gate` (signed in, `assertOrgSession`, the four-way org miss, `assertOrgAccess`, `org_portal.committees`, then presbytery type; returns `ReportPageGate` like its siblings). **Form validation:** the five `xSchema(env)` wrappers in `validate.ts` (inject the organization's local date from a reader's `today`); the form components pass the seat to `changeRoleSchema`/`endSeatSchema` so the form agrees with the store. **Strings:** everything the module produces is in `copy.ts`; B3's page chrome that is not there goes through the Copy section.
+
+No seed, `FEATURES` or flag changes. No new dependency.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit`, `npm run lint` (`--max-warnings=0`) | clean |
+| `npm run check` (all ten tripwires, new files staged) | 10/10 passed |
+| New and changed unit tests (no database) | 305 passed across the 13 touched or new unit files (validate 27, derive 19, copy 15, contract 9, boundaries 35, audit-coverage 11, action-gate 10, actions 17, group-roles 8, gate 40 (+8), committee-directory 13 (+2), audit 20, page 9 unchanged) |
+| New DB suites (serial, pipeline branch) | `groups.committees.db` 25, `store.db` 49, `reads.db` 18, `seat-semantics.db` 5: all green |
+| Existing suites, **unmodified** | `groups.test.ts`, `groups.primitives.db.test.ts` and the `admin/groups` page and component tests: 17 files, 191 passed |
+| `scripts/committees/test-rls-90.sql` as presby_app | green after B2 (it needs no change) |
+| Full unit suite, no DB credentials (`npx vitest run`) | 933 files passed, 165 skipped, 1 failed; 15,363 tests passed, 4,433 skipped, 1 failed: `dev-docs.test.ts` "sees the same tables in the exports as are declared in the schema files", **the expected red until integration** (`committees.ts` declares tables that `domain/index.ts` exports only once B1's patch lands) |
+| **Full serial suite, DB included** (`npm run test:db`, pipeline Neon branch, 8,082 s) | 1,099 files: 1,098 passed, 1 failed (the same `dev-docs.test.ts`); 19,797 tests: 19,795 passed, 1 failed, 1 skipped. No fixture rows left behind (0 organizations, users or people from the four new DB suites) |
+
+**Failing-first.** Each mechanism was proven by a deliberate break (originals restored from a copy, verified byte-identical, no mutation text left in `src/`): the audit made best-effort (a swallowed insert failure) turned both sabotage cases red (2 failed: `fail_before` and `fail_after`); a one-day gap between the old seat's end and the new seat's start turned the three atomic-role-change tests red; removing the names lock and the seat lock turned the three concurrency tests red (two creates of one name, two adds of one person, a dissolve racing an add); removing the presbytery exclusion from `listGroups` and the group check turned three D5 tests red; reading "today" in UTC instead of the organization's zone turned the Kiritimati/Pago Pago test red; and in `boundaries.test.ts` a `roleGrants` name, a direct `tx.update(groupMemberships)` and a store write with its `gate` removed each turned their rule red on the real tree (3 failed). Every boundary rule also has a failing sample.
+
+### Implementer Notes
+
+Deviations from the design (none touches an invariant or a string):
+
+1. **`seat_not_found` is a Refusal kind.** C9 has two `not_found` strings ("That committee could not be found." and "That member could not be found."); the second needs its own kind to be a `copy.ts` entry, and the two are pinned as the only strings that differ by object.
+2. **`RefusalDetail.during: "edit"`** selects C4's sentence ("…kept as history and isn't edited here.") for an edit of a dissolved committee, and C5's for an add. Both strings are in the Copy section.
+3. **Dissolved committee and seat actions.** Change role and end term on a seat of a dissolved committee answer `already_ended` (every such seat is ended), not `committee_dissolved`, whose string says "so no one can be added".
+4. **Field-level rules that need the stored seat are `invalid` outcomes with a field** (change-role date before the seat's start or not before its planned end; end date before the start; dissolve date in the future), using the C6, C7, C8 strings as the Copy section words them. `date_before_start` is used only for dissolve ("A member started on {date}…"). The dissolve future-date rule is re-checked in the store against the organization's own day (the action's parse uses the server's UTC day, as designed).
+5. **Two extra locks, same order.** `updateCommittee` takes the seat lock after the names lock (a rename racing a dissolve), and `setCommitteeSeatPublicListed` takes the seat lock (it must not interleave with a role change, which carries the listing). The order is always names then seats, so no cycle exists. Setting the listing to its current value is `unchanged` (no write, no audit), which the design did not say.
+6. **Blank dates.** A blank "Effective on" has no Copy string and reads "That date isn't valid."; a blank end date parses to `null` (the cancel-planned-term path ignores the field) and the store refuses it for a seat that is serving.
+7. **Reader query count is 5** (access key, organization type, organization zone, committees, grouped serving seats), not the design's three; the property pinned is that it is fixed for 2 and for 30 committees.
+8. **Same-transaction audit rows share a `created_at`** (`now()` is the transaction's start), so a test or a future audit view must not order the two `updateCommittee` rows by time.
+9. **Action values carry their ids** (`(slug, v)` with `committeeId` and `membershipId` inside `v`), as the API Contract table words it, not as separate arguments.
+10. **`boundaries.test.ts` has one self-expiring exemption:** `admin/committees/page.tsx` is allowed to lack `gateCommitteesPage` only while its text still renders `ComingSoon`. B3 replaces that page; the exemption disappears with the placeholder and cannot hide a page that forgot the gate. The real-tree page rule is already enforced for every other page.
+11. **`PUBLIC_ROLE_TITLES` is a new export of `committee-directory.tsx`**, and `copy.ts` imports the pure `formatDateUTC` (the one place a date inside a message is formatted outside JSX).
+
+Strings: no string was added outside the Copy section. Two cross-checks the Copy section does not fully spell out and B3 should know: the add form's role helper, person helper and the empty-state text (C5) and the date fields' helper text (C5 to C8) are page chrome, not in `copy.ts`; B3 puts them where the oversight forms put theirs.
+
+**Handoff to B3 (ux-developer).** Import `reads`, `copy`, `contract`, `derive`, `validate` as above; pages call `gateCommitteesPage` then `isUuid` on every id segment (404 before any read) then the readers with `Promise.all`; a reader's `forbidden` renders `CommitteesForbidden` (`PAGE_STATE.forbidden(name)`), `not_found` renders `notFound()`, a throw renders the section load error (`PAGE_STATE.sectionError` / `tryAgain`), and an `OrgAccessError` is rethrown. Replace the placeholder `admin/committees/page.tsx` and its `page.test.tsx` (the boundaries exemption then expires). Forms call the actions above and use the zod wrappers with the reader's `today`; each root needs `HydrationGate`. `splitRoster(seats, today)`, `seatDatesText(seat, today)`, `chairNames`, `groupCommittees` and `personStatus` are the derivations; `carriesNote`, `carriesWarning`, `TITLES_NOTE`, `STATUS_BADGE`, `END_CONTROL`, `seatDateLineText` are the strings. The public-listing switch is a copy of the groups admin's control with `setCommitteeSeatPublicListedAction` passed in as a prop (the committees tree imports nothing from `admin/groups/`). The `groups` admin pointer (C10) needs `resolved.org.organizationType`; the exclusion itself is already in `groups.ts`.
 
 ---
 

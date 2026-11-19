@@ -789,6 +789,42 @@ export const AUDIT_ACTIONS = {
   OVERSIGHT_PHOTO_REMOVED: "tenant.oversight_photo.removed",
   OVERSIGHT_PHOTO_COVER_SET: "tenant.oversight_photo.cover_set",
   OVERSIGHT_PHOTO_CAPTION_SET: "tenant.oversight_photo.caption_set",
+  // ---------------------------------------------------------------------------
+  // Presbytery committees, Increment 1 (DECISION-353, 354, 357, 359): the nine
+  // committee writes, in an APPENDED block. Written by src/lib/committees/store.ts
+  // with insertAuditRow(tx, ...) in the mutation's OWN transaction (a failed audit
+  // insert undoes the change; never recordAudit()). resourceType "committee",
+  // resourceId the committee's group id; the member events use resourceType
+  // "committee_member" and the membership id. Metadata is ids, closed
+  // enumerations, booleans, counts, dates and field NAMES only: NEVER a committee
+  // name, purpose, meets-when text or a person's name (audit_events is
+  // platform-readable). The existing group.* events stay with the groups admin, so
+  // the later presbytery audit log can filter by the committee. prefix.
+  //   - COMMITTEE_CREATED: { organizationId, committeeId, kind }
+  //   - COMMITTEE_UPDATED: { ..., committeeId, changed: ("name" | "purpose" |
+  //     "meetsWhen")[] }
+  //   - COMMITTEE_LABELLED: { ..., committeeId, kind, previousKind: string | null }
+  //   - COMMITTEE_DISSOLVED: { ..., committeeId, dissolvedOn, seatsEnded,
+  //     carriesRole }
+  //   - COMMITTEE_MEMBER_ADDED: { ..., committeeId, membershipId, personId, role,
+  //     startsOn, endsOn, grantsRole, roleIds? } (roleIds only when the committee
+  //     carries a role: adding a member is then an access change)
+  //   - COMMITTEE_MEMBER_ROLE_CHANGED: { ..., committeeId, membershipId,
+  //     newMembershipId, personId, fromRole, toRole, effectiveOn, grantsRole,
+  //     publicListed } (ONE row for the whole change)
+  //   - COMMITTEE_MEMBER_ENDED: { ..., committeeId, membershipId, personId, role,
+  //     endsOn, cancelled }
+  //   - COMMITTEE_MEMBER_LISTED / COMMITTEE_MEMBER_UNLISTED: { ..., committeeId,
+  //     membershipId, personId }
+  COMMITTEE_CREATED: "tenant.committee.created",
+  COMMITTEE_UPDATED: "tenant.committee.updated",
+  COMMITTEE_LABELLED: "tenant.committee.labelled",
+  COMMITTEE_DISSOLVED: "tenant.committee.dissolved",
+  COMMITTEE_MEMBER_ADDED: "tenant.committee.member_added",
+  COMMITTEE_MEMBER_ROLE_CHANGED: "tenant.committee.member_role_changed",
+  COMMITTEE_MEMBER_ENDED: "tenant.committee.member_ended",
+  COMMITTEE_MEMBER_LISTED: "tenant.committee.member_listed",
+  COMMITTEE_MEMBER_UNLISTED: "tenant.committee.member_unlisted",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

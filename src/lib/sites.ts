@@ -21,6 +21,7 @@ import { isPlatformHost, parseSiteKey, platformOrigin, requestHost } from "@/lib
 import { buildSiteUrls, slugSitePath, type SiteUrls } from "@/lib/site-urls";
 import { normalizeAddress } from "@/lib/site-address";
 import type { OfficerOffice } from "@/lib/officers";
+import type { GroupRoleValue } from "@/lib/group-roles";
 
 /**
  * Public organization websites — the tenant/platform query-and-mutation
@@ -1828,14 +1829,14 @@ export interface PublicCommitteeRosterFilter {
  * security one. */
 export interface PublicCommitteeRosterEntry {
   groupName: string;
-  groupRole: "chair" | "leader" | "member";
+  groupRole: GroupRoleValue;
   displayName: string;
   photoKey: string | null;
 }
 
 interface PublicCommitteeRosterRow {
   group_name: string;
-  group_role: "chair" | "leader" | "member";
+  group_role: GroupRoleValue;
   display_name: string;
   photo_key: string | null;
 }

@@ -5,6 +5,7 @@ import { type db } from "@/lib/db";
 import { groupMemberships, groups, groupTypes } from "@/lib/db/domain/groups";
 import { memberships, people } from "@/lib/db/domain/people";
 import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
+import type { GroupRoleValue } from "@/lib/group-roles";
 
 /**
  * Groups administration — docs/work-log/2026-08-26-groups-admin.md, Phase 3
@@ -80,6 +81,24 @@ import { AUDIT_ACTIONS, recordAudit } from "@/lib/audit";
  * produces. `setGroupMembershipPublicDisplayOrder()` is NOT audited at all
  * (presentation-order only, not a disclosure fact) — see its own doc
  * comment.
+ *
+ * PRESBYTERY COMMITTEES (docs/work-log/2026-11-19-presbytery-committees.md,
+ * Phase 2 R1 and Phase 3 T10; DECISION-352, 357, 359). THE CHANGES BELOW ARE
+ * ADDITIVE AND OPT-IN. (1) `addManagedGroupSeatInTx` and
+ * `setManagedMembershipPublicListedInTx` are new exported primitives for the
+ * committees store (which gates on its own key first, the worship precedent);
+ * the two existing callers of the private roster-row helper are untouched
+ * (`overlap: "open_row"` and the three-role set are its defaults). (2) At a
+ * PRESBYTERY, `committee`-type groups belong to Committees & Commissions, so
+ * the nine GATED functions (`listGroups`, `getGroup`, `getGroupFormOptions`,
+ * `createGroup`, `updateGroup`, `addGroupMember`, `endGroupMembership`,
+ * `setGroupMembershipPublicListed`, `setGroupMembershipPublicDisplayOrder`)
+ * exclude or refuse (`invalid_target`) such a group, because otherwise two
+ * writers would apply different rules (dissolve, planned end dates, interval
+ * overlap, an atomic role change, six roles against three) to the same rows.
+ * A congregation's committees stay here exactly as before. The `*InTx`
+ * primitives are NOT restricted: the committees store and worship call them
+ * after their own gates. `groups.committees.db.test.ts` pins all of it.
  */
 
 type OrgTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -124,6 +143,67 @@ async function hasGroupsManage(
   );
 }
 
+/**
+ * `<alias>` (a `groups` alias in the caller's query) is a `committee`-type group
+ * at a PRESBYTERY: the rows Committees & Commissions owns (R1, T10). One SQL
+ * fragment so every gated read and write below applies the same test. `alias`
+ * is one of this file's own fixed table aliases, never a request value.
+ */
+function isPresbyteryCommitteeSql(alias: "g") {
+  const a = sql.raw(alias);
+  return sql`exists (
+    select 1
+      from organizations po
+      join group_types pgt on pgt.id = ${a}.group_type_id
+     where po.id = ${a}.organization_id
+       and po.organization_type = 'presbytery'
+       and pgt.key = 'committee'
+  )`;
+}
+
+async function anyRow(tx: OrgTx, query: ReturnType<typeof sql>): Promise<boolean> {
+  const result = await tx.execute(query);
+  return ((result as unknown as { rows?: unknown[] }).rows?.length ?? 0) > 0;
+}
+
+/** This group is a presbytery's committee: a gated groups-admin function refuses it (`invalid_target`). */
+function isPresbyteryCommitteeGroup(
+  tx: OrgTx,
+  organizationId: string,
+  groupId: string,
+): Promise<boolean> {
+  return anyRow(
+    tx,
+    sql`select 1 from groups g
+         where g.id = ${groupId}
+           and g.organization_id = ${organizationId}
+           and ${isPresbyteryCommitteeSql("g")}
+         limit 1`,
+  );
+}
+
+/** This membership row belongs to a presbytery's committee. */
+function isPresbyteryCommitteeMembership(
+  tx: OrgTx,
+  organizationId: string,
+  groupMembershipId: string,
+): Promise<boolean> {
+  return anyRow(
+    tx,
+    sql`select 1
+          from group_memberships gm
+          join groups g on g.id = gm.group_id and g.organization_id = gm.organization_id
+         where gm.id = ${groupMembershipId}
+           and gm.organization_id = ${organizationId}
+           and ${isPresbyteryCommitteeSql("g")}
+         limit 1`,
+  );
+}
+
+/** The sentence a hand-built request for the committee type at a presbytery is told (C10). */
+const PRESBYTERY_COMMITTEE_MOVED =
+  "Committees at a presbytery are kept under Committees & Commissions.";
+
 // ---------------------------------------------------------------------------
 // Shared result / entry types
 // ---------------------------------------------------------------------------
@@ -160,7 +240,8 @@ export interface GroupRosterEntry {
   groupMembershipId: string;
   personId: string;
   displayName: string;
-  groupRole: GroupRole;
+  /** Widened to the seven-value vocabulary (DECISION-354); a type-only change. */
+  groupRole: GroupRoleValue;
   /** 'YYYY-MM-DD'. */
   startsOn: string;
   /** 'YYYY-MM-DD', or null (current). */
@@ -249,6 +330,7 @@ export async function listGroups(
           on gm.group_id = g.id and gm.organization_id = g.organization_id
        where g.organization_id = ${organizationId}
          and g.membership_source = 'managed'
+         and not ${isPresbyteryCommitteeSql("g")}
        group by g.id, g.name, g.group_type_id
        order by g.name
     `);
@@ -417,6 +499,7 @@ export async function getGroup(
        where g.id = ${groupId}
          and g.organization_id = ${organizationId}
          and g.membership_source = 'managed'
+         and not ${isPresbyteryCommitteeSql("g")}
        limit 1
     `);
     const groupRow = (
@@ -466,7 +549,7 @@ export async function getGroup(
             lastName: row.last_name,
             preferredName: row.preferred_name,
           }),
-          groupRole: row.group_role as GroupRole,
+          groupRole: row.group_role as GroupRoleValue,
           startsOn: row.starts_on,
           endsOn: row.ends_on,
           publicListed: row.public_listed,
@@ -503,11 +586,20 @@ export async function getGroupFormOptions(
       return { kind: "forbidden" };
     }
 
-    const groupTypeRows = await tx
-      .select({ id: groupTypes.id, key: groupTypes.key, name: groupTypes.name })
-      .from(groupTypes)
-      .where(inArray(groupTypes.key, MANAGEABLE_GROUP_TYPE_KEYS))
-      .orderBy(groupTypes.name);
+    const presbytery = await anyRow(
+      tx,
+      sql`select 1 from organizations o
+           where o.id = ${organizationId} and o.organization_type = 'presbytery'
+           limit 1`,
+    );
+    // At a presbytery the Committee type is Committees & Commissions' (R1).
+    const groupTypeRows = (
+      await tx
+        .select({ id: groupTypes.id, key: groupTypes.key, name: groupTypes.name })
+        .from(groupTypes)
+        .where(inArray(groupTypes.key, MANAGEABLE_GROUP_TYPE_KEYS))
+        .orderBy(groupTypes.name)
+    ).filter((row) => !(presbytery && row.key === "committee"));
 
     const peopleRows = await tx
       .select({
@@ -569,6 +661,22 @@ export async function createGroup(
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasGroupsManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
+    }
+
+    // A hand-built request for the Committee type at a presbytery is told where
+    // committees went (the type select omits it, so only such a request lands here).
+    const committeeAtPresbytery = await anyRow(
+      tx,
+      sql`select 1
+            from group_types gt, organizations o
+           where gt.id = ${input.groupTypeId}
+             and gt.key = 'committee'
+             and o.id = ${organizationId}
+             and o.organization_type = 'presbytery'
+           limit 1`,
+    );
+    if (committeeAtPresbytery) {
+      return { kind: "invalid_input", message: PRESBYTERY_COMMITTEE_MOVED };
     }
 
     return insertManagedGroupInTx(tx, organizationId, input);
@@ -657,6 +765,10 @@ export async function updateGroup(
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasGroupsManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
+    }
+
+    if (await isPresbyteryCommitteeGroup(tx, organizationId, input.groupId)) {
+      return { kind: "invalid_target" };
     }
 
     return updateManagedGroupInTx(tx, organizationId, input);
@@ -763,6 +875,10 @@ export async function addGroupMember(
       return { kind: "forbidden" };
     }
 
+    if (await isPresbyteryCommitteeGroup(tx, organizationId, input.groupId)) {
+      return { kind: "invalid_target" };
+    }
+
     return addManagedGroupRosterRowInTx(tx, organizationId, input);
   });
 }
@@ -794,11 +910,20 @@ export async function addManagedGroupMemberInTx(
   });
 }
 
-/** Shared body of `addGroupMember` and `addManagedGroupMemberInTx`; any role. Not exported. */
+/** The two opt-in parameters of `addManagedGroupRosterRowInTx`; absent, it behaves exactly as it always did. */
+interface RosterRowExtras {
+  /** `'YYYY-MM-DD'` or null: a planned end. Absent means open (the column default). */
+  endsOn?: string | null;
+  /** `"caller"` skips ONLY the `ends_on is null` open-row check (the caller has checked intervals under its own lock). */
+  overlap?: "open_row" | "caller";
+}
+
+/** Shared body of `addGroupMember`, `addManagedGroupMemberInTx` and `addManagedGroupSeatInTx`; any role. Not exported. */
 async function addManagedGroupRosterRowInTx(
   tx: OrgTx,
   organizationId: string,
-  input: AddGroupMemberInput,
+  input: Omit<AddGroupMemberInput, "groupRole"> & { groupRole: GroupRoleValue },
+  extras: RosterRowExtras = {},
 ): Promise<GroupsResult<{ groupMembershipId: string }>> {
   const [group] = await tx
     .select({ id: groups.id, name: groups.name })
@@ -836,20 +961,22 @@ async function addManagedGroupRosterRowInTx(
   }
   const personName = displayName(membership);
 
-  const [existingOpen] = await tx
-    .select({ id: groupMemberships.id })
-    .from(groupMemberships)
-    .where(
-      and(
-        eq(groupMemberships.organizationId, organizationId),
-        eq(groupMemberships.groupId, input.groupId),
-        eq(groupMemberships.personId, input.personId),
-        isNull(groupMemberships.endsOn),
-      ),
-    )
-    .limit(1);
-  if (existingOpen) {
-    return { kind: "overlap", personName, groupName: group.name };
+  if (extras.overlap !== "caller") {
+    const [existingOpen] = await tx
+      .select({ id: groupMemberships.id })
+      .from(groupMemberships)
+      .where(
+        and(
+          eq(groupMemberships.organizationId, organizationId),
+          eq(groupMemberships.groupId, input.groupId),
+          eq(groupMemberships.personId, input.personId),
+          isNull(groupMemberships.endsOn),
+        ),
+      )
+      .limit(1);
+    if (existingOpen) {
+      return { kind: "overlap", personName, groupName: group.name };
+    }
   }
 
   const [inserted] = await tx
@@ -861,10 +988,83 @@ async function addManagedGroupRosterRowInTx(
       groupRole: input.groupRole,
       source: "managed",
       startsOn: input.startsOn,
+      endsOn: extras.endsOn ?? null,
     })
     .returning({ id: groupMemberships.id });
 
   return { kind: "ok", data: { groupMembershipId: inserted!.id } };
+}
+
+export interface AddManagedGroupSeatInput {
+  groupId: string;
+  personId: string;
+  groupRole: GroupRoleValue;
+  /** 'YYYY-MM-DD'. */
+  startsOn: string;
+  /** 'YYYY-MM-DD' (a planned end), or null/absent (open). */
+  endsOn?: string | null;
+}
+
+export interface AddManagedGroupSeatOptions {
+  /** The roles this caller may write. A role outside it THROWS: a call-shape defect, like `addGroupMember`'s role check. */
+  allowedRoles: readonly GroupRoleValue[];
+  /**
+   * `"open_row"` is today's behaviour (an existing open row for the person is `overlap`).
+   * `"caller"` skips only that check: the caller has already checked intervals under its
+   * own lock (the committees store; planned end dates make an open-row check too narrow).
+   */
+  overlap: "open_row" | "caller";
+}
+
+/**
+ * Adds a seat to a managed group's roster for a caller that has gated on its own
+ * key (the committees store, after `groups.manage`; DECISION-359). NO PERMISSION
+ * CHECK here. The body of the private roster-row helper with three opt-in
+ * parameters: a caller-supplied allowed-role set, an optional planned `endsOn`,
+ * and the overlap mode. The same order of checks as `addGroupMember` otherwise:
+ * a managed group (`invalid_target`), a CURRENT membership at this organization
+ * (F21 shape, `invalid_target`), then the open-row check unless the caller took it.
+ * `endsOn` before `startsOn` is `invalid_input`; equal is allowed (a zero-length
+ * row that served no day, which history shows).
+ */
+export async function addManagedGroupSeatInTx(
+  tx: OrgTx,
+  organizationId: string,
+  input: AddManagedGroupSeatInput,
+  options: AddManagedGroupSeatOptions,
+): Promise<GroupsResult<{ groupMembershipId: string }>> {
+  if (!DATE_RE.test(input.startsOn)) {
+    throw new Error(
+      `addManagedGroupSeatInTx: startsOn must be 'YYYY-MM-DD', got ${JSON.stringify(input.startsOn)}`,
+    );
+  }
+  if (input.endsOn != null && !DATE_RE.test(input.endsOn)) {
+    throw new Error(
+      `addManagedGroupSeatInTx: endsOn must be 'YYYY-MM-DD' or null, got ${JSON.stringify(input.endsOn)}`,
+    );
+  }
+  if (!options.allowedRoles.includes(input.groupRole)) {
+    throw new Error(
+      `addManagedGroupSeatInTx: groupRole ${JSON.stringify(input.groupRole)} is not allowed for this caller`,
+    );
+  }
+  if (input.endsOn != null && input.endsOn < input.startsOn) {
+    return {
+      kind: "invalid_input",
+      message: "The end date can't be before the start date.",
+    };
+  }
+  return addManagedGroupRosterRowInTx(
+    tx,
+    organizationId,
+    {
+      groupId: input.groupId,
+      personId: input.personId,
+      groupRole: input.groupRole,
+      startsOn: input.startsOn,
+    },
+    { endsOn: input.endsOn ?? null, overlap: options.overlap },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -902,6 +1102,16 @@ export async function endGroupMembership(
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasGroupsManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
+    }
+
+    if (
+      await isPresbyteryCommitteeMembership(
+        tx,
+        organizationId,
+        input.groupMembershipId,
+      )
+    ) {
+      return { kind: "invalid_target" };
     }
 
     return endManagedGroupMemberInTx(tx, organizationId, input);
@@ -1025,37 +1235,22 @@ export async function setGroupMembershipPublicListed(
         return { kind: "forbidden" };
       }
 
-      const [row] = await tx
-        .select({ id: groupMemberships.id })
-        .from(groupMemberships)
-        .where(
-          and(
-            eq(groupMemberships.id, input.groupMembershipId),
-            eq(groupMemberships.organizationId, organizationId),
-            eq(groupMemberships.source, "managed"),
-          ),
+      if (
+        await isPresbyteryCommitteeMembership(
+          tx,
+          organizationId,
+          input.groupMembershipId,
         )
-        .limit(1);
-      if (!row) {
+      ) {
         return { kind: "invalid_target" };
       }
 
-      await tx
-        .update(groupMemberships)
-        .set({
-          publicListed: input.publicListed,
-          publicListedBy: actingUserId,
-          publicListedAt: new Date(),
-        })
-        .where(eq(groupMemberships.id, input.groupMembershipId));
-
-      return {
-        kind: "ok",
-        data: {
-          groupMembershipId: input.groupMembershipId,
-          publicListed: input.publicListed,
-        },
-      };
+      return setManagedMembershipPublicListedInTx(
+        tx,
+        organizationId,
+        actingUserId,
+        input,
+      );
     },
   );
 
@@ -1071,6 +1266,55 @@ export async function setGroupMembershipPublicListed(
   }
 
   return result;
+}
+
+/**
+ * The body of `setGroupMembershipPublicListed` after its gate, for a caller that
+ * has gated on its own key and audits in its own transaction (the committees
+ * store: `committee.member_listed|unlisted`, written with the change; the
+ * groups admin's own events are written after commit by `recordAudit()`, which a
+ * disclosure fact at a presbytery must not depend on). NO PERMISSION CHECK and
+ * NO AUDIT here. Scoped to `(id, organizationId, source = 'managed')`:
+ * `invalid_target` for a missing row or a derived one (Flow 2's guard).
+ * `publicListedBy`/`publicListedAt` are stamped on every call, both directions.
+ */
+export async function setManagedMembershipPublicListedInTx(
+  tx: OrgTx,
+  organizationId: string,
+  actingUserId: string,
+  input: SetGroupMembershipPublicListedInput,
+): Promise<GroupsResult<{ groupMembershipId: string; publicListed: boolean }>> {
+  const [row] = await tx
+    .select({ id: groupMemberships.id })
+    .from(groupMemberships)
+    .where(
+      and(
+        eq(groupMemberships.id, input.groupMembershipId),
+        eq(groupMemberships.organizationId, organizationId),
+        eq(groupMemberships.source, "managed"),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    return { kind: "invalid_target" };
+  }
+
+  await tx
+    .update(groupMemberships)
+    .set({
+      publicListed: input.publicListed,
+      publicListedBy: actingUserId,
+      publicListedAt: new Date(),
+    })
+    .where(eq(groupMemberships.id, input.groupMembershipId));
+
+  return {
+    kind: "ok",
+    data: {
+      groupMembershipId: input.groupMembershipId,
+      publicListed: input.publicListed,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1122,6 +1366,16 @@ export async function setGroupMembershipPublicDisplayOrder(
   return withOrgContext(viewerPersonId, organizationId, async (tx) => {
     if (!(await hasGroupsManage(tx, viewerPersonId, organizationId))) {
       return { kind: "forbidden" };
+    }
+
+    if (
+      await isPresbyteryCommitteeMembership(
+        tx,
+        organizationId,
+        input.groupMembershipId,
+      )
+    ) {
+      return { kind: "invalid_target" };
     }
 
     const [row] = await tx

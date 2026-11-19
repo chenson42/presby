@@ -6,7 +6,7 @@ import { cachedAuth } from "@/lib/auth/cached-auth";
 import { assertOrgAccess, OrgAccessError, resolveOrgContext, type OrganizationType } from "@/lib/authz";
 import { isFlagEnabled } from "@/lib/flags";
 import { assertOrgSession, orgTotpRedirectUrl } from "@/lib/org-portal/session-check";
-import { INSIGHTS_FLAG, OVERSIGHT_FLAG, REPORT_ORG_TYPES, REPORTS_FLAG, type ReportExport, type ReportRead, type ReportViewer } from "./contract";
+import { COMMITTEES_FLAG, INSIGHTS_FLAG, OVERSIGHT_FLAG, REPORT_ORG_TYPES, REPORTS_FLAG, type ReportExport, type ReportRead, type ReportViewer } from "./contract";
 import { ROUTE_COPY } from "./copy";
 
 /**
@@ -35,7 +35,7 @@ import { ROUTE_COPY } from "./copy";
  * under the four segments calls this file.
  *
  * The page skin is one private core, `gatePresbyteryPage`, with a closed flag
- * union and no default, and three named exports over it (DECISION-342, 347): no
+ * union and no default, and four named exports over it (DECISION-342, 347, 359): no
  * call site passes a flag, so none can pass the wrong one, and the
  * `boundaries.test.ts` of each surface pins each page to its own name. The third,
  * `gateOversightPage`, is Congregation Oversight's (`org_portal.oversight`):
@@ -67,7 +67,11 @@ export type ReportPageGate =
   | { ok: false; state: ReportGateState };
 
 /** The flags a presbytery page gate may check: a closed union, never a free string. */
-type PresbyteryPageFlag = typeof REPORTS_FLAG | typeof INSIGHTS_FLAG | typeof OVERSIGHT_FLAG;
+type PresbyteryPageFlag =
+  | typeof REPORTS_FLAG
+  | typeof INSIGHTS_FLAG
+  | typeof OVERSIGHT_FLAG
+  | typeof COMMITTEES_FLAG;
 
 interface PageGateOptions {
   slug: string;
@@ -88,6 +92,17 @@ export function gateInsightsPage(options: PageGateOptions): Promise<ReportPageGa
 /** Congregation Oversight's gate (`/o/<slug>/admin/oversight/**`): the `org_portal.oversight` flag, same order and result (DECISION-347). */
 export function gateOversightPage(options: PageGateOptions): Promise<ReportPageGate> {
   return gatePresbyteryPage({ ...options, flag: OVERSIGHT_FLAG });
+}
+
+/**
+ * Committees & Commissions' gate (`/o/<slug>/admin/committees/**`): the
+ * `org_portal.committees` flag, same order and result (DECISION-359). Like the
+ * others it checks no KEY: each committees reader checks `groups.manage` inside
+ * its own transaction. It adds the Node-side second-factor recheck the
+ * placeholder page lacked.
+ */
+export function gateCommitteesPage(options: PageGateOptions): Promise<ReportPageGate> {
+  return gatePresbyteryPage({ ...options, flag: COMMITTEES_FLAG });
 }
 
 async function gatePresbyteryPage(options: PageGateOptions & { flag: PresbyteryPageFlag }): Promise<ReportPageGate> {

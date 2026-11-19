@@ -7,7 +7,7 @@
  * states render; `?show` is read as a fixed enum; the form pages render their C4,
  * C5 and C6 states. The placeholder page test this file replaces tested `ComingSoon`.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 vi.mock("server-only", () => ({}));
@@ -31,6 +31,10 @@ const reads = vi.hoisted(() => ({
   readCommitteeFormDefaults: vi.fn(),
   readSeatFormOptions: vi.fn(),
   readSeat: vi.fn(),
+  readCommissionList: vi.fn(),
+  readCommission: vi.fn(),
+  readCommissionFormOptions: vi.fn(),
+  readCommissionMemberFormOptions: vi.fn(),
 }));
 vi.mock("@/lib/committees/reads", () => reads);
 
@@ -43,6 +47,8 @@ vi.mock("./[committeeId]/actions", () => ({
   dissolveCommitteeAction: vi.fn(),
   setCommitteeSeatPublicListedAction: vi.fn(),
 }));
+
+vi.mock("./commissions/[commissionId]/actions", () => ({ endCommissionMemberAction: vi.fn() }));
 
 const notFoundMock = vi.hoisted(() =>
   vi.fn(() => {
@@ -68,6 +74,11 @@ const CID = "00000000-0000-4000-8000-000000000001";
 const MID = "00000000-0000-4000-8000-000000000002";
 const IDENTITY = { userId: "u", email: null, personId: "p", organizationId: "o", organizationName: "Presbytery of the Northern Reach", organizationType: "presbytery", slug: SLUG };
 const okGate = { ok: true as const, identity: IDENTITY };
+
+const NO_COMMISSIONS = { kind: "ok", data: { today: "2026-11-19", commissions: [], endedCount: 0, showEnded: false } };
+beforeEach(() => {
+  reads.readCommissionList.mockResolvedValue(NO_COMMISSIONS);
+});
 
 afterEach(() => {
   cleanup();
@@ -182,7 +193,7 @@ describe("the list page", () => {
     expect(reads.readCommitteeList).toHaveBeenCalledWith(IDENTITY, { showDissolved: true });
     expect(gate).toHaveBeenCalledWith({ slug: SLUG, path: `/o/${SLUG}/admin/committees?show=dissolved` });
     expect(screen.getByRole("heading", { level: 1, name: "Committees & Commissions" })).toBeTruthy();
-    expect(text()).toContain("The committees of Presbytery of the Northern Reach, and who serves on each.");
+    expect(text()).toContain("The committees of Presbytery of the Northern Reach, who serves on each, and the administrative commissions it has recorded.");
     expect(screen.getByRole("link", { name: "New committee" }).getAttribute("href")).toBe(`/o/${SLUG}/admin/committees/new`);
     expect(screen.getAllByText("Chair: Ada Lovelace").length).toBeGreaterThan(0);
   });

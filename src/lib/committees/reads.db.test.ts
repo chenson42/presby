@@ -26,6 +26,15 @@
  *     not for a past or zero-length one, and excludes people whose membership ended;
  *   - the two form readers answer `committee_dissolved` for a dissolved committee.
  *
+ *   - INCREMENT 2, commission records (the last describe): each commission reader is
+ *     `forbidden` without the key (checked before the id); the congregation a record is
+ *     about reads ZERO rows of it (organization-only policy); the list never carries a
+ *     charge, counts serving members by the half-open rule on the organization's local
+ *     day, and uses a fixed number of queries; a removed record, another presbytery's, a
+ *     committee's group id and a malformed id are one `not_found`; the congregation
+ *     choices include a closing congregation and exclude one that left; the member form
+ *     answers `commission_ended` for an ended record.
+ *
  * Run (serial, per docs/testing.md):
  *   npx dotenv -e .env.local -- vitest run --no-file-parallelism src/lib/committees/reads.db.test.ts
  */
@@ -503,6 +512,378 @@ describe.skipIf(!hasDb)("committees/reads.ts (Postgres-backed)", { timeout: 240_
       ] as const) {
         expect(await reads.readSeat(viewer(clerk), committeeId, seatId), `${committeeId} ${seatId}`).toEqual({ kind: "not_found" });
       }
+    });
+  });
+
+  // ===========================================================================
+  // INCREMENT 2: commission records
+  // ===========================================================================
+  describe("commission records (Increment 2)", () => {
+    let CG1: string; // a member congregation of P
+    let CGCLOSING: string; // a member congregation of P whose lifecycle is no longer active
+    let CGDEPART: string; // a congregation that left P for P2
+    let CGX: string; // a member congregation of the other presbytery
+    const made: string[] = [];
+
+    async function affiliate(subject: string, parent: string) {
+      await q(sql`
+        insert into organization_affiliations
+          (organization_id, subject_org_id, parent_org_id, relationship_type, effective_from, authority, minute_reference)
+        values (${parent}, ${subject}, ${parent}, 'member_congregation', '2000-01-01', 'recorded',
+                'Fixture affiliation for the commission reads of reads.db.test.ts')`);
+    }
+    async function cong(label: string, parent: string): Promise<string> {
+      const id = await fx.makeOrg(`${label}${(n += 1)}`);
+      made.push(id);
+      await affiliate(id, parent);
+      return id;
+    }
+
+    /** A commission record, inserted as the owner (the owner may insert history: an ended or removed record). */
+    async function record(
+      org: string,
+      over: { title?: string; charge?: string | null; about?: string | null; appointedOn?: string; endedOn?: string | null; removed?: boolean } = {},
+    ): Promise<string> {
+      const endedOn = over.endedOn ?? null;
+      const rows = await q(sql`
+        insert into commission_records
+          (organization_id, about_org_id, title, charge, appointed_on, ended_on, ended_by, ended_at, removed_at, removed_by, created_by, updated_by)
+        values (${org}, ${over.about ?? null}, ${over.title ?? `Rd90 ${stamp} Commission ${(n += 1)}`}, ${over.charge ?? null},
+                ${over.appointedOn ?? shift(TODAY, -100)}::date,
+                ${endedOn}::date, ${endedOn ? fx.actingUserId : null}, ${endedOn ? sql`now()` : null},
+                ${over.removed ? sql`now()` : null}, ${over.removed ? fx.actingUserId : null}, ${fx.actingUserId}, ${fx.actingUserId})
+        returning id`);
+      return String(rows[0]!.id);
+    }
+    async function member(org: string, commissionId: string, personId: string, role: string, startsOn: string, endsOn: string | null = null) {
+      return String(
+        (
+          await q(sql`insert into commission_record_members (organization_id, commission_record_id, person_id, role, starts_on, ends_on, created_by, updated_by)
+                      values (${org}, ${commissionId}, ${personId}, ${role}, ${startsOn}::date, ${endsOn}::date, ${fx.actingUserId}, ${fx.actingUserId}) returning id`)
+        )[0]!.id,
+      );
+    }
+
+    beforeAll(async () => {
+      CG1 = await cong("RdCong1", P);
+      CGCLOSING = await cong("RdCongClosing", P);
+      await q(sql`update organizations set lifecycle_status = 'dissolved' where id = ${CGCLOSING}`);
+      CGDEPART = await cong("RdCongDeparted", P);
+      CGX = await cong("RdCongX", P2);
+      await fx.platform.transaction(async (tx) => {
+        await tx.execute(sql`select set_config('presby.affiliation_trigger_active', 'true', true)`);
+        await tx.execute(sql`
+          update organization_affiliations
+             set effective_to = '2024-01-01', closed_by_org_id = ${P}, closed_on = '2024-01-01',
+                 closed_minute_reference = 'Fixture departure for the commission reads of reads.db.test.ts'
+           where subject_org_id = ${CGDEPART} and effective_to is null`);
+        await tx.execute(sql`
+          insert into organization_affiliations
+            (organization_id, subject_org_id, parent_org_id, relationship_type, effective_from, authority, minute_reference)
+          values (${P2}, ${CGDEPART}, ${P2}, 'member_congregation', '2024-01-01', 'recorded', 'Fixture arrival for the commission reads of reads.db.test.ts')`);
+      });
+    });
+
+    afterAll(async () => {
+      if (!fx) return;
+      // about_org_id is NO ACTION: the records go before the congregations they name.
+      await q(sql`delete from commission_record_members where organization_id in (${P}, ${P2}, ${PKIR}, ${PPAGO})`);
+      await q(sql`delete from commission_records where organization_id in (${P}, ${P2}, ${PKIR}, ${PPAGO})`);
+      await q(sql`alter table group_memberships disable trigger group_memberships_reject_derived`);
+      try {
+        for (const id of made) await q(sql`delete from organizations where id = ${id}`);
+      } finally {
+        await q(sql`alter table group_memberships enable trigger group_memberships_reject_derived`);
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    describe("forbidden without the key, inside the reader's own transaction", () => {
+      it("every commission reader is `forbidden` for a member with no key, and for the congregation's clerk at a congregation, returning no data", async () => {
+        const id = await record(P, { title: `Rd90 ${stamp} Secret title`, charge: "ZQ-READ-CHARGE-SENTINEL" });
+        for (const who of [viewer(keyless), viewer(clerkC, C)]) {
+          const results = [
+            await reads.readCommissionList(who),
+            await reads.readCommission(who, id),
+            await reads.readCommissionFormOptions(who),
+            await reads.readCommissionMemberFormOptions(who, id),
+          ];
+          for (const r of results) expect(r).toEqual({ kind: "forbidden" });
+          expect(JSON.stringify(results)).not.toContain("ZQ-READ-CHARGE-SENTINEL");
+          expect(JSON.stringify(results)).not.toContain("Secret title");
+        }
+      });
+
+      it("the key is checked BEFORE the id: a keyless viewer is `forbidden` (not `not_found`) for a malformed or foreign id", async () => {
+        const foreign = await record(P2);
+        expect(await reads.readCommission(viewer(keyless), "not-a-uuid")).toEqual({ kind: "forbidden" });
+        expect(await reads.readCommission(viewer(keyless), foreign)).toEqual({ kind: "forbidden" });
+        expect(await reads.readCommission(viewer(clerk), "not-a-uuid")).toEqual({ kind: "not_found" });
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    describe("the congregation a commission is about reads NOTHING of it", () => {
+      it("from the congregation's own context the records table answers zero rows, even for a record about it", async () => {
+        await record(P, { about: CG1, title: `Rd90 ${stamp} About CG1` });
+        const { withOrgContext } = await import("@/lib/authz");
+        const seen = await withOrgContext(clerkC, C, async (tx) => rowsOf(await tx.execute(sql`select count(*)::int as n from commission_records`)));
+        expect(Number(seen[0]!.n)).toBe(0);
+        const seenMembers = await withOrgContext(clerkC, C, async (tx) => rowsOf(await tx.execute(sql`select count(*)::int as n from commission_record_members`)));
+        expect(Number(seenMembers[0]!.n)).toBe(0);
+        // and the other presbytery's clerk sees none of this presbytery's, only their own
+        const other = await withOrgContext(clerkP2, P2, async (tx) => rowsOf(await tx.execute(sql`select count(*)::int as n from commission_records where organization_id = ${P}`)));
+        expect(Number(other[0]!.n)).toBe(0);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    describe("the list", () => {
+      it("lists this presbytery's active records, newest-appointed first; not removed ones, not another presbytery's; ended ones only when asked, and always as a count", async () => {
+        const active = await record(P, { title: `Rd90 ${stamp} List active`, about: CG1, appointedOn: shift(TODAY, -10) });
+        const none = await record(P, { title: `Rd90 ${stamp} List none`, appointedOn: shift(TODAY, -20) });
+        const ended = await record(P, { title: `Rd90 ${stamp} List ended`, endedOn: shift(TODAY, -3) });
+        const removed = await record(P, { title: `Rd90 ${stamp} List removed`, removed: true });
+        const foreign = await record(P2, { title: `Rd90 ${stamp} List foreign` });
+
+        const hidden = await reads.readCommissionList(viewer(clerk));
+        const shown = await reads.readCommissionList(viewer(clerk), { showEnded: true });
+        if (hidden.kind !== "ok" || shown.kind !== "ok") throw new Error("list refused");
+        const ids = (r: typeof hidden) => (r.kind === "ok" ? r.data.commissions.map((c) => c.id) : []);
+        expect(ids(hidden)).toEqual(expect.arrayContaining([active, none]));
+        for (const id of [ended, removed, foreign]) expect(ids(hidden)).not.toContain(id);
+        expect(ids(shown)).toContain(ended);
+        for (const id of [removed, foreign]) expect(ids(shown)).not.toContain(id);
+        expect(ids(hidden).indexOf(active)).toBeLessThan(ids(hidden).indexOf(none));
+        expect(hidden.data.endedCount).toBeGreaterThanOrEqual(1);
+        expect(shown.data.endedCount).toBe(hidden.data.endedCount);
+        expect(hidden.data.showEnded).toBe(false);
+        expect(shown.data.showEnded).toBe(true);
+        expect(hidden.data.today).toBe(TODAY);
+
+        const row = (r: typeof hidden, id: string) => (r.kind === "ok" ? r.data.commissions.find((c) => c.id === id) : undefined);
+        expect(row(hidden, active)).toMatchObject({ aboutOrgId: CG1, congregationName: expect.stringContaining("RdCong1"), endedOn: null });
+        expect(row(hidden, none)).toMatchObject({ aboutOrgId: null, congregationName: null });
+        expect(row(shown, ended)).toMatchObject({ endedOn: shift(TODAY, -3) });
+      });
+
+      it("the list NEVER carries a charge (only the record's own reader does)", async () => {
+        await record(P, { title: `Rd90 ${stamp} Charged`, charge: "ZQ-LIST-CHARGE-SENTINEL" });
+        const r = await reads.readCommissionList(viewer(clerk), { showEnded: true });
+        if (r.kind !== "ok") throw new Error(r.kind);
+        expect(JSON.stringify(r)).not.toContain("ZQ-LIST-CHARGE-SENTINEL");
+        for (const row of r.data.commissions) expect(Object.keys(row)).not.toContain("charge");
+      });
+
+      it("the serving count follows the half-open rule: a member ending today, one starting tomorrow and a zero-length one are not serving; one ending tomorrow is", async () => {
+        const id = await record(P, { title: `Rd90 ${stamp} Serving count` });
+        await member(P, id, people[0]!, "chair", shift(TODAY, -50));
+        await member(P, id, people[1]!, "member", shift(TODAY, -50), shift(TODAY, 1)); // ends tomorrow: serving
+        await member(P, id, people[2]!, "member", shift(TODAY, -50), TODAY); // ends today
+        await member(P, id, people[3]!, "member", shift(TODAY, 1)); // starts tomorrow
+        await member(P, id, people[4]!, "member", shift(TODAY, -2), shift(TODAY, -2)); // zero-length
+        const r = await reads.readCommissionList(viewer(clerk));
+        if (r.kind !== "ok") throw new Error(r.kind);
+        expect(r.data.commissions.find((c) => c.id === id)).toMatchObject({ servingCount: 2 });
+        const none = await record(P, { title: `Rd90 ${stamp} Nobody serves` });
+        const again = await reads.readCommissionList(viewer(clerk));
+        if (again.kind !== "ok") throw new Error(again.kind);
+        expect(again.data.commissions.find((c) => c.id === none)).toMatchObject({ servingCount: 0 });
+      });
+
+      it("a removed record's members are not counted anywhere (a removed record is not listed at all)", async () => {
+        // the live-parent guard refuses a member of an already-removed record even for the owner, so the member goes in first
+        const id = await record(P, { title: `Rd90 ${stamp} Removed with member` });
+        await member(P, id, people[0]!, "member", shift(TODAY, -5));
+        await q(sql`update commission_records set removed_at = now(), removed_by = ${fx.actingUserId} where id = ${id}`);
+        const r = await reads.readCommissionList(viewer(clerk), { showEnded: true });
+        if (r.kind !== "ok") throw new Error(r.kind);
+        expect(r.data.commissions.map((c) => c.id)).not.toContain(id);
+      });
+
+      it("uses the ORGANIZATION'S local day: at one instant a member starting on the 16th serves in Kiritimati and not in Pago Pago", async () => {
+        const instant = new Date("2026-06-15T12:00:00Z");
+        const mk = async (org: string) => {
+          const who = await fx.makePerson("Member", `Cmz${stamp}${(n += 1)}`);
+          await fx.addMember(org, who, { roll: null });
+          const id = await record(org, { title: `Rd90 ${stamp} TZ ${org.slice(0, 4)}`, appointedOn: "2026-01-01" });
+          await member(org, id, who, "chair", "2026-06-16");
+          return id;
+        };
+        const idKir = await mk(PKIR);
+        const idPago = await mk(PPAGO);
+        const kir = await reads.readCommissionList(viewer(clerkKir, PKIR), {}, instant);
+        const pago = await reads.readCommissionList(viewer(clerkPago, PPAGO), {}, instant);
+        if (kir.kind !== "ok" || pago.kind !== "ok") throw new Error("list refused");
+        expect(kir.data.today).toBe("2026-06-16");
+        expect(pago.data.today).toBe("2026-06-15");
+        expect(kir.data.commissions.find((c) => c.id === idKir)).toMatchObject({ servingCount: 1 });
+        expect(pago.data.commissions.find((c) => c.id === idPago)).toMatchObject({ servingCount: 0 });
+      });
+
+      it("uses a FIXED number of queries for 2 and for 30 records", async () => {
+        const own = await fx.makeOrg("CmCountPresbytery", { organizationType: "presbytery" });
+        const who = await fx.makePerson("Counter", `Cmc${stamp}`);
+        await fx.enroll(own, who, ["groups.manage"]);
+        const seated = await fx.makePerson("Seated", `Cmc${stamp}`);
+        await fx.addMember(own, seated, { roll: null });
+        const make = async (count: number) => {
+          for (let i = 0; i < count; i += 1) {
+            const id = await record(own, { title: `Rd90 ${stamp} Cm count ${(n += 1)}` });
+            await member(own, id, seated, "member", shift(TODAY, -5));
+          }
+        };
+        const measure = async () => {
+          counter.executes = 0;
+          const r = await reads.readCommissionList(viewer(who, own));
+          if (r.kind !== "ok") throw new Error(r.kind);
+          return { queries: counter.executes, rows: r.data.commissions.length };
+        };
+        await make(2);
+        const small = await measure();
+        await make(28);
+        const large = await measure();
+        expect(small.rows).toBe(2);
+        expect(large.rows).toBe(30);
+        expect(large.queries).toBe(small.queries);
+        expect(small.queries).toBeLessThanOrEqual(6);
+        await q(sql`delete from commission_record_members where organization_id = ${own}`);
+        await q(sql`delete from commission_records where organization_id = ${own}`);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    describe("readCommission", () => {
+      it("a removed record, another presbytery's, a committee's group id, a congregation's id, a nonexistent UUID and a malformed id are ONE `not_found`", async () => {
+        const removed = await record(P, { removed: true });
+        const foreign = await record(P2);
+        const committeeId = await committee(P);
+        const results = await Promise.all(
+          [removed, foreign, committeeId, CG1, "00000000-0000-4090-8000-00000000f0f0", "not-a-uuid"].map((id) => reads.readCommission(viewer(clerk), id)),
+        );
+        for (const r of results) expect(r).toEqual({ kind: "not_found" });
+        expect(new Set(results.map((r) => JSON.stringify(r))).size).toBe(1);
+      });
+
+      it("returns the record with its charge and congregation, and every member (past and planned too) with role, dates and the two status badges", async () => {
+        const id = await record(P, { title: `Rd90 ${stamp} Detail`, charge: "A general charge.", about: CG1, appointedOn: shift(TODAY, -40) });
+        const deadPerson = await fx.makePerson("Departed", `Cmd${stamp}`);
+        await fx.addMember(P, deadPerson, { roll: null });
+        await q(sql`update people set date_of_death = '2025-02-02' where id = ${deadPerson}`);
+        const leftPerson = await fx.makePerson("Leaver", `Cmd${stamp}`);
+        await fx.addMember(P, leftPerson, { roll: null });
+        await fx.platform.execute(sql`alter table memberships disable trigger memberships_guard_end`);
+        try {
+          await q(sql`update memberships set ended_on = '2025-03-03' where person_id = ${leftPerson} and organization_id = ${P}`);
+        } finally {
+          await fx.platform.execute(sql`alter table memberships enable trigger memberships_guard_end`);
+        }
+        const serving = await member(P, id, people[0]!, "chair", shift(TODAY, -30));
+        const planned = await member(P, id, people[1]!, "clerk", shift(TODAY, 10), shift(TODAY, 90));
+        const past = await member(P, id, people[2]!, "member", shift(TODAY, -39), shift(TODAY, -20));
+        await member(P, id, deadPerson, "member", shift(TODAY, -39), shift(TODAY, -30));
+        await member(P, id, leftPerson, "member", shift(TODAY, -39), shift(TODAY, -30));
+
+        const r = await reads.readCommission(viewer(clerk), id);
+        if (r.kind !== "ok") throw new Error(r.kind);
+        expect(r.data.today).toBe(TODAY);
+        expect(r.data.commission).toMatchObject({
+          id,
+          title: `Rd90 ${stamp} Detail`,
+          charge: "A general charge.",
+          aboutOrgId: CG1,
+          congregationIsMember: true,
+          appointedOn: shift(TODAY, -40),
+          minuteReference: null,
+          endedOn: null,
+          endedMinuteReference: null,
+          rowVersion: 1,
+        });
+        expect(r.data.commission.congregationName).toContain("RdCong1");
+        const byId = new Map(r.data.members.map((m) => [m.memberId, m]));
+        expect(byId.get(serving)).toMatchObject({ role: "chair", startsOn: shift(TODAY, -30), endsOn: null, connected: true, deceased: false });
+        expect(byId.get(planned)).toMatchObject({ role: "clerk", startsOn: shift(TODAY, 10), endsOn: shift(TODAY, 90) });
+        expect(byId.get(past)).toMatchObject({ role: "member", endsOn: shift(TODAY, -20) });
+        const dead = r.data.members.find((m) => m.personId === deadPerson)!;
+        expect(dead).toMatchObject({ deceased: true, connected: true });
+        const left = r.data.members.find((m) => m.personId === leftPerson)!;
+        expect(left).toMatchObject({ connected: false, deceased: false });
+        expect(r.data.members).toHaveLength(5);
+      });
+
+      it("a record with no congregation, one about a CLOSING congregation (still a member) and one about a congregation that has LEFT say so", async () => {
+        const none = await record(P);
+        const closing = await record(P, { about: CGCLOSING });
+        // a record about a congregation that has since left: inserted before it departed would be refused by the trigger today,
+        // so the owner writes it with the trigger's about-org check disabled, exactly as history would have arrived.
+        await q(sql`alter table commission_records disable trigger commission_records_about_org`);
+        let left: string;
+        try {
+          left = await record(P, { about: CGDEPART });
+        } finally {
+          await q(sql`alter table commission_records enable trigger commission_records_about_org`);
+        }
+        const get = async (id: string) => {
+          const r = await reads.readCommission(viewer(clerk), id);
+          if (r.kind !== "ok") throw new Error(r.kind);
+          return r.data.commission;
+        };
+        expect(await get(none)).toMatchObject({ aboutOrgId: null, congregationName: null, congregationIsMember: false });
+        expect(await get(closing)).toMatchObject({ aboutOrgId: CGCLOSING, congregationIsMember: true });
+        expect(await get(left)).toMatchObject({ aboutOrgId: CGDEPART, congregationIsMember: false });
+        expect((await get(left)).congregationName).toContain("RdCongDeparted");
+      });
+
+      it("an ended record carries its end date and minute reference", async () => {
+        const id = await record(P, { endedOn: shift(TODAY, -4) });
+        await q(sql`update commission_records set ended_minute_reference = 'Reported in minutes 2026-11-01' where id = ${id}`);
+        const r = await reads.readCommission(viewer(clerk), id);
+        if (r.kind !== "ok") throw new Error(r.kind);
+        expect(r.data.commission).toMatchObject({ endedOn: shift(TODAY, -4), endedMinuteReference: "Reported in minutes 2026-11-01" });
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    describe("the form readers", () => {
+      it("readCommissionFormOptions: this presbytery's member congregations only (a closing one is choosable); not another presbytery's, not one that left; plus today", async () => {
+        const r = await reads.readCommissionFormOptions(viewer(clerk));
+        if (r.kind !== "ok") throw new Error(r.kind);
+        const ids = r.data.congregations.map((c) => c.id);
+        expect(ids).toEqual(expect.arrayContaining([CG1, CGCLOSING]));
+        for (const other of [CGX, CGDEPART, C, P, P2]) expect(ids).not.toContain(other);
+        expect(r.data.today).toBe(TODAY);
+      });
+
+      it("readCommissionMemberFormOptions: current members only, `alreadyServes` for a serving or planned term and not for a past or zero-length one", async () => {
+        const id = await record(P, { title: `Rd90 ${stamp} Member options` });
+        await member(P, id, people[0]!, "member", shift(TODAY, -10)); // serving
+        await member(P, id, people[1]!, "member", shift(TODAY, 10)); // planned
+        await member(P, id, people[2]!, "member", shift(TODAY, -50), shift(TODAY, -20)); // past
+        await member(P, id, people[3]!, "member", shift(TODAY, -5), shift(TODAY, -5)); // zero-length
+        await member(P, id, people[4]!, "member", shift(TODAY, -50), TODAY); // ends today: past
+
+        const r = await reads.readCommissionMemberFormOptions(viewer(clerk), id);
+        if (r.kind !== "ok") throw new Error(r.kind);
+        const flag = new Map(r.data.people.map((p) => [p.personId, p.alreadyServes]));
+        expect(flag.get(people[0]!)).toBe(true);
+        expect(flag.get(people[1]!)).toBe(true);
+        for (const past of [people[2]!, people[3]!, people[4]!, people[5]!]) expect(flag.get(past)).toBe(false);
+        expect(flag.has(clerkC)).toBe(false);
+        expect(flag.has(clerkP2)).toBe(false);
+        expect(r.data.commissionTitle).toBe(`Rd90 ${stamp} Member options`);
+        expect(r.data.today).toBe(TODAY);
+      });
+
+      it("readCommissionMemberFormOptions: an ended record is `commission_ended`; a removed, foreign, wrong-kind or malformed id is `not_found`", async () => {
+        const ended = await record(P, { endedOn: shift(TODAY, -2) });
+        expect(await reads.readCommissionMemberFormOptions(viewer(clerk), ended)).toEqual({ kind: "commission_ended" });
+        const removed = await record(P, { removed: true });
+        const foreign = await record(P2);
+        const committeeId = await committee(P);
+        for (const id of [removed, foreign, committeeId, "not-a-uuid"]) {
+          expect(await reads.readCommissionMemberFormOptions(viewer(clerk), id), id).toEqual({ kind: "not_found" });
+        }
+      });
     });
   });
 });

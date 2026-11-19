@@ -505,7 +505,7 @@ describe("PORTAL_TILES — liveFor (DECISION-342)", () => {
 });
 
 describe("PORTAL_TILES — the committees tile has graduated (presbytery committees, C11)", () => {
-  it("is not coming soon, keeps its label, flag, scope and category, and carries the Increment 1 description", () => {
+  it("is not coming soon, keeps its label, flag, scope and category, and carries the Increment 2 description", () => {
     const tile = PORTAL_TILES.find((t) => t.key === "committees");
     expect(tile).toBeDefined();
     expect(tile!.comingSoon).toBeUndefined();
@@ -516,8 +516,8 @@ describe("PORTAL_TILES — the committees tile has graduated (presbytery committ
     expect(tile!.category).toBe("operate");
     expect(tile!.domain).toBe("governance");
     expect(tile!.href("northern-reach")).toBe("/o/northern-reach/admin/committees");
-    // Increment 1 claims no commissions: its description says only what it does.
-    expect(tile!.description).toBe("The presbytery's committees and who serves on them.");
-    expect(tile!.description).not.toMatch(/commission/i);
+    // Increment 2 (C11): the description now says the commission records exist.
+    expect(tile!.description).toBe("The presbytery's committees, who serves on them, and the administrative commissions it has recorded.");
+    expect(tile!.description).toMatch(/administrative commissions/);
   });
 });

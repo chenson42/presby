@@ -67,7 +67,11 @@ const refuse = (error: string, kind: Refused["kind"]): ActorResult => ({
 });
 
 /** Authenticate, resolve the organization from the slug, and check every id: or return the refusal. */
-export async function resolveCommitteesActor(slug: unknown, ids: Record<string, unknown> = {}): Promise<ActorResult> {
+export async function resolveCommitteesActor(
+  slug: unknown,
+  ids: Record<string, unknown> = {},
+  options: { subject?: "commission" } = {},
+): Promise<ActorResult> {
   const session = await auth();
   const check = assertOrgSession(session);
   if (check.kind === "unauthenticated") return refuse(GATE_COPY.signedOut, "unauthenticated");
@@ -84,7 +88,8 @@ export async function resolveCommitteesActor(slug: unknown, ids: Record<string, 
   if (!(await isFlagEnabled(COMMITTEES_FLAG))) return refuse(GATE_COPY.flagOff(resolved.org.name), "forbidden");
 
   for (const value of Object.values(ids)) {
-    if (!isUuid(value)) return refuse(REFUSAL.not_found, "not_found");
+    // A commission action's malformed id reads in the commission's wording (orchestrator ruling on B5), one answer for every miss.
+    if (!isUuid(value)) return refuse(refusalMessage("not_found", { subject: options.subject }), "not_found");
   }
 
   return {
@@ -134,6 +139,41 @@ export function finish(
           ...(seatsEnded !== undefined ? { seatsEnded } : {}),
           ...(cancelled !== undefined ? { cancelled } : {}),
           ...(publicListed !== undefined ? { publicListed } : {}),
+        },
+      };
+    }
+    case "refused":
+      return { ok: false, error: refusalMessage(outcome.reason, outcome.detail), kind: outcome.reason };
+    case "invalid":
+      return { ok: false, error: outcome.message, field: outcome.field, kind: "invalid" };
+  }
+}
+
+/**
+ * A commission store outcome as the `ActionResult` the client toasts (Increment 2): the
+ * same shape as `finish`, revalidating the list and the commission's own page when
+ * something was written. The commission pages are not the committee's, so the path
+ * differs (`/commissions/<id>`). Every sentence is a `copy.ts` string.
+ */
+export function finishCommission(
+  identity: CommitteesActionIdentity,
+  commissionId: string | null,
+  outcome: Outcome<Written & Partial<Omit<ActionData, keyof Written>>>,
+): CommitteesActionResult {
+  switch (outcome.kind) {
+    case "ok": {
+      const { id, unchanged, membersEnded, cancelled } = outcome.data;
+      if (!unchanged) {
+        revalidatePath(`/o/${identity.slug}/admin/committees`);
+        revalidatePath(`/o/${identity.slug}/admin/committees/commissions/${commissionId ?? id}`);
+      }
+      return {
+        ok: true,
+        data: {
+          id,
+          ...(unchanged ? { unchanged } : {}),
+          ...(membersEnded !== undefined ? { membersEnded } : {}),
+          ...(cancelled !== undefined ? { cancelled } : {}),
         },
       };
     }

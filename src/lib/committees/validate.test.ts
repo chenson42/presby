@@ -10,7 +10,11 @@ import {
   cleanLine,
   cleanText,
   parseChangeRole,
+  parseCommission as parseCommissionWith,
+  parseCommissionMember,
   parseCommittee,
+  parseEndCommission,
+  parseExpectedVersion,
   parseDate,
   parseDissolve,
   parseEndSeat,
@@ -20,6 +24,9 @@ import {
   changeRoleSchema,
   endSeatSchema,
   dissolveSchema,
+  commissionSchema,
+  commissionMemberSchema,
+  endCommissionSchema,
 } from "./validate";
 import { addYears } from "./derive";
 
@@ -254,5 +261,156 @@ describe("the zod schemas are thin wrappers over the same rules", () => {
     expect(changeRoleSchema(env).safeParse({ newRole: "clerk", effectiveOn: TODAY }).success).toBe(true);
     expect(endSeatSchema(env).safeParse({ endsOn: "" }).success).toBe(true);
     expect(dissolveSchema(env).safeParse({ dissolvedOn: "2026-11-20" }).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Increment 2: the commission record (C15)
+// ---------------------------------------------------------------------------
+
+/** The commission parse with today injected (`env`, as every other parse here). */
+const parseCommission = (values: unknown) => parseCommissionWith(values, env);
+const commission = (over: Record<string, string> = {}) => ({
+  title: "Commission on Alder Creek",
+  charge: "",
+  aboutOrgId: "",
+  appointedOn: "2026-10-01",
+  minuteReference: "",
+  ...over,
+});
+const errorsOf = (r: { ok: boolean } & Record<string, unknown>) => (r.ok ? {} : (r.errors as Record<string, string>));
+
+describe("parseCommission", () => {
+  it("accepts a minimal record, and an empty charge, congregation and minute are null", () => {
+    expect(parseCommission(commission())).toEqual({
+      ok: true,
+      value: { title: "Commission on Alder Creek", charge: null, aboutOrgId: null, appointedOn: "2026-10-01", minuteReference: null },
+    });
+  });
+
+  it("the title: required, 200 allowed, 201 refused; whitespace-only is empty; control characters become spaces", () => {
+    expect(errorsOf(parseCommission(commission({ title: "" })) as never).title).toBe(VALIDATION.titleRequired);
+    expect(errorsOf(parseCommission(commission({ title: "   \n\t " })) as never).title).toBe(VALIDATION.titleRequired);
+    expect(parseCommission(commission({ title: "a".repeat(200) })).ok).toBe(true);
+    expect(errorsOf(parseCommission(commission({ title: "a".repeat(201) })) as never).title).toBe(VALIDATION.titleTooLong);
+    const cleaned = parseCommission(commission({ title: "Alder\u0000 \u0007Creek" }));
+    expect(cleaned.ok && cleaned.value.title).toBe("Alder Creek");
+  });
+
+  it("the charge: 500 allowed, 501 refused, counted in code points (an emoji is one), line breaks kept", () => {
+    expect(parseCommission(commission({ charge: "a".repeat(500) })).ok).toBe(true);
+    expect(errorsOf(parseCommission(commission({ charge: "a".repeat(501) })) as never).charge).toBe(VALIDATION.chargeTooLong);
+    expect(parseCommission(commission({ charge: "😀".repeat(500) })).ok).toBe(true);
+    expect(errorsOf(parseCommission(commission({ charge: "😀".repeat(501) })) as never).charge).toBe(VALIDATION.chargeTooLong);
+    const multi = parseCommission(commission({ charge: "First line\r\nSecond line" }));
+    expect(multi.ok && multi.value.charge).toBe("First line\nSecond line");
+  });
+
+  it("the minute reference: 200 allowed, 201 refused", () => {
+    expect(parseCommission(commission({ minuteReference: "m".repeat(200) })).ok).toBe(true);
+    expect(errorsOf(parseCommission(commission({ minuteReference: "m".repeat(201) })) as never).minuteReference).toBe(VALIDATION.minuteTooLong);
+  });
+
+  it("appointed on may not be after today (orchestrator ruling 3): today is allowed, tomorrow is refused with the ruled sentence — regression for the missing upper bound", () => {
+    expect(parseCommissionWith(commission({ appointedOn: TODAY }), env).ok).toBe(true);
+    expect(errorsOf(parseCommissionWith(commission({ appointedOn: "2026-11-20" }), env) as never).appointedOn).toBe(VALIDATION.appointedFuture);
+    expect(errorsOf(parseCommissionWith(commission({ appointedOn: "2999-01-01" }), env) as never).appointedOn).toBe(VALIDATION.appointedFuture);
+    expect(VALIDATION.appointedFuture).toBe("The appointed date can't be after today.");
+    // the injected day is the rule: the same date is fine one day later
+    expect(parseCommissionWith(commission({ appointedOn: "2026-11-20" }), { today: "2026-11-20" }).ok).toBe(true);
+  });
+
+  it("appointed on: required, a real day, on or after 1900-01-01 (1899-12-31 refused)", () => {
+    expect(errorsOf(parseCommission(commission({ appointedOn: "" })) as never).appointedOn).toBe(VALIDATION.appointedRequired);
+    expect(errorsOf(parseCommission(commission({ appointedOn: "2026-02-30" })) as never).appointedOn).toBe(VALIDATION.dateInvalid);
+    expect(errorsOf(parseCommission(commission({ appointedOn: "1899-12-31" })) as never).appointedOn).toBe(VALIDATION.dateInvalid);
+    expect(parseCommission(commission({ appointedOn: "1900-01-01" })).ok).toBe(true);
+  });
+
+  it("the congregation id is passed through UNCHECKED (the store gives the one neutral answer for every miss, malformed included)", () => {
+    for (const aboutOrgId of ["not-a-uuid", "00000000-0000-4000-8000-0000000000aa", " 00000000-0000-4000-8000-0000000000AA "]) {
+      const r = parseCommission(commission({ aboutOrgId }));
+      expect(r.ok && r.value.aboutOrgId).toBe(aboutOrgId.trim());
+    }
+  });
+
+  it("a value of the wrong type reads as empty (a Server Action gets whatever the client sent)", () => {
+    expect(parseCommission({ title: 5, charge: null, aboutOrgId: {}, appointedOn: [], minuteReference: 0 }).ok).toBe(false);
+    expect(parseCommission(undefined).ok).toBe(false);
+  });
+
+  it("reports every field's error, the first in rule order", () => {
+    const r = parseCommission(commission({ title: "", charge: "x".repeat(501), appointedOn: "" }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(Object.keys(r.errors)).toEqual(["title", "charge", "appointedOn"]);
+      expect(r.field).toBe("title");
+    }
+  });
+
+  it("the schema reports the same messages under the same fields", () => {
+    const r = commissionSchema(env).safeParse(commission({ title: "" }));
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0]).toMatchObject({ path: ["title"], message: VALIDATION.titleRequired });
+  });
+});
+
+describe("parseExpectedVersion", () => {
+  it("a positive integer, as a number or digits; anything else is null", () => {
+    expect(parseExpectedVersion(1)).toBe(1);
+    expect(parseExpectedVersion("12")).toBe(12);
+    expect(parseExpectedVersion(" 3 ")).toBe(3);
+    for (const bad of [0, -1, 1.5, "0", "-1", "1.5", "abc", "", null, undefined, {}, "1234567890", Number.NaN]) {
+      expect(parseExpectedVersion(bad), String(bad)).toBeNull();
+    }
+  });
+});
+
+describe("a commission member is a seat (the same rule)", () => {
+  it("is the same parse, with the same six titles, boundaries and messages as a committee seat", () => {
+    expect(parseCommissionMember).toBe(parseSeat);
+    expect(commissionMemberSchema).toBe(seatSchema);
+    const good = { personId: PERSON, role: "clerk", startsOn: "2026-10-01", endsOn: "" };
+    expect(parseCommissionMember(good, env).ok).toBe(true);
+    expect(errorsOf(parseCommissionMember({ ...good, role: "leader" }, env) as never).role).toBe(VALIDATION.roleRequired);
+    expect(errorsOf(parseCommissionMember({ ...good, endsOn: "2026-10-01" }, env) as never).endsOn).toBe(VALIDATION.endNotAfterStart);
+    expect(errorsOf(parseCommissionMember({ ...good, startsOn: "2031-11-20" }, env) as never).startsOn).toBe(VALIDATION.startTooFar);
+    expect(parseCommissionMember({ ...good, startsOn: addYears(TODAY, 5) }, env).ok).toBe(true);
+  });
+});
+
+describe("parseEndCommission", () => {
+  const end = (over: Record<string, string> = {}) => ({ endedOn: TODAY, endedMinuteReference: "", ...over });
+
+  it("today is allowed, tomorrow refused (never in the future)", () => {
+    expect(parseEndCommission(end(), env).ok).toBe(true);
+    expect(errorsOf(parseEndCommission(end({ endedOn: "2026-11-20" }), env) as never).endedOn).toBe(VALIDATION.endedFuture);
+  });
+
+  it("blank, not a real day and below the floor are 'That date isn't valid.'", () => {
+    for (const endedOn of ["", "2026-02-30", "1899-12-31", "soon"]) {
+      expect(errorsOf(parseEndCommission(end({ endedOn }), env) as never).endedOn, endedOn).toBe(VALIDATION.dateInvalid);
+    }
+  });
+
+  it("against the appointment (when the form holds the record): the appointed day is allowed, the day before refused naming it", () => {
+    const record = { appointedOn: "2026-10-01" };
+    expect(parseEndCommission(end({ endedOn: "2026-10-01" }), env, record).ok).toBe(true);
+    expect(errorsOf(parseEndCommission(end({ endedOn: "2026-09-30" }), env, record) as never).endedOn).toBe(VALIDATION.endedBeforeAppointed("2026-10-01"));
+    // the action's parse does not hold the record: the store applies the same rule with the same message
+    expect(parseEndCommission(end({ endedOn: "2026-09-30" }), env).ok).toBe(true);
+  });
+
+  it("the minute reference for the report: optional, empty is null, 200 allowed, 201 refused", () => {
+    const empty = parseEndCommission(end(), env);
+    expect(empty.ok && empty.value.endedMinuteReference).toBeNull();
+    expect(parseEndCommission(end({ endedMinuteReference: "m".repeat(200) }), env).ok).toBe(true);
+    expect(errorsOf(parseEndCommission(end({ endedMinuteReference: "m".repeat(201) }), env) as never).endedMinuteReference).toBe(VALIDATION.minuteTooLong);
+  });
+
+  it("the schema agrees with the parse", () => {
+    const r = endCommissionSchema(env, { appointedOn: "2026-10-01" }).safeParse(end({ endedOn: "2026-09-30" }));
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0]).toMatchObject({ path: ["endedOn"], message: VALIDATION.endedBeforeAppointed("2026-10-01") });
   });
 });

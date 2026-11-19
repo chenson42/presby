@@ -31,6 +31,9 @@ vi.mock("@/app/(org)/o/[slug]/admin/committees/[committeeId]/actions", () => ({
   setCommitteeSeatPublicListedAction: actions.setCommitteeSeatPublicListedAction,
 }));
 
+vi.mock("@/app/(org)/o/[slug]/admin/committees/commissions/[commissionId]/actions", () => ({
+  endCommissionMemberAction: vi.fn(),
+}));
 const toastError = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, info: vi.fn() } }));

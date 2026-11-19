@@ -19,9 +19,9 @@
 | 1 — Functional refinement | analyst | Complete | READY WITH NOTES | 2026-11-19 |
 | 2 — Architectural review | architect | Complete (R1–R6; DECISION-352–356 proposed; F456–F458) | Approved with suggestions | 2026-11-19 |
 | 3 — Technical design | tech-lead | Complete (one design for both increments; T1–T17; DECISION-357–359 proposed; F459–F460; migration 0090; Inc 1 batches B1–B4, Inc 2 batches B5–B7; two child logs created) | Design complete | 2026-11-19 |
-| 4 — Implementation | Inc 1: database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4); Inc 2: api-developer (B5), ux-developer (B6), full-stack-developer (B7) | Pending | — | — |
-| 5 — Verification | qa | Pending | — | — |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 4 — Implementation | Inc 1: database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4); Inc 2: api-developer (B5), ux-developer (B6), full-stack-developer (B7) | Complete in both children | — | 2026-11-19 |
+| 5 — Verification | qa | Complete in both children (Inc 1 runs 1–2 PASS; Inc 2 run 1 PASS) | PASS | 2026-11-19 |
+| 6 — Shipped vs intent | analyst | Complete in both children (Inc 1 and Inc 2 SHIP WITH NOTES; parent closed) | SHIP WITH NOTES | 2026-11-19 |
 
 ## Children
 

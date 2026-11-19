@@ -1,7 +1,8 @@
 /**
  * Every user-visible string this module produces (docs/work-log/2026-11-19-
- * presbytery-committees.md, Phase 3 "Copy", C1 to C9; Increment 1 ONLY: the
- * commission strings, C15, are the second increment's). PURE: it imports only
+ * presbytery-committees.md, Phase 3 "Copy", C1 to C9, and C15 for the commission
+ * record, Increment 2: only the strings this MODULE produces; the commission
+ * pages' chrome is the ux batch's, in ui-copy.ts). PURE: it imports only
  * the pure date formatter and the pure role labels, so a form, a page, the
  * validators and the tests read one file. A string that is not in the design's
  * Copy section does not belong here: it stops for a ruling.
@@ -32,7 +33,10 @@ export function dateText(iso: string): string {
 // C9: refusals (one fixed string per kind, never raw database text)
 // ---------------------------------------------------------------------------
 
-type PlainRefusal = Exclude<Refusal, "duplicate_name" | "overlap" | "date_before_start" | "committee_dissolved">;
+type PlainRefusal = Exclude<
+  Refusal,
+  "duplicate_name" | "overlap" | "date_before_start" | "committee_dissolved" | "congregation_not_found"
+>;
 
 export const REFUSAL: Record<PlainRefusal, string> = {
   forbidden: "You don't have permission to manage committees here.",
@@ -47,7 +51,22 @@ export const REFUSAL: Record<PlainRefusal, string> = {
   same_role: "Choose a different role.",
   stale: "This seat was changed by someone else after you opened it. Reload the page, then try again.",
   save_failed: "We couldn't save that. Nothing was changed. Try again.",
+  // C15
+  commission_ended: "This commission has ended, so no one can be added.",
 };
+
+/** C15: the same refusal kinds, worded for a commission record (`RefusalDetail.subject === "commission"`). */
+export const COMMISSION_REFUSAL = {
+  /** Orchestrator ruling (B5): one string for every commission miss (removed, another presbytery's, a committee's id, nonexistent, malformed). */
+  notFound: "That commission could not be found.",
+  stale: "This record was changed by someone else after you opened it. Reload the page, then make your change again.",
+  alreadyEnded: "This commission has already ended.",
+  overlap: (personName: string) => `${personName} already serves on this commission during those dates. End that term first.`,
+  dateBeforeStart: (date: string) => `A member started on ${dateText(date)}. The end date can't be before that.`,
+  /** One wording for another presbytery's congregation, a non-congregation, a nonexistent id and a malformed one. */
+  congregationNotFound: (presbyteryName: string) =>
+    `That congregation could not be found among ${presbyteryName}'s member congregations.`,
+} as const;
 
 /** C5: the add-member refusal for a dissolved committee. */
 export const COMMITTEE_DISSOLVED_ADD = "This committee has been dissolved, so no one can be added.";
@@ -57,15 +76,26 @@ export const COMMITTEE_DISSOLVED_EDIT =
 
 /** The message for a refusal. The three that name something take it from `detail` (a stored value, never a client one). */
 export function refusalMessage(reason: Refusal, detail: RefusalDetail = {}): string {
+  const commission = detail.subject === "commission";
   switch (reason) {
     case "duplicate_name":
       return `A committee named "${detail.existingName ?? ""}" already exists. Choose a different name.`;
     case "overlap":
+      if (commission) return COMMISSION_REFUSAL.overlap(detail.personName ?? "That person");
       return `${detail.personName ?? "That person"} already serves on ${detail.committeeName ?? "this committee"} during those dates. Use "Change role", or end that term first.`;
     case "date_before_start":
+      if (commission && detail.date) return COMMISSION_REFUSAL.dateBeforeStart(detail.date);
       return `A member started on ${detail.date ? dateText(detail.date) : "a later date"}. The dissolve date can't be before that.`;
     case "committee_dissolved":
       return detail.during === "edit" ? COMMITTEE_DISSOLVED_EDIT : COMMITTEE_DISSOLVED_ADD;
+    case "not_found":
+      return commission ? COMMISSION_REFUSAL.notFound : REFUSAL.not_found;
+    case "stale":
+      return commission ? COMMISSION_REFUSAL.stale : REFUSAL.stale;
+    case "already_ended":
+      return commission ? COMMISSION_REFUSAL.alreadyEnded : REFUSAL.already_ended;
+    case "congregation_not_found":
+      return COMMISSION_REFUSAL.congregationNotFound(detail.presbyteryName ?? "this presbytery");
     default:
       return REFUSAL[reason];
   }
@@ -120,6 +150,17 @@ export const VALIDATION = {
   endBeforeStart: "The end date can't be before the start date.",
   // C8
   dissolveFuture: "The dissolve date can't be in the future.",
+  // C15: the commission record's fields and its end dialog
+  titleRequired: "Title is required.",
+  titleTooLong: "Title must be 200 characters or fewer.",
+  chargeTooLong: "Charge must be 500 characters or fewer.",
+  minuteTooLong: "Minute reference must be 200 characters or fewer.",
+  appointedRequired: "Choose the date it was appointed.",
+  // Orchestrator rulings on B5 (additions to C15)
+  appointedAfterEnd: "The appointed date can't be after the end date.",
+  appointedFuture: "The appointed date can't be after today.",
+  endedFuture: "The end date can't be in the future.",
+  endedBeforeAppointed: (iso: string) => `The end date can't be before ${dateText(iso)}, when it was appointed.`,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -129,6 +170,28 @@ export const VALIDATION = {
 /** C3 / C5: above the roster and under the add form's title. Says TITLES give no access; never that membership gives none. */
 export const TITLES_NOTE =
   "Chair, vice chair, clerk, secretary and ex officio are titles. A title doesn't give anyone access.";
+
+/**
+ * C15: the sentence a commission page carries about access. True by construction: a
+ * commission record has no `role_id` and no `group_id` (0090's closing assertion;
+ * `boundaries.test.ts` pins that nothing writes the downward tables) and its policy is
+ * organization-only (`test-rls-90.sql` (d)). It says "gives no one access" and "does
+ * not see it": never "no one at the presbytery can see it" (the charge is tier 1,
+ * residual 10, stated by the form's helper and the help page).
+ */
+export function commissionNoAccess(congregationName: string | null): string {
+  return congregationName === null
+    ? "This record gives no one access to any congregation's PresbyPortal."
+    : `This record gives no one access to ${congregationName}'s PresbyPortal, and ${congregationName} does not see it.`;
+}
+
+/** C15: the "About" line of a commission page; a congregation that has left the presbytery is said so. */
+export function commissionAboutLine(congregationName: string | null, stillMember: boolean): string {
+  if (congregationName === null) return "No congregation recorded";
+  return stillMember
+    ? `About ${congregationName}`
+    : `About ${congregationName} (no longer a member of this presbytery)`;
+}
 
 function roleList(names: readonly string[]): string {
   return names.join(", ");
@@ -228,6 +291,12 @@ export const TOAST = {
   termEnded: "Term ended.",
   endDateSaved: "End date saved.",
   plannedCancelled: "Planned term cancelled.",
+  // C15
+  commissionRecorded: "Commission recorded.",
+  commissionSaved: "Commission saved.",
+  commissionMemberAdded: "Added to the commission.",
+  commissionEnded: "Commission ended.",
+  recordRemoved: "Record removed.",
   listed: (name: string, committee: string) => `${name} is now listed publicly on ${committee}'s roster.`,
   unlisted: (name: string, committee: string) => `${name} is no longer listed publicly on ${committee}'s roster.`,
 } as const;

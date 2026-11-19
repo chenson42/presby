@@ -12,6 +12,9 @@ import {
   carriesNote,
   carriesWarning,
   chairLine,
+  commissionAboutLine,
+  commissionNoAccess,
+  COMMISSION_REFUSAL,
   dateText,
   dissolveCarries,
   GATE_COPY,
@@ -40,6 +43,8 @@ const ALL_REFUSALS: Record<Refusal, true> = {
   date_before_start: true,
   stale: true,
   save_failed: true,
+  commission_ended: true,
+  congregation_not_found: true,
 };
 
 /** Every string the module can show, flattened (functions are called with sample values). */
@@ -62,13 +67,77 @@ function everyString(): string[] {
   for (const reason of Object.keys(ALL_REFUSALS) as Refusal[]) {
     out.push(refusalMessage(reason, { existingName: "Finance", personName: "Wren Halloway", committeeName: "Finance", date: "2026-11-01" }));
     out.push(refusalMessage(reason, { during: "edit" } as never));
+    out.push(
+      refusalMessage(reason, { subject: "commission", personName: "Wren Halloway", date: "2026-11-01", presbyteryName: "Northern Reach" }),
+    );
   }
+  out.push(commissionNoAccess("Alder Creek"), commissionNoAccess(null));
+  out.push(commissionAboutLine("Alder Creek", true), commissionAboutLine("Alder Creek", false), commissionAboutLine(null, true));
   out.push(...(carriesNote(["Property"]) ? [carriesNote(["Property"])!, carriesNote(["Property", "Finance"])!] : []));
   out.push(...[carriesWarning(["A"])!, carriesWarning(["A", "B"])!, dissolveCarries(["A"])!, dissolveCarries(["A", "B"])!]);
   return out;
 }
 
 describe("copy.ts (U3)", () => {
+  it("the commission strings are the Copy section's C15, byte for byte", () => {
+    expect(commissionNoAccess("Alder Creek")).toBe(
+      "This record gives no one access to Alder Creek's PresbyPortal, and Alder Creek does not see it.",
+    );
+    expect(commissionNoAccess(null)).toBe("This record gives no one access to any congregation's PresbyPortal.");
+    expect(commissionAboutLine("Alder Creek", true)).toBe("About Alder Creek");
+    expect(commissionAboutLine("Alder Creek", false)).toBe("About Alder Creek (no longer a member of this presbytery)");
+    expect(commissionAboutLine(null, false)).toBe("No congregation recorded");
+    expect(REFUSAL.commission_ended).toBe("This commission has ended, so no one can be added.");
+    expect(refusalMessage("congregation_not_found", { presbyteryName: "Northern Reach" })).toBe(
+      "That congregation could not be found among Northern Reach's member congregations.",
+    );
+    expect(refusalMessage("stale", { subject: "commission" })).toBe(
+      "This record was changed by someone else after you opened it. Reload the page, then make your change again.",
+    );
+    expect(refusalMessage("overlap", { subject: "commission", personName: "Wren Halloway" })).toBe(
+      "Wren Halloway already serves on this commission during those dates. End that term first.",
+    );
+    expect(refusalMessage("already_ended", { subject: "commission" })).toBe("This commission has already ended.");
+    expect(refusalMessage("date_before_start", { subject: "commission", date: "2026-11-01" })).toBe(
+      "A member started on Nov 1, 2026. The end date can't be before that.",
+    );
+    expect(COMMISSION_REFUSAL.dateBeforeStart("2026-11-01")).toBe("A member started on Nov 1, 2026. The end date can't be before that.");
+    // orchestrator rulings on B5 (additions to C15)
+    expect(COMMISSION_REFUSAL.notFound).toBe("That commission could not be found.");
+    expect(refusalMessage("not_found", { subject: "commission" })).toBe("That commission could not be found.");
+    expect(refusalMessage("not_found")).toBe("That committee could not be found.");
+    expect(VALIDATION.appointedAfterEnd).toBe("The appointed date can't be after the end date.");
+    expect(VALIDATION.appointedFuture).toBe("The appointed date can't be after today.");
+    expect(VALIDATION.titleRequired).toBe("Title is required.");
+    expect(VALIDATION.titleTooLong).toBe("Title must be 200 characters or fewer.");
+    expect(VALIDATION.chargeTooLong).toBe("Charge must be 500 characters or fewer.");
+    expect(VALIDATION.minuteTooLong).toBe("Minute reference must be 200 characters or fewer.");
+    expect(VALIDATION.appointedRequired).toBe("Choose the date it was appointed.");
+    expect(VALIDATION.endedFuture).toBe("The end date can't be in the future.");
+    expect(VALIDATION.endedBeforeAppointed("2026-11-01")).toBe("The end date can't be before Nov 1, 2026, when it was appointed.");
+    expect(TOAST.commissionRecorded).toBe("Commission recorded.");
+    expect(TOAST.commissionSaved).toBe("Commission saved.");
+    expect(TOAST.commissionMemberAdded).toBe("Added to the commission.");
+    expect(TOAST.commissionEnded).toBe("Commission ended.");
+    expect(TOAST.recordRemoved).toBe("Record removed.");
+  });
+
+  it("the no-access sentences say 'gives no one access' and 'does not see it', never 'no one at the presbytery can see it' (the charge is tier 1: residual 10)", () => {
+    for (const s of [commissionNoAccess("Alder Creek"), commissionNoAccess(null)]) {
+      expect(s).toMatch(/gives no one access/);
+      expect(s).not.toMatch(/no one (at|else)|can see it|nothing is kept/i);
+    }
+  });
+
+  it("the same kind is worded differently for a commission only through `subject`, and the default wording is unchanged", () => {
+    for (const reason of ["stale", "overlap", "already_ended", "date_before_start", "not_found"] as const) {
+      const detail = { personName: "Wren", committeeName: "Finance", date: "2026-11-01" };
+      expect(refusalMessage(reason, { ...detail, subject: "commission" }), reason).not.toBe(refusalMessage(reason, detail));
+    }
+    expect(refusalMessage("stale")).toBe(REFUSAL.stale);
+    expect(refusalMessage("already_ended")).toBe(REFUSAL.already_ended);
+  });
+
   it("every Refusal kind has a string", () => {
     for (const reason of Object.keys(ALL_REFUSALS) as Refusal[]) {
       const message = refusalMessage(reason, { existingName: "Finance", personName: "Wren", committeeName: "Finance", date: "2026-11-01" });

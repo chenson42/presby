@@ -172,3 +172,36 @@ export interface PersonStatus {
 export function personStatus(facts: { membershipEndedOn: string | null; dateOfDeath: string | null }): PersonStatus {
   return { connected: facts.membershipEndedOn === null, deceased: facts.dateOfDeath !== null };
 }
+
+// ---------------------------------------------------------------------------
+// Commission records (Increment 2, C15)
+// ---------------------------------------------------------------------------
+
+export interface ListedCommission {
+  id: string;
+  title: string;
+  /** `YYYY-MM-DD` when ended, else null. An end is never in the future (the store refuses one), so a record with a date has ended. */
+  endedOn: string | null;
+  appointedOn: string;
+}
+
+export interface CommissionSections<C> {
+  /** No end recorded, most recently appointed first. */
+  active: C[];
+  /** Ended, most recently ended first. */
+  ended: C[];
+}
+
+/**
+ * The commissions list's two sections (C15): Active, then ended ones (shown on
+ * request). Newest first within each, then title, then id, so the order is total.
+ */
+export function groupCommissions<C extends ListedCommission>(commissions: readonly C[]): CommissionSections<C> {
+  const active: C[] = [];
+  const ended: C[] = [];
+  for (const commission of commissions) (commission.endedOn === null ? active : ended).push(commission);
+  const tail = (a: C, b: C) => byName(a.title, b.title) || a.id.localeCompare(b.id);
+  active.sort((a, b) => b.appointedOn.localeCompare(a.appointedOn) || tail(a, b));
+  ended.sort((a, b) => (b.endedOn ?? "").localeCompare(a.endedOn ?? "") || tail(a, b));
+  return { active, ended };
+}

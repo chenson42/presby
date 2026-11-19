@@ -66,6 +66,10 @@ export const LIMITS = {
   nameMax: 200,
   purposeMax: 2000,
   meetsWhenMax: 200,
+  /** Commission record (Increment 2): the `char_length` bounds of 0090 section 3. */
+  titleMax: 200,
+  chargeMax: 500,
+  minuteMax: 200,
   /** The database's date floor on every date column (0090). */
   dateFloor: "1900-01-01",
   /** A start (or an effective date) may not be more than this many years ahead. */
@@ -80,6 +84,10 @@ export const LIMITS = {
 
 export const CHANGED_FIELDS = ["name", "purpose", "meetsWhen"] as const;
 export type ChangedField = (typeof CHANGED_FIELDS)[number];
+
+/** The same for a commission record's `commission_record.updated` row (Increment 2): field NAMES, never a value. */
+export const COMMISSION_CHANGED_FIELDS = ["title", "charge", "congregation", "appointedOn", "minuteReference"] as const;
+export type CommissionChangedField = (typeof COMMISSION_CHANGED_FIELDS)[number];
 
 // ---------------------------------------------------------------------------
 // Viewer, context, outcomes
@@ -116,7 +124,10 @@ export type Refusal =
   | "same_role"
   | "date_before_start"
   | "stale"
-  | "save_failed";
+  | "save_failed"
+  // Increment 2 (commission records, C15):
+  | "commission_ended"
+  | "congregation_not_found";
 
 /** What a refusal's message may name: the stored name of the existing thing, or a date. Never a client value. */
 export interface RefusalDetail {
@@ -129,6 +140,14 @@ export interface RefusalDetail {
   date?: string;
   /** `committee_dissolved`: `"edit"` when the refused act was an edit (C4's sentence), absent for an add (C5's). */
   during?: "edit";
+  /**
+   * `"commission"` when the refused act was about a commission record: `stale`,
+   * `overlap`, `date_before_start` and `already_ended` then use C15's sentence
+   * (the same kind, a different object). Absent for a committee.
+   */
+  subject?: "commission";
+  /** `congregation_not_found`: the presbytery's stored name (C15 names it). */
+  presbyteryName?: string;
 }
 
 export type Outcome<T> =
@@ -154,6 +173,8 @@ export type CommitteesRead<T> =
   | { kind: "forbidden" }
   | { kind: "not_found" };
 export type CommitteesFormRead<T> = CommitteesRead<T> | { kind: "committee_dissolved" };
+/** The commission member form's reader adds `commission_ended` (the page renders that state, not a form). */
+export type CommissionFormRead<T> = CommitteesRead<T> | { kind: "commission_ended" };
 
 // ---------------------------------------------------------------------------
 // What a Server Action returns (a superset of `ActionResult<{ id: string }>`)
@@ -167,6 +188,8 @@ export interface ActionData extends Written {
   cancelled?: boolean;
   /** `setCommitteeSeatPublicListedAction`: the listing as it now stands. */
   publicListed?: boolean;
+  /** `endCommissionAction`: how many members' terms the end closed. */
+  membersEnded?: number;
 }
 
 /**

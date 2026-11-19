@@ -5,7 +5,7 @@ import type { CommitteeListRow } from "@/lib/committees/reads";
 import { FormattedDate } from "@/components/shared/formatted-date";
 import { KindBadge } from "./kind-badge";
 
-const LINK_CLASSES =
+export const LINK_CLASSES =
   "inline-flex min-h-11 max-w-full items-center font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 export function committeeHref(slug: string, id: string): string {

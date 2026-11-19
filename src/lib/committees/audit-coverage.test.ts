@@ -5,7 +5,8 @@
  * 2026-11-19-presbytery-committees.md, Phase 3 "API Contract" and "Test plan" U6;
  * the oversight and person-photos `audit-coverage.test.ts` precedent):
  *
- *   - the nine Increment 1 keys exist in `AUDIT_ACTIONS`, as `tenant.committee.*`;
+ *   - the nine Increment 1 keys exist in `AUDIT_ACTIONS`, as `tenant.committee.*`, and
+ *     the six Increment 2 keys as `tenant.commission_record.*`;
  *   - every exported `store.ts` write calls `audit(` the expected number of times
  *     (once; `updateCommittee` may write two), each with its own key, and `audit()`
  *     writes with `insertAuditRow(tx, ...)` (the SAME transaction), never
@@ -13,7 +14,8 @@
  *   - the metadata keys each call passes equal the allowlist: ids, enumerations,
  *     booleans, counts, dates and field NAMES only, never a name, purpose,
  *     meets-when text or a person's name;
- *   - every one of the nine keys is used.
+ *   - every one of the fifteen keys is used. A commission record's charge, title and
+ *     minute are never audit metadata (the forbidden-key scan names all three).
  *
  * The behavioural half (a failed audit insert undoes the change; sentinel strings
  * in every free-text field appear in no audit row) is `store.db.test.ts`.
@@ -37,6 +39,16 @@ const KEYS: Record<string, string> = {
   COMMITTEE_MEMBER_ENDED: "tenant.committee.member_ended",
   COMMITTEE_MEMBER_LISTED: "tenant.committee.member_listed",
   COMMITTEE_MEMBER_UNLISTED: "tenant.committee.member_unlisted",
+};
+
+/** Increment 2: the commission record's six, all `tenant.commission_record.*`, resourceType `commission_record`. */
+const COMMISSION_KEYS: Record<string, string> = {
+  COMMISSION_RECORD_RECORDED: "tenant.commission_record.recorded",
+  COMMISSION_RECORD_UPDATED: "tenant.commission_record.updated",
+  COMMISSION_RECORD_MEMBER_ADDED: "tenant.commission_record.member_added",
+  COMMISSION_RECORD_MEMBER_ENDED: "tenant.commission_record.member_ended",
+  COMMISSION_RECORD_ENDED: "tenant.commission_record.ended",
+  COMMISSION_RECORD_REMOVED: "tenant.commission_record.removed",
 };
 
 interface Expected {
@@ -85,6 +97,37 @@ const WRITES: Record<string, Expected> = {
     keys: [["COMMITTEE_MEMBER_LISTED", "COMMITTEE_MEMBER_UNLISTED"]],
     resourceType: "committee_member",
     metadata: [[...COMMITTEE_ONLY, "membershipId", "personId"]],
+  },
+  // Increment 2: every commission event names the record by `commissionId` and uses its id as the resource id.
+  recordCommission: {
+    keys: [["COMMISSION_RECORD_RECORDED"]],
+    resourceType: "commission_record",
+    metadata: [["commissionId", "aboutOrgId"]],
+  },
+  updateCommission: {
+    keys: [["COMMISSION_RECORD_UPDATED"]],
+    resourceType: "commission_record",
+    metadata: [["commissionId", "changed"]],
+  },
+  addCommissionMember: {
+    keys: [["COMMISSION_RECORD_MEMBER_ADDED"]],
+    resourceType: "commission_record",
+    metadata: [["commissionId", "memberId", "personId", "role", "startsOn", "endsOn"]],
+  },
+  endCommissionMember: {
+    keys: [["COMMISSION_RECORD_MEMBER_ENDED"]],
+    resourceType: "commission_record",
+    metadata: [["commissionId", "memberId", "personId", "role", "endsOn", "cancelled"]],
+  },
+  endCommission: {
+    keys: [["COMMISSION_RECORD_ENDED"]],
+    resourceType: "commission_record",
+    metadata: [["commissionId", "endedOn", "membersEnded"]],
+  },
+  removeCommissionRecord: {
+    keys: [["COMMISSION_RECORD_REMOVED"]],
+    resourceType: "commission_record",
+    metadata: [["commissionId"]],
   },
 };
 
@@ -209,15 +252,35 @@ describe("audit coverage of src/lib/committees/store.ts (U6)", () => {
     }
   });
 
-  it("every one of the nine keys is used", () => {
-    const used = new Set(Object.values(WRITES).flatMap((w) => w.keys.flat()));
-    expect([...used].sort()).toEqual(Object.keys(KEYS).sort());
+  it("the six commission keys exist in AUDIT_ACTIONS as tenant.commission_record.*", () => {
+    for (const [key, value] of Object.entries(COMMISSION_KEYS)) {
+      expect(AUDIT_TS, key).toContain(`${key}: "${value}"`);
+      expect(value).toMatch(/^tenant\.commission_record\.[a-z_]+$/);
+    }
   });
 
-  it("the store's one `changed` array can only carry the three closed field names", () => {
+  it("every one of the fifteen keys is used", () => {
+    const used = new Set(Object.values(WRITES).flatMap((w) => w.keys.flat()));
+    expect([...used].sort()).toEqual([...Object.keys(KEYS), ...Object.keys(COMMISSION_KEYS)].sort());
+  });
+
+  it("no audit call of a commission write can carry the charge, the title or a minute, even under another spelling", () => {
+    for (const name of Object.keys(WRITES).filter((n) => WRITES[n]!.resourceType === "commission_record")) {
+      const fn = fns.find((f) => f.name === name)!;
+      for (const call of auditCalls(fn.body)) {
+        for (const key of metadataKeys(call)) expect(key, name).not.toMatch(/charge|title|minute|name/i);
+        // and no value expression reads the free-text fields off the input
+        expect(call, name).not.toMatch(/input\.(title|charge|minuteReference|endedMinuteReference)|stored\.(title|charge|minuteReference)/);
+      }
+    }
+  });
+
+  it("the store's `changed` arrays can only carry the closed field names (three for a committee, five for a commission)", () => {
     const contract = readFileSync(path.join(__dirname, "contract.ts"), "utf8");
     expect(contract).toMatch(/CHANGED_FIELDS = \["name", "purpose", "meetsWhen"\] as const/);
+    expect(contract).toMatch(/COMMISSION_CHANGED_FIELDS = \["title", "charge", "congregation", "appointedOn", "minuteReference"\] as const/);
     expect(stripComments(STORE)).toMatch(/const changed: ChangedField\[\] = \[\]/);
+    expect(stripComments(STORE)).toMatch(/const changed: CommissionChangedField\[\] = \[\]/);
   });
 });
 

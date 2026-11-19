@@ -825,6 +825,32 @@ export const AUDIT_ACTIONS = {
   COMMITTEE_MEMBER_ENDED: "tenant.committee.member_ended",
   COMMITTEE_MEMBER_LISTED: "tenant.committee.member_listed",
   COMMITTEE_MEMBER_UNLISTED: "tenant.committee.member_unlisted",
+  // ---------------------------------------------------------------------------
+  // Presbytery committees, Increment 2 (DECISION-355, 358): the six
+  // administrative-commission RECORD writes, in a second APPENDED block. Same
+  // rules as above (insertAuditRow(tx, ...) in the mutation's own transaction;
+  // ids, closed enumerations, booleans, counts, dates and field NAMES only:
+  // NEVER a commission title, charge or minute text, or a person's name).
+  // resourceType "commission_record", resourceId the commission record's id for
+  // every one of the six (a member event names its member in metadata). A
+  // commission record is NOT a grant: nothing here writes
+  // administrative_commissions, org_delegations or a role.
+  //   - COMMISSION_RECORD_RECORDED: { organizationId, commissionId, aboutOrgId:
+  //     string | null }
+  //   - COMMISSION_RECORD_UPDATED: { ..., commissionId, changed: ("title" |
+  //     "charge" | "congregation" | "appointedOn" | "minuteReference")[] }
+  //   - COMMISSION_RECORD_MEMBER_ADDED: { ..., commissionId, memberId, personId,
+  //     role, startsOn, endsOn: string | null }
+  //   - COMMISSION_RECORD_MEMBER_ENDED: { ..., commissionId, memberId, personId,
+  //     role, endsOn, cancelled }
+  //   - COMMISSION_RECORD_ENDED: { ..., commissionId, endedOn, membersEnded }
+  //   - COMMISSION_RECORD_REMOVED: { ..., commissionId }
+  COMMISSION_RECORD_RECORDED: "tenant.commission_record.recorded",
+  COMMISSION_RECORD_UPDATED: "tenant.commission_record.updated",
+  COMMISSION_RECORD_MEMBER_ADDED: "tenant.commission_record.member_added",
+  COMMISSION_RECORD_MEMBER_ENDED: "tenant.commission_record.member_ended",
+  COMMISSION_RECORD_ENDED: "tenant.commission_record.ended",
+  COMMISSION_RECORD_REMOVED: "tenant.commission_record.removed",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

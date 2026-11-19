@@ -17,9 +17,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { endCommitteeSeatAction } from "@/app/(org)/o/[slug]/admin/committees/[committeeId]/actions";
+import { endCommissionMemberAction } from "@/app/(org)/o/[slug]/admin/committees/commissions/[commissionId]/actions";
 import { END_TERM_CARRIES, TOAST } from "@/lib/committees/copy";
 import { parseEndSeat } from "@/lib/committees/validate";
-import { END } from "@/lib/committees/ui-copy";
+import { COMMISSION_MEMBER, END } from "@/lib/committees/ui-copy";
 
 export type EndMode = "end" | "change" | "cancel";
 
@@ -35,6 +36,7 @@ export type EndMode = "end" | "change" | "cancel";
 export function EndTermDialog({
   slug,
   committeeId,
+  commissionId,
   membershipId,
   personName,
   mode,
@@ -45,7 +47,10 @@ export function EndTermDialog({
   idPrefix,
 }: {
   slug: string;
+  /** The committee's id. Ignored (pass any value) when `commissionId` is set. */
   committeeId: string;
+  /** Set on a commission's roster: the same dialog ends a MEMBER TERM of that record (C15), worded for a commission. */
+  commissionId?: string;
   membershipId: string;
   personName: string;
   mode: EndMode;
@@ -64,7 +69,8 @@ export function EndTermDialog({
   const [pending, setPending] = useState(false);
 
   const triggerLabel = mode === "end" ? "End term" : mode === "change" ? "Change end date" : "Cancel planned term";
-  const title = mode === "end" ? END.titleEnd(personName) : mode === "change" ? END.titleChange(personName) : END.titleCancel(personName);
+  const commission = commissionId !== undefined;
+  const title = mode === "end" ? (commission ? COMMISSION_MEMBER.endTitle(personName) : END.titleEnd(personName)) : mode === "change" ? END.titleChange(personName) : END.titleCancel(personName);
   const confirm = mode === "end" ? END.confirmEnd : mode === "change" ? END.confirmChange : END.confirmCancel;
   const fieldId = `${idPrefix}-end-${membershipId}`;
 
@@ -79,7 +85,9 @@ export function EndTermDialog({
     }
     setError(null);
     setPending(true);
-    const result = await endCommitteeSeatAction(slug, { committeeId, membershipId, endsOn: values.endsOn });
+    const result = commission
+      ? await endCommissionMemberAction(slug, { commissionId, memberId: membershipId, endsOn: values.endsOn })
+      : await endCommitteeSeatAction(slug, { committeeId, membershipId, endsOn: values.endsOn });
     setPending(false);
     if (result.ok) {
       toast.success(mode === "end" ? TOAST.termEnded : mode === "change" ? TOAST.endDateSaved : TOAST.plannedCancelled);
@@ -111,7 +119,7 @@ export function EndTermDialog({
           <AlertDialogTitle className="[overflow-wrap:anywhere]">{title}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2">
-              <p>{END.body}</p>
+              <p>{commission ? COMMISSION_MEMBER.endBody : END.body}</p>
               {carries ? <p>{END_TERM_CARRIES}</p> : null}
             </div>
           </AlertDialogDescription>
@@ -129,7 +137,7 @@ export function EndTermDialog({
               className="mt-1 min-h-11"
             />
             <p id={`${fieldId}-hint`} className="mt-1 text-sm text-muted-foreground">
-              {END.helper}
+              {commission ? COMMISSION_MEMBER.endHelper : END.helper}
             </p>
             {error ? (
               <p id={`${fieldId}-error`} role="alert" className="mt-1 text-sm text-destructive">

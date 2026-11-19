@@ -16,7 +16,8 @@ export const backTo = (name: string) => `Back to ${name}`;
 
 // C2: the list
 export const LIST = {
-  intro: (name: string) => `The committees of ${name}, and who serves on each.`,
+  intro: (name: string) =>
+    `The committees of ${name}, who serves on each, and the administrative commissions it has recorded.`,
   newCommittee: "New committee",
   sections: {
     required: "Required committees",
@@ -138,4 +139,81 @@ export const GROUPS_POINTER = {
   after: ".",
   emptyTitle: "No groups yet",
   emptyBody: "Add your first one to get started.",
+} as const;
+
+// C15: administrative commissions (Increment 2)
+export const COMMISSIONS = {
+  heading: "Administrative commissions",
+  intro:
+    "The presbytery's own record of the administrative commissions it has appointed. A record gives no one access to a congregation's PresbyPortal, and the congregation does not see it.",
+  record: "Record a commission",
+  emptyTitle: "No administrative commissions are recorded.",
+  tableHead: { title: "Title", congregation: "Congregation", appointed: "Appointed", status: "Status", serving: "Serving" },
+  /** The word before a date, which the page composes with `FormattedDate` ("Appointed {date}"). */
+  appointedPrefix: "Appointed",
+  active: "Active",
+  ended: "Ended",
+  showEnded: (n: number) => `Show ended commissions (${n})`,
+  hideEnded: "Hide ended commissions",
+  // The commission page
+  charge: "Charge",
+  minute: (reference: string) => `Minute: ${reference}`,
+  noMinute: "No minute recorded",
+  reportedIn: (reference: string) => `Reported in: ${reference}`,
+  edit: "Edit commission",
+  addMember: "Add a member",
+  endCommission: "End commission",
+  removeRecord: "Remove this record",
+  /** Orchestrator ruling (B6 ruling 3): C3's empty-roster line, worded for a commission; an active record only. */
+  emptyRoster: "No one serves on this commission yet.",
+  // The record form
+  newTitle: "Record a commission",
+  editTitle: "Edit commission",
+  fieldTitle: "Title",
+  fieldCharge: "Charge (optional)",
+  fieldCongregation: "Congregation (optional)",
+  congregationNone: "No congregation",
+  fieldAppointed: "Appointed on",
+  fieldMinute: "Minute reference (optional)",
+  chargeHelper:
+    "Describe the charge in general terms. Don't record confidential details. Anyone who can manage committees at this presbytery can read it.",
+  minuteHelper: "For example, the meeting date and item.",
+  submitRecord: "Record commission",
+  // Not in the ratified Copy section (C15 gives the "About" parenthetical only inside a sentence): the label of the
+  // record's own congregation when it has left the presbytery and so is not among the form's options. Recorded as a B6 deviation.
+  leftOption: (name: string) => `${name} (no longer a member of this presbytery)`,
+} as const;
+
+// C15: the member form and the member-term end dialog, C5 and C7 worded for a commission.
+// Not in the ratified Copy section word for word: C15 says "the helpers of C5" and "the C7 dialog" without
+// restating them, and those say "committee". The same sentences with "commission" are recorded as a B6 deviation.
+export const COMMISSION_MEMBER = {
+  personHelper:
+    "Don't see them? People serve on a commission from the presbytery's own records, so add them under Community first. If you don't see Community, ask your presbytery's administrator.",
+  endsHelper: "The first day they are no longer on the commission. Leave it empty if the term has no set end.",
+  submit: "Add to commission",
+  emptyBody: (presbytery: string) =>
+    `People serve on a commission from the presbytery's own records, so add them under Community first. If Community is off for ${presbytery}, turn on "Community: add people and record roll actions" under Features. If you don't see Community or Features, ask your presbytery's administrator.`,
+  endTitle: (name: string) => `End ${name}'s term on this commission?`,
+  endBody: "Their name stays in the history of this commission, with its dates.",
+  endHelper:
+    "The first day they are no longer on the commission. To record their last day of service, enter the day after it.",
+} as const;
+
+// C15: end and remove the record
+export const END_COMMISSION = {
+  title: "End this commission?",
+  body: "This ends every member's term on the date you choose and records that the commission has ended. The record is kept, and it can't be reopened from this page.",
+  field: "Ended on",
+  helper: "The first day the commission no longer exists. Every member's term ends on this date. It can't be in the future.",
+  minuteField: "Minute reference for its report (optional)",
+  confirm: "End commission",
+  goBack: "Go back",
+} as const;
+
+export const REMOVE_RECORD = {
+  title: "Remove this record?",
+  body: "Use this only for a record entered by mistake. It will no longer be listed here, and this page can't bring it back. To record that a commission finished, end it instead.",
+  confirm: "Remove record",
+  goBack: "Go back",
 } as const;

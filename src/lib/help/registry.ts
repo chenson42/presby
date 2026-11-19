@@ -1210,7 +1210,7 @@ export const HELP_PAGES = [
       "Features",
       "Try again",
     ],
-    verifiedIn: "0.62.0",
+    verifiedIn: "0.63.0",
   },
 ] as const satisfies readonly HelpEntry[];
 

@@ -25,6 +25,16 @@ is checked.*
 
 ---
 
+## 2026-11-19
+
+- [ ] **`decision` · Presbytery committees shipped (0.63.0, DECISION-352 to DECISION-359, migration 0090).** Committees & Commissions now works at a presbytery.
+  - **What it keeps:** committees labelled Required, Standing or Ad hoc; members with dated titles (chair, vice chair, clerk, secretary, ex officio, member); a role change with no gap; end term; and dissolve, which is one-way and needs a data fix to undo.
+  - **No access from titles:** a title gives no one access.
+  - **Who can use it:** anyone with `groups.manage`, which the founding administrator already holds; no new key or flag. `org_portal.committees` was already on, so the page is live with the deploy.
+  - **Public committee list:** it now shows every title and drops people outside their term, who left, or who died.
+  - **Database:** 0090 also creates the empty commission-record tables for 0.64.0.
+  - **Tracked, not fixed:** the dormant downward tables (`administrative_commissions`, `org_delegations`, `transfer_certificates`) carry DELETE grants and a write-side policy gap in production (F456/F460), and seat history is soft by convention (F459). These must close before any commission ever grants access.
+
 ## 2026-11-18
 
 - [ ] **`finding` · Building photos and two reports shipped (0.62.0, DECISION-346, DECISION-348; no migration).** The photo code that person photos used now lives in `src/lib/storage/image/`, shared with building photos; person-photo output is byte-identical (checked on 12 generated pictures). Building photos are private and stripped of location data. Two reports join the hub: Buildings (manage key) and Insurance and loans (finance key, two-factor). The Insurance-and-loans spreadsheet includes each loan's guarantee text; it leaves out street addresses, policy numbers, lenders and notes. **Your action after you switch `org_portal.oversight` on:** upload one non-identifying photo from an iPhone (Safari) and an Android phone and confirm it is upright; local Chromium was, Safari is the open question.

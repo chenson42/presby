@@ -21,8 +21,8 @@
 | 2 — Architectural review | architect | Complete (parent; R1–R6) | Approved with suggestions | 2026-11-19 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-19 |
 | 4 — Implementation | database-admin (B1), api-developer (B2), ux-developer (B3), full-stack-developer (B4) | Complete (B1 to B4; see the Phase 4 completion summary) | Ready for Phase 5 | 2026-11-19 |
-| 5 — Verification | qa | Complete (run 1; G1, C1, R1 and copy rulings open) | PASS | 2026-11-19 |
-| 6 — Shipped vs intent | analyst | Pending | — | — |
+| 5 — Verification | qa | Complete (run 1 PASS; run 2 PASS, G1 and R1 closed) | PASS | 2026-11-19 |
+| 6 — Shipped vs intent | analyst | Complete (Increment 1) | SHIP WITH NOTES | 2026-11-19 |
 
 ---
 
@@ -702,6 +702,193 @@ Files referenced:
 
 ---
 
+## QA run 2
+
+**Date:** 2026-11-19
+**Verified by:** qa
+**Tree:** worktree `/Users/cshenso/git/presby-platform/presby-committees`, branch `pipeline/presbytery-committees`, HEAD `acda3ef1`. The diff since run 1 (`22cf0826..acda3ef1`) is two commits: `5def8292` (G1) and `acda3ef1` (R1). I wrote no files to the repository. The only change in the worktree is the Phase 6 analyst's uncommitted section in this work-log, written in parallel; it is not mine.
+**Database:** the pipeline Neon branch, endpoint `ep-odd-hall-ax6wtzf0`. All five connection strings in `.env.local` point at that endpoint: `presby_app` ×2, `neondb_owner` ×3. I checked them by role name and endpoint id only and printed no value. I never touched production or :3000. Disk was 42% used, so ENOSPC is not a factor.
+
+## Scope run
+
+- **In full:** typecheck, lint, `npm run check` (ten tripwires) and the full unit suite, run without database credentials.
+- **G1 fails without the fix, run for real, not just reasoned from the diff:**
+  - I copied the pre-fix `action-gate.ts` (from `22cf0826`) and the current `action-gate.test.ts` into the scratchpad and ran them there under a scratch vitest config. The repository was not touched.
+  - I then ran the same setup with the fixed gate as a control.
+- **R1:** I read the runbook section line by line. I ran its point 6 queries and a trigger→function count, read-only (`begin transaction read only … rollback`), as `neondb_owner` on the pipeline branch.
+- **e2e:**
+  - Before the run I reset the global flags to the CI baseline (`scripts/ci/e2e-reset-flags.sql`, `pipeline_branch=1`). I did it twice; the second time came right before the run (see Environment note).
+  - Specs: `e2e/committees-gates.spec.ts` and `e2e/committees-roster.spec.ts` on my own dev server on 3101, with the env the orchestrator gave plus `E2E_BASE_URL=http://localhost:3101` and `E2E_ALLOW_SHARED_DB=true`.
+  - I stopped the server by PID: npm 71456, node 71475, next-server 71476, child 71604.
+- **Production hydration lane: run.** No `"use client"` file changed. But `src/lib/committees/copy.ts` changed (it gained `flagOff` and an import of the pure `ui-copy.ts`), and six `"use client"` components import it: `dissolve-dialog`, `change-role-form`, `committee-form`, `public-listing-toggle`, `add-member-form` and `end-term-dialog`. So the client bundle changed.
+  - Command: `PW_PROD_BUILD=1 PW_PROD_PORT=3801 --project=prod-build e2e/hydration/committees-forms.spec.ts`, with no `E2E_BASE_URL`. Playwright builds, starts and stops its own server.
+- **Not re-run, and why:**
+  - **Committees database suites:** no server path they exercise changed. The diff does not touch `store.ts`, `reads.ts`, `group-roles.ts`, the migration or any DB test. None of the six DB files imports `action-gate`. The gate's only new dependency is `isFlagEnabled`, and `flags.ts` is unchanged and at 100%.
+  - **RLS (`test-rls-90.sql`, `test-rls.sql`), D6 and the live-catalog audit:** there is no schema change. Run 1's results stand, and the point 6 queries below confirm the catalog is unchanged.
+  - **Run 1's 15 blast-radius specs:** the diff touches only the committees action gate and committees copy, and no layout, proxy, auth, shared component or `e2e/support` file.
+  - **`npm run build`:** the production lane's own build covers it.
+- **Environment note:**
+  - My first `next dev` on 3101 exited at once on Next's per-directory dev lock: the Phase 6 analyst's own server on 3102 (PID 64992) was running in this worktree.
+  - I did not stop it or use it. I waited until it had stopped (its owner stopped it), reset the flags again, and only then started mine.
+  - My first flag reset ran while the analyst's walk was running. Its record says it captured the flags afterwards and restored them to the same values (all off), so the two runs did not overlap on flag state during my e2e.
+  - After the runs: nothing listens on 3101, 3102, 3801 or 3000. No `e2e-cmt*` organizations are left behind. `org_portal.committees` is on and `org_portal.groups` is off (the CI baseline).
+
+## Type Check
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | **PASS** |
+| `npm run lint` (`--max-warnings=0`) | **PASS** (exit 0) |
+| `npm run check` | **PASS**, exit 0, all ten tripwires |
+
+The help check reports 34 registry entries, 31 published, 31 content files and 7 images, the same as run 1.
+
+## Unit Tests
+
+- **Full suite, no database credentials:** 937 files passed, 165 skipped (the database-backed files). 15,460 tests passed, 4,433 skipped, **0 failed**, in 42.6 s.
+  - That is +2 against run 1's 15,458: the two new `action-gate.test.ts` cases. It matches the Phase 4 fix-pass count.
+- **The four changed test files** (`action-gate.test.ts`, `boundaries.test.ts`, `copy.test.ts`, `admin/committees/actions.test.ts`): 4 of 4 files, 79 of 79 tests passed.
+
+Failures: none.
+
+## End-to-End Tests
+
+| Run | Result |
+|---|---|
+| `committees-gates` (5) + `committees-roster` (16), dev lane, own server on 3101, chromium | **21 passed**, 0 failed, 0 skipped, 0 retries (2.6 min) |
+| Production hydration lane, `committees-forms` (3), port 3801 | **3 passed**, 0 failed (41.3 s) |
+
+- `committees-roster` runs every action with the flag on: create, update, add, change role, end, cancel planned, public listing and dissolve. All passed, so the new flag read does not get in the way of normal work.
+- Roster test 15 is the 360px check (no sideways scroll, every control at least 44 px).
+- **Not an auth-touching diff:** nothing under `src/auth.ts`, `src/proxy.ts`, `(auth)`, `api/auth` or `lib/auth` changed.
+
+## Regression Tests Added
+
+**G1: the actions check `org_portal.committees`. Closed.**
+
+- **The fix** (`src/lib/committees/action-gate.ts:84`):
+
+  ```ts
+  if (!(await isFlagEnabled(COMMITTEES_FLAG))) return refuse(GATE_COPY.flagOff(resolved.org.name), "forbidden");
+  ```
+
+  - It sits after `resolveOrgContext` (`:78`) and before the `isUuid` loop (`:86`). `COMMITTEES_FLAG` is `"org_portal.committees"` (`contract.ts:26`, pinned equal to the reports contract's constant in `contract.test.ts:83-84`).
+- **Every action is covered:**
+  - All seven exported actions call `resolveCommitteesActor` as their first awaited step, before any parse or store call: `new/actions.ts:17` and `[committeeId]/actions.ts:51, :64, :81, :94, :116, :133`.
+  - The six on one committee read the form values defensively first (`bag(values)`), which reads nothing from the database.
+  - There are no other mutation paths: no `route.ts` under `admin/committees/**`. Only those two files and tests import `action-gate`.
+  - `boundaries.test.ts` (`actionsCallTheActorGate`) already makes every future action in that tree call the gate first.
+- **Order: flag, then organization type, then `groups.manage`.**
+  - The flag is in the gate.
+  - The type and the key are checked inside the store's own transaction (`store.ts` `gate(tx)`, run 1's record at `:172`/`:173`). The store runs only after the gate returns `ok`.
+  - This matches the page gate (`presbytery-reports/gate.ts:134`: flag, then `REPORT_ORG_TYPES`, then the key in the reader).
+  - The flag comes after the organization resolves, so someone who is not a member gets "You don't have access to that organization." and learns nothing about the rollout. The test proves it: `isFlagEnabled` is never called on a `forbidden` resolution.
+- **Same refusal as the page, as ruled:**
+  - `GATE_COPY.flagOff(name)` is `` `${AREA} isn't turned on for ${orgName} yet.` `` (`copy.ts:79`), with `AREA = "Committees & Commissions"` (`ui-copy.ts:13`).
+  - The page renders `PlaceholderFlagOff area={AREA}` (`committee-gate-state.tsx:19`), which prints `{area} isn't turned on for {orgName} yet.` (`coming-soon.tsx:39`). It is the same sentence, built from the same constant.
+  - `copy.test.ts` pins the exact text.
+- **The test fails without the fix (run, not assumed):**
+  - Setup: the pre-fix gate from `22cf0826` against the current test and the current `copy.ts`. Because `flagOff` exists in that `copy.ts`, the failures come from the gate's behaviour, not from a missing helper.
+  - Result: `× with org_portal.committees off, every action is refused … regression for G1` with `AssertionError: expected { ok: true, identity: {…} } to deeply equal { ok: false, … }`. Also `× the flag is read after the organization resolves … before the ids`, which got `not_found` where `forbidden` was expected. **2 failed, 10 passed.**
+  - Control, same setup with the fixed gate: **12 passed.**
+  - The Phase 4 record's own failing-first run (`TypeError: GATE_COPY.flagOff is not a function`) failed for a weaker reason. This run confirms the test also fails on behaviour.
+- **The boundary rule:** run against the pre-fix file, `actorGateOrder`'s condition gives `flag = -1`, so the rule fires. The rule's own samples (`boundaries.test.ts:528-531`) cover two failures: the flag check dropped, and the flag check after `isUuid`.
+- **Property, not just this fix:**
+  - The unit test runs the real gate with only `isFlagEnabled` mocked.
+  - The boundary test pins the order in source, and the existing rule pins that every action calls this one gate first.
+  - A new action that skips the gate, or a reordering inside it, fails a test.
+  - There is no end-to-end test that sends a real Server Action with the flag off. I judge the unit and boundary pair enough, because `isFlagEnabled` itself is unchanged and fully covered.
+- **Nit, not a finding:** the two actions files' header comments still list the steps without the flag: `[committeeId]/actions.ts:31-39` ("authenticate -> resolve the organization -> UUID check …") and `new/actions.ts:8-14`. `action-gate.ts:24-26` describes it correctly.
+
+## Coverage on Critical Modules
+
+- `src/lib/permissions.ts`, `src/lib/two-factor.ts` and `src/lib/flags.ts` did not change in this diff; run 1's figures stand (100%, 91.1% statements, 100%).
+- `action-gate.ts` gains one branch, and both of its outcomes are tested (flag on: every other test; flag off: the G1 test).
+
+## Feature-Gate Audit
+
+I read every route and action body again. There is no `route.ts` and no `loading.tsx` under `admin/committees/**`.
+
+| Route or action | Signed in + second factor | Organization from the slug | Flag `org_portal.committees` | Presbytery type | `groups.manage` |
+|---|---|---|---|---|---|
+| The six `/o/[slug]/admin/committees/**` pages | yes (`gateCommitteesPage`) | yes | yes (`gate.ts:134`) | yes | yes, in the reader's transaction |
+| `createCommitteeAction` (`new/actions.ts:17`) | yes (`resolveCommitteesActor`) | yes | **yes, `action-gate.ts:84` (new)** | yes, store `gate(tx)` | yes, store `gate(tx)` |
+| `updateCommitteeAction`, `dissolveCommitteeAction`, `addCommitteeSeatAction`, `changeCommitteeSeatRoleAction`, `endCommitteeSeatAction`, `setCommitteeSeatPublicListedAction` (`[committeeId]/actions.ts:51–133`) | yes | yes; UUID check on every id, after the flag | **yes, `action-gate.ts:84` (new)** | yes | yes |
+
+- Groups admin at a presbytery and the public committee directory: unchanged since run 1.
+- Run 1's G1 contradiction with the parent Phase 3 ("flag, then organization type, then `groups.manage` on every page, reader and action") is resolved.
+- The rollback sentence, that with the flag off "a presbytery's committees cannot be edited at all", is now true of Server Actions too.
+
+## Schema/RLS Audit
+
+There is no schema change in this diff. Run 1's live-catalog audit stands. The read-only queries for R1 (below) also confirm the three tables' posture on the branch is unchanged:
+
+- FORCE row-level security on 3 of 3 tables, 3 policies.
+- `presby_app` holds INSERT and SELECT only.
+- No DELETE or TRUNCATE for `presby_app` or `presby_platform`.
+- `presby_platform` holds nothing.
+- The role CHECK is validated.
+
+## Copy Truthfulness
+
+- **Added string:** `GATE_COPY.flagOff`, "Committees & Commissions isn't turned on for {name} yet." (`copy.ts:79`).
+  - **Is it in Copy?** It is the page's existing `PlaceholderFlagOff` sentence, and the orchestrator ruled it the refusal the actions use.
+  - **Who sees it:** any member who reaches an action while the global flag is off. The pages hide the forms then, so in practice it is a direct call or a form left open when the flag was switched off.
+  - **Is it true?** It is shown exactly when `isFlagEnabled("org_portal.committees")` is false. The flag is global, so "for {name}" is true of the named organization, the same way the page's sentence is.
+  - **Instructions:** none.
+  - **Older strings made false:** none; the page sentence is unchanged.
+- **Help diff:** none in this diff.
+
+**R1, the runbook (`docs/deployment.md`, "Presbytery committees (0090)"): closed.**
+
+- **"Four functions behind five triggers (three new guards, plus 0045's about-org function)" (`:1802`): true.**
+  - On the branch, the three tables carry 5 triggers running 4 distinct functions.
+  - Three are new: `presby_commission_guard_write` (2 triggers), `presby_commission_live_guard` and `presby_committee_details_guard`.
+  - The fourth is `presby_check_about_org_affiliated`.
+- **Point 6 now uses `aclexplode` (`:1836-1841`): true.** Run read-only on the branch, the DELETE/TRUNCATE query returns **0** and the `presby_platform` query returns **0**, as the text says. The forced and policy counts return 3 and 3.
+- **Point 8, the five flags: the text is true to the orchestrator's ruling.**
+  - All five keys (`org_portal.groups`, `org_portal.roles`, `org_portal.members_create`, `org_portal.features`, `org_portal.admin_hub`) are exact names of existing `feature_flags` rows. On the branch they are all off at the CI baseline, which is expected for a dev branch.
+  - "Read from production 2026-11-19: all on" rests on the orchestrator's C1 read. I did not read production (out of bounds for this run).
+  - "The rollback is switching `org_portal.committees` off, which hides every page and deletes nothing" is still true, and after G1 it also refuses every action.
+- **Point 9: true.**
+  - It now says the five integration patches are already in the branch and must not be applied again. That is correct: they were integrated in `1fadad5f`.
+  - Then it says: apply `0090` with `-1` as the owner, then the seed, then `test-rls-90.sql` and `test-rls.sql`.
+  - Nit, not a finding: its last clause, "the patch moves the two counts … read the first halt, not the last", is a leftover from the apply-the-patches wording. It is not false, but "the patch" now means the integrated change.
+
+## Verdict
+
+**PASS.**
+
+- G1 is closed: every committees Server Action reads `org_portal.committees` through the one gate. The order is flag, then type, then key. The refusal is the page's sentence. The regression test fails without the fix (2 of 12) and passes with it (12 of 12).
+- R1 is closed: the runbook's function count, `aclexplode` checks and point 9 are true. Point 8 names the four production flags as the orchestrator read them.
+- Nothing regressed: typecheck, lint, ten tripwires, the unit suite at 15,460 passed and 0 failed, e2e committees gates and roster at 21 of 21 on my own server on 3101, and the production hydration lane at 3 of 3.
+- Two comment-level nits (the actions files' header comments; point 9's last clause) are optional and need no re-run.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 5 — Verification | qa | Complete, run 2 (G1 and R1 closed; G1 test confirmed failing on the pre-fix gate, 2 of 12; unit 15,460 passed, 0 failed; e2e gates and roster 21 of 21 on 3101; prod hydration 3 of 3; flags reset to the CI baseline; DB, RLS and blast-radius suites rest on run 1, no schema or store change) | PASS | 2026-11-19 |
+
+## Handoff
+
+- **Next: analyst (Phase 6).** The analyst's Increment 1 section (SHIP WITH NOTES) was written in parallel with this run and is uncommitted in the work-log. It says it did not exercise G1 and treated it as a logged fix. This run confirms that fix, so nothing in Phase 6's G1 reading needs revisiting.
+- **Orchestrator:** record this section verbatim, and the analyst's uncommitted section. The two optional nits are for the implementer at its discretion.
+
+Files referenced:
+- /Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/action-gate.ts
+- /Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/action-gate.test.ts
+- /Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/boundaries.test.ts
+- /Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/copy.ts
+- /Users/cshenso/git/presby-platform/presby-committees/src/app/(org)/o/[slug]/admin/committees/new/actions.ts
+- /Users/cshenso/git/presby-platform/presby-committees/src/app/(org)/o/[slug]/admin/committees/[committeeId]/actions.ts
+- /Users/cshenso/git/presby-platform/presby-committees/src/app/(org)/o/[slug]/admin/committees/committee-gate-state.tsx
+- /Users/cshenso/git/presby-platform/presby-committees/src/lib/presbytery-reports/gate.ts
+- /Users/cshenso/git/presby-platform/presby-committees/docs/deployment.md
+- /Users/cshenso/git/presby-platform/presby-committees/docs/work-log/2026-11-19-presbytery-committees-inc1.md
+
+---
+
 ## Orchestrator rulings after QA run 1 (2026-11-19)
 
 - **G1:** the flag is checked in the actions too, as the design says (parent Phase 3, flag, then org type, then `groups.manage` on every page, reader and action). Add `org_portal.committees` to `resolveCommitteesActor`, with a failing-first test. With the flag off, an action answers the same refusal as the page's "isn't turned on yet" state. The rollback sentence then stays true.
@@ -715,5 +902,165 @@ Files referenced:
 ---
 
 # Phase 6 — Shipped vs Intent (analyst)
+I've finished the Phase 6 section for Increment 1 and the verdict is **SHIP WITH NOTES**. I found nothing that contradicts the build and nothing that blocks the 0.63.0 deploy. The notes are small wording and trust gaps. Increment 1 delivers only the committees half of operator decision B, so the pipeline stays open until Increment 2.
 
-Pending.
+# Phase 6 — Shipped vs Intent (analyst), Increment 1 (0.63.0)
+
+*Date: 2026-11-19. Tree: worktree `/Users/cshenso/git/presby-platform/presby-committees`, branch `pipeline/presbytery-committees`, HEAD `acda3ef1`. I wrote no files to the repository. `git status` is clean.*
+
+**Environment.**
+- I used my own dev server on port 3102, started with the env the orchestrator gave. I stopped it by PID, and nothing now listens on 3102.
+- It ran against the pipeline Neon branch (endpoint ep-odd-hall-ax6wtzf0). I never touched production or :3000.
+- I drove it with headless Chromium scripts that I kept in the scratchpad.
+- **QA run 2 on the G1 fix** (the Server Actions now check `org_portal.committees`) was running in parallel. I did not wait for it or rely on it.
+- I did not exercise G1 itself in this walk. I read it as a log-recorded fix with a failing-first test.
+- Dev-branch global flags I flipped for the Community and Roles walk were `org_portal.roles`, `members_create`, `features`, `admin_hub` and `groups`. I read their original values first and restored them. All were off before and are off now; `org_portal.committees` stayed on throughout.
+- The fixture presbyteries, users and people were removed after each run. I checked that 0 `e2e-cmt%` organizations and 0 `e2e-cmt-` users remain.
+
+## VERDICT: SHIP WITH NOTES
+
+Increment 1 delivers what Phase 1 promised for committees and the operator's decision B (a committee as a group with a Required / Standing / Ad hoc label and dated roles). Every flow I walked matches its Copy string and its Phase 1 verb. Neither the walk nor any help page I read showed a contradiction with the build. Each note below becomes a TODO line.
+
+Commissions are not in this increment. Operator decision B and Phase 1 called them needed at go-live. Judged for truthfulness only, Inc 1's wording says plainly that the page keeps committees and not administrative commissions. The tile description claims only committees. I found nothing in Inc 1 that oversells commissions.
+
+## Walks
+
+**Founding administrator (the person the invitation path creates), 360px, light and dark.**
+- **What I used.**
+  - The e2e fixture's approach. A throwaway presbytery had its founding administrator minted by the real definer `presby_apply_founding_administrator`. The invitation-acceptance migrations call that same function.
+  - The account was enrolled in two-factor sign-in, signed in by password, and answered the real `/totp` challenge. It held no grant beyond the minted bundle (Founding Administrator plus the companion Stated Clerk role).
+  - I did not click through an invitation email. The definer is the single point where the invitation path and the designation path both write, so what I walked is what that person receives.
+- **Portal.** The tile sits under "Governance & Courts" with no "Coming soon" pill: "Committees & Commissions — The presbytery's committees and who serves on them." Communications keeps its own pill.
+- **Empty list.** "No committees yet", the guided sentence, and "Create your first committee". A 360px screenshot confirms it reads well.
+- **New committee form.** Both required fields were refused on their own fields with the Copy sentences. A created committee showed its kind, purpose and meeting time.
+- **Add a member.**
+  - The form showed the titles note, the person helper and the role helper, and Member was preselected.
+  - A start date 120 days back was accepted. A start date 30 days ahead landed under "Starting later". A planned end showed "Ends 6/7/2027" on the card.
+  - With every selectable person already seated, the page switched to the guided empty state. QA and B3 saw that state, and I confirmed the founder's person list is populated before that.
+- **Change role.**
+  - The page read "Now Chair, since …", and the current role was not offered. The helper said "no gap … Both stay in the history".
+  - A Vice chair changed to Chair today appeared in Past members as "Vice chair, Started …, Ended 11/19/2026". The new row read "Chair, Since 11/19/2026", so the two dates abut with no gap.
+- **End term, Change end date, Cancel planned term.** Each opened its own dialog with the correct title and helper. "Go back" wrote nothing.
+- **Dissolve.** The dialog text is as designed. The committee moved to "Show dissolved committees (1)". The dissolved page shows "Dissolved 11/19/2026", the dissolved note and no write control.
+- **Dark mode.** The list, committee page, end dialog and dissolve dialog are legible. Badges, borders and the destructive button hold contrast.
+- **360px.** `scrollWidth == clientWidth` on every page and dialog. A 108-character unbroken last name wraps inside its card and dialog title. Every control is full width or at least 44px.
+- **Carries-role note.** With a role bound to a committee, the committee page, the add-form warning, the end dialog and the dissolve dialog all state the access consequence in the designed words.
+- **Status badges.** A person recorded as deceased shows "Recorded as deceased". A person whose presbytery membership ended shows "No longer connected to this presbytery".
+- **Audit.** The rows written by the listing, role change and end term carry only ids, role, dates and booleans. They hold no names or free text. The seven actions I walked (listing, role change, end term, and so on) each wrote exactly one row.
+- **Groups admin at a presbytery** (with `org_portal.groups` temporarily on).
+  - There is a pointer line, "Committees of {name} are kept under Committees & Commissions."
+  - The list shows no committee-type rows.
+  - The empty state reads "No groups yet".
+
+**Seeded Northern Reach, as the committees clerk (`groups.manage` only).**
+- This covers every list state: three kinds, "Not yet labelled" with its prompt, and dissolved.
+- Cards show below `sm` and a table at 1280px. Role and dates are visible in both layouts.
+- The "Public" badge and switch are shown for the opted-in chair.
+- The legacy "Commission on Alder Creek" group appears as "Not yet labelled" with "No chair serving", as T16 intended.
+
+**Member with no key (`committees.plain@example.invalid`).**
+- The list, `/new`, a committee page and `/members/new` all give the single C1 sentence: "You don't have permission to manage committees at {name}. If you think this is a mistake, ask your presbytery's administrator." They show no committee, form or data.
+- A non-UUID id returns 404.
+- An unknown but well-formed UUID gives the same denied page, so the key check runs before any existence check. That reveals nothing.
+- The denied pages return HTTP 200, as with oversight (accepted precedent).
+
+**Community at a presbytery.**
+- As the founder I switched on "Community: add people and record roll actions" from the Features page. The Community page opened, then "Add person" and the six-step wizard.
+- At step 5, "How is this person connected?", the founder is offered only "Visitor", with the line "Participants and members are recorded by someone who can propose roll actions…".
+- I created a visitor. The new person then appeared in the add-member list of a committee. The help paragraph's whole route works, and Phase 1 Gap 1's "never walked at a presbytery" is now walked.
+- I also reached the Roles page (Roles catalog with "Create role") and Features from "Organization Administration" at `/o/<slug>/admin`.
+- Under the CI-baseline flags the portal does not show Roles or Features. They need the flags that C1 says are on in production.
+
+**Public committee list.**
+- I could not render a browser page. No ingested site bundle with a committee-directory slot exists on this branch, and `/site/fernwood` returns 404.
+- I read `presby_public_committee_roster` as `presby_app`, the anonymous door, at a presbytery with a live site. Results:
+  - A clerk with a planned end date in the future is listed.
+  - A secretary whose term has not started, a member whose term ended, a deceased person and a person who left the presbytery are not listed.
+  - Listing Avery Lindqvist through the UI consent dialog added the chair title to the public result.
+  - Changing the role to Secretary kept the listing and the title became `secretary`.
+  - Ending that term today removed the entry the same day.
+- The label map is pinned by `committee-directory.test.tsx`. Vice chair, Clerk, Secretary and Ex officio titles render there, which QA ran.
+- The "Public" badge and the website's list agree on the right rows. See follow-up 3 for one caveat.
+
+## Help pages, read as their reader at 360px
+
+All four named pages return 200 with no sideways scroll. `/help/planned/presbytery-tools` redirects to `/help/presbytery-committees`.
+
+- **`presbytery-committees`.**
+  - Every quoted label is on screen or in a state I produced: the three kinds, the six roles, "Serving now", "Starting later", "Past members", "Ends on", "Starts on", "Effective on", "Dissolved on", "Change end date" and the two status badges.
+  - "Create your first committee", "Create committee", "Add a member" and "Add to committee" appear in the empty list and the forms.
+  - "Features" and "Try again" appear in no state I opened. QA proved them by component tests.
+  - Every behavioural claim matched: same-name refusal, "Ends" on a planned end, the end term moving a person to Past members, dissolve date capped at today, and the listing rules (start, end, left, deceased, UTC midnight).
+  - The Community route claim matches. The paragraph "Visitor, or Participant if you are able to propose roll actions" is true for this founder, who sees only Visitor.
+  - The "Administrative commissions" section says "This page keeps committees. It does not keep administrative commissions, so record those in your own minutes." That is true for 0.63.0 and Increment 2 rewrites it.
+  - I found no `limitationUntil`. The deleted `presbytery-tools` placeholder carried the falsified "no committees-and-commissions module" sentence, and it is gone.
+- **`roles-who-can-do-what`.** Both added sentences are true. The permission description they quote matches the live row, which QA confirmed. The founding administrator can keep committees where the page is switched on.
+- **`why-cant-i-see-this`.** The added exception is true. The page is a global switch (`org_portal.committees` and `org_portal.oversight` are `feature_flags` rows) and "Features" does not control it.
+- **`privacy-policy`.** The added bullet is true. Public listing is per-member opt-in.
+- **Not edited, correctly.** `adding-people`, `first-day-as-administrator` and the other pages the design dispositioned as "no edit" stay true. I did not re-read them against a screen.
+- `verifiedIn: "0.62.0"` on `presbytery-committees` stays until the release commit sets it. It is mine to move only by this walk, and I now confirm it for 0.63.0.
+
+## Per-gap check against Phase 1
+
+- **Gap 1** (a person on a committee is a current presbytery member; ruling elders need a record) — addressed by the helper, the guided empty state and the walked Community path. The "which congregation" limit is deferred and was accepted.
+- **Gap 2** (a commission is a record, not a grant) — nothing in Inc 1 writes `administrative_commissions`, `org_delegations` or a role. The boundary test and the RLS cases carry this, and QA verified them. No sentence claims access that does not exist.
+- **Gaps 3 to 5** (commission meaning, visibility, sensitive charge) — Increment 2.
+- **Gap 6** (dated roles, planned end, atomic change) — walked.
+- **Gap 7** (public directory degradation) — walked through the definer. The titles are pinned by test.
+- **Gap 8** (unique names) — walked and covered by e2e.
+- **Gap 9** (dissolve) — walked.
+- **Gap 10** (unlabelled legacy rows) — walked, with no guessed label.
+- **Gap 11** (chair is a title here, a seat elsewhere) — the titles note and the carries note both walked.
+- **Gap 12** (production state) — the orchestrator's C1 read says the four flags are on, so the help's Roles and Community instructions are doable. I confirmed the instructions work in the dev walk. I cannot see production myself.
+- **Gap 13** (ex officio by hand) — said in the role helper and the help page.
+- **Gap 14** (a person who leaves stays on the roster) — walked through the two badges.
+- **Gap 15** (audit story) — the walked rows are one per action, with ids, dates and enumerations only.
+- **Adversarial pass.**
+  - There is no `callbackUrl` or `next` on any page. I saw only static back links.
+  - The key is checked before existence, so an unknown id reveals nothing.
+  - Wrong-kind ids give a 404, not a different page.
+  - A hand-built request to create a committee-type group at a presbytery is refused with the C10 sentence. QA's e2e and DB tests cover that.
+
+## Notes (each a TODO follow-up)
+
+1. **Increment 2 is still owed against operator decision B** (commissions needed at go-live). The tile description and the help say honestly that commissions are not part of this page. Keep Increment 2 on the near list, and do not let the parent log close until it has shipped.
+2. **The "Groups" tile description is now false at a presbytery.** It still reads "Manage committees, small groups, choirs, and teams." (`src/lib/org-portal/tiles.ts`, line 285), while the groups page at a presbytery says committees are kept elsewhere. C10 covered the groups page, not the tile. Suggested fix: when the org is a presbytery, drop "committees" from that tile's description.
+3. **The "Public" badge and switch show as "on" for a deceased person or one who has left the presbytery,** although the website suppresses them. The help page states the exclusion, so this is not a falsehood. A one-line follow-up could mute the badge for those two statuses, so a clerk does not read a deceased person's row as published.
+4. **The public-listing switch has no visible label.** At 360px it is a bare toggle beside the buttons, and only the badge "Public" appears when it is on. The accessible name is fine, and the groups admin control is the same. A visible "Public website" label would be kinder to a first-time clerk. This is a polish item.
+5. **Rule 17 housekeeping at the release commit** (the orchestrator does this; I have now walked the page):
+   - set `presbytery-committees` `verifiedIn` to `0.63.0`;
+   - confirm `[help:presbytery-tools]` is off TODO line 29 and run `grep -n "\[help:" docs/TODO.md`.
+6. **Rule 14 and 13.**
+   - Rewrite B3's one-sentence functionality-map addition at release.
+   - Rule 13: Increment 1 has member-visible behaviour. Per the operator's standing "no what's-new for now", draft the entry in the work-log only.
+7. **Carried residuals, not new:** F456, F459 and F460 (tracked); name uniqueness is `paper`; `groups.manage` reads the commission charge once Increment 2 ships (tier-1 residual, architect-accepted).
+8. **QA G1 and the copy rulings** are accepted as recorded. I did not observe G1 in this walk. QA run 2 on the G1 fix was running in parallel, and I note it without relying on it.
+
+## Per-Phase Status row
+
+| Phase | Owner | Status | Verdict | Date |
+|-------|-------|--------|---------|------|
+| 6 — Shipped vs intent | analyst | Complete for Increment 1 (founder walk at 360px, light and dark; keyless member; Community at a presbytery; public roster through the anonymous definer; four help pages read as their reader; QA run 2 on G1 running in parallel, not awaited) | SHIP WITH NOTES | 2026-11-19 |
+
+## Handoff
+
+Next agent: **orchestrator**, for release housekeeping through `/release-notes`.
+- Records the notes above as TODO lines.
+- Sets `verifiedIn` to `0.63.0`.
+- Updates the functionality map.
+- Proceeds to Increment 2 (commission records), as the operator's decision B requires.
+
+Files and artifacts referenced:
+- `/Users/cshenso/git/presby-platform/presby-committees/docs/work-log/2026-11-19-presbytery-committees.md`
+- `/Users/cshenso/git/presby-platform/presby-committees/docs/work-log/2026-11-19-presbytery-committees-inc1.md`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/content/help/presbytery-committees.md`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/org-portal/tiles.ts`
+- `/Users/cshenso/git/presby-platform/presby-committees/src/lib/committees/ui-copy.ts`
+- Walk scripts and screenshots (not in the repo): `/private/tmp/claude-501/-Users-cshenso-git-presby-platform-presby/2313dcc4-4a86-43c8-9bfc-694f433ec0be/scratchpad/walk/`
+
+---
+
+
+## What's-new draft (Rule 13; not published, per the operator's standing "no what's-new for now")
+
+> **Presbytery committees.** Committees & Commissions now keeps your presbytery's committees: Required, Standing and Ad hoc, who serves in which role and since when, with role changes, ended terms and dissolved committees kept as history. Titles give no access. Administrative commissions come next.

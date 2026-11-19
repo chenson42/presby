@@ -20,7 +20,7 @@
 | 1 — Functional refinement | analyst | Complete (parent) | READY WITH NOTES | 2026-11-19 |
 | 2 — Architectural review | architect | Complete (parent; R1–R6) | Approved with suggestions | 2026-11-19 |
 | 3 — Technical design | tech-lead | Complete (parent; this log carries the increment slice below) | Design complete | 2026-11-19 |
-| 4 — Implementation | api-developer (B5), ux-developer (B6), full-stack-developer (B7) | **B5, B6 complete** (api-developer, ux-developer, 2026-11-19); B7 pending | — | 2026-11-19 |
+| 4 — Implementation | api-developer (B5), ux-developer (B6), full-stack-developer (B7) | **Complete** (B5, B6, B7; 2026-11-19) | Ready for Phase 5 | 2026-11-19 |
 | 5 — Verification | qa | Pending | — | — |
 | 6 — Shipped vs intent | analyst | Pending | — | — |
 
@@ -226,6 +226,64 @@ list with the commissions section and "Show ended commissions (1)"; the ended li
 3. Added: an empty-roster state for an ACTIVE commission with no one serving or starting later: "No one serves on this commission yet." (`COMMISSIONS.emptyRoster`), in the same guided box and place as the committee page's, above its "Add a member" button. An ended commission with no members shows nothing extra. Pinned in `ui-copy.test.ts` and `commissions/pages.test.tsx`. The help page does not quote it, so no registry label was added.
 
 **Handoff to B7.** Selectors: fields by label ("Title", "Charge (optional)", "Congregation (optional)", "Appointed on", "Minute reference (optional)", "Ended on", "Minute reference for its report (optional)"); buttons "Record commission", "Add to commission", "End commission" (the trigger and the dialog's confirm share the name: scope to the `alertdialog`), "Remove this record" / "Remove record"; member controls "End term for {name}" (a card and a table row: scope by viewport). Both pages of a commission render the member roster twice (card and table, CSS shows one).
+
+## B7 — full-stack-developer (2026-11-19)
+
+Scope as the batch table: the fixture additions, the commissions spec, the hydration spec for both lanes, the regression of the Increment 1 specs, and the founding-administrator walk for the commissions half. **No source file under `src/`, no migration and no Rule 16 shared file was touched, and no defect was found in B5 or B6's code** (every failure while writing was the spec's or fixture's own; below).
+
+### Files Created
+
+- `e2e/committees-commissions.spec.ts` (16 tests, serial, tag `k`). Founder (minted by `presby_apply_founding_administrator`, MFA enrolled, bundle only) throughout tests 1 to 7, which **are the founding-administrator walk for the commissions half**, scripted at 360px: (1) the section and its guided empty state; (2) record: title required, an appointment after today refused under the field with nothing written, a save lands on the commission page with charge, About line, "Minute:", the no-access sentence (byte for byte, with and without a congregation), the list never shows the charge; (3) edit: carried values, a save, audit `changed` is the field names `charge` and `title`, a **stale** form is the C15 toast and writes nothing; (4) members: the person-required refusal, add Chair, a planned start, a dated term and a second planned start, "(already serves)" is a disabled option, end a term (a date before the start refused in the dialog, Go back writes nothing), cancel a planned term (zero-length), change an end date, no native dialog, three `member_ended` rows; (5) end the commission: a future date and a date before the appointment refused in the dialog, Go back writes nothing, a valid end with a minute ends only the members still running (`membersEnded` 2: the one serving and the one not yet started; the two already over untouched), "Reported in:", no End, Add or End-term control, Edit and Remove stay, the add-member URL says "This commission has ended, so no one can be added." with no form, "Show ended commissions (1)"; (6) remove: Go back writes nothing, a removal lists nothing, the page and an `/edit` answer 404, one audit row; (7) the **neutral congregation refusal**: four forged ids (another presbytery's congregation, a non-congregation, a nonexistent id, a malformed one) each give the one sentence under the field and write nothing, and no name of the other presbytery or its congregation appears. (8) the clerk (`groups.manage` only, no second factor) records one with no `/totp` and the audit names the clerk. (9) the **keyless member**: the C1 sentence on all five commission pages, nothing leaks, nothing written. (10) the **congregation's own administrator** gets the org denial at the presbytery's list and the record, and nothing of the record on the congregation's own paths or portal. (11) **not-found**: twelve misses (malformed, another presbytery's, another presbytery's committee, a real committee, a choir, a congregation's id, a removed and a nonexistent record, and the deeper `/edit` and `/members/new` pages) all 404 with one identical body that names none of them; a commission id typed into the committee page is 404. (12) **flag off**: every commission page says it isn't turned on and shows nothing of the records. (13) **audit**: all six `tenant.commission_record.*` keys present; every metadata key is in the allowlist; no title, charge, minute, end-minute sentinel, congregation or person name in any row; the `tenant.committee.*` stream carries nothing about commissions. (14) **nothing downward**: `administrative_commissions`, `org_delegations` and `role_grants` counts across the fixture equal the baseline taken before the first write, and neither member table has a `role_id`, `group_id` or `public_listed` column. (15) **360px**: a 200-character title, 498-character charge, 198-character minute and 120-character person name on the list, the commission page, edit, add and record forms: no sideways scroll, every control 44px (`smallControls`, which skips Radix's aria-hidden switch input since 98729e07; kept), no `callbackUrl` or `next` link, a "Back to committees" link, role and dates visible; the three dialogs (End term, End commission, Remove this record) open inside the viewport with every button 44px (layout sizes). (16) **1280px**: the commissions list is a table (Title, Congregation, Appointed, Status, Serving) and the roster is a table, no sideways scroll.
+- `e2e/hydration/commissions-forms.spec.ts` (3 tests): scripts held, every control in the gate disabled, release, non-default values, the **persisted row** asserted. The record form, the **edit** form (the same `useForm` root in edit mode, carried values kept) and the add-member form. The end-commission and remove dialogs are plain controlled dialogs with no form root and cannot open before hydration, so there is nothing to hold; the spec header says so.
+
+### Files Modified
+
+- `e2e/support/committees-fixture.ts` (this pipeline's own file): `congOther` (a congregation of the second presbytery, in setup, teardown and `orgIds`: the "another presbytery's congregation" case); `seedCommission`, `seedCommissionMember`, `commissionsByTitle`, `commissionById`, `commissionMembers`, `commissionAudit`, `downwardCounts`; and **`removeCommissionRecords`**, called by the teardown and the sweep. `commission_records.about_org_id` is a plain FK with no cascade (organizations are permanent), so a record about a fixture congregation blocked its owner delete on the first full run (`commission_records_about_org_id_fkey`); the fixture now deletes the fixture councils' records, members first, before their councils. The `smallControls` aria-hidden skip (98729e07) is untouched.
+- `e2e/committees-roster.spec.ts`: test 1 asserted the tile description of Increment 1; B6 changed it (C11 II) to "The presbytery's committees, who serves on them, and the administrative commissions it has recorded." The assertion now reads the shipped sentence. That was the only Increment 1 spec the commission work invalidated.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit`, `npm run lint` (`--max-warnings=0`) | clean |
+| `npm run check` (new files staged so `check:secrets` sees them) | exit 0, all ten tripwires |
+| New specs, own dev server on **3101** (`E2E_BASE_URL=http://localhost:3101`, `E2E_ALLOW_SHARED_DB=true`, CRON_SECRET, RATE_LIMIT_DISABLED, the domains fakes) | `committees-commissions` **16/16** (2.2 min), `hydration/commissions-forms` **3/3** |
+| Regression, same server: `committees-roster` **16/16** (after the one assertion above), `committees-gates` **5/5**, `hydration/committees-forms` **3/3** | **24 passed**. Both were also green together with the new specs in one 43-test run (27 passed plus the roster failure above, which then fixed to 16/16) |
+| Production hydration lane (`PW_PROD_BUILD=1 PW_PROD_PORT=3801`, `--project=prod-build`, no `E2E_BASE_URL`; Playwright built and served and stopped it; the dev server was stopped first because both use `.next`) | `commissions-forms` **3/3** and `committees-forms` **3/3**: **6 passed** (1.4 min) |
+| **Failing-first** | two source sabotages, both restored from a copy (`cmp`-identical; sha-256 `618ca415...` for the form file; `git status` shows no `src/` change): (a) `<HydrationGate>` removed from `commission-member-form.tsx`: the hydration add-member test failed on `aria-busy` (`element(s) not found`); (b) the no-access sentence not rendered on the commission page: spec test 2 failed at `getByText(NO_ACCESS_ALDER)` and test 3 onward did not run. Both green again after the restore |
+| Fixture hygiene | after every run: 0 `e2e-cmt%` organizations, 0 fixture users, 0 fixture people; `org_portal.committees` true (as before) |
+| Servers | the dev server was PIDs 2049 (wrapper) and 2070 (listener), stopped by PID; the production server was Playwright's and is gone; nothing touched :3000; nothing listens on 3101 or 3801 |
+
+### Implementer Notes
+
+1. **Deviation from a spec line: "members (add/plan/end)" are all driven through the page** (four adds, three ends), none seeded, except the long-text case of test 15, which seeds its record and members as the owner because it is about layout.
+2. **The fixture's first full run exposed the FK-without-cascade teardown problem** (above), which is a fixture fix and no product concern: a record about a congregation never needs deleting.
+3. **Not covered here, by design:** the closing-congregation acceptance, the interval overlap and the add-versus-end race are B5's DB tests (deterministic there, not in a browser); dark mode and the real invitation walk are Phase 6's, as in Increment 1.
+4. **Strings added: none.**
+
+**Handoff.** Next agent: **qa** (Phase 5).
+
+## Phase 4 completion summary (Increment 2)
+
+| Batch | Implementer | Commit | Delivered |
+|---|---|---|---|
+| B5 | api-developer | (B5 commits) | commission contract, validate, copy, derive; `store.ts` and `reads.ts` commission functions; six audit keys; the six actions; boundaries and audit-coverage extensions; DB cases (store 88, reads 34); B5 rulings 1 to 3 |
+| B6 | ux-developer | `32ae877b`, `c9536ac6` | the commissions section, record, commission, edit and member pages, the four forms and dialogs, the tile description, the help rewrite and the roles and privacy edits, 360px browser walk; B6 rulings 1 to 3 |
+| B7 | full-stack-developer | (this commit) | the fixture additions, `committees-commissions` (16), `hydration/commissions-forms` (3), the one regression assertion, both hydration lanes, the commissions walk |
+
+**What exists and is tested:** commission records end to end: the pages, forms, dialogs, the server layer, the six audit keys, the help, 16 + 3 new e2e tests and 24 regression e2e tests, and the production hydration lane. No schema change in this increment (0090 is untouched).
+
+**Gates at the end of Phase 4:** `npx tsc --noEmit`, `npm run lint` and `npm run check` clean; `npm run build` passes (B6, and the production lane's build in B7); unit tests: full suite 941 files, 0 failed (B6); DB suites: `store.db` 88 and `reads.db` 34 and the four Increment 1 files green on the pipeline branch (B5); `test-rls-90.sql` unchanged (no DDL); e2e as the B7 gate table.
+
+**What QA should run** (own server on port 3101, `E2E_BASE_URL=http://localhost:3101 E2E_ALLOW_SHARED_DB=true CRON_SECRET=giving-e2e-cron-secret RATE_LIMIT_DISABLED=true DOMAINS_ALLOW_RESERVED_TLDS=1 DOMAINS_PROVIDER=fake DOMAINS_DNS_PROVIDER=fake DOMAINS_FAKE_STATE_FILE=.tmp/domains-fake-state.json`; stop by PID; never :3000):
+1. `npx tsc --noEmit`, `npm run lint`, `npm run check`, `npm run build`.
+2. `npx vitest run` (no DB credentials), then the six committees DB files serially against the pipeline branch (`npx dotenv -e .env.local -- vitest run --no-file-parallelism` over `committees.db`, `committees.schema`, `store.db`, `reads.db`, `seat-semantics.db`, `groups.committees.db`); `scripts/committees/test-rls-90.sql` as `presby_app`.
+3. `npx playwright test e2e/committees-commissions.spec.ts e2e/committees-roster.spec.ts e2e/committees-gates.spec.ts e2e/hydration/commissions-forms.spec.ts e2e/hydration/committees-forms.spec.ts --project=chromium` (43 tests).
+4. Production hydration lane, with the dev server stopped (both use `.next`) and no `E2E_BASE_URL`: `PW_PROD_BUILD=1 PW_PROD_PORT=3801 npx playwright test e2e/hydration/commissions-forms.spec.ts e2e/hydration/committees-forms.spec.ts --project=prod-build` (6 tests).
+5. The copy-truthfulness check on the help diff (`presbytery-committees.md`, `roles-who-can-do-what.md`, the privacy clause) and the C15 strings against the screens; a 360px look at the commission page, light and dark (the specs run light only).
+6. Failing-first is recorded above for the new specs; confirm the `tenant.commission_record.*` rows and the hard-rule test (14) by reading, not by re-sabotaging.
+
+**Open for the orchestrator at integration (not done here; Rule 16):** the Increment 2 TODO reconciliation (line 507 to Done, the `groups.manage` description follow-up of T12), the functionality-map line (Rule 14), the C16 release-note lines through `/release-notes`, `verifiedIn` on the help page at the release walk, and the 0.64.0 `package.json` bump after Phase 6 SHIP IT. No shared file was edited in this batch.
 
 ---
 

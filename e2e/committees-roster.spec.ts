@@ -109,7 +109,8 @@ test.describe.serial("Committees: the roster, end to end", () => {
     const tile = page.locator(`a[href="${base()}"]`);
     await expect(tile).toBeVisible();
     await expect(tile).toContainText("Committees & Commissions");
-    await expect(tile).toContainText("The presbytery's committees and who serves on them.");
+    // The Increment 2 description (C11 II): the tile now also names the commission records.
+    await expect(tile).toContainText("The presbytery's committees, who serves on them, and the administrative commissions it has recorded.");
     await expect(tile).not.toContainText("Coming soon");
     await tile.click();
     await page.waitForURL((url) => url.pathname === base());

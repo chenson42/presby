@@ -18,6 +18,8 @@
  *   congA (managed) and congB (unmanaged): member congregations of A. congA also holds a `committee` group
  *                   (a congregation's committee, untouched by this feature: a 404 under A's committee path).
  *   presbytery B    a second presbytery with one committee, for the cross-presbytery 404.
+ *   congOther       (Increment 2, B7) a member congregation of presbytery B: the "another presbytery's
+ *                   congregation" case of the commission record's neutral congregation refusal.
  *
  * IDS (this pipeline's range, grepped free in e2e/, scripts/ and src/): people `00000000-0000-4090-8000-`,
  * roles `00000000-0000-4090-9000-`, organizations `00000000-0000-4090-9001-` (unique per run, because
@@ -100,6 +102,7 @@ export const COMMITTEES_NAMES = {
   congA: "E2E Committees Congregation Alder",
   congB: "E2E Committees Congregation Birch",
   presbyteryOther: "E2E Committees Other Presbytery",
+  congOther: "E2E Committees Congregation Elm",
   founder: "Corwin Peabody",
   clerk: "Ione Marchetti",
   plain: "Saffron Whitlock",
@@ -127,6 +130,8 @@ export interface CommitteesFixture {
   congB: FixtureOrg;
   /** A second presbytery: nothing in it belongs to presbytery A. */
   presbyteryOther: FixtureOrg;
+  /** A congregation of the second presbytery (Increment 2: a commission cannot be about it). */
+  congOther: FixtureOrg;
   people: Record<Who, string>;
   users: Record<Who, string>;
   seatable: Record<Seatable, string>;
@@ -139,7 +144,7 @@ function assertFixtureSlug(slug: string) {
   if (!/^e2e-cmt[a-z]*-\d+(-[a-z]+)?$/.test(slug)) throw new Error(`[committees-fixture] refusing to touch non-fixture slug "${slug}"`);
 }
 
-const orgIds = (fx: CommitteesFixture) => [fx.presbytery.id, fx.congA.id, fx.congB.id, fx.presbyteryOther.id];
+const orgIds = (fx: CommitteesFixture) => [fx.presbytery.id, fx.congA.id, fx.congB.id, fx.presbyteryOther.id, fx.congOther.id];
 
 // ---------------------------------------------------------------------------
 // teardown and the sweep
@@ -155,6 +160,21 @@ async function removeSites(sql: Sql, ids: string[]): Promise<void> {
   await withDbRetry("delete committees fixture sites", () => sql.query(`delete from organization_sites where organization_id = any($1::uuid[])`, [ids]));
 }
 
+/**
+ * Commission records of the given councils, members first. `commission_records.about_org_id` is a plain FK
+ * to organizations (no cascade: organizations are permanent), so a record ABOUT a fixture congregation would
+ * block the congregation's removal; the owner deletes them before the councils (fixtures only).
+ */
+async function removeCommissionRecords(sql: Sql, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await withDbRetry("delete committees fixture commission members", () =>
+    sql.query(`delete from commission_record_members where organization_id = any($1::uuid[])`, [ids]),
+  );
+  await withDbRetry("delete committees fixture commission records", () =>
+    sql.query(`delete from commission_records where organization_id = any($1::uuid[]) or about_org_id = any($1::uuid[])`, [ids]),
+  );
+}
+
 /** Removes every `e2e-cmt<tag>-<digits>` council a crashed run left, then the fixture people and users. */
 export async function sweepStaleCommitteesFixtures(sql: Sql): Promise<number> {
   const stale = await withDbRetry(
@@ -166,6 +186,7 @@ export async function sweepStaleCommitteesFixtures(sql: Sql): Promise<number> {
       }[],
   );
   await removeSites(sql, stale.map((s) => s.id));
+  await removeCommissionRecords(sql, stale.map((s) => s.id));
   for (const council of stale.filter((s) => s.type === "congregation")) await removeOrg(sql, council.id);
   for (const council of stale.filter((s) => s.type !== "congregation")) await removeOrg(sql, council.id);
   await removeFixturePeopleAndUsers(sql);
@@ -173,9 +194,10 @@ export async function sweepStaleCommitteesFixtures(sql: Sql): Promise<number> {
 }
 
 export async function removeCommitteesFixture(sql: Sql, fx: CommitteesFixture): Promise<void> {
-  for (const org of [fx.presbytery, fx.congA, fx.congB, fx.presbyteryOther]) assertFixtureSlug(org.slug);
+  for (const org of [fx.presbytery, fx.congA, fx.congB, fx.presbyteryOther, fx.congOther]) assertFixtureSlug(org.slug);
   await removeSites(sql, orgIds(fx));
-  for (const congregation of [fx.congA, fx.congB]) await removeOrg(sql, congregation.id);
+  await removeCommissionRecords(sql, orgIds(fx));
+  for (const congregation of [fx.congA, fx.congB, fx.congOther]) await removeOrg(sql, congregation.id);
   for (const presbytery of [fx.presbytery, fx.presbyteryOther]) await removeOrg(sql, presbytery.id);
   await removeFixturePeopleAndUsers(sql);
   const left = await withDbRetry(
@@ -231,12 +253,15 @@ export async function setupCommitteesFixture(sql: Sql, options: SetupOptions): P
     congA: org(2, "ca", COMMITTEES_NAMES.congA),
     congB: org(3, "cb", COMMITTEES_NAMES.congB),
     presbyteryOther: org(4, "po", COMMITTEES_NAMES.presbyteryOther),
+    congOther: org(5, "co", COMMITTEES_NAMES.congOther),
   };
 
   await insertOrg(sql, { ...orgs.presbytery, type: "presbytery", status: "managed" });
   await insertOrg(sql, { ...orgs.presbyteryOther, type: "presbytery", status: "managed" });
   await insertOrg(sql, { ...orgs.congA, type: "congregation", status: "managed" });
   await insertOrg(sql, { ...orgs.congB, type: "congregation", status: "unmanaged" });
+  await insertOrg(sql, { ...orgs.congOther, type: "congregation", status: "managed" });
+  await affiliate(sql, orgs.presbyteryOther.id, orgs.congOther.id);
   await affiliate(sql, orgs.presbytery.id, orgs.congA.id);
   await affiliate(sql, orgs.presbytery.id, orgs.congB.id);
   // The derived Active Membership group of each council: every `memberships` insert syncs it (0017).
@@ -423,6 +448,122 @@ export async function committeesAudit(sql: Sql, presbyteryId: string): Promise<A
          where action like 'tenant.committee.%' and metadata->>'organizationId' = ${presbyteryId}
          order by created_at, id`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// administrative commission records (Increment 2, B7)
+// ---------------------------------------------------------------------------
+
+/** A commission record at presbytery A (or, with `orgId`, at another council). Dates are `YYYY-MM-DD`. */
+export async function seedCommission(
+  sql: Sql,
+  fx: CommitteesFixture,
+  c: {
+    title: string;
+    charge?: string | null;
+    aboutOrgId?: string | null;
+    appointedOn: string;
+    minuteReference?: string | null;
+    endedOn?: string | null;
+    endedMinuteReference?: string | null;
+    orgId?: string;
+  },
+): Promise<string> {
+  const actor = Object.values(fx.users)[0]!;
+  const [row] = await rows<{ id: string }>(sql`
+    insert into commission_records
+      (organization_id, about_org_id, title, charge, appointed_on, minute_reference,
+       ended_on, ended_minute_reference, ended_by, ended_at, created_by, updated_by)
+    values (${c.orgId ?? fx.presbytery.id}::uuid, ${c.aboutOrgId ?? null}::uuid, ${c.title}, ${c.charge ?? null}, ${c.appointedOn}::date,
+            ${c.minuteReference ?? null}, ${c.endedOn ?? null}::date, ${c.endedMinuteReference ?? null},
+            ${c.endedOn ? actor : null}::uuid, ${c.endedOn ? new Date().toISOString() : null}::timestamptz, ${actor}::uuid, ${actor}::uuid)
+    returning id`);
+  return row!.id;
+}
+
+/** A member term on one of presbytery A's commission records. */
+export async function seedCommissionMember(
+  sql: Sql,
+  fx: CommitteesFixture,
+  commissionId: string,
+  personId: string,
+  m: { role?: string; startsOn: string; endsOn?: string | null },
+): Promise<string> {
+  const actor = Object.values(fx.users)[0]!;
+  const [row] = await rows<{ id: string }>(sql`
+    insert into commission_record_members (organization_id, commission_record_id, person_id, role, starts_on, ends_on, created_by, updated_by)
+    values (${fx.presbytery.id}::uuid, ${commissionId}::uuid, ${personId}::uuid, ${m.role ?? "member"}, ${m.startsOn}::date, ${m.endsOn ?? null}::date, ${actor}::uuid, ${actor}::uuid)
+    returning id`);
+  return row!.id;
+}
+
+export interface CommissionRow {
+  id: string;
+  title: string;
+  charge: string | null;
+  about_org_id: string | null;
+  appointed_on: string;
+  minute_reference: string | null;
+  ended_on: string | null;
+  ended_minute_reference: string | null;
+  removed_at: string | null;
+  row_version: number;
+}
+
+const COMMISSION_COLUMNS = `id, title, charge, about_org_id, appointed_on::text as appointed_on, minute_reference,
+  ended_on::text as ended_on, ended_minute_reference, removed_at::text as removed_at, row_version`;
+
+/** Every record (removed ones included) at presbytery A with this exact title, oldest first. */
+export async function commissionsByTitle(sql: Sql, fx: CommitteesFixture, title: string): Promise<CommissionRow[]> {
+  return (await sql.query(
+    `select ${COMMISSION_COLUMNS} from commission_records where organization_id = $1::uuid and title = $2 order by created_at, id`,
+    [fx.presbytery.id, title],
+  )) as CommissionRow[];
+}
+
+export async function commissionById(sql: Sql, id: string): Promise<CommissionRow | undefined> {
+  const found = (await sql.query(`select ${COMMISSION_COLUMNS} from commission_records where id = $1::uuid`, [id])) as CommissionRow[];
+  return found[0];
+}
+
+export interface CommissionMemberRow {
+  id: string;
+  person_id: string;
+  role: string;
+  starts_on: string;
+  ends_on: string | null;
+}
+
+/** Every member term of a commission, oldest first. */
+export async function commissionMembers(sql: Sql, commissionId: string): Promise<CommissionMemberRow[]> {
+  return rows<CommissionMemberRow>(
+    sql`select id, person_id, role, starts_on::text as starts_on, ends_on::text as ends_on
+          from commission_record_members where commission_record_id = ${commissionId}::uuid order by starts_on, ends_on nulls last, id`,
+  );
+}
+
+/** The `tenant.commission_record.*` audit rows of one presbytery, oldest first. */
+export async function commissionAudit(sql: Sql, presbyteryId: string): Promise<Array<{ action: string; resource_id: string | null; metadata: Record<string, unknown> }>> {
+  return rows(
+    sql`select action, resource_id, metadata from audit_events
+         where action like 'tenant.commission_record.%' and metadata->>'organizationId' = ${presbyteryId}
+         order by created_at, id`,
+  );
+}
+
+/**
+ * The three rows a commission RECORD must never write: administrative commissions (the downward reach),
+ * org delegations, and role grants, counted across the whole fixture. A spec takes it before and after.
+ */
+export async function downwardCounts(sql: Sql, fx: CommitteesFixture): Promise<{ administrativeCommissions: number; orgDelegations: number; roleGrants: number }> {
+  const ids = orgIds(fx);
+  const [row] = await rows<{ ac: string; od: string; rg: string }>(
+    sql`select
+          (select count(*) from administrative_commissions where parent_org_id = any(${ids}::uuid[]) or target_org_id = any(${ids}::uuid[])) as ac,
+          (select count(*) from org_delegations where grantor_org_id = any(${ids}::uuid[]) or grantee_org_id = any(${ids}::uuid[])) as od,
+          (select count(*) from role_grants where organization_id = any(${ids}::uuid[])) as rg`,
+  );
+  return { administrativeCommissions: Number(row!.ac), orgDelegations: Number(row!.od), roleGrants: Number(row!.rg) };
 }
 
 // ---------------------------------------------------------------------------
